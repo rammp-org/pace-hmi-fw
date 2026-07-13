@@ -14,7 +14,7 @@ import urllib.error
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent.parent.resolve()
-VALID_TARGETS = ['esp32', 'esp32s2', 'esp32s3', 'esp32c3', 'esp32c6', 'esp32h2']
+VALID_TARGETS = ['esp32', 'esp32s2', 'esp32s3', 'esp32c3', 'esp32c6', 'esp32h2', 'esp32p4']
 
 GREEN = '\033[92m'
 YELLOW = '\033[93m'
@@ -361,7 +361,7 @@ def main():
     setup_idf_env_from_profile()
     sourced_idf_profile = not was_in_idf_terminal and bool(os.environ.get('IDF_PATH'))
     parser = argparse.ArgumentParser(description='Rename this ESP++ template project.')
-    parser.add_argument('--name', help='Project name (lowercase, underscores)')
+    parser.add_argument('--name', help='Project name (lowercase, underscores, hyphens)')
     parser.add_argument('--app-name', dest='app_name', help='Display name for CI')
     parser.add_argument('--target', choices=VALID_TARGETS, help='IDF target chip')
     parser.add_argument('--idf-version', dest='idf_version',
@@ -379,12 +379,12 @@ def main():
 
     name = args.name
     while not name:
-        name = ask('Project name (lowercase, underscores)', default=repo_name)
+        name = ask('Project name (lowercase, underscores, hyphens)', default=repo_name)
         if not name:
             print('  Project name is required.')
             name = None
-        elif not re.match(r'^[a-z][a-z0-9_]*$', name):
-            print('  Use lowercase letters, digits, and underscores only.')
+        elif not re.match(r'^[a-z][a-z0-9_-]*$', name):
+            print('  Use lowercase letters, digits, underscores, and hyphens only.')
             name = None
 
     app_name = args.app_name or ask('Display name for CI', default=name)
@@ -392,13 +392,15 @@ def main():
     skip_set_target = args.skip_set_target
     target = args.target
     while not target and not skip_set_target:
-        t = ask(f'Target chip ({"/".join(VALID_TARGETS)}) or "skip"', default='esp32s3')
+        t = ask(f'Target chip ({"/".join(VALID_TARGETS)}, shorthand like "p4" ok) or "skip"', default='esp32s3').lower()
         if t == 'skip':
             skip_set_target = True
         elif t in VALID_TARGETS:
             target = t
+        elif t and f'esp32{t}' in VALID_TARGETS:
+            target = f'esp32{t}'
         else:
-            print(f'  Invalid. Choose from: {", ".join(VALID_TARGETS)}, or "skip" to skip target configuration')
+            print(f'  Invalid. Choose from: {", ".join(VALID_TARGETS)} (or shorthand like "s3", "p4"), or "skip" to skip target configuration')
 
     raw_flash = args.flash_size or ask('Flash size (bytes or e.g. 4M)', default='8M')
     flash_size = str(int(raw_flash[:-1]) * 1_000_000) if raw_flash.upper().endswith('M') else raw_flash
