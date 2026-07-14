@@ -629,20 +629,20 @@ extern "C" void app_main(void) {
          .log_level = espp::Logger::Verbosity::WARN});
     adc.start();
     auto task_fn = [&adc, &channels](std::mutex &m, std::condition_variable &cv) {
+      std::string line;
       for (auto &conf : channels) {
-        auto maybe_mv = adc.get_mv(conf);
-        if (maybe_mv.has_value()) {
-          fmt::print("{}: {} mV\n", conf, maybe_mv.value());
-        } else {
-          fmt::print("{}: no value!\n", conf);
+        if (!line.empty()) {
+          line += "\t";
         }
         auto maybe_rate = adc.get_rate(conf);
-        if (maybe_rate.has_value()) {
-          fmt::print("{}: {} Hz\n", conf, maybe_rate.value());
-        } else {
-          fmt::print("{}: no rate!\n", conf);
-        }
+        auto maybe_mv = adc.get_mv(conf);
+        line += fmt::format("ADC_CHANNEL_{}: Fs = ", static_cast<int>(conf.channel));
+        line += maybe_rate.has_value() ? fmt::format("{:.1f} Hz", maybe_rate.value()) : "no rate";
+        line += ", V = ";
+        line += maybe_mv.has_value() ? fmt::format("{} mV", static_cast<int>(maybe_mv.value()))
+                                     : "no value";
       }
+      fmt::print("{}\n", line);
       // NOTE: sleeping in this way allows the sleep to exit early when the
       // task is being stopped / destroyed
       {
