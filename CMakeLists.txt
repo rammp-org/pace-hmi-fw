@@ -44,6 +44,6 @@ set(
   )
 
 # TODO: update this with your project's name
-project(template)
+project(rammp-hmi-p4)
 
 set(CMAKE_CXX_STANDARD 20)
