@@ -293,74 +293,6 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 1.1.5
-  espp/m5stack-tab5:
-    component_hash: 40a38c3f189301655138f68dad339765e70db80623f1e00103cbb58cabd3099f
-    dependencies:
-    - name: espp/base_component
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=1.0'
-    - name: espp/bmi270
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=1.0'
-    - name: espp/codec
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=1.0'
-    - name: espp/display
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=1.0'
-    - name: espp/display_drivers
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=1.0'
-    - name: espp/gt911
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=1.0'
-    - name: espp/i2c
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=1.0'
-    - name: espp/ina226
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=1.0'
-    - name: espp/input_drivers
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=1.0'
-    - name: espp/interrupt
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=1.0'
-    - name: espp/pi4ioe5v
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=1.0'
-    - name: espp/rx8130ce
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=1.0'
-    - name: espp/st7123touch
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=1.0'
-    - name: espp/task
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=1.0'
-    - name: idf
-      require: private
-      version: '>=5.0'
-    source:
-      registry_url: https://components.espressif.com/
-      type: service
-    targets:
-    - esp32p4
-    version: 1.1.5
   espp/math:
     component_hash: 41775a884b88b26cb65d0e1355364fcf2c525d56be9903250d8d6caef04b007a
     dependencies:
@@ -484,6 +416,12 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 9.5.0
+  m5stack-tab5:
+    dependencies: []
+    source:
+      path: components/m5stack-tab5
+      type: local
+    version: 1.1.5
 direct_dependencies:
 - espp/adc
 - espp/base_component
@@ -513,6 +451,6 @@ direct_dependencies:
 - espressif/esp-dsp
 - idf
 - lvgl/lvgl
-manifest_hash: eab0e50aaf799d3908b2b92ff19a027d8b736c870944d3853229e8c139b28efb
+manifest_hash: 815c7437ef906a714673529afdb6111f60f07770a6affac5545e67780a825650
 target: esp32p4
 version: 3.0.0

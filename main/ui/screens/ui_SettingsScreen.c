@@ -17,7 +17,7 @@ void ui_event_SettingsButton2(lv_event_t *e) {
   lv_event_code_t event_code = lv_event_get_code(e);
 
   if (event_code == LV_EVENT_CLICKED) {
-    _ui_screen_change(&ui_MainScreen, LV_SCR_LOAD_ANIM_FADE_ON, 100, 0, &ui_MainScreen_screen_init);
+    _ui_screen_change(&ui_MainScreen, LV_SCR_LOAD_ANIM_NONE, 0, 0, &ui_MainScreen_screen_init);
   }
 }
 
@@ -26,7 +26,7 @@ void ui_event_SettingsButton2(lv_event_t *e) {
 void ui_SettingsScreen_screen_init(void) {
   ui_SettingsScreen = lv_obj_create(NULL);
   lv_obj_remove_flag(ui_SettingsScreen, LV_OBJ_FLAG_SCROLLABLE); /// Flags
-  lv_obj_set_style_bg_color(ui_SettingsScreen, lv_color_hex(0x424242),
+  lv_obj_set_style_bg_color(ui_SettingsScreen, lv_color_hex(0x000000),
                             LV_PART_MAIN | LV_STATE_DEFAULT);
   lv_obj_set_style_bg_opa(ui_SettingsScreen, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
 

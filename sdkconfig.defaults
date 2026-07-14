@@ -28,6 +28,11 @@ CONFIG_SPIRAM_XIP_FROM_PSRAM=y
 CONFIG_CACHE_L2_CACHE_256KB=y
 CONFIG_CACHE_L2_CACHE_LINE_128B=y
 
+# Compile at -O2: LVGL renders transition frames in software on the CPU, and
+# debug optimization (-Og, the IDF default) makes full-screen redraws several
+# times slower.
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+
 # Task stack sizes and tick rate from the m5stack-tab5 BSP example — the
 # default 3.5K main stack overflows during LVGL/audio/ADC setup.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=32768

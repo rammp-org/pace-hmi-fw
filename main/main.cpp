@@ -21,6 +21,9 @@
 
 #include "continuous_adc.hpp"
 
+#include "driver/ppa.h"
+#include "esp_heap_caps.h"
+
 using namespace std::chrono_literals;
 
 static constexpr size_t MAX_CIRCLES = 100;
@@ -45,6 +48,96 @@ static void clear_circles();
 
 static bool load_audio(size_t &out_size, size_t &out_sample_rate);
 static void play_click(espp::M5StackTab5 &tab5);
+
+// PPA (hardware) rotation flush, replaces the BSP's lv_draw_sw_rotate flush
+static ppa_client_handle_t ppa_srm = nullptr;
+static uint8_t *ppa_rotated_buf = nullptr;
+static size_t ppa_rotated_buf_size = 0;
+
+// PPA/DMA2D buffers in PSRAM must be aligned to both the L1 (64 B) and L2
+// (128 B on this config) cache line sizes
+static constexpr size_t DMA_BUF_ALIGN = 128;
+static uint8_t *alloc_psram_dma(size_t size) {
+  uint8_t *buf = static_cast<uint8_t *>(heap_caps_aligned_alloc(
+      DMA_BUF_ALIGN, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_8BIT));
+  if (!buf) {
+    // not all IDF configs tag PSRAM as DMA-capable in the heap; the PPA and
+    // DMA2D can still access it
+    buf = static_cast<uint8_t *>(
+        heap_caps_aligned_alloc(DMA_BUF_ALIGN, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  }
+  return buf;
+}
+
+// Rotates the rendered area on the ESP32-P4's PPA instead of the CPU, then
+// queues the DMA2D copy to the DPI framebuffer via write_lcd_lines(). The
+// panel's on_color_trans_done callback calls lv_display_flush_ready(), same
+// as with the BSP's own flush.
+static void ppa_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
+  auto &tab5 = espp::M5StackTab5::get();
+  auto rotation = lv_display_get_rotation(disp);
+  if (rotation == LV_DISPLAY_ROTATION_0) {
+    tab5.write_lcd_lines(area->x1, area->y1, area->x2, area->y2, px_map, 0);
+    return;
+  }
+
+  const uint32_t w = lv_area_get_width(area);
+  const uint32_t h = lv_area_get_height(area);
+  const bool swap_wh = rotation != LV_DISPLAY_ROTATION_180;
+
+  ppa_srm_oper_config_t srm{};
+  srm.in.buffer = px_map;
+  srm.in.pic_w = w;
+  srm.in.pic_h = h;
+  srm.in.block_w = w;
+  srm.in.block_h = h;
+  srm.in.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
+  srm.out.buffer = ppa_rotated_buf;
+  srm.out.buffer_size = ppa_rotated_buf_size;
+  srm.out.pic_w = swap_wh ? h : w;
+  srm.out.pic_h = swap_wh ? w : h;
+  srm.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
+  // both LVGL's sw-rotate and the PPA rotate counter-clockwise, map directly
+  srm.rotation_angle = rotation == LV_DISPLAY_ROTATION_90    ? PPA_SRM_ROTATION_ANGLE_90
+                       : rotation == LV_DISPLAY_ROTATION_180 ? PPA_SRM_ROTATION_ANGLE_180
+                                                             : PPA_SRM_ROTATION_ANGLE_270;
+  srm.scale_x = 1.0f;
+  srm.scale_y = 1.0f;
+  srm.mode = PPA_TRANS_MODE_BLOCKING;
+  esp_err_t err = ppa_do_scale_rotate_mirror(ppa_srm, &srm);
+  if (err != ESP_OK) {
+    // complete the flush anyway so LVGL doesn't stall waiting on this buffer
+    lv_display_flush_ready(disp);
+    return;
+  }
+
+  lv_area_t rotated = *area;
+  lv_display_rotate_area(disp, &rotated);
+  tab5.write_lcd_lines(rotated.x1, rotated.y1, rotated.x2, rotated.y2, ppa_rotated_buf, 0);
+}
+
+// Route flushes through the PPA instead of the BSP's CPU rotation. The
+// (vendored) BSP already allocates full-screen PSRAM draw buffers; on failure
+// here the BSP's software-rotation flush stays in place as the fallback.
+static bool initialize_ppa_flush(espp::M5StackTab5 &tab5) {
+  const size_t fb_bytes = tab5.display_width() * tab5.display_height() * sizeof(uint16_t);
+  ppa_rotated_buf = alloc_psram_dma(fb_bytes);
+  if (!ppa_rotated_buf) {
+    return false;
+  }
+  ppa_rotated_buf_size = fb_bytes;
+
+  ppa_client_config_t ppa_config{};
+  ppa_config.oper_type = PPA_OPERATION_SRM;
+  if (ppa_register_client(&ppa_config, &ppa_srm) != ESP_OK) {
+    heap_caps_free(ppa_rotated_buf);
+    ppa_rotated_buf = nullptr;
+    return false;
+  }
+
+  lv_display_set_flush_cb(lv_display_get_default(), ppa_flush_cb);
+  return true;
+}
 
 extern "C" void app_main(void) {
   espp::Logger logger({.tag = "M5Stack Tab5 Example", .level = espp::Logger::Verbosity::INFO});
@@ -84,13 +177,25 @@ extern "C" void app_main(void) {
   const char *controller_name = tab5.get_display_controller_name();
   logger.info(controller_name);
 
-  // initialize the display with a pixel buffer (Tab5 is 1280x720 with 2 bytes per pixel)
+  // initialize the display with full-screen draw buffers (the vendored BSP in
+  // components/m5stack-tab5 allocates them in PSRAM)
   logger.info("Initializing display...");
-  auto pixel_buffer_size = tab5.display_width() * 10; // tab5.display_height();
+  auto pixel_buffer_size = tab5.display_width() * tab5.display_height();
   if (!tab5.initialize_display(pixel_buffer_size)) {
     logger.error("Failed to initialize display!");
     return;
   }
+
+  // rotate on the PPA hardware instead of the CPU
+  logger.info("Setting up PPA rotation flush...");
+  if (!initialize_ppa_flush(tab5)) {
+    logger.error("Failed to set up PPA flush, keeping BSP software rotation!");
+  }
+
+  // run the LVGL refresh timer at 60 fps — the espp lv_conf.h compiles in a
+  // 33 ms (30 fps) default period; the lv_task loop below already calls
+  // lv_task_handler every 16 ms so it can keep up
+  lv_timer_set_period(lv_display_get_refr_timer(lv_display_get_default()), 16);
 
   auto touch_callback = [&](const auto &touch) {
     // NOTE: since we're directly using the touchpad data, and not using the
@@ -344,7 +449,9 @@ extern "C" void app_main(void) {
     return;
   }
 
-  // start a simple thread to do the lv_task_handler every 16ms
+  // start a simple thread to do the lv_task_handler every 8ms — the refresh
+  // timer runs at 16ms (60 fps), polling at twice that rate keeps its firing
+  // jitter well under a frame
   logger.info("Starting LVGL task...");
   espp::Task lv_task({.callback = [](std::mutex &m, std::condition_variable &cv) -> bool {
                         auto start_time = std::chrono::high_resolution_clock::now();
@@ -353,7 +460,7 @@ extern "C" void app_main(void) {
                           lv_task_handler();
                         }
                         std::unique_lock<std::mutex> lock(m);
-                        cv.wait_until(lock, start_time + 16ms, []() { return false; });
+                        cv.wait_until(lock, start_time + 8ms, []() { return false; });
                         return false;
                       },
                       .task_config = {
