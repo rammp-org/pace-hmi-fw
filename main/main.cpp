@@ -30,6 +30,11 @@ static std::vector<uint8_t> audio_bytes;
 
 static std::recursive_mutex lvgl_mutex;
 
+// Subjects (observer pattern) feeding the Settings-screen axis bars; static
+// lifetime because the bound observers keep pointers to them
+static lv_subject_t adc_x_subject;
+static lv_subject_t adc_y_subject;
+
 static bool load_audio(size_t &out_size, size_t &out_sample_rate);
 static void play_click(espp::M5StackTab5 &tab5);
 
@@ -413,6 +418,15 @@ extern "C" void app_main(void) {
   lv_display_set_rotation(lv_display_get_default(), LV_DISPLAY_ROTATION_270);
   ui_init();
 
+  // Bind the Settings-screen axis bars to the ADC subjects (observer pattern).
+  // Bars show raw millivolts; 3300 ≈ full scale at 12 dB attenuation.
+  lv_subject_init_int(&adc_x_subject, 0);
+  lv_subject_init_int(&adc_y_subject, 0);
+  lv_bar_set_range(ui_XBar, 0, 3300);
+  lv_bar_set_range(ui_YBar, 0, 3300);
+  lv_bar_bind_value(ui_XBar, &adc_x_subject);
+  lv_bar_bind_value(ui_YBar, &adc_y_subject);
+
   logger.info("Initializing touch...");
   if (!tab5.initialize_touch(touch_callback)) {
     logger.error("Failed to initialize touch!");
@@ -610,56 +624,53 @@ extern "C" void app_main(void) {
        }});
   imu_task.start();
 
-  //! [continuous adc example]
-  {
-    size_t num_seconds_to_run = 5000;
-    logger.info("Reading continuous adc for {} seconds", num_seconds_to_run);
+  logger.info("Starting continuous adc...");
 
-    // ADC1_CH0/CH1 = GPIO16/GPIO17, free pins on the M5-Bus header
-    std::vector<espp::AdcConfig> channels{
-        {.unit = ADC_UNIT_1, .channel = ADC_CHANNEL_0, .attenuation = ADC_ATTEN_DB_12},
-        {.unit = ADC_UNIT_1, .channel = ADC_CHANNEL_1, .attenuation = ADC_ATTEN_DB_12}};
-    // this initailizes the DMA and filter task for the continuous adc
-    espp::ContinuousAdc adc(
-        {.sample_rate_hz = 1 * 1000,
-         .channels = channels,
-         .convert_mode =
-             ADC_CONV_SINGLE_UNIT_1, // or BOTH_UNIT, ALTER_UNIT, SINGLE_UNIT_1, SINGLE_UNIT_2
-         .window_size_bytes = 1024,
-         .log_level = espp::Logger::Verbosity::WARN});
-    adc.start();
-    auto task_fn = [&adc, &channels](std::mutex &m, std::condition_variable &cv) {
-      std::string line;
-      for (auto &conf : channels) {
-        if (!line.empty()) {
-          line += "\t";
-        }
-        auto maybe_rate = adc.get_rate(conf);
-        auto maybe_mv = adc.get_mv(conf);
-        line += fmt::format("ADC_CHANNEL_{}: Fs = ", static_cast<int>(conf.channel));
-        line += maybe_rate.has_value() ? fmt::format("{:.1f} Hz", maybe_rate.value()) : "no rate";
-        line += ", V = ";
-        line += maybe_mv.has_value() ? fmt::format("{} mV", static_cast<int>(maybe_mv.value()))
-                                     : "no value";
+  // ADC1_CH0/CH1 = GPIO16/GPIO17, free pins on the M5-Bus header
+  std::vector<espp::AdcConfig> channels{
+      {.unit = ADC_UNIT_1, .channel = ADC_CHANNEL_0, .attenuation = ADC_ATTEN_DB_12},
+      {.unit = ADC_UNIT_1, .channel = ADC_CHANNEL_1, .attenuation = ADC_ATTEN_DB_12}};
+  // this initailizes the DMA and filter task for the continuous adc
+  espp::ContinuousAdc adc(
+      {.sample_rate_hz = 1 * 1000,
+       .channels = channels,
+       .convert_mode =
+           ADC_CONV_SINGLE_UNIT_1, // or BOTH_UNIT, ALTER_UNIT, SINGLE_UNIT_1, SINGLE_UNIT_2
+       .window_size_bytes = 1024,
+       .log_level = espp::Logger::Verbosity::WARN});
+  adc.start();
+  auto adc_task_fn = [&adc, &channels](std::mutex &m, std::condition_variable &cv) {
+    std::string line;
+    for (auto &conf : channels) {
+      auto maybe_mv = adc.get_mv(conf);
+      if (!line.empty()) {
+        line += "\t";
       }
-      fmt::print("{}\n", line);
-      // NOTE: sleeping in this way allows the sleep to exit early when the
-      // task is being stopped / destroyed
-      {
-        std::unique_lock<std::mutex> lk(m);
-        cv.wait_for(lk, 200ms);
+      line += fmt::format("ADC_CHANNEL_{}: V = ", static_cast<int>(conf.channel));
+      line += maybe_mv.has_value() ? fmt::format("{} mV", static_cast<int>(maybe_mv.value()))
+                                   : "no value";
+      if (maybe_mv.has_value()) {
+        lv_subject_t *subject = (conf.channel == ADC_CHANNEL_0) ? &adc_x_subject : &adc_y_subject;
+        // lv_subject_set_int runs the bar's observer callback synchronously,
+        // which touches the widget, so it needs the LVGL lock
+        std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
+        lv_subject_set_int(subject, static_cast<int32_t>(maybe_mv.value()));
       }
-      // don't want to stop the task
-      return false;
-    };
-    auto task = espp::Task({.callback = task_fn,
-                            .task_config = {.name = "Read ADC"},
-                            .log_level = espp::Logger::Verbosity::INFO});
-    task.start();
-
-    //! [continuous adc example]
-    std::this_thread::sleep_for(num_seconds_to_run * 1s);
-  }
+    }
+    fmt::print("{}\n", line);
+    // NOTE: sleeping in this way allows the sleep to exit early when the
+    // task is being stopped / destroyed
+    {
+      std::unique_lock<std::mutex> lk(m);
+      cv.wait_for(lk, 200ms);
+    }
+    // don't want to stop the task
+    return false;
+  };
+  auto adc_task = espp::Task({.callback = adc_task_fn,
+                              .task_config = {.name = "Read ADC"},
+                              .log_level = espp::Logger::Verbosity::INFO});
+  adc_task.start();
 
   // loop forever
   while (true) {
