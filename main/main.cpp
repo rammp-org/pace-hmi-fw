@@ -34,6 +34,7 @@ static std::recursive_mutex lvgl_mutex;
 // lifetime because the bound observers keep pointers to them
 static lv_subject_t adc_x_subject;
 static lv_subject_t adc_y_subject;
+static lv_subject_t adc_twist_subject;
 
 static bool load_audio(size_t &out_size, size_t &out_sample_rate);
 static void play_click(espp::M5StackTab5 &tab5);
@@ -422,10 +423,13 @@ extern "C" void app_main(void) {
   // Bars show raw millivolts; 3300 ≈ full scale at 12 dB attenuation.
   lv_subject_init_int(&adc_x_subject, 0);
   lv_subject_init_int(&adc_y_subject, 0);
+  lv_subject_init_int(&adc_twist_subject, 0);
   lv_bar_set_range(ui_XBar, 0, 3300);
   lv_bar_set_range(ui_YBar, 0, 3300);
+  lv_bar_set_range(ui_TwistBar, 0, 3300);
   lv_bar_bind_value(ui_XBar, &adc_x_subject);
   lv_bar_bind_value(ui_YBar, &adc_y_subject);
+  lv_bar_bind_value(ui_TwistBar, &adc_twist_subject);
 
   logger.info("Initializing touch...");
   if (!tab5.initialize_touch(touch_callback)) {
@@ -626,10 +630,12 @@ extern "C" void app_main(void) {
 
   logger.info("Starting continuous adc...");
 
-  // ADC1_CH0/CH1 = GPIO16/GPIO17, free pins on the M5-Bus header
+  // ADC1_CH0/CH1/CH2 = GPIO16/GPIO17/GPIO18 on the M5-Bus header
+  // (GPIO18 is the bus MOSI position; unused since no SPI module is stacked)
   std::vector<espp::AdcConfig> channels{
       {.unit = ADC_UNIT_1, .channel = ADC_CHANNEL_0, .attenuation = ADC_ATTEN_DB_12},
-      {.unit = ADC_UNIT_1, .channel = ADC_CHANNEL_1, .attenuation = ADC_ATTEN_DB_12}};
+      {.unit = ADC_UNIT_1, .channel = ADC_CHANNEL_1, .attenuation = ADC_ATTEN_DB_12},
+      {.unit = ADC_UNIT_1, .channel = ADC_CHANNEL_2, .attenuation = ADC_ATTEN_DB_12}};
   // this initailizes the DMA and filter task for the continuous adc
   espp::ContinuousAdc adc(
       {.sample_rate_hz = 1 * 1000,
@@ -650,11 +656,26 @@ extern "C" void app_main(void) {
       line += maybe_mv.has_value() ? fmt::format("{} mV", static_cast<int>(maybe_mv.value()))
                                    : "no value";
       if (maybe_mv.has_value()) {
-        lv_subject_t *subject = (conf.channel == ADC_CHANNEL_0) ? &adc_x_subject : &adc_y_subject;
-        // lv_subject_set_int runs the bar's observer callback synchronously,
-        // which touches the widget, so it needs the LVGL lock
-        std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
-        lv_subject_set_int(subject, static_cast<int32_t>(maybe_mv.value()));
+        lv_subject_t *subject = nullptr;
+        switch (conf.channel) {
+        case ADC_CHANNEL_0:
+          subject = &adc_x_subject;
+          break;
+        case ADC_CHANNEL_1:
+          subject = &adc_y_subject;
+          break;
+        case ADC_CHANNEL_2:
+          subject = &adc_twist_subject;
+          break;
+        default:
+          break;
+        }
+        if (subject) {
+          // lv_subject_set_int runs the bar's observer callback synchronously,
+          // which touches the widget, so it needs the LVGL lock
+          std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
+          lv_subject_set_int(subject, static_cast<int32_t>(maybe_mv.value()));
+        }
       }
     }
     fmt::print("{}\n", line);
