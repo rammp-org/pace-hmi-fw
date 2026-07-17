@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <functional>
 
 /**
@@ -17,6 +18,13 @@
 /// to 0-100) arrives on the brightness topic. Call before rtps_comms_start().
 /// The handler runs on the RTPS receive task, not the LVGL thread.
 void rtps_comms_on_brightness(std::function<void(float percent)> handler);
+
+/// Publish one joystick ADC snapshot (millivolts) on the ADC topic
+/// (`espp/rtps_example/adc`, type `rammp/msg/AdcXYTwist`: three uint32 in
+/// x, y, twist order). Safe to call from any task; returns false (without
+/// logging) until the participant is running and a subscriber on the topic
+/// has been discovered.
+bool rtps_comms_publish_adc(uint32_t x_mv, uint32_t y_mv, uint32_t twist_mv);
 
 /// Bring up Ethernet, then start the RTPS participant + publish task in the
 /// background as soon as DHCP assigns an IP (no timeout — also covers a cable

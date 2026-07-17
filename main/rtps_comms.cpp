@@ -65,6 +65,10 @@ constexpr std::string_view kCounterTopic = "espp/rtps_example/request";
 constexpr std::string_view kCmdTopic = "espp/rtps_example/response";
 constexpr std::string_view kBrightnessTopic = "espp/rtps_example/brightness";
 constexpr std::string_view kUInt32TypeName = "std_msgs/msg/UInt32";
+// joystick ADC stream: one sample = x, y, twist millivolts as three uint32.
+// Custom type name — both ends are ours (rtps_adc_plot.py matches these).
+constexpr std::string_view kAdcTopic = "espp/rtps_example/adc";
+constexpr std::string_view kAdcTypeName = "rammp/msg/AdcXYTwist";
 
 constexpr auto kPublishPeriod = 2s;
 
@@ -89,6 +93,17 @@ std::vector<uint8_t> serialize_uint32(uint32_t value) {
       .include_encapsulation = true,
   });
   writer.write<uint32_t>(value);
+  return writer.take_buffer();
+}
+
+std::vector<uint8_t> serialize_adc(uint32_t x_mv, uint32_t y_mv, uint32_t twist_mv) {
+  espp::CdrWriter writer({
+      .encapsulation = espp::CdrEncapsulation::CDR_LE,
+      .include_encapsulation = true,
+  });
+  writer.write<uint32_t>(x_mv);
+  writer.write<uint32_t>(y_mv);
+  writer.write<uint32_t>(twist_mv);
   return writer.take_buffer();
 }
 
@@ -324,6 +339,16 @@ bool start_participant() {
     return false;
   }
   logger.info("Added writer '{}' [{}]", kCounterTopic, kUInt32TypeName);
+  if (!participant->add_writer({
+          .topic_name = std::string(kAdcTopic),
+          .type_name = std::string(kAdcTypeName),
+          .reliability = espp::RtpsParticipant::ReliabilityKind::BEST_EFFORT,
+          .entity_index = 1,
+      })) {
+    logger.error("Failed to add writer for '{}'", kAdcTopic);
+    return false;
+  }
+  logger.info("Added writer '{}' [{}]", kAdcTopic, kAdcTypeName);
   if (!participant->add_reader({
           .topic_name = std::string(kCmdTopic),
           .type_name = std::string(kUInt32TypeName),
@@ -436,6 +461,27 @@ bool start_participant() {
 
 void rtps_comms_on_brightness(std::function<void(float)> handler) {
   brightness_handler = std::move(handler);
+}
+
+bool rtps_comms_publish_adc(uint32_t x_mv, uint32_t y_mv, uint32_t twist_mv) {
+  // called from the ADC task at 30 Hz; quiet no-op until RTPS is up and
+  // someone subscribes, so a missing cable or absent plot script costs
+  // nothing and logs nothing
+  if (!participant || !participant->is_started()) {
+    return false;
+  }
+  bool have_subscriber = false;
+  for (const auto &ep : participant->discovered_readers()) {
+    if (ep.is_reader && ep.topic_name == kAdcTopic) {
+      have_subscriber = true;
+      break;
+    }
+  }
+  if (!have_subscriber) {
+    return false;
+  }
+  // publish() is internally mutex-guarded, safe alongside the counter task
+  return participant->publish(kAdcTopic, serialize_adc(x_mv, y_mv, twist_mv));
 }
 
 bool rtps_comms_start() {

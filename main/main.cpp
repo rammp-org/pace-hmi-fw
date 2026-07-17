@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <optional>
 #include <stdlib.h>
 #include <vector>
 
@@ -667,24 +668,28 @@ extern "C" void app_main(void) {
                            .log_level = espp::Logger::Verbosity::WARN});
   adc.start();
   static espp::OneshotAdc twist_adc({.unit = ADC_UNIT_2, .channels = {twist_channel}});
+  // customization knobs: sampling/LVGL/RTPS cadence, and how often the serial
+  // line is printed. The log is divided down because 30 lines/s is the
+  // console-flood pattern that starved LVGL once before.
+  static constexpr auto kAdcUpdatePeriod = 33ms; // 30 Hz: ADC read, LVGL bars, RTPS publish
+  static constexpr int kAdcLogDivider = 6;       // serial log every Nth cycle (~5 Hz)
   auto adc_task_fn = [&adc, &channels](std::mutex &m, std::condition_variable &cv) {
-    std::string line;
+    static uint32_t cycle = 0;
+    const bool log_this_cycle = (cycle++ % kAdcLogDivider) == 0;
+
+    std::optional<float> x_mv;
+    std::optional<float> y_mv;
     for (auto &conf : channels) {
       auto maybe_mv = adc.get_mv(conf);
-      if (!line.empty()) {
-        line += "\t";
+      if (conf.channel == ADC_CHANNEL_0) {
+        x_mv = maybe_mv;
+      } else if (conf.channel == ADC_CHANNEL_1) {
+        y_mv = maybe_mv;
       }
-      line += fmt::format("ADC{}_CH{}: V = ", static_cast<int>(conf.unit) + 1,
-                          static_cast<int>(conf.channel));
-      line += maybe_mv.has_value() ? fmt::format("{} mV", static_cast<int>(maybe_mv.value()))
-                                   : "no value";
       if (maybe_mv.has_value()) {
-        lv_subject_t *subject = nullptr;
-        if (conf.channel == ADC_CHANNEL_0) {
-          subject = &adc_x_subject;
-        } else if (conf.channel == ADC_CHANNEL_1) {
-          subject = &adc_y_subject;
-        }
+        lv_subject_t *subject = conf.channel == ADC_CHANNEL_0   ? &adc_x_subject
+                                : conf.channel == ADC_CHANNEL_1 ? &adc_y_subject
+                                                                : nullptr;
         if (subject) {
           // lv_subject_set_int runs the bar's observer callback synchronously,
           // which touches the widget, so it needs the LVGL lock
@@ -695,24 +700,36 @@ extern "C" void app_main(void) {
     }
     // twist pot on ADC2 (GPIO49), sampled oneshot — see comment at the
     // channel definitions above
-    auto maybe_twist_mv = twist_adc.read_mv(twist_channel);
-    line += fmt::format("\tADC2_CH{}: V = ", static_cast<int>(twist_channel.channel));
-    line += maybe_twist_mv.has_value() ? fmt::format("{} mV", maybe_twist_mv.value()) : "no value";
-    if (maybe_twist_mv.has_value()) {
+    auto twist_mv = twist_adc.read_mv(twist_channel);
+    if (twist_mv.has_value()) {
       std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
-      lv_subject_set_int(&adc_twist_subject, static_cast<int32_t>(maybe_twist_mv.value()));
+      lv_subject_set_int(&adc_twist_subject, static_cast<int32_t>(twist_mv.value()));
     }
-    // monotonically increasing tag: if the serial log ever goes quiet and
-    // later resumes with a gap in this counter, the task kept running and the
-    // console transport dropped the lines; a continuous sequence would mean
-    // the task itself had paused
-    static uint32_t print_seq = 0;
-    fmt::print("#{} {}\n", print_seq++, line);
+
+    // stream the snapshot to the PC (rtps_adc_plot.py); quiet no-op until
+    // RTPS is up and a subscriber is discovered
+    if (x_mv && y_mv && twist_mv) {
+      auto to_mv = [](float v) { return static_cast<uint32_t>(std::max(v, 0.0f)); };
+      rtps_comms_publish_adc(to_mv(*x_mv), to_mv(*y_mv), to_mv(*twist_mv));
+    }
+
+    if (log_this_cycle) {
+      auto fmt_mv = [](const std::optional<float> &v) {
+        return v ? fmt::format("{} mV", static_cast<int>(*v)) : std::string("no value");
+      };
+      // monotonically increasing tag: if the serial log ever goes quiet and
+      // later resumes with a gap in this counter, the task kept running and the
+      // console transport dropped the lines; a continuous sequence would mean
+      // the task itself had paused
+      static uint32_t print_seq = 0;
+      fmt::print("#{} ADC1_CH0: V = {}\tADC1_CH1: V = {}\tADC2_CH0: V = {}\n", print_seq++,
+                 fmt_mv(x_mv), fmt_mv(y_mv), fmt_mv(twist_mv));
+    }
     // NOTE: sleeping in this way allows the sleep to exit early when the
     // task is being stopped / destroyed
     {
       std::unique_lock<std::mutex> lk(m);
-      cv.wait_for(lk, 200ms);
+      cv.wait_for(lk, kAdcUpdatePeriod);
     }
     // don't want to stop the task
     return false;
