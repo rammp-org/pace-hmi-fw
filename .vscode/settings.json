@@ -82,5 +82,11 @@
     "typeindex": "cpp",
     "typeinfo": "cpp",
     "variant": "cpp"
-  }
+  },
+  "clangd.path": "C:\\Espressif\\tools\\esp-clang\\esp-20.1.1_20250829\\esp-clang\\bin\\clangd.exe",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=**",
+    "--compile-commands-dir=c:\\Users\\halai\\Offline_Documents\\ATDev\\rammp-hmi-p4\\build"
+  ]
 }

@@ -63,6 +63,16 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 1.1.5
+  espp/cdr:
+    component_hash: 2a5b73733e0db5184746754c1b5b148e674725c35ea0bf6ac347f033c2b36c8a
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.1.6
   espp/cli:
     component_hash: 9c9b6e3b05daac62c86cf4d7c02a9ed7f8f461871dd40daa992ed1ea355af006
     dependencies:
@@ -321,6 +331,32 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 1.1.5
+  espp/rtps:
+    component_hash: a97a223869ca231876b835f39e6f9f1aa91546ccbc60c6c63e9024c7b6833bbb
+    dependencies:
+    - name: espp/base_component
+      registry_url: https://components.espressif.com
+      require: private
+      version: '>=1.0'
+    - name: espp/cdr
+      registry_url: https://components.espressif.com
+      require: private
+      version: '>=1.0'
+    - name: espp/socket
+      registry_url: https://components.espressif.com
+      require: private
+      version: '>=1.0'
+    - name: espp/task
+      registry_url: https://components.espressif.com
+      require: private
+      version: '>=1.0'
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.1.6
   espp/rx8130ce:
     component_hash: 2f53ec64993491a9cdf7529ed0fb9973da09136589eda859c2eaa7c2d2d5182c
     dependencies:
@@ -335,6 +371,24 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 1.1.5
+  espp/socket:
+    component_hash: c0ae8a1755a242152c407166f5fee12a214b3a83ed65710babe8ebc2105a3d21
+    dependencies:
+    - name: espp/base_component
+      registry_url: https://components.espressif.com
+      require: private
+      version: '>=1.0'
+    - name: espp/task
+      registry_url: https://components.espressif.com
+      require: private
+      version: '>=1.0'
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com
+      type: service
+    version: 1.1.6
   espp/spi:
     component_hash: 2ed76accaa2c1b5db6dca663187990afe83ef847423a298e3838b2c2b684ac35
     dependencies:
@@ -405,6 +459,30 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 1.8.2
+  espressif/w5500:
+    component_hash: b5f5b466dd0b8f1f2de7ac5b7e4a364e993daf40c999044a54fb545e25be8aba
+    dependencies:
+    - name: espressif/wiznet_common
+      registry_url: https://components.espressif.com
+      require: private
+      version: ^1.0.0
+    - name: idf
+      require: private
+      version: '>=6.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 2.0.0
+  espressif/wiznet_common:
+    component_hash: 57414f4b8ce11295c03030da7ff3ef90184e07b3ba1e8985b5edb2461e9be780
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.3'
+    source:
+      registry_url: https://components.espressif.com
+      type: service
+    version: 1.0.0
   idf:
     source:
       type: idf
@@ -427,6 +505,7 @@ direct_dependencies:
 - espp/base_component
 - espp/base_peripheral
 - espp/bmi270
+- espp/cdr
 - espp/cli
 - espp/codec
 - espp/display
@@ -443,14 +522,16 @@ direct_dependencies:
 - espp/m5stack-tab5
 - espp/math
 - espp/pi4ioe5v
+- espp/rtps
 - espp/rx8130ce
 - espp/spi
 - espp/st7123touch
 - espp/task
 - espp/touch
 - espressif/esp-dsp
+- espressif/w5500
 - idf
 - lvgl/lvgl
-manifest_hash: 815c7437ef906a714673529afdb6111f60f07770a6affac5545e67780a825650
+manifest_hash: 1af1e306093748e1603a37c6fc7e2180aeb9cc263b01d1e681fdfcc5ecdd0341
 target: esp32p4
 version: 3.0.0

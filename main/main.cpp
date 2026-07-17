@@ -20,6 +20,9 @@
 #include "ui.h"
 
 #include "continuous_adc.hpp"
+#include "oneshot_adc.hpp"
+
+#include "rtps_comms.hpp"
 
 #include "driver/ppa.h"
 #include "esp_heap_caps.h"
@@ -66,6 +69,13 @@ static uint8_t *alloc_psram_dma(size_t size) {
 static void ppa_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
   auto &tab5 = espp::M5StackTab5::get();
   auto rotation = lv_display_get_rotation(disp);
+  // one-shot breadcrumb: proves LVGL is rendering and flushing at all
+  static bool first_flush_logged = false;
+  if (!first_flush_logged) {
+    first_flush_logged = true;
+    fmt::print("[flush] first LVGL flush: area ({},{})-({},{}), rotation {}\n", area->x1, area->y1,
+               area->x2, area->y2, static_cast<int>(rotation));
+  }
   if (rotation == LV_DISPLAY_ROTATION_0) {
     tab5.write_lcd_lines(area->x1, area->y1, area->x2, area->y2, px_map, 0);
     return;
@@ -96,6 +106,13 @@ static void ppa_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_
   srm.mode = PPA_TRANS_MODE_BLOCKING;
   esp_err_t err = ppa_do_scale_rotate_mirror(ppa_srm, &srm);
   if (err != ESP_OK) {
+    // log the first failure and then every 100th so a permanently broken PPA
+    // path is visible without flooding the console
+    static uint32_t ppa_errors = 0;
+    if (ppa_errors++ % 100 == 0) {
+      fmt::print("[flush] PPA rotate FAILED: {} (occurrence #{})\n", esp_err_to_name(err),
+                 ppa_errors);
+    }
     // complete the flush anyway so LVGL doesn't stall waiting on this buffer
     lv_display_flush_ready(disp);
     return;
@@ -630,21 +647,25 @@ extern "C" void app_main(void) {
 
   logger.info("Starting continuous adc...");
 
-  // ADC1_CH0/CH1/CH2 = GPIO16/GPIO17/GPIO18 on the M5-Bus header
-  // (GPIO18 is the bus MOSI position; unused since no SPI module is stacked)
+  // X/Y: ADC1_CH0/CH1 = GPIO16/GPIO17 on the M5-Bus header.
+  // Twist: ADC2_CH4 = GPIO53 on the Grove connector — GPIO18 (its previous
+  // pin) is now the M5-Bus SPI MOSI line for the W5500 Ethernet module.
+  // The twist channel is sampled oneshot rather than through the continuous
+  // driver: mixing both units via ADC_CONV_BOTH_UNIT produced a stream of
+  // invalid DMA frames on the P4 (log spam that starved LVGL's first frame).
   std::vector<espp::AdcConfig> channels{
       {.unit = ADC_UNIT_1, .channel = ADC_CHANNEL_0, .attenuation = ADC_ATTEN_DB_12},
-      {.unit = ADC_UNIT_1, .channel = ADC_CHANNEL_1, .attenuation = ADC_ATTEN_DB_12},
-      {.unit = ADC_UNIT_1, .channel = ADC_CHANNEL_2, .attenuation = ADC_ATTEN_DB_12}};
+      {.unit = ADC_UNIT_1, .channel = ADC_CHANNEL_1, .attenuation = ADC_ATTEN_DB_12}};
+  static const espp::AdcConfig twist_channel{
+      .unit = ADC_UNIT_2, .channel = ADC_CHANNEL_4, .attenuation = ADC_ATTEN_DB_12};
   // this initailizes the DMA and filter task for the continuous adc
-  espp::ContinuousAdc adc(
-      {.sample_rate_hz = 1 * 1000,
-       .channels = channels,
-       .convert_mode =
-           ADC_CONV_SINGLE_UNIT_1, // or BOTH_UNIT, ALTER_UNIT, SINGLE_UNIT_1, SINGLE_UNIT_2
-       .window_size_bytes = 1024,
-       .log_level = espp::Logger::Verbosity::WARN});
+  espp::ContinuousAdc adc({.sample_rate_hz = 1 * 1000,
+                           .channels = channels,
+                           .convert_mode = ADC_CONV_SINGLE_UNIT_1,
+                           .window_size_bytes = 1024,
+                           .log_level = espp::Logger::Verbosity::WARN});
   adc.start();
+  static espp::OneshotAdc twist_adc({.unit = ADC_UNIT_2, .channels = {twist_channel}});
   auto adc_task_fn = [&adc, &channels](std::mutex &m, std::condition_variable &cv) {
     std::string line;
     for (auto &conf : channels) {
@@ -652,23 +673,16 @@ extern "C" void app_main(void) {
       if (!line.empty()) {
         line += "\t";
       }
-      line += fmt::format("ADC_CHANNEL_{}: V = ", static_cast<int>(conf.channel));
+      line += fmt::format("ADC{}_CH{}: V = ", static_cast<int>(conf.unit) + 1,
+                          static_cast<int>(conf.channel));
       line += maybe_mv.has_value() ? fmt::format("{} mV", static_cast<int>(maybe_mv.value()))
                                    : "no value";
       if (maybe_mv.has_value()) {
         lv_subject_t *subject = nullptr;
-        switch (conf.channel) {
-        case ADC_CHANNEL_0:
+        if (conf.channel == ADC_CHANNEL_0) {
           subject = &adc_x_subject;
-          break;
-        case ADC_CHANNEL_1:
+        } else if (conf.channel == ADC_CHANNEL_1) {
           subject = &adc_y_subject;
-          break;
-        case ADC_CHANNEL_2:
-          subject = &adc_twist_subject;
-          break;
-        default:
-          break;
         }
         if (subject) {
           // lv_subject_set_int runs the bar's observer callback synchronously,
@@ -678,12 +692,21 @@ extern "C" void app_main(void) {
         }
       }
     }
+    // twist pot on ADC2 (GPIO53), sampled oneshot — see comment at the
+    // channel definitions above
+    auto maybe_twist_mv = twist_adc.read_mv(twist_channel);
+    line += fmt::format("\tADC2_CH{}: V = ", static_cast<int>(twist_channel.channel));
+    line += maybe_twist_mv.has_value() ? fmt::format("{} mV", maybe_twist_mv.value()) : "no value";
+    if (maybe_twist_mv.has_value()) {
+      std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
+      lv_subject_set_int(&adc_twist_subject, static_cast<int32_t>(maybe_twist_mv.value()));
+    }
     fmt::print("{}\n", line);
     // NOTE: sleeping in this way allows the sleep to exit early when the
     // task is being stopped / destroyed
     {
       std::unique_lock<std::mutex> lk(m);
-      cv.wait_for(lk, 200ms);
+      cv.wait_for(lk, 3600s);
     }
     // don't want to stop the task
     return false;
@@ -692,6 +715,13 @@ extern "C" void app_main(void) {
                               .task_config = {.name = "Read ADC"},
                               .log_level = espp::Logger::Verbosity::INFO});
   adc_task.start();
+
+  // bring up W5500 Ethernet + RTPS last so a missing cable / module can't
+  // delay the HMI; on failure the UI keeps running without comms
+  logger.info("Starting RTPS comms...");
+  if (!rtps_comms_start()) {
+    logger.warn("RTPS comms not started (Ethernet bring-up failed)");
+  }
 
   // loop forever
   while (true) {
