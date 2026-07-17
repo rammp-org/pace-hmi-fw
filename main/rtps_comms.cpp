@@ -1,5 +1,6 @@
 #include "rtps_comms.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -35,7 +36,7 @@ namespace {
 
 // W5500 on the M5-Bus SPI lines; CS/INT on the spare header GPIOs. The bus
 // MOSI pin (GPIO18) used to be the twist ADC channel — that pot now lives on
-// Grove GPIO53 (see main.cpp).
+// GPIO49 / ADC2_CH0 (see main.cpp).
 constexpr spi_host_device_t kSpiHost = SPI2_HOST;
 constexpr gpio_num_t kPinSck = GPIO_NUM_5;
 constexpr gpio_num_t kPinMosi = GPIO_NUM_18;
@@ -62,6 +63,7 @@ constexpr int kParticipantId = 0;
 constexpr std::string_view kNodeName = "rammp_hmi";
 constexpr std::string_view kCounterTopic = "espp/rtps_example/request";
 constexpr std::string_view kCmdTopic = "espp/rtps_example/response";
+constexpr std::string_view kBrightnessTopic = "espp/rtps_example/brightness";
 constexpr std::string_view kUInt32TypeName = "std_msgs/msg/UInt32";
 
 constexpr auto kPublishPeriod = 2s;
@@ -74,6 +76,10 @@ esp_netif_ip_info_t ip_info{}; // valid once got_ip is true (gateway used for th
 
 std::unique_ptr<espp::RtpsParticipant> participant;
 std::unique_ptr<espp::Task> publish_task;
+
+// set by rtps_comms_on_brightness() before the participant starts; called
+// from the RTPS receive task when a brightness command arrives
+std::function<void(float)> brightness_handler;
 
 // UInt32 CDR helpers (little-endian CDR with the 4-byte encapsulation header,
 // the on-the-wire format DDS expects for user data)
@@ -338,6 +344,32 @@ bool start_participant() {
   }
   logger.info("Added reader '{}' [{}]", kCmdTopic, kUInt32TypeName);
 
+  if (!participant->add_reader({
+          .topic_name = std::string(kBrightnessTopic),
+          .type_name = std::string(kUInt32TypeName),
+          .reliability = espp::RtpsParticipant::ReliabilityKind::BEST_EFFORT,
+          .entity_index = 1,
+          .on_sample =
+              [](std::span<const uint8_t> cdr) {
+                auto value = deserialize_uint32(cdr);
+                if (!value) {
+                  logger.warn("Received sample on '{}' that failed CDR decode", kBrightnessTopic);
+                  return;
+                }
+                float percent = std::min<float>(static_cast<float>(*value), 100.0f);
+                logger.info("Received brightness command: {} -> {:.0f}%", *value, percent);
+                if (brightness_handler) {
+                  brightness_handler(percent);
+                } else {
+                  logger.warn("No brightness handler registered; command ignored");
+                }
+              },
+      })) {
+    logger.error("Failed to add reader for '{}'", kBrightnessTopic);
+    return false;
+  }
+  logger.info("Added reader '{}' [{}]", kBrightnessTopic, kUInt32TypeName);
+
   if (!participant->start()) {
     logger.error("Failed to start RTPS participant");
     participant.reset();
@@ -401,6 +433,10 @@ bool start_participant() {
 }
 
 } // namespace
+
+void rtps_comms_on_brightness(std::function<void(float)> handler) {
+  brightness_handler = std::move(handler);
+}
 
 bool rtps_comms_start() {
   logger.info("Bringing up W5500 Ethernet (SCK={}, MOSI={}, MISO={}, CS={}, INT={})",

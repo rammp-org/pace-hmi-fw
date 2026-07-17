@@ -7,6 +7,7 @@
  * and communication interfaces.
  */
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <stdlib.h>
@@ -648,7 +649,7 @@ extern "C" void app_main(void) {
   logger.info("Starting continuous adc...");
 
   // X/Y: ADC1_CH0/CH1 = GPIO16/GPIO17 on the M5-Bus header.
-  // Twist: ADC2_CH4 = GPIO53 on the Grove connector — GPIO18 (its previous
+  // Twist: ADC2_CH0 = GPIO49 — GPIO18 (its previous
   // pin) is now the M5-Bus SPI MOSI line for the W5500 Ethernet module.
   // The twist channel is sampled oneshot rather than through the continuous
   // driver: mixing both units via ADC_CONV_BOTH_UNIT produced a stream of
@@ -657,7 +658,7 @@ extern "C" void app_main(void) {
       {.unit = ADC_UNIT_1, .channel = ADC_CHANNEL_0, .attenuation = ADC_ATTEN_DB_12},
       {.unit = ADC_UNIT_1, .channel = ADC_CHANNEL_1, .attenuation = ADC_ATTEN_DB_12}};
   static const espp::AdcConfig twist_channel{
-      .unit = ADC_UNIT_2, .channel = ADC_CHANNEL_4, .attenuation = ADC_ATTEN_DB_12};
+      .unit = ADC_UNIT_2, .channel = ADC_CHANNEL_0, .attenuation = ADC_ATTEN_DB_12};
   // this initailizes the DMA and filter task for the continuous adc
   espp::ContinuousAdc adc({.sample_rate_hz = 1 * 1000,
                            .channels = channels,
@@ -692,7 +693,7 @@ extern "C" void app_main(void) {
         }
       }
     }
-    // twist pot on ADC2 (GPIO53), sampled oneshot — see comment at the
+    // twist pot on ADC2 (GPIO49), sampled oneshot — see comment at the
     // channel definitions above
     auto maybe_twist_mv = twist_adc.read_mv(twist_channel);
     line += fmt::format("\tADC2_CH{}: V = ", static_cast<int>(twist_channel.channel));
@@ -701,12 +702,17 @@ extern "C" void app_main(void) {
       std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
       lv_subject_set_int(&adc_twist_subject, static_cast<int32_t>(maybe_twist_mv.value()));
     }
-    fmt::print("{}\n", line);
+    // monotonically increasing tag: if the serial log ever goes quiet and
+    // later resumes with a gap in this counter, the task kept running and the
+    // console transport dropped the lines; a continuous sequence would mean
+    // the task itself had paused
+    static uint32_t print_seq = 0;
+    fmt::print("#{} {}\n", print_seq++, line);
     // NOTE: sleeping in this way allows the sleep to exit early when the
     // task is being stopped / destroyed
     {
       std::unique_lock<std::mutex> lk(m);
-      cv.wait_for(lk, 3600s);
+      cv.wait_for(lk, 200ms);
     }
     // don't want to stop the task
     return false;
@@ -719,6 +725,11 @@ extern "C" void app_main(void) {
   // bring up W5500 Ethernet + RTPS last so a missing cable / module can't
   // delay the HMI; on failure the UI keeps running without comms
   logger.info("Starting RTPS comms...");
+  // remote LCD brightness (rtps_brightness.py on the PC); floor at 5% so a
+  // remote command can't turn the screen fully off. brightness() drives the
+  // backlight directly (no LVGL), so it's safe from the RTPS receive task.
+  rtps_comms_on_brightness(
+      [](float percent) { espp::M5StackTab5::get().brightness(std::max(percent, 5.0f)); });
   if (!rtps_comms_start()) {
     logger.warn("RTPS comms not started (Ethernet bring-up failed)");
   }
