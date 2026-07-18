@@ -650,8 +650,8 @@ extern "C" void app_main(void) {
   logger.info("Starting continuous adc...");
 
   // X/Y: ADC1_CH0/CH1 = GPIO16/GPIO17 on the M5-Bus header.
-  // Twist: ADC2_CH0 = GPIO49 — GPIO18 (its previous
-  // pin) is now the M5-Bus SPI MOSI line for the W5500 Ethernet module.
+  // Twist: ADC2_CH3 = GPIO52 on the M5-Bus (the W5500 INT moved to GPIO4 to
+  // free it — analog inputs can't be re-routed through the GPIO matrix).
   // The twist channel is sampled oneshot rather than through the continuous
   // driver: mixing both units via ADC_CONV_BOTH_UNIT produced a stream of
   // invalid DMA frames on the P4 (log spam that starved LVGL's first frame).
@@ -659,7 +659,7 @@ extern "C" void app_main(void) {
       {.unit = ADC_UNIT_1, .channel = ADC_CHANNEL_0, .attenuation = ADC_ATTEN_DB_12},
       {.unit = ADC_UNIT_1, .channel = ADC_CHANNEL_1, .attenuation = ADC_ATTEN_DB_12}};
   static const espp::AdcConfig twist_channel{
-      .unit = ADC_UNIT_2, .channel = ADC_CHANNEL_0, .attenuation = ADC_ATTEN_DB_12};
+      .unit = ADC_UNIT_2, .channel = ADC_CHANNEL_3, .attenuation = ADC_ATTEN_DB_12};
   // this initailizes the DMA and filter task for the continuous adc
   espp::ContinuousAdc adc({.sample_rate_hz = 1 * 1000,
                            .channels = channels,
@@ -698,7 +698,7 @@ extern "C" void app_main(void) {
         }
       }
     }
-    // twist pot on ADC2 (GPIO49), sampled oneshot — see comment at the
+    // twist pot on ADC2 (GPIO52), sampled oneshot — see comment at the
     // channel definitions above
     auto twist_mv = twist_adc.read_mv(twist_channel);
     if (twist_mv.has_value()) {

@@ -34,15 +34,16 @@ using namespace std::chrono_literals;
 
 namespace {
 
-// W5500 on the M5-Bus SPI lines; CS/INT on the spare header GPIOs. The bus
-// MOSI pin (GPIO18) used to be the twist ADC channel — that pot now lives on
-// GPIO49 / ADC2_CH0 (see main.cpp).
+// W5500 on the M5-Bus SPI lines; CS/INT on the spare header GPIOs. INT is on
+// GPIO4 (digital, routed via the GPIO matrix) so that GPIO52 — one of the few
+// ADC2-capable pins on the headers — stays free for the twist pot (see
+// main.cpp). GPIO18 (bus MOSI) was the twist channel before the W5500 took it.
 constexpr spi_host_device_t kSpiHost = SPI2_HOST;
 constexpr gpio_num_t kPinSck = GPIO_NUM_5;
 constexpr gpio_num_t kPinMosi = GPIO_NUM_18;
 constexpr gpio_num_t kPinMiso = GPIO_NUM_19;
 constexpr gpio_num_t kPinCs = GPIO_NUM_45;
-constexpr gpio_num_t kPinInt = GPIO_NUM_52;
+constexpr gpio_num_t kPinInt = GPIO_NUM_4;
 // 20 MHz is comfortably within the W5500's 33 MHz limit and tolerant of
 // jumper-wire runs to the module; raise once the wiring is proven.
 constexpr int kSpiClockMhz = 20;
