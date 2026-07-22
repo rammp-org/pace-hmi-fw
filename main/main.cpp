@@ -23,6 +23,8 @@
 
 #include "ui.h"
 
+#include "sample_ui_home.h"
+
 #include "continuous_adc.hpp"
 #include "oneshot_adc.hpp"
 
@@ -674,10 +676,16 @@ extern "C" void app_main(void) {
   // screen. To go back to the demo screen at runtime, keep a pointer to it
   // (lv_screen_active() before this call) and lv_screen_load() it again.
   logger.info("Loading SquareLine UI...");
-  // The Tab5 panel is natively 720x1280 portrait; rotate LVGL 90 degrees so
-  // the UI is 1280x720 landscape (use ROTATION_270 for the other direction).
+  // The Tab5 panel is natively 720x1280 portrait; rotate LVGL 270 degrees so
+  // the UI is 1280x720 landscape (use ROTATION_90 for the other direction).
   lv_display_set_rotation(lv_display_get_default(), LV_DISPLAY_ROTATION_270);
   ui_init();
+
+  // Sample wheelchair dashboard mockup (static, no sensor wiring): builds its
+  // own screen and swaps it in over ui_MainScreen. Comment out to see the
+  // real telemetry UI again; RTPS/ADC binding below is unaffected either way.
+  sample_ui_home_init();
+  lv_screen_load(sample_ui_home_screen);
 
   // Bind the Settings-screen axis bars to the ADC subjects (observer pattern).
   // Bars show raw millivolts; 3300 ≈ full scale at 12 dB attenuation.

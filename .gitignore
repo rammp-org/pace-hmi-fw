@@ -37,3 +37,6 @@ managed_components/
 
 # Python
 __pycache__/
+
+# Claude Code project files
+.claude/
