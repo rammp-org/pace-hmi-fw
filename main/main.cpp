@@ -443,13 +443,19 @@ extern "C" void app_main(void) {
     return;
   }
 
-  // PPA hardware rotation (initialize_ppa_flush) is disabled: on this board,
-  // ppa_do_scale_rotate_mirror() reports success but rotating 1280x720 <->
-  // 720x1280 RGB565 through the PPA visibly shifts the image left (verified
-  // by comparing against LV_DISPLAY_ROTATION_0, which renders correctly).
-  // The BSP's own CPU-based rotation (M5StackTab5::flush, wired up by
-  // initialize_display() above) is used instead; it's slower but correct.
-  logger.info("Using BSP CPU rotation (PPA rotate flush disabled, see ppa_flush_cb comment)");
+  // PPA hardware rotation: previously disabled after ppa_do_scale_rotate_mirror()
+  // appeared to shift the image left on ROTATION_270 (see ppa_flush_cb comment
+  // for the investigation). That symptom was found and fixed as a DPI vsync
+  // porch issue (see the ST7123 video_timing block in video.cpp) affecting the
+  // BSP's own CPU-rotation flush identically regardless of rotation setting,
+  // so it's re-enabled here now that the underlying panel timing is corrected.
+  // Falls back to the BSP's CPU-based rotation (slower but known-correct) if
+  // PPA client setup fails.
+  if (!initialize_ppa_flush(tab5)) {
+    logger.warn("PPA flush init failed, falling back to BSP CPU rotation");
+  } else {
+    logger.info("Using PPA hardware rotation for display flush");
+  }
 
   // run the LVGL refresh timer at 60 fps — the espp lv_conf.h compiles in a
   // 33 ms (30 fps) default period; the lv_task loop below already calls
