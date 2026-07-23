@@ -414,6 +414,15 @@ void M5StackTab5::write_lcd_lines(int xs, int ys, int xe, int ye, const uint8_t 
   esp_lcd_panel_draw_bitmap(lcd_handles_.panel, xs, ys, xe + 1, ye + 1, data);
 }
 
+void *M5StackTab5::get_frame_buffer() const {
+  if (lcd_handles_.panel == nullptr) {
+    return nullptr;
+  }
+  void *fb = nullptr;
+  esp_err_t ret = esp_lcd_dpi_panel_get_frame_buffer(lcd_handles_.panel, 1, &fb);
+  return ret == ESP_OK ? fb : nullptr;
+}
+
 void M5StackTab5::brightness(float brightness) {
   brightness = std::clamp(brightness, 0.0f, 100.0f);
   if (backlight_) {

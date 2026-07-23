@@ -31,7 +31,6 @@
 #include "rtps_comms.hpp"
 
 #include "driver/ppa.h"
-#include "esp_heap_caps.h"
 
 using namespace std::chrono_literals;
 
@@ -59,51 +58,53 @@ static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c);
 
 // PPA (hardware) rotation flush, replaces the BSP's lv_draw_sw_rotate flush
 static ppa_client_handle_t ppa_srm = nullptr;
-static uint8_t *ppa_rotated_buf = nullptr;
-static size_t ppa_rotated_buf_size = 0;
+// Real DPI panel frame buffer (from M5StackTab5::get_frame_buffer()) -- the
+// PPA rotates straight into this via block_offset_x/y, so there's no
+// intermediate scratch buffer or separate write_lcd_lines() copy.
+static void *dpi_frame_buffer = nullptr;
+static size_t dpi_frame_buffer_size = 0;
 
-// PPA/DMA2D buffers in PSRAM must be aligned to both the L1 (64 B) and L2
-// (128 B on this config) cache line sizes
-static constexpr size_t DMA_BUF_ALIGN = 128;
-static uint8_t *alloc_psram_dma(size_t size) {
-  uint8_t *buf = static_cast<uint8_t *>(heap_caps_aligned_alloc(
-      DMA_BUF_ALIGN, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_8BIT));
-  if (!buf) {
-    // not all IDF configs tag PSRAM as DMA-capable in the heap; the PPA and
-    // DMA2D can still access it
-    buf = static_cast<uint8_t *>(
-        heap_caps_aligned_alloc(DMA_BUF_ALIGN, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-  }
-  return buf;
+// TEMPORARY: screen-transition profiling. -1 means "not currently timing a
+// transition"; set to the press timestamp on a nav button click, logged
+// against from inside ppa_flush_cb so we can see the render-vs-PPA-vs-DMA
+// breakdown of the ~150ms screen change. Remove once the bottleneck is found.
+static volatile int64_t screen_switch_start_us = -1;
+static void log_screen_switch_start(lv_event_t *e) {
+  (void)e;
+  screen_switch_start_us = esp_timer_get_time();
+  fmt::print("[timing] ---- button pressed ----\n");
 }
 
-// Rotates the rendered area on the ESP32-P4's PPA instead of the CPU, then
-// queues the DMA2D copy to the DPI framebuffer via write_lcd_lines(). The
-// panel's on_color_trans_done callback calls lv_display_flush_ready(), same
-// as with the BSP's own flush.
-//
-// NOT CURRENTLY USED (see initialize_ppa_flush): ppa_do_scale_rotate_mirror()
-// reports ESP_OK and every coordinate/config value here checks out (verified
-// against LVGL's own math, esp_lcd's DPI draw_bitmap copy path, and the
-// ppa_dsi esp-idf example), but on real hardware the ROTATION_270 case
-// produces a visibly left-shifted image; forcing LV_DISPLAY_ROTATION_0
-// (bypassing this function and the PPA entirely) renders correctly. That
-// isolates the bug to the PPA SRM rotate hardware/driver itself for this
-// 1280x720<->720x1280 RGB565 rotation, not to anything in this function.
-// Left in place in case it's worth revisiting (e.g. an alignment workaround,
-// or an esp-idf update) — kept working via lv_display_get_rotation() so it
-// can be re-enabled by uncommenting the initialize_ppa_flush() call below.
+// Rotates the rendered area on the ESP32-P4's PPA instead of the CPU, writing
+// directly into the DPI panel's frame buffer (at the rotated area's offset)
+// instead of a scratch buffer + a second write_lcd_lines() copy. See
+// initialize_ppa_flush() for how this gets wired up as the active flush.
 static void ppa_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
   auto &tab5 = espp::M5StackTab5::get();
   auto rotation = lv_display_get_rotation(disp);
+  const bool timing = screen_switch_start_us >= 0;
+  const int64_t t_start = timing ? esp_timer_get_time() : 0;
+  if (timing) {
+    fmt::print("[timing] +{:.1f}ms: flush start ({},{})-({},{})\n",
+               (t_start - screen_switch_start_us) / 1000.0, area->x1, area->y1, area->x2, area->y2);
+  }
   if (rotation == LV_DISPLAY_ROTATION_0) {
     tab5.write_lcd_lines(area->x1, area->y1, area->x2, area->y2, px_map, 0);
+    if (timing) {
+      fmt::print("[timing] +{:.1f}ms: flush done (no rotation)\n",
+                 (esp_timer_get_time() - screen_switch_start_us) / 1000.0);
+    }
     return;
   }
 
   const uint32_t w = lv_area_get_width(area);
   const uint32_t h = lv_area_get_height(area);
-  const bool swap_wh = rotation != LV_DISPLAY_ROTATION_180;
+
+  // Where the rotated area lands in the (unrotated) physical panel's frame
+  // buffer -- needed up front now, since it drives the PPA output block
+  // offset instead of a later write_lcd_lines() call.
+  lv_area_t rotated = *area;
+  lv_display_rotate_area(disp, &rotated);
 
   ppa_srm_oper_config_t srm{};
   srm.in.buffer = px_map;
@@ -112,10 +113,12 @@ static void ppa_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_
   srm.in.block_w = w;
   srm.in.block_h = h;
   srm.in.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
-  srm.out.buffer = ppa_rotated_buf;
-  srm.out.buffer_size = ppa_rotated_buf_size;
-  srm.out.pic_w = swap_wh ? h : w;
-  srm.out.pic_h = swap_wh ? w : h;
+  srm.out.buffer = dpi_frame_buffer;
+  srm.out.buffer_size = dpi_frame_buffer_size;
+  srm.out.pic_w = tab5.display_width();
+  srm.out.pic_h = tab5.display_height();
+  srm.out.block_offset_x = rotated.x1;
+  srm.out.block_offset_y = rotated.y1;
   srm.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
   // both LVGL's sw-rotate and the PPA rotate counter-clockwise, map directly
   srm.rotation_angle = rotation == LV_DISPLAY_ROTATION_90    ? PPA_SRM_ROTATION_ANGLE_90
@@ -124,7 +127,13 @@ static void ppa_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_
   srm.scale_x = 1.0f;
   srm.scale_y = 1.0f;
   srm.mode = PPA_TRANS_MODE_BLOCKING;
+  const int64_t t_ppa_start = timing ? esp_timer_get_time() : 0;
   esp_err_t err = ppa_do_scale_rotate_mirror(ppa_srm, &srm);
+  const int64_t t_ppa_end = timing ? esp_timer_get_time() : 0;
+  if (timing) {
+    fmt::print("[timing] +{:.1f}ms: PPA op done ({:.2f}ms)\n",
+               (t_ppa_end - screen_switch_start_us) / 1000.0, (t_ppa_end - t_ppa_start) / 1000.0);
+  }
   if (err != ESP_OK) {
     // log the first failure and then every 100th so a permanently broken PPA
     // path is visible without flooding the console
@@ -133,32 +142,28 @@ static void ppa_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_
       fmt::print("[flush] PPA rotate FAILED: {} (occurrence #{})\n", esp_err_to_name(err),
                  ppa_errors);
     }
-    // complete the flush anyway so LVGL doesn't stall waiting on this buffer
-    lv_display_flush_ready(disp);
-    return;
   }
-
-  lv_area_t rotated = *area;
-  lv_display_rotate_area(disp, &rotated);
-  tab5.write_lcd_lines(rotated.x1, rotated.y1, rotated.x2, rotated.y2, ppa_rotated_buf, 0);
+  // PPA writes directly into the DPI frame buffer (in blocking mode, already
+  // complete by the time ppa_do_scale_rotate_mirror() returns), so there's no
+  // separate DMA/copy step left to wait on -- signal ready either way so
+  // LVGL doesn't stall on a failed flush.
+  lv_display_flush_ready(disp);
 }
 
 // Route flushes through the PPA instead of the BSP's CPU rotation. The
 // (vendored) BSP already allocates full-screen PSRAM draw buffers; on failure
 // here the BSP's software-rotation flush stays in place as the fallback.
 static bool initialize_ppa_flush(espp::M5StackTab5 &tab5) {
-  const size_t fb_bytes = tab5.display_width() * tab5.display_height() * sizeof(uint16_t);
-  ppa_rotated_buf = alloc_psram_dma(fb_bytes);
-  if (!ppa_rotated_buf) {
+  dpi_frame_buffer = tab5.get_frame_buffer();
+  if (!dpi_frame_buffer) {
     return false;
   }
-  ppa_rotated_buf_size = fb_bytes;
+  dpi_frame_buffer_size = tab5.display_width() * tab5.display_height() * sizeof(uint16_t);
 
   ppa_client_config_t ppa_config{};
   ppa_config.oper_type = PPA_OPERATION_SRM;
   if (ppa_register_client(&ppa_config, &ppa_srm) != ESP_OK) {
-    heap_caps_free(ppa_rotated_buf);
-    ppa_rotated_buf = nullptr;
+    dpi_frame_buffer = nullptr;
     return false;
   }
 
@@ -693,6 +698,14 @@ extern "C" void app_main(void) {
   // the UI is 1280x720 landscape (use ROTATION_90 for the other direction).
   lv_display_set_rotation(lv_display_get_default(), LV_DISPLAY_ROTATION_270);
   ui_init();
+
+  // TEMPORARY: screen-transition profiling (see screen_switch_start_us /
+  // ppa_flush_cb). Attached as extra event callbacks so the SquareLine-
+  // generated ui_event_SettingsButton*/handlers in main/ui/ (overwritten on
+  // every import_ui.ps1 run) don't need touching. Remove once the ~150ms
+  // screen-change bottleneck is found.
+  lv_obj_add_event_cb(ui_SettingsButton, log_screen_switch_start, LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(ui_SettingsButton2, log_screen_switch_start, LV_EVENT_CLICKED, nullptr);
 
   // Sample wheelchair dashboard mockup (static, no sensor wiring): builds its
   // own screen and swaps it in over ui_MainScreen. Comment out to see the
