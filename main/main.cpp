@@ -81,16 +81,21 @@ static uint8_t *alloc_psram_dma(size_t size) {
 // queues the DMA2D copy to the DPI framebuffer via write_lcd_lines(). The
 // panel's on_color_trans_done callback calls lv_display_flush_ready(), same
 // as with the BSP's own flush.
+//
+// NOT CURRENTLY USED (see initialize_ppa_flush): ppa_do_scale_rotate_mirror()
+// reports ESP_OK and every coordinate/config value here checks out (verified
+// against LVGL's own math, esp_lcd's DPI draw_bitmap copy path, and the
+// ppa_dsi esp-idf example), but on real hardware the ROTATION_270 case
+// produces a visibly left-shifted image; forcing LV_DISPLAY_ROTATION_0
+// (bypassing this function and the PPA entirely) renders correctly. That
+// isolates the bug to the PPA SRM rotate hardware/driver itself for this
+// 1280x720<->720x1280 RGB565 rotation, not to anything in this function.
+// Left in place in case it's worth revisiting (e.g. an alignment workaround,
+// or an esp-idf update) — kept working via lv_display_get_rotation() so it
+// can be re-enabled by uncommenting the initialize_ppa_flush() call below.
 static void ppa_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
   auto &tab5 = espp::M5StackTab5::get();
   auto rotation = lv_display_get_rotation(disp);
-  // one-shot breadcrumb: proves LVGL is rendering and flushing at all
-  static bool first_flush_logged = false;
-  if (!first_flush_logged) {
-    first_flush_logged = true;
-    fmt::print("[flush] first LVGL flush: area ({},{})-({},{}), rotation {}\n", area->x1, area->y1,
-               area->x2, area->y2, static_cast<int>(rotation));
-  }
   if (rotation == LV_DISPLAY_ROTATION_0) {
     tab5.write_lcd_lines(area->x1, area->y1, area->x2, area->y2, px_map, 0);
     return;
@@ -438,11 +443,13 @@ extern "C" void app_main(void) {
     return;
   }
 
-  // rotate on the PPA hardware instead of the CPU
-  logger.info("Setting up PPA rotation flush...");
-  if (!initialize_ppa_flush(tab5)) {
-    logger.error("Failed to set up PPA flush, keeping BSP software rotation!");
-  }
+  // PPA hardware rotation (initialize_ppa_flush) is disabled: on this board,
+  // ppa_do_scale_rotate_mirror() reports success but rotating 1280x720 <->
+  // 720x1280 RGB565 through the PPA visibly shifts the image left (verified
+  // by comparing against LV_DISPLAY_ROTATION_0, which renders correctly).
+  // The BSP's own CPU-based rotation (M5StackTab5::flush, wired up by
+  // initialize_display() above) is used instead; it's slower but correct.
+  logger.info("Using BSP CPU rotation (PPA rotate flush disabled, see ppa_flush_cb comment)");
 
   // run the LVGL refresh timer at 60 fps — the espp lv_conf.h compiles in a
   // 33 ms (30 fps) default period; the lv_task loop below already calls
@@ -684,8 +691,8 @@ extern "C" void app_main(void) {
   // Sample wheelchair dashboard mockup (static, no sensor wiring): builds its
   // own screen and swaps it in over ui_MainScreen. Comment out to see the
   // real telemetry UI again; RTPS/ADC binding below is unaffected either way.
-  sample_ui_home_init();
-  lv_screen_load(sample_ui_home_screen);
+  // sample_ui_home_init();
+  // lv_screen_load(sample_ui_home_screen);
 
   // Bind the Settings-screen axis bars to the ADC subjects (observer pattern).
   // Bars show raw millivolts; 3300 ≈ full scale at 12 dB attenuation.

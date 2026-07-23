@@ -187,10 +187,9 @@ bool M5StackTab5::initialize_lcd() {
     dpi_cfg.virtual_channel = 0;
     dpi_cfg.dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_DEFAULT;
     // ST7123/ST7121 timing taken from M5Stack's own M5Tab5-UserDemo (known-good):
-    // 78 MHz pixel clock with the vertical porches below. The vendor init table
-    // (byte-identical to the demo) tunes the panel's internal PLL for exactly
-    // this pixel clock + 1300 Mbps lane rate; mismatched values leave the panel
-    // backlit but black.
+    // 78 MHz pixel clock + 1300 Mbps lane rate, which the vendor init table
+    // (byte-identical to the demo) tunes the panel's internal PLL for;
+    // mismatched pixel clock/lane rate leaves the panel backlit but black.
     dpi_cfg.dpi_clock_freq_mhz = 78;
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
     dpi_cfg.in_color_format = LCD_COLOR_FMT_RGB565;
@@ -204,9 +203,13 @@ bool M5StackTab5::initialize_lcd() {
     dpi_cfg.video_timing.hsync_back_porch = 40;
     dpi_cfg.video_timing.hsync_pulse_width = 2;
     dpi_cfg.video_timing.hsync_front_porch = 40;
-    dpi_cfg.video_timing.vsync_back_porch = 4;
+    // vsync_back_porch/front_porch retuned from the vendor defaults (4/320) to
+    // correct a vertical content offset on this board; total frame lines held
+    // constant (2 + 42 + 1280 + 282 == 2 + 4 + 1280 + 320 == 1606) so the
+    // pixel-clock/PLL tuning above is unaffected.
+    dpi_cfg.video_timing.vsync_back_porch = 42;
     dpi_cfg.video_timing.vsync_pulse_width = 2;
-    dpi_cfg.video_timing.vsync_front_porch = 320;
+    dpi_cfg.video_timing.vsync_front_porch = 282;
 #if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(6, 0, 0)
     dpi_cfg.flags.use_dma2d = true;
 #endif
