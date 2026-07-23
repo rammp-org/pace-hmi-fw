@@ -15,7 +15,6 @@ extern void ui_MainScreen_screen_init(void);
 extern void ui_MainScreen_screen_destroy(void);
 extern lv_obj_t *ui_MainScreen;
 extern lv_obj_t *ui_BackgroundPanelSquare;
-extern lv_obj_t *ui_BackgroundPanelSquare2;
 extern lv_obj_t *ui_DriveModeButton;
 extern lv_obj_t *ui_Label1;
 extern lv_obj_t *ui_SeatAdjustmentButton;

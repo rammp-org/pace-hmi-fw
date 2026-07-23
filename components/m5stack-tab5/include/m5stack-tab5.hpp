@@ -262,12 +262,6 @@ public:
   ///       before the write has completed.
   void write_lcd_lines(int xs, int ys, int xe, int ye, const uint8_t *data, uint32_t user_data);
 
-  /// Get the raw DPI panel frame buffer pointer, for callers (e.g. a PPA-based
-  /// flush) that want to write pixel data directly instead of going through
-  /// write_lcd_lines()/esp_lcd_panel_draw_bitmap().
-  /// \return Pointer to the frame buffer, or nullptr if the LCD isn't initialized
-  void *get_frame_buffer() const;
-
   /////////////////////////////////////////////////////////////////////////////
   // Audio System
   /////////////////////////////////////////////////////////////////////////////

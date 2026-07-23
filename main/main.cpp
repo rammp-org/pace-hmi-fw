@@ -31,6 +31,7 @@
 #include "rtps_comms.hpp"
 
 #include "driver/ppa.h"
+#include "esp_heap_caps.h"
 
 using namespace std::chrono_literals;
 
@@ -58,11 +59,8 @@ static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c);
 
 // PPA (hardware) rotation flush, replaces the BSP's lv_draw_sw_rotate flush
 static ppa_client_handle_t ppa_srm = nullptr;
-// Real DPI panel frame buffer (from M5StackTab5::get_frame_buffer()) -- the
-// PPA rotates straight into this via block_offset_x/y, so there's no
-// intermediate scratch buffer or separate write_lcd_lines() copy.
-static void *dpi_frame_buffer = nullptr;
-static size_t dpi_frame_buffer_size = 0;
+static uint8_t *ppa_rotated_buf = nullptr;
+static size_t ppa_rotated_buf_size = 0;
 
 // TEMPORARY: screen-transition profiling. -1 means "not currently timing a
 // transition"; set to the press timestamp on a nav button click, logged
@@ -75,10 +73,30 @@ static void log_screen_switch_start(lv_event_t *e) {
   fmt::print("[timing] ---- button pressed ----\n");
 }
 
-// Rotates the rendered area on the ESP32-P4's PPA instead of the CPU, writing
-// directly into the DPI panel's frame buffer (at the rotated area's offset)
-// instead of a scratch buffer + a second write_lcd_lines() copy. See
-// initialize_ppa_flush() for how this gets wired up as the active flush.
+// PPA/DMA2D buffers in PSRAM must be aligned to both the L1 (64 B) and L2
+// (128 B on this config) cache line sizes
+static constexpr size_t DMA_BUF_ALIGN = 128;
+static uint8_t *alloc_psram_dma(size_t size) {
+  uint8_t *buf = static_cast<uint8_t *>(heap_caps_aligned_alloc(
+      DMA_BUF_ALIGN, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_8BIT));
+  if (!buf) {
+    // not all IDF configs tag PSRAM as DMA-capable in the heap; the PPA and
+    // DMA2D can still access it
+    buf = static_cast<uint8_t *>(
+        heap_caps_aligned_alloc(DMA_BUF_ALIGN, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  }
+  return buf;
+}
+
+// Rotates the rendered area on the ESP32-P4's PPA instead of the CPU, then
+// queues the copy to the DPI framebuffer via write_lcd_lines(). Writing
+// through write_lcd_lines()/esp_lcd_panel_draw_bitmap() (rather than writing
+// the PPA output directly into the live frame buffer) matters now that
+// num_fbs=2: that's the path the driver uses to pick a safe (currently
+// off-screen) buffer to draw into and flip, avoiding the tearing a direct
+// write into the actively-scanned-out buffer would cause. The panel's
+// on_color_trans_done callback calls lv_display_flush_ready(), same as the
+// BSP's own flush.
 static void ppa_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
   auto &tab5 = espp::M5StackTab5::get();
   auto rotation = lv_display_get_rotation(disp);
@@ -99,12 +117,7 @@ static void ppa_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_
 
   const uint32_t w = lv_area_get_width(area);
   const uint32_t h = lv_area_get_height(area);
-
-  // Where the rotated area lands in the (unrotated) physical panel's frame
-  // buffer -- needed up front now, since it drives the PPA output block
-  // offset instead of a later write_lcd_lines() call.
-  lv_area_t rotated = *area;
-  lv_display_rotate_area(disp, &rotated);
+  const bool swap_wh = rotation != LV_DISPLAY_ROTATION_180;
 
   ppa_srm_oper_config_t srm{};
   srm.in.buffer = px_map;
@@ -113,12 +126,10 @@ static void ppa_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_
   srm.in.block_w = w;
   srm.in.block_h = h;
   srm.in.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
-  srm.out.buffer = dpi_frame_buffer;
-  srm.out.buffer_size = dpi_frame_buffer_size;
-  srm.out.pic_w = tab5.display_width();
-  srm.out.pic_h = tab5.display_height();
-  srm.out.block_offset_x = rotated.x1;
-  srm.out.block_offset_y = rotated.y1;
+  srm.out.buffer = ppa_rotated_buf;
+  srm.out.buffer_size = ppa_rotated_buf_size;
+  srm.out.pic_w = swap_wh ? h : w;
+  srm.out.pic_h = swap_wh ? w : h;
   srm.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
   // both LVGL's sw-rotate and the PPA rotate counter-clockwise, map directly
   srm.rotation_angle = rotation == LV_DISPLAY_ROTATION_90    ? PPA_SRM_ROTATION_ANGLE_90
@@ -142,28 +153,36 @@ static void ppa_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_
       fmt::print("[flush] PPA rotate FAILED: {} (occurrence #{})\n", esp_err_to_name(err),
                  ppa_errors);
     }
+    // complete the flush anyway so LVGL doesn't stall waiting on this buffer
+    lv_display_flush_ready(disp);
+    return;
   }
-  // PPA writes directly into the DPI frame buffer (in blocking mode, already
-  // complete by the time ppa_do_scale_rotate_mirror() returns), so there's no
-  // separate DMA/copy step left to wait on -- signal ready either way so
-  // LVGL doesn't stall on a failed flush.
-  lv_display_flush_ready(disp);
+
+  lv_area_t rotated = *area;
+  lv_display_rotate_area(disp, &rotated);
+  tab5.write_lcd_lines(rotated.x1, rotated.y1, rotated.x2, rotated.y2, ppa_rotated_buf, 0);
+  if (timing) {
+    fmt::print("[timing] +{:.1f}ms: flush done (write_lcd_lines returned)\n",
+               (esp_timer_get_time() - screen_switch_start_us) / 1000.0);
+  }
 }
 
 // Route flushes through the PPA instead of the BSP's CPU rotation. The
 // (vendored) BSP already allocates full-screen PSRAM draw buffers; on failure
 // here the BSP's software-rotation flush stays in place as the fallback.
 static bool initialize_ppa_flush(espp::M5StackTab5 &tab5) {
-  dpi_frame_buffer = tab5.get_frame_buffer();
-  if (!dpi_frame_buffer) {
+  const size_t fb_bytes = tab5.display_width() * tab5.display_height() * sizeof(uint16_t);
+  ppa_rotated_buf = alloc_psram_dma(fb_bytes);
+  if (!ppa_rotated_buf) {
     return false;
   }
-  dpi_frame_buffer_size = tab5.display_width() * tab5.display_height() * sizeof(uint16_t);
+  ppa_rotated_buf_size = fb_bytes;
 
   ppa_client_config_t ppa_config{};
   ppa_config.oper_type = PPA_OPERATION_SRM;
   if (ppa_register_client(&ppa_config, &ppa_srm) != ESP_OK) {
-    dpi_frame_buffer = nullptr;
+    heap_caps_free(ppa_rotated_buf);
+    ppa_rotated_buf = nullptr;
     return false;
   }
 

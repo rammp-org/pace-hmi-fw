@@ -35,6 +35,8 @@ void ui_SettingsScreen_screen_init(void) {
   lv_obj_set_height(ui_AxesPanel, 300);
   lv_obj_set_align(ui_AxesPanel, LV_ALIGN_CENTER);
   lv_obj_remove_flag(ui_AxesPanel, LV_OBJ_FLAG_SCROLLABLE); /// Flags
+  lv_obj_set_style_bg_color(ui_AxesPanel, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
+  lv_obj_set_style_bg_opa(ui_AxesPanel, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
 
   ui_XBar = lv_bar_create(ui_AxesPanel);
   lv_bar_set_value(ui_XBar, 25, LV_ANIM_OFF);

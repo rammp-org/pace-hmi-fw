@@ -7,7 +7,6 @@
 
 lv_obj_t *ui_MainScreen = NULL;
 lv_obj_t *ui_BackgroundPanelSquare = NULL;
-lv_obj_t *ui_BackgroundPanelSquare2 = NULL;
 lv_obj_t *ui_DriveModeButton = NULL;
 lv_obj_t *ui_Label1 = NULL;
 lv_obj_t *ui_SeatAdjustmentButton = NULL;
@@ -30,11 +29,11 @@ void ui_event_SettingsButton(lv_event_t *e) {
 void ui_MainScreen_screen_init(void) {
   ui_MainScreen = lv_obj_create(NULL);
   lv_obj_remove_flag(ui_MainScreen, LV_OBJ_FLAG_SCROLLABLE); /// Flags
-  lv_obj_set_style_bg_color(ui_MainScreen, lv_color_hex(0x0009FF), LV_PART_MAIN | LV_STATE_DEFAULT);
+  lv_obj_set_style_bg_color(ui_MainScreen, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
   lv_obj_set_style_bg_opa(ui_MainScreen, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
 
   ui_BackgroundPanelSquare = lv_obj_create(ui_MainScreen);
-  lv_obj_set_width(ui_BackgroundPanelSquare, 1000);
+  lv_obj_set_width(ui_BackgroundPanelSquare, 1280);
   lv_obj_set_height(ui_BackgroundPanelSquare, 720);
   lv_obj_set_align(ui_BackgroundPanelSquare, LV_ALIGN_BOTTOM_LEFT);
   lv_obj_remove_flag(ui_BackgroundPanelSquare, LV_OBJ_FLAG_SCROLLABLE); /// Flags
@@ -42,19 +41,6 @@ void ui_MainScreen_screen_init(void) {
                                 LV_PART_MAIN | LV_STATE_DEFAULT);
   lv_obj_set_style_border_opa(ui_BackgroundPanelSquare, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
   lv_obj_set_style_border_width(ui_BackgroundPanelSquare, 5, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-  ui_BackgroundPanelSquare2 = lv_obj_create(ui_MainScreen);
-  lv_obj_set_width(ui_BackgroundPanelSquare2, 200);
-  lv_obj_set_height(ui_BackgroundPanelSquare2, 720);
-  lv_obj_set_align(ui_BackgroundPanelSquare2, LV_ALIGN_BOTTOM_RIGHT);
-  lv_obj_remove_flag(ui_BackgroundPanelSquare2, LV_OBJ_FLAG_SCROLLABLE); /// Flags
-  lv_obj_set_style_bg_color(ui_BackgroundPanelSquare2, lv_color_hex(0xFC00FF),
-                            LV_PART_MAIN | LV_STATE_DEFAULT);
-  lv_obj_set_style_bg_opa(ui_BackgroundPanelSquare2, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-  lv_obj_set_style_border_color(ui_BackgroundPanelSquare2, lv_color_hex(0x09FF00),
-                                LV_PART_MAIN | LV_STATE_DEFAULT);
-  lv_obj_set_style_border_opa(ui_BackgroundPanelSquare2, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-  lv_obj_set_style_border_width(ui_BackgroundPanelSquare2, 5, LV_PART_MAIN | LV_STATE_DEFAULT);
 
   ui_DriveModeButton = lv_button_create(ui_MainScreen);
   lv_obj_set_width(ui_DriveModeButton, 200);
@@ -137,7 +123,6 @@ void ui_MainScreen_screen_destroy(void) {
   // NULL screen variables
   ui_MainScreen = NULL;
   ui_BackgroundPanelSquare = NULL;
-  ui_BackgroundPanelSquare2 = NULL;
   ui_DriveModeButton = NULL;
   ui_Label1 = NULL;
   ui_SeatAdjustmentButton = NULL;

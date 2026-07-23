@@ -170,7 +170,10 @@ bool M5StackTab5::initialize_lcd() {
 #else
     dpi_cfg.pixel_format = LCD_COLOR_PIXEL_FORMAT_RGB565;
 #endif
-    dpi_cfg.num_fbs = 1;
+    // 2 frame buffers so esp_lcd_panel_draw_bitmap() can draw into an
+    // off-screen buffer and flip, instead of writing live into the buffer
+    // the DPI hardware is actively scanning out (visible tearing otherwise).
+    dpi_cfg.num_fbs = 2;
     dpi_cfg.video_timing.h_size = display_width_;
     dpi_cfg.video_timing.v_size = display_height_;
     dpi_cfg.video_timing.hsync_back_porch = 140;
@@ -197,7 +200,10 @@ bool M5StackTab5::initialize_lcd() {
 #else
     dpi_cfg.pixel_format = LCD_COLOR_PIXEL_FORMAT_RGB565;
 #endif
-    dpi_cfg.num_fbs = 1;
+    // 2 frame buffers so esp_lcd_panel_draw_bitmap() can draw into an
+    // off-screen buffer and flip, instead of writing live into the buffer
+    // the DPI hardware is actively scanning out (visible tearing otherwise).
+    dpi_cfg.num_fbs = 2;
     dpi_cfg.video_timing.h_size = display_width_;
     dpi_cfg.video_timing.v_size = display_height_;
     dpi_cfg.video_timing.hsync_back_porch = 40;
@@ -283,19 +289,25 @@ bool M5StackTab5::initialize_lcd() {
 
   logger_.info("Display initialized with resolution {}x{}", display_width_, display_height_);
 
-  // Fill the DPI frame buffer with white as the default background. This also
-  // acts as a hardware smoke test that is independent of LVGL: if the panel and
-  // DSI link are working the screen turns solid white right here. If it then
-  // stays white with no UI drawn on top, the problem is in LVGL's flush path;
-  // if it stays black, the problem is the panel init / DSI link itself.
+  // Fill both DPI frame buffers with white as the default background (2 now
+  // that num_fbs=2, so whichever one the hardware scans out first isn't
+  // uninitialized memory). This also acts as a hardware smoke test that is
+  // independent of LVGL: if the panel and DSI link are working the screen
+  // turns solid white right here. If it then stays white with no UI drawn on
+  // top, the problem is in LVGL's flush path; if it stays black, the problem
+  // is the panel init / DSI link itself.
   {
     void *fb0 = nullptr;
-    esp_err_t fb_ret = esp_lcd_dpi_panel_get_frame_buffer(lcd_handles_.panel, 1, &fb0);
-    if (fb_ret == ESP_OK && fb0 != nullptr) {
+    void *fb1 = nullptr;
+    esp_err_t fb_ret = esp_lcd_dpi_panel_get_frame_buffer(lcd_handles_.panel, 2, &fb0, &fb1);
+    if (fb_ret == ESP_OK && fb0 != nullptr && fb1 != nullptr) {
       size_t fb_size = display_width_ * display_height_ * sizeof(uint16_t);
       memset(fb0, 0xFF, fb_size); // 0xFFFF per RGB565 pixel = white
+      memset(fb1, 0xFF, fb_size);
       esp_cache_msync(fb0, fb_size, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
-      logger_.info("Filled DPI frame buffer with white ({} bytes) as default background", fb_size);
+      esp_cache_msync(fb1, fb_size, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+      logger_.info("Filled DPI frame buffers with white ({} bytes each) as default background",
+                   fb_size);
     } else {
       logger_.error("Failed to get DPI frame buffer for default fill: {}", esp_err_to_name(fb_ret));
     }
@@ -412,15 +424,6 @@ void M5StackTab5::write_lcd_lines(int xs, int ys, int xe, int ye, const uint8_t 
     return;
   }
   esp_lcd_panel_draw_bitmap(lcd_handles_.panel, xs, ys, xe + 1, ye + 1, data);
-}
-
-void *M5StackTab5::get_frame_buffer() const {
-  if (lcd_handles_.panel == nullptr) {
-    return nullptr;
-  }
-  void *fb = nullptr;
-  esp_err_t ret = esp_lcd_dpi_panel_get_frame_buffer(lcd_handles_.panel, 1, &fb);
-  return ret == ESP_OK ? fb : nullptr;
 }
 
 void M5StackTab5::brightness(float brightness) {
