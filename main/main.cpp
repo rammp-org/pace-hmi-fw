@@ -62,17 +62,6 @@ static ppa_client_handle_t ppa_srm = nullptr;
 static uint8_t *ppa_rotated_buf = nullptr;
 static size_t ppa_rotated_buf_size = 0;
 
-// TEMPORARY: screen-transition profiling. -1 means "not currently timing a
-// transition"; set to the press timestamp on a nav button click, logged
-// against from inside ppa_flush_cb so we can see the render-vs-PPA-vs-DMA
-// breakdown of the ~150ms screen change. Remove once the bottleneck is found.
-static volatile int64_t screen_switch_start_us = -1;
-static void log_screen_switch_start(lv_event_t *e) {
-  (void)e;
-  screen_switch_start_us = esp_timer_get_time();
-  fmt::print("[timing] ---- button pressed ----\n");
-}
-
 // PPA/DMA2D buffers in PSRAM must be aligned to both the L1 (64 B) and L2
 // (128 B on this config) cache line sizes
 static constexpr size_t DMA_BUF_ALIGN = 128;
@@ -100,18 +89,8 @@ static uint8_t *alloc_psram_dma(size_t size) {
 static void ppa_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
   auto &tab5 = espp::M5StackTab5::get();
   auto rotation = lv_display_get_rotation(disp);
-  const bool timing = screen_switch_start_us >= 0;
-  const int64_t t_start = timing ? esp_timer_get_time() : 0;
-  if (timing) {
-    fmt::print("[timing] +{:.1f}ms: flush start ({},{})-({},{})\n",
-               (t_start - screen_switch_start_us) / 1000.0, area->x1, area->y1, area->x2, area->y2);
-  }
   if (rotation == LV_DISPLAY_ROTATION_0) {
     tab5.write_lcd_lines(area->x1, area->y1, area->x2, area->y2, px_map, 0);
-    if (timing) {
-      fmt::print("[timing] +{:.1f}ms: flush done (no rotation)\n",
-                 (esp_timer_get_time() - screen_switch_start_us) / 1000.0);
-    }
     return;
   }
 
@@ -138,13 +117,7 @@ static void ppa_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_
   srm.scale_x = 1.0f;
   srm.scale_y = 1.0f;
   srm.mode = PPA_TRANS_MODE_BLOCKING;
-  const int64_t t_ppa_start = timing ? esp_timer_get_time() : 0;
   esp_err_t err = ppa_do_scale_rotate_mirror(ppa_srm, &srm);
-  const int64_t t_ppa_end = timing ? esp_timer_get_time() : 0;
-  if (timing) {
-    fmt::print("[timing] +{:.1f}ms: PPA op done ({:.2f}ms)\n",
-               (t_ppa_end - screen_switch_start_us) / 1000.0, (t_ppa_end - t_ppa_start) / 1000.0);
-  }
   if (err != ESP_OK) {
     // log the first failure and then every 100th so a permanently broken PPA
     // path is visible without flooding the console
@@ -161,10 +134,6 @@ static void ppa_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_
   lv_area_t rotated = *area;
   lv_display_rotate_area(disp, &rotated);
   tab5.write_lcd_lines(rotated.x1, rotated.y1, rotated.x2, rotated.y2, ppa_rotated_buf, 0);
-  if (timing) {
-    fmt::print("[timing] +{:.1f}ms: flush done (write_lcd_lines returned)\n",
-               (esp_timer_get_time() - screen_switch_start_us) / 1000.0);
-  }
 }
 
 // Route flushes through the PPA instead of the BSP's CPU rotation. The
@@ -717,14 +686,6 @@ extern "C" void app_main(void) {
   // the UI is 1280x720 landscape (use ROTATION_90 for the other direction).
   lv_display_set_rotation(lv_display_get_default(), LV_DISPLAY_ROTATION_270);
   ui_init();
-
-  // TEMPORARY: screen-transition profiling (see screen_switch_start_us /
-  // ppa_flush_cb). Attached as extra event callbacks so the SquareLine-
-  // generated ui_event_SettingsButton*/handlers in main/ui/ (overwritten on
-  // every import_ui.ps1 run) don't need touching. Remove once the ~150ms
-  // screen-change bottleneck is found.
-  lv_obj_add_event_cb(ui_SettingsButton, log_screen_switch_start, LV_EVENT_CLICKED, nullptr);
-  lv_obj_add_event_cb(ui_SettingsButton2, log_screen_switch_start, LV_EVENT_CLICKED, nullptr);
 
   // Sample wheelchair dashboard mockup (static, no sensor wiring): builds its
   // own screen and swaps it in over ui_MainScreen. Comment out to see the
