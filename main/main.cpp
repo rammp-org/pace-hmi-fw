@@ -684,7 +684,7 @@ extern "C" void app_main(void) {
   logger.info("Loading SquareLine UI...");
   // The Tab5 panel is natively 720x1280 portrait; rotate LVGL 270 degrees so
   // the UI is 1280x720 landscape (use ROTATION_90 for the other direction).
-  lv_display_set_rotation(lv_display_get_default(), LV_DISPLAY_ROTATION_270);
+  lv_display_set_rotation(lv_display_get_default(), LV_DISPLAY_ROTATION_90);
   ui_init();
 
   // Sample wheelchair dashboard mockup (static, no sensor wiring): builds its
