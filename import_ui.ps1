@@ -7,19 +7,35 @@
 # behind and break the build (SRC_DIRS compiles everything in ui/).
 #
 # Usage: .\import_ui.ps1 [-Source <path-to-squareline-export>]
+#
+# By default the export is expected as a sibling of this repo:
+#   <parent>\rammp-hmi-p4\import_ui.ps1   (this script)
+#   <parent>\ui_standalone                (the SquareLine export)
 
 param(
-    [string]$Source = "C:\Users\halai\Offline_Documents\ATDev\ui_standalone"
+    [string]$Source
 )
 
 $ErrorActionPreference = "Stop"
 
-$Dest = Join-Path $PSScriptRoot "main\ui"
+$RepoRoot = $PSScriptRoot
+if (-not $Source) {
+    $Source = Join-Path (Split-Path -Parent $RepoRoot) "ui_standalone"
+}
+$Source = [System.IO.Path]::GetFullPath($Source)
+
+$Dest = Join-Path $RepoRoot "main\ui"
 $Excluded = @("CMakeLists.txt", "filelist.txt", "project.info")
 
 # --- sanity checks on the export ---------------------------------------------
 if (-not (Test-Path $Source -PathType Container)) {
-    Write-Error "Source directory not found: $Source"
+    $repoName = Split-Path -Leaf $RepoRoot
+    Write-Error @"
+SquareLine export directory not found: $Source
+Expected 'ui_standalone' to sit beside '$repoName' in $(Split-Path -Parent $RepoRoot).
+Either export/move the UI there, or pass the path explicitly:
+  .\import_ui.ps1 -Source <path-to-squareline-export>
+"@
     exit 1
 }
 foreach ($required in @("ui.c", "ui.h")) {

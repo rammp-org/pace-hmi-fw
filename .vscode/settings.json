@@ -87,6 +87,6 @@
   "clangd.arguments": [
     "--background-index",
     "--query-driver=**",
-    "--compile-commands-dir=c:\\Users\\halai\\Offline_Documents\\ATDev\\rammp-hmi-p4\\build"
+    "--compile-commands-dir=${workspaceFolder}/build"
   ]
 }
