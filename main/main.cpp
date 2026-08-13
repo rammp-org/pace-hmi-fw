@@ -415,6 +415,11 @@ extern "C" void app_main(void) {
     return;
   }
 
+  // EXT5V_EN (0x43 P2) is asserted by the expander's default output mask; read it
+  // back to confirm the M5-Bus / 2.54-10P / HY2.0-4P 5V rail is live
+  auto ext_5v = tab5.get_io_expander_output(0x43, 2);
+  logger.info("EXT_5V_EN: {}", ext_5v ? (*ext_5v ? "enabled" : "DISABLED") : "read failed");
+
   logger.info("Initializing lcd...");
   // initialize the LCD
   if (!tab5.initialize_lcd()) {
