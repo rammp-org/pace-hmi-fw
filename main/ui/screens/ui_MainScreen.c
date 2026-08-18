@@ -15,6 +15,14 @@ lv_obj_t *ui_SettingsButton = NULL;
 lv_obj_t *ui_Label3 = NULL;
 lv_obj_t *ui_BatteryIndicator = NULL;
 // event funtions
+void ui_event_DriveModeButton(lv_event_t *e) {
+  lv_event_code_t event_code = lv_event_get_code(e);
+
+  if (event_code == LV_EVENT_CLICKED) {
+    _ui_screen_change(&ui_DriveScreen, LV_SCR_LOAD_ANIM_NONE, 0, 0, &ui_DriveScreen_screen_init);
+  }
+}
+
 void ui_event_SettingsButton(lv_event_t *e) {
   lv_event_code_t event_code = lv_event_get_code(e);
 
@@ -29,13 +37,14 @@ void ui_event_SettingsButton(lv_event_t *e) {
 void ui_MainScreen_screen_init(void) {
   ui_MainScreen = lv_obj_create(NULL);
   lv_obj_remove_flag(ui_MainScreen, LV_OBJ_FLAG_SCROLLABLE); /// Flags
-  lv_obj_set_style_bg_color(ui_MainScreen, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
+  lv_obj_set_style_bg_color(ui_MainScreen, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
   lv_obj_set_style_bg_opa(ui_MainScreen, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
 
   ui_BackgroundPanelSquare = lv_obj_create(ui_MainScreen);
   lv_obj_set_width(ui_BackgroundPanelSquare, 720);
   lv_obj_set_height(ui_BackgroundPanelSquare, 1280);
   lv_obj_set_align(ui_BackgroundPanelSquare, LV_ALIGN_BOTTOM_LEFT);
+  lv_obj_add_flag(ui_BackgroundPanelSquare, LV_OBJ_FLAG_HIDDEN);        /// Flags
   lv_obj_remove_flag(ui_BackgroundPanelSquare, LV_OBJ_FLAG_SCROLLABLE); /// Flags
   lv_obj_set_style_border_color(ui_BackgroundPanelSquare, lv_color_hex(0xFF0000),
                                 LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -111,6 +120,7 @@ void ui_MainScreen_screen_init(void) {
     lv_obj_set_style_pad_right(ui_BatteryIndicator,
                                lv_obj_get_style_pad_right(ui_BatteryIndicator, LV_PART_MAIN) + 1,
                                LV_PART_MAIN);
+  lv_obj_add_event_cb(ui_DriveModeButton, ui_event_DriveModeButton, LV_EVENT_ALL, NULL);
   lv_obj_add_event_cb(ui_SettingsButton, ui_event_SettingsButton, LV_EVENT_ALL, NULL);
 }
 

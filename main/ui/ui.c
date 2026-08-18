@@ -32,6 +32,7 @@ void ui_init(void) {
   lv_disp_set_theme(dispp, theme);
   ui_MainScreen_screen_init();
   ui_SettingsScreen_screen_init();
+  ui_DriveScreen_screen_init();
   ui____initial_actions0 = lv_obj_create(NULL);
   lv_disp_load_scr(ui_MainScreen);
 }
@@ -39,4 +40,5 @@ void ui_init(void) {
 void ui_destroy(void) {
   ui_MainScreen_screen_destroy();
   ui_SettingsScreen_screen_destroy();
+  ui_DriveScreen_screen_destroy();
 }

@@ -20,6 +20,7 @@
 #include "esp_eth_netif_glue.h"
 #include "esp_eth_phy_w5500.h"
 #include "esp_event.h"
+#include "esp_heap_caps.h"
 #include "esp_mac.h"
 #include "esp_netif.h"
 #include "lwip/ip_addr.h"
@@ -44,6 +45,11 @@ constexpr gpio_num_t kPinMosi = GPIO_NUM_18;
 constexpr gpio_num_t kPinMiso = GPIO_NUM_19;
 constexpr gpio_num_t kPinCs = GPIO_NUM_45;
 constexpr gpio_num_t kPinInt = GPIO_NUM_4;
+// How the driver learns a frame arrived: 0 uses the INT line, anything else
+// polls the chip over SPI every N ms and ignores INT. Set non-zero to rule out
+// INT wiring — with a floating INT the driver never reads RX, so DHCP hangs
+// while TX still works.
+constexpr int kRxPollPeriodMs = 0;
 // 20 MHz is comfortably within the W5500's 33 MHz limit and tolerant of
 // jumper-wire runs to the module; raise once the wiring is proven.
 constexpr int kSpiClockMhz = 20;
@@ -249,7 +255,12 @@ bool initialize_ethernet() {
   dev_config.queue_size = 20;
 
   eth_w5500_config_t w5500_config = ETH_W5500_DEFAULT_CONFIG(kSpiHost, &dev_config);
-  w5500_config.base.int_gpio_num = kPinInt;
+  if (kRxPollPeriodMs > 0) {
+    w5500_config.base.int_gpio_num = -1;
+    w5500_config.base.poll_period_ms = kRxPollPeriodMs;
+  } else {
+    w5500_config.base.int_gpio_num = kPinInt;
+  }
 
   eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
   eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
@@ -310,6 +321,11 @@ bool initialize_ethernet() {
 bool start_participant() {
   logger.info("Creating RTPS participant '{}' (domain {}, participant id {}, advertised IP {})",
               kNodeName, kDomainId, kParticipantId, ip_address);
+  // lwIP allocates TX pbufs from internal DRAM; if this is low, sends to a
+  // not-yet-ARP-resolved peer fail with ENOMEM
+  logger.info("Internal heap: {} free, {} largest block",
+              heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+              heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
   participant = std::make_unique<espp::RtpsParticipant>(espp::RtpsParticipant::Config{
       .node_name = std::string(kNodeName),
       .domain_id = kDomainId,
@@ -326,6 +342,9 @@ bool start_participant() {
             logger.info("Discovered remote {} '{}' [{}]", endpoint.is_reader ? "reader" : "writer",
                         endpoint.topic_name, endpoint.type_name);
           },
+      // raise to DEBUG (and socket to INFO) to trace a failed discovery
+      // exchange: that surfaces the "SPDP parsed"/"SEDP parsed" lines plus
+      // every send, showing what we transmit and what actually reaches us
       .log_level = espp::Logger::Verbosity::INFO,
       .socket_log_level = espp::Logger::Verbosity::WARN,
   });
@@ -486,9 +505,14 @@ bool rtps_comms_publish_adc(uint32_t x_mv, uint32_t y_mv, uint32_t twist_mv) {
 }
 
 bool rtps_comms_start() {
-  logger.info("Bringing up W5500 Ethernet (SCK={}, MOSI={}, MISO={}, CS={}, INT={})",
+  logger.info("Bringing up W5500 Ethernet (SCK={}, MOSI={}, MISO={}, CS={})",
               static_cast<int>(kPinSck), static_cast<int>(kPinMosi), static_cast<int>(kPinMiso),
-              static_cast<int>(kPinCs), static_cast<int>(kPinInt));
+              static_cast<int>(kPinCs));
+  if (kRxPollPeriodMs > 0) {
+    logger.info("RX serviced by polling every {} ms (INT line unused)", kRxPollPeriodMs);
+  } else {
+    logger.info("RX serviced by INT on GPIO{}", static_cast<int>(kPinInt));
+  }
   if (!initialize_ethernet()) {
     return false;
   }

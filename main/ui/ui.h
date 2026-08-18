@@ -27,6 +27,7 @@ extern "C" {
 
 ///////////////////// SCREENS ////////////////////
 
+#include "screens/ui_DriveScreen.h"
 #include "screens/ui_MainScreen.h"
 #include "screens/ui_SettingsScreen.h"
 
@@ -35,6 +36,9 @@ extern "C" {
 // EVENTS
 
 extern lv_obj_t *ui____initial_actions0;
+
+// FONTS
+LV_FONT_DECLARE(ui_font_Digital7);
 
 // UI INIT
 void ui_init(void);

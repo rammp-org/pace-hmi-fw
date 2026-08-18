@@ -39,6 +39,14 @@ CONFIG_COMPILER_OPTIMIZATION_PERF=y
 # 6.0 the SPI-Ethernet chip drivers moved out of esp_eth to the registry).
 CONFIG_ETH_USE_SPI_ETHERNET=y
 
+# Font sizes referenced by the SquareLine UI export (main/ui/screens). Any size
+# used there must be enabled here or the build fails on an undeclared
+# lv_font_montserrat_<N>.
+CONFIG_LV_FONT_MONTSERRAT_24=y
+CONFIG_LV_FONT_MONTSERRAT_32=y
+CONFIG_LV_FONT_MONTSERRAT_34=y
+CONFIG_LV_FONT_MONTSERRAT_48=y
+
 # Task stack sizes and tick rate from the m5stack-tab5 BSP example — the
 # default 3.5K main stack overflows during LVGL/audio/ADC setup.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=32768
