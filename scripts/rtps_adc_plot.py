@@ -89,6 +89,7 @@ def build_harness_args(cli: argparse.Namespace) -> argparse.Namespace:
         type_name=ADC_TYPE_NAME,
         announce_period=1.0,
         duration=0.0,
+        trace_packets=cli.trace_packets,
     )
 
 
@@ -177,6 +178,8 @@ def main() -> int:
                         help="IPv4 interface for multicast join/send")
     parser.add_argument("--multicast-group", default="239.255.0.1",
                         help="RTPS metatraffic multicast group")
+    parser.add_argument("--trace-packets", action="store_true",
+                        help="Log every received UDP packet and its RTPS submessage headers")
     cli = parser.parse_args()
     if cli.fps <= 0:
         parser.error("--fps must be > 0")

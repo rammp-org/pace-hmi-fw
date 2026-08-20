@@ -46,6 +46,9 @@ USER_UNICAST_OFFSET = 11
 DATA_SUBMESSAGE_KIND = 0x15
 DATA_SUBMESSAGE_FLAGS = 0x01 | 0x04
 DATA_SUBMESSAGE_OCTETS_TO_INLINE_QOS = 16
+HEARTBEAT_SUBMESSAGE_KIND = 0x07
+ACKNACK_SUBMESSAGE_KIND = 0x06
+ACKNACK_SUBMESSAGE_FLAGS = 0x03  # EndiannessFlag (LE) | FinalFlag
 
 RTPS_QOS_RELIABILITY_BEST_EFFORT = 1
 RTPS_QOS_RELIABILITY_RELIABLE = 2
@@ -487,6 +490,13 @@ class RtpsHostHarness:
         self.discovered_participants: Dict[bytes, ParticipantProxy] = {}
         self.discovered_writers: Dict[bytes, EndpointProxy] = {}
         self.discovered_readers: Dict[bytes, EndpointProxy] = {}
+        # How many times we have announced our endpoints to each peer. Unlike
+        # SPDP (a liveliness refresh that must keep repeating), SEDP only needs
+        # to arrive once. embeddedRTPS adds a ReaderProxy per announcement with
+        # no dedupe by GUID (Writer::addNewMatchedReader -> m_proxies.add), so
+        # repeating forever exhausts its pool: "MemoryPool RESSOURCE LIMIT
+        # EXCEEDED". Send a few times to cover packet loss, then stop.
+        self.sedp_announce_counts: Dict[bytes, int] = {}
         self.joined_user_multicast_groups: Set[str] = set()
 
         self.local_writers = [
@@ -645,9 +655,15 @@ class RtpsHostHarness:
         append_parameter_string_cdr(parameters, PID_ENTITY_NAME, self.args.node_name)
         append_parameter_sentinel(parameters)
         payload = build_parameter_list_payload(parameters)
+        # Address the SPDP DATA to the builtin SPDP reader rather than
+        # ENTITYID_UNKNOWN. embeddedRTPS (espp/rtps >= 1.2.0) routes an UNKNOWN
+        # readerId via getReaderByWriterId(), which only finds a reader that
+        # already has a proxy for this exact remote writer — impossible on
+        # first contact, so the announcement is dropped and the peer never
+        # learns we exist. An explicit reader id dispatches directly.
         return build_rtps_message(
             self.guid_prefix,
-            ENTITY_ID_UNKNOWN,
+            SPDP_READER_ENTITY_ID,
             SPDP_WRITER_ENTITY_ID,
             self._next_sequence(SPDP_WRITER_ENTITY_ID),
             payload,
@@ -722,11 +738,29 @@ class RtpsHostHarness:
             payload,
             (self.args.multicast_group, self.ports.metatraffic_multicast),
         )
+        # embeddedRTPS (espp/rtps >= 1.2.0) drops any SEDP message whose sender
+        # it has not already registered via SPDP, so a peer that never receives
+        # our multicast announcement will silently ignore our endpoints. Mirror
+        # the announcement as unicast to every participant we know about — the
+        # same way send_sedp_announcements_to() already reaches them.
+        for participant in list(self.discovered_participants.values()):
+            if not participant.address or participant.ports.metatraffic_unicast == 0:
+                continue
+            self.metatraffic_unicast_sock.sendto(
+                payload,
+                (participant.address, participant.ports.metatraffic_unicast),
+            )
+
+    SEDP_ANNOUNCE_REPEATS = 3
 
     def send_sedp_announcements_to(self, participant: ParticipantProxy) -> None:
         target = (participant.address, participant.ports.metatraffic_unicast)
         if participant.ports.metatraffic_unicast == 0 or not participant.address:
             return
+        sent = self.sedp_announce_counts.get(participant.participant_guid, 0)
+        if sent >= self.SEDP_ANNOUNCE_REPEATS:
+            return
+        self.sedp_announce_counts[participant.participant_guid] = sent + 1
         for writer in self.local_writers:
             self.metatraffic_unicast_sock.sendto(self.build_sedp_publication_message(writer), target)
         for reader in self.local_readers:
@@ -789,7 +823,41 @@ class RtpsHostHarness:
             self.user_unicast_sock.sendto(payload, destination)
         return True
 
+    # Reader entity to answer with, per builtin writer we may hear a HEARTBEAT from.
+    BUILTIN_HEARTBEAT_READERS = {
+        SEDP_PUBLICATIONS_WRITER_ENTITY_ID: SEDP_PUBLICATIONS_READER_ENTITY_ID,
+        SEDP_SUBSCRIPTIONS_WRITER_ENTITY_ID: SEDP_SUBSCRIPTIONS_READER_ENTITY_ID,
+    }
+
+    def respond_to_heartbeats(self, packet: bytes, sender_ip: str) -> None:
+        """Answer a reliable builtin writer's HEARTBEAT with an ACKNACK.
+
+        embeddedRTPS publishes SEDP over reliable stateful writers: it announces
+        what it holds via HEARTBEAT and only sends the DATA once a reader ACKNACKs
+        for it. Without this the peer's endpoints are never learned, so its samples
+        arrive but cannot be routed to a topic.
+        """
+        for guid_prefix, _reader_id, writer_id, first_sn, last_sn, count in parse_heartbeats(packet):
+            local_reader = self.BUILTIN_HEARTBEAT_READERS.get(writer_id)
+            if local_reader is None or last_sn < first_sn:
+                continue
+            port = next(
+                (
+                    p.ports.metatraffic_unicast
+                    for p in self.discovered_participants.values()
+                    if p.guid_prefix == guid_prefix
+                ),
+                0,
+            )
+            if not port:
+                continue
+            acknack = build_acknack_message(
+                self.guid_prefix, local_reader, writer_id, first_sn, last_sn - first_sn + 1, count
+            )
+            self.metatraffic_unicast_sock.sendto(acknack, (sender_ip, port))
+
     def handle_metatraffic_packet(self, packet: bytes, sender_ip: str) -> None:
+        self.respond_to_heartbeats(packet, sender_ip)
         for _guid_prefix, writer_id, serialized_payload in parse_rtps_data_messages(packet):
             parameters = parse_parameter_list(serialized_payload)
             if not parameters:
@@ -975,7 +1043,13 @@ class RtpsHostHarness:
                 for sock in readable:
                     packet, sender = sock.recvfrom(4096)
                     sender_ip, sender_port = sender[0], sender[1]
-                    if sock is self.user_unicast_sock or sock is self.user_multicast_sock:
+                    is_user = sock is self.user_unicast_sock or sock is self.user_multicast_sock
+                    if getattr(self.args, "trace_packets", False):
+                        log(
+                            f"[raw:{'user' if is_user else 'meta'}] {len(packet)}B from "
+                            f"{sender_ip}:{sender_port} :: {describe_submessages(packet)}"
+                        )
+                    if is_user:
                         self.handle_user_packet(packet, sender_ip, sender_port)
                     else:
                         self.handle_metatraffic_packet(packet, sender_ip)
@@ -995,6 +1069,95 @@ class RtpsHostHarness:
                 sock.close()
             except OSError as exc:
                 log(f"[close] ignoring socket close failure for {sock!r}: {exc}")
+
+
+def describe_submessages(packet: bytes) -> str:
+    """Compact dump of an RTPS message's submessage headers, for --trace-packets.
+
+    Surfaces the two things parse_rtps_data_messages() silently drops a DATA on:
+    the InlineQos flag being set, and octetsToInlineQos differing from 16. Also
+    flags octetsToNextHeader==0 ("rest of message"), which the parser mishandles.
+    """
+    if len(packet) < 20 or not packet.startswith(RTPS_MAGIC):
+        return f"not-RTPS ({len(packet)}B)"
+    parts = []
+    offset = 20
+    while offset + 4 <= len(packet):
+        kind = packet[offset]
+        flags = packet[offset + 1]
+        length = struct.unpack_from("<H", packet, offset + 2)[0]
+        body = packet[offset + 4 : offset + 4 + length] if length else packet[offset + 4 :]
+        detail = ""
+        if kind == DATA_SUBMESSAGE_KIND:
+            detail = f" D={bool(flags & 0x04)} Q={bool(flags & 0x02)}"
+            if len(body) >= 4:
+                detail += f" octetsToInlineQos={struct.unpack_from('<H', body, 2)[0]}"
+        parts.append(f"kind=0x{kind:02x} flags=0x{flags:02x} len={length}{detail}")
+        if length == 0:
+            parts.append("<- len=0 means 'rest of message'; parser cannot walk past this")
+            break
+        offset += 4 + length
+    return " | ".join(parts)
+
+
+def parse_heartbeats(packet: bytes) -> List[tuple[bytes, bytes, bytes, int, int, int]]:
+    """Return (guid_prefix, reader_id, writer_id, first_sn, last_sn, count) per HEARTBEAT."""
+    if len(packet) < 20 or not packet.startswith(RTPS_MAGIC):
+        return []
+    guid_prefix = packet[8:20]
+    offset = 20
+    beats: List[tuple[bytes, bytes, bytes, int, int, int]] = []
+    while offset + 4 <= len(packet):
+        kind = packet[offset]
+        length = struct.unpack_from("<H", packet, offset + 2)[0]
+        offset += 4
+        if length == 0 or offset + length > len(packet):
+            break
+        body = packet[offset : offset + length]
+        offset += length
+        if kind != HEARTBEAT_SUBMESSAGE_KIND or len(body) < 28:
+            continue
+        reader_id = body[0:4]
+        writer_id = body[4:8]
+        first_high, first_low = struct.unpack_from("<iI", body, 8)
+        last_high, last_low = struct.unpack_from("<iI", body, 16)
+        count = struct.unpack_from("<I", body, 24)[0]
+        beats.append(
+            (
+                guid_prefix,
+                reader_id,
+                writer_id,
+                (first_high << 32) | first_low,
+                (last_high << 32) | last_low,
+                count,
+            )
+        )
+    return beats
+
+
+def build_acknack_message(
+    guid_prefix: bytes, reader_id: bytes, writer_id: bytes, base_sn: int, num_bits: int, count: int
+) -> bytes:
+    """ACKNACK requesting `num_bits` sequence numbers starting at `base_sn`.
+
+    The readerSNState bitmap marks every requested sequence as missing, which is
+    how a reliable writer is told to (re)send them.
+    """
+    num_bits = max(0, min(num_bits, 256))
+    body = bytearray()
+    body.extend(reader_id)
+    body.extend(writer_id)
+    body.extend(struct.pack("<iI", base_sn >> 32, base_sn & 0xFFFFFFFF))
+    body.extend(struct.pack("<I", num_bits))
+    for word in range((num_bits + 31) // 32):
+        remaining = num_bits - word * 32
+        bits = 0xFFFFFFFF if remaining >= 32 else (0xFFFFFFFF << (32 - remaining)) & 0xFFFFFFFF
+        body.extend(struct.pack("<I", bits))
+    body.extend(struct.pack("<I", count))
+    header = RTPS_MAGIC + bytes((2, 3)) + VENDOR_ID + guid_prefix
+    return header + struct.pack(
+        "<BBH", ACKNACK_SUBMESSAGE_KIND, ACKNACK_SUBMESSAGE_FLAGS, len(body)
+    ) + bytes(body)
 
 
 def parse_rtps_data_messages(packet: bytes) -> List[tuple[bytes, bytes, bytes]]:
@@ -1118,6 +1281,8 @@ def parse_args() -> argparse.Namespace:
         help="IPv4 interface to use for multicast join/send (defaults to advertised address)",
     )
     parser.add_argument("--multicast-group", default="239.255.0.1", help="RTPS metatraffic multicast group")
+    parser.add_argument("--trace-packets", action="store_true",
+                        help="Log every received UDP packet and its RTPS submessage headers")
     parser.add_argument("--enclave", default="/", help="Enclave string advertised in SPDP user data")
     parser.add_argument(
         "--subscribe-topic",

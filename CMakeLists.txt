@@ -47,3 +47,12 @@ set(
 project(rammp-hmi-p4)
 
 set(CMAKE_CXX_STANDARD 20)
+
+# picolibc's pthread.h uses `__noreturn` in trailing position (`void f(void)
+# __noreturn;`). In C++ that macro expands to `[[noreturn]]`, which then
+# appertains to the type rather than the declaration, so GCC raises
+# -Wattributes; IDF v6.0 makes it fatal via its build-wide -Werror. Hit by the
+# Tab5 BSP's camera.cpp, which includes <pthread.h> after <driver/ppa.h> has
+# pulled in hal/assert.h. Toolchain header issue, not a BSP one.
+idf_component_get_property(tab5_lib espp__m5stack-tab5 COMPONENT_LIB)
+target_compile_options(${tab5_lib} PRIVATE -Wno-error=attributes)
