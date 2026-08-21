@@ -68,3 +68,14 @@ CONFIG_FREERTOS_HZ=1000
 #
 # CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
 # CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# SVG rendering for the SquareLine image assets exported as raw SVG data
+# (main/ui/images/ui_img_*.c hold the .svg text verbatim). LVGL's SVG image
+# decoder is compiled out unless LV_USE_SVG is set, and LV_USE_SVG depends on
+# LV_USE_VECTOR_GRAPHIC. Vector drawing itself has no software fallback — the
+# SW draw unit's vector path is guarded on LV_USE_VECTOR_GRAPHIC && LV_USE_THORVG
+# — so ThorVG must be built in too, or SVG images render as blank rectangles.
+CONFIG_LV_USE_VECTOR_GRAPHIC=y
+CONFIG_LV_USE_THORVG=y
+CONFIG_LV_USE_THORVG_INTERNAL=y
+CONFIG_LV_USE_SVG=y

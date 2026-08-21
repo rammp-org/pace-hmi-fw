@@ -7,10 +7,8 @@
   "size": 200,
   "bpp": 4,
   "letters": 3,
-  "ranges": [
-    "0x20-0xff"
-  ],
-  "symbols": "",
+  "ranges": [],
+  "symbols": "0123456789.",
   "customparams": "--no-compress --no-prefilter",
   "uploaded": false
 }

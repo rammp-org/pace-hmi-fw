@@ -846,7 +846,7 @@ extern "C" void app_main(void) {
          int x1 = x0 + 50 * gravity_vector.x;
          int y1 = y0 + 50 * gravity_vector.y;
 
-         static lv_point_precise_t line_points0[] = {{x0, y0}, {x1, y1}};
+         static lv_point_precise_t line_points0[2] = {};
          line_points0[0].x = x0;
          line_points0[0].y = y0;
          line_points0[1].x = x1;
@@ -881,7 +881,7 @@ extern "C" void app_main(void) {
          x1 = x0 + 50 * vx;
          y1 = y0 + 50 * vy;
 
-         static lv_point_precise_t line_points1[] = {{x0, y0}, {x1, y1}};
+         static lv_point_precise_t line_points1[2] = {};
          line_points1[0].x = x0;
          line_points1[0].y = y0;
          line_points1[1].x = x1;

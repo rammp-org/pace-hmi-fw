@@ -44,6 +44,16 @@ set(
   )
 
 # TODO: update this with your project's name
+# ThorVG renders vectors into an ARGB8888 scratch buffer the size of the whole
+# layer whenever the layer isn't already ARGB/XRGB8888 (see lv_draw_sw_vector.c).
+# At LV_COLOR_DEPTH=16 on this 1280x720 panel that's a 3.5 MB request, and LVGL's
+# builtin allocator only has LV_MEM_SIZE (64 KB), so it returned NULL and
+# LV_ASSERT_NULL spun in LV_ASSERT_HANDLER's `while(1)` until the task WDT fired.
+# LV_USE_STDLIB_MALLOC isn't exposed through LVGL's Kconfig and CONFIG_LV_CONF_SKIP
+# is set, so it has to come from the command line. Global (not per-component) so
+# every translation unit sees the same allocator.
+idf_build_set_property(COMPILE_DEFINITIONS "LV_USE_STDLIB_MALLOC=LV_STDLIB_CLIB" APPEND)
+
 project(rammp-hmi-p4)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -56,3 +66,10 @@ set(CMAKE_CXX_STANDARD 20)
 # pulled in hal/assert.h. Toolchain header issue, not a BSP one.
 idf_component_get_property(tab5_lib espp__m5stack-tab5 COMPONENT_LIB)
 target_compile_options(${tab5_lib} PRIVATE -Wno-error=attributes)
+
+# ThorVG's base64 decoder guards with `encoded[3] < 0` on a `const char*`.
+# `char` is unsigned on RISC-V, so that test is always false and GCC raises
+# -Wtype-limits, fatal under IDF v6.0's build-wide -Werror. Upstream ThorVG
+# issue, pulled in only because LV_USE_THORVG is on for SVG rendering.
+idf_component_get_property(lvgl_lib lvgl__lvgl COMPONENT_LIB)
+target_compile_options(${lvgl_lib} PRIVATE -Wno-error=type-limits)
