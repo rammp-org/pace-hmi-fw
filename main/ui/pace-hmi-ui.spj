@@ -6,12 +6,12 @@
         "guid": "GUID37616367-852284S4795233",
         "children": [
           {
-            "guid": "GUID68667088-958391S6915236",
+            "guid": "GUID82751423-901313S3955236",
             "properties": [
               {
                 "nid": 10,
                 "strtype": "OBJECT/Name",
-                "strval": "Image1",
+                "strval": "Image3",
                 "InheritedType": 10
               },
               {
@@ -52,8 +52,8 @@
                 "flags": 17,
                 "strtype": "OBJECT/Size",
                 "intarray": [
-                  720,
-                  300
+                  0,
+                  0
                 ],
                 "InheritedType": 7
               },
@@ -151,7 +151,7 @@
               {
                 "nid": 1050,
                 "strtype": "IMAGE/Scale",
-                "integer": 400,
+                "integer": 256,
                 "InheritedType": 6
               },
               {
@@ -357,13 +357,12 @@
                   {
                     "nid": 1000481,
                     "strtype": "CHANGE SCREEN/Fade_mode",
-                    "strval": "FADE_ON",
+                    "strval": "NONE",
                     "InheritedType": 3
                   },
                   {
                     "nid": 1000482,
                     "strtype": "CHANGE SCREEN/Speed",
-                    "integer": 500,
                     "InheritedType": 6
                   },
                   {
@@ -1891,7 +1890,7 @@
           }
         ],
         "isPage": true,
-        "editor_posx": 2520,
+        "editor_posx": 3330,
         "editor_posy": -900,
         "properties": [
           {
@@ -3052,7 +3051,7 @@
           }
         ],
         "isPage": true,
-        "editor_posx": 3285,
+        "editor_posx": 4185,
         "editor_posy": -900,
         "properties": [
           {
@@ -5399,7 +5398,7 @@
           }
         ],
         "isPage": true,
-        "editor_posx": 4050,
+        "editor_posx": 2520,
         "editor_posy": -900,
         "properties": [
           {
@@ -8636,7 +8635,7 @@
     "separate_screen_save": false,
     "hierarchy_state_save": false,
     "reverse_event_order": false,
-    "backup_cnt": 86,
+    "backup_cnt": 92,
     "autosave_cnt": 0,
     "group_color_cnt": 0,
     "imagebytearrayprefix": "",

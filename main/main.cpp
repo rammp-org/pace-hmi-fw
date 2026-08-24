@@ -17,6 +17,7 @@
 #include "m5stack-tab5.hpp"
 
 #include "da7280.hpp"
+#include "drv2605.hpp"
 
 #include "kalman_filter.hpp"
 #include "madgwick_filter.hpp"
@@ -47,6 +48,9 @@ static lv_subject_t adc_twist_subject;
 
 static bool load_audio(size_t &out_size, size_t &out_sample_rate);
 static void play_click(espp::M5StackTab5 &tab5);
+
+// DRV2605 haptic driver smoke test: a few clicks at boot, one log line each
+static void test_drv2605(espp::Logger &logger, espp::I2c &i2c);
 
 // DA7280 haptic driver bring-up test (raw register read, no driver class yet)
 static void test_da7280(espp::Logger &logger, espp::I2c &i2c,
@@ -383,6 +387,80 @@ static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c) {
   logger.info("DA7280 functional test complete");
 }
 
+// DRV2605 haptic driver smoke test: play a handful of STRONG_CLICK waveforms
+// from the ROM library so the motor is unambiguously alive, logging each one.
+// The bundled motor is an ERM; for an LRA swap MotorType::ERM -> LRA and
+// Library::ERM_1 -> Library::LRA.
+// Each beep chains kDrv2605BuzzSlots back-to-back STRONG_BUZZ effects (100%
+// strength, ~1 s each) rather than a single STRONG_CLICK transient, so it is
+// both long and hard to mistake for nothing. The sequencer has 8 slots and the
+// last one used must hold the END terminator.
+static constexpr int kDrv2605BeepCount = 3;
+static constexpr uint8_t kDrv2605BuzzSlots = 2;
+static_assert(kDrv2605BuzzSlots < 8, "need a sequencer slot left for END");
+// buzz duration plus enough silence that consecutive beeps stay distinct
+static constexpr auto kDrv2605BeepGap = 2500ms;
+// The Tab5 internal bus runs at 1 MHz; the DRV2605 is fast-mode only (400 kHz
+// max), so this device gets its own per-device clock rather than the bus rate.
+static constexpr uint32_t kDrv2605SclSpeedHz = 400 * 1000;
+
+static void test_drv2605(espp::Logger &logger, espp::I2c &i2c) {
+  std::error_code ec;
+  auto drv2605_i2c_device = i2c.add_device<uint8_t>(
+      {
+          .device_address = espp::Drv2605::DEFAULT_ADDRESS,
+          .timeout_ms = static_cast<int>(i2c.config().timeout_ms),
+          .scl_speed_hz = kDrv2605SclSpeedHz,
+          .log_level = espp::Logger::Verbosity::WARN,
+      },
+      ec);
+  if (!drv2605_i2c_device) {
+    logger.error("Could not create DRV2605 I2C device: {}", ec.message());
+    return;
+  }
+
+  espp::Drv2605 drv2605({
+      .device_address = espp::Drv2605::DEFAULT_ADDRESS,
+      .write = espp::make_i2c_addressed_write(drv2605_i2c_device),
+      .read_register = espp::make_i2c_addressed_read_register(drv2605_i2c_device),
+      .motor_type = espp::Drv2605::MotorType::ERM,
+      .auto_init = false,
+      .log_level = espp::Logger::Verbosity::INFO,
+  });
+
+  if (!drv2605.initialize(ec)) {
+    logger.error("DRV2605 init failed at {:#02x} ({}) — check wiring",
+                 espp::Drv2605::DEFAULT_ADDRESS, ec.message());
+    return;
+  }
+  // ERM_1 is LIBRARY register value 2, i.e. TI's "Library B" (3 V rated ERM) —
+  // the enum names are offset by one from the datasheet's library numbering.
+  if (!drv2605.select_library(espp::Drv2605::Library::ERM_1, ec)) {
+    logger.error("DRV2605 select_library failed: {}", ec.message());
+    return;
+  }
+  for (uint8_t slot = 0; slot < kDrv2605BuzzSlots; slot++) {
+    if (!drv2605.set_waveform(slot, espp::Drv2605::Waveform::STRONG_BUZZ, ec)) {
+      logger.error("DRV2605 set_waveform failed: {}", ec.message());
+      return;
+    }
+  }
+  if (!drv2605.set_waveform(kDrv2605BuzzSlots, espp::Drv2605::Waveform::END, ec)) {
+    logger.error("DRV2605 set_waveform failed: {}", ec.message());
+    return;
+  }
+
+  for (int beep = 1; beep <= kDrv2605BeepCount; beep++) {
+    logger.info("DRV2605 beep {}/{}", beep, kDrv2605BeepCount);
+    if (!drv2605.start(ec)) {
+      logger.error("DRV2605 start failed: {}", ec.message());
+      return;
+    }
+    std::this_thread::sleep_for(kDrv2605BeepGap);
+  }
+  logger.info("DRV2605 beep test complete");
+}
+
 extern "C" void app_main(void) {
   espp::Logger logger({.tag = "M5Stack Tab5 Example", .level = espp::Logger::Verbosity::INFO});
   logger.info("Starting example!");
@@ -401,6 +479,9 @@ extern "C" void app_main(void) {
     }
   }
   logger.info("Found devices at addresses: {::#02x}", found_addresses);
+
+  // DRV2605 haptic driver smoke test (a few clicks at boot)
+  test_drv2605(logger, i2c);
 
   // DA7280 haptic driver bring-up test (raw register read, no driver yet)
   test_da7280(logger, i2c, found_addresses);

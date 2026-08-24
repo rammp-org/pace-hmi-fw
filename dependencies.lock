@@ -149,6 +149,24 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 1.2.0
+  espp/drv2605:
+    component_hash: a78b1923d6f8582278d3d60fad594ded8d7da8026051cd70d7e15a20fce70f7d
+    dependencies:
+    - name: espp/base_peripheral
+      registry_url: https://components.espressif.com
+      require: private
+      version: '>=1.0'
+    - name: espp/cli
+      registry_url: https://components.espressif.com
+      require: private
+      version: '>=1.0'
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.2.0
   espp/filters:
     component_hash: 5ea654ccdc7118bd4b6881f7b8f6d7315da58dcd14e5ab515189d68d41483d2c
     dependencies:
@@ -784,6 +802,7 @@ direct_dependencies:
 - espp/codec
 - espp/display
 - espp/display_drivers
+- espp/drv2605
 - espp/filters
 - espp/format
 - espp/gt911
@@ -806,6 +825,6 @@ direct_dependencies:
 - espressif/w5500
 - idf
 - lvgl/lvgl
-manifest_hash: a0ec4f7555b9e3c76dc9c12cd118afc2623ff5507f6f8685e505802ee296bad5
+manifest_hash: cace1202fb711e7c9763ed4ae03cc7d74edc6bd7b19c298013ed3358290b7f56
 target: esp32p4
 version: 3.0.0
