@@ -50,6 +50,11 @@ Write-Host "  from: $Source"
 Write-Host "  to:   $Dest"
 Write-Host ""
 
+# Snapshot the source file set so we can tell afterwards whether screens were
+# added or removed (see the CMake re-configure step below).
+$srcsBefore = @(Get-ChildItem $Dest -Recurse -Filter *.c -File -ErrorAction SilentlyContinue |
+    ForEach-Object { $_.FullName } | Sort-Object)
+
 # --- mirror copy, excluding SquareLine's build/project files ------------------
 # /MIR mirrors (copies new/changed, deletes stale), /XF excludes files by name.
 # /NJH /NJS /NDL trim the output to just the per-file lines.
@@ -80,6 +85,23 @@ if ($dupFonts) {
     Write-Host ""
     Write-Host "Dropped duplicate generated font source from ui/assets (ui/fonts copy is the one built):"
     $dupFonts | ForEach-Object { Write-Host "  assets/$($_.Name)" }
+}
+
+# --- force a CMake re-configure when screens were added or removed ------------
+# SRC_DIRS expands its glob only when CMake configures. Delete a screen in
+# SquareLine and ninja keeps a rule for the vanished file ("missing and no known
+# rule to make it"); add one and it is silently never compiled. Touching the
+# component's CMakeLists.txt makes ninja re-run CMake on the next build, since
+# CMake emits a rule tying build.ninja to those files.
+$srcsAfter = @(Get-ChildItem $Dest -Recurse -Filter *.c -File -ErrorAction SilentlyContinue |
+    ForEach-Object { $_.FullName } | Sort-Object)
+if (Compare-Object $srcsBefore $srcsAfter) {
+    $mainCMake = Join-Path $RepoRoot "main\CMakeLists.txt"
+    if (Test-Path $mainCMake) {
+        (Get-Item $mainCMake).LastWriteTime = Get-Date
+        Write-Host ""
+        Write-Host "Source file set changed - touched main/CMakeLists.txt so CMake re-configures."
+    }
 }
 
 # --- warn about mirrored ui/ subdirs that the build does not compile ----------

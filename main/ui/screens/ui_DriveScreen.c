@@ -6,11 +6,6 @@
 #include "../ui.h"
 
 lv_obj_t * ui_DriveScreen = NULL;
-lv_obj_t * ui_TopBar = NULL;
-lv_obj_t * ui_Clock = NULL;
-lv_obj_t * ui_GPS = NULL;
-lv_obj_t * ui_Battery = NULL;
-lv_obj_t * ui_Label4 = NULL;
 lv_obj_t * ui_StatePanel = NULL;
 lv_obj_t * ui_Speed = NULL;
 lv_obj_t * ui_Units = NULL;
@@ -41,59 +36,6 @@ void ui_DriveScreen_screen_init(void)
     lv_obj_remove_flag(ui_DriveScreen, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_obj_set_style_bg_color(ui_DriveScreen, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(ui_DriveScreen, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    ui_TopBar = lv_obj_create(ui_DriveScreen);
-    lv_obj_set_width(ui_TopBar, 720);
-    lv_obj_set_height(ui_TopBar, 50);
-    lv_obj_set_align(ui_TopBar, LV_ALIGN_TOP_MID);
-    lv_obj_remove_flag(ui_TopBar, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_bg_color(ui_TopBar, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(ui_TopBar, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_side(ui_TopBar, LV_BORDER_SIDE_NONE, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    ui_Clock = lv_label_create(ui_TopBar);
-    lv_obj_set_width(ui_Clock, LV_SIZE_CONTENT);   /// 1
-    lv_obj_set_height(ui_Clock, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_align(ui_Clock, LV_ALIGN_LEFT_MID);
-    lv_label_set_text(ui_Clock, "10:42");
-    lv_obj_set_style_text_color(ui_Clock, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_opa(ui_Clock, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_Clock, &lv_font_montserrat_24, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    ui_GPS = lv_label_create(ui_TopBar);
-    lv_obj_set_width(ui_GPS, LV_SIZE_CONTENT);   /// 1
-    lv_obj_set_height(ui_GPS, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_x(ui_GPS, -120);
-    lv_obj_set_y(ui_GPS, 0);
-    lv_obj_set_align(ui_GPS, LV_ALIGN_RIGHT_MID);
-    lv_label_set_text(ui_GPS, "BT   GPS");
-    lv_obj_set_style_text_color(ui_GPS, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_opa(ui_GPS, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_GPS, &lv_font_montserrat_24, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    ui_Battery = lv_bar_create(ui_TopBar);
-    lv_bar_set_value(ui_Battery, 80, LV_ANIM_OFF);
-    lv_bar_set_start_value(ui_Battery, 0, LV_ANIM_OFF);
-    lv_obj_set_width(ui_Battery, 100);
-    lv_obj_set_height(ui_Battery, 20);
-    lv_obj_set_align(ui_Battery, LV_ALIGN_RIGHT_MID);
-    lv_obj_set_style_bg_color(ui_Battery, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(ui_Battery, 20, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    lv_obj_set_style_radius(ui_Battery, 0, LV_PART_INDICATOR | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(ui_Battery, lv_color_hex(0xFFFFFF), LV_PART_INDICATOR | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(ui_Battery, 255, LV_PART_INDICATOR | LV_STATE_DEFAULT);
-
-    //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
-    if(lv_obj_get_style_pad_top(ui_Battery, LV_PART_MAIN) > 0) lv_obj_set_style_pad_right(ui_Battery,
-                                                                                              lv_obj_get_style_pad_right(ui_Battery, LV_PART_MAIN) + 1, LV_PART_MAIN);
-    ui_Label4 = lv_label_create(ui_Battery);
-    lv_obj_set_width(ui_Label4, LV_SIZE_CONTENT);   /// 1
-    lv_obj_set_height(ui_Label4, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_align(ui_Label4, LV_ALIGN_CENTER);
-    lv_label_set_text(ui_Label4, "30 km");
-    lv_obj_set_style_text_color(ui_Label4, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_opa(ui_Label4, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_StatePanel = lv_obj_create(ui_DriveScreen);
     lv_obj_set_width(ui_StatePanel, 720);
@@ -238,11 +180,6 @@ void ui_DriveScreen_screen_destroy(void)
 
     // NULL screen variables
     ui_DriveScreen = NULL;
-    ui_TopBar = NULL;
-    ui_Clock = NULL;
-    ui_GPS = NULL;
-    ui_Battery = NULL;
-    ui_Label4 = NULL;
     ui_StatePanel = NULL;
     ui_Speed = NULL;
     ui_Units = NULL;

@@ -27,10 +27,11 @@ extern "C" {
 
 ///////////////////// SCREENS ////////////////////
 
-#include "screens/ui_MainScreen.h"
+#include "screens/ui_BootScreen.h"
+#include "screens/ui_NotMainScreen.h"
 #include "screens/ui_SettingsScreen.h"
 #include "screens/ui_DriveScreen.h"
-#include "screens/ui_SVGTestScreen.h"
+#include "screens/ui_MainScreen.h"
 
 ///////////////////// VARIABLES ////////////////////
 
@@ -40,8 +41,8 @@ extern "C" {
 extern lv_obj_t * ui____initial_actions0;
 
 // IMAGES AND IMAGE SETS
-LV_IMG_DECLARE(ui_img_1180088808);    // assets/electronics-svgrepo-com.svg
-LV_IMG_DECLARE(ui_img_633030620);    // assets/atdev-logo.svg
+LV_IMG_DECLARE(ui_img_rammp_type_white_svg);    // assets/RAMMP_Type_White.svg
+LV_IMG_DECLARE(ui_img_633112390);    // assets/motor-svgrepo-com.svg
 
 // FONTS
 LV_FONT_DECLARE(ui_font_Digital7);

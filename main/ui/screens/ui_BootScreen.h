@@ -3,19 +3,18 @@
 // LVGL version: 9.5
 // Project name: pace-hmi-ui
 
-#ifndef UI_SVGTESTSCREEN_H
-#define UI_SVGTESTSCREEN_H
+#ifndef UI_BOOTSCREEN_H
+#define UI_BOOTSCREEN_H
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// SCREEN: ui_SVGTestScreen
-extern void ui_SVGTestScreen_screen_init(void);
-extern void ui_SVGTestScreen_screen_destroy(void);
-extern lv_obj_t * ui_SVGTestScreen;
-extern void ui_event_SVGImage(lv_event_t * e);
-extern lv_obj_t * ui_SVGImage;
+// SCREEN: ui_BootScreen
+extern void ui_BootScreen_screen_init(void);
+extern void ui_BootScreen_screen_destroy(void);
+extern void ui_event_BootScreen(lv_event_t * e);
+extern lv_obj_t * ui_BootScreen;
 extern lv_obj_t * ui_Image1;
 // CUSTOM VARIABLES
 

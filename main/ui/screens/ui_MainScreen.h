@@ -14,17 +14,23 @@ extern "C" {
 extern void ui_MainScreen_screen_init(void);
 extern void ui_MainScreen_screen_destroy(void);
 extern lv_obj_t * ui_MainScreen;
-extern lv_obj_t * ui_BackgroundPanelSquare;
-extern void ui_event_DriveModeButton(lv_event_t * e);
-extern lv_obj_t * ui_DriveModeButton;
-extern lv_obj_t * ui_Label1;
-extern void ui_event_SeatAdjustmentButton(lv_event_t * e);
-extern lv_obj_t * ui_SeatAdjustmentButton;
-extern lv_obj_t * ui_Label2;
-extern void ui_event_SettingsButton(lv_event_t * e);
-extern lv_obj_t * ui_SettingsButton;
-extern lv_obj_t * ui_Label3;
-extern lv_obj_t * ui_BatteryIndicator;
+extern lv_obj_t * ui_TopBar;
+extern lv_obj_t * ui_Clock1;
+extern lv_obj_t * ui_GPS1;
+extern lv_obj_t * ui_Battery1;
+extern lv_obj_t * ui_Label6;
+extern lv_obj_t * ui_MenuPanel;
+extern lv_obj_t * ui_DriveMode2;
+extern lv_obj_t * ui_Info1;
+extern lv_obj_t * ui_Image2;
+extern lv_obj_t * ui_BottomMenu;
+extern lv_obj_t * ui_Mode1;
+extern lv_obj_t * ui_LeftButtonLabel3;
+extern void ui_event_Mode2(lv_event_t * e);
+extern lv_obj_t * ui_Mode2;
+extern lv_obj_t * ui_LeftButtonLabel4;
+extern lv_obj_t * ui_Mode3;
+extern lv_obj_t * ui_LeftButtonLabel5;
 // CUSTOM VARIABLES
 
 #ifdef __cplusplus
