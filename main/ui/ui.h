@@ -47,7 +47,8 @@ extern lv_obj_t * ui____initial_actions0;
 // IMAGES AND IMAGE SETS
 LV_IMG_DECLARE(ui_img_rammp_type_white_svg);    // assets/RAMMP_Type_White.svg
 LV_IMG_DECLARE(ui_img_633112390);    // assets/motor-svgrepo-com.svg
-LV_IMG_DECLARE(ui_img_seat_svg);    // assets/seat.svg
+LV_IMG_DECLARE(ui_img_107617181);    // assets/turbo-rasterized.png
+LV_IMG_DECLARE(ui_img_1236721514);    // assets/seat-rasterized.png
 
 // FONTS
 LV_FONT_DECLARE(ui_font_Digital7);

@@ -192,7 +192,7 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_style_text_font(ui_Info3, &lv_font_montserrat_34, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_Image4 = lv_image_create(ui_MenuPanel2);
-    lv_image_set_src(ui_Image4, &ui_img_633112390);
+    lv_image_set_src(ui_Image4, &ui_img_107617181);
     lv_obj_set_width(ui_Image4, 720);
     lv_obj_set_height(ui_Image4, 720);
     lv_obj_set_x(ui_Image4, 0);
@@ -200,7 +200,7 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_align(ui_Image4, LV_ALIGN_CENTER);
     lv_obj_add_flag(ui_Image4, LV_OBJ_FLAG_CLICKABLE);     /// Flags
     lv_obj_remove_flag(ui_Image4, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_image_set_scale(ui_Image4, 100);
+    lv_image_set_scale(ui_Image4, 150);
 
     ui_PanelButton1 = lv_button_create(ui_ButtonPanel1);
     lv_obj_set_width(ui_PanelButton1, 220);
@@ -239,7 +239,7 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_style_border_opa(ui_ButtonPanel2, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_Image1 = lv_image_create(ui_ButtonPanel2);
-    lv_image_set_src(ui_Image1, &ui_img_seat_svg);
+    lv_image_set_src(ui_Image1, &ui_img_1236721514);
     lv_obj_set_width(ui_Image1, 400);
     lv_obj_set_height(ui_Image1, 400);
     lv_obj_set_x(ui_Image1, 0);
@@ -247,7 +247,7 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_align(ui_Image1, LV_ALIGN_CENTER);
     lv_obj_add_flag(ui_Image1, LV_OBJ_FLAG_CLICKABLE);     /// Flags
     lv_obj_remove_flag(ui_Image1, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_image_set_scale(ui_Image1, 100);
+    lv_image_set_scale(ui_Image1, 150);
 
     ui_PanelButton2 = lv_button_create(ui_ButtonPanel2);
     lv_obj_set_width(ui_PanelButton2, 220);
