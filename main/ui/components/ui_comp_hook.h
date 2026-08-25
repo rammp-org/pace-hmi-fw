@@ -3,14 +3,14 @@
 // LVGL version: 9.5
 // Project name: pace-hmi-ui
 
-#ifndef _UI_EVENTS_H
-#define _UI_EVENTS_H
+#ifndef _PACE_HMI_UI_UI_COMP_HOOK_H
+#define _PACE_HMI_UI_UI_COMP_HOOK_H
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-void flex_scroll_next(lv_event_t * e);
+void ui_comp_TopBar_create_hook(lv_obj_t * comp);
 
 #ifdef __cplusplus
 } /*extern "C"*/

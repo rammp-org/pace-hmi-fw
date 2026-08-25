@@ -6,14 +6,14 @@
 #include "../ui.h"
 
 lv_obj_t * ui_BootScreen = NULL;
-lv_obj_t * ui_Image1 = NULL;
+lv_obj_t * ui_Image3 = NULL;
 // event funtions
 void ui_event_BootScreen(lv_event_t * e)
 {
     lv_event_code_t event_code = lv_event_get_code(e);
 
     if(event_code == LV_EVENT_SCREEN_LOADED) {
-        _ui_screen_change(&ui_MainScreen, LV_SCREEN_LOAD_ANIM_FADE_ON, 500, 2500, &ui_MainScreen_screen_init);
+        _ui_screen_change(&ui_MainScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 2500, &ui_MainScreen_screen_init);
     }
 }
 
@@ -26,14 +26,14 @@ void ui_BootScreen_screen_init(void)
     lv_obj_set_style_bg_color(ui_BootScreen, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(ui_BootScreen, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_Image1 = lv_image_create(ui_BootScreen);
-    lv_image_set_src(ui_Image1, &ui_img_rammp_type_white_svg);
-    lv_obj_set_width(ui_Image1, 720);
-    lv_obj_set_height(ui_Image1, 300);
-    lv_obj_set_align(ui_Image1, LV_ALIGN_CENTER);
-    lv_obj_add_flag(ui_Image1, LV_OBJ_FLAG_CLICKABLE);     /// Flags
-    lv_obj_remove_flag(ui_Image1, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_image_set_scale(ui_Image1, 400);
+    ui_Image3 = lv_image_create(ui_BootScreen);
+    lv_image_set_src(ui_Image3, &ui_img_rammp_type_white_svg);
+    lv_obj_set_width(ui_Image3, 720);
+    lv_obj_set_height(ui_Image3, 1280);
+    lv_obj_set_align(ui_Image3, LV_ALIGN_CENTER);
+    lv_obj_add_flag(ui_Image3, LV_OBJ_FLAG_CLICKABLE);     /// Flags
+    lv_obj_remove_flag(ui_Image3, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_image_set_scale(ui_Image3, 300);
 
     lv_obj_add_event_cb(ui_BootScreen, ui_event_BootScreen, LV_EVENT_ALL, NULL);
 
@@ -45,6 +45,6 @@ void ui_BootScreen_screen_destroy(void)
 
     // NULL screen variables
     ui_BootScreen = NULL;
-    ui_Image1 = NULL;
+    ui_Image3 = NULL;
 
 }

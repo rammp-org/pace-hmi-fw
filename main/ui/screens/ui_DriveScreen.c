@@ -6,6 +6,7 @@
 #include "../ui.h"
 
 lv_obj_t * ui_DriveScreen = NULL;
+lv_obj_t * ui_TopBar1 = NULL;
 lv_obj_t * ui_StatePanel = NULL;
 lv_obj_t * ui_Speed = NULL;
 lv_obj_t * ui_Units = NULL;
@@ -36,6 +37,12 @@ void ui_DriveScreen_screen_init(void)
     lv_obj_remove_flag(ui_DriveScreen, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_obj_set_style_bg_color(ui_DriveScreen, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(ui_DriveScreen, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_TopBar1 = ui_TopBar_create(ui_DriveScreen);
+    lv_obj_set_x(ui_TopBar1, 0);
+    lv_obj_set_y(ui_TopBar1, 0);
+
+    //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
 
     ui_StatePanel = lv_obj_create(ui_DriveScreen);
     lv_obj_set_width(ui_StatePanel, 720);
@@ -118,7 +125,7 @@ void ui_DriveScreen_screen_init(void)
     lv_obj_set_width(ui_LeftButtonLabel, 220);
     lv_obj_set_height(ui_LeftButtonLabel, 50);
     lv_obj_set_align(ui_LeftButtonLabel, LV_ALIGN_CENTER);
-    lv_label_set_text(ui_LeftButtonLabel, "AUTO");
+    lv_label_set_text(ui_LeftButtonLabel, "HOME");
     lv_obj_set_style_text_color(ui_LeftButtonLabel, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_opa(ui_LeftButtonLabel, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_align(ui_LeftButtonLabel, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -141,7 +148,7 @@ void ui_DriveScreen_screen_init(void)
     lv_obj_set_width(ui_LeftButtonLabel1, 220);
     lv_obj_set_height(ui_LeftButtonLabel1, 50);
     lv_obj_set_align(ui_LeftButtonLabel1, LV_ALIGN_CENTER);
-    lv_label_set_text(ui_LeftButtonLabel1, "HOME");
+    lv_label_set_text(ui_LeftButtonLabel1, "DRIVE");
     lv_obj_set_style_text_color(ui_LeftButtonLabel1, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_opa(ui_LeftButtonLabel1, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_align(ui_LeftButtonLabel1, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -164,7 +171,7 @@ void ui_DriveScreen_screen_init(void)
     lv_obj_set_width(ui_LeftButtonLabel2, 220);
     lv_obj_set_height(ui_LeftButtonLabel2, 50);
     lv_obj_set_align(ui_LeftButtonLabel2, LV_ALIGN_CENTER);
-    lv_label_set_text(ui_LeftButtonLabel2, "CITY");
+    lv_label_set_text(ui_LeftButtonLabel2, "SEAT");
     lv_obj_set_style_text_color(ui_LeftButtonLabel2, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_opa(ui_LeftButtonLabel2, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_align(ui_LeftButtonLabel2, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -180,6 +187,7 @@ void ui_DriveScreen_screen_destroy(void)
 
     // NULL screen variables
     ui_DriveScreen = NULL;
+    ui_TopBar1 = NULL;
     ui_StatePanel = NULL;
     ui_Speed = NULL;
     ui_Units = NULL;

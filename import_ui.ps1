@@ -2,7 +2,7 @@
 #
 # Mirrors the export directory into main/ui/, excluding SquareLine's own
 # CMakeLists.txt (its add_library(ui ...) conflicts with the ESP-IDF component
-# build), filelist.txt, and project.info. Mirroring also deletes files for
+# build), filelist.txt, project.info, and ui_events.cpp. Mirroring also deletes files for
 # screens that were renamed/removed in SquareLine, which would otherwise stay
 # behind and break the build (SRC_DIRS compiles everything in ui/).
 #
@@ -10,7 +10,7 @@
 #
 # By default the export is expected as a sibling of this repo:
 #   <parent>\rammp-hmi-p4\import_ui.ps1   (this script)
-#   <parent>\ui_standalone                (the SquareLine export)
+#   <parent>\ui_c_files                (the SquareLine export)
 
 param(
     [string]$Source
@@ -20,19 +20,21 @@ $ErrorActionPreference = "Stop"
 
 $RepoRoot = $PSScriptRoot
 if (-not $Source) {
-    $Source = Join-Path (Split-Path -Parent $RepoRoot) "ui_standalone"
+    $Source = Join-Path (Split-Path -Parent $RepoRoot) "ui_c_files"
 }
 $Source = [System.IO.Path]::GetFullPath($Source)
 
 $Dest = Join-Path $RepoRoot "main\ui"
-$Excluded = @("CMakeLists.txt", "filelist.txt", "project.info")
+# ui_events.cpp holds hand-written Call-function bodies; SquareLine regenerates
+# it with empty stubs, so keep the repo copy and ignore the exported one.
+$Excluded = @("CMakeLists.txt", "filelist.txt", "project.info", "ui_events.cpp")
 
 # --- sanity checks on the export ---------------------------------------------
 if (-not (Test-Path $Source -PathType Container)) {
     $repoName = Split-Path -Leaf $RepoRoot
     Write-Error @"
 SquareLine export directory not found: $Source
-Expected 'ui_standalone' to sit beside '$repoName' in $(Split-Path -Parent $RepoRoot).
+Expected 'ui_c_files' to sit beside '$repoName' in $(Split-Path -Parent $RepoRoot).
 Either export/move the UI there, or pass the path explicitly:
   .\import_ui.ps1 -Source <path-to-squareline-export>
 "@
@@ -52,7 +54,8 @@ Write-Host ""
 
 # Snapshot the source file set so we can tell afterwards whether screens were
 # added or removed (see the CMake re-configure step below).
-$srcsBefore = @(Get-ChildItem $Dest -Recurse -Filter *.c -File -ErrorAction SilentlyContinue |
+$srcsBefore = @(Get-ChildItem $Dest -Recurse -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Extension -in ".c", ".cpp" } |
     ForEach-Object { $_.FullName } | Sort-Object)
 
 # --- mirror copy, excluding SquareLine's build/project files ------------------
@@ -73,27 +76,14 @@ if ($rc -eq 0) {
     Write-Host "Import complete (robocopy code $rc)."
 }
 
-# --- drop SquareLine's duplicate generated font sources -----------------------
-# SquareLine writes each generated font .c into BOTH assets/ and fonts/. Only the
-# fonts/ copy is compiled (ui/assets is deliberately not in SRC_DIRS), and these
-# run to megabytes each - enough to OOM clang-format in the pre-commit hook. Keep
-# the real source assets (.ttf/.fcfg/.bin/.svg) and drop the duplicate .c. Done
-# after the mirror because robocopy /XF rejects an absolute wildcard path.
-$dupFonts = @(Get-ChildItem (Join-Path $Dest "assets") -Filter *.c -File -ErrorAction SilentlyContinue)
-if ($dupFonts) {
-    $dupFonts | Remove-Item -Force
-    Write-Host ""
-    Write-Host "Dropped duplicate generated font source from ui/assets (ui/fonts copy is the one built):"
-    $dupFonts | ForEach-Object { Write-Host "  assets/$($_.Name)" }
-}
-
 # --- force a CMake re-configure when screens were added or removed ------------
 # SRC_DIRS expands its glob only when CMake configures. Delete a screen in
 # SquareLine and ninja keeps a rule for the vanished file ("missing and no known
 # rule to make it"); add one and it is silently never compiled. Touching the
 # component's CMakeLists.txt makes ninja re-run CMake on the next build, since
 # CMake emits a rule tying build.ninja to those files.
-$srcsAfter = @(Get-ChildItem $Dest -Recurse -Filter *.c -File -ErrorAction SilentlyContinue |
+$srcsAfter = @(Get-ChildItem $Dest -Recurse -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Extension -in ".c", ".cpp" } |
     ForEach-Object { $_.FullName } | Sort-Object)
 if (Compare-Object $srcsBefore $srcsAfter) {
     $mainCMake = Join-Path $RepoRoot "main\CMakeLists.txt"
@@ -110,12 +100,6 @@ if (Compare-Object $srcsBefore $srcsAfter) {
 # added image asset), the mirror brings it in but nothing compiles it, and the
 # only symptom is an "undefined reference to ui_img_*" at link time. Flag it
 # here instead.
-#
-# ui/assets is deliberately not compiled: SquareLine puts the raw source assets
-# there (.ttf/.svg/.fcfg) plus a duplicate copy of the generated font .c that
-# also lands in ui/fonts - compiling both gives duplicate symbols.
-$NotCompiled = @("assets")
-
 $MainCMake = Join-Path $RepoRoot "main\CMakeLists.txt"
 if (Test-Path $MainCMake) {
     $cmakeText = Get-Content $MainCMake -Raw
@@ -130,7 +114,6 @@ if (Test-Path $MainCMake) {
         Write-Host "WARNING: could not parse SRC_DIRS from $MainCMake - skipping source-dir check."
     } else {
         $missing = Get-ChildItem $Dest -Directory |
-            Where-Object { $NotCompiled -notcontains $_.Name } |
             Where-Object { Get-ChildItem $_.FullName -Filter *.c -File } |
             Where-Object { $srcDirs -notcontains "ui/$($_.Name)" } |
             ForEach-Object { $_.Name }

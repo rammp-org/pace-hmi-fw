@@ -14,6 +14,7 @@ extern "C" {
 extern void ui_DriveScreen_screen_init(void);
 extern void ui_DriveScreen_screen_destroy(void);
 extern lv_obj_t * ui_DriveScreen;
+extern lv_obj_t * ui_TopBar1;
 extern lv_obj_t * ui_StatePanel;
 extern lv_obj_t * ui_Speed;
 extern lv_obj_t * ui_Units;

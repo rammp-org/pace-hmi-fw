@@ -14,13 +14,27 @@ extern "C" {
 extern void ui_SettingsScreen_screen_init(void);
 extern void ui_SettingsScreen_screen_destroy(void);
 extern lv_obj_t * ui_SettingsScreen;
-extern lv_obj_t * ui_AxesPanel;
-extern lv_obj_t * ui_XBar;
-extern lv_obj_t * ui_YBar;
-extern lv_obj_t * ui_TwistBar;
-extern void ui_event_SettingsButton2(lv_event_t * e);
-extern lv_obj_t * ui_SettingsButton2;
-extern lv_obj_t * ui_Label5;
+extern lv_obj_t * ui_TopBar2;
+extern lv_obj_t * ui_SettingsPanel;
+extern lv_obj_t * ui_Button;
+extern lv_obj_t * ui_ButtonLabel;
+extern lv_obj_t * ui_Button1;
+extern lv_obj_t * ui_ButtonLabel1;
+extern lv_obj_t * ui_Button2;
+extern lv_obj_t * ui_ButtonLabel2;
+extern lv_obj_t * ui_Button3;
+extern lv_obj_t * ui_ButtonLabel3;
+extern lv_obj_t * ui_Button4;
+extern lv_obj_t * ui_ButtonLabel4;
+extern lv_obj_t * ui_BottomMenu2;
+extern lv_obj_t * ui_Mode7;
+extern lv_obj_t * ui_LeftButtonLabel9;
+extern void ui_event_Mode4(lv_event_t * e);
+extern lv_obj_t * ui_Mode4;
+extern lv_obj_t * ui_LeftButtonLabel6;
+extern void ui_event_Mode5(lv_event_t * e);
+extern lv_obj_t * ui_Mode5;
+extern lv_obj_t * ui_LeftButtonLabel7;
 // CUSTOM VARIABLES
 
 #ifdef __cplusplus

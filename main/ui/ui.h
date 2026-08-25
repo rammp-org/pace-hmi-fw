@@ -23,15 +23,19 @@ extern "C" {
 #endif
 
 #include "ui_helpers.h"
+#include "components/ui_comp.h"
+#include "components/ui_comp_hook.h"
 #include "ui_events.h"
 
 ///////////////////// SCREENS ////////////////////
 
 #include "screens/ui_BootScreen.h"
 #include "screens/ui_NotMainScreen.h"
-#include "screens/ui_SettingsScreen.h"
+#include "screens/ui_JoystickTest.h"
 #include "screens/ui_DriveScreen.h"
 #include "screens/ui_MainScreen.h"
+#include "screens/ui_SettingsScreen.h"
+#include "screens/ui_MainScreenFlex.h"
 
 ///////////////////// VARIABLES ////////////////////
 
@@ -43,6 +47,7 @@ extern lv_obj_t * ui____initial_actions0;
 // IMAGES AND IMAGE SETS
 LV_IMG_DECLARE(ui_img_rammp_type_white_svg);    // assets/RAMMP_Type_White.svg
 LV_IMG_DECLARE(ui_img_633112390);    // assets/motor-svgrepo-com.svg
+LV_IMG_DECLARE(ui_img_seat_svg);    // assets/seat.svg
 
 // FONTS
 LV_FONT_DECLARE(ui_font_Digital7);
