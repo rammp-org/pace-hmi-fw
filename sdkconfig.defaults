@@ -79,3 +79,37 @@ CONFIG_LV_USE_VECTOR_GRAPHIC=y
 CONFIG_LV_USE_THORVG=y
 CONFIG_LV_USE_THORVG_INTERNAL=y
 CONFIG_LV_USE_SVG=y
+
+# --- Rendering performance (step 1) ---
+# The refresh timer is already forced to 16 ms at runtime in main.cpp; match the
+# compiled-in default so the two cannot disagree.
+CONFIG_LV_DEF_REFR_PERIOD=16
+#
+# NOT re-enabling the image cache. Measured: 176.0 -> 175.5 ms (~1%), because the
+# cost is ThorVG RASTERIZING the vectors, not parsing them -- caching the parsed
+# render list does not avoid the rasterization. It also allocates from INTERNAL
+# RAM, not PSRAM: CMakeLists forces LV_USE_STDLIB_MALLOC=LV_STDLIB_CLIB, and
+# CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384 keeps the decoder's many small nodes
+# internal. A 4 MB budget against ~400 KB of free internal RAM is a latent OOM.
+
+# --- Rendering performance (step 2: PPA draw unit) ---
+# LVGL 9.5 ships an Espressif PPA draw unit that runs rect fills and RGB565
+# image blits on the P4's Pixel Processing Accelerator instead of the CPU. It
+# hard-requires LV_DRAW_BUF_ALIGN == CONFIG_CACHE_L2_CACHE_LINE_SIZE (128).
+# That is only safe now that the draw buffers ARE the DPI panel's frame buffers,
+# which the driver allocates cache-line aligned; the previous attempt used
+# espp's heap_caps_malloc buffers (4/8-byte aligned) and boot-looped on the
+# "buf1 is not aligned" assert in lv_display_set_buffers.
+CONFIG_LV_DRAW_BUF_ALIGN=128
+# LV_USE_PPA is OFF. Its draw unit only ever writes the cache BACK (C2M) and
+# never invalidates (M2C) -- grep the ppa dir, there is no M2C anywhere. So after
+# the PPA's DMA writes pixels, the CPU's cached copy of that region is stale, and
+# refr_sync_areas' lv_draw_buf_copy then propagates those stale pixels into the
+# other frame buffer. The two buffers drift apart and LVGL alternates between
+# them every refresh -> the screen visibly blinks on a static image.
+# It also ignores the `area` argument and msyncs the whole 1.8 MB frame buffer
+# twice per PPA task (lv_draw_ppa_buf.c:42), which scales with task count rather
+# than pixel count -- so it may well be a net slowdown here too.
+# Re-enable only with an area-scoped C2M + M2C fix in the draw unit.
+# CONFIG_LV_USE_PPA=y
+# CONFIG_LV_USE_PPA_IMG=y

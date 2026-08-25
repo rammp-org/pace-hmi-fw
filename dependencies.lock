@@ -307,86 +307,6 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 1.2.0
-  espp/m5stack-tab5:
-    component_hash: 631cf860514a15a3f4be66f1836ca82322ce9162d606f95c79f509a026e58047
-    dependencies:
-    - name: espp/base_component
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=1.0'
-    - name: espp/bmi270
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=1.0'
-    - name: espp/codec
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=1.0'
-    - name: espp/display
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=1.0'
-    - name: espp/display_drivers
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=1.0'
-    - name: espp/gt911
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=1.0'
-    - name: espp/i2c
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=1.0'
-    - name: espp/ina226
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=1.0'
-    - name: espp/input_drivers
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=1.0'
-    - name: espp/interrupt
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=1.0'
-    - name: espp/pi4ioe5v
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=1.0'
-    - name: espp/rx8130ce
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=1.0'
-    - name: espp/st7123touch
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=1.0'
-    - name: espp/task
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=1.0'
-    - name: espressif/esp_cam_sensor
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=2.0,<2.4'
-    - name: espressif/esp_ipa
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=2.0,<2.3'
-    - name: espressif/esp_video
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=2.0,<2.4'
-    - name: idf
-      require: private
-      version: '>=5.0'
-    source:
-      registry_url: https://components.espressif.com/
-      type: service
-    targets:
-    - esp32p4
-    version: 1.2.0
   espp/math:
     component_hash: 34da2b7150e5b89baa0c1757afc9bd2d0d6f8ad09a1c62196386e7fc039fc6a0
     dependencies:
@@ -604,7 +524,7 @@ dependencies:
       require: private
       version: '>=5.3'
     source:
-      registry_url: https://components.espressif.com
+      registry_url: https://components.espressif.com/
       type: service
     targets:
     - esp32p4
@@ -639,7 +559,7 @@ dependencies:
       require: private
       version: '>=5.4'
     source:
-      registry_url: https://components.espressif.com
+      registry_url: https://components.espressif.com/
       type: service
     targets:
     - esp32p4
@@ -687,7 +607,7 @@ dependencies:
       - if: target in [esp32p4, esp32s3, esp32s31]
       version: 2.5.*
     source:
-      registry_url: https://components.espressif.com
+      registry_url: https://components.espressif.com/
       type: service
     targets:
     - esp32p4
@@ -793,7 +713,6 @@ direct_dependencies:
 - espp/interrupt
 - espp/led
 - espp/logger
-- espp/m5stack-tab5
 - espp/math
 - espp/pi4ioe5v
 - espp/rtps
@@ -803,9 +722,12 @@ direct_dependencies:
 - espp/task
 - espp/touch
 - espressif/esp-dsp
+- espressif/esp_cam_sensor
+- espressif/esp_ipa
+- espressif/esp_video
 - espressif/w5500
 - idf
 - lvgl/lvgl
-manifest_hash: a0ec4f7555b9e3c76dc9c12cd118afc2623ff5507f6f8685e505802ee296bad5
+manifest_hash: 45ebe6f29878be8d33ab13e7cd8575127c05a6a2d5eb749d8bb2bc9e7cbe2f41
 target: esp32p4
 version: 3.0.0

@@ -26,8 +26,10 @@ lv_obj_t * ui_TopBar_create(lv_obj_t * comp_parent)
     lv_obj_set_height(cui_TopBar, 50);
     lv_obj_set_align(cui_TopBar, LV_ALIGN_TOP_MID);
     lv_obj_remove_flag(cui_TopBar, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_bg_color(cui_TopBar, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(cui_TopBar, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_TopBar, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_TopBar, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
     lv_obj_set_style_border_side(cui_TopBar, LV_BORDER_SIDE_NONE, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     lv_obj_t * cui_Clock1;
@@ -36,8 +38,10 @@ lv_obj_t * ui_TopBar_create(lv_obj_t * comp_parent)
     lv_obj_set_height(cui_Clock1, LV_SIZE_CONTENT);    /// 1
     lv_obj_set_align(cui_Clock1, LV_ALIGN_LEFT_MID);
     lv_label_set_text(cui_Clock1, "10:42");
-    lv_obj_set_style_text_color(cui_Clock1, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_opa(cui_Clock1, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_Clock1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(cui_Clock1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text);
     lv_obj_set_style_text_font(cui_Clock1, &lv_font_montserrat_24, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     lv_obj_t * cui_GPS1;
@@ -48,8 +52,10 @@ lv_obj_t * ui_TopBar_create(lv_obj_t * comp_parent)
     lv_obj_set_y(cui_GPS1, 0);
     lv_obj_set_align(cui_GPS1, LV_ALIGN_RIGHT_MID);
     lv_label_set_text(cui_GPS1, "BT   GPS");
-    lv_obj_set_style_text_color(cui_GPS1, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_opa(cui_GPS1, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_GPS1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(cui_GPS1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text);
     lv_obj_set_style_text_font(cui_GPS1, &lv_font_montserrat_24, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     lv_obj_t * cui_Battery1;
@@ -59,12 +65,16 @@ lv_obj_t * ui_TopBar_create(lv_obj_t * comp_parent)
     lv_obj_set_width(cui_Battery1, 100);
     lv_obj_set_height(cui_Battery1, 20);
     lv_obj_set_align(cui_Battery1, LV_ALIGN_RIGHT_MID);
-    lv_obj_set_style_bg_color(cui_Battery1, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(cui_Battery1, 20, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_Battery1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_Battery1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
 
     lv_obj_set_style_radius(cui_Battery1, 0, LV_PART_INDICATOR | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(cui_Battery1, lv_color_hex(0xFFFFFF), LV_PART_INDICATOR | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(cui_Battery1, 255, LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_Battery1, LV_PART_INDICATOR | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(cui_Battery1, LV_PART_INDICATOR | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
 
     //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
     if(lv_obj_get_style_pad_top(cui_Battery1, LV_PART_MAIN) > 0) lv_obj_set_style_pad_right(cui_Battery1,
@@ -75,8 +85,10 @@ lv_obj_t * ui_TopBar_create(lv_obj_t * comp_parent)
     lv_obj_set_height(cui_Label4, LV_SIZE_CONTENT);    /// 1
     lv_obj_set_align(cui_Label4, LV_ALIGN_CENTER);
     lv_label_set_text(cui_Label4, "30 km");
-    lv_obj_set_style_text_color(cui_Label4, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_opa(cui_Label4, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_Label4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_Label4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
 
     lv_obj_t ** children = lv_malloc(sizeof(lv_obj_t *) * _UI_COMP_TOPBAR_NUM);
     children[UI_COMP_TOPBAR_TOPBAR] = cui_TopBar;

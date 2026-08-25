@@ -13,7 +13,7 @@ void ui_event_BootScreen(lv_event_t * e)
     lv_event_code_t event_code = lv_event_get_code(e);
 
     if(event_code == LV_EVENT_SCREEN_LOADED) {
-        _ui_screen_change(&ui_MainScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 2500, &ui_MainScreen_screen_init);
+        _ui_screen_change(&ui_MainScreenFlex, LV_SCREEN_LOAD_ANIM_NONE, 0, 2500, &ui_MainScreenFlex_screen_init);
     }
 }
 

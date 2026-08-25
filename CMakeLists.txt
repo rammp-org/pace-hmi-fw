@@ -64,7 +64,7 @@ set(CMAKE_CXX_STANDARD 20)
 # -Wattributes; IDF v6.0 makes it fatal via its build-wide -Werror. Hit by the
 # Tab5 BSP's camera.cpp, which includes <pthread.h> after <driver/ppa.h> has
 # pulled in hal/assert.h. Toolchain header issue, not a BSP one.
-idf_component_get_property(tab5_lib espp__m5stack-tab5 COMPONENT_LIB)
+idf_component_get_property(tab5_lib m5stack-tab5 COMPONENT_LIB)
 target_compile_options(${tab5_lib} PRIVATE -Wno-error=attributes)
 
 # ThorVG's base64 decoder guards with `encoded[3] < 0` on a `const char*`.

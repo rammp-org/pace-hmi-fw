@@ -43,3 +43,9 @@ void flex_scroll_prev(lv_event_t * e)
     LV_UNUSED(e);
     flex_scroll_step(-1);
 }
+
+void theme_toggle(lv_event_t * e)
+{
+    LV_UNUSED(e);
+    _ui_switch_theme(ui_theme_idx == UI_THEME_DAY ? UI_THEME_DEFAULT : UI_THEME_DAY);
+}

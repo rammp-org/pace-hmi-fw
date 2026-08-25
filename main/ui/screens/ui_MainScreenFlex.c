@@ -8,23 +8,23 @@
 lv_obj_t * ui_MainScreenFlex = NULL;
 lv_obj_t * ui_TopBar3 = NULL;
 lv_obj_t * ui_FlexPanel = NULL;
-lv_obj_t * ui_ButtonPanel = NULL;
+lv_obj_t * ui_LockedPanel = NULL;
 lv_obj_t * ui_PanelButton = NULL;
 lv_obj_t * ui_PanelButtonLabel = NULL;
 lv_obj_t * ui_PanelButton4 = NULL;
 lv_obj_t * ui_PanelButtonLabel4 = NULL;
-lv_obj_t * ui_ButtonPanel1 = NULL;
+lv_obj_t * ui_DriveOption = NULL;
 lv_obj_t * ui_MenuPanel2 = NULL;
 lv_obj_t * ui_DriveMode4 = NULL;
 lv_obj_t * ui_Info3 = NULL;
 lv_obj_t * ui_Image4 = NULL;
 lv_obj_t * ui_PanelButton1 = NULL;
 lv_obj_t * ui_PanelButtonLabel1 = NULL;
-lv_obj_t * ui_ButtonPanel2 = NULL;
+lv_obj_t * ui_SeatAdjustOption = NULL;
 lv_obj_t * ui_Image1 = NULL;
 lv_obj_t * ui_PanelButton2 = NULL;
 lv_obj_t * ui_PanelButtonLabel2 = NULL;
-lv_obj_t * ui_ButtonPanel3 = NULL;
+lv_obj_t * ui_SettingsMenu = NULL;
 lv_obj_t * ui_SettingsPanel2 = NULL;
 lv_obj_t * ui_Button10 = NULL;
 lv_obj_t * ui_ButtonLabel10 = NULL;
@@ -36,6 +36,10 @@ lv_obj_t * ui_Button7 = NULL;
 lv_obj_t * ui_ButtonLabel7 = NULL;
 lv_obj_t * ui_Button8 = NULL;
 lv_obj_t * ui_ButtonLabel8 = NULL;
+lv_obj_t * ui_Button9 = NULL;
+lv_obj_t * ui_ButtonLabel9 = NULL;
+lv_obj_t * ui_Button11 = NULL;
+lv_obj_t * ui_ButtonLabel11 = NULL;
 lv_obj_t * ui_PanelButton3 = NULL;
 lv_obj_t * ui_PanelButtonLabel3 = NULL;
 // event funtions
@@ -57,14 +61,25 @@ void ui_event_PanelButton1(lv_event_t * e)
     }
 }
 
+void ui_event_Button5(lv_event_t * e)
+{
+    lv_event_code_t event_code = lv_event_get_code(e);
+
+    if(event_code == LV_EVENT_CLICKED) {
+        theme_toggle(e);
+    }
+}
+
 // build funtions
 
 void ui_MainScreenFlex_screen_init(void)
 {
     ui_MainScreenFlex = lv_obj_create(NULL);
     lv_obj_set_scroll_snap_x(ui_MainScreenFlex, LV_SCROLL_SNAP_CENTER);
-    lv_obj_set_style_bg_color(ui_MainScreenFlex, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(ui_MainScreenFlex, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_MainScreenFlex, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_MainScreenFlex, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
 
     ui_TopBar3 = ui_TopBar_create(ui_MainScreenFlex);
     lv_obj_set_x(ui_TopBar3, 0);
@@ -81,25 +96,30 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_flex_flow(ui_FlexPanel, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(ui_FlexPanel, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_add_flag(ui_FlexPanel, LV_OBJ_FLAG_SCROLL_WITH_ARROW | LV_OBJ_FLAG_SCROLL_ONE);     /// Flags
+    lv_obj_remove_flag(ui_FlexPanel, LV_OBJ_FLAG_SCROLL_MOMENTUM | LV_OBJ_FLAG_SCROLL_CHAIN);      /// Flags
     lv_obj_set_scrollbar_mode(ui_FlexPanel, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_scroll_dir(ui_FlexPanel, LV_DIR_HOR);
     lv_obj_set_scroll_snap_x(ui_FlexPanel, LV_SCROLL_SNAP_START);
-    lv_obj_set_style_bg_color(ui_FlexPanel, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(ui_FlexPanel, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_FlexPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_FlexPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
     lv_obj_set_style_border_side(ui_FlexPanel, LV_BORDER_SIDE_NONE, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_ButtonPanel = lv_obj_create(ui_FlexPanel);
-    lv_obj_set_width(ui_ButtonPanel, lv_pct(100));
-    lv_obj_set_height(ui_ButtonPanel, lv_pct(100));
-    lv_obj_set_align(ui_ButtonPanel, LV_ALIGN_CENTER);
-    lv_obj_remove_flag(ui_ButtonPanel, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_radius(ui_ButtonPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(ui_ButtonPanel, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(ui_ButtonPanel, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_color(ui_ButtonPanel, lv_color_hex(0xFF0000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_opa(ui_ButtonPanel, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_LockedPanel = lv_obj_create(ui_FlexPanel);
+    lv_obj_set_width(ui_LockedPanel, lv_pct(100));
+    lv_obj_set_height(ui_LockedPanel, lv_pct(100));
+    lv_obj_set_align(ui_LockedPanel, LV_ALIGN_CENTER);
+    lv_obj_remove_flag(ui_LockedPanel, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_radius(ui_LockedPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_LockedPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_LockedPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    lv_obj_set_style_border_color(ui_LockedPanel, lv_color_hex(0xFF0000), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_opa(ui_LockedPanel, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_PanelButton = lv_button_create(ui_ButtonPanel);
+    ui_PanelButton = lv_button_create(ui_LockedPanel);
     lv_obj_set_width(ui_PanelButton, 220);
     lv_obj_set_height(ui_PanelButton, 100);
     lv_obj_set_x(ui_PanelButton, 0);
@@ -108,10 +128,14 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_add_flag(ui_PanelButton, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
     lv_obj_remove_flag(ui_PanelButton, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_obj_set_style_radius(ui_PanelButton, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(ui_PanelButton, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(ui_PanelButton, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_color(ui_PanelButton, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_opa(ui_PanelButton, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_PanelButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_PanelButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_PanelButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_PanelButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
+                                           _ui_theme_alpha_text);
     lv_obj_set_style_border_width(ui_PanelButton, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_PanelButtonLabel = lv_label_create(ui_PanelButton);
@@ -119,12 +143,14 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_height(ui_PanelButtonLabel, 50);
     lv_obj_set_align(ui_PanelButtonLabel, LV_ALIGN_CENTER);
     lv_label_set_text(ui_PanelButtonLabel, "HOME");
-    lv_obj_set_style_text_color(ui_PanelButtonLabel, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_opa(ui_PanelButtonLabel, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_PanelButtonLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_PanelButtonLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text);
     lv_obj_set_style_text_align(ui_PanelButtonLabel, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(ui_PanelButtonLabel, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_PanelButton4 = lv_button_create(ui_ButtonPanel);
+    ui_PanelButton4 = lv_button_create(ui_LockedPanel);
     lv_obj_set_width(ui_PanelButton4, 220);
     lv_obj_set_height(ui_PanelButton4, 100);
     lv_obj_set_x(ui_PanelButton4, 240);
@@ -133,10 +159,14 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_add_flag(ui_PanelButton4, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
     lv_obj_remove_flag(ui_PanelButton4, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_obj_set_style_radius(ui_PanelButton4, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(ui_PanelButton4, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(ui_PanelButton4, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_color(ui_PanelButton4, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_opa(ui_PanelButton4, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_PanelButton4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_PanelButton4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_PanelButton4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_PanelButton4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
+                                           _ui_theme_alpha_text);
     lv_obj_set_style_border_width(ui_PanelButton4, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_PanelButtonLabel4 = lv_label_create(ui_PanelButton4);
@@ -144,29 +174,35 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_height(ui_PanelButtonLabel4, 50);
     lv_obj_set_align(ui_PanelButtonLabel4, LV_ALIGN_CENTER);
     lv_label_set_text(ui_PanelButtonLabel4, "DRIVE\n");
-    lv_obj_set_style_text_color(ui_PanelButtonLabel4, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_opa(ui_PanelButtonLabel4, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_PanelButtonLabel4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_PanelButtonLabel4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text);
     lv_obj_set_style_text_align(ui_PanelButtonLabel4, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(ui_PanelButtonLabel4, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_ButtonPanel1 = lv_obj_create(ui_FlexPanel);
-    lv_obj_set_width(ui_ButtonPanel1, lv_pct(100));
-    lv_obj_set_height(ui_ButtonPanel1, lv_pct(100));
-    lv_obj_set_align(ui_ButtonPanel1, LV_ALIGN_CENTER);
-    lv_obj_remove_flag(ui_ButtonPanel1, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_radius(ui_ButtonPanel1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(ui_ButtonPanel1, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(ui_ButtonPanel1, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_color(ui_ButtonPanel1, lv_color_hex(0xFF0000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_opa(ui_ButtonPanel1, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_DriveOption = lv_obj_create(ui_FlexPanel);
+    lv_obj_set_width(ui_DriveOption, lv_pct(100));
+    lv_obj_set_height(ui_DriveOption, lv_pct(100));
+    lv_obj_set_align(ui_DriveOption, LV_ALIGN_CENTER);
+    lv_obj_remove_flag(ui_DriveOption, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_radius(ui_DriveOption, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_DriveOption, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_DriveOption, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    lv_obj_set_style_border_color(ui_DriveOption, lv_color_hex(0xFF0000), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_opa(ui_DriveOption, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_MenuPanel2 = lv_obj_create(ui_ButtonPanel1);
+    ui_MenuPanel2 = lv_obj_create(ui_DriveOption);
     lv_obj_set_width(ui_MenuPanel2, 720);
     lv_obj_set_height(ui_MenuPanel2, 1230);
     lv_obj_set_align(ui_MenuPanel2, LV_ALIGN_CENTER);
     lv_obj_remove_flag(ui_MenuPanel2, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_bg_color(ui_MenuPanel2, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(ui_MenuPanel2, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_MenuPanel2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_MenuPanel2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
     lv_obj_set_style_border_side(ui_MenuPanel2, LV_BORDER_SIDE_NONE, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_DriveMode4 = lv_label_create(ui_MenuPanel2);
@@ -176,8 +212,10 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_y(ui_DriveMode4, 300);
     lv_obj_set_align(ui_DriveMode4, LV_ALIGN_CENTER);
     lv_label_set_text(ui_DriveMode4, "DRIVE MODE");
-    lv_obj_set_style_text_color(ui_DriveMode4, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_opa(ui_DriveMode4, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_DriveMode4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_DriveMode4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text);
     lv_obj_set_style_text_font(ui_DriveMode4, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_Info3 = lv_label_create(ui_DriveMode4);
@@ -187,8 +225,10 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_y(ui_Info3, 100);
     lv_obj_set_align(ui_Info3, LV_ALIGN_CENTER);
     lv_label_set_text(ui_Info3, "Press & hold to enter selected mode");
-    lv_obj_set_style_text_color(ui_Info3, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_opa(ui_Info3, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_Info3, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_Info3, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text);
     lv_obj_set_style_text_font(ui_Info3, &lv_font_montserrat_34, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_Image4 = lv_image_create(ui_MenuPanel2);
@@ -202,7 +242,7 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_remove_flag(ui_Image4, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_image_set_scale(ui_Image4, 150);
 
-    ui_PanelButton1 = lv_button_create(ui_ButtonPanel1);
+    ui_PanelButton1 = lv_button_create(ui_DriveOption);
     lv_obj_set_width(ui_PanelButton1, 220);
     lv_obj_set_height(ui_PanelButton1, 100);
     lv_obj_set_x(ui_PanelButton1, 0);
@@ -211,10 +251,14 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_add_flag(ui_PanelButton1, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
     lv_obj_remove_flag(ui_PanelButton1, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_obj_set_style_radius(ui_PanelButton1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(ui_PanelButton1, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(ui_PanelButton1, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_color(ui_PanelButton1, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_opa(ui_PanelButton1, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_PanelButton1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_PanelButton1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_PanelButton1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_PanelButton1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
+                                           _ui_theme_alpha_text);
     lv_obj_set_style_border_width(ui_PanelButton1, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_PanelButtonLabel1 = lv_label_create(ui_PanelButton1);
@@ -222,23 +266,27 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_height(ui_PanelButtonLabel1, 50);
     lv_obj_set_align(ui_PanelButtonLabel1, LV_ALIGN_CENTER);
     lv_label_set_text(ui_PanelButtonLabel1, "DRIVE");
-    lv_obj_set_style_text_color(ui_PanelButtonLabel1, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_opa(ui_PanelButtonLabel1, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_PanelButtonLabel1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_PanelButtonLabel1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text);
     lv_obj_set_style_text_align(ui_PanelButtonLabel1, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(ui_PanelButtonLabel1, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_ButtonPanel2 = lv_obj_create(ui_FlexPanel);
-    lv_obj_set_width(ui_ButtonPanel2, lv_pct(100));
-    lv_obj_set_height(ui_ButtonPanel2, lv_pct(100));
-    lv_obj_set_align(ui_ButtonPanel2, LV_ALIGN_CENTER);
-    lv_obj_remove_flag(ui_ButtonPanel2, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_radius(ui_ButtonPanel2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(ui_ButtonPanel2, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(ui_ButtonPanel2, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_color(ui_ButtonPanel2, lv_color_hex(0xFF0000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_opa(ui_ButtonPanel2, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_SeatAdjustOption = lv_obj_create(ui_FlexPanel);
+    lv_obj_set_width(ui_SeatAdjustOption, lv_pct(100));
+    lv_obj_set_height(ui_SeatAdjustOption, lv_pct(100));
+    lv_obj_set_align(ui_SeatAdjustOption, LV_ALIGN_CENTER);
+    lv_obj_remove_flag(ui_SeatAdjustOption, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_radius(ui_SeatAdjustOption, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_SeatAdjustOption, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_SeatAdjustOption, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    lv_obj_set_style_border_color(ui_SeatAdjustOption, lv_color_hex(0xFF0000), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_opa(ui_SeatAdjustOption, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_Image1 = lv_image_create(ui_ButtonPanel2);
+    ui_Image1 = lv_image_create(ui_SeatAdjustOption);
     lv_image_set_src(ui_Image1, &ui_img_1236721514);
     lv_obj_set_width(ui_Image1, 400);
     lv_obj_set_height(ui_Image1, 400);
@@ -249,7 +297,7 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_remove_flag(ui_Image1, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_image_set_scale(ui_Image1, 150);
 
-    ui_PanelButton2 = lv_button_create(ui_ButtonPanel2);
+    ui_PanelButton2 = lv_button_create(ui_SeatAdjustOption);
     lv_obj_set_width(ui_PanelButton2, 220);
     lv_obj_set_height(ui_PanelButton2, 100);
     lv_obj_set_x(ui_PanelButton2, 0);
@@ -258,10 +306,14 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_add_flag(ui_PanelButton2, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
     lv_obj_remove_flag(ui_PanelButton2, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_obj_set_style_radius(ui_PanelButton2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(ui_PanelButton2, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(ui_PanelButton2, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_color(ui_PanelButton2, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_opa(ui_PanelButton2, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_PanelButton2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_PanelButton2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_PanelButton2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_PanelButton2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
+                                           _ui_theme_alpha_text);
     lv_obj_set_style_border_width(ui_PanelButton2, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_PanelButtonLabel2 = lv_label_create(ui_PanelButton2);
@@ -269,29 +321,35 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_height(ui_PanelButtonLabel2, 50);
     lv_obj_set_align(ui_PanelButtonLabel2, LV_ALIGN_CENTER);
     lv_label_set_text(ui_PanelButtonLabel2, "SEAT");
-    lv_obj_set_style_text_color(ui_PanelButtonLabel2, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_opa(ui_PanelButtonLabel2, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_PanelButtonLabel2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_PanelButtonLabel2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text);
     lv_obj_set_style_text_align(ui_PanelButtonLabel2, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(ui_PanelButtonLabel2, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_ButtonPanel3 = lv_obj_create(ui_FlexPanel);
-    lv_obj_set_width(ui_ButtonPanel3, lv_pct(100));
-    lv_obj_set_height(ui_ButtonPanel3, lv_pct(100));
-    lv_obj_set_align(ui_ButtonPanel3, LV_ALIGN_CENTER);
-    lv_obj_remove_flag(ui_ButtonPanel3, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_radius(ui_ButtonPanel3, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(ui_ButtonPanel3, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(ui_ButtonPanel3, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_color(ui_ButtonPanel3, lv_color_hex(0xFF0000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_opa(ui_ButtonPanel3, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_SettingsMenu = lv_obj_create(ui_FlexPanel);
+    lv_obj_set_width(ui_SettingsMenu, lv_pct(100));
+    lv_obj_set_height(ui_SettingsMenu, lv_pct(100));
+    lv_obj_set_align(ui_SettingsMenu, LV_ALIGN_CENTER);
+    lv_obj_remove_flag(ui_SettingsMenu, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_radius(ui_SettingsMenu, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_SettingsMenu, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_SettingsMenu, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    lv_obj_set_style_border_color(ui_SettingsMenu, lv_color_hex(0xFF0000), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_opa(ui_SettingsMenu, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_SettingsPanel2 = lv_obj_create(ui_ButtonPanel3);
+    ui_SettingsPanel2 = lv_obj_create(ui_SettingsMenu);
     lv_obj_set_width(ui_SettingsPanel2, 720);
     lv_obj_set_height(ui_SettingsPanel2, 1230);
     lv_obj_set_align(ui_SettingsPanel2, LV_ALIGN_CENTER);
     lv_obj_remove_flag(ui_SettingsPanel2, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_bg_color(ui_SettingsPanel2, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(ui_SettingsPanel2, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_SettingsPanel2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_SettingsPanel2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
     lv_obj_set_style_border_side(ui_SettingsPanel2, LV_BORDER_SIDE_NONE, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_Button10 = lv_button_create(ui_SettingsPanel2);
@@ -303,10 +361,14 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_add_flag(ui_Button10, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
     lv_obj_remove_flag(ui_Button10, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_obj_set_style_radius(ui_Button10, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(ui_Button10, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(ui_Button10, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_color(ui_Button10, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_opa(ui_Button10, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_Button10, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_Button10, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_Button10, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_Button10, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
+                                           _ui_theme_alpha_text);
     lv_obj_set_style_border_width(ui_Button10, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_ButtonLabel10 = lv_label_create(ui_Button10);
@@ -316,8 +378,10 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_y(ui_ButtonLabel10, 0);
     lv_obj_set_align(ui_ButtonLabel10, LV_ALIGN_LEFT_MID);
     lv_label_set_text(ui_ButtonLabel10, "JOYSTICK");
-    lv_obj_set_style_text_color(ui_ButtonLabel10, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_opa(ui_ButtonLabel10, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_ButtonLabel10, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_ButtonLabel10, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text);
     lv_obj_set_style_text_align(ui_ButtonLabel10, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(ui_ButtonLabel10, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
 
@@ -330,10 +394,14 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_add_flag(ui_Button5, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
     lv_obj_remove_flag(ui_Button5, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_obj_set_style_radius(ui_Button5, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(ui_Button5, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(ui_Button5, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_color(ui_Button5, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_opa(ui_Button5, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_Button5, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_Button5, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_Button5, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_Button5, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
+                                           _ui_theme_alpha_text);
     lv_obj_set_style_border_width(ui_Button5, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_ButtonLabel5 = lv_label_create(ui_Button5);
@@ -342,9 +410,11 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_x(ui_ButtonLabel5, 20);
     lv_obj_set_y(ui_ButtonLabel5, 0);
     lv_obj_set_align(ui_ButtonLabel5, LV_ALIGN_LEFT_MID);
-    lv_label_set_text(ui_ButtonLabel5, "SEAT");
-    lv_obj_set_style_text_color(ui_ButtonLabel5, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_opa(ui_ButtonLabel5, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_label_set_text(ui_ButtonLabel5, "CHANGE THEME");
+    ui_object_set_themeable_style_property(ui_ButtonLabel5, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_ButtonLabel5, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text);
     lv_obj_set_style_text_align(ui_ButtonLabel5, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(ui_ButtonLabel5, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
 
@@ -357,10 +427,14 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_add_flag(ui_Button6, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
     lv_obj_remove_flag(ui_Button6, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_obj_set_style_radius(ui_Button6, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(ui_Button6, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(ui_Button6, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_color(ui_Button6, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_opa(ui_Button6, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_Button6, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_Button6, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_Button6, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_Button6, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
+                                           _ui_theme_alpha_text);
     lv_obj_set_style_border_width(ui_Button6, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_ButtonLabel6 = lv_label_create(ui_Button6);
@@ -369,9 +443,11 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_x(ui_ButtonLabel6, 20);
     lv_obj_set_y(ui_ButtonLabel6, 0);
     lv_obj_set_align(ui_ButtonLabel6, LV_ALIGN_LEFT_MID);
-    lv_label_set_text(ui_ButtonLabel6, "SEAT");
-    lv_obj_set_style_text_color(ui_ButtonLabel6, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_opa(ui_ButtonLabel6, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_label_set_text(ui_ButtonLabel6, "R&D SELF TEST");
+    ui_object_set_themeable_style_property(ui_ButtonLabel6, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_ButtonLabel6, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text);
     lv_obj_set_style_text_align(ui_ButtonLabel6, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(ui_ButtonLabel6, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
 
@@ -384,10 +460,14 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_add_flag(ui_Button7, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
     lv_obj_remove_flag(ui_Button7, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_obj_set_style_radius(ui_Button7, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(ui_Button7, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(ui_Button7, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_color(ui_Button7, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_opa(ui_Button7, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_Button7, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_Button7, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_Button7, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_Button7, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
+                                           _ui_theme_alpha_text);
     lv_obj_set_style_border_width(ui_Button7, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_ButtonLabel7 = lv_label_create(ui_Button7);
@@ -396,9 +476,11 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_x(ui_ButtonLabel7, 20);
     lv_obj_set_y(ui_ButtonLabel7, 0);
     lv_obj_set_align(ui_ButtonLabel7, LV_ALIGN_LEFT_MID);
-    lv_label_set_text(ui_ButtonLabel7, "SEAT");
-    lv_obj_set_style_text_color(ui_ButtonLabel7, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_opa(ui_ButtonLabel7, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_label_set_text(ui_ButtonLabel7, "R&D DEBUG");
+    ui_object_set_themeable_style_property(ui_ButtonLabel7, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_ButtonLabel7, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text);
     lv_obj_set_style_text_align(ui_ButtonLabel7, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(ui_ButtonLabel7, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
 
@@ -411,10 +493,14 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_add_flag(ui_Button8, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
     lv_obj_remove_flag(ui_Button8, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_obj_set_style_radius(ui_Button8, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(ui_Button8, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(ui_Button8, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_color(ui_Button8, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_opa(ui_Button8, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_Button8, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_Button8, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_Button8, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_Button8, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
+                                           _ui_theme_alpha_text);
     lv_obj_set_style_border_width(ui_Button8, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_ButtonLabel8 = lv_label_create(ui_Button8);
@@ -423,13 +509,81 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_x(ui_ButtonLabel8, 20);
     lv_obj_set_y(ui_ButtonLabel8, 0);
     lv_obj_set_align(ui_ButtonLabel8, LV_ALIGN_LEFT_MID);
-    lv_label_set_text(ui_ButtonLabel8, "SEAT");
-    lv_obj_set_style_text_color(ui_ButtonLabel8, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_opa(ui_ButtonLabel8, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_label_set_text(ui_ButtonLabel8, "SOFTWARE UPDATES");
+    ui_object_set_themeable_style_property(ui_ButtonLabel8, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_ButtonLabel8, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text);
     lv_obj_set_style_text_align(ui_ButtonLabel8, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(ui_ButtonLabel8, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_PanelButton3 = lv_button_create(ui_ButtonPanel3);
+    ui_Button9 = lv_button_create(ui_SettingsPanel2);
+    lv_obj_set_width(ui_Button9, 620);
+    lv_obj_set_height(ui_Button9, 100);
+    lv_obj_set_x(ui_Button9, 0);
+    lv_obj_set_y(ui_Button9, 700);
+    lv_obj_set_align(ui_Button9, LV_ALIGN_TOP_MID);
+    lv_obj_add_flag(ui_Button9, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
+    lv_obj_remove_flag(ui_Button9, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_radius(ui_Button9, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_Button9, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_Button9, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_Button9, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_Button9, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
+                                           _ui_theme_alpha_text);
+    lv_obj_set_style_border_width(ui_Button9, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_ButtonLabel9 = lv_label_create(ui_Button9);
+    lv_obj_set_width(ui_ButtonLabel9, 540);
+    lv_obj_set_height(ui_ButtonLabel9, 50);
+    lv_obj_set_x(ui_ButtonLabel9, 20);
+    lv_obj_set_y(ui_ButtonLabel9, 0);
+    lv_obj_set_align(ui_ButtonLabel9, LV_ALIGN_LEFT_MID);
+    lv_label_set_text(ui_ButtonLabel9, "ABOUT");
+    ui_object_set_themeable_style_property(ui_ButtonLabel9, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_ButtonLabel9, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text);
+    lv_obj_set_style_text_align(ui_ButtonLabel9, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_ButtonLabel9, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_Button11 = lv_button_create(ui_SettingsPanel2);
+    lv_obj_set_width(ui_Button11, 620);
+    lv_obj_set_height(ui_Button11, 100);
+    lv_obj_set_x(ui_Button11, 0);
+    lv_obj_set_y(ui_Button11, 700);
+    lv_obj_set_align(ui_Button11, LV_ALIGN_TOP_MID);
+    lv_obj_add_flag(ui_Button11, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
+    lv_obj_remove_flag(ui_Button11, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_radius(ui_Button11, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_Button11, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_Button11, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_Button11, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_Button11, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
+                                           _ui_theme_alpha_text);
+    lv_obj_set_style_border_width(ui_Button11, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_ButtonLabel11 = lv_label_create(ui_Button11);
+    lv_obj_set_width(ui_ButtonLabel11, 540);
+    lv_obj_set_height(ui_ButtonLabel11, 50);
+    lv_obj_set_x(ui_ButtonLabel11, 20);
+    lv_obj_set_y(ui_ButtonLabel11, 0);
+    lv_obj_set_align(ui_ButtonLabel11, LV_ALIGN_LEFT_MID);
+    lv_label_set_text(ui_ButtonLabel11, "ABOUT");
+    ui_object_set_themeable_style_property(ui_ButtonLabel11, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_ButtonLabel11, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text);
+    lv_obj_set_style_text_align(ui_ButtonLabel11, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_ButtonLabel11, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_PanelButton3 = lv_button_create(ui_SettingsMenu);
     lv_obj_set_width(ui_PanelButton3, 220);
     lv_obj_set_height(ui_PanelButton3, 100);
     lv_obj_set_x(ui_PanelButton3, 0);
@@ -438,10 +592,14 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_add_flag(ui_PanelButton3, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
     lv_obj_remove_flag(ui_PanelButton3, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_obj_set_style_radius(ui_PanelButton3, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(ui_PanelButton3, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(ui_PanelButton3, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_color(ui_PanelButton3, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_opa(ui_PanelButton3, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_PanelButton3, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_PanelButton3, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_PanelButton3, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_PanelButton3, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
+                                           _ui_theme_alpha_text);
     lv_obj_set_style_border_width(ui_PanelButton3, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_PanelButtonLabel3 = lv_label_create(ui_PanelButton3);
@@ -449,13 +607,16 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_height(ui_PanelButtonLabel3, 50);
     lv_obj_set_align(ui_PanelButtonLabel3, LV_ALIGN_CENTER);
     lv_label_set_text(ui_PanelButtonLabel3, "SETTING");
-    lv_obj_set_style_text_color(ui_PanelButtonLabel3, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_opa(ui_PanelButtonLabel3, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_PanelButtonLabel3, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_PanelButtonLabel3, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text);
     lv_obj_set_style_text_align(ui_PanelButtonLabel3, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(ui_PanelButtonLabel3, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     lv_obj_add_event_cb(ui_PanelButton4, ui_event_PanelButton4, LV_EVENT_ALL, NULL);
     lv_obj_add_event_cb(ui_PanelButton1, ui_event_PanelButton1, LV_EVENT_ALL, NULL);
+    lv_obj_add_event_cb(ui_Button5, ui_event_Button5, LV_EVENT_ALL, NULL);
 
 }
 
@@ -467,23 +628,23 @@ void ui_MainScreenFlex_screen_destroy(void)
     ui_MainScreenFlex = NULL;
     ui_TopBar3 = NULL;
     ui_FlexPanel = NULL;
-    ui_ButtonPanel = NULL;
+    ui_LockedPanel = NULL;
     ui_PanelButton = NULL;
     ui_PanelButtonLabel = NULL;
     ui_PanelButton4 = NULL;
     ui_PanelButtonLabel4 = NULL;
-    ui_ButtonPanel1 = NULL;
+    ui_DriveOption = NULL;
     ui_MenuPanel2 = NULL;
     ui_DriveMode4 = NULL;
     ui_Info3 = NULL;
     ui_Image4 = NULL;
     ui_PanelButton1 = NULL;
     ui_PanelButtonLabel1 = NULL;
-    ui_ButtonPanel2 = NULL;
+    ui_SeatAdjustOption = NULL;
     ui_Image1 = NULL;
     ui_PanelButton2 = NULL;
     ui_PanelButtonLabel2 = NULL;
-    ui_ButtonPanel3 = NULL;
+    ui_SettingsMenu = NULL;
     ui_SettingsPanel2 = NULL;
     ui_Button10 = NULL;
     ui_ButtonLabel10 = NULL;
@@ -495,6 +656,10 @@ void ui_MainScreenFlex_screen_destroy(void)
     ui_ButtonLabel7 = NULL;
     ui_Button8 = NULL;
     ui_ButtonLabel8 = NULL;
+    ui_Button9 = NULL;
+    ui_ButtonLabel9 = NULL;
+    ui_Button11 = NULL;
+    ui_ButtonLabel11 = NULL;
     ui_PanelButton3 = NULL;
     ui_PanelButtonLabel3 = NULL;
 

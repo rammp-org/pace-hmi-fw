@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <optional>
 #include <stdlib.h>
@@ -30,14 +31,46 @@
 
 #include "rtps_comms.hpp"
 
-#include "driver/ppa.h"
 #include "esp_heap_caps.h"
+#include "esp_lcd_mipi_dsi.h"
+#include "esp_timer.h"
 
 using namespace std::chrono_literals;
 
 static std::vector<uint8_t> audio_bytes;
 
 static std::recursive_mutex lvgl_mutex;
+
+// ---------------------------------------------------------------------------
+// Frame-rate instrumentation (temporary; remove once tuning is finished).
+//
+// Reports over serial rather than the LVGL perf overlay, so throughput can be
+// measured without eyes on the panel. RENDER_START/RENDER_READY fire only when
+// LVGL actually rasterizes, so these numbers are real frame cost -- REFR_*
+// would tick even on an idle screen and read as a meaningless "infinite fps".
+//
+// kFpsStress forces a full-screen invalidation every LVGL cycle. Without it a
+// static SquareLine screen invalidates nothing and renders nothing, which
+// measures the redraw path not at all. With it we get sustained worst case.
+// ---------------------------------------------------------------------------
+static constexpr bool kFpsInstrument = false;
+static constexpr bool kFpsStress = false;
+static constexpr bool kFpsHideImages = false;
+static std::atomic<uint32_t> fps_frames{0};
+static std::atomic<uint64_t> fps_render_us_total{0};
+static std::atomic<uint32_t> fps_render_us_max{0};
+static int64_t fps_render_start_us = 0;
+
+static void fps_render_start_cb(lv_event_t *) { fps_render_start_us = esp_timer_get_time(); }
+
+static void fps_render_ready_cb(lv_event_t *) {
+  const uint32_t us = static_cast<uint32_t>(esp_timer_get_time() - fps_render_start_us);
+  fps_frames.fetch_add(1, std::memory_order_relaxed);
+  fps_render_us_total.fetch_add(us, std::memory_order_relaxed);
+  uint32_t prev = fps_render_us_max.load(std::memory_order_relaxed);
+  while (us > prev && !fps_render_us_max.compare_exchange_weak(prev, us)) {
+  }
+}
 
 // Subjects (observer pattern) feeding the Settings-screen axis bars; static
 // lifetime because the bound observers keep pointers to them
@@ -57,106 +90,31 @@ static void test_da7280(espp::Logger &logger, espp::I2c &i2c,
 // register peek, all with the Da7280 driver class (DRO mode).
 static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c);
 
-// PPA (hardware) rotation flush, replaces the BSP's lv_draw_sw_rotate flush
-static ppa_client_handle_t ppa_srm = nullptr;
-static uint8_t *ppa_rotated_buf = nullptr;
-static size_t ppa_rotated_buf_size = 0;
-
-// PPA/DMA2D buffers in PSRAM must be aligned to both the L1 (64 B) and L2
-// (128 B on this config) cache line sizes
-static constexpr size_t DMA_BUF_ALIGN = 128;
-static uint8_t *alloc_psram_dma(size_t size) {
-  uint8_t *buf = static_cast<uint8_t *>(heap_caps_aligned_alloc(
-      DMA_BUF_ALIGN, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_8BIT));
-  if (!buf) {
-    // not all IDF configs tag PSRAM as DMA-capable in the heap; the PPA and
-    // DMA2D can still access it
-    buf = static_cast<uint8_t *>(
-        heap_caps_aligned_alloc(DMA_BUF_ALIGN, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-  }
-  return buf;
-}
-
-// Rotates the rendered area on the ESP32-P4's PPA instead of the CPU, then
-// queues the copy to the DPI framebuffer via write_lcd_lines(). Writing
-// through write_lcd_lines()/esp_lcd_panel_draw_bitmap() (rather than writing
-// the PPA output directly into the live frame buffer) matters now that
-// num_fbs=2: that's the path the driver uses to pick a safe (currently
-// off-screen) buffer to draw into and flip, avoiding the tearing a direct
-// write into the actively-scanned-out buffer would cause. The panel's
-// on_color_trans_done callback calls lv_display_flush_ready(), same as the
-// BSP's own flush.
-static void ppa_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
-  auto &tab5 = espp::M5StackTab5::get();
-  auto rotation = lv_display_get_rotation(disp);
-  if (rotation == LV_DISPLAY_ROTATION_0) {
-    tab5.write_lcd_lines(area->x1, area->y1, area->x2, area->y2, px_map, 0);
-    return;
-  }
-
-  const uint32_t w = lv_area_get_width(area);
-  const uint32_t h = lv_area_get_height(area);
-  const bool swap_wh = rotation != LV_DISPLAY_ROTATION_180;
-
-  ppa_srm_oper_config_t srm{};
-  srm.in.buffer = px_map;
-  srm.in.pic_w = w;
-  srm.in.pic_h = h;
-  srm.in.block_w = w;
-  srm.in.block_h = h;
-  srm.in.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
-  srm.out.buffer = ppa_rotated_buf;
-  srm.out.buffer_size = ppa_rotated_buf_size;
-  srm.out.pic_w = swap_wh ? h : w;
-  srm.out.pic_h = swap_wh ? w : h;
-  srm.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
-  // both LVGL's sw-rotate and the PPA rotate counter-clockwise, map directly
-  srm.rotation_angle = rotation == LV_DISPLAY_ROTATION_90    ? PPA_SRM_ROTATION_ANGLE_90
-                       : rotation == LV_DISPLAY_ROTATION_180 ? PPA_SRM_ROTATION_ANGLE_180
-                                                             : PPA_SRM_ROTATION_ANGLE_270;
-  srm.scale_x = 1.0f;
-  srm.scale_y = 1.0f;
-  srm.mode = PPA_TRANS_MODE_BLOCKING;
-  esp_err_t err = ppa_do_scale_rotate_mirror(ppa_srm, &srm);
-  if (err != ESP_OK) {
-    // log the first failure and then every 100th so a permanently broken PPA
-    // path is visible without flooding the console
-    static uint32_t ppa_errors = 0;
-    if (ppa_errors++ % 100 == 0) {
-      fmt::print("[flush] PPA rotate FAILED: {} (occurrence #{})\n", esp_err_to_name(err),
-                 ppa_errors);
-    }
-    // complete the flush anyway so LVGL doesn't stall waiting on this buffer
+// Direct-mode flush. LVGL renders into the DPI panel's own frame buffers, so
+// px_map is already a frame buffer and esp_lcd_panel_draw_bitmap takes its
+// no-copy branch: it writes the cache back, sets cur_fb_index, and returns,
+// instead of copying 1.8 MB.
+//
+// KNOWN DEFECT -- this is NOT vsync-gated. That no-copy branch calls
+// on_color_trans_done SYNCHRONOUSLY (esp_lcd_panel_dpi.c), which the BSP wires
+// to lv_display_flush_ready, so disp->flushing clears before this function even
+// returns and LVGL's wait_for_flushing() becomes a no-op. LVGL then starts
+// rasterizing into the buffer the DSI DMA may still be scanning out, so partial
+// updates can tear. The real fix is to register on_refresh_done (currently
+// nullptr in the BSP) and defer flush_ready until the flip actually lands.
+//
+// Ignoring `area` and flushing full-screen IS correct here: call_flush_cb passes
+// the buffer START (not an offset), and refr_sync_areas already copies the
+// previous frame's invalid areas forward, so both buffers stay coherent.
+static void direct_flush_cb(lv_display_t *disp, const lv_area_t * /*area*/, uint8_t *px_map) {
+  if (!lv_display_flush_is_last(disp)) {
     lv_display_flush_ready(disp);
     return;
   }
-
-  lv_area_t rotated = *area;
-  lv_display_rotate_area(disp, &rotated);
-  tab5.write_lcd_lines(rotated.x1, rotated.y1, rotated.x2, rotated.y2, ppa_rotated_buf, 0);
-}
-
-// Route flushes through the PPA instead of the BSP's CPU rotation. The
-// (vendored) BSP already allocates full-screen PSRAM draw buffers; on failure
-// here the BSP's software-rotation flush stays in place as the fallback.
-static bool initialize_ppa_flush(espp::M5StackTab5 &tab5) {
-  const size_t fb_bytes = tab5.display_width() * tab5.display_height() * sizeof(uint16_t);
-  ppa_rotated_buf = alloc_psram_dma(fb_bytes);
-  if (!ppa_rotated_buf) {
-    return false;
-  }
-  ppa_rotated_buf_size = fb_bytes;
-
-  ppa_client_config_t ppa_config{};
-  ppa_config.oper_type = PPA_OPERATION_SRM;
-  if (ppa_register_client(&ppa_config, &ppa_srm) != ESP_OK) {
-    heap_caps_free(ppa_rotated_buf);
-    ppa_rotated_buf = nullptr;
-    return false;
-  }
-
-  lv_display_set_flush_cb(lv_display_get_default(), ppa_flush_cb);
-  return true;
+  auto &tab5 = espp::M5StackTab5::get();
+  tab5.write_lcd_lines(0, 0, static_cast<int>(tab5.display_width()) - 1,
+                       static_cast<int>(tab5.display_height()) - 1, px_map, 0);
+  // completion arrives via the panel's on_color_trans_done -> flush_ready
 }
 
 // DA7280 haptic driver bring-up test: read-only register probe, no driver
@@ -441,24 +399,46 @@ extern "C" void app_main(void) {
     return;
   }
 
-  // PPA hardware rotation: previously disabled after ppa_do_scale_rotate_mirror()
-  // appeared to shift the image left on ROTATION_270 (see ppa_flush_cb comment
-  // for the investigation). That symptom was found and fixed as a DPI vsync
-  // porch issue (see the ST7123 video_timing block in video.cpp) affecting the
-  // BSP's own CPU-rotation flush identically regardless of rotation setting,
-  // so it's re-enabled here now that the underlying panel timing is corrected.
-  // Falls back to the BSP's CPU-based rotation (slower but known-correct) if
-  // PPA client setup fails.
-  if (!initialize_ppa_flush(tab5)) {
-    logger.warn("PPA flush init failed, falling back to BSP CPU rotation");
-  } else {
-    logger.info("Using PPA hardware rotation for display flush");
+  // Switch LVGL to DIRECT render mode over the panel's own frame buffers. The
+  // BSP already handed those buffers to lv_display_set_buffers, but espp's
+  // Display hardcodes RENDER_MODE_PARTIAL; DIRECT is what lets LVGL treat them
+  // as real frame buffers (tracking dirty areas across both) so a flush is a
+  // vsync flip rather than a copy. DIRECT requires rotation 0, which is what
+  // this panel runs at.
+  {
+    void *fb0 = nullptr;
+    void *fb1 = nullptr;
+    esp_err_t fb_err = esp_lcd_dpi_panel_get_frame_buffer(tab5.lcd_panel_handle(), 2, &fb0, &fb1);
+    const size_t fb_bytes = tab5.display_width() * tab5.display_height() * sizeof(uint16_t);
+    // DIRECT mode renders into screen-sized frame buffers and direct_flush_cb
+    // assumes the panel's native orientation, so it is incompatible with LVGL
+    // software rotation. Assert here rather than depend on the
+    // lv_display_set_rotation(ROTATION_0) call much further down.
+    assert(lv_display_get_rotation(lv_display_get_default()) == LV_DISPLAY_ROTATION_0 &&
+           "DIRECT render mode requires rotation 0");
+    if (fb_err == ESP_OK && fb0 && fb1) {
+      lv_display_set_buffers(lv_display_get_default(), fb0, fb1, fb_bytes,
+                             LV_DISPLAY_RENDER_MODE_DIRECT);
+      lv_display_set_flush_cb(lv_display_get_default(), direct_flush_cb);
+      logger.info("LVGL rendering directly into the DSI frame buffers (DIRECT mode)");
+    } else {
+      logger.error("Could not get DPI frame buffers ({}); leaving BSP flush in place",
+                   esp_err_to_name(fb_err));
+    }
   }
 
   // run the LVGL refresh timer at 60 fps — the espp lv_conf.h compiles in a
   // 33 ms (30 fps) default period; the lv_task loop below already calls
   // lv_task_handler every 16 ms so it can keep up
   lv_timer_set_period(lv_display_get_refr_timer(lv_display_get_default()), 16);
+
+  if (kFpsInstrument) {
+    lv_display_add_event_cb(lv_display_get_default(), fps_render_start_cb, LV_EVENT_RENDER_START,
+                            nullptr);
+    lv_display_add_event_cb(lv_display_get_default(), fps_render_ready_cb, LV_EVENT_RENDER_READY,
+                            nullptr);
+    logger.info("FPS instrumentation enabled (stress={})", kFpsStress);
+  }
 
   auto touch_callback = [&](const auto &touch) {
     // NOTE: since we're directly using the touchpad data, and not using the
@@ -692,6 +672,21 @@ extern "C" void app_main(void) {
   lv_display_set_rotation(lv_display_get_default(), LV_DISPLAY_ROTATION_0);
   ui_init();
 
+  // Benchmark against the real flex UI (PNG assets only) rather than the boot
+  // screen, whose SVG logo otherwise dominates every measurement. Temporary,
+  // paired with kFpsInstrument.
+  if (kFpsInstrument) {
+    lv_screen_load(ui_MainScreenFlex);
+    // Experiment: hide the two scaled RGB565A8 images. lv_image_set_scale(150)
+    // sets transformed=true in lv_draw_sw_img.c, which skips the fast
+    // RGB565A8 blit and routes through transform_and_recolor per pixel.
+    // Hiding them isolates that cost from the rest of the screen.
+    if (kFpsHideImages) {
+      lv_obj_add_flag(ui_Image4, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(ui_Image1, LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+
   // Sample wheelchair dashboard mockup (static, no sensor wiring): builds its
   // own screen and swaps it in over ui_MainScreen. Comment out to see the
   // real telemetry UI again; RTPS/ADC binding below is unaffected either way.
@@ -720,22 +715,46 @@ extern "C" void app_main(void) {
   // timer runs at 16ms (60 fps), polling at twice that rate keeps its firing
   // jitter well under a frame
   logger.info("Starting LVGL task...");
-  espp::Task lv_task({.callback = [](std::mutex &m, std::condition_variable &cv) -> bool {
-                        auto start_time = std::chrono::high_resolution_clock::now();
-                        {
-                          std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
-                          lv_task_handler();
-                        }
-                        std::unique_lock<std::mutex> lock(m);
-                        cv.wait_until(lock, start_time + 8ms, []() { return false; });
-                        return false;
-                      },
-                      .task_config = {
-                          .name = "lv_task",
-                          .stack_size_bytes = 32 * 1024,
-                          .priority = 20,
-                          .core_id = 1,
-                      }});
+  espp::Task lv_task(
+      {.callback = [](std::mutex &m, std::condition_variable &cv) -> bool {
+         auto start_time = std::chrono::high_resolution_clock::now();
+         {
+           std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
+           if (kFpsStress) {
+             lv_obj_invalidate(lv_screen_active());
+           }
+           lv_task_handler();
+         }
+         if (kFpsInstrument) {
+           static int64_t last_report_us = 0;
+           const int64_t now_us = esp_timer_get_time();
+           if (last_report_us == 0)
+             last_report_us = now_us;
+           if (now_us - last_report_us >= 1000000) {
+             const uint32_t frames = fps_frames.exchange(0);
+             const uint64_t total_us = fps_render_us_total.exchange(0);
+             const uint32_t max_us = fps_render_us_max.exchange(0);
+             const float secs = (now_us - last_report_us) / 1e6f;
+             last_report_us = now_us;
+             fmt::print("[FPS] {:.1f} fps | render avg {:.2f} ms | max {:.2f} ms\n", frames / secs,
+                        frames ? (total_us / 1000.0f) / frames : 0.0f, max_us / 1000.0f);
+           }
+         }
+         std::unique_lock<std::mutex> lock(m);
+         // Always yield at least one tick: once a render cycle exceeds 8 ms
+         // the deadline is already past and wait_until returns without
+         // yielding, which pins core 1 at priority 20 and starves IDLE1.
+         const auto deadline =
+             std::max(start_time + 8ms, std::chrono::high_resolution_clock::now() + 1ms);
+         cv.wait_until(lock, deadline, []() { return false; });
+         return false;
+       },
+       .task_config = {
+           .name = "lv_task",
+           .stack_size_bytes = 32 * 1024,
+           .priority = 20,
+           .core_id = 1,
+       }});
   if (!lv_task.start()) {
     logger.error("Failed to start LVGL task!");
     return;

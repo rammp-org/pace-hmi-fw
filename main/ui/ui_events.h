@@ -11,6 +11,7 @@ extern "C" {
 #endif
 
 void flex_scroll_next(lv_event_t * e);
+void theme_toggle(lv_event_t * e);
 
 #ifdef __cplusplus
 } /*extern "C"*/
