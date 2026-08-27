@@ -32,11 +32,7 @@ extern "C" {
 ///////////////////// SCREENS ////////////////////
 
 #include "screens/ui_BootScreen.h"
-#include "screens/ui_NotMainScreen.h"
 #include "screens/ui_JoystickTest.h"
-#include "screens/ui_DriveScreen.h"
-#include "screens/ui_MainScreen.h"
-#include "screens/ui_SettingsScreen.h"
 #include "screens/ui_MainScreenFlex.h"
 
 ///////////////////// VARIABLES ////////////////////
@@ -48,7 +44,10 @@ extern lv_obj_t * ui____initial_actions0;
 
 // IMAGES AND IMAGE SETS
 LV_IMG_DECLARE(ui_img_rammp_type_white_svg);    // assets/RAMMP_Type_White.svg
-LV_IMG_DECLARE(ui_img_633112390);    // assets/motor-svgrepo-com.svg
+LV_IMG_DECLARE(ui_img_lock_png);    // assets/Lock.png
+LV_IMG_DECLARE(ui_img_unlock_png);    // assets/Unlock.png
+LV_IMG_DECLARE(ui_img_arrow_left_png);    // assets/arrow_left.png
+LV_IMG_DECLARE(ui_img_arrow_png);    // assets/arrow.png
 LV_IMG_DECLARE(ui_img_107617181);    // assets/turbo-rasterized.png
 LV_IMG_DECLARE(ui_img_1236721514);    // assets/seat-rasterized.png
 

@@ -20,7 +20,6 @@ extern "C" {
 #define UI_COMP_TOPBAR_BATTERY1_LABEL4 4
 #define _UI_COMP_TOPBAR_NUM 5
 lv_obj_t * ui_TopBar_create(lv_obj_t * comp_parent);
-void ui_event_comp_TopBar_TopBar(lv_event_t * e);
 
 #ifdef __cplusplus
 } /*extern "C"*/

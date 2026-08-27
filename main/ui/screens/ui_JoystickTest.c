@@ -18,7 +18,7 @@ void ui_event_SettingsButton2(lv_event_t * e)
     lv_event_code_t event_code = lv_event_get_code(e);
 
     if(event_code == LV_EVENT_CLICKED) {
-        _ui_screen_change(&ui_NotMainScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0, &ui_NotMainScreen_screen_init);
+        _ui_screen_change(&ui_MainScreenFlex, LV_SCREEN_LOAD_ANIM_NONE, 0, 0, &ui_MainScreenFlex_screen_init);
     }
 }
 

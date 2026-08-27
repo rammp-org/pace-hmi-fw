@@ -5,16 +5,6 @@
 
 #include "../ui.h"
 
-void ui_event_comp_TopBar_TopBar(lv_event_t * e)
-{
-    lv_event_code_t event_code = lv_event_get_code(e);
-    lv_obj_t ** comp_TopBar = lv_event_get_user_data(e);
-
-    if(event_code == LV_EVENT_CLICKED) {
-        _ui_screen_change(&ui_SettingsScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0, &ui_SettingsScreen_screen_init);
-    }
-}
-
 // COMPONENT TopBar
 
 lv_obj_t * ui_TopBar_create(lv_obj_t * comp_parent)
@@ -69,6 +59,11 @@ lv_obj_t * ui_TopBar_create(lv_obj_t * comp_parent)
                                            _ui_theme_color_background);
     ui_object_set_themeable_style_property(cui_Battery1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
                                            _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(cui_Battery1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(cui_Battery1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
+                                           _ui_theme_alpha_text);
+    lv_obj_set_style_border_width(cui_Battery1, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     lv_obj_set_style_radius(cui_Battery1, 0, LV_PART_INDICATOR | LV_STATE_DEFAULT);
     ui_object_set_themeable_style_property(cui_Battery1, LV_PART_INDICATOR | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
@@ -98,7 +93,6 @@ lv_obj_t * ui_TopBar_create(lv_obj_t * comp_parent)
     children[UI_COMP_TOPBAR_BATTERY1_LABEL4] = cui_Label4;
     lv_obj_add_event_cb(cui_TopBar, get_component_child_event_cb, LV_EVENT_GET_COMP_CHILD, children);
     lv_obj_add_event_cb(cui_TopBar, del_component_child_event_cb, LV_EVENT_DELETE, children);
-    lv_obj_add_event_cb(cui_TopBar, ui_event_comp_TopBar_TopBar, LV_EVENT_ALL, children);
     ui_comp_TopBar_create_hook(cui_TopBar);
     return cui_TopBar;
 }

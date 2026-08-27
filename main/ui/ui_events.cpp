@@ -38,7 +38,7 @@ void flex_scroll_next(lv_event_t * e)
     flex_scroll_step(1);
 }
 
-void flex_scroll_prev(lv_event_t * e)
+void flex_scroll_previous(lv_event_t * e)
 {
     LV_UNUSED(e);
     flex_scroll_step(-1);

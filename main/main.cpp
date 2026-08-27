@@ -682,7 +682,7 @@ extern "C" void app_main(void) {
     // RGB565A8 blit and routes through transform_and_recolor per pixel.
     // Hiding them isolates that cost from the rest of the screen.
     if (kFpsHideImages) {
-      lv_obj_add_flag(ui_Image4, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(ui_Image2, LV_OBJ_FLAG_HIDDEN);
       lv_obj_add_flag(ui_Image1, LV_OBJ_FLAG_HIDDEN);
     }
   }

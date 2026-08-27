@@ -3,16 +3,19 @@
 // LVGL version: 9.5
 // Project name: pace-hmi-ui
 
-#ifndef _UI_EVENTS_H
-#define _UI_EVENTS_H
+#ifndef _UI_COMP_UNLOCKARC_H
+#define _UI_COMP_UNLOCKARC_H
+
+#include "../ui.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-void flex_scroll_previous(lv_event_t * e);
-void flex_scroll_next(lv_event_t * e);
-void theme_toggle(lv_event_t * e);
+// COMPONENT UnlockArc
+#define UI_COMP_UNLOCKARC_UNLOCKARC 0
+#define _UI_COMP_UNLOCKARC_NUM 1
+lv_obj_t * ui_UnlockArc_create(lv_obj_t * comp_parent);
 
 #ifdef __cplusplus
 } /*extern "C"*/
