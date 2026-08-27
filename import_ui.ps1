@@ -6,7 +6,8 @@
 # screens that were renamed/removed in SquareLine, which would otherwise stay
 # behind and break the build (SRC_DIRS compiles everything in ui/).
 #
-# After mirroring it converts any indexed image (I1/I2/I4/I8) in the export to A8.
+# After mirroring it converts any indexed image (I1/I2/I4/I8) in the export: to A8
+# when the palette is a single ink, to RGB565A8 when it carries real colour.
 # The sw renderer cannot draw indexed data, so those images fault or vanish as soon
 # as they are scaled or rotated. SquareLine infers the format from the source PNG's
 # colour count (256 or fewer distinct colours -> indexed) and cannot emit A8 at all,
@@ -184,6 +185,9 @@ if (Test-Path $eventsHeader) {
 # mask is one RGB times at most 256 alpha levels, so it is always under that
 # bound. SquareLine cannot emit A8 at all. So convert unconditionally rather
 # than asking a question whose answer is always yes, and just say what changed.
+# A colourful palette (a photo that quantised under 256 colours) becomes
+# RGB565A8 instead of A8, which triples its flash cost -- hence the per-file
+# format and byte count in the report below.
 $assetTool = Join-Path $RepoRoot "scripts\ui_assets.py"
 if (-not (Test-Path $assetTool)) {
     # nothing to do
@@ -197,20 +201,20 @@ if (-not (Test-Path $assetTool)) {
 
     if ($converted.Count -gt 0) {
         Write-Host ""
-        Write-Host "WARNING: converted $($converted.Count) image(s) from indexed to A8." -ForegroundColor Yellow
+        Write-Host "WARNING: converted $($converted.Count) image(s) out of indexed colour formats." -ForegroundColor Yellow
         $converted | ForEach-Object { Write-Host $_ -ForegroundColor Yellow }
         Write-Host "Indexed images fault or draw nothing when scaled or rotated. This runs" -ForegroundColor Yellow
         Write-Host "on every import: SquareLine picks indexed for any source PNG with 256 or" -ForegroundColor Yellow
         Write-Host "fewer colours and cannot export A8. Originals kept as .c.orig." -ForegroundColor Yellow
     }
 
-    # Anything the converter refused (a palette with real colour in it, where A8
-    # would discard information) needs a person to pick a format, so make it loud.
+    # Anything the converter refused (a map the descriptor disagrees with, i.e. an
+    # export this tool cannot parse) needs a person to look at it, so make it loud.
     $refused = @($assetReport | Where-Object { $_ -match 'CANNOT convert' })
     if ($refused.Count -gt 0) {
         Write-Host ""
         $refused | ForEach-Object { Write-Host $_ -ForegroundColor Red }
-        Write-Host "Re-export those as RGB565A8 or ARGB8888." -ForegroundColor Red
+        Write-Host "Those images are still indexed and will fault or vanish when transformed." -ForegroundColor Red
     }
 
     # Everything else the tool reported (e.g. the set_scale advisory) prints plain.

@@ -99,8 +99,8 @@ def map_bytes(body: str) -> bytes:
     return bytes(int(v, 16) for v in re.findall(r"0x([0-9a-fA-F]{2})", body))
 
 
-def indexed_to_alpha(img: ImageFile, data: bytes) -> bytes:
-    """Flatten an indexed image to one alpha byte per pixel.
+def decode_indexed(img: ImageFile, data: bytes) -> tuple[list[tuple[int, ...]], list[int]]:
+    """Split an indexed map into its palette and one palette index per pixel.
 
     The palette is BGRA, 4 bytes per entry, at the front of the map. Rows are
     packed at (w * bpp + 7) >> 3 bytes -- LV_DRAW_BUF_STRIDE_ALIGN is 1 here and
@@ -110,7 +110,7 @@ def indexed_to_alpha(img: ImageFile, data: bytes) -> bytes:
     """
     entries = PALETTE_ENTRIES[img.cf]
     bpp = INDEXED_BPP[img.cf]
-    palette, pixels = data[: entries * 4], data[entries * 4:]
+    raw, pixels = data[: entries * 4], data[entries * 4:]
 
     stride = (img.w * bpp + 7) >> 3
     if len(pixels) != stride * img.h:
@@ -118,39 +118,77 @@ def indexed_to_alpha(img: ImageFile, data: bytes) -> bytes:
             "pixel data is %d bytes, expected %d for %dx%d %s"
             % (len(pixels), stride * img.h, img.w, img.h, img.cf))
 
-    inks = {tuple(palette[4 * i: 4 * i + 3]) for i in range(entries)
-            if palette[4 * i + 3]}
-    if len(inks) > 1:
-        raise ConversionError(
-            "palette holds %d distinct colours, so A8 would discard colour; "
-            "set this asset to RGB565A8 or ARGB8888 instead" % len(inks))
-
-    alpha_of = [palette[4 * i + 3] for i in range(entries)]
+    palette = [tuple(raw[4 * i: 4 * i + 4]) for i in range(entries)]
     mask = (1 << bpp) - 1
 
-    out = bytearray()
+    idx = []
     for y in range(img.h):
         row = pixels[y * stride: (y + 1) * stride]
         for x in range(img.w):
             bit = x * bpp
             shift = 8 - bpp - (bit & 7)
-            out.append(alpha_of[(row[bit >> 3] >> shift) & mask])
-    return bytes(out)
+            idx.append((row[bit >> 3] >> shift) & mask)
+    return palette, idx
 
 
-def render_a8(img: ImageFile, alpha: bytes) -> str:
-    """Rebuild the .c as A8, touching only the map body and the changed fields.
+def to_a8(palette: list[tuple[int, ...]], idx: list[int]) -> bytes:
+    """Flatten to one alpha byte per pixel. Only lossless for a single-ink palette."""
+    alpha_of = bytes(entry[3] for entry in palette)
+    return bytes(alpha_of[i] for i in idx)
+
+
+def to_rgb565a8(palette: list[tuple[int, ...]], idx: list[int]) -> bytes:
+    """Build an RGB565 plane followed by an A8 plane, the layout LVGL 9 expects.
+
+    lv_draw_sw reads RGB565A8 as w*h*2 bytes of little-endian RGB565 followed by
+    w*h bytes of alpha (hence data_size = w*h*3), both unpremultiplied. Checked
+    against SquareLine's own RGB565A8 exports, which also park 0xffff in the
+    colour plane wherever alpha is 0.
+    """
+    packed = []
+    for b, g, r, a in palette:
+        v = 0xffff if not a else ((r & 0xf8) << 8) | ((g & 0xfc) << 3) | (b >> 3)
+        packed.append((v & 0xff, v >> 8))
+
+    colour = bytearray(len(idx) * 2)
+    alpha = bytearray(len(idx))
+    for n, i in enumerate(idx):
+        colour[2 * n], colour[2 * n + 1] = packed[i]
+        alpha[n] = palette[i][3]
+    return bytes(colour) + bytes(alpha)
+
+
+def convert(img: ImageFile, data: bytes) -> tuple[str, bytes]:
+    """Rewrite an indexed map into the cheapest format the renderer can transform.
+
+    One ink -- an icon, a logo, any alpha mask -- is A8 at 1 byte per pixel; the
+    colour comes back from the widget's image_recolor. A palette with real colour
+    in it (a photo or a shaded render that happened to quantise under 256 colours)
+    would lose that as A8, so it becomes RGB565A8 at 3 bytes per pixel instead:
+    the format SquareLine itself picks above 256 colours, and the only other
+    alpha-carrying format the sw renderer can transform. Rounding 8-bit channels
+    to 5/6/5 costs nothing on screen -- LV_COLOR_DEPTH is 16.
+    """
+    palette, idx = decode_indexed(img, data)
+    inks = {entry[:3] for entry in palette if entry[3]}
+    if len(inks) <= 1:
+        return "A8", to_a8(palette, idx)
+    return "RGB565A8", to_rgb565a8(palette, idx)
+
+
+def render(img: ImageFile, cf: str, data: bytes) -> str:
+    """Rebuild the .c in `cf`, touching only the map body and the changed fields.
 
     Symbol names, include guards and LV_ATTRIBUTE_* boilerplate are preserved
     verbatim -- ui.h and the screen sources refer to them by name.
     """
     suffix = re.sub(r"\.header\.cf\s*=\s*LV_COLOR_FORMAT_\w+",
-                    ".header.cf = LV_COLOR_FORMAT_A8", img.suffix, count=1)
+                    ".header.cf = LV_COLOR_FORMAT_" + cf, img.suffix, count=1)
     suffix = re.sub(r"\.data_size\s*=\s*[^,\n]+,",
-                    ".data_size = %d," % len(alpha), suffix, count=1)
+                    ".data_size = %d," % len(data), suffix, count=1)
 
-    rows = ["  " + ", ".join("0x%02x" % b for b in alpha[o: o + 16]) + ","
-            for o in range(0, len(alpha), 16)]
+    rows = ["  " + ", ".join("0x%02x" % b for b in data[o: o + 16]) + ","
+            for o in range(0, len(data), 16)]
     return img.prefix + MAP_OPEN + "\n" + "\n".join(rows) + "\n" + "};" + suffix
 
 
@@ -190,7 +228,7 @@ def cmd_check(fix: bool) -> int:
         if not fix:
             continue
         try:
-            alpha = indexed_to_alpha(img, map_bytes(img.body))
+            cf, data = convert(img, map_bytes(img.body))
         except ConversionError as exc:
             failed.append((img, exc))
             continue
@@ -198,8 +236,8 @@ def cmd_check(fix: bool) -> int:
         # the next import (it is not in the export), which is exactly the window
         # it is useful for, and .orig is never picked up by SRC_DIRS.
         shutil.copy2(path, path.with_name(path.name + ".orig"))
-        path.write_text(render_a8(img, alpha), encoding="utf-8", newline="")
-        fixed.append(img)
+        path.write_text(render(img, cf, data), encoding="utf-8", newline="")
+        fixed.append((img, cf, len(data)))
 
     if indexed and not fix:
         # Report mode. In fix mode the per-file "converted" lines below already
@@ -211,11 +249,11 @@ def cmd_check(fix: bool) -> int:
             print("  %-28s %s  %dx%d"
                   % (img.path.name, img.cf, img.w, img.h))
     elif indexed:
-        print("Converting %d indexed image(s) to A8:" % len(indexed))
+        print("Converting %d indexed image(s):" % len(indexed))
 
-    for img in fixed:
-        print("  converted %s -> A8 (%d bytes, original kept as %s.orig)"
-              % (img.path.name, img.w * img.h, img.path.name))
+    for img, cf, size in fixed:
+        print("  converted %s -> %s (%d bytes, original kept as %s.orig)"
+              % (img.path.name, cf, size, img.path.name))
     for img, exc in failed:
         print("  CANNOT convert %s: %s" % (img.path.name, exc))
 
@@ -238,7 +276,8 @@ def main() -> int:
 
     check = sub.add_parser("check", help="audit main/ui/images/*.c")
     check.add_argument("--fix", action="store_true",
-                       help="rewrite indexed images to A8 in place when lossless")
+                       help="rewrite indexed images in place as A8, or RGB565A8 "
+                            "when the palette carries colour")
 
     args = parser.parse_args()
     return cmd_check(args.fix)
