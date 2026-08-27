@@ -129,3 +129,13 @@ CONFIG_LV_DRAW_BUF_ALIGN=128
 # Re-enable only with an area-scoped C2M + M2C fix in the draw unit.
 # CONFIG_LV_USE_PPA=y
 # CONFIG_LV_USE_PPA_IMG=y
+
+# LVGL's built-in FPS/CPU overlay (lv_sysmon), toggled at runtime from the
+# FPS COUNTER row in the settings menu via lv_sysmon_show/hide_performance().
+# LV_USE_PERF_MONITOR depends on LV_USE_SYSMON, and the position is a
+# compile-time choice -- default is BOTTOM_RIGHT, we want the top right corner.
+# NOTE: sdkconfig.defaults only seeds a *fresh* sdkconfig, so these are also set
+# in the (gitignored) sdkconfig for the current build tree.
+CONFIG_LV_USE_SYSMON=y
+CONFIG_LV_USE_PERF_MONITOR=y
+CONFIG_LV_PERF_MONITOR_ALIGN_TOP_RIGHT=y

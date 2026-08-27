@@ -48,8 +48,8 @@ lv_obj_t * ui_Button1 = NULL;
 lv_obj_t * ui_ButtonLabel1 = NULL;
 lv_obj_t * ui_Button2 = NULL;
 lv_obj_t * ui_ButtonLabel2 = NULL;
-lv_obj_t * ui_Button3 = NULL;
-lv_obj_t * ui_ButtonLabel3 = NULL;
+lv_obj_t * ui_FPSCounterButton = NULL;
+lv_obj_t * ui_FPSCounterLabel = NULL;
 lv_obj_t * ui_Button4 = NULL;
 lv_obj_t * ui_ButtonLabel4 = NULL;
 lv_obj_t * ui_Button7 = NULL;
@@ -492,7 +492,6 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_remove_flag(ui_SettingsFlexPanel, LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM);      /// Flags
     lv_obj_set_scrollbar_mode(ui_SettingsFlexPanel, LV_SCROLLBAR_MODE_ON);
     lv_obj_set_scroll_dir(ui_SettingsFlexPanel, LV_DIR_VER);
-    lv_obj_set_scroll_snap_y(ui_SettingsFlexPanel, LV_SCROLL_SNAP_START);
     ui_object_set_themeable_style_property(ui_SettingsFlexPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
                                            _ui_theme_color_background);
     ui_object_set_themeable_style_property(ui_SettingsFlexPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
@@ -695,42 +694,42 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_style_text_align(ui_ButtonLabel2, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(ui_ButtonLabel2, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_Button3 = lv_button_create(ui_SettingsFlexPanel);
-    lv_obj_set_width(ui_Button3, 620);
-    lv_obj_set_height(ui_Button3, 100);
-    lv_obj_set_x(ui_Button3, 0);
-    lv_obj_set_y(ui_Button3, 340);
-    lv_obj_set_align(ui_Button3, LV_ALIGN_TOP_MID);
-    lv_obj_add_flag(ui_Button3, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
-    lv_obj_remove_flag(ui_Button3, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_radius(ui_Button3, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_Button3, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+    ui_FPSCounterButton = lv_button_create(ui_SettingsFlexPanel);
+    lv_obj_set_width(ui_FPSCounterButton, 620);
+    lv_obj_set_height(ui_FPSCounterButton, 100);
+    lv_obj_set_x(ui_FPSCounterButton, 0);
+    lv_obj_set_y(ui_FPSCounterButton, 340);
+    lv_obj_set_align(ui_FPSCounterButton, LV_ALIGN_TOP_MID);
+    lv_obj_add_flag(ui_FPSCounterButton, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
+    lv_obj_remove_flag(ui_FPSCounterButton, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_radius(ui_FPSCounterButton, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_FPSCounterButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
                                            _ui_theme_color_background);
-    ui_object_set_themeable_style_property(ui_Button3, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+    ui_object_set_themeable_style_property(ui_FPSCounterButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
                                            _ui_theme_alpha_background);
-    ui_object_set_themeable_style_property(ui_Button3, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
+    ui_object_set_themeable_style_property(ui_FPSCounterButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
                                            _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_Button3, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
+    ui_object_set_themeable_style_property(ui_FPSCounterButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
                                            _ui_theme_alpha_text);
-    lv_obj_set_style_border_width(ui_Button3, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_Button3, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_BORDER_COLOR,
+    lv_obj_set_style_border_width(ui_FPSCounterButton, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_FPSCounterButton, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_BORDER_COLOR,
                                            _ui_theme_color_focused);
-    ui_object_set_themeable_style_property(ui_Button3, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_BORDER_OPA,
+    ui_object_set_themeable_style_property(ui_FPSCounterButton, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_BORDER_OPA,
                                            _ui_theme_alpha_focused);
 
-    ui_ButtonLabel3 = lv_label_create(ui_Button3);
-    lv_obj_set_width(ui_ButtonLabel3, 540);
-    lv_obj_set_height(ui_ButtonLabel3, 50);
-    lv_obj_set_x(ui_ButtonLabel3, 20);
-    lv_obj_set_y(ui_ButtonLabel3, 0);
-    lv_obj_set_align(ui_ButtonLabel3, LV_ALIGN_LEFT_MID);
-    lv_label_set_text(ui_ButtonLabel3, "ABOUT");
-    ui_object_set_themeable_style_property(ui_ButtonLabel3, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+    ui_FPSCounterLabel = lv_label_create(ui_FPSCounterButton);
+    lv_obj_set_width(ui_FPSCounterLabel, 540);
+    lv_obj_set_height(ui_FPSCounterLabel, 50);
+    lv_obj_set_x(ui_FPSCounterLabel, 20);
+    lv_obj_set_y(ui_FPSCounterLabel, 0);
+    lv_obj_set_align(ui_FPSCounterLabel, LV_ALIGN_LEFT_MID);
+    lv_label_set_text(ui_FPSCounterLabel, "FPS COUNTER");
+    ui_object_set_themeable_style_property(ui_FPSCounterLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_ButtonLabel3, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+    ui_object_set_themeable_style_property(ui_FPSCounterLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
                                            _ui_theme_alpha_text);
-    lv_obj_set_style_text_align(ui_ButtonLabel3, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_ButtonLabel3, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_align(ui_FPSCounterLabel, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_FPSCounterLabel, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_Button4 = lv_button_create(ui_SettingsFlexPanel);
     lv_obj_set_width(ui_Button4, 620);
@@ -1120,8 +1119,8 @@ void ui_MainScreenFlex_screen_destroy(void)
     ui_ButtonLabel1 = NULL;
     ui_Button2 = NULL;
     ui_ButtonLabel2 = NULL;
-    ui_Button3 = NULL;
-    ui_ButtonLabel3 = NULL;
+    ui_FPSCounterButton = NULL;
+    ui_FPSCounterLabel = NULL;
     ui_Button4 = NULL;
     ui_ButtonLabel4 = NULL;
     ui_Button7 = NULL;

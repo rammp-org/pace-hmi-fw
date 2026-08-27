@@ -171,6 +171,22 @@ static void flex_key_cb(lv_event_t *e) {
   }
 }
 
+// FPS COUNTER settings row -> LVGL's built-in perf overlay (lv_sysmon), which
+// already renders FPS/CPU on the sys layer above every screen. Wired here rather
+// than through a SquareLine CALL FUNCTION event so it needs no round trip
+// through the design tool; either way import_ui.ps1's mirror never touches
+// main.cpp.
+static void fps_toggle_cb(lv_event_t *e) {
+  LV_UNUSED(e);
+  static bool shown = false;
+  shown = !shown;
+  if (shown) {
+    lv_sysmon_show_performance(lv_display_get_default());
+  } else {
+    lv_sysmon_hide_performance(lv_display_get_default());
+  }
+}
+
 // Observer for the ButtonPanel background. There's no built-in binding for a
 // style property, so the widget work happens here; the observer is bound to the
 // object, so it dies with it.
@@ -908,6 +924,23 @@ extern "C" void app_main(void) {
   settings_group = lv_group_create();
   for (uint32_t i = 0; i < lv_obj_get_child_count(ui_SettingsFlexPanel); i++) {
     lv_group_add_obj(settings_group, lv_obj_get_child(ui_SettingsFlexPanel, i));
+  }
+
+  // LV_USE_PERF_MONITOR makes lv_display_create() show the overlay immediately
+  // (lv_display.c calls lv_sysmon_show_performance), so start it hidden — it's a
+  // debug readout, not part of the normal HMI. The label already exists by now,
+  // which is what makes the hide safe.
+  lv_sysmon_hide_performance(lv_display_get_default());
+  lv_obj_add_event_cb(ui_FPSCounterButton, fps_toggle_cb, LV_EVENT_CLICKED, nullptr);
+
+  // The overlay hardcodes LVGL's 14 px default font (lv_sysmon_create sets no
+  // font at all), which is unreadable on a 1280x720 panel at arm's length.
+  // There's no API or Kconfig for it, but the label is parented to the sys
+  // layer, and with LV_USE_MEM_MONITOR off it is that layer's only child.
+  if (lv_obj_t *perf_label =
+          lv_obj_get_child(lv_display_get_layer_sys(lv_display_get_default()), 0)) {
+    lv_obj_set_style_text_font(perf_label, &lv_font_montserrat_48, 0);
+    lv_obj_set_style_pad_all(perf_label, 10, 0); // grow the backing box to match
   }
 
   logger.info("Initializing touch...");
