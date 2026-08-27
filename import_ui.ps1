@@ -6,21 +6,50 @@
 # screens that were renamed/removed in SquareLine, which would otherwise stay
 # behind and break the build (SRC_DIRS compiles everything in ui/).
 #
-# Usage: .\import_ui.ps1 [-Source <path-to-squareline-export>]
+# After mirroring it converts any indexed image (I1/I2/I4/I8) in the export to A8.
+# The sw renderer cannot draw indexed data, so those images fault or vanish as soon
+# as they are scaled or rotated. SquareLine infers the format from the source PNG's
+# colour count (256 or fewer distinct colours -> indexed) and cannot emit A8 at all,
+# so a single-ink icon can only ever arrive indexed. The conversion is therefore
+# unconditional rather than a prompt. Each rewritten file keeps a .c.orig beside it.
 #
-# By default the export is expected as a sibling of this repo:
-#   <parent>\rammp-hmi-p4\import_ui.ps1   (this script)
-#   <parent>\ui_c_files                (the SquareLine export)
+# Usage: .\import_ui.ps1 [-Source <path-to-squareline-export>] [-bfm]
+#
+# -bfm builds, flashes and monitors with idf.py once the import succeeds,
+# loading the ESP-IDF PowerShell environment first if idf.py is not on PATH.
+#
+# By default the export is expected as a sibling of this repo, or of any
+# directory above it:
+#   <parent>\<this repo>\import_ui.ps1   (this script)
+#   <parent>\ui_c_files                  (the SquareLine export)
 
 param(
-    [string]$Source
+    [string]$Source,
+    # -bfm: hand off to idf.py once the import is done.
+    [Alias("bfm")]
+    [switch]$BuildFlashMonitor
 )
 
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = $PSScriptRoot
 if (-not $Source) {
-    $Source = Join-Path (Split-Path -Parent $RepoRoot) "ui_c_files"
+    # The export normally sits beside this repo, but moving the repo down a
+    # level (ATDev\<repo> -> ATDev\rammp\<repo>) silently broke a hard-coded
+    # "..\ui_c_files". Walk up from the repo and take the first ui_c_files that
+    # actually looks like an export.
+    $probe = Split-Path -Parent $RepoRoot
+    while ($probe) {
+        $candidate = Join-Path $probe "ui_c_files"
+        if (Test-Path (Join-Path $candidate "ui.c")) {
+            $Source = $candidate
+            break
+        }
+        $probe = Split-Path -Parent $probe
+    }
+    if (-not $Source) {
+        $Source = Join-Path (Split-Path -Parent $RepoRoot) "ui_c_files"
+    }
 }
 $Source = [System.IO.Path]::GetFullPath($Source)
 
@@ -33,8 +62,9 @@ $Excluded = @("CMakeLists.txt", "filelist.txt", "project.info", "ui_events.cpp")
 if (-not (Test-Path $Source -PathType Container)) {
     $repoName = Split-Path -Leaf $RepoRoot
     Write-Error @"
-SquareLine export directory not found: $Source
-Expected 'ui_c_files' to sit beside '$repoName' in $(Split-Path -Parent $RepoRoot).
+SquareLine export directory not found.
+Looked for a 'ui_c_files' directory beside '$repoName' and beside each of its
+parent directories, starting at $(Split-Path -Parent $RepoRoot).
 Either export/move the UI there, or pass the path explicitly:
   .\import_ui.ps1 -Source <path-to-squareline-export>
 "@
@@ -143,6 +173,115 @@ if (Test-Path $eventsHeader) {
     }
 }
 
+# --- convert indexed images the renderer cannot draw --------------------------
+# The sw renderer has no indexed support, so LVGL falls back to a line-by-line
+# decoder that breaks under any transform: a scaled-up image wraps a uint32_t
+# offset and panics, a scaled-down or rotated one silently draws nothing.
+#
+# There is no way to avoid this upstream. SquareLine infers the format from the
+# source PNG's colour count -- 256 or fewer distinct colours exports indexed
+# (measured: Lock 247 -> I8, turbo 1105 -> RGB565A8) -- and a single-ink alpha
+# mask is one RGB times at most 256 alpha levels, so it is always under that
+# bound. SquareLine cannot emit A8 at all. So convert unconditionally rather
+# than asking a question whose answer is always yes, and just say what changed.
+$assetTool = Join-Path $RepoRoot "scripts\ui_assets.py"
+if (-not (Test-Path $assetTool)) {
+    # nothing to do
+} elseif (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+    Write-Host ""
+    Write-Host "NOTE: python not on PATH - skipped the image colour-format conversion."
+} else {
+    $assetReport = & python $assetTool check --fix
+    $assetFailed = $LASTEXITCODE -ne 0
+    $converted = @($assetReport | Where-Object { $_ -match '^\s+converted ' })
+
+    if ($converted.Count -gt 0) {
+        Write-Host ""
+        Write-Host "WARNING: converted $($converted.Count) image(s) from indexed to A8." -ForegroundColor Yellow
+        $converted | ForEach-Object { Write-Host $_ -ForegroundColor Yellow }
+        Write-Host "Indexed images fault or draw nothing when scaled or rotated. This runs" -ForegroundColor Yellow
+        Write-Host "on every import: SquareLine picks indexed for any source PNG with 256 or" -ForegroundColor Yellow
+        Write-Host "fewer colours and cannot export A8. Originals kept as .c.orig." -ForegroundColor Yellow
+    }
+
+    # Anything the converter refused (a palette with real colour in it, where A8
+    # would discard information) needs a person to pick a format, so make it loud.
+    $refused = @($assetReport | Where-Object { $_ -match 'CANNOT convert' })
+    if ($refused.Count -gt 0) {
+        Write-Host ""
+        $refused | ForEach-Object { Write-Host $_ -ForegroundColor Red }
+        Write-Host "Re-export those as RGB565A8 or ARGB8888." -ForegroundColor Red
+    }
+
+    # Everything else the tool reported (e.g. the set_scale advisory) prints plain.
+    $assetReport |
+        Where-Object { $_ -notmatch '^\s+converted |CANNOT convert|^Converting ' } |
+        Where-Object { $_.Trim() -ne "" } |
+        ForEach-Object { Write-Host $_ }
+
+    if ($assetFailed -and $refused.Count -eq 0) {
+        Write-Host ""
+        Write-Host "NOTE: image check reported a problem it could not fix automatically."
+    }
+}
+
+# --- optionally hand off to idf.py -------------------------------------------
+if (-not $BuildFlashMonitor) {
+    Write-Host ""
+    Write-Host "Rebuild with: idf.py build flash monitor  (or re-run with -bfm)"
+    exit 0
+}
+
+# idf.py is not on PATH by default; the ESP-IDF PowerShell profile defines it as
+# a global alias. Skip loading when it already resolves - the profile prepends to
+# PATH every time it runs, so re-sourcing it in an already-exported shell just
+# grows PATH.
+if (-not (Get-Command "idf.py" -ErrorAction SilentlyContinue)) {
+    # The filename carries the IDF version, so a toolchain upgrade moves it.
+    $idfProfile = "C:\Espressif\tools\Microsoft.v6.0.PowerShell_profile.ps1"
+    if (-not (Test-Path $idfProfile)) {
+        $idfProfile = Get-ChildItem "C:\Espressif\tools\Microsoft.*.PowerShell_profile.ps1" `
+            -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+    }
+    if (-not $idfProfile) {
+        Write-Error @"
+-bfm needs idf.py, but neither idf.py nor an ESP-IDF PowerShell profile was found
+under C:\Espressif\tools. Open an ESP-IDF shell and run 'idf.py build flash monitor'
+by hand, or re-run the import without -bfm.
+"@
+        exit 1
+    }
+
+    Write-Host ""
+    Write-Host "Loading ESP-IDF environment: $idfProfile"
+    # The profile activates a venv and probes for optional tools; a stray
+    # non-terminating error there must not abort the import script.
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $idfProfile | Out-Null
+    } finally {
+        $ErrorActionPreference = $prevEAP
+    }
+
+    if (-not (Get-Command "idf.py" -ErrorAction SilentlyContinue)) {
+        Write-Error "idf.py is still not available after loading $idfProfile."
+        exit 1
+    }
+}
+
 Write-Host ""
-Write-Host "Rebuild with: idf.py build flash monitor"
-exit 0
+Write-Host "Running: idf.py build flash monitor"
+Write-Host ""
+# Run from the repo root: the import can be launched from anywhere, but idf.py
+# resolves the project from the working directory.
+Push-Location $RepoRoot
+try {
+    idf.py build flash monitor
+    $idfExit = $LASTEXITCODE
+} finally {
+    Pop-Location
+}
+exit $idfExit
