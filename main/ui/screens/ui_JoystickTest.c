@@ -6,16 +6,25 @@
 #include "../ui.h"
 
 lv_obj_t * ui_JoystickTest = NULL;
+lv_obj_t * ui_LockedPanel2 = NULL;
+lv_obj_t * ui_GraphicsPanel4 = NULL;
 lv_obj_t * ui_AxesPanel = NULL;
 lv_obj_t * ui_XBar = NULL;
+lv_obj_t * ui_Label1 = NULL;
 lv_obj_t * ui_YBar = NULL;
+lv_obj_t * ui_Label2 = NULL;
 lv_obj_t * ui_TwistBar = NULL;
-lv_obj_t * ui_SettingsButton2 = NULL;
-lv_obj_t * ui_Label5 = NULL;
+lv_obj_t * ui_Label3 = NULL;
 lv_obj_t * ui_ButtonPanel = NULL;
 lv_obj_t * ui_ButtonCounter = NULL;
+lv_obj_t * ui_ExitButton = NULL;
+lv_obj_t * ui_PanelButtonLabel5 = NULL;
+lv_obj_t * ui_TopBar1 = NULL;
+lv_obj_t * ui_StatusPanel1 = NULL;
+lv_obj_t * ui_TextPanel4 = NULL;
+lv_obj_t * ui_Info5 = NULL;
 // event funtions
-void ui_event_SettingsButton2(lv_event_t * e)
+void ui_event_ExitButton(lv_event_t * e)
 {
     lv_event_code_t event_code = lv_event_get_code(e);
 
@@ -33,70 +42,139 @@ void ui_JoystickTest_screen_init(void)
     lv_obj_set_style_bg_color(ui_JoystickTest, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(ui_JoystickTest, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_AxesPanel = lv_obj_create(ui_JoystickTest);
+    ui_LockedPanel2 = lv_obj_create(ui_JoystickTest);
+    lv_obj_set_width(ui_LockedPanel2, lv_pct(100));
+    lv_obj_set_height(ui_LockedPanel2, lv_pct(100));
+    lv_obj_set_x(ui_LockedPanel2, 1);
+    lv_obj_set_y(ui_LockedPanel2, 0);
+    lv_obj_set_align(ui_LockedPanel2, LV_ALIGN_CENTER);
+    lv_obj_remove_flag(ui_LockedPanel2, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_radius(ui_LockedPanel2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_LockedPanel2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_LockedPanel2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    lv_obj_set_style_border_side(ui_LockedPanel2, LV_BORDER_SIDE_NONE, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_GraphicsPanel4 = lv_obj_create(ui_LockedPanel2);
+    lv_obj_set_width(ui_GraphicsPanel4, 720);
+    lv_obj_set_height(ui_GraphicsPanel4, 500);
+    lv_obj_set_x(ui_GraphicsPanel4, 0);
+    lv_obj_set_y(ui_GraphicsPanel4, 400);
+    lv_obj_set_align(ui_GraphicsPanel4, LV_ALIGN_TOP_MID);
+    lv_obj_remove_flag(ui_GraphicsPanel4, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_radius(ui_GraphicsPanel4, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_GraphicsPanel4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_GraphicsPanel4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    lv_obj_set_style_border_side(ui_GraphicsPanel4, LV_BORDER_SIDE_NONE, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_AxesPanel = lv_obj_create(ui_GraphicsPanel4);
     lv_obj_set_width(ui_AxesPanel, 600);
-    lv_obj_set_height(ui_AxesPanel, 300);
+    lv_obj_set_height(ui_AxesPanel, 280);
     lv_obj_set_align(ui_AxesPanel, LV_ALIGN_CENTER);
     lv_obj_remove_flag(ui_AxesPanel, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_obj_set_style_bg_color(ui_AxesPanel, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(ui_AxesPanel, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_XBar = lv_bar_create(ui_AxesPanel);
-    lv_bar_set_value(ui_XBar, 25, LV_ANIM_OFF);
+    lv_bar_set_value(ui_XBar, 50, LV_ANIM_OFF);
     lv_bar_set_start_value(ui_XBar, 0, LV_ANIM_OFF);
     lv_obj_set_width(ui_XBar, 500);
     lv_obj_set_height(ui_XBar, 30);
-    lv_obj_set_x(ui_XBar, 0);
-    lv_obj_set_y(ui_XBar, -80);
-    lv_obj_set_align(ui_XBar, LV_ALIGN_CENTER);
+    lv_obj_set_align(ui_XBar, LV_ALIGN_TOP_MID);
+    ui_object_set_themeable_style_property(ui_XBar, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_XBar, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+
+    ui_object_set_themeable_style_property(ui_XBar, LV_PART_INDICATOR | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_XBar, LV_PART_INDICATOR | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
 
     //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
     if(lv_obj_get_style_pad_top(ui_XBar, LV_PART_MAIN) > 0) lv_obj_set_style_pad_right(ui_XBar,
                                                                                            lv_obj_get_style_pad_right(ui_XBar, LV_PART_MAIN) + 1, LV_PART_MAIN);
+    ui_Label1 = lv_label_create(ui_XBar);
+    lv_obj_set_width(ui_Label1, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(ui_Label1, LV_SIZE_CONTENT);    /// 1
+    lv_obj_set_align(ui_Label1, LV_ALIGN_CENTER);
+    lv_label_set_text(ui_Label1, "X AXIS");
+    lv_obj_set_style_text_color(ui_Label1, lv_color_hex(0x0009FF), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_opa(ui_Label1, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_Label1, &lv_font_montserrat_30, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_side(ui_Label1, LV_BORDER_SIDE_NONE, LV_PART_MAIN | LV_STATE_DEFAULT);
+
     ui_YBar = lv_bar_create(ui_AxesPanel);
-    lv_bar_set_value(ui_YBar, 25, LV_ANIM_OFF);
+    lv_bar_set_value(ui_YBar, 50, LV_ANIM_OFF);
     lv_bar_set_start_value(ui_YBar, 0, LV_ANIM_OFF);
     lv_obj_set_width(ui_YBar, 500);
     lv_obj_set_height(ui_YBar, 30);
-    lv_obj_set_align(ui_YBar, LV_ALIGN_CENTER);
+    lv_obj_set_x(ui_YBar, 0);
+    lv_obj_set_y(ui_YBar, 60);
+    lv_obj_set_align(ui_YBar, LV_ALIGN_TOP_MID);
+    ui_object_set_themeable_style_property(ui_YBar, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_YBar, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+
+    ui_object_set_themeable_style_property(ui_YBar, LV_PART_INDICATOR | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_YBar, LV_PART_INDICATOR | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
 
     //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
     if(lv_obj_get_style_pad_top(ui_YBar, LV_PART_MAIN) > 0) lv_obj_set_style_pad_right(ui_YBar,
                                                                                            lv_obj_get_style_pad_right(ui_YBar, LV_PART_MAIN) + 1, LV_PART_MAIN);
+    ui_Label2 = lv_label_create(ui_YBar);
+    lv_obj_set_width(ui_Label2, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(ui_Label2, LV_SIZE_CONTENT);    /// 1
+    lv_obj_set_align(ui_Label2, LV_ALIGN_CENTER);
+    lv_label_set_text(ui_Label2, "Y AXIS");
+    lv_obj_set_style_text_color(ui_Label2, lv_color_hex(0x0009FF), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_opa(ui_Label2, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_Label2, &lv_font_montserrat_30, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_side(ui_Label2, LV_BORDER_SIDE_NONE, LV_PART_MAIN | LV_STATE_DEFAULT);
+
     ui_TwistBar = lv_bar_create(ui_AxesPanel);
-    lv_bar_set_value(ui_TwistBar, 25, LV_ANIM_OFF);
+    lv_bar_set_value(ui_TwistBar, 50, LV_ANIM_OFF);
     lv_bar_set_start_value(ui_TwistBar, 0, LV_ANIM_OFF);
     lv_obj_set_width(ui_TwistBar, 500);
     lv_obj_set_height(ui_TwistBar, 30);
     lv_obj_set_x(ui_TwistBar, 0);
-    lv_obj_set_y(ui_TwistBar, 80);
-    lv_obj_set_align(ui_TwistBar, LV_ALIGN_CENTER);
+    lv_obj_set_y(ui_TwistBar, 120);
+    lv_obj_set_align(ui_TwistBar, LV_ALIGN_TOP_MID);
+    ui_object_set_themeable_style_property(ui_TwistBar, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_TwistBar, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+
+    ui_object_set_themeable_style_property(ui_TwistBar, LV_PART_INDICATOR | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_TwistBar, LV_PART_INDICATOR | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
 
     //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
     if(lv_obj_get_style_pad_top(ui_TwistBar, LV_PART_MAIN) > 0) lv_obj_set_style_pad_right(ui_TwistBar,
                                                                                                lv_obj_get_style_pad_right(ui_TwistBar, LV_PART_MAIN) + 1, LV_PART_MAIN);
-    ui_SettingsButton2 = lv_button_create(ui_JoystickTest);
-    lv_obj_set_width(ui_SettingsButton2, 200);
-    lv_obj_set_height(ui_SettingsButton2, 200);
-    lv_obj_set_x(ui_SettingsButton2, -100);
-    lv_obj_set_y(ui_SettingsButton2, -100);
-    lv_obj_set_align(ui_SettingsButton2, LV_ALIGN_BOTTOM_RIGHT);
-    lv_obj_add_flag(ui_SettingsButton2, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
-    lv_obj_remove_flag(ui_SettingsButton2, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    ui_Label3 = lv_label_create(ui_TwistBar);
+    lv_obj_set_width(ui_Label3, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(ui_Label3, LV_SIZE_CONTENT);    /// 1
+    lv_obj_set_align(ui_Label3, LV_ALIGN_CENTER);
+    lv_label_set_text(ui_Label3, "TWIST");
+    lv_obj_set_style_text_color(ui_Label3, lv_color_hex(0x0009FF), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_opa(ui_Label3, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_Label3, &lv_font_montserrat_30, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_side(ui_Label3, LV_BORDER_SIDE_NONE, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_Label5 = lv_label_create(ui_SettingsButton2);
-    lv_obj_set_width(ui_Label5, LV_SIZE_CONTENT);   /// 1
-    lv_obj_set_height(ui_Label5, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_align(ui_Label5, LV_ALIGN_CENTER);
-    lv_label_set_text(ui_Label5, "Home");
-    lv_obj_set_style_text_font(ui_Label5, &lv_font_montserrat_24, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    ui_ButtonPanel = lv_obj_create(ui_JoystickTest);
-    lv_obj_set_width(ui_ButtonPanel, 200);
-    lv_obj_set_height(ui_ButtonPanel, 100);
+    ui_ButtonPanel = lv_obj_create(ui_AxesPanel);
+    lv_obj_set_width(ui_ButtonPanel, 500);
+    lv_obj_set_height(ui_ButtonPanel, 50);
     lv_obj_set_x(ui_ButtonPanel, 0);
-    lv_obj_set_y(ui_ButtonPanel, -300);
-    lv_obj_set_align(ui_ButtonPanel, LV_ALIGN_CENTER);
+    lv_obj_set_y(ui_ButtonPanel, 180);
+    lv_obj_set_align(ui_ButtonPanel, LV_ALIGN_TOP_MID);
     lv_obj_remove_flag(ui_ButtonPanel, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     ui_object_set_themeable_style_property(ui_ButtonPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
                                            _ui_theme_color_background);
@@ -114,7 +192,74 @@ void ui_JoystickTest_screen_init(void)
                                            _ui_theme_alpha_text);
     lv_obj_set_style_text_font(ui_ButtonCounter, &lv_font_montserrat_30, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    lv_obj_add_event_cb(ui_SettingsButton2, ui_event_SettingsButton2, LV_EVENT_ALL, NULL);
+    ui_ExitButton = lv_button_create(ui_LockedPanel2);
+    lv_obj_set_width(ui_ExitButton, 500);
+    lv_obj_set_height(ui_ExitButton, 150);
+    lv_obj_set_x(ui_ExitButton, 0);
+    lv_obj_set_y(ui_ExitButton, -70);
+    lv_obj_set_align(ui_ExitButton, LV_ALIGN_BOTTOM_MID);
+    lv_obj_add_flag(ui_ExitButton, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
+    lv_obj_remove_flag(ui_ExitButton, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_radius(ui_ExitButton, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_ExitButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_ExitButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_ExitButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_ExitButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
+                                           _ui_theme_alpha_text);
+    lv_obj_set_style_border_width(ui_ExitButton, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_PanelButtonLabel5 = lv_label_create(ui_ExitButton);
+    lv_obj_set_width(ui_PanelButtonLabel5, 280);
+    lv_obj_set_height(ui_PanelButtonLabel5, 50);
+    lv_obj_set_align(ui_PanelButtonLabel5, LV_ALIGN_CENTER);
+    lv_label_set_text(ui_PanelButtonLabel5, "EXIT");
+    ui_object_set_themeable_style_property(ui_PanelButtonLabel5, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_PanelButtonLabel5, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text);
+    lv_obj_set_style_text_align(ui_PanelButtonLabel5, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_PanelButtonLabel5, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_TopBar1 = ui_TopBar_create(ui_JoystickTest);
+    lv_obj_set_x(ui_TopBar1, 0);
+    lv_obj_set_y(ui_TopBar1, 0);
+
+    //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
+
+    ui_StatusPanel1 = ui_StatusPanel_create(ui_JoystickTest);
+    lv_obj_set_x(ui_StatusPanel1, 0);
+    lv_obj_set_y(ui_StatusPanel1, 50);
+
+    ui_TextPanel4 = lv_label_create(ui_JoystickTest);
+    lv_obj_set_width(ui_TextPanel4, 660);
+    lv_obj_set_height(ui_TextPanel4, 200);
+    lv_obj_set_x(ui_TextPanel4, 0);
+    lv_obj_set_y(ui_TextPanel4, 200);
+    lv_obj_set_align(ui_TextPanel4, LV_ALIGN_TOP_MID);
+    lv_label_set_text(ui_TextPanel4, "JOYSTICK TEST");
+    ui_object_set_themeable_style_property(ui_TextPanel4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_TextPanel4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text);
+    lv_obj_set_style_text_font(ui_TextPanel4, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_Info5 = lv_label_create(ui_TextPanel4);
+    lv_obj_set_width(ui_Info5, 660);
+    lv_obj_set_height(ui_Info5, 150);
+    lv_obj_set_x(ui_Info5, 0);
+    lv_obj_set_y(ui_Info5, 100);
+    lv_obj_set_align(ui_Info5, LV_ALIGN_TOP_MID);
+    lv_label_set_text(ui_Info5, "Move the Joystick. The sliders should correlate with the movement");
+    ui_object_set_themeable_style_property(ui_Info5, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_Info5, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text);
+    lv_obj_set_style_text_font(ui_Info5, &lv_font_montserrat_34, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    lv_obj_add_event_cb(ui_ExitButton, ui_event_ExitButton, LV_EVENT_ALL, NULL);
 
 }
 
@@ -124,13 +269,22 @@ void ui_JoystickTest_screen_destroy(void)
 
     // NULL screen variables
     ui_JoystickTest = NULL;
+    ui_LockedPanel2 = NULL;
+    ui_GraphicsPanel4 = NULL;
     ui_AxesPanel = NULL;
     ui_XBar = NULL;
+    ui_Label1 = NULL;
     ui_YBar = NULL;
+    ui_Label2 = NULL;
     ui_TwistBar = NULL;
-    ui_SettingsButton2 = NULL;
-    ui_Label5 = NULL;
+    ui_Label3 = NULL;
     ui_ButtonPanel = NULL;
     ui_ButtonCounter = NULL;
+    ui_ExitButton = NULL;
+    ui_PanelButtonLabel5 = NULL;
+    ui_TopBar1 = NULL;
+    ui_StatusPanel1 = NULL;
+    ui_TextPanel4 = NULL;
+    ui_Info5 = NULL;
 
 }

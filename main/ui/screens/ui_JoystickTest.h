@@ -14,15 +14,24 @@ extern "C" {
 extern void ui_JoystickTest_screen_init(void);
 extern void ui_JoystickTest_screen_destroy(void);
 extern lv_obj_t * ui_JoystickTest;
+extern lv_obj_t * ui_LockedPanel2;
+extern lv_obj_t * ui_GraphicsPanel4;
 extern lv_obj_t * ui_AxesPanel;
 extern lv_obj_t * ui_XBar;
+extern lv_obj_t * ui_Label1;
 extern lv_obj_t * ui_YBar;
+extern lv_obj_t * ui_Label2;
 extern lv_obj_t * ui_TwistBar;
-extern void ui_event_SettingsButton2(lv_event_t * e);
-extern lv_obj_t * ui_SettingsButton2;
-extern lv_obj_t * ui_Label5;
+extern lv_obj_t * ui_Label3;
 extern lv_obj_t * ui_ButtonPanel;
 extern lv_obj_t * ui_ButtonCounter;
+extern void ui_event_ExitButton(lv_event_t * e);
+extern lv_obj_t * ui_ExitButton;
+extern lv_obj_t * ui_PanelButtonLabel5;
+extern lv_obj_t * ui_TopBar1;
+extern lv_obj_t * ui_StatusPanel1;
+extern lv_obj_t * ui_TextPanel4;
+extern lv_obj_t * ui_Info5;
 // CUSTOM VARIABLES
 
 #ifdef __cplusplus
