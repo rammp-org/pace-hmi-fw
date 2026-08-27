@@ -85,16 +85,54 @@ static lv_subject_t adc_twist_subject;
 static lv_subject_t button_count_subject;
 static lv_subject_t button_pressed_subject;
 
-// Joystick -> LVGL keypad. The stick is continuous and a keypad is discrete, so
-// the ADC task latches one direction per flick here and the indev read function
-// drains it. Atomic because the two run on different tasks.
-// -1 = left, +1 = right, 0 = nothing pending.
-static std::atomic<int> joy_key_dir{0};
+// Joystick -> LVGL keypad. Held at the *level* the stick is at: whichever
+// LV_KEY_* direction it is deflected toward, or 0 when centered. Reporting a
+// held key rather than a one-shot latch is what lets LVGL's own key repeat
+// ([lv_indev.c] re-sends the key every long_press_repeat_time) walk the
+// settings list while the stick stays pushed.
+static std::atomic<uint32_t> joy_key{0};
 
-// Page the FlexPanel one child per key. This replaces LVGL's built-in
-// LV_OBJ_FLAG_SCROLL_WITH_ARROW handling, which scrolls by width/4 with
-// LV_ANIM_OFF and ignores snap entirely — with 720 px children that's four
-// off-center nudges per panel instead of one clean page.
+// GPIO48 "select" stays edge-latched, unlike the directions: repeating ENTER
+// would re-click the focused row every repeat period, which for the theme-toggle
+// row means it strobes. Consumed by the indev read.
+static std::atomic<bool> select_key{false};
+
+// Focus manager for the rows inside ui_SettingsFlexPanel. Deliberately NOT
+// attached to any indev: ui_FlexPanel stays the keypad's focused object so
+// left/right keep paging, and this group is driven directly from flex_key_cb.
+// LVGL still does the real work on focus change — LV_STATE_FOCUSED for the
+// styling and, because the rows carry LV_OBJ_FLAG_SCROLL_ON_FOCUS, the
+// scroll-into-view.
+static lv_group_t *settings_group = nullptr;
+
+// Which FlexPanel child is currently centered in the viewport. Derived from
+// live coordinates rather than a stored index, so it stays correct no matter
+// how the panel got scrolled — joystick, touch drag, or the on-screen arrows.
+static lv_obj_t *flex_current_page() {
+  if (!ui_FlexPanel) {
+    return nullptr;
+  }
+  lv_area_t panel;
+  lv_obj_get_coords(ui_FlexPanel, &panel);
+  const int32_t cx = (panel.x1 + panel.x2) / 2;
+  for (uint32_t i = 0; i < lv_obj_get_child_count(ui_FlexPanel); i++) {
+    lv_obj_t *child = lv_obj_get_child(ui_FlexPanel, i);
+    lv_area_t a;
+    lv_obj_get_coords(child, &a);
+    if (cx >= a.x1 && cx <= a.x2) {
+      return child;
+    }
+  }
+  return nullptr;
+}
+
+// All keypad input lands here, because ui_FlexPanel is what the indev focuses.
+// Left/right page the flex panel; up/down walk the settings rows once that page
+// is showing; enter clicks the focused row.
+//
+// Paging reuses flex_scroll_next/previous from ui_events.cpp — the same
+// functions the on-screen arrows call — so the joystick and touch share one
+// notion of the current page instead of each keeping their own.
 static void flex_key_cb(lv_event_t *e) {
   lv_obj_t *panel = lv_event_get_target_obj(e);
   // the group is global, so an inactive screen would otherwise scroll unseen
@@ -102,16 +140,35 @@ static void flex_key_cb(lv_event_t *e) {
     return;
   }
   const uint32_t key = lv_event_get_key(e);
-  static int32_t idx = 0;
-  const int32_t last = static_cast<int32_t>(lv_obj_get_child_count(panel)) - 1;
+
   if (key == LV_KEY_RIGHT) {
-    idx = LV_MIN(idx + 1, last);
-  } else if (key == LV_KEY_LEFT) {
-    idx = LV_MAX(idx - 1, 0);
-  } else {
+    flex_scroll_next(nullptr);
     return;
   }
-  lv_obj_scroll_to_view(lv_obj_get_child(panel, idx), LV_ANIM_ON);
+  if (key == LV_KEY_LEFT) {
+    flex_scroll_previous(nullptr);
+    return;
+  }
+
+  // the remaining keys only mean anything on the settings page
+  if (flex_current_page() != ui_SettingsMenu || !settings_group) {
+    return;
+  }
+  lv_obj_t *focused = lv_group_get_focused(settings_group);
+  if (key == LV_KEY_UP || key == LV_KEY_DOWN) {
+    if (!focused) {
+      // first nudge onto the page lands on the top row rather than wrapping
+      lv_group_focus_obj(lv_obj_get_child(ui_SettingsFlexPanel, 0));
+    } else if (key == LV_KEY_DOWN) {
+      lv_group_focus_next(settings_group);
+    } else {
+      lv_group_focus_prev(settings_group);
+    }
+  } else if (key == LV_KEY_ENTER && focused) {
+    // the group has no indev, so LVGL won't route the press itself; the row's
+    // SquareLine handlers listen for LV_EVENT_CLICKED
+    lv_obj_send_event(focused, LV_EVENT_CLICKED, nullptr);
+  }
 }
 
 // Observer for the ButtonPanel background. There's no built-in binding for a
@@ -139,6 +196,12 @@ static void gpio48_button_callback(const espp::Interrupt::Event &event) {
   // the panel follows every edge, so contact bounce can't strand it blue: the
   // last edge always wins
   lv_subject_set_int(&button_pressed_subject, event.active);
+
+  // doubles as the "select" gesture for the settings list — the joystick has no
+  // natural press of its own
+  if (event.active) {
+    select_key.store(true);
+  }
 
   // only the counter is debounced. espp's GPIO glitch filters are ns-scale and
   // do nothing against millisecond-scale mechanical bounce.
@@ -815,20 +878,37 @@ extern "C" void app_main(void) {
   logger.info("Adding joystick keypad input device...");
   static espp::KeypadInput joystick_keypad(
       {.read = [](bool *up, bool *down, bool *left, bool *right, bool *enter, bool *escape) {
-        const int dir = joy_key_dir.exchange(0);
-        *left = dir < 0;
-        *right = dir > 0;
-        *up = *down = *enter = *escape = false;
+        const uint32_t key = joy_key.load(); // held, so LVGL can repeat it
+        *left = key == LV_KEY_LEFT;
+        *right = key == LV_KEY_RIGHT;
+        *up = key == LV_KEY_UP;
+        *down = key == LV_KEY_DOWN;
+        *enter = select_key.exchange(false); // one-shot
+        *escape = false;
       }});
   static lv_group_t *joystick_group = lv_group_create();
   lv_group_add_obj(joystick_group, ui_FlexPanel);
   lv_indev_set_group(joystick_keypad.get_input_device(), joystick_group);
+  // hold-to-repeat feel. LVGL's defaults (400 ms then every 100 ms) are tuned
+  // for a keyboard and run the settings list far too fast for a joystick you
+  // steer with; these are the two knobs if it feels wrong on the bench.
+  lv_indev_set_long_press_time(joystick_keypad.get_input_device(), 500);
+  lv_indev_set_long_press_repeat_time(joystick_keypad.get_input_device(), 250);
   lv_group_focus_obj(ui_FlexPanel);
   // drop the built-in arrow scroll so only flex_key_cb acts on the key. Done
   // here rather than in ui_MainScreenFlex.c because import_ui.ps1 mirrors the
   // SquareLine export (robocopy /MIR) and would delete the edit.
   lv_obj_remove_flag(ui_FlexPanel, LV_OBJ_FLAG_SCROLL_WITH_ARROW);
   lv_obj_add_event_cb(ui_FlexPanel, flex_key_cb, LV_EVENT_KEY, nullptr);
+
+  // Focus group for the settings rows. Built by walking the children rather
+  // than naming ui_Button10/5/6/... so rows added in SquareLine are picked up
+  // on the next import with no change here. The FOCUSED styling (blue border)
+  // comes from the export, so there is nothing to style in code.
+  settings_group = lv_group_create();
+  for (uint32_t i = 0; i < lv_obj_get_child_count(ui_SettingsFlexPanel); i++) {
+    lv_group_add_obj(settings_group, lv_obj_get_child(ui_SettingsFlexPanel, i));
+  }
 
   logger.info("Initializing touch...");
   if (!tab5.initialize_touch(touch_callback)) {
@@ -1139,17 +1219,29 @@ extern "C" void app_main(void) {
       // horizontal channel, Y the vertical one (inverted by kVerticalCal).
       stick.update(*horiz_mv, *vert_mv, *twist_mv);
 
-      // Analog -> discrete for the LVGL keypad: one key per flick. Hysteresis
-      // (out past 0.5, back inside 0.25 to re-arm) is what stops a held stick
-      // from paging continuously.
+      // Analog -> keypad level. Schmitt trigger (engage past 0.5, release below
+      // 0.25) so the boundary can't chatter; between the two thresholds the
+      // previous state holds. The direction is recomputed every cycle, so
+      // rolling the stick from one direction to another re-aims without
+      // needing to pass through center. The larger component wins, so a
+      // diagonal resolves to one direction rather than two.
       {
-        static bool centered = true;
+        static bool engaged = false;
         const float x = stick.x();
-        if (centered && std::abs(x) > 0.5f) {
-          joy_key_dir.store(x > 0 ? 1 : -1);
-          centered = false;
-        } else if (!centered && std::abs(x) < 0.25f) {
-          centered = true;
+        const float y = stick.y();
+        const float mag = std::max(std::abs(x), std::abs(y));
+        if (mag > 0.5f) {
+          engaged = true;
+        } else if (mag < 0.25f) {
+          engaged = false;
+        }
+        if (!engaged) {
+          joy_key.store(0);
+        } else if (std::abs(x) >= std::abs(y)) {
+          joy_key.store(x > 0 ? LV_KEY_RIGHT : LV_KEY_LEFT);
+        } else {
+          // +Y is up after kVerticalCal's inversion, and up the list is prev
+          joy_key.store(y > 0 ? LV_KEY_UP : LV_KEY_DOWN);
         }
       }
       {
