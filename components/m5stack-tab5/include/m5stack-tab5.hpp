@@ -23,6 +23,7 @@
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
+#include <freertos/semphr.h>
 #include <freertos/stream_buffer.h>
 #include <freertos/task.h>
 
@@ -290,6 +291,38 @@ public:
   /// Exposed so the application can call esp_lcd_dpi_panel_get_frame_buffer()
   /// and hand LVGL the panel's own frame buffers to render into directly.
   esp_lcd_panel_handle_t lcd_panel_handle() const { return lcd_handles_.panel; }
+
+  /// Present a full frame that already lives in one of the panel's own frame
+  /// buffers, and block until the panel has swapped to it.
+  ///
+  /// This is the tear-free path for LVGL's DIRECT render mode. Because \p fb
+  /// is inside a frame buffer, esp_lcd_panel_draw_bitmap() takes its no-copy
+  /// branch: it writes the cache back, points cur_fb_index at \p fb, and fires
+  /// on_color_trans_done SYNCHRONOUSLY -- so on its own it tells the caller
+  /// nothing about when the flip lands. The actual swap happens when the DSI
+  /// DMA re-arms at the end of the current frame, which is what on_refresh_done
+  /// signals. Blocking here until then keeps the renderer off the buffer the
+  /// DMA is still scanning out.
+  ///
+  /// \param fb Pointer to the frame buffer to present (from
+  ///        esp_lcd_dpi_panel_get_frame_buffer()).
+  /// \param timeout_ms How long to wait for the swap before giving up.
+  /// \return true if the swap was observed; false on a bad argument or if the
+  ///         wait timed out (the frame is still queued -- the caller should
+  ///         carry on rather than stall the UI).
+  /// \note Must not be called from an ISR; it blocks for up to one panel
+  ///       refresh period (~17 ms on the ST7123/ST7121, ~21 ms on the ILI9881).
+  bool present_frame(const uint8_t *fb, uint32_t timeout_ms = 100);
+
+  /// Enable or disable the vsync wait inside present_frame().
+  /// Disabled, present_frame() degrades to write_lcd_lines(): the frame is
+  /// queued and the call returns immediately, which is faster but can tear.
+  /// \param enabled Whether present_frame() should wait for the swap.
+  void set_vsync_enabled(bool enabled) { vsync_enabled_.store(enabled, std::memory_order_relaxed); }
+
+  /// Whether present_frame() waits for the frame-buffer swap.
+  /// \return True if the vsync wait is enabled.
+  bool vsync_enabled() const { return vsync_enabled_.load(std::memory_order_relaxed); }
 
   /////////////////////////////////////////////////////////////////////////////
   // Audio System
@@ -959,6 +992,18 @@ protected:
   void flush(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map);
   static bool notify_lvgl_flush_ready(esp_lcd_panel_handle_t panel,
                                       esp_lcd_dpi_panel_event_data_t *edata, void *user_ctx);
+  /// on_refresh_done handler: the DSI DMA has re-armed on cur_fb_index, i.e.
+  /// the frame buffer queued by the last draw_bitmap() is now the one being
+  /// scanned out. Gives vsync_sem_ so present_frame() can return.
+  static bool notify_vsync(esp_lcd_panel_handle_t panel, esp_lcd_dpi_panel_event_data_t *edata,
+                           void *user_ctx);
+
+  // Signalled from notify_vsync() once per panel refresh. Binary semaphore:
+  // present_frame() drains it before queueing a frame, then waits on it.
+  SemaphoreHandle_t vsync_sem_{nullptr};
+  std::atomic<bool> vsync_enabled_{true};
+  // Latched so a wedged panel logs once instead of once per frame.
+  std::atomic<bool> vsync_timeout_logged_{false};
 
   // DSI write helpers
   void dsi_write_command(uint8_t cmd, std::span<const uint8_t> params, uint32_t flags);

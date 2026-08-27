@@ -95,13 +95,16 @@ static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c);
 // no-copy branch: it writes the cache back, sets cur_fb_index, and returns,
 // instead of copying 1.8 MB.
 //
-// KNOWN DEFECT -- this is NOT vsync-gated. That no-copy branch calls
-// on_color_trans_done SYNCHRONOUSLY (esp_lcd_panel_dpi.c), which the BSP wires
-// to lv_display_flush_ready, so disp->flushing clears before this function even
-// returns and LVGL's wait_for_flushing() becomes a no-op. LVGL then starts
-// rasterizing into the buffer the DSI DMA may still be scanning out, so partial
-// updates can tear. The real fix is to register on_refresh_done (currently
-// nullptr in the BSP) and defer flush_ready until the flip actually lands.
+// That branch is not self-synchronising: it fires on_color_trans_done
+// SYNCHRONOUSLY (esp_lcd_panel_dpi.c), which the BSP wires to
+// lv_display_flush_ready, so disp->flushing clears before this function even
+// returns. The actual buffer swap only lands when the DSI DMA re-arms at the
+// end of the current frame. present_frame() blocks until it does. Blocking here
+// is what gates the renderer: LVGL is single-threaded and cannot start the next
+// refresh while flush_cb is on the stack, so by the time this returns the DMA
+// is scanning the frame we just queued and the other buffer is free to draw
+// into. Costs up to one panel refresh period (~17 ms) per frame, during which
+// the LVGL task holds lvgl_mutex.
 //
 // Ignoring `area` and flushing full-screen IS correct here: call_flush_cb passes
 // the buffer START (not an offset), and refr_sync_areas already copies the
@@ -112,9 +115,9 @@ static void direct_flush_cb(lv_display_t *disp, const lv_area_t * /*area*/, uint
     return;
   }
   auto &tab5 = espp::M5StackTab5::get();
-  tab5.write_lcd_lines(0, 0, static_cast<int>(tab5.display_width()) - 1,
-                       static_cast<int>(tab5.display_height()) - 1, px_map, 0);
-  // completion arrives via the panel's on_color_trans_done -> flush_ready
+  // flush_ready itself arrives via the panel's on_color_trans_done; this call
+  // additionally waits for the swap before letting LVGL render again.
+  tab5.present_frame(px_map);
 }
 
 // DA7280 haptic driver bring-up test: read-only register probe, no driver
@@ -403,8 +406,8 @@ extern "C" void app_main(void) {
   // BSP already handed those buffers to lv_display_set_buffers, but espp's
   // Display hardcodes RENDER_MODE_PARTIAL; DIRECT is what lets LVGL treat them
   // as real frame buffers (tracking dirty areas across both) so a flush is a
-  // vsync flip rather than a copy. DIRECT requires rotation 0, which is what
-  // this panel runs at.
+  // vsync-gated flip (see direct_flush_cb) rather than a copy. DIRECT requires
+  // rotation 0, which is what this panel runs at.
   {
     void *fb0 = nullptr;
     void *fb1 = nullptr;

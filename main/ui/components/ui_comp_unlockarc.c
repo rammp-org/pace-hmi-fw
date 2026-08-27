@@ -15,6 +15,8 @@ lv_obj_t * ui_UnlockArc_create(lv_obj_t * comp_parent)
     lv_obj_set_width(cui_UnlockArc, 400);
     lv_obj_set_height(cui_UnlockArc, 400);
     lv_obj_set_align(cui_UnlockArc, LV_ALIGN_CENTER);
+    lv_obj_remove_flag(cui_UnlockArc, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_PRESS_LOCK | LV_OBJ_FLAG_CLICK_FOCUSABLE |
+                       LV_OBJ_FLAG_GESTURE_BUBBLE | LV_OBJ_FLAG_SNAPPABLE);     /// Flags
     lv_arc_set_value(cui_UnlockArc, 70);
     lv_arc_set_bg_angles(cui_UnlockArc, 90, 89);
     lv_obj_set_style_arc_color(cui_UnlockArc, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);

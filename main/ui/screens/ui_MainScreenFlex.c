@@ -99,7 +99,8 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_flex_flow(ui_FlexPanel, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(ui_FlexPanel, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_add_flag(ui_FlexPanel, LV_OBJ_FLAG_SCROLL_WITH_ARROW | LV_OBJ_FLAG_SCROLL_ONE);     /// Flags
-    lv_obj_remove_flag(ui_FlexPanel, LV_OBJ_FLAG_SCROLL_MOMENTUM | LV_OBJ_FLAG_SCROLL_CHAIN);      /// Flags
+    lv_obj_remove_flag(ui_FlexPanel, LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM |
+                       LV_OBJ_FLAG_SCROLL_CHAIN);    /// Flags
     lv_obj_set_scrollbar_mode(ui_FlexPanel, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_scroll_dir(ui_FlexPanel, LV_DIR_HOR);
     lv_obj_set_scroll_snap_x(ui_FlexPanel, LV_SCROLL_SNAP_START);
@@ -115,6 +116,7 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_x(ui_LockedPanel, 1);
     lv_obj_set_y(ui_LockedPanel, 0);
     lv_obj_set_align(ui_LockedPanel, LV_ALIGN_CENTER);
+    lv_obj_add_flag(ui_LockedPanel, LV_OBJ_FLAG_HIDDEN);     /// Flags
     lv_obj_remove_flag(ui_LockedPanel, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_obj_set_style_radius(ui_LockedPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     ui_object_set_themeable_style_property(ui_LockedPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
@@ -240,6 +242,7 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_x(ui_DrivePanel, 1);
     lv_obj_set_y(ui_DrivePanel, 0);
     lv_obj_set_align(ui_DrivePanel, LV_ALIGN_CENTER);
+    lv_obj_add_flag(ui_DrivePanel, LV_OBJ_FLAG_HIDDEN);     /// Flags
     lv_obj_remove_flag(ui_DrivePanel, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_obj_set_style_radius(ui_DrivePanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     ui_object_set_themeable_style_property(ui_DrivePanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
@@ -369,13 +372,13 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_style_border_side(ui_GraphicsPanel2, LV_BORDER_SIDE_NONE, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_Image2 = lv_image_create(ui_GraphicsPanel2);
-    lv_image_set_src(ui_Image2, &ui_img_1236721514);
+    lv_image_set_src(ui_Image2, &ui_img_rammp_wheelchair_png);
     lv_obj_set_width(ui_Image2, 280);
     lv_obj_set_height(ui_Image2, 280);
     lv_obj_set_align(ui_Image2, LV_ALIGN_CENTER);
     lv_obj_add_flag(ui_Image2, LV_OBJ_FLAG_CLICKABLE);     /// Flags
     lv_obj_remove_flag(ui_Image2, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_image_set_scale(ui_Image2, 128);
+    lv_image_set_scale(ui_Image2, 150);
 
     ui_UnlockArc2 = ui_UnlockArc_create(ui_GraphicsPanel2);
     lv_obj_set_x(ui_UnlockArc2, 0);

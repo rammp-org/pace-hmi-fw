@@ -20,11 +20,27 @@ CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
-# PSRAM — required for the MIPI DSI frame buffer (matches the m5stack-tab5
+# PSRAM - required for the MIPI DSI frame buffer (matches the m5stack-tab5
 # BSP example's config)
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_SPEED_200M=y
-CONFIG_SPIRAM_XIP_FROM_PSRAM=y
+#
+# XIP-from-PSRAM is deliberately OFF (it is also the IDF default).
+#
+# It selects SPIRAM_FETCH_INSTRUCTIONS + SPIRAM_RODATA, which move .text and
+# .rodata out of flash and into PSRAM at boot. On the P4 flash and PSRAM sit on
+# two SEPARATE SPI buses, so that does not offload anything -- it piles code
+# fetch and rodata reads onto the one bus the DSI scanout is already saturating.
+# This panel pulls 720*1280*2 B at ~58 Hz = ~106 MB/s continuously (~140 MB/s
+# instantaneous during active pixels), and the UI's image assets are rodata:
+# ui_img_lock_png alone is 189 KB of A8. When the DSI bridge FIFO runs dry it
+# emits black, which shows up as black horizontal lines across the frame --
+# visible only where they cross non-black content, i.e. "lines in the icons".
+# The bridge logs "underrun happens" (ESP_DRAM_LOGE) when this occurs.
+#
+# Leaving it off costs the ability to run arbitrary code during a flash
+# write/erase without IRAM placement, which this firmware does not need.
+# CONFIG_SPIRAM_XIP_FROM_PSRAM is not set
 CONFIG_CACHE_L2_CACHE_256KB=y
 CONFIG_CACHE_L2_CACHE_LINE_128B=y
 

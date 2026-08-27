@@ -49,7 +49,7 @@ LV_IMG_DECLARE(ui_img_unlock_png);    // assets/Unlock.png
 LV_IMG_DECLARE(ui_img_arrow_left_png);    // assets/arrow_left.png
 LV_IMG_DECLARE(ui_img_arrow_png);    // assets/arrow.png
 LV_IMG_DECLARE(ui_img_107617181);    // assets/turbo-rasterized.png
-LV_IMG_DECLARE(ui_img_1236721514);    // assets/seat-rasterized.png
+LV_IMG_DECLARE(ui_img_rammp_wheelchair_png);    // assets/rammp_wheelchair.png
 
 // FONTS
 LV_FONT_DECLARE(ui_font_Digital7);

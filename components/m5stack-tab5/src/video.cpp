@@ -213,13 +213,10 @@ bool M5StackTab5::initialize_lcd() {
     dpi_cfg.pixel_format = LCD_COLOR_PIXEL_FORMAT_RGB565;
 #endif
     // 2 frame buffers, so LVGL can render straight into a frame buffer instead of
-    // the driver memcpy'ing 1.8 MB on every flush.
-    //
-    // NOTE: this is NOT by itself tear-free. esp_lcd_panel_draw_bitmap's no-copy
-    // branch just sets cur_fb_index and fires on_color_trans_done synchronously;
-    // the swap lands at the next DMA restart and nothing waits for it. Gating on
-    // vsync requires registering on_refresh_done (still nullptr below) and
-    // deferring lv_display_flush_ready until the flip actually happens.
+    // the driver memcpy'ing 1.8 MB on every flush, and so the two can be
+    // swapped at the refresh boundary instead of torn through. The swap is
+    // gated by present_frame(), which waits on the on_refresh_done callback
+    // registered further down.
     dpi_cfg.num_fbs = 2;
     dpi_cfg.video_timing.h_size = display_width_;
     dpi_cfg.video_timing.v_size = display_height_;
@@ -249,13 +246,10 @@ bool M5StackTab5::initialize_lcd() {
     dpi_cfg.pixel_format = LCD_COLOR_PIXEL_FORMAT_RGB565;
 #endif
     // 2 frame buffers, so LVGL can render straight into a frame buffer instead of
-    // the driver memcpy'ing 1.8 MB on every flush.
-    //
-    // NOTE: this is NOT by itself tear-free. esp_lcd_panel_draw_bitmap's no-copy
-    // branch just sets cur_fb_index and fires on_color_trans_done synchronously;
-    // the swap lands at the next DMA restart and nothing waits for it. Gating on
-    // vsync requires registering on_refresh_done (still nullptr below) and
-    // deferring lv_display_flush_ready until the flip actually happens.
+    // the driver memcpy'ing 1.8 MB on every flush, and so the two can be
+    // swapped at the refresh boundary instead of torn through. The swap is
+    // gated by present_frame(), which waits on the on_refresh_done callback
+    // registered further down.
     dpi_cfg.num_fbs = 2;
     dpi_cfg.video_timing.h_size = display_width_;
     dpi_cfg.video_timing.v_size = display_height_;
@@ -282,13 +276,10 @@ bool M5StackTab5::initialize_lcd() {
     dpi_cfg.pixel_format = LCD_COLOR_PIXEL_FORMAT_RGB565;
 #endif
     // 2 frame buffers, so LVGL can render straight into a frame buffer instead of
-    // the driver memcpy'ing 1.8 MB on every flush.
-    //
-    // NOTE: this is NOT by itself tear-free. esp_lcd_panel_draw_bitmap's no-copy
-    // branch just sets cur_fb_index and fires on_color_trans_done synchronously;
-    // the swap lands at the next DMA restart and nothing waits for it. Gating on
-    // vsync requires registering on_refresh_done (still nullptr below) and
-    // deferring lv_display_flush_ready until the flip actually happens.
+    // the driver memcpy'ing 1.8 MB on every flush, and so the two can be
+    // swapped at the refresh boundary instead of torn through. The swap is
+    // gated by present_frame(), which waits on the on_refresh_done callback
+    // registered further down.
     dpi_cfg.num_fbs = 2;
     dpi_cfg.video_timing.h_size = display_width_;
     dpi_cfg.video_timing.v_size = display_height_;
@@ -379,10 +370,30 @@ bool M5StackTab5::initialize_lcd() {
 
   logger_.info("Display initialized with resolution {}x{}", display_width_, display_height_);
 
-  logger_.info("Register DPI panel event callback for LVGL flush ready notification");
+  // The vsync latch present_frame() waits on. Created before the callbacks are
+  // registered so notify_vsync() can never see a null handle.
+  if (vsync_sem_ == nullptr) {
+    vsync_sem_ = xSemaphoreCreateBinary();
+    if (vsync_sem_ == nullptr) {
+      logger_.warn("Could not create the vsync semaphore; presenting without a vsync wait");
+      vsync_enabled_.store(false, std::memory_order_relaxed);
+    }
+  }
+
+  // on_color_trans_done fires synchronously from esp_lcd_panel_draw_bitmap and
+  // drives the BSP's own flush() path (lv_disp_flush_ready). on_refresh_done is
+  // the one that means "the queued frame buffer is now the one being scanned
+  // out" -- see notify_vsync(). Registering it also has a cost: it enables the
+  // bridge VSYNC interrupt on chip revisions that have one (>= v3.0). On the
+  // revisions this firmware targets (CONFIG_ESP_REV_MIN_FULL=100) that event
+  // does not exist, and esp_lcd_panel_dpi.c instead invokes on_refresh_done
+  // from the DW-GDMA transfer-done callback, right after the link list has been
+  // re-armed with the current cur_fb_index. That is exactly the swap boundary,
+  // so it is the signal we want either way.
+  logger_.info("Register DPI panel event callbacks (flush ready + refresh done)");
   esp_lcd_dpi_panel_event_callbacks_t cbs = {
       .on_color_trans_done = &M5StackTab5::notify_lvgl_flush_ready,
-      .on_refresh_done = nullptr,
+      .on_refresh_done = &M5StackTab5::notify_vsync,
   };
   ret = esp_lcd_dpi_panel_register_event_callbacks(lcd_handles_.panel, &cbs, this);
   if (ret != ESP_OK) {
@@ -512,6 +523,45 @@ void M5StackTab5::write_lcd_lines(int xs, int ys, int xe, int ye, const uint8_t 
     return;
   }
   esp_lcd_panel_draw_bitmap(lcd_handles_.panel, xs, ys, xe + 1, ye + 1, data);
+}
+
+bool M5StackTab5::present_frame(const uint8_t *fb, uint32_t timeout_ms) {
+  if (lcd_handles_.panel == nullptr || fb == nullptr) {
+    return false;
+  }
+
+  const bool wait = vsync_enabled_.load(std::memory_order_relaxed) && vsync_sem_ != nullptr;
+
+  // Drain any swap that completed while the caller was rendering, so the take
+  // below can only be satisfied by an event that happens after this point.
+  // Must come before draw_bitmap(): a stale token would let us return while the
+  // DMA is still scanning the buffer LVGL is about to draw into.
+  if (wait) {
+    xSemaphoreTake(vsync_sem_, 0);
+  }
+
+  // Queues the swap: cache write-back, cur_fb_index = fb, and a synchronous
+  // on_color_trans_done. The DMA picks the new index up when it re-arms.
+  esp_lcd_panel_draw_bitmap(lcd_handles_.panel, 0, 0, static_cast<int>(display_width_),
+                            static_cast<int>(display_height_), fb);
+
+  if (!wait) {
+    return true;
+  }
+
+  if (xSemaphoreTake(vsync_sem_, pdMS_TO_TICKS(timeout_ms)) == pdTRUE) {
+    return true;
+  }
+
+  // A panel that has stopped refreshing must not freeze the UI, so fall through
+  // to the pre-vsync behaviour (the frame is queued; it will appear whenever the
+  // DMA next re-arms). Logged once, not once per frame.
+  if (!vsync_timeout_logged_.exchange(true, std::memory_order_relaxed)) {
+    logger_.warn("Timed out after {} ms waiting for the frame buffer swap; further timeouts will "
+                 "not be logged",
+                 timeout_ms);
+  }
+  return false;
 }
 
 void M5StackTab5::brightness(float brightness) {
@@ -645,6 +695,22 @@ bool IRAM_ATTR M5StackTab5::notify_lvgl_flush_ready(esp_lcd_panel_handle_t panel
     tab5->display_->notify_flush_ready();
   }
   return false;
+}
+
+bool IRAM_ATTR M5StackTab5::notify_vsync(esp_lcd_panel_handle_t panel,
+                                         esp_lcd_dpi_panel_event_data_t *edata, void *user_ctx) {
+  espp::M5StackTab5 *tab5 = static_cast<espp::M5StackTab5 *>(user_ctx);
+  if (tab5 == nullptr || tab5->vsync_sem_ == nullptr) {
+    return false;
+  }
+
+  // ISR context (the DW-GDMA transfer-done handler, or the bridge VSYNC
+  // interrupt on chip revisions that have one): give the semaphore and nothing
+  // else. Returning true asks the driver to yield to the woken task, which is
+  // the LVGL task blocked in present_frame().
+  BaseType_t higher_priority_task_woken = pdFALSE;
+  xSemaphoreGiveFromISR(tab5->vsync_sem_, &higher_priority_task_woken);
+  return higher_priority_task_woken == pdTRUE;
 }
 
 void M5StackTab5::dsi_write_command(uint8_t cmd, std::span<const uint8_t> params,
