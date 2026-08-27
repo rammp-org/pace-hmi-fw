@@ -26,6 +26,7 @@
 
 #include "sample_ui_home.h"
 
+#include "button.hpp"
 #include "continuous_adc.hpp"
 #include "joystick.hpp"
 #include "oneshot_adc.hpp"
@@ -78,6 +79,46 @@ static void fps_render_ready_cb(lv_event_t *) {
 static lv_subject_t adc_x_subject;
 static lv_subject_t adc_y_subject;
 static lv_subject_t adc_twist_subject;
+// GPIO48 test button: press count (bound to the ButtonCounter label) and
+// current pressed state (drives the ButtonPanel background via an observer)
+static lv_subject_t button_count_subject;
+static lv_subject_t button_pressed_subject;
+
+// Observer for the ButtonPanel background. There's no built-in binding for a
+// style property, so the widget work happens here; the observer is bound to the
+// object, so it dies with it.
+static void gpio48_panel_observer(lv_observer_t *observer, lv_subject_t *subject) {
+  lv_obj_t *panel = lv_observer_get_target_obj(observer);
+  // "not pressed" is the *current theme's* background, not a hardcoded black —
+  // SquareLine registered this property as themeable, so reading the theme keeps
+  // the panel correct after a dark/day switch
+  lv_obj_set_style_bg_color(panel,
+                            lv_subject_get_int(subject)
+                                ? lv_palette_main(LV_PALETTE_BLUE)
+                                : lv_color_hex(ui_get_theme_value(_ui_theme_color_background)),
+                            LV_PART_MAIN);
+}
+
+// Runs on the Button's interrupt task (not in ISR context). Only touches
+// subjects, never widgets directly.
+static void gpio48_button_callback(const espp::Interrupt::Event &event) {
+  // lv_subject_set_int runs the observers synchronously on this task, and they
+  // touch widgets, so this needs the LVGL lock
+  std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
+
+  // the panel follows every edge, so contact bounce can't strand it blue: the
+  // last edge always wins
+  lv_subject_set_int(&button_pressed_subject, event.active);
+
+  // only the counter is debounced. espp's GPIO glitch filters are ns-scale and
+  // do nothing against millisecond-scale mechanical bounce.
+  static int64_t last_press_us = 0;
+  const int64_t now = esp_timer_get_time();
+  if (event.active && (now - last_press_us) > 30000) {
+    last_press_us = now;
+    lv_subject_set_int(&button_count_subject, lv_subject_get_int(&button_count_subject) + 1);
+  }
+}
 
 static bool load_audio(size_t &out_size, size_t &out_sample_rate);
 static void play_click(espp::M5StackTab5 &tab5);
@@ -709,6 +750,33 @@ extern "C" void app_main(void) {
   lv_bar_bind_value(ui_XBar, &adc_x_subject);
   lv_bar_bind_value(ui_YBar, &adc_y_subject);
   lv_bar_bind_value(ui_TwistBar, &adc_twist_subject);
+
+  // GPIO48 test button. The label has a built-in binding; the panel background
+  // is a style property with no binding, so it gets an observer bound to the
+  // object (torn down with it).
+  lv_subject_init_int(&button_count_subject, 0);
+  lv_subject_init_int(&button_pressed_subject, 0);
+  lv_label_bind_text(ui_ButtonCounter, &button_count_subject, "%d");
+  lv_subject_add_observer_obj(&button_pressed_subject, gpio48_panel_observer, ui_ButtonPanel,
+                              nullptr);
+
+  // GPIO48, pulled up and shorted to ground on press (board-wide convention),
+  // so active LOW. Constructed after the subjects are initialized, because the
+  // interrupt task starts here and its callback writes them. The internal
+  // pull-up is redundant against the external one but harmless.
+  logger.info("Initializing GPIO48 test button...");
+  static espp::Button gpio48_button({
+      .name = "GPIO48 Button",
+      .interrupt_config =
+          {
+              .gpio_num = 48,
+              .callback = gpio48_button_callback,
+              .active_level = espp::Button::ActiveLevel::LOW,
+              .interrupt_type = espp::Button::InterruptType::ANY_EDGE,
+              .pullup_enabled = true,
+          },
+      .task_config = {.name = "Button", .stack_size_bytes = 4 * 1024, .priority = 5},
+  });
 
   logger.info("Initializing touch...");
   if (!tab5.initialize_touch(touch_callback)) {
