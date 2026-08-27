@@ -27,6 +27,7 @@
 #include "sample_ui_home.h"
 
 #include "continuous_adc.hpp"
+#include "joystick.hpp"
 #include "oneshot_adc.hpp"
 
 #include "rtps_comms.hpp"
@@ -697,13 +698,14 @@ extern "C" void app_main(void) {
   // lv_screen_load(sample_ui_home_screen);
 
   // Bind the Settings-screen axis bars to the ADC subjects (observer pattern).
-  // Bars show raw millivolts; 3300 ≈ full scale at 12 dB attenuation.
+  // Bars show the calibrated joystick position as a percentage: -100..+100,
+  // centered at 0. Raw millivolts still go to RTPS (see the ADC task).
   lv_subject_init_int(&adc_x_subject, 0);
   lv_subject_init_int(&adc_y_subject, 0);
   lv_subject_init_int(&adc_twist_subject, 0);
-  lv_bar_set_range(ui_XBar, 0, 3300);
-  lv_bar_set_range(ui_YBar, 0, 3300);
-  lv_bar_set_range(ui_TwistBar, 0, 3300);
+  lv_bar_set_range(ui_XBar, -100, 100);
+  lv_bar_set_range(ui_YBar, -100, 100);
+  lv_bar_set_range(ui_TwistBar, -100, 100);
   lv_bar_bind_value(ui_XBar, &adc_x_subject);
   lv_bar_bind_value(ui_YBar, &adc_y_subject);
   lv_bar_bind_value(ui_TwistBar, &adc_twist_subject);
@@ -929,6 +931,11 @@ extern "C" void app_main(void) {
        }});
   imu_task.start();
 
+  // guards the joystick range-mapping math (center/range deadbands, circular
+  // clamp, and that twist stays independent of the X/Y gimbal). Asserts, so it
+  // aborts loudly on a regression; compiles to nothing under NDEBUG.
+  espp::joystick_selftest();
+
   logger.info("Starting continuous adc...");
 
   // X/Y: ADC1_CH0/CH1 = GPIO16/GPIO17 on the M5-Bus header.
@@ -950,6 +957,34 @@ extern "C" void app_main(void) {
                            .log_level = espp::Logger::Verbosity::WARN});
   adc.start();
   static espp::OneshotAdc twist_adc({.unit = ADC_UNIT_2, .channels = {twist_channel}});
+
+  // Joystick calibration. These are the numbers to tune per unit: run
+  // scripts/rtps_adc_plot.py, note the resting mV of each axis and the mV at
+  // full deflection each way, and put them here. The values below are the
+  // ideal-divider defaults (0-3300 mV, centered) and WILL be off on real
+  // hardware.
+  //
+  // X/Y are one circular gimbal, so their per-axis deadbands are 0 and the
+  // deadzone lives on the vector radius instead (center_deadzone_radius /
+  // range_deadzone below). Twist is a separate pot on its own axis, so it
+  // carries its own center/range deadbands.
+  static constexpr espp::FloatRangeMapper::Config kXCal{
+      .center = 1650.0f, .center_deadband = 0.0f, .minimum = 0.0f, .maximum = 3300.0f};
+  static constexpr espp::FloatRangeMapper::Config kYCal{
+      .center = 1650.0f, .center_deadband = 0.0f, .minimum = 0.0f, .maximum = 3300.0f};
+  static constexpr espp::FloatRangeMapper::Config kTwistCal{.center = 1650.0f,
+                                                            .center_deadband = 60.0f,
+                                                            .minimum = 0.0f,
+                                                            .maximum = 3300.0f,
+                                                            .range_deadband = 40.0f};
+  static espp::Joystick stick({.x_calibration = kXCal,
+                               .y_calibration = kYCal,
+                               .z_calibration = kTwistCal,
+                               .type = espp::Joystick::Type::CIRCULAR,
+                               .center_deadzone_radius = 0.10f,
+                               .range_deadzone = 0.05f,
+                               .log_level = espp::Logger::Verbosity::WARN});
+
   // customization knobs: sampling/LVGL/RTPS cadence, and how often the serial
   // line is printed. The log is divided down because 30 lines/s is the
   // console-flood pattern that starved LVGL once before.
@@ -959,38 +994,28 @@ extern "C" void app_main(void) {
     static uint32_t cycle = 0;
     const bool log_this_cycle = (cycle++ % kAdcLogDivider) == 0;
 
-    std::optional<float> x_mv;
-    std::optional<float> y_mv;
-    for (auto &conf : channels) {
-      auto maybe_mv = adc.get_mv(conf);
-      if (conf.channel == ADC_CHANNEL_0) {
-        x_mv = maybe_mv;
-      } else if (conf.channel == ADC_CHANNEL_1) {
-        y_mv = maybe_mv;
-      }
-      if (maybe_mv.has_value()) {
-        lv_subject_t *subject = conf.channel == ADC_CHANNEL_0   ? &adc_x_subject
-                                : conf.channel == ADC_CHANNEL_1 ? &adc_y_subject
-                                                                : nullptr;
-        if (subject) {
-          // lv_subject_set_int runs the bar's observer callback synchronously,
-          // which touches the widget, so it needs the LVGL lock
-          std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
-          lv_subject_set_int(subject, static_cast<int32_t>(maybe_mv.value()));
-        }
-      }
-    }
+    auto x_mv = adc.get_mv(channels[0]); // ADC1_CH0
+    auto y_mv = adc.get_mv(channels[1]); // ADC1_CH1
     // twist pot on ADC2 (GPIO52), sampled oneshot — see comment at the
     // channel definitions above
     auto twist_mv = twist_adc.read_mv(twist_channel);
-    if (twist_mv.has_value()) {
-      std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
-      lv_subject_set_int(&adc_twist_subject, static_cast<int32_t>(twist_mv.value()));
-    }
 
-    // stream the snapshot to the PC (rtps_adc_plot.py); quiet no-op until
-    // RTPS is up and a subscriber is discovered
     if (x_mv && y_mv && twist_mv) {
+      // raw mV -> calibrated [-1,1] per axis: circular deadzone on the X/Y
+      // gimbal, twist mapped independently by its own range mapper
+      stick.update(*x_mv, *y_mv, *twist_mv);
+      {
+        // lv_subject_set_int runs the bar's observer callback synchronously,
+        // which touches the widget, so it needs the LVGL lock
+        std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
+        lv_subject_set_int(&adc_x_subject, static_cast<int32_t>(stick.x() * 100.0f));
+        lv_subject_set_int(&adc_y_subject, static_cast<int32_t>(stick.y() * 100.0f));
+        lv_subject_set_int(&adc_twist_subject, static_cast<int32_t>(stick.z() * 100.0f));
+      }
+
+      // stream the RAW snapshot to the PC (rtps_adc_plot.py); this is what the
+      // calibration constants above get measured from, so it stays in mV.
+      // quiet no-op until RTPS is up and a subscriber is discovered
       auto to_mv = [](float v) { return static_cast<uint32_t>(std::max(v, 0.0f)); };
       rtps_comms_publish_adc(to_mv(*x_mv), to_mv(*y_mv), to_mv(*twist_mv));
     }
