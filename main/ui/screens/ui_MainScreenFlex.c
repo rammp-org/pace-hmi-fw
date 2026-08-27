@@ -116,7 +116,6 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_x(ui_LockedPanel, 1);
     lv_obj_set_y(ui_LockedPanel, 0);
     lv_obj_set_align(ui_LockedPanel, LV_ALIGN_CENTER);
-    lv_obj_add_flag(ui_LockedPanel, LV_OBJ_FLAG_HIDDEN);     /// Flags
     lv_obj_remove_flag(ui_LockedPanel, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_obj_set_style_radius(ui_LockedPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     ui_object_set_themeable_style_property(ui_LockedPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
@@ -242,7 +241,6 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_x(ui_DrivePanel, 1);
     lv_obj_set_y(ui_DrivePanel, 0);
     lv_obj_set_align(ui_DrivePanel, LV_ALIGN_CENTER);
-    lv_obj_add_flag(ui_DrivePanel, LV_OBJ_FLAG_HIDDEN);     /// Flags
     lv_obj_remove_flag(ui_DrivePanel, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_obj_set_style_radius(ui_DrivePanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     ui_object_set_themeable_style_property(ui_DrivePanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,

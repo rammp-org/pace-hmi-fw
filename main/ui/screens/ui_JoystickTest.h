@@ -21,6 +21,8 @@ extern lv_obj_t * ui_TwistBar;
 extern void ui_event_SettingsButton2(lv_event_t * e);
 extern lv_obj_t * ui_SettingsButton2;
 extern lv_obj_t * ui_Label5;
+extern lv_obj_t * ui_ButtonPanel;
+extern lv_obj_t * ui_ButtonCounter;
 // CUSTOM VARIABLES
 
 #ifdef __cplusplus

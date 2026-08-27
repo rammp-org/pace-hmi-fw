@@ -12,6 +12,8 @@ lv_obj_t * ui_YBar = NULL;
 lv_obj_t * ui_TwistBar = NULL;
 lv_obj_t * ui_SettingsButton2 = NULL;
 lv_obj_t * ui_Label5 = NULL;
+lv_obj_t * ui_ButtonPanel = NULL;
+lv_obj_t * ui_ButtonCounter = NULL;
 // event funtions
 void ui_event_SettingsButton2(lv_event_t * e)
 {
@@ -89,6 +91,29 @@ void ui_JoystickTest_screen_init(void)
     lv_label_set_text(ui_Label5, "Home");
     lv_obj_set_style_text_font(ui_Label5, &lv_font_montserrat_24, LV_PART_MAIN | LV_STATE_DEFAULT);
 
+    ui_ButtonPanel = lv_obj_create(ui_JoystickTest);
+    lv_obj_set_width(ui_ButtonPanel, 200);
+    lv_obj_set_height(ui_ButtonPanel, 100);
+    lv_obj_set_x(ui_ButtonPanel, 0);
+    lv_obj_set_y(ui_ButtonPanel, -300);
+    lv_obj_set_align(ui_ButtonPanel, LV_ALIGN_CENTER);
+    lv_obj_remove_flag(ui_ButtonPanel, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    ui_object_set_themeable_style_property(ui_ButtonPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_ButtonPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+
+    ui_ButtonCounter = lv_label_create(ui_ButtonPanel);
+    lv_obj_set_width(ui_ButtonCounter, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(ui_ButtonCounter, LV_SIZE_CONTENT);    /// 1
+    lv_obj_set_align(ui_ButtonCounter, LV_ALIGN_CENTER);
+    lv_label_set_text(ui_ButtonCounter, "0");
+    ui_object_set_themeable_style_property(ui_ButtonCounter, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_ButtonCounter, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text);
+    lv_obj_set_style_text_font(ui_ButtonCounter, &lv_font_montserrat_30, LV_PART_MAIN | LV_STATE_DEFAULT);
+
     lv_obj_add_event_cb(ui_SettingsButton2, ui_event_SettingsButton2, LV_EVENT_ALL, NULL);
 
 }
@@ -105,5 +130,7 @@ void ui_JoystickTest_screen_destroy(void)
     ui_TwistBar = NULL;
     ui_SettingsButton2 = NULL;
     ui_Label5 = NULL;
+    ui_ButtonPanel = NULL;
+    ui_ButtonCounter = NULL;
 
 }
