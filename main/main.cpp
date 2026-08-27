@@ -29,6 +29,7 @@
 #include "button.hpp"
 #include "continuous_adc.hpp"
 #include "joystick.hpp"
+#include "keypad_input.hpp"
 #include "oneshot_adc.hpp"
 
 #include "rtps_comms.hpp"
@@ -83,6 +84,35 @@ static lv_subject_t adc_twist_subject;
 // current pressed state (drives the ButtonPanel background via an observer)
 static lv_subject_t button_count_subject;
 static lv_subject_t button_pressed_subject;
+
+// Joystick -> LVGL keypad. The stick is continuous and a keypad is discrete, so
+// the ADC task latches one direction per flick here and the indev read function
+// drains it. Atomic because the two run on different tasks.
+// -1 = left, +1 = right, 0 = nothing pending.
+static std::atomic<int> joy_key_dir{0};
+
+// Page the FlexPanel one child per key. This replaces LVGL's built-in
+// LV_OBJ_FLAG_SCROLL_WITH_ARROW handling, which scrolls by width/4 with
+// LV_ANIM_OFF and ignores snap entirely — with 720 px children that's four
+// off-center nudges per panel instead of one clean page.
+static void flex_key_cb(lv_event_t *e) {
+  lv_obj_t *panel = lv_event_get_target_obj(e);
+  // the group is global, so an inactive screen would otherwise scroll unseen
+  if (lv_obj_get_screen(panel) != lv_screen_active()) {
+    return;
+  }
+  const uint32_t key = lv_event_get_key(e);
+  static int32_t idx = 0;
+  const int32_t last = static_cast<int32_t>(lv_obj_get_child_count(panel)) - 1;
+  if (key == LV_KEY_RIGHT) {
+    idx = LV_MIN(idx + 1, last);
+  } else if (key == LV_KEY_LEFT) {
+    idx = LV_MAX(idx - 1, 0);
+  } else {
+    return;
+  }
+  lv_obj_scroll_to_view(lv_obj_get_child(panel, idx), LV_ANIM_ON);
+}
 
 // Observer for the ButtonPanel background. There's no built-in binding for a
 // style property, so the widget work happens here; the observer is bound to the
@@ -778,6 +808,28 @@ extern "C" void app_main(void) {
       .task_config = {.name = "Button", .stack_size_bytes = 4 * 1024, .priority = 5},
   });
 
+  // Joystick as an LVGL keypad input device, driving the MainScreenFlex
+  // horizontal pager. The read function runs on the LVGL task and drains the
+  // latch the ADC task fills, so one flick of the stick = one PRESSED cycle =
+  // one LV_EVENT_KEY. Touch keeps working; indevs coexist.
+  logger.info("Adding joystick keypad input device...");
+  static espp::KeypadInput joystick_keypad(
+      {.read = [](bool *up, bool *down, bool *left, bool *right, bool *enter, bool *escape) {
+        const int dir = joy_key_dir.exchange(0);
+        *left = dir < 0;
+        *right = dir > 0;
+        *up = *down = *enter = *escape = false;
+      }});
+  static lv_group_t *joystick_group = lv_group_create();
+  lv_group_add_obj(joystick_group, ui_FlexPanel);
+  lv_indev_set_group(joystick_keypad.get_input_device(), joystick_group);
+  lv_group_focus_obj(ui_FlexPanel);
+  // drop the built-in arrow scroll so only flex_key_cb acts on the key. Done
+  // here rather than in ui_MainScreenFlex.c because import_ui.ps1 mirrors the
+  // SquareLine export (robocopy /MIR) and would delete the edit.
+  lv_obj_remove_flag(ui_FlexPanel, LV_OBJ_FLAG_SCROLL_WITH_ARROW);
+  lv_obj_add_event_cb(ui_FlexPanel, flex_key_cb, LV_EVENT_KEY, nullptr);
+
   logger.info("Initializing touch...");
   if (!tab5.initialize_touch(touch_callback)) {
     logger.error("Failed to initialize touch!");
@@ -1036,17 +1088,28 @@ extern "C" void app_main(void) {
   // deadzone lives on the vector radius instead (center_deadzone_radius /
   // range_deadzone below). Twist is a separate pot on its own axis, so it
   // carries its own center/range deadbands.
-  static constexpr espp::FloatRangeMapper::Config kXCal{
+  //
+  // AXIS WIRING: the gimbal pots are cross-wired relative to the channel
+  // names. ADC1_CH1 (GPIO17) is the HORIZONTAL axis and reads higher to the
+  // right, so it feeds the joystick's X with no inversion. ADC1_CH0 (GPIO16)
+  // is the VERTICAL axis and reads *lower* moving up, so it feeds Y with
+  // invert_output — after which +Y is up, as the rest of the code assumes.
+  // Fixed here at the calibration level so every consumer (UI bars, the
+  // keypad pager, RTPS) sees correct axes without compensating itself.
+  static constexpr espp::FloatRangeMapper::Config kHorizontalCal{
       .center = 1650.0f, .center_deadband = 0.0f, .minimum = 0.0f, .maximum = 3300.0f};
-  static constexpr espp::FloatRangeMapper::Config kYCal{
-      .center = 1650.0f, .center_deadband = 0.0f, .minimum = 0.0f, .maximum = 3300.0f};
+  static constexpr espp::FloatRangeMapper::Config kVerticalCal{.center = 1650.0f,
+                                                               .center_deadband = 0.0f,
+                                                               .minimum = 0.0f,
+                                                               .maximum = 3300.0f,
+                                                               .invert_output = true};
   static constexpr espp::FloatRangeMapper::Config kTwistCal{.center = 1650.0f,
                                                             .center_deadband = 60.0f,
                                                             .minimum = 0.0f,
                                                             .maximum = 3300.0f,
                                                             .range_deadband = 40.0f};
-  static espp::Joystick stick({.x_calibration = kXCal,
-                               .y_calibration = kYCal,
+  static espp::Joystick stick({.x_calibration = kHorizontalCal,
+                               .y_calibration = kVerticalCal,
                                .z_calibration = kTwistCal,
                                .type = espp::Joystick::Type::CIRCULAR,
                                .center_deadzone_radius = 0.10f,
@@ -1062,16 +1125,33 @@ extern "C" void app_main(void) {
     static uint32_t cycle = 0;
     const bool log_this_cycle = (cycle++ % kAdcLogDivider) == 0;
 
-    auto x_mv = adc.get_mv(channels[0]); // ADC1_CH0
-    auto y_mv = adc.get_mv(channels[1]); // ADC1_CH1
+    // see the AXIS WIRING note at the calibrations: CH1 is horizontal, CH0 is
+    // vertical
+    auto vert_mv = adc.get_mv(channels[0]);  // ADC1_CH0 (GPIO16)
+    auto horiz_mv = adc.get_mv(channels[1]); // ADC1_CH1 (GPIO17)
     // twist pot on ADC2 (GPIO52), sampled oneshot — see comment at the
     // channel definitions above
     auto twist_mv = twist_adc.read_mv(twist_channel);
 
-    if (x_mv && y_mv && twist_mv) {
+    if (vert_mv && horiz_mv && twist_mv) {
       // raw mV -> calibrated [-1,1] per axis: circular deadzone on the X/Y
-      // gimbal, twist mapped independently by its own range mapper
-      stick.update(*x_mv, *y_mv, *twist_mv);
+      // gimbal, twist mapped independently by its own range mapper. X is the
+      // horizontal channel, Y the vertical one (inverted by kVerticalCal).
+      stick.update(*horiz_mv, *vert_mv, *twist_mv);
+
+      // Analog -> discrete for the LVGL keypad: one key per flick. Hysteresis
+      // (out past 0.5, back inside 0.25 to re-arm) is what stops a held stick
+      // from paging continuously.
+      {
+        static bool centered = true;
+        const float x = stick.x();
+        if (centered && std::abs(x) > 0.5f) {
+          joy_key_dir.store(x > 0 ? 1 : -1);
+          centered = false;
+        } else if (!centered && std::abs(x) < 0.25f) {
+          centered = true;
+        }
+      }
       {
         // lv_subject_set_int runs the bar's observer callback synchronously,
         // which touches the widget, so it needs the LVGL lock
@@ -1083,9 +1163,13 @@ extern "C" void app_main(void) {
 
       // stream the RAW snapshot to the PC (rtps_adc_plot.py); this is what the
       // calibration constants above get measured from, so it stays in mV.
+      // Ordered by logical axis (X = horizontal, Y = vertical) to match the
+      // rest of the code, but the values are untouched: the vertical trace
+      // still falls as the stick moves up, since invert_output is applied by
+      // the mapper, not here.
       // quiet no-op until RTPS is up and a subscriber is discovered
       auto to_mv = [](float v) { return static_cast<uint32_t>(std::max(v, 0.0f)); };
-      rtps_comms_publish_adc(to_mv(*x_mv), to_mv(*y_mv), to_mv(*twist_mv));
+      rtps_comms_publish_adc(to_mv(*horiz_mv), to_mv(*vert_mv), to_mv(*twist_mv));
     }
 
     if (log_this_cycle) {
@@ -1097,8 +1181,8 @@ extern "C" void app_main(void) {
       // console transport dropped the lines; a continuous sequence would mean
       // the task itself had paused
       static uint32_t print_seq = 0;
-      // fmt::print("#{} ADC1_CH0: V = {}\tADC1_CH1: V = {}\tADC2_CH0: V = {}\n", print_seq++,
-      //            fmt_mv(x_mv), fmt_mv(y_mv), fmt_mv(twist_mv));
+      // fmt::print("#{} horiz(CH1): {}\tvert(CH0): {}\ttwist: {}\n", print_seq++,
+      //            fmt_mv(horiz_mv), fmt_mv(vert_mv), fmt_mv(twist_mv));
     }
     // NOTE: sleeping in this way allows the sleep to exit early when the
     // task is being stopped / destroyed
