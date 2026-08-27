@@ -63,6 +63,20 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 1.2.0
+  espp/button:
+    component_hash: 1d2728b7d7cbeed05343d36e2b5b66ae190c9daf94d6dbddd5165474c4315665
+    dependencies:
+    - name: espp/interrupt
+      registry_url: https://components.espressif.com
+      require: private
+      version: '>=1.0'
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.2.0
   espp/cdr:
     component_hash: 71b9fc0118e25d782c35081e895670095e1ca79750d95a91b177610e733dd95b
     dependencies:
@@ -699,6 +713,7 @@ direct_dependencies:
 - espp/base_component
 - espp/base_peripheral
 - espp/bmi270
+- espp/button
 - espp/cdr
 - espp/cli
 - espp/codec
@@ -728,6 +743,6 @@ direct_dependencies:
 - espressif/w5500
 - idf
 - lvgl/lvgl
-manifest_hash: 45ebe6f29878be8d33ab13e7cd8575127c05a6a2d5eb749d8bb2bc9e7cbe2f41
+manifest_hash: 5c3a11fc34cb113cc19f9f1c0f4c72a18df46a7ce46763ed8101750d4ca78bfc
 target: esp32p4
 version: 3.0.0
