@@ -284,7 +284,6 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_align(ui_Image1, LV_ALIGN_CENTER);
     lv_obj_add_flag(ui_Image1, LV_OBJ_FLAG_CLICKABLE);     /// Flags
     lv_obj_remove_flag(ui_Image1, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_image_set_scale(ui_Image1, 128);
 
     ui_UnlockArc1 = ui_UnlockArc_create(ui_GraphicsPanel1);
     lv_obj_set_x(ui_UnlockArc1, 0);
@@ -390,7 +389,6 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_align(ui_Image2, LV_ALIGN_CENTER);
     lv_obj_add_flag(ui_Image2, LV_OBJ_FLAG_CLICKABLE);     /// Flags
     lv_obj_remove_flag(ui_Image2, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_image_set_scale(ui_Image2, 150);
 
     ui_UnlockArc2 = ui_UnlockArc_create(ui_GraphicsPanel2);
     lv_obj_set_x(ui_UnlockArc2, 0);

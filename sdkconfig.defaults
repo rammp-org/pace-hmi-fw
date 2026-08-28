@@ -139,3 +139,21 @@ CONFIG_LV_DRAW_BUF_ALIGN=128
 CONFIG_LV_USE_SYSMON=y
 CONFIG_LV_USE_PERF_MONITOR=y
 CONFIG_LV_PERF_MONITOR_ALIGN_TOP_RIGHT=y
+
+# Parallel software rendering (LV_DRAW_SW_DRAW_UNIT_CNT=2 + LV_OS_FREERTOS) is
+# OFF: it boot-loops with a stack-protection fault in ThorVG's rleRender.
+#
+# Enabling >1 draw unit makes lv_draw_sw_init call
+# tvg_engine_init(TVG_ENGINE_SW, CNT) instead of (..., 0), which spawns ThorVG's
+# own TaskScheduler worker threads (tvgTaskScheduler.cpp uses std::thread). With
+# 1 draw unit ThorVG runs inline on the 32KB LVGL task stack and is fine.
+#
+# Those workers get a ~2040-byte usable stack and none of the obvious knobs move
+# it -- verified by panic dumps reporting byte-identical stack bounds after:
+#   LV_DRAW_THREAD_STACK_SIZE=131072  (that governs LVGL's own swdraw threads,
+#       and note LVGL's FreeRTOS port divides bytes by sizeof(StackType_t) while
+#       ESP-IDF's xTaskCreate already takes BYTES, so it under-allocates 4x)
+#   PTHREAD_TASK_STACK_SIZE_DEFAULT=32768 (confirmed present in sdkconfig.h)
+# Next thing to try: whether LVGL's bundled ThorVG sets an explicit pthread attr
+# stack size of its own, or drop LV_USE_THORVG entirely (the only runtime SVG
+# left is the BootScreen logo; other SVGs are already pre-rasterized to PNG).
