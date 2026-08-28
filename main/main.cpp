@@ -18,6 +18,7 @@
 #include "m5stack-tab5.hpp"
 
 #include "da7280.hpp"
+#include "drv2605.hpp"
 
 #include "kalman_filter.hpp"
 #include "madgwick_filter.hpp"
@@ -171,6 +172,65 @@ static void flex_key_cb(lv_event_t *e) {
   }
 }
 
+// HAPTIC TEST settings row -> kHapticBuzzDuration of vibration.
+//
+// Set by init_haptic() once the DRV2605 answers, and left null if it does not,
+// so the button is inert rather than fatal on a board with no motor fitted.
+// The DRV2605 plays the armed waveform on its own once START is written, so
+// this is a single I2C write and the LVGL task is never held for the duration.
+// espp::I2c and BasePeripheral are both mutex-protected, so sharing the bus
+// with the IMU/touch/expander traffic from other tasks is safe.
+static espp::Drv2605 *haptic = nullptr;
+
+// One ALERT_1000MS effect per sequencer slot, so the buzz lasts one second per
+// slot. Keep kHapticBuzzDuration in step with kHapticBuzzSlots: it is what the
+// label countdown runs on, and a mismatch shows up as a label that clears
+// before the motor stops (or lingers after it).
+static constexpr uint8_t kHapticBuzzSlots = 2;
+static_assert(kHapticBuzzSlots < 8, "need a sequencer slot left for END");
+static constexpr auto kHapticBuzzDuration = kHapticBuzzSlots * 1000ms;
+
+// The button label is firmware state, so it goes through a subject rather than
+// an lv_label_set_text() from the press handler. The buffers are static for the
+// same reason the subject is: the subject stores its copy in them, and both have
+// to outlive the label bound to them.
+static constexpr const char *kHapticIdleText = "HAPTIC TEST";
+static constexpr const char *kHapticBusyText = "VIBRATING";
+static char haptic_label_buf[16];
+static char haptic_label_prev_buf[16];
+static_assert(sizeof(haptic_label_buf) > sizeof("HAPTIC TEST"), "label buffer too small");
+static lv_subject_t haptic_label_subject;
+
+// Restores the idle label when the buzz ends. The DRV2605 does not report that
+// it finished a sequence, so the label is timed rather than polled — which is
+// why kHapticBuzzDuration has to stay in step with the armed slot count.
+//
+// Created paused and re-armed on each press, so pressing again mid-buzz just
+// restarts the countdown instead of stacking a second timer that would clear
+// the label while the motor is still running. Runs on the LVGL task, like the
+// handler that arms it.
+static lv_timer_t *haptic_label_timer = nullptr;
+
+static void haptic_label_reset_cb(lv_timer_t *timer) {
+  lv_timer_pause(timer);
+  lv_subject_copy_string(&haptic_label_subject, kHapticIdleText);
+}
+
+static void haptic_test_cb(lv_event_t *e) {
+  LV_UNUSED(e);
+  if (!haptic) {
+    return; // no motor on this board (init_haptic already logged why)
+  }
+  std::error_code ec;
+  if (!haptic->start(ec)) {
+    fmt::print("DRV2605 start failed: {}\n", ec.message());
+    return; // nothing is vibrating, so leave the label alone
+  }
+  lv_subject_copy_string(&haptic_label_subject, kHapticBusyText);
+  lv_timer_reset(haptic_label_timer);
+  lv_timer_resume(haptic_label_timer);
+}
+
 // FPS COUNTER settings row -> LVGL's built-in perf overlay (lv_sysmon), which
 // already renders FPS/CPU on the sys layer above every screen. Wired here rather
 // than through a SquareLine CALL FUNCTION event so it needs no round trip
@@ -232,6 +292,10 @@ static void gpio48_button_callback(const espp::Interrupt::Event &event) {
 static bool load_audio(size_t &out_size, size_t &out_sample_rate);
 static void play_click(espp::M5StackTab5 &tab5);
 
+// DRV2605 haptic driver: brings the motor on the PCB's JST connector up and
+// arms it with a one-second waveform, ready for haptic_buzz().
+static void init_haptic(espp::Logger &logger, espp::I2c &i2c);
+
 // DA7280 haptic driver bring-up test (raw register read, no driver class yet)
 static void test_da7280(espp::Logger &logger, espp::I2c &i2c,
                         const std::vector<uint8_t> &found_addresses);
@@ -269,6 +333,76 @@ static void direct_flush_cb(lv_display_t *disp, const lv_area_t * /*area*/, uint
   // flush_ready itself arrives via the panel's on_color_trans_done; this call
   // additionally waits for the swap before letting LVGL render again.
   tab5.present_frame(px_map);
+}
+
+// DRV2605 haptic motor driver (the motor on the PCB's JST connector).
+//
+// The waveform is armed once here rather than per press: slots 0 and 1 each
+// hold ALERT 1000MS (ROM effect 16, a one-second continuous buzz) so the two
+// play back to back for kHapticBuzzDuration, and slot 2 holds END to terminate
+// the sequence. Every later press is then just a START write and the chip runs
+// the two seconds on its own — nothing blocks the LVGL task for the duration.
+// The sequencer has 8 slots, and the last one used must hold the terminator.
+//
+// The bundled motor is an ERM; for an LRA swap MotorType::ERM -> LRA and
+// Library::ERM_1 -> Library::LRA. ERM_1 is LIBRARY register value 2, i.e. TI's
+// "Library B" (3 V rated ERM) — the enum names are offset by one from the
+// datasheet's library numbering.
+//
+// The Tab5 internal bus runs at 1 MHz; the DRV2605 is fast-mode only (400 kHz
+// max), so this device gets its own per-device clock rather than the bus rate.
+static constexpr uint32_t kDrv2605SclSpeedHz = 400 * 1000;
+
+static void init_haptic(espp::Logger &logger, espp::I2c &i2c) {
+  std::error_code ec;
+  // Function-local statics: both outlive this call, because haptic_test_cb
+  // reaches the driver (and the driver the device) for the rest of the run.
+  static auto drv2605_i2c_device = i2c.add_device<uint8_t>(
+      {
+          .device_address = espp::Drv2605::DEFAULT_ADDRESS,
+          .timeout_ms = static_cast<int>(i2c.config().timeout_ms),
+          .scl_speed_hz = kDrv2605SclSpeedHz,
+          .log_level = espp::Logger::Verbosity::WARN,
+      },
+      ec);
+  if (!drv2605_i2c_device) {
+    logger.error("Could not create DRV2605 I2C device: {}", ec.message());
+    return;
+  }
+
+  static espp::Drv2605 drv2605({
+      .device_address = espp::Drv2605::DEFAULT_ADDRESS,
+      .write = espp::make_i2c_addressed_write(drv2605_i2c_device),
+      .read_register = espp::make_i2c_addressed_read_register(drv2605_i2c_device),
+      .motor_type = espp::Drv2605::MotorType::ERM,
+      .auto_init = false,
+      .log_level = espp::Logger::Verbosity::WARN,
+  });
+
+  if (!drv2605.initialize(ec)) {
+    logger.error("DRV2605 init failed at {:#02x} ({}) — check wiring",
+                 espp::Drv2605::DEFAULT_ADDRESS, ec.message());
+    return;
+  }
+  if (!drv2605.select_library(espp::Drv2605::Library::ERM_1, ec)) {
+    logger.error("DRV2605 select_library failed: {}", ec.message());
+    return;
+  }
+  for (uint8_t slot = 0; slot < kHapticBuzzSlots; slot++) {
+    if (!drv2605.set_waveform(slot, espp::Drv2605::Waveform::ALERT_1000MS, ec)) {
+      logger.error("DRV2605 set_waveform failed: {}", ec.message());
+      return;
+    }
+  }
+  if (!drv2605.set_waveform(kHapticBuzzSlots, espp::Drv2605::Waveform::END, ec)) {
+    logger.error("DRV2605 set_waveform failed: {}", ec.message());
+    return;
+  }
+
+  // Only published once the motor is armed, so a half-configured driver can
+  // never be reached from the button.
+  haptic = &drv2605;
+  logger.info("DRV2605 ready: HAPTIC TEST plays a {} ms buzz", kHapticBuzzDuration.count());
 }
 
 // DA7280 haptic driver bring-up test: read-only register probe, no driver
@@ -513,6 +647,10 @@ extern "C" void app_main(void) {
     }
   }
   logger.info("Found devices at addresses: {::#02x}", found_addresses);
+
+  // DRV2605 haptic motor driver, armed with the 1 s waveform the HAPTIC TEST
+  // settings row plays (the button is wired up after ui_init() below).
+  init_haptic(logger, i2c);
 
   // DA7280 haptic driver bring-up test (raw register read, no driver yet)
   test_da7280(logger, i2c, found_addresses);
@@ -917,6 +1055,18 @@ extern "C" void app_main(void) {
   lv_obj_remove_flag(ui_FlexPanel, LV_OBJ_FLAG_SCROLL_WITH_ARROW);
   lv_obj_add_event_cb(ui_FlexPanel, flex_key_cb, LV_EVENT_KEY, nullptr);
 
+  // WORKAROUND: the current SquareLine export marks these three pages hidden,
+  // which leaves SettingsMenu as the only page the flex layout lays out. That
+  // breaks paging outright — flex_scroll_step() sizes its step from child 0
+  // (LockedPanel), and a hidden child has width 0, so it returns early and the
+  // joystick appears dead. Cleared here for the same reason as the flag above
+  // (a hand-edit in main/ui would not survive the next /MIR import).
+  // Delete once the export stops hiding them; until then this is a no-op if
+  // they are already visible.
+  lv_obj_remove_flag(ui_LockedPanel, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_remove_flag(ui_DrivePanel, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_remove_flag(ui_SeatAdjustmentPanel, LV_OBJ_FLAG_HIDDEN);
+
   // Focus group for the settings rows. Built by walking the children rather
   // than naming ui_Button10/5/6/... so rows added in SquareLine are picked up
   // on the next import with no change here. The FOCUSED styling (blue border)
@@ -932,6 +1082,18 @@ extern "C" void app_main(void) {
   // which is what makes the hide safe.
   lv_sysmon_hide_performance(lv_display_get_default());
   lv_obj_add_event_cb(ui_FPSCounterButton, fps_toggle_cb, LV_EVENT_CLICKED, nullptr);
+
+  // HAPTIC TEST settings row. CLICKED (not PRESSED) so the joystick's ENTER
+  // key drives it too — the keypad indev raises the same event as a touch.
+  // The label reads VIBRATING for as long as the motor runs, so the binding and
+  // the countdown timer are set up before the handler that drives them.
+  lv_subject_init_string(&haptic_label_subject, haptic_label_buf, haptic_label_prev_buf,
+                         sizeof(haptic_label_buf), kHapticIdleText);
+  lv_label_bind_text(ui_HapticTestLabel, &haptic_label_subject, nullptr);
+  haptic_label_timer = lv_timer_create(haptic_label_reset_cb,
+                                       static_cast<uint32_t>(kHapticBuzzDuration.count()), nullptr);
+  lv_timer_pause(haptic_label_timer);
+  lv_obj_add_event_cb(ui_HapticTestButton, haptic_test_cb, LV_EVENT_CLICKED, nullptr);
 
   // The overlay hardcodes LVGL's 14 px default font (lv_sysmon_create sets no
   // font at all), which is unreadable on a 1280x720 panel at arm's length.

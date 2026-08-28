@@ -50,8 +50,8 @@ lv_obj_t * ui_Button2 = NULL;
 lv_obj_t * ui_ButtonLabel2 = NULL;
 lv_obj_t * ui_FPSCounterButton = NULL;
 lv_obj_t * ui_FPSCounterLabel = NULL;
-lv_obj_t * ui_Button4 = NULL;
-lv_obj_t * ui_ButtonLabel4 = NULL;
+lv_obj_t * ui_HapticTestButton = NULL;
+lv_obj_t * ui_HapticTestLabel = NULL;
 lv_obj_t * ui_Button7 = NULL;
 lv_obj_t * ui_ButtonLabel7 = NULL;
 lv_obj_t * ui_Button8 = NULL;
@@ -729,42 +729,42 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_style_text_align(ui_FPSCounterLabel, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(ui_FPSCounterLabel, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_Button4 = lv_button_create(ui_SettingsFlexPanel);
-    lv_obj_set_width(ui_Button4, 620);
-    lv_obj_set_height(ui_Button4, 100);
-    lv_obj_set_x(ui_Button4, 0);
-    lv_obj_set_y(ui_Button4, 340);
-    lv_obj_set_align(ui_Button4, LV_ALIGN_TOP_MID);
-    lv_obj_add_flag(ui_Button4, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
-    lv_obj_remove_flag(ui_Button4, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_radius(ui_Button4, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_Button4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+    ui_HapticTestButton = lv_button_create(ui_SettingsFlexPanel);
+    lv_obj_set_width(ui_HapticTestButton, 620);
+    lv_obj_set_height(ui_HapticTestButton, 100);
+    lv_obj_set_x(ui_HapticTestButton, 0);
+    lv_obj_set_y(ui_HapticTestButton, 340);
+    lv_obj_set_align(ui_HapticTestButton, LV_ALIGN_TOP_MID);
+    lv_obj_add_flag(ui_HapticTestButton, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
+    lv_obj_remove_flag(ui_HapticTestButton, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_radius(ui_HapticTestButton, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_HapticTestButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
                                            _ui_theme_color_background);
-    ui_object_set_themeable_style_property(ui_Button4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+    ui_object_set_themeable_style_property(ui_HapticTestButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
                                            _ui_theme_alpha_background);
-    ui_object_set_themeable_style_property(ui_Button4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
+    ui_object_set_themeable_style_property(ui_HapticTestButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
                                            _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_Button4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
+    ui_object_set_themeable_style_property(ui_HapticTestButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
                                            _ui_theme_alpha_text);
-    lv_obj_set_style_border_width(ui_Button4, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_Button4, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_BORDER_COLOR,
+    lv_obj_set_style_border_width(ui_HapticTestButton, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_HapticTestButton, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_BORDER_COLOR,
                                            _ui_theme_color_focused);
-    ui_object_set_themeable_style_property(ui_Button4, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_BORDER_OPA,
+    ui_object_set_themeable_style_property(ui_HapticTestButton, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_BORDER_OPA,
                                            _ui_theme_alpha_focused);
 
-    ui_ButtonLabel4 = lv_label_create(ui_Button4);
-    lv_obj_set_width(ui_ButtonLabel4, 540);
-    lv_obj_set_height(ui_ButtonLabel4, 50);
-    lv_obj_set_x(ui_ButtonLabel4, 20);
-    lv_obj_set_y(ui_ButtonLabel4, 0);
-    lv_obj_set_align(ui_ButtonLabel4, LV_ALIGN_LEFT_MID);
-    lv_label_set_text(ui_ButtonLabel4, "ABOUT2");
-    ui_object_set_themeable_style_property(ui_ButtonLabel4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+    ui_HapticTestLabel = lv_label_create(ui_HapticTestButton);
+    lv_obj_set_width(ui_HapticTestLabel, 540);
+    lv_obj_set_height(ui_HapticTestLabel, 50);
+    lv_obj_set_x(ui_HapticTestLabel, 20);
+    lv_obj_set_y(ui_HapticTestLabel, 0);
+    lv_obj_set_align(ui_HapticTestLabel, LV_ALIGN_LEFT_MID);
+    lv_label_set_text(ui_HapticTestLabel, "HAPTIC TEST");
+    ui_object_set_themeable_style_property(ui_HapticTestLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_ButtonLabel4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+    ui_object_set_themeable_style_property(ui_HapticTestLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
                                            _ui_theme_alpha_text);
-    lv_obj_set_style_text_align(ui_ButtonLabel4, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_ButtonLabel4, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_align(ui_HapticTestLabel, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_HapticTestLabel, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_Button7 = lv_button_create(ui_SettingsFlexPanel);
     lv_obj_set_width(ui_Button7, 620);
@@ -1119,8 +1119,8 @@ void ui_MainScreenFlex_screen_destroy(void)
     ui_ButtonLabel2 = NULL;
     ui_FPSCounterButton = NULL;
     ui_FPSCounterLabel = NULL;
-    ui_Button4 = NULL;
-    ui_ButtonLabel4 = NULL;
+    ui_HapticTestButton = NULL;
+    ui_HapticTestLabel = NULL;
     ui_Button7 = NULL;
     ui_ButtonLabel7 = NULL;
     ui_Button8 = NULL;

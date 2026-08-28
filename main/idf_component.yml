@@ -30,6 +30,8 @@ dependencies:
   espp/codec: ==1.2.0
   espp/display: ==1.2.0
   espp/display_drivers: ==1.2.0
+  # DRV2605 haptic motor driver (the motor on the PCB's JST connector)
+  espp/drv2605: ==1.2.0
   espressif/esp-dsp: ^1.8.2
   espp/filters: ==1.2.0
   espp/gt911: ==1.2.0
