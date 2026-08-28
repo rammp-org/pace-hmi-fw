@@ -86,6 +86,22 @@ static lv_subject_t adc_twist_subject;
 static lv_subject_t button_count_subject;
 static lv_subject_t button_pressed_subject;
 
+// Lock state. Declared up here with the other subjects because flex_key_cb
+// below reads them; the rest of the lock/unlock machinery lives in its own
+// section further down, after the haptic and audio helpers it needs.
+//
+// 1 = locked, 0 = unlocked. The single source of truth for both padlock images
+// and both labels, so a future "lock on request" is one set_locked(true) call
+// and every bound widget follows.
+static lv_subject_t locked_subject;
+// 1 = the FlexPanel pager is usable. Deliberately NOT just !locked_subject:
+// it stays 0 through the pause between the unlock landing and the auto-advance
+// to the Drive page, so nothing can steer the pager out from under that scroll.
+// Drives the pager's SCROLLABLE flag (touch), the LockedPanel arrows' HIDDEN
+// flag (taps), the sibling pages' HIDDEN flags, and the guard in flex_key_cb
+// (joystick) — the four independent ways the pager can be moved.
+static lv_subject_t paging_subject;
+
 // Joystick -> LVGL keypad. Held at the *level* the stick is at: whichever
 // LV_KEY_* direction it is deflected toward, or 0 when centered. Reporting a
 // held key rather than a one-shot latch is what lets LVGL's own key repeat
@@ -142,12 +158,18 @@ static void flex_key_cb(lv_event_t *e) {
   }
   const uint32_t key = lv_event_get_key(e);
 
-  if (key == LV_KEY_RIGHT) {
-    flex_scroll_next(nullptr);
-    return;
-  }
-  if (key == LV_KEY_LEFT) {
-    flex_scroll_previous(nullptr);
+  // Paging is blocked until the driving mode is unlocked. Removing the pager's
+  // SCROLLABLE flag stops a touch drag but not this: flex_scroll_step reaches
+  // lv_obj_scroll_to_x, which is programmatic and has no SCROLLABLE check.
+  if (key == LV_KEY_RIGHT || key == LV_KEY_LEFT) {
+    if (!lv_subject_get_int(&paging_subject)) {
+      return;
+    }
+    if (key == LV_KEY_RIGHT) {
+      flex_scroll_next(nullptr);
+    } else {
+      flex_scroll_previous(nullptr);
+    }
     return;
   }
 
@@ -339,24 +361,29 @@ static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c);
 // closed padlock (ui_Lock) visible, open padlock (ui_Unlock) hidden, arc empty.
 // Pushing the joystick up while the LockedPanel page is showing fills
 // ui_UnlockArc over kUnlockHoldMs; letting go before it tops out snaps it back
-// to 0. Reaching the top unlocks and confirms with a click + a haptic tick.
+// to 0. Reaching the top unlocks, confirms with a click + a haptic tick, and
+// kUnlockAdvanceMs later hands the pager over and scrolls on to the Drive page.
 //
-// Both pieces of state are subjects, so nothing below reaches a widget except
+// While locked the pager is frozen and every other page is hidden, so the
+// LockedPanel really is the only thing reachable — see paging_subject.
+//
+// All of the state here is subjects, so nothing below reaches a widget except
 // through a binding or an observer bound to the object (see CLAUDE.md). The
-// wiring that hangs the widgets off them is in app_main.
+// wiring that hangs the widgets off them is in app_main. locked_subject and
+// paging_subject are declared with the other subjects at the top of the file,
+// because flex_key_cb needs them before this point.
 /////////////////////////////////////////////////////////////////////////////
 
 static constexpr uint32_t kUnlockHoldMs = 2000; // hold time for a full arc
 static constexpr int32_t kUnlockArcMax = 100;   // ui_UnlockArc's range (LVGL's default)
+// Beat between the unlock landing and the pager moving on to the Drive page,
+// so the READY TO DRIVE state is legible rather than a flash.
+static constexpr uint32_t kUnlockAdvanceMs = 1000;
 // Poll cadence for the joystick latch. Matched to the ADC task's 33 ms period:
 // joy_key cannot change faster than that, so a shorter period would only burn
 // LVGL task time re-reading the same value.
 static constexpr uint32_t kUnlockPollMs = 33;
 
-// 1 = locked, 0 = unlocked. The single source of truth for both padlock images
-// and both labels, so a future "lock on request" is one set_locked(true) call
-// and every bound widget follows.
-static lv_subject_t locked_subject;
 // 0..kUnlockArcMax fill of ui_UnlockArc. Written only by the fill animation.
 static lv_subject_t unlock_progress_subject;
 
@@ -367,8 +394,8 @@ struct LockText {
   const char *locked;
   const char *unlocked;
 };
-static LockText kLockTitleText{"DRIVING MODE LOCKED", "DRIVING MODE UNLOCKED"};
-static LockText kLockHintText{"Push & hold joystick to unlock", "Ready to drive"};
+static LockText kLockTitleText{"DRIVING MODE LOCKED", "READY TO DRIVE"};
+static LockText kLockHintText{"Push & hold joystick to unlock", "Driving Mode Unlocked"};
 
 // lv_label_bind_text exists, but it binds a *string* subject — which would mean
 // a second copy of the lock state to keep in step with locked_subject. An
@@ -394,12 +421,48 @@ static void unlock_arc_reset(void) {
   lv_subject_set_int(&unlock_progress_subject, 0);
 }
 
+// One-shot, armed by the unlock and cancelled by a re-lock that beats it. Held
+// so set_locked(true) can delete it: a re-lock inside the kUnlockAdvanceMs
+// window would otherwise be immediately undone by the advance it left running.
+static lv_timer_t *unlock_advance_timer = nullptr;
+
+// Hands the pager over and moves on to the Drive page. Enabling paging first is
+// what makes the scroll possible: the sibling pages are hidden while paging is
+// off, and a hidden flex child lays out at zero width, so there would be
+// nothing to scroll to. flex_scroll_step calls lv_obj_update_layout before it
+// measures, so the un-hide is accounted for by the time the step is computed.
+static void unlock_advance_cb(lv_timer_t *) {
+  unlock_advance_timer = nullptr; // repeat_count 1: LVGL deletes it after this
+  lv_subject_set_int(&paging_subject, 1);
+  flex_scroll_next(nullptr);
+}
+
 // Locks or unlocks the HMI. Callers must hold lvgl_mutex: writing a subject runs
 // its observers synchronously on the calling task and those touch widgets.
 // Callers already on the LVGL task (timers, event callbacks) are covered by the
 // lock lv_task_handler() is called under.
+//
+// Unlocking does not release the pager itself — it arms unlock_advance_cb,
+// which does that as it scrolls on. Locking releases nothing and takes the
+// pager back, so re-locking from any page returns to the LockedPanel rather
+// than stranding the user on a page they can no longer scroll away from.
 static void set_locked(bool locked) {
+  if (unlock_advance_timer) {
+    lv_timer_delete(unlock_advance_timer);
+    unlock_advance_timer = nullptr;
+  }
   unlock_arc_reset();
+  if (locked) {
+    // Scroll home before paging_subject hides the other pages: once they are
+    // hidden the pager's content is one page wide, and lv_obj_scroll_by_bounded
+    // would be clamping against a scroll range that no longer matches where the
+    // viewport actually is.
+    lv_obj_scroll_to_x(ui_FlexPanel, 0, LV_ANIM_OFF);
+    lv_subject_set_int(&paging_subject, 0);
+  } else {
+    unlock_advance_timer = lv_timer_create(unlock_advance_cb, kUnlockAdvanceMs, nullptr);
+    lv_timer_set_repeat_count(unlock_advance_timer, 1);
+  }
   lv_subject_set_int(&locked_subject, locked ? 1 : 0);
 }
 
@@ -1187,23 +1250,22 @@ extern "C" void app_main(void) {
   lv_obj_remove_flag(ui_FlexPanel, LV_OBJ_FLAG_SCROLL_WITH_ARROW);
   lv_obj_add_event_cb(ui_FlexPanel, flex_key_cb, LV_EVENT_KEY, nullptr);
 
-  // WORKAROUND: the current SquareLine export marks these three pages hidden,
-  // which leaves SettingsMenu as the only page the flex layout lays out. That
-  // breaks paging outright — flex_scroll_step() sizes its step from child 0
-  // (LockedPanel), and a hidden child has width 0, so it returns early and the
-  // joystick appears dead. Cleared here for the same reason as the flag above
-  // (a hand-edit in main/ui would not survive the next /MIR import).
-  // Delete once the export stops hiding them; until then this is a no-op if
-  // they are already visible.
+  // WORKAROUND: the current SquareLine export marks the LockedPanel hidden.
+  // That breaks paging outright — flex_scroll_step() sizes its step from child
+  // 0 (LockedPanel), and a hidden child has width 0, so it returns early and
+  // the joystick appears dead. Cleared here for the same reason as the flag
+  // above (a hand-edit in main/ui would not survive the next /MIR import).
+  // Delete once the export stops hiding it; until then this is a no-op if it is
+  // already visible. The export also hides DrivePanel and SeatAdjustmentPanel,
+  // but their HIDDEN flag is owned by paging_subject below, which is bound
+  // after this and so wins either way.
   lv_obj_remove_flag(ui_LockedPanel, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_remove_flag(ui_DrivePanel, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_remove_flag(ui_SeatAdjustmentPanel, LV_OBJ_FLAG_HIDDEN);
 
-  // Lock/unlock for the LockedPanel page. Locked at boot, which is also what
-  // the export draws, so the initial observer run is a no-op rather than a
-  // visible flicker. Set up after the workaround above, since a page that is
-  // still hidden would never be flex_current_page().
+  // Lock/unlock for the LockedPanel page. Locked and un-paged at boot, which is
+  // what the export already draws, so the initial observer run is a no-op
+  // rather than a visible flicker.
   lv_subject_init_int(&locked_subject, 1);
+  lv_subject_init_int(&paging_subject, 0);
   lv_subject_init_int(&unlock_progress_subject, 0);
   lv_arc_bind_value(ui_UnlockArc, &unlock_progress_subject);
   // padlock swap: each image hides on the state that is not its own
@@ -1212,6 +1274,18 @@ extern "C" void app_main(void) {
   lv_subject_add_observer_obj(&locked_subject, lock_text_observer, ui_TextPanel, &kLockTitleText);
   lv_subject_add_observer_obj(&locked_subject, lock_text_observer, ui_Info4, &kLockHintText);
   lv_timer_create(unlock_poll_cb, kUnlockPollMs, nullptr);
+
+  // Freeze the pager until the unlock hands it over. Each of these closes one
+  // route into it, and they are genuinely independent — see paging_subject.
+  // SCROLLABLE stops a touch drag; hiding the LockedPanel's own arrows stops a
+  // tap on them (the other pages keep theirs, since they are only reachable
+  // once paging is on); hiding the sibling pages leaves nothing to scroll to at
+  // all. The joystick is handled by the guard in flex_key_cb.
+  lv_obj_bind_flag_if_eq(ui_FlexPanel, &paging_subject, LV_OBJ_FLAG_SCROLLABLE, 1);
+  lv_obj_bind_flag_if_eq(ui_ArrowsPanel, &paging_subject, LV_OBJ_FLAG_HIDDEN, 0);
+  lv_obj_bind_flag_if_eq(ui_DrivePanel, &paging_subject, LV_OBJ_FLAG_HIDDEN, 0);
+  lv_obj_bind_flag_if_eq(ui_SeatAdjustmentPanel, &paging_subject, LV_OBJ_FLAG_HIDDEN, 0);
+  lv_obj_bind_flag_if_eq(ui_SettingsMenu, &paging_subject, LV_OBJ_FLAG_HIDDEN, 0);
 
   // Focus group for the settings rows. Built by walking the children rather
   // than naming ui_Button10/5/6/... so rows added in SquareLine are picked up
