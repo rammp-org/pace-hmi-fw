@@ -216,14 +216,40 @@ static void haptic_label_reset_cb(lv_timer_t *timer) {
   lv_subject_copy_string(&haptic_label_subject, kHapticIdleText);
 }
 
-static void haptic_test_cb(lv_event_t *e) {
-  LV_UNUSED(e);
+// Arms `slots` copies of `w` (plus the END marker) and fires the sequencer.
+// The DRV2605 has exactly one waveform sequence, so every caller re-arms before
+// starting rather than relying on whatever the previous one left in the slots —
+// otherwise the unlock's single click and the HAPTIC TEST buzz would overwrite
+// each other. Returns false (having logged) if there is no motor or the I2C
+// burst fails, so callers can leave their own UI alone.
+//
+// Cheap enough for the LVGL task: slots+2 register writes at 400 kHz, and the
+// DRV2605 plays the sequence on its own once START is written.
+static bool haptic_play(espp::Drv2605::Waveform w, uint8_t slots) {
   if (!haptic) {
-    return; // no motor on this board (init_haptic already logged why)
+    return false; // no motor on this board (init_haptic already logged why)
   }
   std::error_code ec;
+  for (uint8_t slot = 0; slot < slots; slot++) {
+    if (!haptic->set_waveform(slot, w, ec)) {
+      fmt::print("DRV2605 set_waveform failed: {}\n", ec.message());
+      return false;
+    }
+  }
+  if (!haptic->set_waveform(slots, espp::Drv2605::Waveform::END, ec)) {
+    fmt::print("DRV2605 set_waveform failed: {}\n", ec.message());
+    return false;
+  }
   if (!haptic->start(ec)) {
     fmt::print("DRV2605 start failed: {}\n", ec.message());
+    return false;
+  }
+  return true;
+}
+
+static void haptic_test_cb(lv_event_t *e) {
+  LV_UNUSED(e);
+  if (!haptic_play(espp::Drv2605::Waveform::ALERT_1000MS, kHapticBuzzSlots)) {
     return; // nothing is vibrating, so leave the label alone
   }
   lv_subject_copy_string(&haptic_label_subject, kHapticBusyText);
@@ -293,7 +319,8 @@ static bool load_audio(size_t &out_size, size_t &out_sample_rate);
 static void play_click(espp::M5StackTab5 &tab5);
 
 // DRV2605 haptic driver: brings the motor on the PCB's JST connector up and
-// arms it with a one-second waveform, ready for haptic_buzz().
+// selects its effect library. The waveform slots are armed per play, by
+// haptic_play().
 static void init_haptic(espp::Logger &logger, espp::I2c &i2c);
 
 // DA7280 haptic driver bring-up test (raw register read, no driver class yet)
@@ -304,6 +331,118 @@ static void test_da7280(espp::Logger &logger, espp::I2c &i2c,
 // acceleration/rapid-stop/frequency-tracking toggles, and a fault-status
 // register peek, all with the Da7280 driver class (DRO mode).
 static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c);
+
+/////////////////////////////////////////////////////////////////////////////
+// Lock / unlock (MainScreenFlex LockedPanel)
+//
+// Locked is the boot state, which is also what the SquareLine export draws:
+// closed padlock (ui_Lock) visible, open padlock (ui_Unlock) hidden, arc empty.
+// Pushing the joystick up while the LockedPanel page is showing fills
+// ui_UnlockArc over kUnlockHoldMs; letting go before it tops out snaps it back
+// to 0. Reaching the top unlocks and confirms with a click + a haptic tick.
+//
+// Both pieces of state are subjects, so nothing below reaches a widget except
+// through a binding or an observer bound to the object (see CLAUDE.md). The
+// wiring that hangs the widgets off them is in app_main.
+/////////////////////////////////////////////////////////////////////////////
+
+static constexpr uint32_t kUnlockHoldMs = 2000; // hold time for a full arc
+static constexpr int32_t kUnlockArcMax = 100;   // ui_UnlockArc's range (LVGL's default)
+// Poll cadence for the joystick latch. Matched to the ADC task's 33 ms period:
+// joy_key cannot change faster than that, so a shorter period would only burn
+// LVGL task time re-reading the same value.
+static constexpr uint32_t kUnlockPollMs = 33;
+
+// 1 = locked, 0 = unlocked. The single source of truth for both padlock images
+// and both labels, so a future "lock on request" is one set_locked(true) call
+// and every bound widget follows.
+static lv_subject_t locked_subject;
+// 0..kUnlockArcMax fill of ui_UnlockArc. Written only by the fill animation.
+static lv_subject_t unlock_progress_subject;
+
+// The pair of strings one label swaps between, chosen by locked_subject. Passed
+// as observer user_data so a single callback serves both labels. Non-const
+// because lv_subject_add_observer_obj takes a void* user_data.
+struct LockText {
+  const char *locked;
+  const char *unlocked;
+};
+static LockText kLockTitleText{"DRIVING MODE LOCKED", "DRIVING MODE UNLOCKED"};
+static LockText kLockHintText{"Push & hold joystick to unlock", "Ready to drive"};
+
+// lv_label_bind_text exists, but it binds a *string* subject — which would mean
+// a second copy of the lock state to keep in step with locked_subject. An
+// observer bound to the object keeps one source of truth, and is torn down with
+// the label like any other object-bound observer.
+static void lock_text_observer(lv_observer_t *observer, lv_subject_t *subject) {
+  const auto *text = static_cast<const LockText *>(lv_observer_get_user_data(observer));
+  lv_label_set_text(lv_observer_get_target_obj(observer),
+                    lv_subject_get_int(subject) ? text->locked : text->unlocked);
+}
+
+// The fill ramp. lv_anim supplies the timing and the completion callback for
+// free; its exec callback only ever writes the subject, so the arc is still
+// driven through lv_arc_bind_value rather than touched directly.
+static void unlock_anim_exec_cb(void *, int32_t value) {
+  lv_subject_set_int(&unlock_progress_subject, value);
+}
+
+// Cancels any in-flight fill and empties the arc. The subject doubles as the
+// animation's `var`, so it is also the handle lv_anim_delete matches on.
+static void unlock_arc_reset(void) {
+  lv_anim_delete(&unlock_progress_subject, unlock_anim_exec_cb);
+  lv_subject_set_int(&unlock_progress_subject, 0);
+}
+
+// Locks or unlocks the HMI. Callers must hold lvgl_mutex: writing a subject runs
+// its observers synchronously on the calling task and those touch widgets.
+// Callers already on the LVGL task (timers, event callbacks) are covered by the
+// lock lv_task_handler() is called under.
+static void set_locked(bool locked) {
+  unlock_arc_reset();
+  lv_subject_set_int(&locked_subject, locked ? 1 : 0);
+}
+
+static void unlock_anim_completed_cb(lv_anim_t *) {
+  set_locked(false);
+  // Deleting the animation from inside its own completed_cb (via
+  // unlock_arc_reset) is safe and expected: lv_anim.c removes it from the list
+  // before calling us, and anim_timer explicitly re-reads the list afterwards.
+  //
+  // Confirmation feedback. Both are non-blocking — one short I2C burst, and one
+  // xStreamBufferSend with a zero timeout — so neither holds the LVGL task for
+  // the duration of the effect it starts.
+  haptic_play(espp::Drv2605::Waveform::STRONG_CLICK, 1);
+  play_click(espp::M5StackTab5::get());
+}
+
+// Edge-detects the hold on the LVGL task rather than starting/cancelling the
+// animation from the ADC task: everything here is LVGL state, and this way the
+// animation is created and destroyed on the task that runs it. joy_key is the
+// same Schmitt-triggered latch the flex pager uses, so the engage/release
+// thresholds stay in one place.
+static void unlock_poll_cb(lv_timer_t *) {
+  static bool holding = false;
+  const bool hold = lv_subject_get_int(&locked_subject) != 0 && joy_key.load() == LV_KEY_UP &&
+                    lv_obj_get_screen(ui_LockedPanel) == lv_screen_active() &&
+                    flex_current_page() == ui_LockedPanel;
+  if (hold == holding) {
+    return;
+  }
+  holding = hold;
+  if (!hold) {
+    unlock_arc_reset();
+    return;
+  }
+  lv_anim_t a;
+  lv_anim_init(&a);
+  lv_anim_set_var(&a, &unlock_progress_subject);
+  lv_anim_set_exec_cb(&a, unlock_anim_exec_cb);
+  lv_anim_set_values(&a, 0, kUnlockArcMax);
+  lv_anim_set_duration(&a, kUnlockHoldMs);
+  lv_anim_set_completed_cb(&a, unlock_anim_completed_cb);
+  lv_anim_start(&a);
+}
 
 // Direct-mode flush. LVGL renders into the DPI panel's own frame buffers, so
 // px_map is already a frame buffer and esp_lcd_panel_draw_bitmap takes its
@@ -388,19 +527,12 @@ static void init_haptic(espp::Logger &logger, espp::I2c &i2c) {
     logger.error("DRV2605 select_library failed: {}", ec.message());
     return;
   }
-  for (uint8_t slot = 0; slot < kHapticBuzzSlots; slot++) {
-    if (!drv2605.set_waveform(slot, espp::Drv2605::Waveform::ALERT_1000MS, ec)) {
-      logger.error("DRV2605 set_waveform failed: {}", ec.message());
-      return;
-    }
-  }
-  if (!drv2605.set_waveform(kHapticBuzzSlots, espp::Drv2605::Waveform::END, ec)) {
-    logger.error("DRV2605 set_waveform failed: {}", ec.message());
-    return;
-  }
+  // No waveform is armed here: the sequencer slots are shared between the
+  // HAPTIC TEST buzz and the unlock click, so haptic_play() writes them on
+  // every play instead.
 
-  // Only published once the motor is armed, so a half-configured driver can
-  // never be reached from the button.
+  // Only published once the library is selected, so a half-configured driver
+  // can never be reached from the button.
   haptic = &drv2605;
   logger.info("DRV2605 ready: HAPTIC TEST plays a {} ms buzz", kHapticBuzzDuration.count());
 }
@@ -1066,6 +1198,20 @@ extern "C" void app_main(void) {
   lv_obj_remove_flag(ui_LockedPanel, LV_OBJ_FLAG_HIDDEN);
   lv_obj_remove_flag(ui_DrivePanel, LV_OBJ_FLAG_HIDDEN);
   lv_obj_remove_flag(ui_SeatAdjustmentPanel, LV_OBJ_FLAG_HIDDEN);
+
+  // Lock/unlock for the LockedPanel page. Locked at boot, which is also what
+  // the export draws, so the initial observer run is a no-op rather than a
+  // visible flicker. Set up after the workaround above, since a page that is
+  // still hidden would never be flex_current_page().
+  lv_subject_init_int(&locked_subject, 1);
+  lv_subject_init_int(&unlock_progress_subject, 0);
+  lv_arc_bind_value(ui_UnlockArc, &unlock_progress_subject);
+  // padlock swap: each image hides on the state that is not its own
+  lv_obj_bind_flag_if_eq(ui_Lock, &locked_subject, LV_OBJ_FLAG_HIDDEN, 0);
+  lv_obj_bind_flag_if_eq(ui_Unlock, &locked_subject, LV_OBJ_FLAG_HIDDEN, 1);
+  lv_subject_add_observer_obj(&locked_subject, lock_text_observer, ui_TextPanel, &kLockTitleText);
+  lv_subject_add_observer_obj(&locked_subject, lock_text_observer, ui_Info4, &kLockHintText);
+  lv_timer_create(unlock_poll_cb, kUnlockPollMs, nullptr);
 
   // Focus group for the settings rows. Built by walking the children rather
   // than naming ui_Button10/5/6/... so rows added in SquareLine are picked up
