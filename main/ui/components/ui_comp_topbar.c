@@ -79,7 +79,7 @@ lv_obj_t * ui_TopBar_create(lv_obj_t * comp_parent)
     lv_obj_set_width(cui_Label4, LV_SIZE_CONTENT);   /// 1
     lv_obj_set_height(cui_Label4, LV_SIZE_CONTENT);    /// 1
     lv_obj_set_align(cui_Label4, LV_ALIGN_CENTER);
-    lv_label_set_text(cui_Label4, "30 km");
+    lv_label_set_text(cui_Label4, "30 mi");
     ui_object_set_themeable_style_property(cui_Label4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_background);
     ui_object_set_themeable_style_property(cui_Label4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,

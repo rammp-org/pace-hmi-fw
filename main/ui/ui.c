@@ -35,6 +35,8 @@ void ui_init(void)
     ui_BootScreen_screen_init();
     ui_JoystickTest_screen_init();
     ui_MainScreenFlex_screen_init();
+    ui_DriveScreen_screen_init();
+    ui_SeatAdjustmentFlexScreen_screen_init();
     ui____initial_actions0 = lv_obj_create(NULL);
     lv_disp_load_scr(ui_BootScreen);
 }
@@ -44,4 +46,6 @@ void ui_destroy(void)
     ui_BootScreen_screen_destroy();
     ui_JoystickTest_screen_destroy();
     ui_MainScreenFlex_screen_destroy();
+    ui_DriveScreen_screen_destroy();
+    ui_SeatAdjustmentFlexScreen_screen_destroy();
 }

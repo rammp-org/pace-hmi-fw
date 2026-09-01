@@ -27,7 +27,7 @@ lv_obj_t * ui_PanelButton1 = NULL;
 lv_obj_t * ui_PanelButtonLabel1 = NULL;
 lv_obj_t * ui_TextPanel1 = NULL;
 lv_obj_t * ui_Info1 = NULL;
-lv_obj_t * ui_SeatAdjustmentPanel = NULL;
+lv_obj_t * ui_SeatAdjustmentMenu = NULL;
 lv_obj_t * ui_GraphicsPanel2 = NULL;
 lv_obj_t * ui_Image2 = NULL;
 lv_obj_t * ui_UnlockArc2 = NULL;
@@ -354,21 +354,21 @@ void ui_MainScreenFlex_screen_init(void)
                                            _ui_theme_alpha_text);
     lv_obj_set_style_text_font(ui_Info1, &lv_font_montserrat_34, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_SeatAdjustmentPanel = lv_obj_create(ui_FlexPanel);
-    lv_obj_set_width(ui_SeatAdjustmentPanel, lv_pct(100));
-    lv_obj_set_height(ui_SeatAdjustmentPanel, lv_pct(100));
-    lv_obj_set_x(ui_SeatAdjustmentPanel, 1);
-    lv_obj_set_y(ui_SeatAdjustmentPanel, 0);
-    lv_obj_set_align(ui_SeatAdjustmentPanel, LV_ALIGN_CENTER);
-    lv_obj_remove_flag(ui_SeatAdjustmentPanel, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_radius(ui_SeatAdjustmentPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_SeatAdjustmentPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+    ui_SeatAdjustmentMenu = lv_obj_create(ui_FlexPanel);
+    lv_obj_set_width(ui_SeatAdjustmentMenu, lv_pct(100));
+    lv_obj_set_height(ui_SeatAdjustmentMenu, lv_pct(100));
+    lv_obj_set_x(ui_SeatAdjustmentMenu, 1);
+    lv_obj_set_y(ui_SeatAdjustmentMenu, 0);
+    lv_obj_set_align(ui_SeatAdjustmentMenu, LV_ALIGN_CENTER);
+    lv_obj_remove_flag(ui_SeatAdjustmentMenu, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_radius(ui_SeatAdjustmentMenu, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentMenu, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
                                            _ui_theme_color_background);
-    ui_object_set_themeable_style_property(ui_SeatAdjustmentPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentMenu, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
                                            _ui_theme_alpha_background);
-    lv_obj_set_style_border_side(ui_SeatAdjustmentPanel, LV_BORDER_SIDE_NONE, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_side(ui_SeatAdjustmentMenu, LV_BORDER_SIDE_NONE, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_GraphicsPanel2 = lv_obj_create(ui_SeatAdjustmentPanel);
+    ui_GraphicsPanel2 = lv_obj_create(ui_SeatAdjustmentMenu);
     lv_obj_set_width(ui_GraphicsPanel2, 720);
     lv_obj_set_height(ui_GraphicsPanel2, 720);
     lv_obj_set_x(ui_GraphicsPanel2, 0);
@@ -394,7 +394,7 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_x(ui_UnlockArc2, 0);
     lv_obj_set_y(ui_UnlockArc2, 0);
 
-    ui_ArrowsPanel2 = ui_ArrowsPanel_create(ui_SeatAdjustmentPanel);
+    ui_ArrowsPanel2 = ui_ArrowsPanel_create(ui_SeatAdjustmentMenu);
     lv_obj_set_x(ui_ArrowsPanel2, 0);
     lv_obj_set_y(ui_ArrowsPanel2, -70);
 
@@ -402,7 +402,7 @@ void ui_MainScreenFlex_screen_init(void)
 
     lv_image_set_src(ui_comp_get_child(ui_ArrowsPanel2, UI_COMP_ARROWSPANEL_RIGHTARROW), &ui_img_arrow_png);
 
-    ui_PanelButton2 = lv_button_create(ui_SeatAdjustmentPanel);
+    ui_PanelButton2 = lv_button_create(ui_SeatAdjustmentMenu);
     lv_obj_set_width(ui_PanelButton2, 280);
     lv_obj_set_height(ui_PanelButton2, 100);
     lv_obj_set_x(ui_PanelButton2, 0);
@@ -433,7 +433,7 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_style_text_align(ui_PanelButtonLabel2, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(ui_PanelButtonLabel2, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_TextPanel2 = lv_label_create(ui_SeatAdjustmentPanel);
+    ui_TextPanel2 = lv_label_create(ui_SeatAdjustmentMenu);
     lv_obj_set_width(ui_TextPanel2, 660);
     lv_obj_set_height(ui_TextPanel2, 150);
     lv_obj_set_x(ui_TextPanel2, 0);
@@ -1096,7 +1096,7 @@ void ui_MainScreenFlex_screen_destroy(void)
     ui_PanelButtonLabel1 = NULL;
     ui_TextPanel1 = NULL;
     ui_Info1 = NULL;
-    ui_SeatAdjustmentPanel = NULL;
+    ui_SeatAdjustmentMenu = NULL;
     ui_GraphicsPanel2 = NULL;
     ui_Image2 = NULL;
     ui_UnlockArc2 = NULL;

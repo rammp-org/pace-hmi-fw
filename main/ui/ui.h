@@ -34,6 +34,8 @@ extern "C" {
 #include "screens/ui_BootScreen.h"
 #include "screens/ui_JoystickTest.h"
 #include "screens/ui_MainScreenFlex.h"
+#include "screens/ui_DriveScreen.h"
+#include "screens/ui_SeatAdjustmentFlexScreen.h"
 
 ///////////////////// VARIABLES ////////////////////
 
@@ -52,7 +54,9 @@ LV_IMG_DECLARE(ui_img_107617181);    // assets/turbo-rasterized.png
 LV_IMG_DECLARE(ui_img_rammp_wheelchair_png);    // assets/rammp_wheelchair.png
 
 // FONTS
-LV_FONT_DECLARE(ui_font_Digital7);
+LV_FONT_DECLARE(ui_font_IBMPlexSansMedium264);
+LV_FONT_DECLARE(ui_font_IBMPlexSansBold82);
+LV_FONT_DECLARE(ui_font_IBMPlexSansMedium53);
 
 // UI INIT
 void ui_init(void);

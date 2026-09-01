@@ -63,6 +63,14 @@ CONFIG_LV_FONT_MONTSERRAT_32=y
 CONFIG_LV_FONT_MONTSERRAT_34=y
 CONFIG_LV_FONT_MONTSERRAT_48=y
 
+# Custom fonts exported by SquareLine can be far larger than the Montserrat set
+# above (ui_font_IBMPlexSansMedium264 is 264 px). Past a point the glyph
+# bitmap/advance-width bitfields in lv_font_fmt_txt overflow their default
+# widths, and the generated .c fails to compile with an explicit
+# "Too large font or glyphs ... Enable LV_FONT_FMT_TXT_LARGE" #error. This
+# widens those fields for every font, costing a little flash.
+CONFIG_LV_FONT_FMT_TXT_LARGE=y
+
 # Task stack sizes and tick rate from the m5stack-tab5 BSP example — the
 # default 3.5K main stack overflows during LVGL/audio/ADC setup.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=32768

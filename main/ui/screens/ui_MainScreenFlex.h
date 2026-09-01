@@ -35,7 +35,7 @@ extern lv_obj_t * ui_PanelButton1;
 extern lv_obj_t * ui_PanelButtonLabel1;
 extern lv_obj_t * ui_TextPanel1;
 extern lv_obj_t * ui_Info1;
-extern lv_obj_t * ui_SeatAdjustmentPanel;
+extern lv_obj_t * ui_SeatAdjustmentMenu;
 extern lv_obj_t * ui_GraphicsPanel2;
 extern lv_obj_t * ui_Image2;
 extern lv_obj_t * ui_UnlockArc2;

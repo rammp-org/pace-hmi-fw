@@ -122,6 +122,16 @@ static std::atomic<bool> select_key{false};
 // scroll-into-view.
 static lv_group_t *settings_group = nullptr;
 
+// An indev can own exactly one group, so the joystick's group follows the
+// active screen: joystick_group keeps ui_FlexPanel focused for paging on
+// MainScreenFlex, seat_group walks the SeatAdjustmentFlexScreen buttons. The
+// swap happens on LV_EVENT_SCREEN_LOADED, so it covers every route between the
+// screens including ExitButton1's own SquareLine handler.
+static lv_indev_t *joystick_indev = nullptr;
+static lv_group_t *joystick_group = nullptr;
+static lv_group_t *seat_group = nullptr;        // seat screen, function buttons page
+static lv_group_t *seat_adjust_group = nullptr; // seat screen, adjustment page
+
 // Which FlexPanel child is currently centered in the viewport. Derived from
 // live coordinates rather than a stored index, so it stays correct no matter
 // how the panel got scrolled — joystick, touch drag, or the on-screen arrows.
@@ -355,37 +365,137 @@ static void test_da7280(espp::Logger &logger, espp::I2c &i2c,
 static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c);
 
 /////////////////////////////////////////////////////////////////////////////
-// Lock / unlock (MainScreenFlex LockedPanel)
+// Push-and-hold gestures
 //
-// Locked is the boot state, which is also what the SquareLine export draws:
-// closed padlock (ui_Lock) visible, open padlock (ui_Unlock) hidden, arc empty.
-// Pushing the joystick up while the LockedPanel page is showing fills
-// ui_UnlockArc over kUnlockHoldMs; letting go before it tops out snaps it back
-// to 0. Reaching the top unlocks, confirms with a click + a haptic tick, and
-// kUnlockAdvanceMs later hands the pager over and scrolls on to the Drive page.
+// Several places in the HMI ask the user to hold an input for kHoldMs before
+// something happens, and they all show the same thing while they wait: a widget
+// filling 0..kHoldMax, emptying the moment the hold breaks.
 //
+//   LockedPanel           joystick up      ui_UnlockArc   unlocks driving mode
+//   DrivePanel            joystick up      ui_UnlockArc1  -> DriveScreen
+//   SeatAdjustmentMenu    joystick up      ui_UnlockArc2  -> SeatAdjustmentFlexScreen
+//   DriveScreen           joystick down    ui_ExitBarPull      -> MainScreenFlex
+//   Seat / buttons page   joystick down    ui_ExitBarPull1     -> MainScreenFlex
+//   Seat / adjust page    joystick left    ui_ExitBarPushLeft  -> buttons page
+//
+// "Pull" is the stick toward the user, i.e. LV_KEY_DOWN; "push left" is
+// LV_KEY_LEFT. Each exit bar lives on the page it applies to, so the gestures
+// are gated on which page is showing as well as on the screen.
+//
+// They differ only in the input, in when they apply, and in what completing
+// does, so they share one HoldGesture driver rather than a copy of the
+// animation bookkeeping each. Each gesture owns a subject; the arc/bar is bound
+// to it, so the widget is still only ever reached through a binding (see
+// CLAUDE.md) and the fill animation only ever writes the subject.
+//
+// The lock state itself (locked_subject, paging_subject) is declared with the
+// other subjects at the top of the file, because flex_key_cb needs it earlier.
 // While locked the pager is frozen and every other page is hidden, so the
-// LockedPanel really is the only thing reachable — see paging_subject.
-//
-// All of the state here is subjects, so nothing below reaches a widget except
-// through a binding or an observer bound to the object (see CLAUDE.md). The
-// wiring that hangs the widgets off them is in app_main. locked_subject and
-// paging_subject are declared with the other subjects at the top of the file,
-// because flex_key_cb needs them before this point.
+// LockedPanel really is the only thing reachable.
 /////////////////////////////////////////////////////////////////////////////
 
-static constexpr uint32_t kUnlockHoldMs = 2000; // hold time for a full arc
-static constexpr int32_t kUnlockArcMax = 100;   // ui_UnlockArc's range (LVGL's default)
+static constexpr uint32_t kHoldMs = 2000; // hold time to fill a gesture widget
+static constexpr int32_t kHoldMax = 100;  // arc/bar range (LVGL's default)
 // Beat between the unlock landing and the pager moving on to the Drive page,
 // so the READY TO DRIVE state is legible rather than a flash.
 static constexpr uint32_t kUnlockAdvanceMs = 1000;
-// Poll cadence for the joystick latch. Matched to the ADC task's 33 ms period:
-// joy_key cannot change faster than that, so a shorter period would only burn
-// LVGL task time re-reading the same value.
-static constexpr uint32_t kUnlockPollMs = 33;
+// Poll cadence for the inputs. Matched to the ADC task's 33 ms period: joy_key
+// cannot change faster than that, so a shorter period would only burn LVGL task
+// time re-reading the same value.
+static constexpr uint32_t kHoldPollMs = 33;
 
-// 0..kUnlockArcMax fill of ui_UnlockArc. Written only by the fill animation.
-static lv_subject_t unlock_progress_subject;
+// Whether each input is currently released, and so free to start a new hold.
+//
+// This is the "let go first" rule, and it is per *input* rather than per
+// gesture on purpose: completing one gesture usually navigates straight to a
+// screen where another gesture watches the same input, and the user's thumb is
+// still where it was. Without this, unlocking would roll on into the Drive
+// screen with no second hold, because joystick-up triggers both.
+static bool joy_up_armed = true;
+static bool joy_down_armed = true;
+static bool joy_left_armed = true;
+
+// progress and holding carry default member initializers rather than being
+// spelled out at each definition below: the three gestures differ only in the
+// four fields that follow, and -Wmissing-field-initializers is happy with a
+// defaulted member but not with an omitted one.
+struct HoldGesture {
+  lv_subject_t progress{}; // 0..kHoldMax; the arc/bar is bound to this
+  bool *armed;             // the input's "released since the last completion"
+  bool (*is_held)();       // is the input held right now (sampled on LVGL task)
+  bool (*applies)();       // is this gesture live on the current screen/page
+  void (*completed)();     // what a full hold does
+  bool holding = false;    // edge detector for is_held && applies
+};
+
+static void hold_anim_exec_cb(void *var, int32_t value) {
+  lv_subject_set_int(&static_cast<HoldGesture *>(var)->progress, value);
+}
+
+// Cancels any in-flight fill and empties the widget. The gesture doubles as the
+// animation's `var`, so it is also the handle lv_anim_delete matches on.
+static void hold_reset(HoldGesture *g) {
+  lv_anim_delete(g, hold_anim_exec_cb);
+  lv_subject_set_int(&g->progress, 0);
+}
+
+static void hold_anim_completed_cb(lv_anim_t *a) {
+  auto *g = static_cast<HoldGesture *>(lv_anim_get_user_data(a));
+  // Disarm before running the action: `completed` navigates, and the input is
+  // still held at this instant, so whatever gesture watches that input on the
+  // far side must not read the same unbroken hold as a fresh one.
+  *g->armed = false;
+  g->holding = false;
+  // Deleting the animation from inside its own completed_cb (via hold_reset) is
+  // safe and expected: lv_anim.c removes it from the list before calling us,
+  // and anim_timer explicitly re-reads the list afterwards.
+  hold_reset(g);
+  // Confirmation feedback, the same for all three. Both calls are non-blocking
+  // - one short I2C burst, and one xStreamBufferSend with a zero timeout - so
+  // neither holds the LVGL task for the duration of the effect it starts.
+  haptic_play(espp::Drv2605::Waveform::STRONG_CLICK, 1);
+  play_click(espp::M5StackTab5::get());
+  g->completed();
+}
+
+// Runs on the LVGL task rather than the ADC/button tasks that produce the
+// inputs: everything here is LVGL state, and this way each animation is created
+// and destroyed on the task that runs it.
+static void hold_poll(HoldGesture *g) {
+  const bool held = g->is_held();
+  if (!held) {
+    *g->armed = true;
+  }
+  const bool hold = held && *g->armed && g->applies();
+  if (hold == g->holding) {
+    return;
+  }
+  g->holding = hold;
+  if (!hold) {
+    hold_reset(g);
+    return;
+  }
+  lv_anim_t a;
+  lv_anim_init(&a);
+  lv_anim_set_var(&a, g);
+  lv_anim_set_user_data(&a, g);
+  lv_anim_set_exec_cb(&a, hold_anim_exec_cb);
+  lv_anim_set_values(&a, 0, kHoldMax);
+  lv_anim_set_duration(&a, kHoldMs);
+  lv_anim_set_completed_cb(&a, hold_anim_completed_cb);
+  lv_anim_start(&a);
+}
+
+// The inputs. joy_key is the same Schmitt-triggered latch the flex pager uses,
+// so the engage/release thresholds stay in one place, and it resolves a diagonal
+// to a single direction — which is what keeps these three mutually exclusive.
+static bool joy_up_held() { return joy_key.load() == LV_KEY_UP; }
+static bool joy_down_held() { return joy_key.load() == LV_KEY_DOWN; }
+static bool joy_left_held() { return joy_key.load() == LV_KEY_LEFT; }
+
+/////////////////////////////////////////////////////////////////////////////
+// Lock / unlock, and the LockedPanel gesture
+/////////////////////////////////////////////////////////////////////////////
 
 // The pair of strings one label swaps between, chosen by locked_subject. Passed
 // as observer user_data so a single callback serves both labels. Non-const
@@ -397,7 +507,7 @@ struct LockText {
 static LockText kLockTitleText{"DRIVING MODE LOCKED", "READY TO DRIVE"};
 static LockText kLockHintText{"Push & hold joystick to unlock", "Driving Mode Unlocked"};
 
-// lv_label_bind_text exists, but it binds a *string* subject — which would mean
+// lv_label_bind_text exists, but it binds a *string* subject - which would mean
 // a second copy of the lock state to keep in step with locked_subject. An
 // observer bound to the object keeps one source of truth, and is torn down with
 // the label like any other object-bound observer.
@@ -405,20 +515,6 @@ static void lock_text_observer(lv_observer_t *observer, lv_subject_t *subject) {
   const auto *text = static_cast<const LockText *>(lv_observer_get_user_data(observer));
   lv_label_set_text(lv_observer_get_target_obj(observer),
                     lv_subject_get_int(subject) ? text->locked : text->unlocked);
-}
-
-// The fill ramp. lv_anim supplies the timing and the completion callback for
-// free; its exec callback only ever writes the subject, so the arc is still
-// driven through lv_arc_bind_value rather than touched directly.
-static void unlock_anim_exec_cb(void *, int32_t value) {
-  lv_subject_set_int(&unlock_progress_subject, value);
-}
-
-// Cancels any in-flight fill and empties the arc. The subject doubles as the
-// animation's `var`, so it is also the handle lv_anim_delete matches on.
-static void unlock_arc_reset(void) {
-  lv_anim_delete(&unlock_progress_subject, unlock_anim_exec_cb);
-  lv_subject_set_int(&unlock_progress_subject, 0);
 }
 
 // One-shot, armed by the unlock and cancelled by a re-lock that beats it. Held
@@ -442,7 +538,7 @@ static void unlock_advance_cb(lv_timer_t *) {
 // Callers already on the LVGL task (timers, event callbacks) are covered by the
 // lock lv_task_handler() is called under.
 //
-// Unlocking does not release the pager itself — it arms unlock_advance_cb,
+// Unlocking does not release the pager itself - it arms unlock_advance_cb,
 // which does that as it scrolls on. Locking releases nothing and takes the
 // pager back, so re-locking from any page returns to the LockedPanel rather
 // than stranding the user on a page they can no longer scroll away from.
@@ -451,7 +547,6 @@ static void set_locked(bool locked) {
     lv_timer_delete(unlock_advance_timer);
     unlock_advance_timer = nullptr;
   }
-  unlock_arc_reset();
   if (locked) {
     // Scroll home before paging_subject hides the other pages: once they are
     // hidden the pager's content is one page wide, and lv_obj_scroll_by_bounded
@@ -466,45 +561,282 @@ static void set_locked(bool locked) {
   lv_subject_set_int(&locked_subject, locked ? 1 : 0);
 }
 
-static void unlock_anim_completed_cb(lv_anim_t *) {
-  set_locked(false);
-  // Deleting the animation from inside its own completed_cb (via
-  // unlock_arc_reset) is safe and expected: lv_anim.c removes it from the list
-  // before calling us, and anim_timer explicitly re-reads the list afterwards.
-  //
-  // Confirmation feedback. Both are non-blocking — one short I2C burst, and one
-  // xStreamBufferSend with a zero timeout — so neither holds the LVGL task for
-  // the duration of the effect it starts.
-  haptic_play(espp::Drv2605::Waveform::STRONG_CLICK, 1);
-  play_click(espp::M5StackTab5::get());
+// Is `page` the flex page the user is actually looking at? The screen check
+// matters because the pager keeps its scroll position while the DriveScreen is
+// loaded over the top of it.
+static bool showing_flex_page(lv_obj_t *page) {
+  return lv_screen_active() == ui_MainScreenFlex && flex_current_page() == page;
 }
 
-// Edge-detects the hold on the LVGL task rather than starting/cancelling the
-// animation from the ADC task: everything here is LVGL state, and this way the
-// animation is created and destroyed on the task that runs it. joy_key is the
-// same Schmitt-triggered latch the flex pager uses, so the engage/release
-// thresholds stay in one place.
-static void unlock_poll_cb(lv_timer_t *) {
-  static bool holding = false;
-  const bool hold = lv_subject_get_int(&locked_subject) != 0 && joy_key.load() == LV_KEY_UP &&
-                    lv_obj_get_screen(ui_LockedPanel) == lv_screen_active() &&
-                    flex_current_page() == ui_LockedPanel;
-  if (hold == holding) {
+static HoldGesture unlock_gesture{
+    .armed = &joy_up_armed,
+    .is_held = joy_up_held,
+    .applies =
+        [] {
+          return lv_subject_get_int(&locked_subject) != 0 && showing_flex_page(ui_LockedPanel);
+        },
+    .completed = [] { set_locked(false); },
+};
+
+/////////////////////////////////////////////////////////////////////////////
+// Entering and leaving the DriveScreen and the SeatAdjustmentFlexScreen
+//
+// Both work the same way: hold up on the matching MainScreenFlex page to go in,
+// hold the joystick button to come back. Neither exit re-locks — the pager is
+// still sitting on the page you left from, so you land back where you were and
+// going in again is one more hold.
+//
+// Screen swaps go through the SquareLine helper rather than lv_screen_load, so
+// they take the same path as the boot screen's own transition and re-create the
+// target if it was ever destroyed.
+/////////////////////////////////////////////////////////////////////////////
+
+static void screen_return_to_main() {
+  _ui_screen_change(&ui_MainScreenFlex, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
+                    &ui_MainScreenFlex_screen_init);
+}
+
+static HoldGesture drive_enter_gesture{
+    .armed = &joy_up_armed,
+    .is_held = joy_up_held,
+    .applies = [] { return showing_flex_page(ui_DrivePanel); },
+    .completed =
+        [] {
+          _ui_screen_change(&ui_DriveScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
+                            &ui_DriveScreen_screen_init);
+        },
+};
+
+static HoldGesture drive_exit_gesture{
+    .armed = &joy_down_armed,
+    .is_held = joy_down_held,
+    .applies = [] { return lv_screen_active() == ui_DriveScreen; },
+    .completed = screen_return_to_main,
+};
+
+// Which page of the seat screen's own pager is showing: 0 = the function
+// buttons, 1 = the adjustment panel. Each page carries its own exit bar, so a
+// gesture that ignored this would fill a bar the user cannot see. Kept as a
+// plain flag rather than derived from the scroll position, because the slide is
+// animated and a derived value would flip halfway through it.
+static int seat_page = 0;
+
+// Defined with the rest of the seat navigation below, which is where the button
+// grid it restores focus into is declared.
+static void seat_show_buttons_page();
+
+// Pull to leave the seat screen entirely. Only on the buttons page, where
+// ui_ExitBarPull1 lives.
+//
+// Joystick-down also walks the button grid, and both happen: focus steps down
+// and clamps at the bottom row while the bar fills. That is deliberate — the
+// bar promises "pull and hold to exit" without qualification, and gating it on
+// the bottom row would make a pull from anywhere else look broken.
+static HoldGesture seat_exit_gesture{
+    .armed = &joy_down_armed,
+    .is_held = joy_down_held,
+    .applies = [] { return lv_screen_active() == ui_SeatAdjustmentFlexScreen && seat_page == 0; },
+    .completed = screen_return_to_main,
+};
+
+// Push left to go back a page. Nothing else is bound to left on the adjustment
+// panel — the joystick has no group there at all — so this one has the input to
+// itself.
+static HoldGesture seat_back_gesture{
+    .armed = &joy_left_armed,
+    .is_held = joy_left_held,
+    .applies = [] { return lv_screen_active() == ui_SeatAdjustmentFlexScreen && seat_page == 1; },
+    .completed = seat_show_buttons_page,
+};
+
+static HoldGesture seat_enter_gesture{
+    .armed = &joy_up_armed,
+    .is_held = joy_up_held,
+    .applies = [] { return showing_flex_page(ui_SeatAdjustmentMenu); },
+    .completed =
+        [] {
+          // The seat screen has a pager of its own, and unlike the MainScreenFlex
+          // one it starts fresh on every visit rather than resuming where it was
+          // left. Done before the swap so the reset is never seen mid-scroll.
+          lv_obj_scroll_to_x(ui_SeatAdjustmentScreenFlexPanel, 0, LV_ANIM_OFF);
+          _ui_screen_change(&ui_SeatAdjustmentFlexScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
+                            &ui_SeatAdjustmentFlexScreen_screen_init);
+        },
+};
+
+static void hold_poll_cb(lv_timer_t *) {
+  hold_poll(&unlock_gesture);
+  hold_poll(&drive_enter_gesture);
+  hold_poll(&drive_exit_gesture);
+  hold_poll(&seat_enter_gesture);
+  hold_poll(&seat_exit_gesture);
+  hold_poll(&seat_back_gesture);
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// SeatAdjustmentFlexScreen: joystick navigation of both pages
+//
+// Both pages lay their buttons out with LV_FLEX_FLOW_ROW_WRAP, so the joystick
+// walks them as the grid the user sees rather than as the flat list LVGL's own
+// focus_next would give. Each page has its own group and its own cursor:
+//
+//   buttons page                    adjustment page
+//   [ Elevation ] [ Real Tilt ]     [     -     ] [     +     ]
+//   [ FW Tilt   ] [ Side Tilt ]     [ 0deg ] [ 15deg ] [ 25deg ]
+//   [ Static    ] [ Dynamic   ]
+//
+// Note the adjustment page's rows are different lengths, which is why a grid
+// carries a per-row count rather than one column total.
+//
+// Selecting one of the four live function buttons names it on the adjustment
+// page and slides the pager across; push-left-and-hold there
+// (seat_back_gesture) comes back. The adjustment buttons are navigable and
+// pressable but carry no handler of their own yet, so pressing one only shows
+// LVGL's pressed state.
+/////////////////////////////////////////////////////////////////////////////
+
+static constexpr int kGridMaxRows = 3;
+static constexpr int kGridMaxCols = 3;
+
+// A page's focusable buttons in visual order, plus where the cursor is. Cells
+// are filled in at wiring time: the ui_* globals are null until ui_init runs.
+struct ButtonGrid {
+  lv_obj_t *cell[kGridMaxRows][kGridMaxCols];
+  int cols[kGridMaxRows]; // buttons in each row; rows may differ in length
+  int rows;
+  int row; // cursor
+  int col;
+};
+
+static ButtonGrid seat_buttons_grid;
+static ButtonGrid seat_adjust_grid;
+
+// Which seat function the SeatAdjustmentPanel is showing. A subject rather than
+// an lv_label_set_text from the click handler, so the label is reached the same
+// way as every other piece of UI state (see CLAUDE.md). Buffers are static for
+// the same reason the subject is — the subject stores its copy in them, and both
+// have to outlive the label bound to them.
+static char seat_function_buf[24];
+static char seat_function_prev_buf[24];
+static_assert(sizeof(seat_function_buf) > sizeof("Elevation"), "label buffer too small");
+static lv_subject_t seat_function_subject;
+
+// Arrow keys arrive here as LV_EVENT_KEY on the focused button: lv_indev only
+// consumes NEXT/PREV/ENTER/ESC itself and passes everything else through
+// lv_group_send_data. That is what lets a grid do its own 2D movement.
+//
+// user_data is the grid the button belongs to, so one callback serves both
+// pages. On the adjustment page LV_KEY_LEFT also feeds seat_back_gesture: the
+// cursor moves and the back bar fills at the same time, matching how down
+// behaves on the buttons page.
+static void grid_key_cb(lv_event_t *e) {
+  auto *g = static_cast<ButtonGrid *>(lv_event_get_user_data(e));
+  switch (lv_event_get_key(e)) {
+  case LV_KEY_UP:
+    g->row--;
+    break;
+  case LV_KEY_DOWN:
+    g->row++;
+    break;
+  case LV_KEY_LEFT:
+    g->col--;
+    break;
+  case LV_KEY_RIGHT:
+    g->col++;
+    break;
+  default:
     return;
   }
-  holding = hold;
-  if (!hold) {
-    unlock_arc_reset();
-    return;
+  // Clamp rather than wrap. On a control surface you steer by feel, and running
+  // off one edge to reappear at the opposite one is disorienting. The column is
+  // re-clamped after a row change too, since rows can be different lengths.
+  g->row = std::clamp(g->row, 0, g->rows - 1);
+  g->col = std::clamp(g->col, 0, g->cols[g->row] - 1);
+  lv_group_focus_obj(g->cell[g->row][g->col]);
+}
+
+// Puts the cursor on `button`, so joystick movement carries on from wherever a
+// finger last landed instead of from where the joystick left off.
+static void grid_sync_cursor(ButtonGrid *g, lv_obj_t *button) {
+  for (int r = 0; r < g->rows; r++) {
+    for (int c = 0; c < g->cols[r]; c++) {
+      if (g->cell[r][c] == button) {
+        g->row = r;
+        g->col = c;
+      }
+    }
   }
-  lv_anim_t a;
-  lv_anim_init(&a);
-  lv_anim_set_var(&a, &unlock_progress_subject);
-  lv_anim_set_exec_cb(&a, unlock_anim_exec_cb);
-  lv_anim_set_values(&a, 0, kUnlockArcMax);
-  lv_anim_set_duration(&a, kUnlockHoldMs);
-  lv_anim_set_completed_cb(&a, unlock_anim_completed_cb);
-  lv_anim_start(&a);
+  lv_group_focus_obj(button);
+}
+
+// The adjustment buttons have no behaviour yet, so this is all a press does:
+// take focus. LVGL still shows the pressed state on its own.
+static void grid_click_cb(lv_event_t *e) {
+  grid_sync_cursor(static_cast<ButtonGrid *>(lv_event_get_user_data(e)),
+                   lv_event_get_target_obj(e));
+}
+
+// Both a tap and the joystick button land here: with seat_group owning the
+// indev, LVGL raises LV_EVENT_CLICKED on the focused button for an ENTER key
+// exactly as it does for a touch release.
+//
+// user_data is the button's own label for the four live buttons and null for the
+// inert pair, so those only take focus.
+static void seat_click_cb(lv_event_t *e) {
+  lv_obj_t *button = lv_event_get_target_obj(e);
+  grid_sync_cursor(&seat_buttons_grid, button);
+
+  auto *label = static_cast<lv_obj_t *>(lv_event_get_user_data(e));
+  if (!label) {
+    return; // Static and Dynamic
+  }
+  lv_subject_copy_string(&seat_function_subject, lv_label_get_text(label));
+
+  // The pager has SCROLLABLE cleared, so lv_obj_scroll_to_view would bail out
+  // early (it checks that flag) — but lv_obj_scroll_to_x is programmatic and
+  // still moves it. Step math mirrors flex_scroll_step's.
+  lv_obj_update_layout(ui_SeatAdjustmentScreenFlexPanel);
+  const int32_t step = lv_obj_get_width(ui_SeatFunctionsButtonsPanel) +
+                       lv_obj_get_style_pad_column(ui_SeatAdjustmentScreenFlexPanel, LV_PART_MAIN);
+  lv_obj_scroll_to_x(ui_SeatAdjustmentScreenFlexPanel, step, LV_ANIM_ON);
+
+  // Scrolling the buttons out of sight does not stop the keypad reaching them:
+  // the group still holds a focused button, so the joystick would go on moving
+  // and clicking widgets nobody can see. Touch is already safe (LVGL only
+  // descends into children the touch point actually lands on, and these are now
+  // outside the viewport), so it is only the group that needs detaching.
+  //
+  // The adjustment page has its own group, so the joystick moves across with the
+  // pager rather than staying on buttons nobody can see any more.
+  lv_indev_set_group(joystick_indev, seat_adjust_group);
+  seat_adjust_grid.row = 0;
+  seat_adjust_grid.col = 0;
+  lv_group_focus_obj(seat_adjust_grid.cell[0][0]);
+  seat_page = 1;
+}
+
+// Declared up with seat_back_gesture, which is what calls it.
+static void seat_show_buttons_page() {
+  lv_obj_scroll_to_x(ui_SeatAdjustmentScreenFlexPanel, 0, LV_ANIM_ON);
+  seat_page = 0;
+  lv_indev_set_group(joystick_indev, seat_group);
+  // Back to the button the user selected rather than the top-left one: the
+  // grid's cursor still holds it, and returning to where you were is less
+  // jarring than being bounced to the corner.
+  lv_group_focus_obj(seat_buttons_grid.cell[seat_buttons_grid.row][seat_buttons_grid.col]);
+}
+
+// Hands the joystick to whichever group belongs to the screen being shown.
+static void screen_loaded_cb(lv_event_t *e) {
+  if (lv_event_get_target_obj(e) == ui_SeatAdjustmentFlexScreen) {
+    lv_indev_set_group(joystick_indev, seat_group);
+    seat_page = 0;
+    seat_buttons_grid.row = 0;
+    seat_buttons_grid.col = 0;
+    lv_group_focus_obj(seat_buttons_grid.cell[0][0]);
+  } else {
+    lv_indev_set_group(joystick_indev, joystick_group);
+  }
 }
 
 // Direct-mode flush. LVGL renders into the DPI panel's own frame buffers, so
@@ -1235,9 +1567,10 @@ extern "C" void app_main(void) {
         *enter = select_key.exchange(false); // one-shot
         *escape = false;
       }});
-  static lv_group_t *joystick_group = lv_group_create();
+  joystick_indev = joystick_keypad.get_input_device();
+  joystick_group = lv_group_create();
   lv_group_add_obj(joystick_group, ui_FlexPanel);
-  lv_indev_set_group(joystick_keypad.get_input_device(), joystick_group);
+  lv_indev_set_group(joystick_indev, joystick_group);
   // hold-to-repeat feel. LVGL's defaults (400 ms then every 100 ms) are tuned
   // for a keyboard and run the settings list far too fast for a joystick you
   // steer with; these are the two knobs if it feels wrong on the bench.
@@ -1250,30 +1583,128 @@ extern "C" void app_main(void) {
   lv_obj_remove_flag(ui_FlexPanel, LV_OBJ_FLAG_SCROLL_WITH_ARROW);
   lv_obj_add_event_cb(ui_FlexPanel, flex_key_cb, LV_EVENT_KEY, nullptr);
 
-  // WORKAROUND: the current SquareLine export marks the LockedPanel hidden.
-  // That breaks paging outright — flex_scroll_step() sizes its step from child
-  // 0 (LockedPanel), and a hidden child has width 0, so it returns early and
-  // the joystick appears dead. Cleared here for the same reason as the flag
-  // above (a hand-edit in main/ui would not survive the next /MIR import).
-  // Delete once the export stops hiding it; until then this is a no-op if it is
-  // already visible. The export also hides DrivePanel and SeatAdjustmentPanel,
-  // but their HIDDEN flag is owned by paging_subject below, which is bound
-  // after this and so wins either way.
-  lv_obj_remove_flag(ui_LockedPanel, LV_OBJ_FLAG_HIDDEN);
+  // (Older exports marked the flex pages hidden, which broke paging outright:
+  // flex_scroll_step sizes its step from child 0, and a hidden child lays out
+  // at zero width. The current export no longer does, so the un-hide that used
+  // to live here is gone. If paging ever goes dead again after a re-import,
+  // check the HIDDEN flag on ui_LockedPanel first.)
 
   // Lock/unlock for the LockedPanel page. Locked and un-paged at boot, which is
   // what the export already draws, so the initial observer run is a no-op
   // rather than a visible flicker.
   lv_subject_init_int(&locked_subject, 1);
   lv_subject_init_int(&paging_subject, 0);
-  lv_subject_init_int(&unlock_progress_subject, 0);
-  lv_arc_bind_value(ui_UnlockArc, &unlock_progress_subject);
   // padlock swap: each image hides on the state that is not its own
   lv_obj_bind_flag_if_eq(ui_Lock, &locked_subject, LV_OBJ_FLAG_HIDDEN, 0);
   lv_obj_bind_flag_if_eq(ui_Unlock, &locked_subject, LV_OBJ_FLAG_HIDDEN, 1);
   lv_subject_add_observer_obj(&locked_subject, lock_text_observer, ui_TextPanel, &kLockTitleText);
   lv_subject_add_observer_obj(&locked_subject, lock_text_observer, ui_Info4, &kLockHintText);
-  lv_timer_create(unlock_poll_cb, kUnlockPollMs, nullptr);
+
+  // The push-and-hold gestures. Each one's subject drives exactly one widget,
+  // and one shared timer polls them all — only the gesture whose applies() is
+  // true on the current screen can be filling at any moment. The two exit bars
+  // live on screens ui_init has already built.
+  lv_subject_init_int(&unlock_gesture.progress, 0);
+  lv_subject_init_int(&drive_enter_gesture.progress, 0);
+  lv_subject_init_int(&drive_exit_gesture.progress, 0);
+  lv_subject_init_int(&seat_enter_gesture.progress, 0);
+  lv_arc_bind_value(ui_UnlockArc, &unlock_gesture.progress);
+  lv_arc_bind_value(ui_UnlockArc1, &drive_enter_gesture.progress);
+  lv_arc_bind_value(ui_UnlockArc2, &seat_enter_gesture.progress);
+  lv_subject_init_int(&seat_exit_gesture.progress, 0);
+  lv_subject_init_int(&seat_back_gesture.progress, 0);
+  lv_bar_set_range(ui_ExitBarPull, 0, kHoldMax);
+  lv_bar_bind_value(ui_ExitBarPull, &drive_exit_gesture.progress);
+  lv_bar_set_range(ui_ExitBarPull1, 0, kHoldMax);
+  lv_bar_bind_value(ui_ExitBarPull1, &seat_exit_gesture.progress);
+  lv_bar_set_range(ui_ExitBarPushLeft, 0, kHoldMax);
+  lv_bar_bind_value(ui_ExitBarPushLeft, &seat_back_gesture.progress);
+  lv_timer_create(hold_poll_cb, kHoldPollMs, nullptr);
+
+  // SeatAdjustmentFlexScreen. Both grids are built here rather than declared
+  // with initialisers because the ui_* globals only exist once ui_init has run.
+  seat_buttons_grid.rows = 3;
+  seat_buttons_grid.cols[0] = 2;
+  seat_buttons_grid.cell[0][0] = ui_SeatButton1;
+  seat_buttons_grid.cell[0][1] = ui_SeatButton2;
+  seat_buttons_grid.cols[1] = 2;
+  seat_buttons_grid.cell[1][0] = ui_SeatButton3;
+  seat_buttons_grid.cell[1][1] = ui_SeatButton4;
+  seat_buttons_grid.cols[2] = 2;
+  seat_buttons_grid.cell[2][0] = ui_SeatButton5;
+  seat_buttons_grid.cell[2][1] = ui_SeatButton6;
+
+  // 2 then 3: the wrap layout fits "-" and "+" on one row and the three presets
+  // on the next.
+  seat_adjust_grid.rows = 2;
+  seat_adjust_grid.cols[0] = 2;
+  seat_adjust_grid.cell[0][0] = ui_SeatAdjustmentButton1;
+  seat_adjust_grid.cell[0][1] = ui_SeatAdjustmentButton2;
+  seat_adjust_grid.cols[1] = 3;
+  seat_adjust_grid.cell[1][0] = ui_SeatAdjustmentButton3;
+  seat_adjust_grid.cell[1][1] = ui_SeatAdjustmentButton4;
+  seat_adjust_grid.cell[1][2] = ui_SeatAdjustmentButton5;
+
+  // Neither page's buttons carry a FOCUSED style in the export, so joystick
+  // focus would be invisible. Recolour the 2 px border they already have, the
+  // same way the settings rows do, so it tracks the day/dark theme instead of
+  // being a hardcoded accent.
+  //
+  // The selector is spelled out rather than written `LV_PART_MAIN |
+  // LV_STATE_FOCUSED` as the C export does: C++ deprecates a bitwise OR between
+  // two different enum types, and -Werror turns that into a build failure.
+  auto style_focus = [](lv_obj_t *button) {
+    static constexpr lv_style_selector_t kFocused =
+        static_cast<lv_style_selector_t>(LV_PART_MAIN) |
+        static_cast<lv_style_selector_t>(LV_STATE_FOCUSED);
+    ui_object_set_themeable_style_property(button, kFocused, LV_STYLE_BORDER_COLOR,
+                                           _ui_theme_color_focused);
+    ui_object_set_themeable_style_property(button, kFocused, LV_STYLE_BORDER_OPA,
+                                           _ui_theme_alpha_focused);
+  };
+
+  // The label each function button names on the adjustment page, or null for the
+  // two inert ones. Indexed to match seat_buttons_grid.
+  lv_obj_t *seat_labels[3][2] = {
+      {ui_SeatButtonLabel1, ui_SeatButtonLabel2},
+      {ui_SeatButtonLabel3, ui_SeatButtonLabel4},
+      {nullptr, nullptr},
+  };
+
+  seat_group = lv_group_create();
+  for (int r = 0; r < seat_buttons_grid.rows; r++) {
+    for (int c = 0; c < seat_buttons_grid.cols[r]; c++) {
+      lv_obj_t *button = seat_buttons_grid.cell[r][c];
+      lv_group_add_obj(seat_group, button);
+      lv_obj_add_event_cb(button, grid_key_cb, LV_EVENT_KEY, &seat_buttons_grid);
+      lv_obj_add_event_cb(button, seat_click_cb, LV_EVENT_CLICKED, seat_labels[r][c]);
+      style_focus(button);
+    }
+  }
+
+  // The adjustment buttons get navigation and focus only — grid_click_cb moves
+  // the cursor and nothing else, so pressing one does nothing beyond LVGL's own
+  // pressed state until their behaviour is written.
+  seat_adjust_group = lv_group_create();
+  for (int r = 0; r < seat_adjust_grid.rows; r++) {
+    for (int c = 0; c < seat_adjust_grid.cols[r]; c++) {
+      lv_obj_t *button = seat_adjust_grid.cell[r][c];
+      lv_group_add_obj(seat_adjust_group, button);
+      lv_obj_add_event_cb(button, grid_key_cb, LV_EVENT_KEY, &seat_adjust_grid);
+      lv_obj_add_event_cb(button, grid_click_cb, LV_EVENT_CLICKED, &seat_adjust_grid);
+      style_focus(button);
+    }
+  }
+
+  lv_subject_init_string(&seat_function_subject, seat_function_buf, seat_function_prev_buf,
+                         sizeof(seat_function_buf), lv_label_get_text(ui_AngleSettingLabel));
+  lv_label_bind_text(ui_AngleSettingLabel, &seat_function_subject, nullptr);
+
+  // Hand the joystick between groups as the screen changes. Registered on both
+  // screens so every route in and out is covered.
+  lv_obj_add_event_cb(ui_SeatAdjustmentFlexScreen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED,
+                      nullptr);
+  lv_obj_add_event_cb(ui_MainScreenFlex, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, nullptr);
 
   // Freeze the pager until the unlock hands it over. Each of these closes one
   // route into it, and they are genuinely independent — see paging_subject.
@@ -1284,7 +1715,10 @@ extern "C" void app_main(void) {
   lv_obj_bind_flag_if_eq(ui_FlexPanel, &paging_subject, LV_OBJ_FLAG_SCROLLABLE, 1);
   lv_obj_bind_flag_if_eq(ui_ArrowsPanel, &paging_subject, LV_OBJ_FLAG_HIDDEN, 0);
   lv_obj_bind_flag_if_eq(ui_DrivePanel, &paging_subject, LV_OBJ_FLAG_HIDDEN, 0);
-  lv_obj_bind_flag_if_eq(ui_SeatAdjustmentPanel, &paging_subject, LV_OBJ_FLAG_HIDDEN, 0);
+  // ui_SeatAdjustmentMenu, not ui_SeatAdjustmentPanel: a re-import renamed this
+  // flex page, and the new SeatAdjustmentFlexScreen took the old name for one of
+  // its own children. Binding the wrong one still compiles and fails silently.
+  lv_obj_bind_flag_if_eq(ui_SeatAdjustmentMenu, &paging_subject, LV_OBJ_FLAG_HIDDEN, 0);
   lv_obj_bind_flag_if_eq(ui_SettingsMenu, &paging_subject, LV_OBJ_FLAG_HIDDEN, 0);
 
   // Focus group for the settings rows. Built by walking the children rather
