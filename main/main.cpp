@@ -394,8 +394,17 @@ static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c);
 // LockedPanel really is the only thing reachable.
 /////////////////////////////////////////////////////////////////////////////
 
-static constexpr uint32_t kHoldMs = 2000; // hold time to fill a gesture widget
-static constexpr int32_t kHoldMax = 100;  // arc/bar range (LVGL's default)
+static constexpr uint32_t kHoldMs = 1000; // hold time to fill a gesture widget
+// Dead time before an exit bar starts filling. Down on the seat buttons page and
+// left on the adjustment page each do double duty — they step the focus grid as
+// well as feeding a hold gesture — so without this every single navigation step
+// ticks its bar up and snaps it back. Longer than a key-repeat step (250 ms), so
+// stepping through a grid leaves the bars alone entirely.
+//
+// The arcs get none of this: nothing shares their input, and they should answer
+// the moment the stick moves.
+static constexpr uint32_t kBarGraceMs = 500;
+static constexpr int32_t kHoldMax = 100; // arc/bar range (LVGL's default)
 // Beat between the unlock landing and the pager moving on to the Drive page,
 // so the READY TO DRIVE state is legible rather than a flash.
 static constexpr uint32_t kUnlockAdvanceMs = 1000;
@@ -425,6 +434,7 @@ struct HoldGesture {
   bool (*is_held)();       // is the input held right now (sampled on LVGL task)
   bool (*applies)();       // is this gesture live on the current screen/page
   void (*completed)();     // what a full hold does
+  uint32_t grace_ms = 0;   // dead time before the widget starts filling
   bool holding = false;    // edge detector for is_held && applies
 };
 
@@ -482,6 +492,10 @@ static void hold_poll(HoldGesture *g) {
   lv_anim_set_exec_cb(&a, hold_anim_exec_cb);
   lv_anim_set_values(&a, 0, kHoldMax);
   lv_anim_set_duration(&a, kHoldMs);
+  // The delay holds act_time negative, so the exec callback does not run and the
+  // widget stays empty until it elapses. Completion lands at grace + duration,
+  // which is what a gesture with a grace period costs in total.
+  lv_anim_set_delay(&a, g->grace_ms);
   lv_anim_set_completed_cb(&a, hold_anim_completed_cb);
   lv_anim_start(&a);
 }
@@ -612,6 +626,7 @@ static HoldGesture drive_exit_gesture{
     .is_held = joy_down_held,
     .applies = [] { return lv_screen_active() == ui_DriveScreen; },
     .completed = screen_return_to_main,
+    .grace_ms = kBarGraceMs,
 };
 
 // Which page of the seat screen's own pager is showing: 0 = the function
@@ -637,6 +652,7 @@ static HoldGesture seat_exit_gesture{
     .is_held = joy_down_held,
     .applies = [] { return lv_screen_active() == ui_SeatAdjustmentFlexScreen && seat_page == 0; },
     .completed = screen_return_to_main,
+    .grace_ms = kBarGraceMs,
 };
 
 // Push left to go back a page. Nothing else is bound to left on the adjustment
@@ -647,6 +663,7 @@ static HoldGesture seat_back_gesture{
     .is_held = joy_left_held,
     .applies = [] { return lv_screen_active() == ui_SeatAdjustmentFlexScreen && seat_page == 1; },
     .completed = seat_show_buttons_page,
+    .grace_ms = kBarGraceMs,
 };
 
 static HoldGesture seat_enter_gesture{
@@ -2068,20 +2085,28 @@ extern "C" void app_main(void) {
       // horizontal channel, Y the vertical one (inverted by kVerticalCal).
       stick.update(*horiz_mv, *vert_mv, *twist_mv);
 
-      // Analog -> keypad level. Schmitt trigger (engage past 0.5, release below
-      // 0.25) so the boundary can't chatter; between the two thresholds the
-      // previous state holds. The direction is recomputed every cycle, so
-      // rolling the stick from one direction to another re-aims without
-      // needing to pass through center. The larger component wins, so a
+      // Analog -> keypad level. Schmitt trigger (engage past kKeyEngage, release
+      // below kKeyRelease) so the boundary can't chatter; between the two
+      // thresholds the previous state holds. The direction is recomputed every
+      // cycle, so rolling the stick from one direction to another re-aims
+      // without needing to pass through center. The larger component wins, so a
       // diagonal resolves to one direction rather than two.
+      //
+      // A light touch on purpose: menus should answer well before the stick is
+      // anywhere near its travel limit. The release threshold sits exactly on
+      // the joystick's own center_deadzone_radius, so a direction lets go the
+      // moment the stick is back inside the dead zone, and the deadzone already
+      // suppresses any noise below it.
+      static constexpr float kKeyEngage = 0.20f;
+      static constexpr float kKeyRelease = 0.10f;
       {
         static bool engaged = false;
         const float x = stick.x();
         const float y = stick.y();
         const float mag = std::max(std::abs(x), std::abs(y));
-        if (mag > 0.5f) {
+        if (mag > kKeyEngage) {
           engaged = true;
-        } else if (mag < 0.25f) {
+        } else if (mag < kKeyRelease) {
           engaged = false;
         }
         if (!engaged) {
