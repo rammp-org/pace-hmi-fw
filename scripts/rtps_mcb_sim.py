@@ -10,7 +10,7 @@ Topics, type names, enum values and the wire layout all come from
 firmware builds against, so there is nothing here to keep in sync by hand.
 
 Usage:
-  python rtps_mcb_sim.py                  # interactive: type a/i/ok/err
+  python rtps_mcb_sim.py                  # interactive: type a/i/ok/err, p/r to pause
   python rtps_mcb_sim.py --cycle          # rotate through every combination
   python rtps_mcb_sim.py --list-interfaces
   python rtps_mcb_sim.py --advertised-address 192.168.1.42
@@ -54,16 +54,23 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
         self.flags = 0
         self.seq = 0
         self.announced_targets = -1
+        # Stop publishing without tearing the participant down, so the HMI's
+        # stale path can be exercised and then recovered from without a fresh
+        # discovery round confusing the picture.
+        self.paused = False
 
     def describe(self) -> str:
         return (
             f"drive={spec.DRIVE_STATUS_NAMES.get(self.drive_status, '?')} "
             f"state={spec.STATE_NAMES.get(self.system_state, '?')} "
             f"flags=0x{self.flags:02x}"
+            + (" [PAUSED]" if self.paused else "")
         )
 
     def publish_now(self) -> None:
         """Called by the harness run loop every --period seconds."""
+        if self.paused:
+            return
         writer = self.local_writers[0]
         payload = self.build_data_message(
             writer, spec.pack_mcb_status(self.drive_status, self.system_state, self.flags, self.seq)
@@ -138,6 +145,9 @@ HELP_TEXT = """commands:
   ok              state -> OK
   e / err         state -> ERROR
   f <hex>         reserved flags byte (e.g. 'f 01')
+  p               pause publishing (HMI should go stale after
+                  RAMMP_MCB_STATUS_TIMEOUT_MS: blinking orange RTPS, '---')
+  r               resume publishing (HMI should go straight back to green)
   <enter>         show what is being published
   q               quit"""
 
@@ -159,6 +169,12 @@ def run_interactive(harness: McbStatusPublisher) -> None:
             harness.system_state = spec.STATE_OK
         elif command in ("e", "err", "error"):
             harness.system_state = spec.STATE_ERROR
+        elif command in ("p", "pause"):
+            harness.paused = True
+            print(f"  {harness.describe()}")
+            continue
+        elif command in ("r", "resume"):
+            harness.paused = False
         elif command.startswith("f "):
             try:
                 harness.flags = int(command[2:].strip(), 16) & 0xFF
@@ -184,6 +200,7 @@ def run_cycle(harness: McbStatusPublisher, dwell: float) -> None:
         (spec.DRIVE_STATUS_ACTIVE, spec.STATE_ERROR),
         (spec.DRIVE_STATUS_INACTIVE, spec.STATE_ERROR),
     ]
+    stale_gap = max(dwell, spec.MCB_STATUS_TIMEOUT_MS / 1000.0 + 1.0)
     print(f"Cycling every {dwell:.1f}s; Ctrl-C to stop.")
     try:
         while True:
@@ -193,6 +210,13 @@ def run_cycle(harness: McbStatusPublisher, dwell: float) -> None:
                 harness.publish_now()
                 print(f"  {harness.describe()}")
                 time.sleep(dwell)
+            # One gap per lap, longer than the timeout, so the link-loss path
+            # gets exercised too: the HMI should blink its RTPS label orange and
+            # show '---' for drive/state, then recover on the next publish.
+            harness.paused = True
+            print(f"  paused {stale_gap:.1f}s - HMI should go stale")
+            time.sleep(stale_gap)
+            harness.paused = False
     except KeyboardInterrupt:
         return
 
@@ -206,8 +230,12 @@ def main() -> int:
         help="Rotate through every drive-status/state combination instead of reading commands")
     parser.add_argument("--dwell", type=float, default=3.0,
                         help="Seconds per combination in --cycle mode (default 3)")
-    parser.add_argument("--period", type=float, default=0.5,
-                        help="Seconds between republishes of the current status (default 0.5)")
+    parser.add_argument(
+        "--period", type=float, default=spec.MCB_STATUS_PERIOD_MS / 1000.0,
+        help="Seconds between republishes of the current status (default from the spec header's "
+             f"RAMMP_MCB_STATUS_PERIOD_MS = {spec.MCB_STATUS_PERIOD_MS} ms). Anything longer than "
+             f"RAMMP_MCB_STATUS_TIMEOUT_MS ({spec.MCB_STATUS_TIMEOUT_MS} ms) makes the HMI declare "
+             "the link stale between perfectly good samples.")
     parser.add_argument("--list-interfaces", action="store_true",
                         help="Print this host's IPv4 addresses and exit")
     parser.add_argument("--node-name", default="mcb_sim", help="Local participant name")

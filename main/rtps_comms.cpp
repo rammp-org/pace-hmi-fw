@@ -24,6 +24,7 @@
 #include "esp_heap_caps.h"
 #include "esp_mac.h"
 #include "esp_netif.h"
+#include "esp_timer.h"
 #include "lwip/ip_addr.h"
 #include "ping/ping_sock.h"
 
@@ -84,6 +85,14 @@ constexpr std::string_view kMcbStatusTypeName = RAMMP_TYPE_MCB_STATUS;
 constexpr auto kPublishPeriod = 2s;
 
 espp::Logger logger({.tag = "rtps_comms", .level = espp::Logger::Verbosity::INFO});
+
+// Link-state inputs for rtps_comms_link_state(). Atomics because the event
+// handlers, the RTPS receive task and the LVGL poll all touch them.
+std::atomic<bool> eth_failed{false};
+std::atomic<bool> link_up{false};
+// esp_timer microseconds at the last MCB status sample; 0 = never
+std::atomic<int64_t> last_status_us{0};
+constexpr int64_t kMcbStatusTimeoutUs = RAMMP_MCB_STATUS_TIMEOUT_MS * 1000LL;
 
 std::atomic<bool> got_ip{false};
 // 1.2.0 dropped the discovered-endpoint accessors, so a matched-callback is the
@@ -148,9 +157,14 @@ void eth_event_handler(void *, esp_event_base_t, int32_t event_id, void *) {
   switch (event_id) {
   case ETHERNET_EVENT_CONNECTED:
     logger.info("Ethernet link up");
+    link_up = true;
     break;
   case ETHERNET_EVENT_DISCONNECTED:
     logger.warn("Ethernet link down");
+    link_up = false;
+    // the lease does not survive the link, and got_ip latching true across an
+    // unplug would leave the indicator claiming a network that is gone
+    got_ip = false;
     break;
   case ETHERNET_EVENT_START:
     logger.info("Ethernet started");
@@ -170,6 +184,11 @@ void got_ip_event_handler(void *, esp_event_base_t, int32_t, void *event_data) {
   logger.info("Got IP: {} netmask {}.{}.{}.{} gateway {}.{}.{}.{}", ip_address,
               IP2STR(&event->ip_info.netmask), IP2STR(&event->ip_info.gw));
   got_ip = true;
+}
+
+void lost_ip_event_handler(void *, esp_event_base_t, int32_t, void *) {
+  logger.warn("Lost IP address (DHCP lease expired or link dropped)");
+  got_ip = false;
 }
 
 // Fire a short ICMP ping session at `target` and log every reply/timeout.
@@ -326,6 +345,7 @@ bool initialize_ethernet() {
 
   esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, &eth_event_handler, nullptr);
   esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, &got_ip_event_handler, nullptr);
+  esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_LOST_IP, &lost_ip_event_handler, nullptr);
 
   err = esp_eth_start(eth_handle);
   if (err != ESP_OK) {
@@ -447,6 +467,9 @@ bool start_participant() {
                   logger.warn("Received sample on '{}' that failed CDR decode", kMcbStatusTopic);
                   return;
                 }
+                // liveness evidence for rtps_comms_link_state(); stamped before
+                // the handler runs so a slow observer cannot age the link
+                last_status_us = esp_timer_get_time();
                 // the MCB republishes on a period, so log only what changes —
                 // otherwise this floods at the status rate
                 static std::optional<rammp_mcb_status_t> last;
@@ -523,6 +546,23 @@ void rtps_comms_on_mcb_status(std::function<void(const rammp_mcb_status_t &)> ha
   mcb_status_handler = std::move(handler);
 }
 
+RtpsLinkState rtps_comms_link_state() {
+  if (eth_failed) {
+    return RtpsLinkState::ETH_FAILED;
+  }
+  if (!link_up) {
+    return RtpsLinkState::LINK_DOWN;
+  }
+  if (!got_ip) {
+    return RtpsLinkState::NO_IP;
+  }
+  const int64_t last = last_status_us.load();
+  if (last != 0 && (esp_timer_get_time() - last) < kMcbStatusTimeoutUs) {
+    return RtpsLinkState::CONNECTED;
+  }
+  return RtpsLinkState::NO_PEER;
+}
+
 bool rtps_comms_publish_adc(uint32_t x_mv, uint32_t y_mv, uint32_t twist_mv) {
   // called from the ADC task at 30 Hz; quiet no-op until RTPS is up and
   // someone subscribes, so a missing cable or absent plot script costs
@@ -547,6 +587,7 @@ bool rtps_comms_start() {
     logger.info("RX serviced by INT on GPIO{}", static_cast<int>(kPinInt));
   }
   if (!initialize_ethernet()) {
+    eth_failed = true;
     return false;
   }
 

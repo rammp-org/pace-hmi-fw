@@ -27,6 +27,7 @@
 // StatusPanel is a SquareLine *component*, so its children are reached by index
 // through ui_comp_get_child() rather than by a ui_* global.
 #include "components/ui_comp_statuspanel.h"
+#include "components/ui_comp_topbar.h"
 
 #include "sample_ui_home.h"
 
@@ -90,6 +91,12 @@ static lv_subject_t adc_twist_subject;
 // RAMMP_STATE_* enums from rammp_rtps_spec.h.
 static lv_subject_t drive_status_subject;
 static lv_subject_t mcb_state_subject;
+// Link health behind those two, polled from rtps_comms (RtpsLinkState). Drives
+// the TopBar's RTPS indicator, and greys the status labels when it is not
+// CONNECTED - a value we can no longer vouch for must not keep showing.
+static lv_subject_t rtps_link_subject;
+// 0/1 blink phase for the indicator, flipped by the same poll timer
+static lv_subject_t rtps_blink_subject;
 
 // GPIO48 test button: press count (bound to the ButtonCounter label) and
 // current pressed state (drives the ButtonPanel background via an observer)
@@ -348,11 +355,29 @@ static StatusKind kStateKind = StatusKind::kState;
 static constexpr uint32_t kStatusGreen = 0x01FF00; // the export's ACTIVE/OK green
 static constexpr uint32_t kStatusGrey = 0xAAAAAA;  // nothing wrong, just not driving
 static constexpr uint32_t kStatusRed = 0xFF0000;
+static constexpr uint32_t kStatusOrange = 0xFF8C00; // network up, nothing peering
+// Shown instead of a stale drive-status/state: the MCB has gone quiet, so the
+// last value it sent is no longer something the HMI can stand behind.
+static constexpr const char *kStatusUnknownText = "---";
 
-static void mcb_status_label_observer(lv_observer_t *observer, lv_subject_t *subject) {
+// Bound to both the label's own value subject and rtps_link_subject, so it is
+// re-run either when the MCB says something new or when the link changes. The
+// subject argument is therefore ignored: whichever one fired, the answer
+// depends on both.
+static void mcb_status_label_observer(lv_observer_t *observer, lv_subject_t *) {
   lv_obj_t *label = lv_observer_get_target_obj(observer);
   const auto kind = *static_cast<const StatusKind *>(lv_observer_get_user_data(observer));
-  const auto value = static_cast<uint8_t>(lv_subject_get_int(subject));
+
+  // No live link means no current answer, whatever arrived last.
+  if (static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) !=
+      RtpsLinkState::CONNECTED) {
+    lv_label_set_text(label, kStatusUnknownText);
+    lv_obj_set_style_text_color(label, lv_color_hex(kStatusGrey), LV_PART_MAIN);
+    return;
+  }
+
+  const auto value = static_cast<uint8_t>(lv_subject_get_int(
+      kind == StatusKind::kDriveStatus ? &drive_status_subject : &mcb_state_subject));
 
   const char *text = nullptr;
   uint32_t color = kStatusRed;
@@ -380,13 +405,90 @@ static void bind_status_panel(lv_obj_t *panel) {
   if (panel == nullptr) {
     return;
   }
-  lv_subject_add_observer_obj(
-      &drive_status_subject, mcb_status_label_observer,
-      ui_comp_get_child(panel, UI_COMP_STATUSPANEL_STATUSPANELLEFT_DRIVESTATUSLABEL),
-      &kDriveStatusKind);
-  lv_subject_add_observer_obj(
-      &mcb_state_subject, mcb_status_label_observer,
-      ui_comp_get_child(panel, UI_COMP_STATUSPANEL_STATUSPANELRIGHT_STATELABEL), &kStateKind);
+  lv_obj_t *drive_label =
+      ui_comp_get_child(panel, UI_COMP_STATUSPANEL_STATUSPANELLEFT_DRIVESTATUSLABEL);
+  lv_obj_t *state_label = ui_comp_get_child(panel, UI_COMP_STATUSPANEL_STATUSPANELRIGHT_STATELABEL);
+  lv_subject_add_observer_obj(&drive_status_subject, mcb_status_label_observer, drive_label,
+                              &kDriveStatusKind);
+  lv_subject_add_observer_obj(&mcb_state_subject, mcb_status_label_observer, state_label,
+                              &kStateKind);
+  // A second observer each, so losing the link repaints them even though the
+  // MCB said nothing new. Both are object-bound and die with the label.
+  lv_subject_add_observer_obj(&rtps_link_subject, mcb_status_label_observer, drive_label,
+                              &kDriveStatusKind);
+  lv_subject_add_observer_obj(&rtps_link_subject, mcb_status_label_observer, state_label,
+                              &kStateKind);
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// TopBar RTPS indicator
+/////////////////////////////////////////////////////////////////////////////
+
+static constexpr uint32_t kRtpsPollMs = 250;
+
+// Bound to rtps_link_subject and rtps_blink_subject both; reads both regardless
+// of which one fired.
+static void rtps_label_observer(lv_observer_t *observer, lv_subject_t *) {
+  lv_obj_t *label = lv_observer_get_target_obj(observer);
+  const auto state = static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject));
+
+  uint32_t color = kStatusRed;
+  bool blink = false;
+  switch (state) {
+  case RtpsLinkState::ETH_FAILED: // no hardware and no link are both "there is
+  case RtpsLinkState::LINK_DOWN:  // no network", and neither is worth blinking
+    color = kStatusRed;
+    break;
+  case RtpsLinkState::NO_IP:
+    color = kStatusOrange;
+    break;
+  case RtpsLinkState::NO_PEER: // link is fine, nobody is talking - the one
+    color = kStatusOrange;     // state worth drawing the eye to
+    blink = true;
+    break;
+  case RtpsLinkState::CONNECTED:
+    color = kStatusGreen;
+    break;
+  }
+  lv_obj_set_style_text_color(label, lv_color_hex(color), LV_PART_MAIN);
+  // Blink on opacity rather than colour: the label keeps its size so nothing in
+  // the bar reflows, and it reads the same against either theme.
+  const bool visible = !blink || lv_subject_get_int(&rtps_blink_subject) != 0;
+  lv_obj_set_style_text_opa(label, visible ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_MAIN);
+}
+
+static void bind_rtps_label(lv_obj_t *bar) {
+  if (bar == nullptr) {
+    return;
+  }
+  lv_obj_t *label = ui_comp_get_child(bar, UI_COMP_TOPBAR_RTPS);
+  lv_subject_add_observer_obj(&rtps_link_subject, rtps_label_observer, label, nullptr);
+  lv_subject_add_observer_obj(&rtps_blink_subject, rtps_label_observer, label, nullptr);
+}
+
+// Runs on the LVGL task, so the subject writes are already covered by the lock
+// lv_task_handler() is called under. Staleness has to be polled - nothing
+// happens when a sample fails to arrive - so the blink phase rides along here
+// rather than owning a second timer.
+static void rtps_poll_cb(lv_timer_t *) {
+  lv_subject_set_int(&rtps_link_subject, static_cast<int32_t>(rtps_comms_link_state()));
+  static uint32_t ticks = 0;
+  // flip every other tick: a 500 ms half-period, i.e. a 1 Hz blink
+  lv_subject_set_int(&rtps_blink_subject, static_cast<int32_t>((++ticks / 2) & 1u));
+
+  // Defensive: if the RTPS label's text colour/opacity are registered as
+  // themeable in the SquareLine project, ui_theme_set() re-applies the theme's
+  // values over whatever this indicator last painted, and since the subject has
+  // not changed nothing would repaint it — a solid state would keep the theme's
+  // colour indefinitely (a blinking one would self-heal within 500 ms, which is
+  // what makes the bug read as intermittent). Re-notifying on a theme change
+  // takes the label back either way, so this stays correct whichever way the
+  // export sets those two properties.
+  static uint8_t last_theme = ui_theme_idx;
+  if (ui_theme_idx != last_theme) {
+    last_theme = ui_theme_idx;
+    lv_subject_notify(&rtps_link_subject);
+  }
 }
 
 // Runs on the Button's interrupt task (not in ISR context). Only touches
@@ -1617,10 +1719,20 @@ extern "C" void app_main(void) {
   // repaints it grey — that is the point, not a flicker to design away.
   lv_subject_init_int(&drive_status_subject, RAMMP_DRIVE_STATUS_INACTIVE);
   lv_subject_init_int(&mcb_state_subject, RAMMP_STATE_OK);
+  // Initialised before the panels bind, because their observers read it on the
+  // first run. LINK_DOWN at boot is true and self-correcting: the poll timer
+  // has the real answer a quarter second later.
+  lv_subject_init_int(&rtps_link_subject, static_cast<int32_t>(RtpsLinkState::LINK_DOWN));
+  lv_subject_init_int(&rtps_blink_subject, 1);
   bind_status_panel(ui_StatusPanel);  // MainScreenFlex
   bind_status_panel(ui_StatusPanel1); // JoystickTest
   bind_status_panel(ui_StatusPanel2); // DriveScreen
   bind_status_panel(ui_StatusPanel3); // SeatAdjustmentFlexScreen
+  bind_rtps_label(ui_TopBar1);        // JoystickTest
+  bind_rtps_label(ui_TopBar2);        // DriveScreen
+  bind_rtps_label(ui_TopBar3);        // MainScreenFlex
+  bind_rtps_label(ui_TopBar4);        // SeatAdjustmentFlexScreen
+  lv_timer_create(rtps_poll_cb, kRtpsPollMs, nullptr);
 
   // GPIO48 test button. The label has a built-in binding; the panel background
   // is a style property with no binding, so it gets an observer bound to the

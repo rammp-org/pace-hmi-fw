@@ -52,6 +52,22 @@ extern "C" {
 #define RAMMP_TYPE_UINT32 "std_msgs/msg/UInt32"
 
 /* -------------------------------------------------------------------------
+ * Timing contract for RAMMP_TOPIC_MCB_STATUS
+ *
+ * A publisher of McbStatus must republish at least every
+ * RAMMP_MCB_STATUS_TIMEOUT_MS, even when nothing has changed. The topic is
+ * best-effort with no durability, so silence is indistinguishable from an
+ * absent publisher: a consumer that has heard nothing for that long treats the
+ * link as lost, and the HMI greys out its drive-status and state labels rather
+ * than keep showing a value it can no longer vouch for.
+ *
+ * PERIOD is the recommended send rate, four times inside the timeout so three
+ * consecutive drops still do not trip it.
+ * ---------------------------------------------------------------------- */
+#define RAMMP_MCB_STATUS_PERIOD_MS 500
+#define RAMMP_MCB_STATUS_TIMEOUT_MS 2000
+
+/* -------------------------------------------------------------------------
  * Enumerations
  *
  * Deliberately minimal: only the states the HMI can show today. Additions go

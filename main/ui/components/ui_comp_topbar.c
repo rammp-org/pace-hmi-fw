@@ -22,6 +22,20 @@ lv_obj_t * ui_TopBar_create(lv_obj_t * comp_parent)
                                            _ui_theme_alpha_background);
     lv_obj_set_style_border_side(cui_TopBar, LV_BORDER_SIDE_NONE, LV_PART_MAIN | LV_STATE_DEFAULT);
 
+    lv_obj_t * cui_RTPS;
+    cui_RTPS = lv_label_create(cui_TopBar);
+    lv_obj_set_width(cui_RTPS, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(cui_RTPS, LV_SIZE_CONTENT);    /// 1
+    lv_obj_set_x(cui_RTPS, -240);
+    lv_obj_set_y(cui_RTPS, 0);
+    lv_obj_set_align(cui_RTPS, LV_ALIGN_RIGHT_MID);
+    lv_label_set_text(cui_RTPS, "RTPS");
+    ui_object_set_themeable_style_property(cui_RTPS, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(cui_RTPS, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text);
+    lv_obj_set_style_text_font(cui_RTPS, &lv_font_montserrat_24, LV_PART_MAIN | LV_STATE_DEFAULT);
+
     lv_obj_t * cui_Clock1;
     cui_Clock1 = lv_label_create(cui_TopBar);
     lv_obj_set_width(cui_Clock1, LV_SIZE_CONTENT);   /// 1
@@ -87,6 +101,7 @@ lv_obj_t * ui_TopBar_create(lv_obj_t * comp_parent)
 
     lv_obj_t ** children = lv_malloc(sizeof(lv_obj_t *) * _UI_COMP_TOPBAR_NUM);
     children[UI_COMP_TOPBAR_TOPBAR] = cui_TopBar;
+    children[UI_COMP_TOPBAR_RTPS] = cui_RTPS;
     children[UI_COMP_TOPBAR_CLOCK1] = cui_Clock1;
     children[UI_COMP_TOPBAR_GPS1] = cui_GPS1;
     children[UI_COMP_TOPBAR_BATTERY1] = cui_Battery1;

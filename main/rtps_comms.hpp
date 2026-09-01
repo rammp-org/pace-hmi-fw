@@ -17,6 +17,25 @@
  *   - and keeps the bench topics (counter/command/brightness) for bring-up.
  */
 
+/// Where the HMI's link to the MCB currently stands, worst to best. The TopBar
+/// RTPS indicator maps these to colours.
+enum class RtpsLinkState {
+  ETH_FAILED, ///< W5500 bring-up failed at boot; will not recover without one
+  LINK_DOWN,  ///< no Ethernet link (cable out, switch down)
+  NO_IP,      ///< link up, no DHCP lease yet
+  NO_PEER,    ///< have an IP, but no MCB status inside the timeout window
+  CONNECTED,  ///< MCB status arriving
+};
+
+/// Current link state. Cheap (a few atomics and one timestamp compare), safe
+/// from any task.
+///
+/// NO_PEER deliberately covers both "never heard from the MCB" and "the MCB
+/// went quiet": espp's matched callback is a latch that never resets, and
+/// matching an endpoint does not mean anyone is publishing, so live samples
+/// inside RAMMP_MCB_STATUS_TIMEOUT_MS are the only honest evidence of a peer.
+RtpsLinkState rtps_comms_link_state();
+
 /// Register the handler invoked when a brightness command (percent, clamped
 /// to 0-100) arrives on the brightness topic. Call before rtps_comms_start().
 /// The handler runs on the RTPS receive task, not the LVGL thread.

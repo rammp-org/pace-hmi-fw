@@ -29,6 +29,7 @@ HEADER_RELATIVE_PATH = os.path.join("main", "rammp_rtps_spec.h")
 
 _DEFINE_RE = re.compile(r'^\s*#define\s+RAMMP_((?:TOPIC|TYPE)_[A-Z0-9_]+)\s+"([^"]*)"', re.M)
 _ENUM_RE = re.compile(r"^\s*RAMMP_([A-Z0-9_]+)\s*=\s*(\d+)\s*,", re.M)
+_NUMBER_RE = re.compile(r"^\s*#define\s+RAMMP_([A-Z0-9_]+)\s+(\d+)\s*$", re.M)
 
 
 def find_header() -> str:
@@ -54,12 +55,15 @@ with open(HEADER_PATH, encoding="utf-8") as _header_file:
 STRINGS: Dict[str, str] = {name: value for name, value in _DEFINE_RE.findall(_HEADER_TEXT)}
 #: every enumerator in the header, keyed without the RAMMP_ prefix
 ENUMS: Dict[str, int] = {name: int(value) for name, value in _ENUM_RE.findall(_HEADER_TEXT)}
+#: every numeric #define (the timing contract), keyed without the RAMMP_ prefix
+NUMBERS: Dict[str, int] = {name: int(value) for name, value in _NUMBER_RE.findall(_HEADER_TEXT)}
 
 if not STRINGS or not ENUMS:
     raise RuntimeError(f"{HEADER_PATH} parsed to nothing — has its #define/enum style changed?")
 
 globals().update(STRINGS)
 globals().update(ENUMS)
+globals().update(NUMBERS)
 
 
 def _group(prefix: str) -> Dict[int, str]:
@@ -107,3 +111,6 @@ if __name__ == "__main__":
     print("\nenums:")
     for key in sorted(ENUMS, key=lambda k: (k.rsplit("_", 1)[0], ENUMS[k])):
         print(f"  {key:<24} {ENUMS[key]}")
+    print("\nnumbers:")
+    for key in sorted(NUMBERS):
+        print(f"  {key:<24} {NUMBERS[key]}")

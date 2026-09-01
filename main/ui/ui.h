@@ -54,8 +54,8 @@ LV_IMG_DECLARE(ui_img_107617181);    // assets/turbo-rasterized.png
 LV_IMG_DECLARE(ui_img_rammp_wheelchair_png);    // assets/rammp_wheelchair.png
 
 // FONTS
-LV_FONT_DECLARE(ui_font_IBMPlexSansMedium264);
 LV_FONT_DECLARE(ui_font_IBMPlexSansBold82);
+LV_FONT_DECLARE(ui_font_IBMPlexSansMedium264);
 LV_FONT_DECLARE(ui_font_IBMPlexSansMedium53);
 
 // UI INIT

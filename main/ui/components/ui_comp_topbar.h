@@ -14,11 +14,12 @@ extern "C" {
 
 // COMPONENT TopBar
 #define UI_COMP_TOPBAR_TOPBAR 0
-#define UI_COMP_TOPBAR_CLOCK1 1
-#define UI_COMP_TOPBAR_GPS1 2
-#define UI_COMP_TOPBAR_BATTERY1 3
-#define UI_COMP_TOPBAR_BATTERY1_LABEL4 4
-#define _UI_COMP_TOPBAR_NUM 5
+#define UI_COMP_TOPBAR_RTPS 1
+#define UI_COMP_TOPBAR_CLOCK1 2
+#define UI_COMP_TOPBAR_GPS1 3
+#define UI_COMP_TOPBAR_BATTERY1 4
+#define UI_COMP_TOPBAR_BATTERY1_LABEL4 5
+#define _UI_COMP_TOPBAR_NUM 6
 lv_obj_t * ui_TopBar_create(lv_obj_t * comp_parent);
 
 #ifdef __cplusplus
