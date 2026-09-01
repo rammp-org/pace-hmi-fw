@@ -24,6 +24,9 @@
 #include "madgwick_filter.hpp"
 
 #include "ui.h"
+// StatusPanel is a SquareLine *component*, so its children are reached by index
+// through ui_comp_get_child() rather than by a ui_* global.
+#include "components/ui_comp_statuspanel.h"
 
 #include "sample_ui_home.h"
 
@@ -81,6 +84,13 @@ static void fps_render_ready_cb(lv_event_t *) {
 static lv_subject_t adc_x_subject;
 static lv_subject_t adc_y_subject;
 static lv_subject_t adc_twist_subject;
+// MCB status, as reported over RTPS. The joystick is a slave here: these two
+// hold whatever the Main Control Board last said, and every StatusPanel on
+// every screen follows them. Values are the RAMMP_DRIVE_STATUS_* /
+// RAMMP_STATE_* enums from rammp_rtps_spec.h.
+static lv_subject_t drive_status_subject;
+static lv_subject_t mcb_state_subject;
+
 // GPIO48 test button: press count (bound to the ButtonCounter label) and
 // current pressed state (drives the ButtonPanel background via an observer)
 static lv_subject_t button_count_subject;
@@ -318,6 +328,65 @@ static void gpio48_panel_observer(lv_observer_t *observer, lv_subject_t *subject
                                 ? lv_palette_main(LV_PALETTE_BLUE)
                                 : lv_color_hex(ui_get_theme_value(_ui_theme_color_background)),
                             LV_PART_MAIN);
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// MCB status panel
+//
+// One observer serves both labels on all four StatusPanel instances. It sets
+// the text (from the shared spec, so the MCB's logs and these labels use the
+// same words) and the colour — a style property, which has no built-in
+// binding, hence an observer rather than lv_label_bind_text.
+/////////////////////////////////////////////////////////////////////////////
+
+// Which enum a label is showing. Passed as observer user_data; non-const
+// because lv_subject_add_observer_obj takes a void*.
+enum class StatusKind { kDriveStatus, kState };
+static StatusKind kDriveStatusKind = StatusKind::kDriveStatus;
+static StatusKind kStateKind = StatusKind::kState;
+
+static constexpr uint32_t kStatusGreen = 0x01FF00; // the export's ACTIVE/OK green
+static constexpr uint32_t kStatusGrey = 0xAAAAAA;  // nothing wrong, just not driving
+static constexpr uint32_t kStatusRed = 0xFF0000;
+
+static void mcb_status_label_observer(lv_observer_t *observer, lv_subject_t *subject) {
+  lv_obj_t *label = lv_observer_get_target_obj(observer);
+  const auto kind = *static_cast<const StatusKind *>(lv_observer_get_user_data(observer));
+  const auto value = static_cast<uint8_t>(lv_subject_get_int(subject));
+
+  const char *text = nullptr;
+  uint32_t color = kStatusRed;
+  if (kind == StatusKind::kDriveStatus) {
+    text = rammp_drive_status_name(value);
+    // INACTIVE is a normal resting state, not a fault, so it reads grey —
+    // red is reserved for a value neither board knows, which is what an MCB
+    // running ahead of this firmware would send.
+    color = value == RAMMP_DRIVE_STATUS_ACTIVE     ? kStatusGreen
+            : value == RAMMP_DRIVE_STATUS_INACTIVE ? kStatusGrey
+                                                   : kStatusRed;
+  } else {
+    text = rammp_state_name(value);
+    color = value == RAMMP_STATE_OK ? kStatusGreen : kStatusRed;
+  }
+  lv_label_set_text(label, text);
+  lv_obj_set_style_text_color(label, lv_color_hex(color), LV_PART_MAIN);
+}
+
+// Binds one StatusPanel instance's two labels to the two subjects. Called once
+// per instance at startup: ui_init builds all four and nothing destroys them,
+// so there is no rebinding to do on a screen change. If a screen ever does get
+// destroyed and re-created, its panel needs this run again.
+static void bind_status_panel(lv_obj_t *panel) {
+  if (panel == nullptr) {
+    return;
+  }
+  lv_subject_add_observer_obj(
+      &drive_status_subject, mcb_status_label_observer,
+      ui_comp_get_child(panel, UI_COMP_STATUSPANEL_STATUSPANELLEFT_DRIVESTATUSLABEL),
+      &kDriveStatusKind);
+  lv_subject_add_observer_obj(
+      &mcb_state_subject, mcb_status_label_observer,
+      ui_comp_get_child(panel, UI_COMP_STATUSPANEL_STATUSPANELRIGHT_STATELABEL), &kStateKind);
 }
 
 // Runs on the Button's interrupt task (not in ISR context). Only touches
@@ -1542,6 +1611,17 @@ extern "C" void app_main(void) {
   lv_bar_bind_value(ui_YBar, &adc_y_subject);
   lv_bar_bind_value(ui_TwistBar, &adc_twist_subject);
 
+  // MCB status labels. The joystick is a slave: until the MCB says otherwise
+  // the chair is not accepting drive commands, so INACTIVE/OK is the honest
+  // default. The export draws a green "ACTIVE", so the initial observer run
+  // repaints it grey — that is the point, not a flicker to design away.
+  lv_subject_init_int(&drive_status_subject, RAMMP_DRIVE_STATUS_INACTIVE);
+  lv_subject_init_int(&mcb_state_subject, RAMMP_STATE_OK);
+  bind_status_panel(ui_StatusPanel);  // MainScreenFlex
+  bind_status_panel(ui_StatusPanel1); // JoystickTest
+  bind_status_panel(ui_StatusPanel2); // DriveScreen
+  bind_status_panel(ui_StatusPanel3); // SeatAdjustmentFlexScreen
+
   // GPIO48 test button. The label has a built-in binding; the panel background
   // is a style property with no binding, so it gets an observer bound to the
   // object (torn down with it).
@@ -2172,6 +2252,15 @@ extern "C" void app_main(void) {
   // backlight directly (no LVGL), so it's safe from the RTPS receive task.
   rtps_comms_on_brightness(
       [](float percent) { espp::M5StackTab5::get().brightness(std::max(percent, 5.0f)); });
+  // MCB status -> the two StatusPanel labels. Runs on the RTPS receive task,
+  // so it only writes subjects — and takes the LVGL lock to do it, because
+  // lv_subject_set_int runs the observers synchronously on this task and they
+  // touch widgets.
+  rtps_comms_on_mcb_status([](const rammp_mcb_status_t &status) {
+    std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
+    lv_subject_set_int(&drive_status_subject, status.drive_status);
+    lv_subject_set_int(&mcb_state_subject, status.system_state);
+  });
   if (!rtps_comms_start()) {
     logger.warn("RTPS comms not started (Ethernet bring-up failed)");
   }

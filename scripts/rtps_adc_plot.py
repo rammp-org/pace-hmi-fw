@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Live plot of the Tab5 joystick ADC stream (X/Y position + twist bar).
 
-The firmware publishes one sample per ADC cycle (30 Hz by default) on
-``espp/rtps_example/adc`` with type ``rammp/msg/AdcXYTwist``: three
-little-endian uint32 millivolt values (x, y, twist) behind the standard 4-byte
-CDR encapsulation header (see ``serialize_adc`` in ``main/rtps_comms.cpp``).
+The firmware publishes one sample per ADC cycle (30 Hz by default) on the
+joystick ADC topic: three little-endian uint32 millivolt values (x, y, twist)
+behind the standard 4-byte CDR encapsulation header. The topic and type names
+and the payload decoder all come from ``rammp_rtps.py``, which scrapes
+``main/rammp_rtps_spec.h`` — the same wire spec the firmware builds against.
 
 This script reuses the RTPS machinery from ``rtps_host.py`` (same directory)
 for discovery and reception, and matplotlib for display:
@@ -26,7 +27,6 @@ from __future__ import annotations
 import argparse
 import collections
 import os
-import struct
 import sys
 import threading
 import time
@@ -63,7 +63,7 @@ class AdcPlotHarness(rtps_host.RtpsHostHarness):
             writer = self.discovered_writers.get(guid_prefix + writer_id)
             if writer is None or writer.topic_name != ADC_TOPIC:
                 continue
-            values = deserialize_adc_cdr(serialized_payload)
+            values = spec.unpack_adc_xy_twist(serialized_payload)
             if values is None:
                 continue
             self.samples.append((time.monotonic(), *values))
@@ -90,6 +90,8 @@ def build_harness_args(cli: argparse.Namespace) -> argparse.Namespace:
         announce_period=1.0,
         duration=0.0,
         trace_packets=cli.trace_packets,
+        peer=cli.peer,
+        peer_participant_ids=cli.peer_participant_ids,
     )
 
 
@@ -178,6 +180,15 @@ def main() -> int:
                         help="IPv4 interface for multicast join/send")
     parser.add_argument("--multicast-group", default="239.255.0.1",
                         help="RTPS metatraffic multicast group")
+    parser.add_argument(
+        "--peer", action="append", default=None, metavar="HOST",
+        help="Hostname or IP of the Tab5, to reach it without multicast discovery (repeatable). "
+             "Needed when it is routed rather than on-link (Tailscale, VPN, another subnet). "
+             "Usually 'espressif'.")
+    parser.add_argument(
+        "--peer-participant-ids", type=rtps_host.parse_participant_id_range, default="0-3",
+        metavar="IDS",
+        help="Participant ids to try on each --peer, as '0-3' or '0,1,2' (default 0-3)")
     parser.add_argument("--trace-packets", action="store_true",
                         help="Log every received UDP packet and its RTPS submessage headers")
     cli = parser.parse_args()

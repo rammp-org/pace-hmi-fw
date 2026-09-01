@@ -59,24 +59,27 @@ constexpr int kSpiClockMhz = 20;
 // (RtpsParticipant::Config::DOMAIN_ID, default 0 = the ROS_DOMAIN_ID default)
 // and is no longer settable per participant.
 //
-// Topics/type below match the espp python host harness (rtps_host.py): it
-// subscribes to '.../request' and echoes every value back on '.../response',
-// giving a full publish->echo->receive round trip. A writer only has send
-// destinations once a remote reader on the same topic is discovered, so
-// unmatched topics show up as "No send destinations" warnings.
+// Every topic and type name comes from rammp_rtps_spec.h so the MCB and the
+// python test tools cannot drift from us. A writer only has send destinations
+// once a remote reader on the same topic is discovered, so a name mismatch
+// shows up as a "No send destinations" warning rather than an error.
 //
-// For a ROS 2 peer instead, use pre-mangled ROS 2 wire names — e.g. topic
-// "rt/tab5/counter" / "rt/tab5/cmd" with type "std_msgs::msg::dds_::UInt32_"
-// — since the espp rtps component emits names verbatim.
+// For a ROS 2 peer instead, use pre-mangled ROS 2 wire names — e.g. type
+// "std_msgs::msg::dds_::UInt32_" — since the espp rtps component emits names
+// verbatim.
+//
+// The counter/command pair still matches the espp python host harness
+// (rtps_host.py --publish-topic/--subscribe-topic): it echoes every value
+// back, giving a full publish->echo->receive round trip for bring-up.
 constexpr std::string_view kNodeName = "rammp_hmi";
-constexpr std::string_view kCounterTopic = "espp/rtps_example/request";
-constexpr std::string_view kCmdTopic = "espp/rtps_example/response";
-constexpr std::string_view kBrightnessTopic = "espp/rtps_example/brightness";
-constexpr std::string_view kUInt32TypeName = "std_msgs/msg/UInt32";
-// joystick ADC stream: one sample = x, y, twist millivolts as three uint32.
-// Custom type name — both ends are ours (rtps_adc_plot.py matches these).
-constexpr std::string_view kAdcTopic = "espp/rtps_example/adc";
-constexpr std::string_view kAdcTypeName = "rammp/msg/AdcXYTwist";
+constexpr std::string_view kCounterTopic = RAMMP_TOPIC_HMI_COUNTER;
+constexpr std::string_view kCmdTopic = RAMMP_TOPIC_HMI_COMMAND;
+constexpr std::string_view kBrightnessTopic = RAMMP_TOPIC_HMI_BRIGHTNESS;
+constexpr std::string_view kUInt32TypeName = RAMMP_TYPE_UINT32;
+constexpr std::string_view kAdcTopic = RAMMP_TOPIC_JOYSTICK_ADC;
+constexpr std::string_view kAdcTypeName = RAMMP_TYPE_ADC_XY_TWIST;
+constexpr std::string_view kMcbStatusTopic = RAMMP_TOPIC_MCB_STATUS;
+constexpr std::string_view kMcbStatusTypeName = RAMMP_TYPE_MCB_STATUS;
 
 constexpr auto kPublishPeriod = 2s;
 
@@ -96,9 +99,10 @@ esp_netif_ip_info_t ip_info{}; // valid once got_ip is true (gateway used for th
 std::unique_ptr<espp::RtpsParticipant> participant;
 std::unique_ptr<espp::Task> publish_task;
 
-// set by rtps_comms_on_brightness() before the participant starts; called
-// from the RTPS receive task when a brightness command arrives
+// set by rtps_comms_on_brightness() / rtps_comms_on_mcb_status() before the
+// participant starts; called from the RTPS receive task when a sample arrives
 std::function<void(float)> brightness_handler;
+std::function<void(const rammp_mcb_status_t &)> mcb_status_handler;
 
 // UInt32 CDR helpers (little-endian CDR with the 4-byte encapsulation header,
 // the on-the-wire format DDS expects for user data). espp/cdr derives the
@@ -107,12 +111,6 @@ std::function<void(float)> brightness_handler;
 // which is what ROS 2 / DDS peers expect.
 struct UInt32Sample {
   uint32_t value;
-};
-
-struct AdcSample {
-  uint32_t x_mv;
-  uint32_t y_mv;
-  uint32_t twist_mv;
 };
 
 std::vector<uint8_t> to_uint8(std::span<const std::byte> bytes) {
@@ -126,8 +124,16 @@ std::vector<uint8_t> serialize_uint32(uint32_t value) {
 }
 
 std::vector<uint8_t> serialize_adc(uint32_t x_mv, uint32_t y_mv, uint32_t twist_mv) {
-  auto bytes = cdr::serialize<cdr::xcdr1>(AdcSample{x_mv, y_mv, twist_mv});
+  auto bytes = cdr::serialize<cdr::xcdr1>(rammp_adc_xy_twist_t{x_mv, y_mv, twist_mv});
   return bytes ? to_uint8(*bytes) : std::vector<uint8_t>{};
+}
+
+std::optional<rammp_mcb_status_t> deserialize_mcb_status(std::span<const uint8_t> cdr_payload) {
+  auto sample = cdr::deserialize<rammp_mcb_status_t>(std::as_bytes(cdr_payload));
+  if (!sample) {
+    return std::nullopt;
+  }
+  return *sample;
 }
 
 std::optional<uint32_t> deserialize_uint32(std::span<const uint8_t> cdr_payload) {
@@ -426,6 +432,43 @@ bool start_participant() {
   }
   logger.info("Added reader '{}' [{}]", kBrightnessTopic, kUInt32TypeName);
 
+  // The MCB's status broadcast. This is the one topic the HMI is a slave to:
+  // the drive-status and state labels show whatever arrives here, so a decode
+  // failure is left visible in the log rather than silently displaying a
+  // stale or zeroed state.
+  if (!participant->add_reader({
+          .topic = std::string(kMcbStatusTopic),
+          .type_name = std::string(kMcbStatusTypeName),
+          .reliability = espp::RtpsParticipant::Reliability::BEST_EFFORT,
+          .on_sample =
+              [](std::span<const uint8_t> cdr) {
+                auto status = deserialize_mcb_status(cdr);
+                if (!status) {
+                  logger.warn("Received sample on '{}' that failed CDR decode", kMcbStatusTopic);
+                  return;
+                }
+                // the MCB republishes on a period, so log only what changes —
+                // otherwise this floods at the status rate
+                static std::optional<rammp_mcb_status_t> last;
+                if (!last || last->drive_status != status->drive_status ||
+                    last->system_state != status->system_state || last->flags != status->flags) {
+                  logger.info("MCB status: drive={} state={} flags=0x{:02x} (seq {})",
+                              rammp_drive_status_name(status->drive_status),
+                              rammp_state_name(status->system_state), status->flags, status->seq);
+                  last = status;
+                }
+                if (mcb_status_handler) {
+                  mcb_status_handler(*status);
+                } else {
+                  logger.warn("No MCB status handler registered; sample ignored");
+                }
+              },
+      })) {
+    logger.error("Failed to add reader for '{}'", kMcbStatusTopic);
+    return false;
+  }
+  logger.info("Added reader '{}' [{}]", kMcbStatusTopic, kMcbStatusTypeName);
+
   logger.info("RTPS participant '{}' up on {} (domain fixed at build time)", kNodeName, ip_address);
   logger.info("Publishing '{}' every {} s, listening on '{}'", kCounterTopic,
               std::chrono::duration_cast<std::chrono::seconds>(kPublishPeriod).count(), kCmdTopic);
@@ -474,6 +517,10 @@ bool start_participant() {
 
 void rtps_comms_on_brightness(std::function<void(float)> handler) {
   brightness_handler = std::move(handler);
+}
+
+void rtps_comms_on_mcb_status(std::function<void(const rammp_mcb_status_t &)> handler) {
+  mcb_status_handler = std::move(handler);
 }
 
 bool rtps_comms_publish_adc(uint32_t x_mv, uint32_t y_mv, uint32_t twist_mv) {
