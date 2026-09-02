@@ -27,10 +27,23 @@ Navigation is joystick-only: push up and hold on a page to enter it, then hold t
 
 ## Flashing without building
 
-A board can be brought up to date without an ESP-IDF toolchain. Grab the images from
-the [latest release](https://github.com/rammp-org/pace-hmi-fw/releases) — CI builds and
+The easiest route needs nothing installed at all — no Python, no esptool, not even this
+repo. Every CI build produces a self-contained programmer for each desktop OS, attached
+to the workflow run under **Actions → Build and Package Main → Artifacts**:
+
+```
+rammp-hmi-p4_programmer_<version>_windows.exe
+rammp-hmi-p4_programmer_<version>_macos.bin
+rammp-hmi-p4_programmer_<version>_linux.bin
+```
+
+Download the one for your machine, plug in a board and run it. The firmware is baked in,
+so the version in the filename is exactly what gets flashed.
+
+Otherwise, if you already have this repo checked out: grab the images from the
+[latest release](https://github.com/rammp-org/pace-hmi-fw/releases) — CI builds and
 attaches them on every release — and extract them into a `precompiled/` folder at the
-root of this repo, then:
+root of the repo, then:
 
 ```powershell
 .\flash_precompiled.ps1            # one board attached: the port is found automatically
