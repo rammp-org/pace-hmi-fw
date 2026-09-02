@@ -832,7 +832,11 @@ class RtpsHostHarness:
                 continue
             if address not in resolved:
                 resolved.append(address)
-                log(f"[peer] seeding discovery at {peer}" + (f" ({address})" if address != peer else ""))
+                # A subnet scan seeds hundreds of peers at once; one line each
+                # would bury whatever the scan was run to find.
+                if not getattr(self.args, "quiet", False):
+                    log(f"[peer] seeding discovery at {peer}"
+                        + (f" ({address})" if address != peer else ""))
         return resolved
 
     def seed_peer_discovery(self) -> None:
@@ -1199,25 +1203,31 @@ class RtpsHostHarness:
         self.next_discovery_send = start_time
         self.next_publish_send = start_time + self.args.publish_interval
 
-        log(
-            "Starting RTPS host harness\n"
-            f"  node: {self.args.node_name}\n"
-            f"  advertised address: {self.args.advertised_address}\n"
-            f"  domain/participant: {self.args.domain_id}/{self.args.participant_id}\n"
-            f"  ports: meta_mc={self.ports.metatraffic_multicast}, meta_uc={self.ports.metatraffic_unicast}, "
-            f"user_mc={self.ports.user_multicast}, user_uc={self.ports.user_unicast}"
-        )
-        if self.local_readers:
-            log("  readers: " + ", ".join(reader.topic_name for reader in self.local_readers))
-        if self.local_writers:
-            writer = self.local_writers[0]
-            writer_mode = "echo responder" if self.args.echo_received else "periodic publisher"
-            interval_text = (
-                f", publish value={self.args.publish_value} every {self.args.publish_interval:.2f}s"
-                if self.args.publish_interval > 0
-                else ""
+        # Probe and scan participants are created and torn down constantly;
+        # their banners would drown the log they exist to populate.
+        if not getattr(self.args, "quiet", False):
+            log(
+                "Starting RTPS host harness\n"
+                f"  node: {self.args.node_name}\n"
+                f"  advertised address: {self.args.advertised_address}\n"
+                f"  domain/participant: {self.args.domain_id}/{self.args.participant_id}\n"
+                f"  ports: meta_mc={self.ports.metatraffic_multicast}, "
+                f"meta_uc={self.ports.metatraffic_unicast}, "
+                f"user_mc={self.ports.user_multicast}, user_uc={self.ports.user_unicast}"
             )
-            log(f"  writer: {writer.topic_name} ({reliability_to_name(writer.reliable)}, {writer_mode}{interval_text})")
+            if self.local_readers:
+                log("  readers: " + ", ".join(r.topic_name for r in self.local_readers))
+            if self.local_writers:
+                writer = self.local_writers[0]
+                writer_mode = "echo responder" if self.args.echo_received else "periodic publisher"
+                interval_text = (
+                    f", publish value={self.args.publish_value} "
+                    f"every {self.args.publish_interval:.2f}s"
+                    if self.args.publish_interval > 0
+                    else ""
+                )
+                log(f"  writer: {writer.topic_name} "
+                    f"({reliability_to_name(writer.reliable)}, {writer_mode}{interval_text})")
 
         try:
             while not self._stop_event.is_set():

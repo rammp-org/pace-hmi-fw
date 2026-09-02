@@ -28,16 +28,20 @@ import sys
 import threading
 import time
 import tkinter as tk
-from tkinter import ttk
+from tkinter import simpledialog, ttk
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import rammp_rtps as spec  # noqa: E402  (path setup must run first)
 import rtps_host  # noqa: E402
 import rtps_mcb_sim  # noqa: E402
+import rtps_net  # noqa: E402
 
 LOG_MAX_LINES = 500
 TICK_MS = 100
+
+#: "Via" entry meaning "work it out from whichever adapter reaches the peer".
+AUTO_ADAPTER = "Auto (follow the route to the board)"
 
 
 class McbPanel:
@@ -54,6 +58,9 @@ class McbPanel:
         # thread. rtps_host.log calls this from the network thread.
         self.log_queue: queue.Queue[str] = queue.Queue()
         rtps_host.LOG_SINK = self.log_queue.put
+        # Worker threads hand results back here; only _tick touches widgets.
+        self.result_queue: queue.Queue[tuple] = queue.Queue()
+        self.adapters: list = []
 
         self.cycling = False
         self.cycle_job: str | None = None
@@ -61,6 +68,8 @@ class McbPanel:
         self._rate_seq = 0
         self._rate_time = time.monotonic()
         self._rate = 0.0
+
+        self.config = rtps_net.load_config()
 
         root.title("RAMMP MCB simulator")
         self._build_connection()
@@ -71,6 +80,9 @@ class McbPanel:
         self._build_log()
         root.after(TICK_MS, self._tick)
         root.protocol("WM_DELETE_WINDOW", self._on_close)
+        # Passive only, and on a worker thread: opening the window must not
+        # block, and nothing scans the network unless Scan is pressed.
+        root.after(200, lambda: self._start_discovery(announce=False))
 
     # ---------------------------------------------------------------- widgets
 
@@ -78,31 +90,38 @@ class McbPanel:
         frame = ttk.LabelFrame(self.root, text="Connection", padding=8)
         frame.pack(fill="x", padx=8, pady=(8, 4))
 
-        ttk.Label(frame, text="Peer").grid(row=0, column=0, sticky="w")
-        self.peer_var = tk.StringVar(value=(self.cli.peer[0] if self.cli.peer else ""))
-        ttk.Entry(frame, textvariable=self.peer_var, width=18).grid(row=0, column=1, padx=(4, 12))
+        ttk.Label(frame, text="Board").grid(row=0, column=0, sticky="w")
+        self.peer_var = tk.StringVar(
+            value=(self.cli.peer[0] if self.cli.peer else self.config.get("peer", ""))
+        )
+        ttk.Entry(frame, textvariable=self.peer_var, width=18).grid(row=0, column=1, padx=(4, 4))
+        self.detect_button = ttk.Button(frame, text="Detect", command=self._on_detect)
+        self.detect_button.grid(row=0, column=2)
+        self.scan_button = ttk.Button(frame, text="Scan...", command=self._on_scan)
+        self.scan_button.grid(row=0, column=3, padx=(4, 12))
 
-        ttk.Label(frame, text="Via").grid(row=0, column=2, sticky="w")
-        addresses = rtps_mcb_sim.local_ipv4_addresses()
+        ttk.Label(frame, text="Via").grid(row=1, column=0, sticky="w", pady=(6, 0))
         self.address_var = tk.StringVar(
-            value=self.cli.advertised_address or rtps_host.guess_local_ipv4()
+            value=self.cli.advertised_address or self.config.get("advertised_address")
+            or AUTO_ADAPTER
         )
-        ttk.Combobox(frame, textvariable=self.address_var, values=addresses, width=18).grid(
-            row=0, column=3, padx=(4, 12)
-        )
+        self.address_combo = ttk.Combobox(frame, textvariable=self.address_var, width=46)
+        self.address_combo.grid(row=1, column=1, columnspan=3, sticky="w", padx=(4, 12),
+                                pady=(6, 0))
+        self._refresh_adapters()
 
         self.connect_button = ttk.Button(frame, text="Connect", command=self._toggle_connection)
         self.connect_button.grid(row=0, column=4)
 
         self.connection_label = ttk.Label(frame, text="not connected")
-        self.connection_label.grid(row=0, column=5, padx=(12, 0), sticky="w")
+        self.connection_label.grid(row=1, column=4, sticky="w", pady=(6, 0))
 
         ttk.Label(
             frame,
-            text="Peer is only needed where multicast cannot reach the board "
-                 "(Tailscale, VPN, another subnet).",
+            text="Via defaults to Auto, which picks the adapter that actually routes to the "
+                 "board \u2014 not the one that reaches the internet.",
             foreground="#666666",
-        ).grid(row=1, column=0, columnspan=6, sticky="w", pady=(6, 0))
+        ).grid(row=2, column=0, columnspan=6, sticky="w", pady=(6, 0))
 
     def _build_status_controls(self) -> None:
         self.drive_text_var = tk.StringVar()
@@ -232,6 +251,83 @@ class McbPanel:
 
     # ------------------------------------------------------------ connection
 
+    def _refresh_adapters(self) -> None:
+        """Populate the Via dropdown with named adapters, Auto first."""
+        self.adapters = rtps_net.list_adapters()
+        values = [AUTO_ADAPTER]
+        # Live adapters first; a down one is almost never the answer but is
+        # still worth offering rather than hiding.
+        values += [a.label() for a in self.adapters if a.is_up]
+        values += [a.label() for a in self.adapters if not a.is_up]
+        self.address_combo["values"] = values
+
+    def _selected_address(self) -> str | None:
+        """The advertised address to use, or None for Auto."""
+        chosen = self.address_var.get().strip()
+        if not chosen or chosen == AUTO_ADAPTER:
+            return None
+        for adapter in self.adapters:
+            if chosen == adapter.label():
+                return adapter.ip
+        return chosen  # a hand-typed address
+
+    def _start_discovery(self, announce: bool = True) -> None:
+        """Find the board on a worker thread; never blocks the window."""
+        if self.harness is not None:
+            self._append_log("[gui] disconnect before detecting")
+            return
+        saved = self.peer_var.get().strip() or self.config.get("peer")
+        self.detect_button.configure(state="disabled")
+        self.connection_label.configure(text="looking for the board...")
+
+        def work() -> None:
+            found = rtps_net.discover_board(saved, progress=self.log_queue.put)
+            self.result_queue.put(("detect", found))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_detect(self) -> None:
+        self._start_discovery(announce=True)
+
+    def _on_scan(self) -> None:
+        """Sweep a subnet, after showing which one."""
+        if self.harness is not None:
+            self._append_log("[gui] disconnect before scanning")
+            return
+        default = rtps_net.subnet_guess(self.peer_var.get().strip()
+                                        or self.config.get("peer"))
+        subnet = simpledialog.askstring(
+            "Scan for the board",
+            "Subnet to sweep with RTPS discovery probes:",
+            initialvalue=default, parent=self.root)
+        if not subnet:
+            return
+        self.scan_button.configure(state="disabled")
+        self.connection_label.configure(text=f"scanning {subnet}...")
+
+        def work() -> None:
+            try:
+                found = rtps_net.scan_subnet(subnet, progress=self.log_queue.put)
+            except ValueError as exc:
+                self.log_queue.put(f"[gui] {subnet} is not a valid subnet: {exc}")
+                found = []
+            self.result_queue.put(("scan", found[0] if found else None))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _discovery_finished(self, kind: str, found: str | None) -> None:
+        self.detect_button.configure(state="normal")
+        self.scan_button.configure(state="normal")
+        if found:
+            self.peer_var.set(found)
+            adapter = rtps_net.adapter_for(found)
+            via = adapter.label() if adapter else "unknown"
+            self.connection_label.configure(text=f"found {found} via {via}")
+            self._append_log(f"[gui] board at {found}, reachable via {via}")
+        else:
+            hint = "try Scan" if kind == "detect" else "check the subnet, and that the board is on"
+            self.connection_label.configure(text=f"board not found - {hint}")
+
     def _toggle_connection(self) -> None:
         if self.harness is None:
             self._connect()
@@ -245,7 +341,8 @@ class McbPanel:
                 domain_id=self.cli.domain_id,
                 participant_id=self.cli.participant_id,
                 bind_address=None,
-                advertised_address=self.address_var.get().strip() or None,
+                advertised_address=self._selected_address()
+                or rtps_net.source_address_for(self.peer_var.get().strip()),
                 multicast_interface=self.cli.multicast_interface,
                 multicast_group=self.cli.multicast_group,
                 period=self.cli.period,
@@ -268,6 +365,12 @@ class McbPanel:
         self._apply_error_text()
         self.connect_button.configure(text="Disconnect")
         self.connection_label.configure(text=f"publishing as {args.advertised_address}")
+        # Only remember settings that actually stood up a participant.
+        rtps_net.save_config({
+            "peer": self.peer_var.get().strip() or None,
+            "advertised_address": args.advertised_address,
+            "period": self.cli.period,
+        })
 
     def _disconnect(self) -> None:
         self._stop_cycle()
@@ -418,6 +521,13 @@ class McbPanel:
                 self._append_log(self.log_queue.get_nowait())
             except queue.Empty:
                 break
+        while True:
+            try:
+                kind, payload = self.result_queue.get_nowait()
+            except queue.Empty:
+                break
+            if kind in ("detect", "scan"):
+                self._discovery_finished(kind, payload)
 
         if self.harness is not None:
             now = time.monotonic()

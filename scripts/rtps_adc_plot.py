@@ -33,7 +33,8 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import rtps_host  # noqa: E402  (path setup must run first)
+import rtps_host  # noqa: E402
+import rtps_net  # noqa: E402  (path setup must run first)
 
 ADC_TOPIC = "espp/rtps_example/adc"
 ADC_TYPE_NAME = "rammp/msg/AdcXYTwist"
@@ -71,7 +72,11 @@ class AdcPlotHarness(rtps_host.RtpsHostHarness):
 
 
 def build_harness_args(cli: argparse.Namespace) -> argparse.Namespace:
-    advertised = cli.advertised_address or rtps_host.guess_local_ipv4()
+    # See rtps_mcb_sim.build_harness_args: derive the adapter from the route to
+    # the board, not from the route to the internet.
+    advertised = (cli.advertised_address
+                  or (rtps_net.source_address_for(cli.peer[0]) if cli.peer else None)
+                  or rtps_host.guess_local_ipv4())
     return argparse.Namespace(
         node_name=cli.node_name,
         domain_id=cli.domain_id,
@@ -193,6 +198,10 @@ def main() -> int:
     parser.add_argument("--trace-packets", action="store_true",
                         help="Log every received UDP packet and its RTPS submessage headers")
     cli = parser.parse_args()
+    config = rtps_net.load_config()
+    if not cli.peer and config.get("peer"):
+        cli.peer = [config["peer"]]
+        print(f"using remembered board address {config['peer']}")
     if cli.fps <= 0:
         parser.error("--fps must be > 0")
     if cli.trail < 1:

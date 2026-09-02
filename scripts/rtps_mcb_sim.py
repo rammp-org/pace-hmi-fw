@@ -42,6 +42,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import rammp_rtps as spec  # noqa: E402  (path setup must run first)
 import rtps_host  # noqa: E402
+import rtps_net  # noqa: E402
 
 
 #: Full stick deflection takes the emulated speed from 0 to max in roughly
@@ -191,23 +192,38 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
 
 
 def local_ipv4_addresses() -> list[str]:
-    """Best-effort list of this host's IPv4 addresses, stdlib only."""
-    addresses = []
-    try:
-        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
-            address = info[4][0]
-            if address not in addresses:
-                addresses.append(address)
-    except socket.gaierror:
-        pass
-    guess = rtps_host.guess_local_ipv4()
-    if guess not in addresses:
-        addresses.insert(0, guess)
-    return addresses
+    """This host's IPv4 addresses. Kept for callers that want bare strings."""
+    return [adapter.ip for adapter in rtps_net.list_adapters()]
+
+def resolve_endpoints(cli: argparse.Namespace) -> tuple[str | None, str | None]:
+    """Work out which board to talk to and which adapter to do it from.
+
+    Order: what was asked for on the command line, then what worked last time,
+    then passive discovery. The adapter is derived from the board rather than
+    chosen independently — routing to the board is the only question whose
+    answer is guaranteed to be the right adapter.
+    """
+    config = rtps_net.load_config()
+    peer = (cli.peer[0] if cli.peer else None) or config.get("peer")
+    if peer and not rtps_net.probe_board(peer, timeout=2.0):
+        print(f"no answer from {peer}; looking for the board...")
+        peer = None
+    if peer is None:
+        peer = rtps_net.discover_board(config.get("peer"), progress=print)
+    advertised = cli.advertised_address or (
+        rtps_net.source_address_for(peer) if peer else None
+    ) or config.get("advertised_address")
+    return peer, advertised
+
 
 
 def build_harness_args(cli: argparse.Namespace) -> argparse.Namespace:
-    advertised = cli.advertised_address or rtps_host.guess_local_ipv4()
+    # Falls back to the route to the peer, not the route to the internet:
+    # guess_local_ipv4() names the adapter that reaches 8.8.8.8, which on a
+    # bench network is usually the wrong one.
+    advertised = (cli.advertised_address
+                  or (rtps_net.source_address_for(cli.peer[0]) if cli.peer else None)
+                  or rtps_host.guess_local_ipv4())
     return argparse.Namespace(
         node_name=cli.node_name,
         domain_id=cli.domain_id,
@@ -378,10 +394,18 @@ def main() -> int:
     cli = parser.parse_args()
 
     if cli.list_interfaces:
-        print("local IPv4 addresses (pass one as --advertised-address):")
-        for address in local_ipv4_addresses():
-            print(f"  {address}")
+        print("network adapters (pass an address as --advertised-address):")
+        for adapter in rtps_net.list_adapters():
+            print(f"  {adapter.label()}")
         return 0
+
+    peer, advertised = resolve_endpoints(cli)
+    if peer is None:
+        print("Could not find the board. Pass --peer, or run rtps_mcb_gui.py and use Scan.")
+        return 1
+    cli.peer = [peer]
+    cli.advertised_address = advertised
+    print(f"board {peer} via {advertised}")
     if cli.period <= 0:
         parser.error("--period must be > 0")
 
@@ -392,6 +416,8 @@ def main() -> int:
     harness = McbStatusPublisher(args)
     network = threading.Thread(target=harness.run, daemon=True)
     network.start()
+    rtps_net.save_config({"peer": peer, "advertised_address": args.advertised_address,
+                          "period": cli.period})
 
     print(f"Publishing '{spec.TOPIC_MCB_STATUS}' [{spec.TYPE_MCB_STATUS}] "
           f"every {cli.period:.2f}s\n")
