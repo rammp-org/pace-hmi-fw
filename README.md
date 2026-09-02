@@ -25,6 +25,30 @@ Navigation is joystick-only: push up and hold on a page to enter it, then hold t
 | <img src="docs/screenshots/SeatAdjustmentFlexScreen.png" width="200"> | <img src="docs/screenshots/JoystickTest.png" width="200"> | |
 | Seat functions: elevation and tilts, static or dynamic | Bars follow the raw X/Y/twist ADC values | |
 
+## Flashing without building
+
+A board can be brought up to date without an ESP-IDF toolchain. Grab the images from
+the [latest release](https://github.com/rammp-org/pace-hmi-fw/releases) — CI builds and
+attaches them on every release — and extract them into a `precompiled/` folder at the
+root of this repo, then:
+
+```powershell
+.\flash_precompiled.ps1            # one board attached: the port is found automatically
+.\flash_precompiled.ps1 -Port COM6 # or name it
+```
+
+Double-clicking `flash_precompiled.bat` does the same thing for anyone who doesn't
+live in a terminal. The only prerequisite is **esptool v5 or newer** — the script
+uses the copy inside the ESP-IDF tools directory if it's installed, otherwise
+`pip install esptool`.
+
+`precompiled/` is **not committed** — it is build output, not source. Every `idf.py
+build` regenerates it locally (the `precompiled` target in `CMakeLists.txt`), so if you
+do have a toolchain the folder always holds the image this tree just produced, and
+`flash_precompiled.ps1` flashes exactly that. `manifest.txt` beside the binaries records
+the version, commit and SHA256 of each image; the `.elf` lands there too, for decoding a
+backtrace against the image actually on the board.
+
 ## Quick testing
 
 ### 3D Joystick

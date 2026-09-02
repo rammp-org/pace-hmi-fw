@@ -73,3 +73,22 @@ target_compile_options(${tab5_lib} PRIVATE -Wno-error=attributes)
 # issue, pulled in only because LV_USE_THORVG is on for SVG rendering.
 idf_component_get_property(lvgl_lib lvgl__lvgl COMPONENT_LIB)
 target_compile_options(${lvgl_lib} PRIVATE -Wno-error=type-limits)
+
+# Refresh precompiled/ after every build, so flash_precompiled.ps1 always has the
+# image this tree just produced. The folder is gitignored -- it is build output, not
+# source; the copy anyone without a toolchain flashes comes from a release asset.
+#
+# Ordering is by target, not by output file: IDF's app binary is produced by a
+# custom command whose declared output is a `.bin_timestamp` sentinel rather than
+# the .bin itself (components/esptool_py/project_include.cmake), so ninja has no
+# rule making `rammp-hmi-p4.bin` and a file-level DEPENDS on it fails a clean
+# build outright. `bootloader` is an ExternalProject and nothing else orders it
+# against the app, so it has to be named here too. Only `all` pulls this target
+# in, so `idf.py app` stays as cheap as it was.
+idf_build_get_property(python PYTHON)
+add_custom_target(precompiled ALL
+  COMMAND ${python} "${CMAKE_CURRENT_LIST_DIR}/scripts/export_precompiled.py"
+          --build-dir "${CMAKE_BINARY_DIR}"
+          --out-dir "${CMAKE_CURRENT_LIST_DIR}/precompiled"
+  VERBATIM USES_TERMINAL)
+add_dependencies(precompiled app bootloader partition_table_bin)
