@@ -1,6 +1,11 @@
 name: Static analysis
 
-on: [pull_request]
+# push is here as well as pull_request: see the note in build.yml --
+# pull_request events on this repo do not currently create runs.
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
 
 jobs:
   static_analysis:

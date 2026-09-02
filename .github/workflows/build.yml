@@ -1,7 +1,16 @@
 name: Build
 
 # TODO: update if you want to allow from forked repositories
-on: [pull_request]
+#
+# `push` is here as well as `pull_request` because pull_request events on this
+# repo record but never create runs (verified: workflow_dispatch green, three
+# pull_request events across two PRs, zero runs). Until that is sorted at the
+# org level, the push trigger is what actually gets a branch built. `main` is
+# excluded because package_main.yml already covers it.
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
 
 permissions:
   contents: read
