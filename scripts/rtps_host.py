@@ -27,6 +27,7 @@ import select
 import socket
 import struct
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Set, Tuple
@@ -162,7 +163,18 @@ class ReaderConfig:
     entity_index: int
 
 
+#: Optional callable receiving every log line as well as stdout. Set by a GUI
+#: that wants the harness output in a widget; called from the network thread, so
+#: whatever is assigned here must be safe to call from there (a Queue.put is).
+LOG_SINK = None
+
+
 def log(message: str) -> None:
+    if LOG_SINK is not None:
+        try:
+            LOG_SINK(message)
+        except Exception:  # a broken sink must not take the network thread down
+            pass
     print(message, flush=True)
 
 
@@ -548,6 +560,9 @@ class RtpsHostHarness:
         self._configure_multicast_sender(self.metatraffic_unicast_sock)
         self._configure_multicast_sender(self.user_unicast_sock)
 
+        # Lets a caller end run() without a KeyboardInterrupt or a --duration,
+        # which is what a GUI's Disconnect needs.
+        self._stop_event = threading.Event()
         self.next_discovery_send = 0.0
         self.next_publish_send = 0.0
         self.last_no_participant_log = 0.0
@@ -1171,7 +1186,7 @@ class RtpsHostHarness:
             log(f"  writer: {writer.topic_name} ({reliability_to_name(writer.reliable)}, {writer_mode}{interval_text})")
 
         try:
-            while True:
+            while not self._stop_event.is_set():
                 now = time.monotonic()
                 if now >= self.next_discovery_send:
                     self.send_discovery_now()
@@ -1217,6 +1232,10 @@ class RtpsHostHarness:
             log("Stopping RTPS host harness")
         finally:
             self.close()
+
+    def stop(self) -> None:
+        """Ask run() to return. Safe from any thread; run() closes the sockets."""
+        self._stop_event.set()
 
     def close(self) -> None:
         for sock in (

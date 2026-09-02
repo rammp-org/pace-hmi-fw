@@ -91,6 +91,17 @@ static lv_subject_t adc_twist_subject;
 // RAMMP_STATE_* enums from rammp_rtps_spec.h.
 static lv_subject_t drive_status_subject;
 static lv_subject_t mcb_state_subject;
+// Optional label overrides from the MCB. Empty means "use the enum's name",
+// which is the normal path; a non-empty string replaces the text only, never
+// the colour. String subjects need their own storage plus a previous-value
+// buffer, same as the seat-function and haptic labels further down.
+static lv_subject_t drive_text_subject;
+static lv_subject_t state_text_subject;
+static char drive_text_buf[RAMMP_MCB_TEXT_LEN];
+static char drive_text_prev_buf[RAMMP_MCB_TEXT_LEN];
+static char state_text_buf[RAMMP_MCB_TEXT_LEN];
+static char state_text_prev_buf[RAMMP_MCB_TEXT_LEN];
+
 // Link health behind those two, polled from rtps_comms (RtpsLinkState). Drives
 // the TopBar's RTPS indicator, and greys the status labels when it is not
 // CONNECTED - a value we can no longer vouch for must not keep showing.
@@ -378,11 +389,16 @@ static void mcb_status_label_observer(lv_observer_t *observer, lv_subject_t *) {
 
   const auto value = static_cast<uint8_t>(lv_subject_get_int(
       kind == StatusKind::kDriveStatus ? &drive_status_subject : &mcb_state_subject));
+  // The override replaces the wording only; the colour below still comes from
+  // the enum, so the MCB can say ACTIVE and still label it "CHARGING".
+  const char *override_text = lv_subject_get_string(
+      kind == StatusKind::kDriveStatus ? &drive_text_subject : &state_text_subject);
+  const bool overridden = override_text != nullptr && override_text[0] != '\0';
 
   const char *text = nullptr;
   uint32_t color = kStatusRed;
   if (kind == StatusKind::kDriveStatus) {
-    text = rammp_drive_status_name(value);
+    text = overridden ? override_text : rammp_drive_status_name(value);
     // INACTIVE is a normal resting state, not a fault, so it reads grey —
     // red is reserved for a value neither board knows, which is what an MCB
     // running ahead of this firmware would send.
@@ -390,7 +406,7 @@ static void mcb_status_label_observer(lv_observer_t *observer, lv_subject_t *) {
             : value == RAMMP_DRIVE_STATUS_INACTIVE ? kStatusGrey
                                                    : kStatusRed;
   } else {
-    text = rammp_state_name(value);
+    text = overridden ? override_text : rammp_state_name(value);
     color = value == RAMMP_STATE_OK ? kStatusGreen : kStatusRed;
   }
   lv_label_set_text(label, text);
@@ -412,11 +428,16 @@ static void bind_status_panel(lv_obj_t *panel) {
                               &kDriveStatusKind);
   lv_subject_add_observer_obj(&mcb_state_subject, mcb_status_label_observer, state_label,
                               &kStateKind);
-  // A second observer each, so losing the link repaints them even though the
-  // MCB said nothing new. Both are object-bound and die with the label.
+  // Further observers, so losing the link or receiving a new override repaints
+  // them even though the enum said nothing new. All are object-bound and die
+  // with the label.
   lv_subject_add_observer_obj(&rtps_link_subject, mcb_status_label_observer, drive_label,
                               &kDriveStatusKind);
   lv_subject_add_observer_obj(&rtps_link_subject, mcb_status_label_observer, state_label,
+                              &kStateKind);
+  lv_subject_add_observer_obj(&drive_text_subject, mcb_status_label_observer, drive_label,
+                              &kDriveStatusKind);
+  lv_subject_add_observer_obj(&state_text_subject, mcb_status_label_observer, state_label,
                               &kStateKind);
 }
 
@@ -1724,6 +1745,11 @@ extern "C" void app_main(void) {
   // has the real answer a quarter second later.
   lv_subject_init_int(&rtps_link_subject, static_cast<int32_t>(RtpsLinkState::LINK_DOWN));
   lv_subject_init_int(&rtps_blink_subject, 1);
+  // empty = no override, so the labels start on the enum names
+  lv_subject_init_string(&drive_text_subject, drive_text_buf, drive_text_prev_buf,
+                         sizeof(drive_text_buf), "");
+  lv_subject_init_string(&state_text_subject, state_text_buf, state_text_prev_buf,
+                         sizeof(state_text_buf), "");
   bind_status_panel(ui_StatusPanel);  // MainScreenFlex
   bind_status_panel(ui_StatusPanel1); // JoystickTest
   bind_status_panel(ui_StatusPanel2); // DriveScreen
@@ -2372,6 +2398,10 @@ extern "C" void app_main(void) {
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
     lv_subject_set_int(&drive_status_subject, status.drive_status);
     lv_subject_set_int(&mcb_state_subject, status.system_state);
+    // decode() guarantees these are NUL-terminated within RAMMP_MCB_TEXT_LEN,
+    // which is exactly the size the subjects were initialised with
+    lv_subject_copy_string(&drive_text_subject, status.drive_text);
+    lv_subject_copy_string(&state_text_subject, status.state_text);
   });
   if (!rtps_comms_start()) {
     logger.warn("RTPS comms not started (Ethernet bring-up failed)");

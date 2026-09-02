@@ -20,6 +20,8 @@
 #ifndef RAMMP_RTPS_SPEC_H
 #define RAMMP_RTPS_SPEC_H
 
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -97,18 +99,103 @@ enum {
  * ---------------------------------------------------------------------- */
 
 /**
+ * Length of a label override, including the NUL terminator: 15 usable
+ * characters. Printable ASCII only — the HMI draws these with LVGL's built-in
+ * Montserrat faces, which carry no glyphs outside ASCII.
+ */
+#define RAMMP_MCB_TEXT_LEN 16
+
+/**
  * MCB -> joystick status, published periodically (best-effort, no durability,
  * so a late-joining or rebooted joystick converges on the next period rather
  * than on the next change).
  *
- * Wire size: 4 bytes, 8 including the CDR encapsulation header.
+ * The two text fields are OVERRIDES, not the normal path: leave them empty and
+ * the HMI shows the enum's own name, which is what a production MCB should do —
+ * it sends what the chair is doing and lets the HMI choose the wording. A
+ * non-empty string replaces the displayed text only; the colour still follows
+ * the enum, so drive_status=ACTIVE with drive_text="CHARGING" reads as green
+ * "CHARGING". They exist so a bench tool can drive the panel into states the
+ * enums do not (yet) name.
+ *
+ * Wire size: RAMMP_MCB_STATUS_PAYLOAD_SIZE bytes, or
+ * RAMMP_MCB_STATUS_CDR_SIZE including the encapsulation header.
  */
 typedef struct rammp_mcb_status {
-  uint8_t drive_status; /**< one of RAMMP_DRIVE_STATUS_* */
-  uint8_t system_state; /**< one of RAMMP_STATE_* */
-  uint8_t flags;        /**< reserved: drive inhibit, e-stop, ... (send 0) */
-  uint8_t seq;          /**< free-running, wraps; for staleness and debug */
+  uint8_t drive_status;                /**< one of RAMMP_DRIVE_STATUS_* */
+  uint8_t system_state;                /**< one of RAMMP_STATE_* */
+  uint8_t flags;                       /**< reserved: drive inhibit, e-stop, ... (send 0) */
+  uint8_t seq;                         /**< free-running, wraps; for staleness and debug */
+  char drive_text[RAMMP_MCB_TEXT_LEN]; /**< "" = use the enum's name */
+  char state_text[RAMMP_MCB_TEXT_LEN]; /**< "" = use the enum's name */
 } rammp_mcb_status_t;
+
+/** 4 scalars + two fixed strings; every field is byte-aligned, so no padding. */
+#define RAMMP_MCB_STATUS_PAYLOAD_SIZE (4 + 2 * RAMMP_MCB_TEXT_LEN)
+/** Classic CDR encapsulation header, little-endian (xcdr1). */
+#define RAMMP_CDR_HEADER_SIZE 4
+#define RAMMP_MCB_STATUS_CDR_SIZE (RAMMP_CDR_HEADER_SIZE + RAMMP_MCB_STATUS_PAYLOAD_SIZE)
+
+/**
+ * Serialize `status` into `out` as a CDR-encapsulated sample.
+ *
+ * Written out by hand rather than derived by reflection: this struct is the
+ * contract between two independently built boards, so the byte order deserves
+ * to be stated here rather than implied by whichever serializer each side
+ * happens to link against. The MCB may not be C++ and may not use espp/cdr at
+ * all — it only needs this header.
+ *
+ * @return bytes written, or 0 if `out` is too small.
+ */
+static inline size_t rammp_mcb_status_encode(const rammp_mcb_status_t *status, uint8_t *out,
+                                             size_t out_size) {
+  size_t i;
+  if (status == NULL || out == NULL || out_size < RAMMP_MCB_STATUS_CDR_SIZE) {
+    return 0;
+  }
+  out[0] = 0x00; /* CDR_LE */
+  out[1] = 0x01;
+  out[2] = 0x00; /* options */
+  out[3] = 0x00;
+  out[4] = status->drive_status;
+  out[5] = status->system_state;
+  out[6] = status->flags;
+  out[7] = status->seq;
+  for (i = 0; i < RAMMP_MCB_TEXT_LEN; ++i) {
+    out[8 + i] = (uint8_t)status->drive_text[i];
+    out[8 + RAMMP_MCB_TEXT_LEN + i] = (uint8_t)status->state_text[i];
+  }
+  return RAMMP_MCB_STATUS_CDR_SIZE;
+}
+
+/**
+ * Parse a CDR-encapsulated sample into `status`.
+ *
+ * @return false if the buffer is short or is not little-endian CDR.
+ */
+static inline bool rammp_mcb_status_decode(const uint8_t *in, size_t in_size,
+                                           rammp_mcb_status_t *status) {
+  size_t i;
+  if (in == NULL || status == NULL || in_size < RAMMP_MCB_STATUS_CDR_SIZE) {
+    return false;
+  }
+  if (in[0] != 0x00 || in[1] != 0x01) {
+    return false; /* big-endian CDR or not CDR at all; nobody here emits that */
+  }
+  status->drive_status = in[4];
+  status->system_state = in[5];
+  status->flags = in[6];
+  status->seq = in[7];
+  for (i = 0; i < RAMMP_MCB_TEXT_LEN; ++i) {
+    status->drive_text[i] = (char)in[8 + i];
+    status->state_text[i] = (char)in[8 + RAMMP_MCB_TEXT_LEN + i];
+  }
+  /* A sender that filled every byte leaves no terminator; force one rather than
+     let the consumer walk off the end of the field. */
+  status->drive_text[RAMMP_MCB_TEXT_LEN - 1] = '\0';
+  status->state_text[RAMMP_MCB_TEXT_LEN - 1] = '\0';
+  return true;
+}
 
 /** joystick -> MCB stick position, in millivolts. Wire size: 12 bytes. */
 typedef struct rammp_adc_xy_twist {

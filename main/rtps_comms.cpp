@@ -11,6 +11,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -138,11 +139,14 @@ std::vector<uint8_t> serialize_adc(uint32_t x_mv, uint32_t y_mv, uint32_t twist_
 }
 
 std::optional<rammp_mcb_status_t> deserialize_mcb_status(std::span<const uint8_t> cdr_payload) {
-  auto sample = cdr::deserialize<rammp_mcb_status_t>(std::as_bytes(cdr_payload));
-  if (!sample) {
+  // Explicit codec from the shared spec rather than cdr::deserialize: espp/cdr
+  // reflects std::array but not the plain C arrays this struct needs to stay
+  // includable from a C MCB. See rammp_rtps_spec.h.
+  rammp_mcb_status_t status{};
+  if (!rammp_mcb_status_decode(cdr_payload.data(), cdr_payload.size(), &status)) {
     return std::nullopt;
   }
-  return *sample;
+  return status;
 }
 
 std::optional<uint32_t> deserialize_uint32(std::span<const uint8_t> cdr_payload) {
@@ -473,11 +477,20 @@ bool start_participant() {
                 // the MCB republishes on a period, so log only what changes —
                 // otherwise this floods at the status rate
                 static std::optional<rammp_mcb_status_t> last;
-                if (!last || last->drive_status != status->drive_status ||
-                    last->system_state != status->system_state || last->flags != status->flags) {
-                  logger.info("MCB status: drive={} state={} flags=0x{:02x} (seq {})",
+                const bool changed = !last || last->drive_status != status->drive_status ||
+                                     last->system_state != status->system_state ||
+                                     last->flags != status->flags ||
+                                     std::string_view(last->drive_text) != status->drive_text ||
+                                     std::string_view(last->state_text) != status->state_text;
+                if (changed) {
+                  logger.info("MCB status: drive={}{} state={}{} flags=0x{:02x} (seq {})",
                               rammp_drive_status_name(status->drive_status),
-                              rammp_state_name(status->system_state), status->flags, status->seq);
+                              status->drive_text[0] ? fmt::format(" \"{}\"", status->drive_text)
+                                                    : std::string(),
+                              rammp_state_name(status->system_state),
+                              status->state_text[0] ? fmt::format(" \"{}\"", status->state_text)
+                                                    : std::string(),
+                              status->flags, status->seq);
                   last = status;
                 }
                 if (mcb_status_handler) {

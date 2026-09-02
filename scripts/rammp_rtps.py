@@ -82,18 +82,45 @@ STATE_NAMES = _group("STATE_")
 CDR_LE_HEADER = b"\x00\x01\x00\x00"
 
 
-def pack_mcb_status(drive_status: int, system_state: int, flags: int = 0, seq: int = 0) -> bytes:
-    """Serialize a rammp_mcb_status_t the way espp/cdr will deserialize it."""
+#: struct format for the payload behind the encapsulation header, matching
+#: rammp_mcb_status_encode() in the spec header
+_MCB_STATUS_FORMAT = f"<BBBB{MCB_TEXT_LEN}s{MCB_TEXT_LEN}s"
+_MCB_STATUS_CDR_SIZE = len(CDR_LE_HEADER) + struct.calcsize(_MCB_STATUS_FORMAT)
+
+
+def encode_label(text: str) -> bytes:
+    """ASCII-encode a label override, truncated to leave room for the NUL.
+
+    The HMI draws these with LVGL's built-in Montserrat faces, which have no
+    glyphs outside ASCII, so anything else is dropped rather than sent as bytes
+    that would render blank.
+    """
+    ascii_only = text.encode("ascii", "ignore")[: MCB_TEXT_LEN - 1]
+    return ascii_only  # struct's 's' pads the rest with NULs
+
+
+def pack_mcb_status(drive_status: int, system_state: int, flags: int = 0, seq: int = 0,
+                    drive_text: str = "", state_text: str = "") -> bytes:
+    """Serialize a rammp_mcb_status_t, matching rammp_mcb_status_encode()."""
     return CDR_LE_HEADER + struct.pack(
-        "<BBBB", drive_status & 0xFF, system_state & 0xFF, flags & 0xFF, seq & 0xFF
+        _MCB_STATUS_FORMAT,
+        drive_status & 0xFF, system_state & 0xFF, flags & 0xFF, seq & 0xFF,
+        encode_label(drive_text), encode_label(state_text),
     )
 
 
-def unpack_mcb_status(payload: bytes) -> tuple[int, int, int, int] | None:
-    """(drive_status, system_state, flags, seq), or None if this isn't one."""
-    if len(payload) < 8 or payload[:2] != CDR_LE_HEADER[:2]:
+def unpack_mcb_status(payload: bytes) -> tuple[int, int, int, int, str, str] | None:
+    """(drive_status, system_state, flags, seq, drive_text, state_text)."""
+    if len(payload) < _MCB_STATUS_CDR_SIZE or payload[:2] != CDR_LE_HEADER[:2]:
         return None
-    return struct.unpack_from("<BBBB", payload, 4)
+    drive, state, flags, seq, drive_raw, state_raw = struct.unpack_from(
+        _MCB_STATUS_FORMAT, payload, len(CDR_LE_HEADER)
+    )
+    return (
+        drive, state, flags, seq,
+        drive_raw.split(b"\0", 1)[0].decode("ascii", "replace"),
+        state_raw.split(b"\0", 1)[0].decode("ascii", "replace"),
+    )
 
 
 def unpack_adc_xy_twist(payload: bytes) -> tuple[int, int, int] | None:

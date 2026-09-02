@@ -52,6 +52,9 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
         self.drive_status = spec.DRIVE_STATUS_INACTIVE
         self.system_state = spec.STATE_OK
         self.flags = 0
+        # label overrides; empty means "let the HMI use the enum's own name"
+        self.drive_text = ""
+        self.state_text = ""
         self.seq = 0
         self.announced_targets = -1
         # Stop publishing without tearing the participant down, so the HMI's
@@ -64,6 +67,8 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
             f"drive={spec.DRIVE_STATUS_NAMES.get(self.drive_status, '?')} "
             f"state={spec.STATE_NAMES.get(self.system_state, '?')} "
             f"flags=0x{self.flags:02x}"
+            + (f" drive_text='{self.drive_text}'" if self.drive_text else "")
+            + (f" state_text='{self.state_text}'" if self.state_text else "")
             + (" [PAUSED]" if self.paused else "")
         )
 
@@ -73,7 +78,9 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
             return
         writer = self.local_writers[0]
         payload = self.build_data_message(
-            writer, spec.pack_mcb_status(self.drive_status, self.system_state, self.flags, self.seq)
+            writer,
+            spec.pack_mcb_status(self.drive_status, self.system_state, self.flags, self.seq,
+                                 self.drive_text, self.state_text),
         )
         targets = self._build_user_targets(writer)
         for destination in targets:
@@ -145,6 +152,8 @@ HELP_TEXT = """commands:
   ok              state -> OK
   e / err         state -> ERROR
   f <hex>         reserved flags byte (e.g. 'f 01')
+  dt <text>       override the DRIVE label text ('dt' alone clears it)
+  st <text>       override the STATE label text ('st' alone clears it)
   p               pause publishing (HMI should go stale after
                   RAMMP_MCB_STATUS_TIMEOUT_MS: blinking orange RTPS, '---')
   r               resume publishing (HMI should go straight back to green)
@@ -169,6 +178,10 @@ def run_interactive(harness: McbStatusPublisher) -> None:
             harness.system_state = spec.STATE_OK
         elif command in ("e", "err", "error"):
             harness.system_state = spec.STATE_ERROR
+        elif command == "dt" or command.startswith("dt "):
+            harness.drive_text = command[3:].strip()
+        elif command == "st" or command.startswith("st "):
+            harness.state_text = command[3:].strip()
         elif command in ("p", "pause"):
             harness.paused = True
             print(f"  {harness.describe()}")
