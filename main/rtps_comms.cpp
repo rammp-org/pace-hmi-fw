@@ -133,8 +133,9 @@ std::vector<uint8_t> serialize_uint32(uint32_t value) {
   return bytes ? to_uint8(*bytes) : std::vector<uint8_t>{};
 }
 
-std::vector<uint8_t> serialize_adc(uint32_t x_mv, uint32_t y_mv, uint32_t twist_mv) {
-  auto bytes = cdr::serialize<cdr::xcdr1>(rammp_adc_xy_twist_t{x_mv, y_mv, twist_mv});
+std::vector<uint8_t> serialize_adc(uint32_t x_mv, uint32_t y_mv, uint32_t twist_mv,
+                                   uint32_t buttons) {
+  auto bytes = cdr::serialize<cdr::xcdr1>(rammp_adc_xy_twist_t{x_mv, y_mv, twist_mv, buttons});
   return bytes ? to_uint8(*bytes) : std::vector<uint8_t>{};
 }
 
@@ -480,17 +481,26 @@ bool start_participant() {
                 const bool changed = !last || last->drive_status != status->drive_status ||
                                      last->system_state != status->system_state ||
                                      last->flags != status->flags ||
+                                     last->speed_tenths != status->speed_tenths ||
                                      std::string_view(last->drive_text) != status->drive_text ||
-                                     std::string_view(last->state_text) != status->state_text;
+                                     std::string_view(last->state_text) != status->state_text ||
+                                     std::string_view(last->error_text) != status->error_text ||
+                                     std::string_view(last->error_footer) != status->error_footer;
                 if (changed) {
-                  logger.info("MCB status: drive={}{} state={}{} flags=0x{:02x} (seq {})",
-                              rammp_drive_status_name(status->drive_status),
-                              status->drive_text[0] ? fmt::format(" \"{}\"", status->drive_text)
-                                                    : std::string(),
-                              rammp_state_name(status->system_state),
-                              status->state_text[0] ? fmt::format(" \"{}\"", status->state_text)
-                                                    : std::string(),
-                              status->flags, status->seq);
+                  logger.info(
+                      "MCB status: drive={}{} state={}{} speed={}.{} flags=0x{:02x} (seq {})",
+                      rammp_drive_status_name(status->drive_status),
+                      status->drive_text[0] ? fmt::format(" \"{}\"", status->drive_text)
+                                            : std::string(),
+                      rammp_state_name(status->system_state),
+                      status->state_text[0] ? fmt::format(" \"{}\"", status->state_text)
+                                            : std::string(),
+                      status->speed_tenths / 10, status->speed_tenths % 10, status->flags,
+                      status->seq);
+                  if (status->error_text[0] || status->error_footer[0]) {
+                    logger.info("  banner: \"{}\" / \"{}\"", status->error_text,
+                                status->error_footer);
+                  }
                   last = status;
                 }
                 if (mcb_status_handler) {
@@ -576,7 +586,7 @@ RtpsLinkState rtps_comms_link_state() {
   return RtpsLinkState::NO_PEER;
 }
 
-bool rtps_comms_publish_adc(uint32_t x_mv, uint32_t y_mv, uint32_t twist_mv) {
+bool rtps_comms_publish_adc(uint32_t x_mv, uint32_t y_mv, uint32_t twist_mv, uint32_t buttons) {
   // called from the ADC task at 30 Hz; quiet no-op until RTPS is up and
   // someone subscribes, so a missing cable or absent plot script costs
   // nothing and logs nothing
@@ -587,7 +597,7 @@ bool rtps_comms_publish_adc(uint32_t x_mv, uint32_t y_mv, uint32_t twist_mv) {
     return false;
   }
   // publish() is internally mutex-guarded, safe alongside the counter task
-  return participant->publish(kAdcTopic, serialize_adc(x_mv, y_mv, twist_mv));
+  return participant->publish(kAdcTopic, serialize_adc(x_mv, y_mv, twist_mv, buttons));
 }
 
 bool rtps_comms_start() {

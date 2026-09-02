@@ -59,9 +59,10 @@ class AdcPlotHarness(rtps_host.RtpsHostHarness):
     def handle_user_packet(self, packet: bytes, sender_ip: str, sender_port: int) -> None:
         # Same writer-GUID -> topic routing as the base class, but with the
         # AdcXYTwist payload decoder instead of the single-uint32 one.
-        for guid_prefix, writer_id, serialized_payload in rtps_host.parse_rtps_data_messages(packet):
-            writer = self.discovered_writers.get(guid_prefix + writer_id)
-            if writer is None or writer.topic_name != ADC_TOPIC:
+        for guid_prefix, writer_id, serialized_payload, reader_id in (
+            rtps_host.parse_rtps_data_messages(packet)
+        ):
+            if self.topic_for_sample(guid_prefix, writer_id, reader_id) != ADC_TOPIC:
                 continue
             values = spec.unpack_adc_xy_twist(serialized_payload)
             if values is None:

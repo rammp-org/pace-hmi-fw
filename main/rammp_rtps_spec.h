@@ -45,6 +45,21 @@ extern "C" {
 #define RAMMP_TOPIC_JOYSTICK_ADC "rammp/joystick/adc"
 #define RAMMP_TYPE_ADC_XY_TWIST "rammp/msg/AdcXYTwist"
 
+/* The joystick publishes RAW millivolts, deliberately: the firmware's own
+   calibration is measured from this stream, so it must not arrive pre-cooked.
+   A consumer needs these two numbers to interpret it. Centre is the resting
+   position of every axis, full scale is the supply, so deflection on any axis
+   runs +/- (FULL_SCALE / 2).
+
+   Sign: pushing the stick FORWARD makes the vertical axis read BELOW centre.
+   The firmware's range mapper inverts on the way to its own UI, but that
+   inversion is not applied to what goes on the wire. */
+#define RAMMP_JOYSTICK_CENTER_MV 1650
+#define RAMMP_JOYSTICK_FULL_SCALE_MV 3300
+
+/** Bits in rammp_adc_xy_twist_t.buttons. */
+#define RAMMP_BUTTON_JOYSTICK 0x00000001u
+
 /** Bench/bring-up topics: heartbeat counter, its echo, remote LCD brightness. */
 #define RAMMP_TOPIC_HMI_COUNTER "rammp/hmi/counter"
 #define RAMMP_TOPIC_HMI_COMMAND "rammp/hmi/command"
@@ -106,6 +121,18 @@ enum {
 #define RAMMP_MCB_TEXT_LEN 16
 
 /**
+ * Error banner body and footer, including the NUL. The body wraps inside a
+ * 600 px label at Montserrat 48 and the footer sits under it at 34, so these
+ * are sized for a couple of short lines rather than a paragraph. ASCII only,
+ * same reason as above.
+ */
+#define RAMMP_ERROR_TEXT_LEN 64
+#define RAMMP_ERROR_FOOTER_LEN 32
+
+/** speed_tenths runs 0..99 and is displayed as N.N, so 0.0 to 9.9. */
+#define RAMMP_SPEED_MAX_TENTHS 99
+
+/**
  * MCB -> joystick status, published periodically (best-effort, no durability,
  * so a late-joining or rebooted joystick converges on the next period rather
  * than on the next change).
@@ -126,12 +153,19 @@ typedef struct rammp_mcb_status {
   uint8_t system_state;                /**< one of RAMMP_STATE_* */
   uint8_t flags;                       /**< reserved: drive inhibit, e-stop, ... (send 0) */
   uint8_t seq;                         /**< free-running, wraps; for staleness and debug */
+  uint8_t speed_tenths;                /**< 0..RAMMP_SPEED_MAX_TENTHS, shown as N.N */
   char drive_text[RAMMP_MCB_TEXT_LEN]; /**< "" = use the enum's name */
   char state_text[RAMMP_MCB_TEXT_LEN]; /**< "" = use the enum's name */
+  /* Body and footer of the error banner the HMI raises whenever system_state is
+     not RAMMP_STATE_OK. Shown verbatim: the MCB owns the wording of a fault,
+     the HMI only decides when to show it. */
+  char error_text[RAMMP_ERROR_TEXT_LEN];
+  char error_footer[RAMMP_ERROR_FOOTER_LEN];
 } rammp_mcb_status_t;
 
-/** 4 scalars + two fixed strings; every field is byte-aligned, so no padding. */
-#define RAMMP_MCB_STATUS_PAYLOAD_SIZE (4 + 2 * RAMMP_MCB_TEXT_LEN)
+/** 5 scalars + four fixed strings; every field is byte-aligned, so no padding. */
+#define RAMMP_MCB_STATUS_PAYLOAD_SIZE                                                              \
+  (5 + 2 * RAMMP_MCB_TEXT_LEN + RAMMP_ERROR_TEXT_LEN + RAMMP_ERROR_FOOTER_LEN)
 /** Classic CDR encapsulation header, little-endian (xcdr1). */
 #define RAMMP_CDR_HEADER_SIZE 4
 #define RAMMP_MCB_STATUS_CDR_SIZE (RAMMP_CDR_HEADER_SIZE + RAMMP_MCB_STATUS_PAYLOAD_SIZE)
@@ -149,7 +183,7 @@ typedef struct rammp_mcb_status {
  */
 static inline size_t rammp_mcb_status_encode(const rammp_mcb_status_t *status, uint8_t *out,
                                              size_t out_size) {
-  size_t i;
+  size_t i, offset;
   if (status == NULL || out == NULL || out_size < RAMMP_MCB_STATUS_CDR_SIZE) {
     return 0;
   }
@@ -161,9 +195,19 @@ static inline size_t rammp_mcb_status_encode(const rammp_mcb_status_t *status, u
   out[5] = status->system_state;
   out[6] = status->flags;
   out[7] = status->seq;
+  out[8] = status->speed_tenths;
+  offset = RAMMP_CDR_HEADER_SIZE + 5;
   for (i = 0; i < RAMMP_MCB_TEXT_LEN; ++i) {
-    out[8 + i] = (uint8_t)status->drive_text[i];
-    out[8 + RAMMP_MCB_TEXT_LEN + i] = (uint8_t)status->state_text[i];
+    out[offset + i] = (uint8_t)status->drive_text[i];
+    out[offset + RAMMP_MCB_TEXT_LEN + i] = (uint8_t)status->state_text[i];
+  }
+  offset += 2 * RAMMP_MCB_TEXT_LEN;
+  for (i = 0; i < RAMMP_ERROR_TEXT_LEN; ++i) {
+    out[offset + i] = (uint8_t)status->error_text[i];
+  }
+  offset += RAMMP_ERROR_TEXT_LEN;
+  for (i = 0; i < RAMMP_ERROR_FOOTER_LEN; ++i) {
+    out[offset + i] = (uint8_t)status->error_footer[i];
   }
   return RAMMP_MCB_STATUS_CDR_SIZE;
 }
@@ -175,7 +219,7 @@ static inline size_t rammp_mcb_status_encode(const rammp_mcb_status_t *status, u
  */
 static inline bool rammp_mcb_status_decode(const uint8_t *in, size_t in_size,
                                            rammp_mcb_status_t *status) {
-  size_t i;
+  size_t i, offset;
   if (in == NULL || status == NULL || in_size < RAMMP_MCB_STATUS_CDR_SIZE) {
     return false;
   }
@@ -186,22 +230,37 @@ static inline bool rammp_mcb_status_decode(const uint8_t *in, size_t in_size,
   status->system_state = in[5];
   status->flags = in[6];
   status->seq = in[7];
+  status->speed_tenths = in[8];
+  offset = RAMMP_CDR_HEADER_SIZE + 5;
   for (i = 0; i < RAMMP_MCB_TEXT_LEN; ++i) {
-    status->drive_text[i] = (char)in[8 + i];
-    status->state_text[i] = (char)in[8 + RAMMP_MCB_TEXT_LEN + i];
+    status->drive_text[i] = (char)in[offset + i];
+    status->state_text[i] = (char)in[offset + RAMMP_MCB_TEXT_LEN + i];
+  }
+  offset += 2 * RAMMP_MCB_TEXT_LEN;
+  for (i = 0; i < RAMMP_ERROR_TEXT_LEN; ++i) {
+    status->error_text[i] = (char)in[offset + i];
+  }
+  offset += RAMMP_ERROR_TEXT_LEN;
+  for (i = 0; i < RAMMP_ERROR_FOOTER_LEN; ++i) {
+    status->error_footer[i] = (char)in[offset + i];
   }
   /* A sender that filled every byte leaves no terminator; force one rather than
      let the consumer walk off the end of the field. */
   status->drive_text[RAMMP_MCB_TEXT_LEN - 1] = '\0';
   status->state_text[RAMMP_MCB_TEXT_LEN - 1] = '\0';
+  status->error_text[RAMMP_ERROR_TEXT_LEN - 1] = '\0';
+  status->error_footer[RAMMP_ERROR_FOOTER_LEN - 1] = '\0';
   return true;
 }
 
-/** joystick -> MCB stick position, in millivolts. Wire size: 12 bytes. */
+/** joystick -> MCB stick position in millivolts, plus button state.
+ *  Wire size: 16 bytes. Serialized by reflection (every field is uint32),
+ *  not by a hand-written codec like McbStatus. */
 typedef struct rammp_adc_xy_twist {
   uint32_t x_mv;
   uint32_t y_mv;
   uint32_t twist_mv;
+  uint32_t buttons; /**< bitfield of RAMMP_BUTTON_*; bit set = pressed */
 } rammp_adc_xy_twist_t;
 
 /* -------------------------------------------------------------------------

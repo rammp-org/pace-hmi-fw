@@ -26,6 +26,7 @@
 #include "ui.h"
 // StatusPanel is a SquareLine *component*, so its children are reached by index
 // through ui_comp_get_child() rather than by a ui_* global.
+#include "components/ui_comp_errorwarningpanel.h"
 #include "components/ui_comp_statuspanel.h"
 #include "components/ui_comp_topbar.h"
 
@@ -101,6 +102,21 @@ static char drive_text_buf[RAMMP_MCB_TEXT_LEN];
 static char drive_text_prev_buf[RAMMP_MCB_TEXT_LEN];
 static char state_text_buf[RAMMP_MCB_TEXT_LEN];
 static char state_text_prev_buf[RAMMP_MCB_TEXT_LEN];
+
+// Drive-screen readouts the MCB owns: the big speed number, and the body and
+// footer of the error banner. Speed is carried as tenths so the wire stays
+// integer; the label formats it as N.N.
+static lv_subject_t speed_tenths_subject;
+static lv_subject_t error_text_subject;
+static lv_subject_t error_footer_subject;
+static char error_text_buf[RAMMP_ERROR_TEXT_LEN];
+static char error_text_prev_buf[RAMMP_ERROR_TEXT_LEN];
+static char error_footer_buf[RAMMP_ERROR_FOOTER_LEN];
+static char error_footer_prev_buf[RAMMP_ERROR_FOOTER_LEN];
+
+// Joystick button, mirrored out of the LVGL world so the ADC task can publish
+// it alongside the stick position without taking the LVGL lock.
+static std::atomic<bool> joy_button_pressed{false};
 
 // Link health behind those two, polled from rtps_comms (RtpsLinkState). Drives
 // the TopBar's RTPS indicator, and greys the status labels when it is not
@@ -487,6 +503,41 @@ static void bind_rtps_label(lv_obj_t *bar) {
   lv_subject_add_observer_obj(&rtps_blink_subject, rtps_label_observer, label, nullptr);
 }
 
+/////////////////////////////////////////////////////////////////////////////
+// DriveScreen: speed readout and the error banner
+/////////////////////////////////////////////////////////////////////////////
+
+// The speed arrives as tenths; the label wants "N.N". No built-in binding
+// formats an integer that way, so this does the divide itself.
+static void speed_label_observer(lv_observer_t *observer, lv_subject_t *subject) {
+  // int32_t is long on this target, so narrow explicitly rather than hand a
+  // long to a "%d" that -Werror=format would reject
+  const int tenths =
+      static_cast<int>(std::clamp<int32_t>(lv_subject_get_int(subject), 0, RAMMP_SPEED_MAX_TENTHS));
+  lv_label_set_text_fmt(lv_observer_get_target_obj(observer), "%d.%d", tenths / 10, tenths % 10);
+}
+
+// The banner is one instance on the DriveScreen, so unlike StatusPanel/TopBar
+// this is not a per-screen loop.
+static void bind_error_panel() {
+  if (ui_ErrorWarningPanel == nullptr) {
+    return;
+  }
+  // Visible whenever the state is anything other than OK. Using _if_eq against
+  // OK rather than _if_not_eq against ERROR is deliberate: a value neither
+  // board knows raises the banner instead of silently hiding it.
+  lv_obj_bind_flag_if_eq(ui_ErrorWarningPanel, &mcb_state_subject, LV_OBJ_FLAG_HIDDEN,
+                         RAMMP_STATE_OK);
+  lv_label_bind_text(
+      ui_comp_get_child(ui_ErrorWarningPanel,
+                        UI_COMP_ERRORWARNINGPANEL_ERRORMESSAGECONTAINER_ERRORMESSAGELABEL),
+      &error_text_subject, nullptr);
+  lv_label_bind_text(
+      ui_comp_get_child(ui_ErrorWarningPanel,
+                        UI_COMP_ERRORWARNINGPANEL_ERRORMESSAGECONTAINER_ERRORMESSAGEFOOTERLABEL),
+      &error_footer_subject, nullptr);
+}
+
 // Runs on the LVGL task, so the subject writes are already covered by the lock
 // lv_task_handler() is called under. Staleness has to be polled - nothing
 // happens when a sample fails to arrive - so the blink phase rides along here
@@ -522,6 +573,9 @@ static void gpio48_button_callback(const espp::Interrupt::Event &event) {
   // the panel follows every edge, so contact bounce can't strand it blue: the
   // last edge always wins
   lv_subject_set_int(&button_pressed_subject, event.active);
+  // undebounced on purpose: the MCB wants the raw line state, and this is the
+  // same every-edge signal the panel follows
+  joy_button_pressed.store(event.active);
 
   // doubles as the "select" gesture for the settings list — the joystick has no
   // natural press of its own
@@ -802,10 +856,22 @@ static void screen_return_to_main() {
                     &ui_MainScreenFlex_screen_init);
 }
 
+// Is the MCB currently telling us the chair is fit to drive? Requires a live
+// link as well as an OK state: if the status is stale we do not KNOW the state,
+// and "unknown" is not "known good" on a device that moves someone.
+static bool drive_permitted() {
+  return static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) ==
+             RtpsLinkState::CONNECTED &&
+         lv_subject_get_int(&mcb_state_subject) == RAMMP_STATE_OK;
+}
+
 static HoldGesture drive_enter_gesture{
     .armed = &joy_up_armed,
     .is_held = joy_up_held,
-    .applies = [] { return showing_flex_page(ui_DrivePanel); },
+    // Gated in applies() rather than completed(), so a barred entry never even
+    // starts filling the arc: nothing happens, instead of a progress animation
+    // that betrays you at the end. The STATUS panel's red STATE says why.
+    .applies = [] { return showing_flex_page(ui_DrivePanel) && drive_permitted(); },
     .completed =
         [] {
           _ui_screen_change(&ui_DriveScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
@@ -1750,6 +1816,11 @@ extern "C" void app_main(void) {
                          sizeof(drive_text_buf), "");
   lv_subject_init_string(&state_text_subject, state_text_buf, state_text_prev_buf,
                          sizeof(state_text_buf), "");
+  lv_subject_init_int(&speed_tenths_subject, 0);
+  lv_subject_init_string(&error_text_subject, error_text_buf, error_text_prev_buf,
+                         sizeof(error_text_buf), "");
+  lv_subject_init_string(&error_footer_subject, error_footer_buf, error_footer_prev_buf,
+                         sizeof(error_footer_buf), "");
   bind_status_panel(ui_StatusPanel);  // MainScreenFlex
   bind_status_panel(ui_StatusPanel1); // JoystickTest
   bind_status_panel(ui_StatusPanel2); // DriveScreen
@@ -1758,6 +1829,8 @@ extern "C" void app_main(void) {
   bind_rtps_label(ui_TopBar2);        // DriveScreen
   bind_rtps_label(ui_TopBar3);        // MainScreenFlex
   bind_rtps_label(ui_TopBar4);        // SeatAdjustmentFlexScreen
+  lv_subject_add_observer_obj(&speed_tenths_subject, speed_label_observer, ui_SpeedNumber, nullptr);
+  bind_error_panel();
   lv_timer_create(rtps_poll_cb, kRtpsPollMs, nullptr);
 
   // GPIO48 test button. The label has a built-in binding; the panel background
@@ -2353,7 +2426,8 @@ extern "C" void app_main(void) {
       // the mapper, not here.
       // quiet no-op until RTPS is up and a subscriber is discovered
       auto to_mv = [](float v) { return static_cast<uint32_t>(std::max(v, 0.0f)); };
-      rtps_comms_publish_adc(to_mv(*horiz_mv), to_mv(*vert_mv), to_mv(*twist_mv));
+      rtps_comms_publish_adc(to_mv(*horiz_mv), to_mv(*vert_mv), to_mv(*twist_mv),
+                             joy_button_pressed.load() ? RAMMP_BUTTON_JOYSTICK : 0u);
     }
 
     if (log_this_cycle) {
@@ -2402,6 +2476,9 @@ extern "C" void app_main(void) {
     // which is exactly the size the subjects were initialised with
     lv_subject_copy_string(&drive_text_subject, status.drive_text);
     lv_subject_copy_string(&state_text_subject, status.state_text);
+    lv_subject_set_int(&speed_tenths_subject, status.speed_tenths);
+    lv_subject_copy_string(&error_text_subject, status.error_text);
+    lv_subject_copy_string(&error_footer_subject, status.error_footer);
   });
   if (!rtps_comms_start()) {
     logger.warn("RTPS comms not started (Ethernet bring-up failed)");

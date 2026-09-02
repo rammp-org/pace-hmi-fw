@@ -29,7 +29,11 @@ HEADER_RELATIVE_PATH = os.path.join("main", "rammp_rtps_spec.h")
 
 _DEFINE_RE = re.compile(r'^\s*#define\s+RAMMP_((?:TOPIC|TYPE)_[A-Z0-9_]+)\s+"([^"]*)"', re.M)
 _ENUM_RE = re.compile(r"^\s*RAMMP_([A-Z0-9_]+)\s*=\s*(\d+)\s*,", re.M)
-_NUMBER_RE = re.compile(r"^\s*#define\s+RAMMP_([A-Z0-9_]+)\s+(\d+)\s*$", re.M)
+# Accepts decimal and hex, with the C integer suffixes: bitmasks in a wire
+# spec are naturally written 0x...u, and those must scrape like any other.
+_NUMBER_RE = re.compile(
+    r"^\s*#define\s+RAMMP_([A-Z0-9_]+)\s+(0[xX][0-9a-fA-F]+|\d+)[uUlL]*\s*$", re.M
+)
 
 
 def find_header() -> str:
@@ -56,7 +60,9 @@ STRINGS: Dict[str, str] = {name: value for name, value in _DEFINE_RE.findall(_HE
 #: every enumerator in the header, keyed without the RAMMP_ prefix
 ENUMS: Dict[str, int] = {name: int(value) for name, value in _ENUM_RE.findall(_HEADER_TEXT)}
 #: every numeric #define (the timing contract), keyed without the RAMMP_ prefix
-NUMBERS: Dict[str, int] = {name: int(value) for name, value in _NUMBER_RE.findall(_HEADER_TEXT)}
+NUMBERS: Dict[str, int] = {
+    name: int(value, 0) for name, value in _NUMBER_RE.findall(_HEADER_TEXT)
+}
 
 if not STRINGS or not ENUMS:
     raise RuntimeError(f"{HEADER_PATH} parsed to nothing — has its #define/enum style changed?")
@@ -84,50 +90,58 @@ CDR_LE_HEADER = b"\x00\x01\x00\x00"
 
 #: struct format for the payload behind the encapsulation header, matching
 #: rammp_mcb_status_encode() in the spec header
-_MCB_STATUS_FORMAT = f"<BBBB{MCB_TEXT_LEN}s{MCB_TEXT_LEN}s"
+_MCB_STATUS_FORMAT = (
+    f"<BBBBB{MCB_TEXT_LEN}s{MCB_TEXT_LEN}s{ERROR_TEXT_LEN}s{ERROR_FOOTER_LEN}s"
+)
 _MCB_STATUS_CDR_SIZE = len(CDR_LE_HEADER) + struct.calcsize(_MCB_STATUS_FORMAT)
 
 
-def encode_label(text: str) -> bytes:
-    """ASCII-encode a label override, truncated to leave room for the NUL.
+def _decode_field(raw: bytes) -> str:
+    """Text up to the first NUL, as the C decoder reads it."""
+    return raw.split(b"\0", 1)[0].decode("ascii", "replace")
+
+
+def encode_label(text: str, limit: int = MCB_TEXT_LEN) -> bytes:
+    """ASCII-encode a text field, truncated to leave room for the NUL.
 
     The HMI draws these with LVGL's built-in Montserrat faces, which have no
     glyphs outside ASCII, so anything else is dropped rather than sent as bytes
     that would render blank.
     """
-    ascii_only = text.encode("ascii", "ignore")[: MCB_TEXT_LEN - 1]
-    return ascii_only  # struct's 's' pads the rest with NULs
+    return text.encode("ascii", "ignore")[: limit - 1]  # struct's 's' NUL-pads
 
 
 def pack_mcb_status(drive_status: int, system_state: int, flags: int = 0, seq: int = 0,
-                    drive_text: str = "", state_text: str = "") -> bytes:
+                    speed_tenths: int = 0, drive_text: str = "", state_text: str = "",
+                    error_text: str = "", error_footer: str = "") -> bytes:
     """Serialize a rammp_mcb_status_t, matching rammp_mcb_status_encode()."""
     return CDR_LE_HEADER + struct.pack(
         _MCB_STATUS_FORMAT,
         drive_status & 0xFF, system_state & 0xFF, flags & 0xFF, seq & 0xFF,
+        max(0, min(int(speed_tenths), SPEED_MAX_TENTHS)),
         encode_label(drive_text), encode_label(state_text),
+        encode_label(error_text, ERROR_TEXT_LEN), encode_label(error_footer, ERROR_FOOTER_LEN),
     )
 
 
-def unpack_mcb_status(payload: bytes) -> tuple[int, int, int, int, str, str] | None:
-    """(drive_status, system_state, flags, seq, drive_text, state_text)."""
+def unpack_mcb_status(payload: bytes):
+    """(drive, state, flags, seq, speed_tenths, drive_text, state_text,
+    error_text, error_footer), or None if this isn't one."""
     if len(payload) < _MCB_STATUS_CDR_SIZE or payload[:2] != CDR_LE_HEADER[:2]:
         return None
-    drive, state, flags, seq, drive_raw, state_raw = struct.unpack_from(
+    drive, state, flags, seq, speed, drive_raw, state_raw, err_raw, foot_raw = struct.unpack_from(
         _MCB_STATUS_FORMAT, payload, len(CDR_LE_HEADER)
     )
-    return (
-        drive, state, flags, seq,
-        drive_raw.split(b"\0", 1)[0].decode("ascii", "replace"),
-        state_raw.split(b"\0", 1)[0].decode("ascii", "replace"),
-    )
+    return (drive, state, flags, seq, speed,
+            _decode_field(drive_raw), _decode_field(state_raw),
+            _decode_field(err_raw), _decode_field(foot_raw))
 
 
-def unpack_adc_xy_twist(payload: bytes) -> tuple[int, int, int] | None:
-    """(x_mv, y_mv, twist_mv) from a rammp_adc_xy_twist_t sample."""
-    if len(payload) < 16 or payload[:2] != CDR_LE_HEADER[:2]:
+def unpack_adc_xy_twist(payload: bytes) -> tuple[int, int, int, int] | None:
+    """(x_mv, y_mv, twist_mv, buttons) from a rammp_adc_xy_twist_t sample."""
+    if len(payload) < 20 or payload[:2] != CDR_LE_HEADER[:2]:
         return None
-    return struct.unpack_from("<III", payload, 4)
+    return struct.unpack_from("<IIII", payload, 4)
 
 
 if __name__ == "__main__":

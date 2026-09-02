@@ -28,59 +28,59 @@ lv_obj_t * ui_ErrorWarningPanel_create(lv_obj_t * comp_parent)
                                            _ui_theme_alpha_text);
     lv_obj_set_style_border_side(cui_ErrorWarningPanel, LV_BORDER_SIDE_BOTTOM, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    lv_obj_t * cui_ErrorWarningLabel;
-    cui_ErrorWarningLabel = lv_label_create(cui_ErrorWarningPanel);
-    lv_obj_set_width(cui_ErrorWarningLabel, 660);
-    lv_obj_set_height(cui_ErrorWarningLabel, 50);
-    lv_obj_set_x(cui_ErrorWarningLabel, 30);
-    lv_obj_set_y(cui_ErrorWarningLabel, 0);
-    lv_label_set_text(cui_ErrorWarningLabel, "ERROR TYPE");
-    ui_object_set_themeable_style_property(cui_ErrorWarningLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+    lv_obj_t * cui_ErrorTitleLabel;
+    cui_ErrorTitleLabel = lv_label_create(cui_ErrorWarningPanel);
+    lv_obj_set_width(cui_ErrorTitleLabel, 660);
+    lv_obj_set_height(cui_ErrorTitleLabel, 50);
+    lv_obj_set_x(cui_ErrorTitleLabel, 30);
+    lv_obj_set_y(cui_ErrorTitleLabel, 0);
+    lv_label_set_text(cui_ErrorTitleLabel, "ERROR TYPE");
+    ui_object_set_themeable_style_property(cui_ErrorTitleLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_text);
-    ui_object_set_themeable_style_property(cui_ErrorWarningLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+    ui_object_set_themeable_style_property(cui_ErrorTitleLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
                                            _ui_theme_alpha_text);
-    lv_obj_set_style_text_font(cui_ErrorWarningLabel, &lv_font_montserrat_34, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(cui_ErrorTitleLabel, &lv_font_montserrat_34, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    lv_obj_t * cui_MessageContainer;
-    cui_MessageContainer = lv_obj_create(cui_ErrorWarningPanel);
-    lv_obj_remove_style_all(cui_MessageContainer);
-    lv_obj_set_width(cui_MessageContainer, 600);
-    lv_obj_set_height(cui_MessageContainer, 250);
-    lv_obj_set_align(cui_MessageContainer, LV_ALIGN_CENTER);
-    lv_obj_remove_flag(cui_MessageContainer,
+    lv_obj_t * cui_ErrorMessageContainer;
+    cui_ErrorMessageContainer = lv_obj_create(cui_ErrorWarningPanel);
+    lv_obj_remove_style_all(cui_ErrorMessageContainer);
+    lv_obj_set_width(cui_ErrorMessageContainer, 600);
+    lv_obj_set_height(cui_ErrorMessageContainer, 250);
+    lv_obj_set_align(cui_ErrorMessageContainer, LV_ALIGN_CENTER);
+    lv_obj_remove_flag(cui_ErrorMessageContainer,
                        LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM |
                        LV_OBJ_FLAG_SCROLL_CHAIN);     /// Flags
 
-    lv_obj_t * cui_SpeedNumber1;
-    cui_SpeedNumber1 = lv_label_create(cui_MessageContainer);
-    lv_obj_set_width(cui_SpeedNumber1, 600);
-    lv_obj_set_height(cui_SpeedNumber1, LV_SIZE_CONTENT);    /// 660
-    lv_obj_set_align(cui_SpeedNumber1, LV_ALIGN_TOP_MID);
-    lv_label_set_text(cui_SpeedNumber1, "BODY OF TEST MESSAGE RECEIVED VIA RTPS");
-    ui_object_set_themeable_style_property(cui_SpeedNumber1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+    lv_obj_t * cui_ErrorMessageLabel;
+    cui_ErrorMessageLabel = lv_label_create(cui_ErrorMessageContainer);
+    lv_obj_set_width(cui_ErrorMessageLabel, 600);
+    lv_obj_set_height(cui_ErrorMessageLabel, LV_SIZE_CONTENT);    /// 660
+    lv_obj_set_align(cui_ErrorMessageLabel, LV_ALIGN_TOP_MID);
+    lv_label_set_text(cui_ErrorMessageLabel, "BODY OF TEST MESSAGE RECEIVED VIA RTPS");
+    ui_object_set_themeable_style_property(cui_ErrorMessageLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_text);
-    ui_object_set_themeable_style_property(cui_SpeedNumber1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+    ui_object_set_themeable_style_property(cui_ErrorMessageLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
                                            _ui_theme_alpha_text);
-    lv_obj_set_style_text_font(cui_SpeedNumber1, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(cui_ErrorMessageLabel, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    lv_obj_t * cui_SpeedNumber2;
-    cui_SpeedNumber2 = lv_label_create(cui_MessageContainer);
-    lv_obj_set_width(cui_SpeedNumber2, 600);
-    lv_obj_set_height(cui_SpeedNumber2, LV_SIZE_CONTENT);    /// 660
-    lv_obj_set_align(cui_SpeedNumber2, LV_ALIGN_BOTTOM_MID);
-    lv_label_set_text(cui_SpeedNumber2, "FOOTER RECEIVED VIA RTPS");
-    ui_object_set_themeable_style_property(cui_SpeedNumber2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(cui_SpeedNumber2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+    lv_obj_t * cui_ErrorMessageFooterLabel;
+    cui_ErrorMessageFooterLabel = lv_label_create(cui_ErrorMessageContainer);
+    lv_obj_set_width(cui_ErrorMessageFooterLabel, 600);
+    lv_obj_set_height(cui_ErrorMessageFooterLabel, LV_SIZE_CONTENT);    /// 660
+    lv_obj_set_align(cui_ErrorMessageFooterLabel, LV_ALIGN_BOTTOM_MID);
+    lv_label_set_text(cui_ErrorMessageFooterLabel, "FOOTER RECEIVED VIA RTPS");
+    ui_object_set_themeable_style_property(cui_ErrorMessageFooterLabel, LV_PART_MAIN | LV_STATE_DEFAULT,
+                                           LV_STYLE_TEXT_COLOR, _ui_theme_color_text);
+    ui_object_set_themeable_style_property(cui_ErrorMessageFooterLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
                                            _ui_theme_alpha_text);
-    lv_obj_set_style_text_font(cui_SpeedNumber2, &lv_font_montserrat_34, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(cui_ErrorMessageFooterLabel, &lv_font_montserrat_34, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     lv_obj_t ** children = lv_malloc(sizeof(lv_obj_t *) * _UI_COMP_ERRORWARNINGPANEL_NUM);
     children[UI_COMP_ERRORWARNINGPANEL_ERRORWARNINGPANEL] = cui_ErrorWarningPanel;
-    children[UI_COMP_ERRORWARNINGPANEL_ERRORWARNINGLABEL] = cui_ErrorWarningLabel;
-    children[UI_COMP_ERRORWARNINGPANEL_MESSAGECONTAINER] = cui_MessageContainer;
-    children[UI_COMP_ERRORWARNINGPANEL_MESSAGECONTAINER_SPEEDNUMBER1] = cui_SpeedNumber1;
-    children[UI_COMP_ERRORWARNINGPANEL_MESSAGECONTAINER_SPEEDNUMBER2] = cui_SpeedNumber2;
+    children[UI_COMP_ERRORWARNINGPANEL_ERRORTITLELABEL] = cui_ErrorTitleLabel;
+    children[UI_COMP_ERRORWARNINGPANEL_ERRORMESSAGECONTAINER] = cui_ErrorMessageContainer;
+    children[UI_COMP_ERRORWARNINGPANEL_ERRORMESSAGECONTAINER_ERRORMESSAGELABEL] = cui_ErrorMessageLabel;
+    children[UI_COMP_ERRORWARNINGPANEL_ERRORMESSAGECONTAINER_ERRORMESSAGEFOOTERLABEL] = cui_ErrorMessageFooterLabel;
     lv_obj_add_event_cb(cui_ErrorWarningPanel, get_component_child_event_cb, LV_EVENT_GET_COMP_CHILD, children);
     lv_obj_add_event_cb(cui_ErrorWarningPanel, del_component_child_event_cb, LV_EVENT_DELETE, children);
     ui_comp_ErrorWarningPanel_create_hook(cui_ErrorWarningPanel);

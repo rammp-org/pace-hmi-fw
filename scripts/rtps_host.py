@@ -65,6 +65,9 @@ SEDP_PUBLICATIONS_WRITER_ENTITY_ID = b"\x00\x00\x03\xc2"
 SEDP_PUBLICATIONS_READER_ENTITY_ID = b"\x00\x00\x03\xc7"
 SEDP_SUBSCRIPTIONS_WRITER_ENTITY_ID = b"\x00\x00\x04\xc2"
 SEDP_SUBSCRIPTIONS_READER_ENTITY_ID = b"\x00\x00\x04\xc7"
+#: The 'no particular reader' entity id. A writer that matched us through
+#: SEDP replaces it with our reader's own id, which topic_for_sample uses.
+ENTITYID_UNKNOWN = bytes(4)
 USER_WRITER_NO_KEY_KIND = 0x03
 USER_READER_NO_KEY_KIND = 0x04
 
@@ -543,10 +546,11 @@ class RtpsHostHarness:
                 entity_index=0,
             )
         ] if args.publish_topic else []
+        subscribe_type_name = getattr(args, "subscribe_type_name", None) or args.type_name
         self.local_readers = [
             ReaderConfig(
                 topic_name=topic_name,
-                type_name=args.type_name,
+                type_name=subscribe_type_name,
                 reliable=False,
                 entity_index=index,
             )
@@ -1026,7 +1030,9 @@ class RtpsHostHarness:
 
     def handle_metatraffic_packet(self, packet: bytes, sender_ip: str) -> None:
         self.respond_to_heartbeats(packet, sender_ip)
-        for _guid_prefix, writer_id, serialized_payload in parse_rtps_data_messages(packet):
+        for _guid_prefix, writer_id, serialized_payload, _reader_id in parse_rtps_data_messages(
+            packet
+        ):
             parameters = parse_parameter_list(serialized_payload)
             if not parameters:
                 continue
@@ -1121,32 +1127,60 @@ class RtpsHostHarness:
                 f"reliability={endpoint.reliability} participant={guid_to_string(endpoint.participant_guid)}"
             )
 
+    def topic_for_sample(self, guid_prefix: bytes, writer_id: bytes,
+                         reader_id: bytes) -> Optional[str]:
+        """Which topic a DATA submessage belongs to, or None if it can't be placed.
+
+        The normal route is SEDP: the writer GUID is looked up in the endpoints
+        the peer announced. A peer seeded by --peer never announces them to us,
+        though — embeddedRTPS sends SEDP only to participants it discovered
+        itself, and a unicast SPDP does not put us in that set, so
+        discovered_writers stays empty and every sample would be dropped as
+        "undiscovered".
+
+        The sample still carries the reader entity id the writer addressed it
+        to, which it learned from OUR subscription announcement. That names one
+        of our own readers, so it places the sample just as definitively.
+        """
+        writer = self.discovered_writers.get(guid_prefix + writer_id)
+        if writer is not None:
+            return writer.topic_name
+        if reader_id and reader_id != ENTITYID_UNKNOWN:
+            for reader in self.local_readers:
+                if entity_id_for_index(reader.entity_index, USER_READER_NO_KEY_KIND) == reader_id:
+                    return reader.topic_name
+        return None
+
     def handle_user_packet(self, packet: bytes, sender_ip: str, sender_port: int) -> None:
         subscribed_topics = {reader.topic_name for reader in self.local_readers}
-        for guid_prefix, writer_id, serialized_payload in parse_rtps_data_messages(packet):
-            # Standard RTPS: resolve the topic from the writer GUID via SEDP discovery state.
-            writer_guid = guid_prefix + writer_id
-            writer = self.discovered_writers.get(writer_guid)
-            if writer is None:
-                # Sample arrived before its writer was discovered via SEDP; drop it (best-effort).
-                # Surface it (rate-limited) so a missing SEDP exchange is visible rather than silent.
+        for guid_prefix, writer_id, serialized_payload, reader_id in parse_rtps_data_messages(
+            packet
+        ):
+            topic_name = self.topic_for_sample(guid_prefix, writer_id, reader_id)
+            if topic_name is None:
+                # Neither SEDP nor the addressed reader id could place this
+                # sample. Surface it (rate-limited) rather than dropping silently.
                 now = time.monotonic()
                 if now - self.last_unknown_writer_log > 2.0:
                     log(
                         f"[data] received {len(serialized_payload)}-byte sample from UNDISCOVERED "
-                        f"writer {guid_to_string(writer_guid)} at {sender_ip}:{sender_port}; cannot "
-                        f"route without SEDP (discovered_writers={len(self.discovered_writers)})"
+                        f"writer {guid_to_string(guid_prefix + writer_id)} at "
+                        f"{sender_ip}:{sender_port}, addressed to reader {reader_id.hex()}; cannot "
+                        f"route (discovered_writers={len(self.discovered_writers)})"
                     )
                     self.last_unknown_writer_log = now
                 continue
-            topic_name = writer.topic_name
             if topic_name not in subscribed_topics:
                 continue
+            writer = self.discovered_writers.get(guid_prefix + writer_id)
             maybe_value = deserialize_uint32_cdr(serialized_payload)
             if maybe_value is None:
                 continue
+            # writer is None when the sample was routed by reader id alone, so
+            # its QoS is not something we ever learned
+            reliability = writer.reliability if writer is not None else "unknown"
             log(
-                f"[data] topic='{topic_name}' value={maybe_value} reliability={writer.reliability} "
+                f"[data] topic='{topic_name}' value={maybe_value} reliability={reliability} "
                 f"from {sender_ip}:{sender_port} writer={hex_string(writer_id)}"
             )
             if self.args.echo_received and self.local_writers:
@@ -1339,13 +1373,19 @@ def build_acknack_message(
     ) + bytes(body)
 
 
-def parse_rtps_data_messages(packet: bytes) -> List[tuple[bytes, bytes, bytes]]:
-    """Return (guid_prefix, writer_id, serialized_payload) for each DATA submessage."""
+def parse_rtps_data_messages(packet: bytes) -> List[tuple[bytes, bytes, bytes, bytes]]:
+    """Return (guid_prefix, writer_id, serialized_payload, reader_id) per DATA submessage.
+
+    reader_id is the entity the writer addressed the sample to. It is often
+    ENTITYID_UNKNOWN, but a writer that matched us through SEDP fills it in with
+    our own reader's entity id — which is the only way to route a sample when
+    the writer itself was never discovered (see topic_for_sample).
+    """
     if len(packet) < 20 or not packet.startswith(RTPS_MAGIC):
         return []
     guid_prefix = packet[8:20]
     offset = 20
-    messages: List[tuple[bytes, bytes, bytes]] = []
+    messages: List[tuple[bytes, bytes, bytes, bytes]] = []
     while offset + 4 <= len(packet):
         kind = packet[offset]
         flags = packet[offset + 1]
@@ -1363,9 +1403,10 @@ def parse_rtps_data_messages(packet: bytes) -> List[tuple[bytes, bytes, bytes]]:
         del extra_flags
         if (flags & 0x02) != 0 or octets_to_inline_qos != DATA_SUBMESSAGE_OCTETS_TO_INLINE_QOS:
             continue
+        reader_id = payload[4:8]
         writer_id = payload[8:12]
         serialized_payload = payload[20:]
-        messages.append((guid_prefix, writer_id, serialized_payload))
+        messages.append((guid_prefix, writer_id, serialized_payload, reader_id))
     return messages
 
 

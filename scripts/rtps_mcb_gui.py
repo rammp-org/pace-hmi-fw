@@ -65,6 +65,8 @@ class McbPanel:
         root.title("RAMMP MCB simulator")
         self._build_connection()
         self._build_status_controls()
+        self._build_error_banner()
+        self._build_joystick()
         self._build_cycle()
         self._build_log()
         root.after(TICK_MS, self._tick)
@@ -152,6 +154,58 @@ class McbPanel:
             frame, text=f"max {spec.MCB_TEXT_LEN - 1} chars, ASCII", foreground="#666666"
         ).grid(row=1, column=column + 2, padx=(8, 0), pady=(8, 0), sticky="w")
 
+    def _build_error_banner(self) -> None:
+        frame = ttk.LabelFrame(self.root, text="Error banner", padding=8)
+        frame.pack(fill="x", padx=8, pady=4)
+
+        self.error_text_var = tk.StringVar()
+        self.error_footer_var = tk.StringVar()
+        for row, (label, var, limit) in enumerate((
+            ("body", self.error_text_var, spec.ERROR_TEXT_LEN),
+            ("footer", self.error_footer_var, spec.ERROR_FOOTER_LEN),
+        )):
+            ttk.Label(frame, text=label).grid(row=row, column=0, sticky="w", pady=2)
+            entry = ttk.Entry(frame, textvariable=var, width=46)
+            entry.grid(row=row, column=1, padx=4, pady=2)
+            entry.bind("<Return>", lambda _event: self._apply_error_text())
+            ttk.Label(frame, text=f"max {limit - 1}", foreground="#666666").grid(
+                row=row, column=2, sticky="w"
+            )
+        ttk.Button(frame, text="Set", command=self._apply_error_text).grid(row=0, column=3, padx=6)
+        ttk.Button(
+            frame, text="Clear",
+            command=lambda: (self.error_text_var.set(""), self.error_footer_var.set(""),
+                             self._apply_error_text()),
+        ).grid(row=1, column=3, padx=6)
+        ttk.Label(
+            frame,
+            text="The panel only shows on the HMI while STATE is not OK.",
+            foreground="#666666",
+        ).grid(row=2, column=0, columnspan=4, sticky="w", pady=(6, 0))
+
+    def _build_joystick(self) -> None:
+        """Read-only view of what the joystick is publishing back to us."""
+        frame = ttk.LabelFrame(self.root, text="Joystick (from the HMI)", padding=8)
+        frame.pack(fill="x", padx=8, pady=4)
+
+        self.axis_bars = {}
+        self.axis_labels = {}
+        for row, axis in enumerate(("X", "Y", "Twist")):
+            ttk.Label(frame, text=axis, width=6).grid(row=row, column=0, sticky="w")
+            # Deflection as 0-100 with centre at 50, so a resting stick sits
+            # mid-bar and either direction is visible.
+            bar = ttk.Progressbar(frame, orient="horizontal", length=320, maximum=100)
+            bar.grid(row=row, column=1, padx=4, pady=1)
+            value = ttk.Label(frame, text="-", width=22)
+            value.grid(row=row, column=2, sticky="w")
+            self.axis_bars[axis] = bar
+            self.axis_labels[axis] = value
+
+        self.button_label = ttk.Label(frame, text="button: -", width=22)
+        self.button_label.grid(row=3, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        self.speed_label = ttk.Label(frame, text="emulated speed: 0.0")
+        self.speed_label.grid(row=3, column=2, sticky="w", pady=(6, 0))
+
     def _build_cycle(self) -> None:
         frame = ttk.Frame(self.root, padding=(8, 4))
         frame.pack(fill="x")
@@ -211,6 +265,7 @@ class McbPanel:
         self.thread = threading.Thread(target=self.harness.run, daemon=True)
         self.thread.start()
         self._apply_overrides()
+        self._apply_error_text()
         self.connect_button.configure(text="Disconnect")
         self.connection_label.configure(text=f"publishing as {args.advertised_address}")
 
@@ -268,6 +323,14 @@ class McbPanel:
         except ValueError:
             self._append_log(f"[gui] '{var.get()}' is not a number; sending 0")
             return 0
+
+    def _apply_error_text(self) -> None:
+        if self.harness is None:
+            self._append_log("[gui] not connected")
+            return
+        self.harness.error_text = self.error_text_var.get()
+        self.harness.error_footer = self.error_footer_var.get()
+        self._publish()
 
     def _apply_overrides(self) -> None:
         if self.harness is None:
@@ -364,12 +427,37 @@ class McbPanel:
                 self._rate = sent / elapsed
                 self._rate_seq = self.harness.seq
                 self._rate_time = now
+            self._update_joystick()
             targets = max(0, self.harness.announced_targets)
             paused = " PAUSED" if self.harness.paused else ""
             self.status_label.configure(
                 text=f"seq {self.harness.seq} - {self._rate:.1f} Hz - {targets} target(s){paused}"
             )
         self.root.after(TICK_MS, self._tick)
+
+    def _update_joystick(self) -> None:
+        sample = self.harness.joystick if self.harness is not None else None
+        if sample is None:
+            for axis in self.axis_bars:
+                self.axis_bars[axis]["value"] = 50
+                self.axis_labels[axis].configure(text="no data")
+            self.button_label.configure(text="button: no data")
+            return
+        x_mv, y_mv, twist_mv, buttons = sample
+        half_scale = spec.JOYSTICK_FULL_SCALE_MV / 2.0
+        # Shown against the spec's nominal centre, not the measured one: the
+        # standing offset of a real stick is worth seeing rather than hiding.
+        # Only the speed emulation corrects for it.
+        for axis, mv in (("X", x_mv), ("Y", y_mv), ("Twist", twist_mv)):
+            deflection = (mv - spec.JOYSTICK_CENTER_MV) / half_scale
+            self.axis_bars[axis]["value"] = max(0, min(100, 50 + deflection * 50))
+            self.axis_labels[axis].configure(text=f"{mv:4d} mV  ({deflection:+.2f})")
+        pressed = bool(buttons & spec.BUTTON_JOYSTICK)
+        self.button_label.configure(text=f"button: {'PRESSED' if pressed else 'released'}")
+        self.speed_label.configure(
+            text=f"emulated speed: {self.harness.speed_tenths / 10:.1f}"
+                 f"   (Y rest {self.harness.center_y:.0f} mV)"
+        )
 
     def _on_close(self) -> None:
         self._disconnect()

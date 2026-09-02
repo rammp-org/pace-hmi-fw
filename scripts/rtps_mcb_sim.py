@@ -44,6 +44,21 @@ import rammp_rtps as spec  # noqa: E402  (path setup must run first)
 import rtps_host  # noqa: E402
 
 
+#: Full stick deflection takes the emulated speed from 0 to max in roughly
+#: this many seconds. Deliberately unhurried so the number is readable as it
+#: moves rather than snapping to an end stop.
+SPEED_FULL_TRAVEL_SECONDS = 3.0
+#: Fraction of full deflection below which the stick counts as centred. The
+#: firmware has its own, tighter deadzone; this one only has to stop a resting
+#: stick from drifting the number.
+SPEED_DEADZONE = 0.15
+#: Samples averaged after connecting to establish where the stick actually
+#: rests. About half a second at the firmware's 30 Hz publish rate — long
+#: enough to average out ADC noise, short enough that it is over before anyone
+#: has touched the stick.
+CENTER_SAMPLE_COUNT = 15
+
+
 class McbStatusPublisher(rtps_host.RtpsHostHarness):
     """Harness whose periodic publish sends a rammp_mcb_status_t."""
 
@@ -55,12 +70,75 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
         # label overrides; empty means "let the HMI use the enum's own name"
         self.drive_text = ""
         self.state_text = ""
+        self.error_text = ""
+        self.error_footer = ""
+        # Emulated chair speed in tenths. The GUI integrates the joystick into
+        # this; the CLI just leaves it at zero.
+        self.speed_tenths = 0
+        # Latest joystick sample: (x_mv, y_mv, twist_mv, buttons), or None.
+        self.joystick: tuple[int, int, int, int] | None = None
+        # Emulated speed kept as a float so slow stick movements accumulate
+        # instead of being lost to integer rounding every step.
+        self._speed = 0.0
+        self._last_speed_step = time.monotonic()
+        # Measured resting position of the vertical axis. The spec's nominal
+        # centre assumes an ideal divider; a real stick sits somewhere near it
+        # (1506 mV against a nominal 1650 on the bench board). Left uncorrected
+        # that standing offset makes the deadzone lopsided — pulling back would
+        # trip far sooner than pushing forward — so take the first samples after
+        # connecting, while the stick is at rest, as the true zero.
+        self._center_y: float | None = None
+        self._center_samples = 0
         self.seq = 0
         self.announced_targets = -1
         # Stop publishing without tearing the participant down, so the HMI's
         # stale path can be exercised and then recovered from without a fresh
         # discovery round confusing the picture.
         self.paused = False
+
+    def handle_user_packet(self, packet: bytes, sender_ip: str, sender_port: int) -> None:
+        """Capture joystick samples; everything else falls through to the base."""
+        for guid_prefix, writer_id, payload, reader_id in rtps_host.parse_rtps_data_messages(
+            packet
+        ):
+            if self.topic_for_sample(guid_prefix, writer_id, reader_id) != spec.TOPIC_JOYSTICK_ADC:
+                continue
+            sample = spec.unpack_adc_xy_twist(payload)
+            if sample is not None:
+                self.joystick = sample
+
+    @property
+    def center_y(self) -> float:
+        """Measured resting position of the vertical axis, or the spec nominal
+        until enough samples have arrived to establish it."""
+        return self._center_y if self._center_y is not None else spec.JOYSTICK_CENTER_MV
+
+    def step_speed(self, dt: float) -> None:
+        """Integrate stick deflection into the emulated speed.
+
+        Push forward and the number climbs, pull back and it falls, hold centre
+        and it stays put — the simplest thing that makes the readout respond to
+        the stick. Forward reads BELOW centre on the wire (see the spec
+        header), hence the subtraction.
+        """
+        if self.joystick is None:
+            return
+        _x_mv, y_mv, _twist_mv, _buttons = self.joystick
+        if self._center_samples < CENTER_SAMPLE_COUNT:
+            # Average the opening samples rather than trusting a single one, so
+            # a bit of ADC noise does not become a permanent bias.
+            previous = self._center_y if self._center_y is not None else 0.0
+            self._center_y = (previous * self._center_samples + y_mv) / (self._center_samples + 1)
+            self._center_samples += 1
+            return  # no speed change while still establishing the rest position
+        half_scale = spec.JOYSTICK_FULL_SCALE_MV / 2.0
+        deflection = (self._center_y - y_mv) / half_scale
+        if abs(deflection) < SPEED_DEADZONE:
+            return
+        maximum = spec.SPEED_MAX_TENTHS / 10.0
+        self._speed += deflection * (maximum / SPEED_FULL_TRAVEL_SECONDS) * dt
+        self._speed = max(0.0, min(self._speed, maximum))
+        self.speed_tenths = int(round(self._speed * 10))
 
     def describe(self) -> str:
         return (
@@ -69,6 +147,7 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
             f"flags=0x{self.flags:02x}"
             + (f" drive_text='{self.drive_text}'" if self.drive_text else "")
             + (f" state_text='{self.state_text}'" if self.state_text else "")
+            + f" speed={self.speed_tenths / 10:.1f}"
             + (" [PAUSED]" if self.paused else "")
         )
 
@@ -76,11 +155,18 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
         """Called by the harness run loop every --period seconds."""
         if self.paused:
             return
+        # Advance the emulated speed on real elapsed time. Clamped so a long
+        # gap (a pause, a breakpoint) cannot lurch the number across its range
+        # in a single step.
+        now = time.monotonic()
+        self.step_speed(min(now - self._last_speed_step, 0.5))
+        self._last_speed_step = now
         writer = self.local_writers[0]
         payload = self.build_data_message(
             writer,
             spec.pack_mcb_status(self.drive_status, self.system_state, self.flags, self.seq,
-                                 self.drive_text, self.state_text),
+                                 self.speed_tenths, self.drive_text, self.state_text,
+                                 self.error_text, self.error_footer),
         )
         targets = self._build_user_targets(writer)
         for destination in targets:
@@ -131,7 +217,10 @@ def build_harness_args(cli: argparse.Namespace) -> argparse.Namespace:
         multicast_interface=cli.multicast_interface,
         multicast_group=cli.multicast_group,
         enclave="/",
-        subscribe_topic=[],  # publish-only participant
+        # Subscribe to the joystick stream as well as publishing status, so the
+        # emulated speed can follow the stick.
+        subscribe_topic=[spec.TOPIC_JOYSTICK_ADC],
+        subscribe_type_name=spec.TYPE_ADC_XY_TWIST,
         publish_topic=spec.TOPIC_MCB_STATUS,
         publish_value=0,  # unused: publish_now() is overridden
         publish_interval=cli.period,
@@ -152,6 +241,8 @@ HELP_TEXT = """commands:
   ok              state -> OK
   e / err         state -> ERROR
   f <hex>         reserved flags byte (e.g. 'f 01')
+  et <text>       error banner body ('et' alone clears it)
+  ef <text>       error banner footer ('ef' alone clears it)
   dt <text>       override the DRIVE label text ('dt' alone clears it)
   st <text>       override the STATE label text ('st' alone clears it)
   p               pause publishing (HMI should go stale after
@@ -178,6 +269,10 @@ def run_interactive(harness: McbStatusPublisher) -> None:
             harness.system_state = spec.STATE_OK
         elif command in ("e", "err", "error"):
             harness.system_state = spec.STATE_ERROR
+        elif command == "et" or command.startswith("et "):
+            harness.error_text = command[3:].strip()
+        elif command == "ef" or command.startswith("ef "):
+            harness.error_footer = command[3:].strip()
         elif command == "dt" or command.startswith("dt "):
             harness.drive_text = command[3:].strip()
         elif command == "st" or command.startswith("st "):
