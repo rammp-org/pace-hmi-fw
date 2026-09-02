@@ -28,8 +28,8 @@ lv_obj_t * ui_DriveModeButton1 = NULL;
 lv_obj_t * ui_DriveModeButtonLabel1 = NULL;
 lv_obj_t * ui_DriveModeButton2 = NULL;
 lv_obj_t * ui_DriveModeButtonLabel2 = NULL;
-lv_obj_t * ui_ExitBarPull = NULL;
 lv_obj_t * ui_StatusPanel2 = NULL;
+lv_obj_t * ui_ExitBarPress1 = NULL;
 // event funtions
 
 // build funtions
@@ -364,15 +364,15 @@ void ui_DriveScreen_screen_init(void)
     lv_obj_set_style_text_align(ui_DriveModeButtonLabel2, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(ui_DriveModeButtonLabel2, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_ExitBarPull = ui_ExitBarPull_create(ui_DriveScreen);
-    lv_obj_set_x(ui_ExitBarPull, 0);
-    lv_obj_set_y(ui_ExitBarPull, -10);
-
-    //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
-
     ui_StatusPanel2 = ui_StatusPanel_create(ui_DriveScreen);
     lv_obj_set_x(ui_StatusPanel2, 0);
     lv_obj_set_y(ui_StatusPanel2, 50);
+
+    ui_ExitBarPress1 = ui_ExitBarPress_create(ui_DriveScreen);
+    lv_obj_set_x(ui_ExitBarPress1, 0);
+    lv_obj_set_y(ui_ExitBarPress1, -10);
+
+    //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
 
 }
 
@@ -404,7 +404,7 @@ void ui_DriveScreen_screen_destroy(void)
     ui_DriveModeButtonLabel1 = NULL;
     ui_DriveModeButton2 = NULL;
     ui_DriveModeButtonLabel2 = NULL;
-    ui_ExitBarPull = NULL;
     ui_StatusPanel2 = NULL;
+    ui_ExitBarPress1 = NULL;
 
 }

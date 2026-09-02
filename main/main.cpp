@@ -620,13 +620,17 @@ static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c);
 //   LockedPanel           joystick up      ui_UnlockArc   unlocks driving mode
 //   DrivePanel            joystick up      ui_UnlockArc1  -> DriveScreen
 //   SeatAdjustmentMenu    joystick up      ui_UnlockArc2  -> SeatAdjustmentFlexScreen
-//   DriveScreen           joystick down    ui_ExitBarPull      -> MainScreenFlex
+//   DriveScreen           stick button     ui_ExitBarPress1    -> MainScreenFlex
 //   Seat / buttons page   joystick down    ui_ExitBarPull1     -> MainScreenFlex
 //   Seat / adjust page    joystick left    ui_ExitBarPushLeft  -> buttons page
 //
 // "Pull" is the stick toward the user, i.e. LV_KEY_DOWN; "push left" is
 // LV_KEY_LEFT. Each exit bar lives on the page it applies to, so the gestures
 // are gated on which page is showing as well as on the screen.
+//
+// The DriveScreen is the odd one out because pulling the stick back is how you
+// reverse: an exit on LV_KEY_DOWN there fired every time the user drove
+// backwards, so it exits on the stick button instead.
 //
 // They differ only in the input, in when they apply, and in what completing
 // does, so they share one HoldGesture driver rather than a copy of the
@@ -669,6 +673,7 @@ static constexpr uint32_t kHoldPollMs = 33;
 static bool joy_up_armed = true;
 static bool joy_down_armed = true;
 static bool joy_left_armed = true;
+static bool joy_button_armed = true;
 
 // progress and holding carry default member initializers rather than being
 // spelled out at each definition below: the three gestures differ only in the
@@ -752,6 +757,10 @@ static void hold_poll(HoldGesture *g) {
 static bool joy_up_held() { return joy_key.load() == LV_KEY_UP; }
 static bool joy_down_held() { return joy_key.load() == LV_KEY_DOWN; }
 static bool joy_left_held() { return joy_key.load() == LV_KEY_LEFT; }
+// The stick's own button. Reads the level the button callback mirrors out, not
+// the edge-latched select_key: a hold gesture needs to know the button is still
+// down, and select_key is consumed by the first indev read after the press.
+static bool joy_button_held() { return joy_button_pressed.load(); }
 
 /////////////////////////////////////////////////////////////////////////////
 // Lock / unlock, and the LockedPanel gesture
@@ -879,11 +888,17 @@ static HoldGesture drive_enter_gesture{
         },
 };
 
+// Exits on the stick BUTTON, not on pulling the stick back: pulling back is how
+// you drive in reverse, so a pull-to-exit gesture fired every time the user
+// reversed. The button is the only input on this screen that means nothing to
+// driving.
 static HoldGesture drive_exit_gesture{
-    .armed = &joy_down_armed,
-    .is_held = joy_down_held,
+    .armed = &joy_button_armed,
+    .is_held = joy_button_held,
     .applies = [] { return lv_screen_active() == ui_DriveScreen; },
     .completed = screen_return_to_main,
+    // The button doubles as select, so a tap would visibly tick the bar and
+    // snap back without this — the same reason the pull bars carry it.
     .grace_ms = kBarGraceMs,
 };
 
@@ -1921,8 +1936,8 @@ extern "C" void app_main(void) {
   lv_arc_bind_value(ui_UnlockArc2, &seat_enter_gesture.progress);
   lv_subject_init_int(&seat_exit_gesture.progress, 0);
   lv_subject_init_int(&seat_back_gesture.progress, 0);
-  lv_bar_set_range(ui_ExitBarPull, 0, kHoldMax);
-  lv_bar_bind_value(ui_ExitBarPull, &drive_exit_gesture.progress);
+  lv_bar_set_range(ui_ExitBarPress1, 0, kHoldMax);
+  lv_bar_bind_value(ui_ExitBarPress1, &drive_exit_gesture.progress);
   lv_bar_set_range(ui_ExitBarPull1, 0, kHoldMax);
   lv_bar_bind_value(ui_ExitBarPull1, &seat_exit_gesture.progress);
   lv_bar_set_range(ui_ExitBarPushLeft, 0, kHoldMax);

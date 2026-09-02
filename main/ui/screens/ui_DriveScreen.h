@@ -36,8 +36,8 @@ extern lv_obj_t * ui_DriveModeButton1;
 extern lv_obj_t * ui_DriveModeButtonLabel1;
 extern lv_obj_t * ui_DriveModeButton2;
 extern lv_obj_t * ui_DriveModeButtonLabel2;
-extern lv_obj_t * ui_ExitBarPull;
 extern lv_obj_t * ui_StatusPanel2;
+extern lv_obj_t * ui_ExitBarPress1;
 // CUSTOM VARIABLES
 
 #ifdef __cplusplus
