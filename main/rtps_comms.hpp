@@ -50,7 +50,8 @@ void rtps_comms_on_mcb_status(std::function<void(const rammp_mcb_status_t &statu
 /// Publish one joystick ADC snapshot (millivolts) on RAMMP_TOPIC_JOYSTICK_ADC.
 /// Safe to call from any task; returns false (without logging) until the
 /// participant is running and a subscriber on the topic has been discovered.
-bool rtps_comms_publish_adc(uint32_t x_mv, uint32_t y_mv, uint32_t twist_mv, uint32_t buttons);
+bool rtps_comms_publish_adc(uint32_t x_mv, uint32_t y_mv, uint32_t twist_mv, uint32_t buttons,
+                            uint32_t drive_mode);
 
 /// Bring up Ethernet, then start the RTPS participant + publish task in the
 /// background as soon as DHCP assigns an IP (no timeout — also covers a cable

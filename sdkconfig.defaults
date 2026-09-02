@@ -59,6 +59,7 @@ CONFIG_ETH_USE_SPI_ETHERNET=y
 # used there must be enabled here or the build fails on an undeclared
 # lv_font_montserrat_<N>.
 CONFIG_LV_FONT_MONTSERRAT_24=y
+CONFIG_LV_FONT_MONTSERRAT_30=y
 CONFIG_LV_FONT_MONTSERRAT_32=y
 CONFIG_LV_FONT_MONTSERRAT_34=y
 CONFIG_LV_FONT_MONTSERRAT_48=y

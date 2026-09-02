@@ -34,11 +34,26 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import rammp_rtps as spec  # noqa: E402  (path setup must run first)
 import rtps_host  # noqa: E402
+import rtps_drive_game  # noqa: E402
 import rtps_mcb_sim  # noqa: E402
 import rtps_net  # noqa: E402
 
 LOG_MAX_LINES = 500
 TICK_MS = 100
+#: How many times to try finding and connecting to the board on startup
+#: before giving up and leaving it to Detect/Scan.
+AUTOCONNECT_ATTEMPTS = 3
+#: Grace after connecting before deciding an attempt worked. Discovery has
+#: to complete and the first publish has to find a target inside this.
+AUTOCONNECT_VERIFY_MS = 4000
+#: Pause between a failed attempt and the next one.
+AUTOCONNECT_RETRY_MS = 1500
+
+#: Prefilled error banner. Only shown on the HMI while STATE is not OK, so this
+#: is there to make flipping to ERROR immediately show something realistic
+#: rather than an empty red panel.
+DEFAULT_ERROR_TEXT = "MOTOR CONTROLLER OVERTEMPERATURE"
+DEFAULT_ERROR_FOOTER = "REDUCE SPEED AND PULL OVER"
 
 #: "Via" entry meaning "work it out from whichever adapter reaches the peer".
 AUTO_ADAPTER = "Auto (follow the route to the board)"
@@ -62,6 +77,17 @@ class McbPanel:
         self.result_queue: queue.Queue[tuple] = queue.Queue()
         self.adapters: list = []
 
+        # Owned here rather than by the harness so the drive window can be
+        # opened before connecting and survive a disconnect; the harness borrows
+        # it and reads the speed off it.
+        self.car = rtps_drive_game.CarModel()
+        self.drive_view = None
+        # Auto-connect bookkeeping. _auto_active is cleared by success or by any
+        # manual Connect/Detect/Scan: once the user takes over, the retries must
+        # not reach in behind them.
+        self._auto_active = True
+        self._auto_attempt = 0
+        self._auto_pending = False
         self.cycling = False
         self.cycle_job: str | None = None
         self.cycle_index = 0
@@ -82,7 +108,7 @@ class McbPanel:
         root.protocol("WM_DELETE_WINDOW", self._on_close)
         # Passive only, and on a worker thread: opening the window must not
         # block, and nothing scans the network unless Scan is pressed.
-        root.after(200, lambda: self._start_discovery(announce=False))
+        root.after(200, self._auto_step)
 
     # ---------------------------------------------------------------- widgets
 
@@ -112,9 +138,18 @@ class McbPanel:
 
         self.connect_button = ttk.Button(frame, text="Connect", command=self._toggle_connection)
         self.connect_button.grid(row=0, column=4)
+        # tk.Button rather than ttk: on Windows the default "vista" ttk theme
+        # draws buttons from a native bitmap and silently ignores `background`,
+        # so a ttk style would store the colour and change nothing. The classic
+        # widget honours it.
+        self.drive_button = tk.Button(
+            frame, text="Drive view", command=self._toggle_drive_view,
+            bg="#1a6dd4", fg="white", activebackground="#2f82ea", activeforeground="white",
+            relief="raised", borderwidth=1, padx=10, cursor="hand2")
+        self.drive_button.grid(row=0, column=5, padx=(8, 0))
 
         self.connection_label = ttk.Label(frame, text="not connected")
-        self.connection_label.grid(row=1, column=4, sticky="w", pady=(6, 0))
+        self.connection_label.grid(row=1, column=4, columnspan=2, sticky="w", pady=(6, 0))
 
         ttk.Label(
             frame,
@@ -177,8 +212,8 @@ class McbPanel:
         frame = ttk.LabelFrame(self.root, text="Error banner", padding=8)
         frame.pack(fill="x", padx=8, pady=4)
 
-        self.error_text_var = tk.StringVar()
-        self.error_footer_var = tk.StringVar()
+        self.error_text_var = tk.StringVar(value=DEFAULT_ERROR_TEXT)
+        self.error_footer_var = tk.StringVar(value=DEFAULT_ERROR_FOOTER)
         for row, (label, var, limit) in enumerate((
             ("body", self.error_text_var, spec.ERROR_TEXT_LEN),
             ("footer", self.error_footer_var, spec.ERROR_FOOTER_LEN),
@@ -240,6 +275,33 @@ class McbPanel:
         self.status_label = ttk.Label(frame, text="idle")
         self.status_label.pack(side="right")
 
+    def _toggle_drive_view(self) -> None:
+        """Open (or close) the car window.
+
+        Deliberately works while disconnected: the window opening and saying so
+        is far better feedback than a button that appears to do nothing. The car
+        simply sits still until joystick samples start arriving.
+        """
+        if self.drive_view is not None:
+            self.drive_view.close()
+            return
+        self.drive_view = rtps_drive_game.DriveView(
+            self.root, self.car, status_fn=self._drive_status,
+            on_close=self._drive_view_closed)
+        self.drive_button.configure(text="Close drive view")
+
+    def _drive_status(self) -> str:
+        """One line for the drive window about where its input is coming from."""
+        if self.harness is None:
+            return "not connected - press Connect on the MCB panel to drive"
+        if self.harness.joystick is None:
+            return "connected, waiting for joystick samples"
+        return "set the drive mode on the Tab5"
+
+    def _drive_view_closed(self) -> None:
+        self.drive_view = None
+        self.drive_button.configure(text="Drive view")
+
     def _build_log(self) -> None:
         frame = ttk.LabelFrame(self.root, text="Log", padding=4)
         frame.pack(fill="both", expand=True, padx=8, pady=(4, 8))
@@ -271,7 +333,47 @@ class McbPanel:
                 return adapter.ip
         return chosen  # a hand-typed address
 
-    def _start_discovery(self, announce: bool = True) -> None:
+    def _auto_step(self) -> None:
+        """One attempt at finding the board and connecting to it.
+
+        Runs on open so the common case — board on, address remembered — needs
+        no clicks at all. Retries because discovery is a network operation and
+        one miss is not evidence the board is absent; gives up after a few so a
+        genuinely absent board does not leave the panel looping forever.
+        """
+        if not self._auto_active or self.harness is not None:
+            return
+        self._auto_attempt += 1
+        if self._auto_attempt > AUTOCONNECT_ATTEMPTS:
+            self._auto_active = False
+            self.connection_label.configure(
+                text=f"auto-connect gave up after {AUTOCONNECT_ATTEMPTS} tries")
+            self._append_log("[gui] auto-connect gave up - use Detect, or Scan for a subnet")
+            return
+        self._append_log(f"[gui] auto-connect attempt {self._auto_attempt}"
+                         f"/{AUTOCONNECT_ATTEMPTS}")
+        self._auto_pending = True
+        self._start_discovery()
+
+    def _auto_verify(self) -> None:
+        """Did the attempt actually reach the board, or only open a socket?"""
+        if not self._auto_active:
+            return
+        if self.harness is not None and self.harness.announced_targets > 0:
+            self._auto_active = False
+            self._append_log("[gui] auto-connect succeeded")
+            return
+        self._append_log("[gui] connected but nothing answered; retrying")
+        if self.harness is not None:
+            self._disconnect()
+        self.root.after(AUTOCONNECT_RETRY_MS, self._auto_step)
+
+    def _cancel_autoconnect(self) -> None:
+        """A manual action takes precedence over the retry sequence."""
+        if self._auto_active:
+            self._auto_active = False
+
+    def _start_discovery(self) -> None:
         """Find the board on a worker thread; never blocks the window."""
         if self.harness is not None:
             self._append_log("[gui] disconnect before detecting")
@@ -287,10 +389,12 @@ class McbPanel:
         threading.Thread(target=work, daemon=True).start()
 
     def _on_detect(self) -> None:
-        self._start_discovery(announce=True)
+        self._cancel_autoconnect()
+        self._start_discovery()
 
     def _on_scan(self) -> None:
         """Sweep a subnet, after showing which one."""
+        self._cancel_autoconnect()
         if self.harness is not None:
             self._append_log("[gui] disconnect before scanning")
             return
@@ -318,17 +422,24 @@ class McbPanel:
     def _discovery_finished(self, kind: str, found: str | None) -> None:
         self.detect_button.configure(state="normal")
         self.scan_button.configure(state="normal")
+        auto, self._auto_pending = self._auto_pending, False
         if found:
             self.peer_var.set(found)
             adapter = rtps_net.adapter_for(found)
             via = adapter.label() if adapter else "unknown"
             self.connection_label.configure(text=f"found {found} via {via}")
             self._append_log(f"[gui] board at {found}, reachable via {via}")
-        else:
-            hint = "try Scan" if kind == "detect" else "check the subnet, and that the board is on"
-            self.connection_label.configure(text=f"board not found - {hint}")
+            if auto and self._auto_active and self.harness is None:
+                self._connect()
+                self.root.after(AUTOCONNECT_VERIFY_MS, self._auto_verify)
+            return
+        hint = "try Scan" if kind == "detect" else "check the subnet, and that the board is on"
+        self.connection_label.configure(text=f"board not found - {hint}")
+        if auto and self._auto_active:
+            self.root.after(AUTOCONNECT_RETRY_MS, self._auto_step)
 
     def _toggle_connection(self) -> None:
+        self._cancel_autoconnect()
         if self.harness is None:
             self._connect()
         else:
@@ -352,7 +463,7 @@ class McbPanel:
             )
         )
         try:
-            self.harness = rtps_mcb_sim.McbStatusPublisher(args)
+            self.harness = rtps_mcb_sim.McbStatusPublisher(args, car=self.car)
         except OSError as exc:
             # a bad address or a port already taken by another script
             self._append_log(f"[gui] connect failed: {exc}")
@@ -361,6 +472,12 @@ class McbPanel:
             return
         self.thread = threading.Thread(target=self.harness.run, daemon=True)
         self.thread.start()
+        # A fresh publisher starts INACTIVE, but the interesting state to be in
+        # on connecting is a chair that is actually driveable - otherwise the
+        # HMI bars entry to the drive screen and the first thing anyone does is
+        # click ACTIVE by hand.
+        self.harness.drive_status = spec.DRIVE_STATUS_ACTIVE
+        self.drive_raw_var.set(str(spec.DRIVE_STATUS_ACTIVE))
         self._apply_overrides()
         self._apply_error_text()
         self.connect_button.configure(text="Disconnect")
@@ -537,6 +654,9 @@ class McbPanel:
                 self._rate = sent / elapsed
                 self._rate_seq = self.harness.seq
                 self._rate_time = now
+            # Also steps the car; update() takes its own dt, so this and the
+            # publisher's own tick cannot double-integrate.
+            self.harness.step_speed()
             self._update_joystick()
             targets = max(0, self.harness.announced_targets)
             paused = " PAUSED" if self.harness.paused else ""
@@ -553,7 +673,7 @@ class McbPanel:
                 self.axis_labels[axis].configure(text="no data")
             self.button_label.configure(text="button: no data")
             return
-        x_mv, y_mv, twist_mv, buttons = sample
+        x_mv, y_mv, twist_mv, buttons = sample[0], sample[1], sample[2], sample[3]
         half_scale = spec.JOYSTICK_FULL_SCALE_MV / 2.0
         # Shown against the spec's nominal centre, not the measured one: the
         # standing offset of a real stick is worth seeing rather than hiding.
@@ -562,8 +682,10 @@ class McbPanel:
             deflection = (mv - spec.JOYSTICK_CENTER_MV) / half_scale
             self.axis_bars[axis]["value"] = max(0, min(100, 50 + deflection * 50))
             self.axis_labels[axis].configure(text=f"{mv:4d} mV  ({deflection:+.2f})")
+        mode = spec.DRIVE_MODE_NAMES.get(sample[4] if len(sample) > 4 else None, "?")
         pressed = bool(buttons & spec.BUTTON_JOYSTICK)
-        self.button_label.configure(text=f"button: {'PRESSED' if pressed else 'released'}")
+        self.button_label.configure(
+            text=f"button: {'PRESSED' if pressed else 'released'}   mode: {mode}")
         self.speed_label.configure(
             text=f"emulated speed: {self.harness.speed_tenths / 10:.1f}"
                  f"   (Y rest {self.harness.center_y:.0f} mV)"

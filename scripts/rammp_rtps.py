@@ -83,6 +83,8 @@ def _group(prefix: str) -> Dict[int, str]:
 DRIVE_STATUS_NAMES = _group("DRIVE_STATUS_")
 #: {0: 'OK', 1: 'ERROR'} — mirrors rammp_state_name() in the header
 STATE_NAMES = _group("STATE_")
+#: {0: 'NORMAL', 1: 'HOLO', 2: 'AUTO'} — the HMI's drive-mode buttons
+DRIVE_MODE_NAMES = _group("DRIVE_MODE_")
 
 #: 4-byte CDR encapsulation header: little-endian classic CDR (xcdr1)
 CDR_LE_HEADER = b"\x00\x01\x00\x00"
@@ -137,11 +139,11 @@ def unpack_mcb_status(payload: bytes):
             _decode_field(err_raw), _decode_field(foot_raw))
 
 
-def unpack_adc_xy_twist(payload: bytes) -> tuple[int, int, int, int] | None:
-    """(x_mv, y_mv, twist_mv, buttons) from a rammp_adc_xy_twist_t sample."""
-    if len(payload) < 20 or payload[:2] != CDR_LE_HEADER[:2]:
+def unpack_adc_xy_twist(payload: bytes) -> tuple[int, int, int, int, int] | None:
+    """(x_mv, y_mv, twist_mv, buttons, drive_mode) from the joystick sample."""
+    if len(payload) < 24 or payload[:2] != CDR_LE_HEADER[:2]:
         return None
-    return struct.unpack_from("<IIII", payload, 4)
+    return struct.unpack_from("<IIIII", payload, 4)
 
 
 if __name__ == "__main__":

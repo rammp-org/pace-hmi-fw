@@ -294,7 +294,7 @@ void ui_DriveScreen_screen_init(void)
     lv_obj_set_width(ui_DriveModeButtonLabel, 280);
     lv_obj_set_height(ui_DriveModeButtonLabel, 50);
     lv_obj_set_align(ui_DriveModeButtonLabel, LV_ALIGN_CENTER);
-    lv_label_set_text(ui_DriveModeButtonLabel, "Manual");
+    lv_label_set_text(ui_DriveModeButtonLabel, "HOLO");
     ui_object_set_themeable_style_property(ui_DriveModeButtonLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_text);
     ui_object_set_themeable_style_property(ui_DriveModeButtonLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
@@ -325,7 +325,7 @@ void ui_DriveScreen_screen_init(void)
     lv_obj_set_width(ui_DriveModeButtonLabel1, 280);
     lv_obj_set_height(ui_DriveModeButtonLabel1, 50);
     lv_obj_set_align(ui_DriveModeButtonLabel1, LV_ALIGN_CENTER);
-    lv_label_set_text(ui_DriveModeButtonLabel1, "Assist");
+    lv_label_set_text(ui_DriveModeButtonLabel1, "Normal");
     ui_object_set_themeable_style_property(ui_DriveModeButtonLabel1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_text);
     ui_object_set_themeable_style_property(ui_DriveModeButtonLabel1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,

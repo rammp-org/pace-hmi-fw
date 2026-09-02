@@ -42,6 +42,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import rammp_rtps as spec  # noqa: E402  (path setup must run first)
 import rtps_host  # noqa: E402
+import rtps_drive_game  # noqa: E402
 import rtps_net  # noqa: E402
 
 
@@ -63,7 +64,8 @@ CENTER_SAMPLE_COUNT = 15
 class McbStatusPublisher(rtps_host.RtpsHostHarness):
     """Harness whose periodic publish sends a rammp_mcb_status_t."""
 
-    def __init__(self, args: argparse.Namespace) -> None:
+    def __init__(self, args: argparse.Namespace,
+                 car: "rtps_drive_game.CarModel | None" = None) -> None:
         super().__init__(args)
         self.drive_status = spec.DRIVE_STATUS_INACTIVE
         self.system_state = spec.STATE_OK
@@ -76,8 +78,14 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
         # Emulated chair speed in tenths. The GUI integrates the joystick into
         # this; the CLI just leaves it at zero.
         self.speed_tenths = 0
-        # Latest joystick sample: (x_mv, y_mv, twist_mv, buttons), or None.
-        self.joystick: tuple[int, int, int, int] | None = None
+        # Latest joystick sample: (x, y, twist, buttons, drive_mode), or None.
+        self.joystick: tuple[int, int, int, int, int] | None = None
+        # The chair being simulated. It is the single source of speed: what the
+        # Tab5 displays is read straight off it, so the number on the screen and
+        # the car in the drive view cannot disagree. Accepted from the caller so
+        # a GUI can own one that outlives any single connection, and keep its
+        # drive window open across a disconnect.
+        self.car = car if car is not None else rtps_drive_game.CarModel()
         # Emulated speed kept as a float so slow stick movements accumulate
         # instead of being lost to integer rounding every step.
         self._speed = 0.0
@@ -114,32 +122,22 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
         until enough samples have arrived to establish it."""
         return self._center_y if self._center_y is not None else spec.JOYSTICK_CENTER_MV
 
-    def step_speed(self, dt: float) -> None:
-        """Integrate stick deflection into the emulated speed.
+    def step_speed(self, _dt: float = 0.0) -> None:
+        """Advance the simulated chair and take its speed.
 
-        Push forward and the number climbs, pull back and it falls, hold centre
-        and it stays put — the simplest thing that makes the readout respond to
-        the stick. Forward reads BELOW centre on the wire (see the spec
-        header), hence the subtraction.
+        The dt is ignored: CarModel.update() reads the clock itself, so the
+        publisher ticking it twice a second and the drive window ticking it
+        thirty times a second produce the same trajectory rather than
+        double-integrating each other's steps.
         """
         if self.joystick is None:
             return
-        _x_mv, y_mv, _twist_mv, _buttons = self.joystick
-        if self._center_samples < CENTER_SAMPLE_COUNT:
-            # Average the opening samples rather than trusting a single one, so
-            # a bit of ADC noise does not become a permanent bias.
-            previous = self._center_y if self._center_y is not None else 0.0
-            self._center_y = (previous * self._center_samples + y_mv) / (self._center_samples + 1)
-            self._center_samples += 1
-            return  # no speed change while still establishing the rest position
-        half_scale = spec.JOYSTICK_FULL_SCALE_MV / 2.0
-        deflection = (self._center_y - y_mv) / half_scale
-        if abs(deflection) < SPEED_DEADZONE:
-            return
-        maximum = spec.SPEED_MAX_TENTHS / 10.0
-        self._speed += deflection * (maximum / SPEED_FULL_TRAVEL_SECONDS) * dt
-        self._speed = max(0.0, min(self._speed, maximum))
-        self.speed_tenths = int(round(self._speed * 10))
+        x_mv, y_mv, twist_mv = self.joystick[0], self.joystick[1], self.joystick[2]
+        if self.car.note_center_sample(x_mv, y_mv, twist_mv, CENTER_SAMPLE_COUNT):
+            return  # still learning where the stick rests; do not drive on it yet
+        drive_mode = self.joystick[4] if len(self.joystick) > 4 else None
+        self.car.update(self.joystick, drive_mode)
+        self.speed_tenths = self.car.speed_tenths
 
     def describe(self) -> str:
         return (

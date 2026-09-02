@@ -134,8 +134,9 @@ std::vector<uint8_t> serialize_uint32(uint32_t value) {
 }
 
 std::vector<uint8_t> serialize_adc(uint32_t x_mv, uint32_t y_mv, uint32_t twist_mv,
-                                   uint32_t buttons) {
-  auto bytes = cdr::serialize<cdr::xcdr1>(rammp_adc_xy_twist_t{x_mv, y_mv, twist_mv, buttons});
+                                   uint32_t buttons, uint32_t drive_mode) {
+  auto bytes =
+      cdr::serialize<cdr::xcdr1>(rammp_adc_xy_twist_t{x_mv, y_mv, twist_mv, buttons, drive_mode});
   return bytes ? to_uint8(*bytes) : std::vector<uint8_t>{};
 }
 
@@ -586,7 +587,8 @@ RtpsLinkState rtps_comms_link_state() {
   return RtpsLinkState::NO_PEER;
 }
 
-bool rtps_comms_publish_adc(uint32_t x_mv, uint32_t y_mv, uint32_t twist_mv, uint32_t buttons) {
+bool rtps_comms_publish_adc(uint32_t x_mv, uint32_t y_mv, uint32_t twist_mv, uint32_t buttons,
+                            uint32_t drive_mode) {
   // called from the ADC task at 30 Hz; quiet no-op until RTPS is up and
   // someone subscribes, so a missing cable or absent plot script costs
   // nothing and logs nothing
@@ -597,7 +599,7 @@ bool rtps_comms_publish_adc(uint32_t x_mv, uint32_t y_mv, uint32_t twist_mv, uin
     return false;
   }
   // publish() is internally mutex-guarded, safe alongside the counter task
-  return participant->publish(kAdcTopic, serialize_adc(x_mv, y_mv, twist_mv, buttons));
+  return participant->publish(kAdcTopic, serialize_adc(x_mv, y_mv, twist_mv, buttons, drive_mode));
 }
 
 bool rtps_comms_start() {

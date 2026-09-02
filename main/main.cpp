@@ -118,6 +118,13 @@ static char error_footer_prev_buf[RAMMP_ERROR_FOOTER_LEN];
 // it alongside the stick position without taking the LVGL lock.
 static std::atomic<bool> joy_button_pressed{false};
 
+// Which drive mode the user picked on the DriveScreen. The HMI owns this - it
+// is a question about what the person wants the stick to mean - and reports it
+// to the MCB with every joystick sample. Mirrored into an atomic for the same
+// reason as the button: the ADC task must not take the LVGL lock to read it.
+static lv_subject_t drive_mode_subject;
+static std::atomic<uint32_t> drive_mode_published{RAMMP_DRIVE_MODE_NORMAL};
+
 // Link health behind those two, polled from rtps_comms (RtpsLinkState). Drives
 // the TopBar's RTPS indicator, and greys the status labels when it is not
 // CONNECTED - a value we can no longer vouch for must not keep showing.
@@ -506,6 +513,49 @@ static void bind_rtps_label(lv_obj_t *bar) {
 /////////////////////////////////////////////////////////////////////////////
 // DriveScreen: speed readout and the error banner
 /////////////////////////////////////////////////////////////////////////////
+
+/////////////////////////////////////////////////////////////////////////////
+// DriveScreen: drive-mode selection
+//
+// Three plain LVGL buttons, so they are already touch-clickable; all this adds
+// is what a tap means and which one looks selected. Deliberately touch-only:
+// the joystick is busy driving on this screen, and stealing left/right for menu
+// navigation is exactly the class of bug that made pulling back exit the
+// screen.
+/////////////////////////////////////////////////////////////////////////////
+
+// Paired with the button that selects it, so one callback serves all three.
+static uint32_t kModeHolo = RAMMP_DRIVE_MODE_HOLO;
+static uint32_t kModeNormal = RAMMP_DRIVE_MODE_NORMAL;
+static uint32_t kModeAuto = RAMMP_DRIVE_MODE_AUTO;
+
+static void drive_mode_click_cb(lv_event_t *e) {
+  const auto *mode = static_cast<const uint32_t *>(lv_event_get_user_data(e));
+  lv_subject_set_int(&drive_mode_subject, static_cast<int32_t>(*mode));
+}
+
+// Highlights the button whose mode is selected. Border width rather than a
+// colour, so it reads the same in either theme - the buttons' colours are
+// themeable and would fight a hardcoded highlight.
+static void drive_mode_button_observer(lv_observer_t *observer, lv_subject_t *subject) {
+  lv_obj_t *button = lv_observer_get_target_obj(observer);
+  const auto mine = *static_cast<const uint32_t *>(lv_observer_get_user_data(observer));
+  const bool selected = static_cast<uint32_t>(lv_subject_get_int(subject)) == mine;
+  lv_obj_set_style_border_width(button, selected ? 8 : 2, LV_PART_MAIN);
+}
+
+static void bind_drive_mode_button(lv_obj_t *button, uint32_t *mode) {
+  if (button == nullptr) {
+    return;
+  }
+  lv_obj_add_event_cb(button, drive_mode_click_cb, LV_EVENT_CLICKED, mode);
+  lv_subject_add_observer_obj(&drive_mode_subject, drive_mode_button_observer, button, mode);
+}
+
+// Mirrors the subject out to the ADC task, which cannot take the LVGL lock.
+static void drive_mode_publish_observer(lv_observer_t *, lv_subject_t *subject) {
+  drive_mode_published.store(static_cast<uint32_t>(lv_subject_get_int(subject)));
+}
 
 // The speed arrives as tenths; the label wants "N.N". No built-in binding
 // formats an integer that way, so this does the divide itself.
@@ -1845,6 +1895,11 @@ extern "C" void app_main(void) {
   bind_rtps_label(ui_TopBar3);        // MainScreenFlex
   bind_rtps_label(ui_TopBar4);        // SeatAdjustmentFlexScreen
   lv_subject_add_observer_obj(&speed_tenths_subject, speed_label_observer, ui_SpeedNumber, nullptr);
+  lv_subject_init_int(&drive_mode_subject, RAMMP_DRIVE_MODE_NORMAL);
+  bind_drive_mode_button(ui_DriveModeButton, &kModeHolo);
+  bind_drive_mode_button(ui_DriveModeButton1, &kModeNormal);
+  bind_drive_mode_button(ui_DriveModeButton2, &kModeAuto);
+  lv_subject_add_observer(&drive_mode_subject, drive_mode_publish_observer, nullptr);
   bind_error_panel();
   lv_timer_create(rtps_poll_cb, kRtpsPollMs, nullptr);
 
@@ -2442,7 +2497,8 @@ extern "C" void app_main(void) {
       // quiet no-op until RTPS is up and a subscriber is discovered
       auto to_mv = [](float v) { return static_cast<uint32_t>(std::max(v, 0.0f)); };
       rtps_comms_publish_adc(to_mv(*horiz_mv), to_mv(*vert_mv), to_mv(*twist_mv),
-                             joy_button_pressed.load() ? RAMMP_BUTTON_JOYSTICK : 0u);
+                             joy_button_pressed.load() ? RAMMP_BUTTON_JOYSTICK : 0u,
+                             drive_mode_published.load());
     }
 
     if (log_this_cycle) {

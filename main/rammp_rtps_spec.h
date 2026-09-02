@@ -60,6 +60,21 @@ extern "C" {
 /** Bits in rammp_adc_xy_twist_t.buttons. */
 #define RAMMP_BUTTON_JOYSTICK 0x00000001u
 
+/* How the chair should interpret stick deflection. Chosen by the user on the
+   HMI's drive screen and reported to the MCB, so the MCB never has to guess
+   what the person meant by pushing the stick sideways.
+
+   NORMAL  car-like: forward/back drives, left/right steers.
+   HOLO    holonomic: the stick's X/Y is a velocity vector, no steering.
+   AUTO    reserved; the HMI can select it but nothing implements it yet.
+
+   Twist is independent of all three: it always rotates the chair on the spot. */
+enum {
+  RAMMP_DRIVE_MODE_NORMAL = 0,
+  RAMMP_DRIVE_MODE_HOLO = 1,
+  RAMMP_DRIVE_MODE_AUTO = 2,
+};
+
 /** Bench/bring-up topics: heartbeat counter, its echo, remote LCD brightness. */
 #define RAMMP_TOPIC_HMI_COUNTER "rammp/hmi/counter"
 #define RAMMP_TOPIC_HMI_COMMAND "rammp/hmi/command"
@@ -260,8 +275,13 @@ typedef struct rammp_adc_xy_twist {
   uint32_t x_mv;
   uint32_t y_mv;
   uint32_t twist_mv;
-  uint32_t buttons; /**< bitfield of RAMMP_BUTTON_*; bit set = pressed */
+  uint32_t buttons;    /**< bitfield of RAMMP_BUTTON_*; bit set = pressed */
+  uint32_t drive_mode; /**< one of RAMMP_DRIVE_MODE_*, chosen on the HMI */
 } rammp_adc_xy_twist_t;
+/* NOTE: this message has outgrown the name "AdcXYTwist" — it now carries button
+   and drive-mode state as well as the raw axes. Worth renaming to JoystickState
+   on the next change that touches both ends anyway; not done here to avoid
+   churning the topic name for a field addition. */
 
 /* -------------------------------------------------------------------------
  * Display names
