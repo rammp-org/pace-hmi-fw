@@ -4,12 +4,14 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -23,12 +25,13 @@
 #include "esp_heap_caps.h"
 #include "esp_mac.h"
 #include "esp_netif.h"
+#include "esp_timer.h"
 #include "lwip/ip_addr.h"
 #include "ping/ping_sock.h"
 
 #include "cdr.hpp"
 #include "logger.hpp"
-#include "rtps.hpp"
+#include "rtps_participant.hpp"
 #include "task.hpp"
 
 using namespace std::chrono_literals;
@@ -54,85 +57,120 @@ constexpr int kRxPollPeriodMs = 0;
 // jumper-wire runs to the module; raise once the wiring is proven.
 constexpr int kSpiClockMhz = 20;
 
-// RTPS settings. Domain 0 matches the ROS_DOMAIN_ID default.
+// RTPS settings. The domain is fixed at build time by the engine
+// (RtpsParticipant::Config::DOMAIN_ID, default 0 = the ROS_DOMAIN_ID default)
+// and is no longer settable per participant.
 //
-// Topics/type below match the espp python host harness (rtps_host.py): it
-// subscribes to '.../request' and echoes every value back on '.../response',
-// giving a full publish->echo->receive round trip. A writer only has send
-// destinations once a remote reader on the same topic is discovered, so
-// unmatched topics show up as "No send destinations" warnings.
+// Every topic and type name comes from rammp_rtps_spec.h so the MCB and the
+// python test tools cannot drift from us. A writer only has send destinations
+// once a remote reader on the same topic is discovered, so a name mismatch
+// shows up as a "No send destinations" warning rather than an error.
 //
-// For a ROS 2 peer instead, use pre-mangled ROS 2 wire names — e.g. topic
-// "rt/tab5/counter" / "rt/tab5/cmd" with type "std_msgs::msg::dds_::UInt32_"
-// — since the espp rtps component emits names verbatim.
-constexpr int kDomainId = 0;
-constexpr int kParticipantId = 0;
+// For a ROS 2 peer instead, use pre-mangled ROS 2 wire names — e.g. type
+// "std_msgs::msg::dds_::UInt32_" — since the espp rtps component emits names
+// verbatim.
+//
+// The counter/command pair still matches the espp python host harness
+// (rtps_host.py --publish-topic/--subscribe-topic): it echoes every value
+// back, giving a full publish->echo->receive round trip for bring-up.
 constexpr std::string_view kNodeName = "rammp_hmi";
-constexpr std::string_view kCounterTopic = "espp/rtps_example/request";
-constexpr std::string_view kCmdTopic = "espp/rtps_example/response";
-constexpr std::string_view kBrightnessTopic = "espp/rtps_example/brightness";
-constexpr std::string_view kUInt32TypeName = "std_msgs/msg/UInt32";
-// joystick ADC stream: one sample = x, y, twist millivolts as three uint32.
-// Custom type name — both ends are ours (rtps_adc_plot.py matches these).
-constexpr std::string_view kAdcTopic = "espp/rtps_example/adc";
-constexpr std::string_view kAdcTypeName = "rammp/msg/AdcXYTwist";
+constexpr std::string_view kCounterTopic = RAMMP_TOPIC_HMI_COUNTER;
+constexpr std::string_view kCmdTopic = RAMMP_TOPIC_HMI_COMMAND;
+constexpr std::string_view kBrightnessTopic = RAMMP_TOPIC_HMI_BRIGHTNESS;
+constexpr std::string_view kUInt32TypeName = RAMMP_TYPE_UINT32;
+constexpr std::string_view kAdcTopic = RAMMP_TOPIC_JOYSTICK_ADC;
+constexpr std::string_view kAdcTypeName = RAMMP_TYPE_ADC_XY_TWIST;
+constexpr std::string_view kMcbStatusTopic = RAMMP_TOPIC_MCB_STATUS;
+constexpr std::string_view kMcbStatusTypeName = RAMMP_TYPE_MCB_STATUS;
 
 constexpr auto kPublishPeriod = 2s;
 
 espp::Logger logger({.tag = "rtps_comms", .level = espp::Logger::Verbosity::INFO});
 
+// Link-state inputs for rtps_comms_link_state(). Atomics because the event
+// handlers, the RTPS receive task and the LVGL poll all touch them.
+std::atomic<bool> eth_failed{false};
+std::atomic<bool> link_up{false};
+// esp_timer microseconds at the last MCB status sample; 0 = never
+std::atomic<int64_t> last_status_us{0};
+constexpr int64_t kMcbStatusTimeoutUs = RAMMP_MCB_STATUS_TIMEOUT_MS * 1000LL;
+
 std::atomic<bool> got_ip{false};
+// 1.2.0 dropped the discovered-endpoint accessors, so a matched-callback is the
+// only signal that a peer exists: participant-wide, not per-topic. Both are
+// wired because the facade's two callbacks are crossed relative to what its
+// header documents — a remote reader matching our writer arrives on
+// on_subscriber_matched, not on_publisher_matched (espp/rtps 1.2.0,
+// rtps_participant.cpp:168-171 vs the Config doc comments).
+std::atomic<bool> peer_matched{false};
 std::string ip_address;
 esp_netif_ip_info_t ip_info{}; // valid once got_ip is true (gateway used for the ping test)
 
 std::unique_ptr<espp::RtpsParticipant> participant;
 std::unique_ptr<espp::Task> publish_task;
 
-// set by rtps_comms_on_brightness() before the participant starts; called
-// from the RTPS receive task when a brightness command arrives
+// set by rtps_comms_on_brightness() / rtps_comms_on_mcb_status() before the
+// participant starts; called from the RTPS receive task when a sample arrives
 std::function<void(float)> brightness_handler;
+std::function<void(const rammp_mcb_status_t &)> mcb_status_handler;
 
 // UInt32 CDR helpers (little-endian CDR with the 4-byte encapsulation header,
-// the on-the-wire format DDS expects for user data)
+// the on-the-wire format DDS expects for user data). espp/cdr derives the
+// layout from the struct by reflection, so the wire shape lives in these
+// definitions rather than in an explicit write sequence. xcdr1 is classic CDR,
+// which is what ROS 2 / DDS peers expect.
+struct UInt32Sample {
+  uint32_t value;
+};
+
+std::vector<uint8_t> to_uint8(std::span<const std::byte> bytes) {
+  const auto *begin = reinterpret_cast<const uint8_t *>(bytes.data());
+  return {begin, begin + bytes.size()};
+}
+
 std::vector<uint8_t> serialize_uint32(uint32_t value) {
-  espp::CdrWriter writer({
-      .encapsulation = espp::CdrEncapsulation::CDR_LE,
-      .include_encapsulation = true,
-  });
-  writer.write<uint32_t>(value);
-  return writer.take_buffer();
+  auto bytes = cdr::serialize<cdr::xcdr1>(UInt32Sample{value});
+  return bytes ? to_uint8(*bytes) : std::vector<uint8_t>{};
 }
 
-std::vector<uint8_t> serialize_adc(uint32_t x_mv, uint32_t y_mv, uint32_t twist_mv) {
-  espp::CdrWriter writer({
-      .encapsulation = espp::CdrEncapsulation::CDR_LE,
-      .include_encapsulation = true,
-  });
-  writer.write<uint32_t>(x_mv);
-  writer.write<uint32_t>(y_mv);
-  writer.write<uint32_t>(twist_mv);
-  return writer.take_buffer();
+std::vector<uint8_t> serialize_adc(uint32_t x_mv, uint32_t y_mv, uint32_t twist_mv,
+                                   uint32_t buttons, uint32_t drive_mode) {
+  auto bytes =
+      cdr::serialize<cdr::xcdr1>(rammp_adc_xy_twist_t{x_mv, y_mv, twist_mv, buttons, drive_mode});
+  return bytes ? to_uint8(*bytes) : std::vector<uint8_t>{};
 }
 
-std::optional<uint32_t> deserialize_uint32(std::span<const uint8_t> cdr) {
-  espp::CdrReader reader(cdr, {
-                                  .expect_encapsulation = true,
-                                  .default_encapsulation = espp::CdrEncapsulation::CDR_LE,
-                              });
-  uint32_t value = 0;
-  if (!reader.valid() || !reader.read<uint32_t>(value)) {
+std::optional<rammp_mcb_status_t> deserialize_mcb_status(std::span<const uint8_t> cdr_payload) {
+  // Explicit codec from the shared spec rather than cdr::deserialize: espp/cdr
+  // reflects std::array but not the plain C arrays this struct needs to stay
+  // includable from a C MCB. See rammp_rtps_spec.h.
+  rammp_mcb_status_t status{};
+  if (!rammp_mcb_status_decode(cdr_payload.data(), cdr_payload.size(), &status)) {
     return std::nullopt;
   }
-  return value;
+  return status;
+}
+
+std::optional<uint32_t> deserialize_uint32(std::span<const uint8_t> cdr_payload) {
+  auto sample = cdr::deserialize<UInt32Sample>(std::as_bytes(cdr_payload));
+  if (!sample) {
+    return std::nullopt;
+  }
+  return sample->value;
 }
 
 void eth_event_handler(void *, esp_event_base_t, int32_t event_id, void *) {
   switch (event_id) {
   case ETHERNET_EVENT_CONNECTED:
     logger.info("Ethernet link up");
+    link_up = true;
     break;
   case ETHERNET_EVENT_DISCONNECTED:
     logger.warn("Ethernet link down");
+    link_up = false;
+    // the lease does not survive the link, and got_ip latching true across an
+    // unplug would leave the indicator claiming a network that is gone
+    got_ip = false;
     break;
   case ETHERNET_EVENT_START:
     logger.info("Ethernet started");
@@ -152,6 +190,11 @@ void got_ip_event_handler(void *, esp_event_base_t, int32_t, void *event_data) {
   logger.info("Got IP: {} netmask {}.{}.{}.{} gateway {}.{}.{}.{}", ip_address,
               IP2STR(&event->ip_info.netmask), IP2STR(&event->ip_info.gw));
   got_ip = true;
+}
+
+void lost_ip_event_handler(void *, esp_event_base_t, int32_t, void *) {
+  logger.warn("Lost IP address (DHCP lease expired or link dropped)");
+  got_ip = false;
 }
 
 // Fire a short ICMP ping session at `target` and log every reply/timeout.
@@ -308,6 +351,7 @@ bool initialize_ethernet() {
 
   esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, &eth_event_handler, nullptr);
   esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, &got_ip_event_handler, nullptr);
+  esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_LOST_IP, &lost_ip_event_handler, nullptr);
 
   err = esp_eth_start(eth_handle);
   if (err != ESP_OK) {
@@ -319,61 +363,61 @@ bool initialize_ethernet() {
 }
 
 bool start_participant() {
-  logger.info("Creating RTPS participant '{}' (domain {}, participant id {}, advertised IP {})",
-              kNodeName, kDomainId, kParticipantId, ip_address);
+  logger.info("Creating RTPS participant '{}' (interface {})", kNodeName, ip_address);
   // lwIP allocates TX pbufs from internal DRAM; if this is low, sends to a
   // not-yet-ARP-resolved peer fail with ENOMEM
   logger.info("Internal heap: {} free, {} largest block",
               heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
               heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
   participant = std::make_unique<espp::RtpsParticipant>(espp::RtpsParticipant::Config{
-      .node_name = std::string(kNodeName),
-      .domain_id = kDomainId,
-      .participant_id = kParticipantId,
-      .advertised_address = ip_address,
-      .on_participant_discovered =
-          [](const auto &proxy) {
-            logger.info("Discovered participant '{}' at {}",
-                        proxy.name.empty() ? proxy.guid_prefix.to_string() : proxy.name,
-                        proxy.address);
+      .interface_address = ip_address,
+      .on_publisher_matched =
+          [] {
+            if (!peer_matched.exchange(true)) {
+              logger.info("Endpoint matched (publisher callback)");
+            }
           },
-      .on_endpoint_discovered =
-          [](const auto &endpoint) {
-            logger.info("Discovered remote {} '{}' [{}]", endpoint.is_reader ? "reader" : "writer",
-                        endpoint.topic_name, endpoint.type_name);
+      .on_subscriber_matched =
+          [] {
+            if (!peer_matched.exchange(true)) {
+              logger.info("Endpoint matched (subscriber callback)");
+            }
           },
-      // raise to DEBUG (and socket to INFO) to trace a failed discovery
-      // exchange: that surfaces the "SPDP parsed"/"SEDP parsed" lines plus
-      // every send, showing what we transmit and what actually reaches us
+      // raise to DEBUG to trace a failed discovery exchange: that surfaces the
+      // "SPDP parsed"/"SEDP parsed" lines plus every send, showing what we
+      // transmit and what actually reaches us
       .log_level = espp::Logger::Verbosity::INFO,
-      .socket_log_level = espp::Logger::Verbosity::WARN,
   });
 
+  // endpoints can only be added once the transport is up
+  if (!participant->start()) {
+    logger.error("Failed to start RTPS participant");
+    participant.reset();
+    return false;
+  }
+
   if (!participant->add_writer({
-          .topic_name = std::string(kCounterTopic),
+          .topic = std::string(kCounterTopic),
           .type_name = std::string(kUInt32TypeName),
-          .reliability = espp::RtpsParticipant::ReliabilityKind::BEST_EFFORT,
-          .entity_index = 0,
+          .reliability = espp::RtpsParticipant::Reliability::BEST_EFFORT,
       })) {
     logger.error("Failed to add writer for '{}'", kCounterTopic);
     return false;
   }
   logger.info("Added writer '{}' [{}]", kCounterTopic, kUInt32TypeName);
   if (!participant->add_writer({
-          .topic_name = std::string(kAdcTopic),
+          .topic = std::string(kAdcTopic),
           .type_name = std::string(kAdcTypeName),
-          .reliability = espp::RtpsParticipant::ReliabilityKind::BEST_EFFORT,
-          .entity_index = 1,
+          .reliability = espp::RtpsParticipant::Reliability::BEST_EFFORT,
       })) {
     logger.error("Failed to add writer for '{}'", kAdcTopic);
     return false;
   }
   logger.info("Added writer '{}' [{}]", kAdcTopic, kAdcTypeName);
   if (!participant->add_reader({
-          .topic_name = std::string(kCmdTopic),
+          .topic = std::string(kCmdTopic),
           .type_name = std::string(kUInt32TypeName),
-          .reliability = espp::RtpsParticipant::ReliabilityKind::BEST_EFFORT,
-          .entity_index = 0,
+          .reliability = espp::RtpsParticipant::Reliability::BEST_EFFORT,
           .on_sample =
               [](std::span<const uint8_t> cdr) {
                 auto value = deserialize_uint32(cdr);
@@ -390,10 +434,9 @@ bool start_participant() {
   logger.info("Added reader '{}' [{}]", kCmdTopic, kUInt32TypeName);
 
   if (!participant->add_reader({
-          .topic_name = std::string(kBrightnessTopic),
+          .topic = std::string(kBrightnessTopic),
           .type_name = std::string(kUInt32TypeName),
-          .reliability = espp::RtpsParticipant::ReliabilityKind::BEST_EFFORT,
-          .entity_index = 1,
+          .reliability = espp::RtpsParticipant::Reliability::BEST_EFFORT,
           .on_sample =
               [](std::span<const uint8_t> cdr) {
                 auto value = deserialize_uint32(cdr);
@@ -415,16 +458,65 @@ bool start_participant() {
   }
   logger.info("Added reader '{}' [{}]", kBrightnessTopic, kUInt32TypeName);
 
-  if (!participant->start()) {
-    logger.error("Failed to start RTPS participant");
-    participant.reset();
+  // The MCB's status broadcast. This is the one topic the HMI is a slave to:
+  // the drive-status and state labels show whatever arrives here, so a decode
+  // failure is left visible in the log rather than silently displaying a
+  // stale or zeroed state.
+  if (!participant->add_reader({
+          .topic = std::string(kMcbStatusTopic),
+          .type_name = std::string(kMcbStatusTypeName),
+          .reliability = espp::RtpsParticipant::Reliability::BEST_EFFORT,
+          .on_sample =
+              [](std::span<const uint8_t> cdr) {
+                auto status = deserialize_mcb_status(cdr);
+                if (!status) {
+                  logger.warn("Received sample on '{}' that failed CDR decode", kMcbStatusTopic);
+                  return;
+                }
+                // liveness evidence for rtps_comms_link_state(); stamped before
+                // the handler runs so a slow observer cannot age the link
+                last_status_us = esp_timer_get_time();
+                // the MCB republishes on a period, so log only what changes —
+                // otherwise this floods at the status rate
+                static std::optional<rammp_mcb_status_t> last;
+                const bool changed = !last || last->drive_status != status->drive_status ||
+                                     last->system_state != status->system_state ||
+                                     last->flags != status->flags ||
+                                     last->speed_tenths != status->speed_tenths ||
+                                     std::string_view(last->drive_text) != status->drive_text ||
+                                     std::string_view(last->state_text) != status->state_text ||
+                                     std::string_view(last->error_text) != status->error_text ||
+                                     std::string_view(last->error_footer) != status->error_footer;
+                if (changed) {
+                  logger.info(
+                      "MCB status: drive={}{} state={}{} speed={}.{} flags=0x{:02x} (seq {})",
+                      rammp_drive_status_name(status->drive_status),
+                      status->drive_text[0] ? fmt::format(" \"{}\"", status->drive_text)
+                                            : std::string(),
+                      rammp_state_name(status->system_state),
+                      status->state_text[0] ? fmt::format(" \"{}\"", status->state_text)
+                                            : std::string(),
+                      status->speed_tenths / 10, status->speed_tenths % 10, status->flags,
+                      status->seq);
+                  if (status->error_text[0] || status->error_footer[0]) {
+                    logger.info("  banner: \"{}\" / \"{}\"", status->error_text,
+                                status->error_footer);
+                  }
+                  last = status;
+                }
+                if (mcb_status_handler) {
+                  mcb_status_handler(*status);
+                } else {
+                  logger.warn("No MCB status handler registered; sample ignored");
+                }
+              },
+      })) {
+    logger.error("Failed to add reader for '{}'", kMcbStatusTopic);
     return false;
   }
+  logger.info("Added reader '{}' [{}]", kMcbStatusTopic, kMcbStatusTypeName);
 
-  auto ports = participant->ports();
-  logger.info("RTPS participant '{}' GUID {} on domain {} (meta uc={}, user uc={})", kNodeName,
-              participant->participant_guid().to_string(), kDomainId, ports.metatraffic_unicast,
-              ports.user_unicast);
+  logger.info("RTPS participant '{}' up on {} (domain fixed at build time)", kNodeName, ip_address);
   logger.info("Publishing '{}' every {} s, listening on '{}'", kCounterTopic,
               std::chrono::duration_cast<std::chrono::seconds>(kPublishPeriod).count(), kCmdTopic);
 
@@ -434,14 +526,7 @@ bool start_participant() {
         // a best-effort writer has no send destinations until a
         // remote reader on the topic is discovered — hold off
         // instead of warning every period
-        bool have_subscriber = false;
-        for (const auto &ep : participant->discovered_readers()) {
-          if (ep.is_reader && ep.topic_name == kCounterTopic) {
-            have_subscriber = true;
-            break;
-          }
-        }
-        if (!have_subscriber) {
+        if (!peer_matched) {
           static uint32_t skips = 0;
           if (skips++ % 10 == 0) {
             logger.info("No subscriber for '{}' yet; not publishing", kCounterTopic);
@@ -455,9 +540,7 @@ bool start_participant() {
           // heartbeat log on the first and every 10th sample so a
           // working publish loop is visible without log spam
           if (counter % 10 == 1) {
-            logger.info("Published counter {} on '{}' ({} participants "
-                        "discovered)",
-                        counter, kCounterTopic, participant->discovered_participants().size());
+            logger.info("Published counter {} on '{}'", counter, kCounterTopic);
           } else {
             logger.debug("Published counter {}", counter);
           }
@@ -483,25 +566,40 @@ void rtps_comms_on_brightness(std::function<void(float)> handler) {
   brightness_handler = std::move(handler);
 }
 
-bool rtps_comms_publish_adc(uint32_t x_mv, uint32_t y_mv, uint32_t twist_mv) {
+void rtps_comms_on_mcb_status(std::function<void(const rammp_mcb_status_t &)> handler) {
+  mcb_status_handler = std::move(handler);
+}
+
+RtpsLinkState rtps_comms_link_state() {
+  if (eth_failed) {
+    return RtpsLinkState::ETH_FAILED;
+  }
+  if (!link_up) {
+    return RtpsLinkState::LINK_DOWN;
+  }
+  if (!got_ip) {
+    return RtpsLinkState::NO_IP;
+  }
+  const int64_t last = last_status_us.load();
+  if (last != 0 && (esp_timer_get_time() - last) < kMcbStatusTimeoutUs) {
+    return RtpsLinkState::CONNECTED;
+  }
+  return RtpsLinkState::NO_PEER;
+}
+
+bool rtps_comms_publish_adc(uint32_t x_mv, uint32_t y_mv, uint32_t twist_mv, uint32_t buttons,
+                            uint32_t drive_mode) {
   // called from the ADC task at 30 Hz; quiet no-op until RTPS is up and
   // someone subscribes, so a missing cable or absent plot script costs
   // nothing and logs nothing
   if (!participant || !participant->is_started()) {
     return false;
   }
-  bool have_subscriber = false;
-  for (const auto &ep : participant->discovered_readers()) {
-    if (ep.is_reader && ep.topic_name == kAdcTopic) {
-      have_subscriber = true;
-      break;
-    }
-  }
-  if (!have_subscriber) {
+  if (!peer_matched) {
     return false;
   }
   // publish() is internally mutex-guarded, safe alongside the counter task
-  return participant->publish(kAdcTopic, serialize_adc(x_mv, y_mv, twist_mv));
+  return participant->publish(kAdcTopic, serialize_adc(x_mv, y_mv, twist_mv, buttons, drive_mode));
 }
 
 bool rtps_comms_start() {
@@ -514,6 +612,7 @@ bool rtps_comms_start() {
     logger.info("RX serviced by INT on GPIO{}", static_cast<int>(kPinInt));
   }
   if (!initialize_ethernet()) {
+    eth_failed = true;
     return false;
   }
 

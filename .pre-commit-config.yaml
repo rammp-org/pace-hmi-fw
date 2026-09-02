@@ -5,6 +5,7 @@ repos:
     -   id: clang-format
         exclude: |
           (?x)(
+          ^main/ui/|
           ^components/esp-dsp/|
           ^components/esp_littlefs/|
           ^components/lvgl/|

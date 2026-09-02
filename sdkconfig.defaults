@@ -20,11 +20,27 @@ CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
-# PSRAM — required for the MIPI DSI frame buffer (matches the m5stack-tab5
+# PSRAM - required for the MIPI DSI frame buffer (matches the m5stack-tab5
 # BSP example's config)
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_SPEED_200M=y
-CONFIG_SPIRAM_XIP_FROM_PSRAM=y
+#
+# XIP-from-PSRAM is deliberately OFF (it is also the IDF default).
+#
+# It selects SPIRAM_FETCH_INSTRUCTIONS + SPIRAM_RODATA, which move .text and
+# .rodata out of flash and into PSRAM at boot. On the P4 flash and PSRAM sit on
+# two SEPARATE SPI buses, so that does not offload anything -- it piles code
+# fetch and rodata reads onto the one bus the DSI scanout is already saturating.
+# This panel pulls 720*1280*2 B at ~58 Hz = ~106 MB/s continuously (~140 MB/s
+# instantaneous during active pixels), and the UI's image assets are rodata:
+# ui_img_lock_png alone is 189 KB of A8. When the DSI bridge FIFO runs dry it
+# emits black, which shows up as black horizontal lines across the frame --
+# visible only where they cross non-black content, i.e. "lines in the icons".
+# The bridge logs "underrun happens" (ESP_DRAM_LOGE) when this occurs.
+#
+# Leaving it off costs the ability to run arbitrary code during a flash
+# write/erase without IRAM placement, which this firmware does not need.
+# CONFIG_SPIRAM_XIP_FROM_PSRAM is not set
 CONFIG_CACHE_L2_CACHE_256KB=y
 CONFIG_CACHE_L2_CACHE_LINE_128B=y
 
@@ -43,9 +59,18 @@ CONFIG_ETH_USE_SPI_ETHERNET=y
 # used there must be enabled here or the build fails on an undeclared
 # lv_font_montserrat_<N>.
 CONFIG_LV_FONT_MONTSERRAT_24=y
+CONFIG_LV_FONT_MONTSERRAT_30=y
 CONFIG_LV_FONT_MONTSERRAT_32=y
 CONFIG_LV_FONT_MONTSERRAT_34=y
 CONFIG_LV_FONT_MONTSERRAT_48=y
+
+# Custom fonts exported by SquareLine can be far larger than the Montserrat set
+# above (ui_font_IBMPlexSansMedium264 is 264 px). Past a point the glyph
+# bitmap/advance-width bitfields in lv_font_fmt_txt overflow their default
+# widths, and the generated .c fails to compile with an explicit
+# "Too large font or glyphs ... Enable LV_FONT_FMT_TXT_LARGE" #error. This
+# widens those fields for every font, costing a little flash.
+CONFIG_LV_FONT_FMT_TXT_LARGE=y
 
 # Task stack sizes and tick rate from the m5stack-tab5 BSP example — the
 # default 3.5K main stack overflows during LVGL/audio/ADC setup.
@@ -68,3 +93,76 @@ CONFIG_FREERTOS_HZ=1000
 #
 # CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
 # CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# SVG rendering for the SquareLine image assets exported as raw SVG data
+# (main/ui/images/ui_img_*.c hold the .svg text verbatim). LVGL's SVG image
+# decoder is compiled out unless LV_USE_SVG is set, and LV_USE_SVG depends on
+# LV_USE_VECTOR_GRAPHIC. Vector drawing itself has no software fallback — the
+# SW draw unit's vector path is guarded on LV_USE_VECTOR_GRAPHIC && LV_USE_THORVG
+# — so ThorVG must be built in too, or SVG images render as blank rectangles.
+CONFIG_LV_USE_VECTOR_GRAPHIC=y
+CONFIG_LV_USE_THORVG=y
+CONFIG_LV_USE_THORVG_INTERNAL=y
+CONFIG_LV_USE_SVG=y
+
+# --- Rendering performance (step 1) ---
+# The refresh timer is already forced to 16 ms at runtime in main.cpp; match the
+# compiled-in default so the two cannot disagree.
+CONFIG_LV_DEF_REFR_PERIOD=16
+#
+# NOT re-enabling the image cache. Measured: 176.0 -> 175.5 ms (~1%), because the
+# cost is ThorVG RASTERIZING the vectors, not parsing them -- caching the parsed
+# render list does not avoid the rasterization. It also allocates from INTERNAL
+# RAM, not PSRAM: CMakeLists forces LV_USE_STDLIB_MALLOC=LV_STDLIB_CLIB, and
+# CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384 keeps the decoder's many small nodes
+# internal. A 4 MB budget against ~400 KB of free internal RAM is a latent OOM.
+
+# --- Rendering performance (step 2: PPA draw unit) ---
+# LVGL 9.5 ships an Espressif PPA draw unit that runs rect fills and RGB565
+# image blits on the P4's Pixel Processing Accelerator instead of the CPU. It
+# hard-requires LV_DRAW_BUF_ALIGN == CONFIG_CACHE_L2_CACHE_LINE_SIZE (128).
+# That is only safe now that the draw buffers ARE the DPI panel's frame buffers,
+# which the driver allocates cache-line aligned; the previous attempt used
+# espp's heap_caps_malloc buffers (4/8-byte aligned) and boot-looped on the
+# "buf1 is not aligned" assert in lv_display_set_buffers.
+CONFIG_LV_DRAW_BUF_ALIGN=128
+# LV_USE_PPA is OFF. Its draw unit only ever writes the cache BACK (C2M) and
+# never invalidates (M2C) -- grep the ppa dir, there is no M2C anywhere. So after
+# the PPA's DMA writes pixels, the CPU's cached copy of that region is stale, and
+# refr_sync_areas' lv_draw_buf_copy then propagates those stale pixels into the
+# other frame buffer. The two buffers drift apart and LVGL alternates between
+# them every refresh -> the screen visibly blinks on a static image.
+# It also ignores the `area` argument and msyncs the whole 1.8 MB frame buffer
+# twice per PPA task (lv_draw_ppa_buf.c:42), which scales with task count rather
+# than pixel count -- so it may well be a net slowdown here too.
+# Re-enable only with an area-scoped C2M + M2C fix in the draw unit.
+# CONFIG_LV_USE_PPA=y
+# CONFIG_LV_USE_PPA_IMG=y
+
+# LVGL's built-in FPS/CPU overlay (lv_sysmon), toggled at runtime from the
+# FPS COUNTER row in the settings menu via lv_sysmon_show/hide_performance().
+# LV_USE_PERF_MONITOR depends on LV_USE_SYSMON, and the position is a
+# compile-time choice -- default is BOTTOM_RIGHT, we want the top right corner.
+# NOTE: sdkconfig.defaults only seeds a *fresh* sdkconfig, so these are also set
+# in the (gitignored) sdkconfig for the current build tree.
+CONFIG_LV_USE_SYSMON=y
+CONFIG_LV_USE_PERF_MONITOR=y
+CONFIG_LV_PERF_MONITOR_ALIGN_TOP_RIGHT=y
+
+# Parallel software rendering (LV_DRAW_SW_DRAW_UNIT_CNT=2 + LV_OS_FREERTOS) is
+# OFF: it boot-loops with a stack-protection fault in ThorVG's rleRender.
+#
+# Enabling >1 draw unit makes lv_draw_sw_init call
+# tvg_engine_init(TVG_ENGINE_SW, CNT) instead of (..., 0), which spawns ThorVG's
+# own TaskScheduler worker threads (tvgTaskScheduler.cpp uses std::thread). With
+# 1 draw unit ThorVG runs inline on the 32KB LVGL task stack and is fine.
+#
+# Those workers get a ~2040-byte usable stack and none of the obvious knobs move
+# it -- verified by panic dumps reporting byte-identical stack bounds after:
+#   LV_DRAW_THREAD_STACK_SIZE=131072  (that governs LVGL's own swdraw threads,
+#       and note LVGL's FreeRTOS port divides bytes by sizeof(StackType_t) while
+#       ESP-IDF's xTaskCreate already takes BYTES, so it under-allocates 4x)
+#   PTHREAD_TASK_STACK_SIZE_DEFAULT=32768 (confirmed present in sdkconfig.h)
+# Next thing to try: whether LVGL's bundled ThorVG sets an explicit pthread attr
+# stack size of its own, or drop LV_USE_THORVG entirely (the only runtime SVG
+# left is the BootScreen logo; other SVGs are already pre-rasterized to PNG).

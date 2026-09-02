@@ -11,8 +11,7 @@
 #include <algorithm>
 #include <cstdlib>
 
-#include <esp_cache.h>
-#include <esp_heap_caps.h>
+#include <driver/ppa.h>
 #include <esp_lcd_mipi_dsi.h>
 #include <esp_lcd_panel_io.h>
 #include <esp_lcd_panel_ops.h>
@@ -25,28 +24,66 @@ namespace espp {
 M5StackTab5::DisplayController M5StackTab5::detect_display_controller() {
   auto &i2c = internal_i2c();
 
-  // This probe usually runs right after the LCD hardware reset. On the ST7123
-  // (TDDI) the reset momentarily drops its I2C endpoint (0x55) off the bus, and
-  // it can take longer than the post-reset delay to re-enumerate. Probing once
-  // is therefore racy — it intermittently reports UNKNOWN even though the chip
-  // is present. Retry a few times with a short delay so a slow re-enumeration
-  // doesn't abort LCD init.
-  static constexpr int kProbeAttempts = 10;
-  for (int attempt = 0; attempt < kProbeAttempts; ++attempt) {
-    // Probe for the GT911 touch controller, if it exists we have an ILI9881 display
-    if (i2c.probe_device(0x14)) {
+  // The Tab5 has shipped with three display revisions:
+  //   - ILI9881C panel + separate GT911 touch controller (original),
+  //   - ST7123 TDDI (integrated display+touch, post Oct-2025),
+  //   - ST7121 TDDI (newest).
+  // The two Sitronix TDDI parts answer on the same touch I2C address (0x55)
+  // and cannot be told apart by their DSI ID, but they need DIFFERENT init
+  // sequences and DSI lane rates — mis-identifying one as the other yields a
+  // black screen. Distinguish them by the touch firmware-version register
+  // (2-byte register address 0x0000): 1 = ST7121, 3 = ST7123 (same method
+  // M5GFX uses). The ST touch engine can take ~50 ms after reset before it
+  // responds, so poll rather than probing once; a GT911 ACK at any point
+  // identifies the ILI9881 variant immediately.
+  static constexpr uint8_t kStTouchAddress = 0x55;
+  static constexpr uint8_t kGt911Address = 0x14; // TouchDriver::DEFAULT_ADDRESS_2
+  bool st_acked = false;   // an ST device ACKed its address (even if reads failed)
+  bool st_fw_read = false; // a firmware-version byte was successfully read
+  int last_logged_fw = -1;
+  for (int attempt = 0; attempt < 60; ++attempt) {
+    const uint8_t fw_reg[2] = {0x00, 0x00};
+    uint8_t fw_version = 0;
+    // Quiet ACK probe first: while the ST touch engine is still booting it can
+    // ACK-then-NACK a register read, which would log a scary (but harmless)
+    // WriteRead error from the bus layer on every early attempt.
+    if (i2c.probe_device(kStTouchAddress)) {
+      st_acked = true;
+      if (i2c.write_read(kStTouchAddress, fw_reg, sizeof(fw_reg), &fw_version, 1)) {
+        st_fw_read = true;
+        if (fw_version != last_logged_fw) {
+          last_logged_fw = fw_version;
+          logger_.info("ST touch firmware version: {:#04x}", fw_version);
+        }
+        if (fw_version == 1) {
+          return M5StackTab5::DisplayController::ST7121;
+        }
+        if (fw_version == 3) {
+          return M5StackTab5::DisplayController::ST7123;
+        }
+        // Unknown FW value — the touch engine may still be booting; keep polling.
+      }
+    } else if (i2c.probe_device(kGt911Address)) {
+      // GT911 present -> original ILI9881 revision.
       return M5StackTab5::DisplayController::ILI9881;
     }
+    std::this_thread::sleep_for(10ms);
+  }
 
-    // Probe for the ST7123 display controller
-    if (i2c.probe_device(0x55)) {
-      return M5StackTab5::DisplayController::ST7123;
+  if (st_acked) {
+    // An ST TDDI is present but we could not identify it: either the firmware
+    // version register read an unrecognized value, or the reads kept failing
+    // for the whole poll window. Fall back to the ST7123 (the more common
+    // part) rather than failing outright.
+    if (st_fw_read) {
+      logger_.warn("ST touch controller present but firmware version {:#04x} is unknown; "
+                   "assuming ST7123",
+                   last_logged_fw);
+    } else {
+      logger_.warn("ST touch controller ACKs but its firmware version could not be read; "
+                   "assuming ST7123");
     }
-
-    if (attempt + 1 < kProbeAttempts) {
-      logger_.debug("Display controller not found on probe {} — retrying", attempt);
-      std::this_thread::sleep_for(20ms);
-    }
+    return M5StackTab5::DisplayController::ST7123;
   }
 
   // Unknown display controller
@@ -116,13 +153,22 @@ bool M5StackTab5::initialize_lcd() {
     bus_config.bus_id = 0;
     bus_config.num_data_lanes = 2;
     bus_config.phy_clk_src = MIPI_DSI_PHY_CLK_SRC_DEFAULT;
-    // ST7123/ST7121 lane rate must match the value the vendor init table is
-    // tuned for. M5Stack's own M5Tab5-UserDemo (known-good) uses 1300 Mbps for
-    // this panel; feeding a lower rate (e.g. 965) leaves the panel's internal
-    // MIPI PLL desynced from the incoming HS stream -> backlit but black screen,
-    // even though the pixel clock is close enough for the touch engine to run.
-    bus_config.lane_bit_rate_mbps =
-        (detected_controller == DisplayController::ILI9881) ? 730 : 1300;
+    // Per-controller DSI lane rate. The ST7121 runs a slower lane clock than
+    // the ST7123: M5GFX's reference values are 900 vs 1040 Mbps, and this BSP
+    // deliberately derates the ST7123 to 965 Mbps (margin for esp-lcd's PHY)
+    // while using the M5GFX 900 Mbps for the ST7121. Driving an ST7121 at the
+    // ST7123 rate is one of the reasons a mis-detected ST7121 shows nothing.
+    switch (detected_controller) {
+    case DisplayController::ILI9881:
+      bus_config.lane_bit_rate_mbps = 730;
+      break;
+    case DisplayController::ST7121:
+      bus_config.lane_bit_rate_mbps = 900;
+      break;
+    default: // ST7123 (and the ST fallback)
+      bus_config.lane_bit_rate_mbps = 965;
+      break;
+    }
     ret = esp_lcd_new_dsi_bus(&bus_config, &lcd_handles_.mipi_dsi_bus);
     if (ret != ESP_OK) {
       logger_.error("New DSI bus init failed: {}", esp_err_to_name(ret));
@@ -159,20 +205,18 @@ bool M5StackTab5::initialize_lcd() {
     logger_.info("Creating MIPI DSI DPI panel with M5Stack Tab5 ILI9881 configuration");
     dpi_cfg.virtual_channel = 0;
     dpi_cfg.dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_DEFAULT;
-    // 74 MHz -> ~59.5 Hz refresh with the porches below (M5Stack's official 60
-    // MHz only reaches ~48 Hz). Stays within the 730 Mbps lane budget
-    // (74 MHz * 16 bpp / 2 lanes = 592 Mbps). If the panel blanks or
-    // flickers, revert to 60.
-    dpi_cfg.dpi_clock_freq_mhz = 74;
+    dpi_cfg.dpi_clock_freq_mhz = 60;
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
     dpi_cfg.in_color_format = LCD_COLOR_FMT_RGB565;
     dpi_cfg.out_color_format = LCD_COLOR_FMT_RGB565;
 #else
     dpi_cfg.pixel_format = LCD_COLOR_PIXEL_FORMAT_RGB565;
 #endif
-    // 2 frame buffers so esp_lcd_panel_draw_bitmap() can draw into an
-    // off-screen buffer and flip, instead of writing live into the buffer
-    // the DPI hardware is actively scanning out (visible tearing otherwise).
+    // 2 frame buffers, so LVGL can render straight into a frame buffer instead of
+    // the driver memcpy'ing 1.8 MB on every flush, and so the two can be
+    // swapped at the refresh boundary instead of torn through. The swap is
+    // gated by present_frame(), which waits on the on_refresh_done callback
+    // registered further down.
     dpi_cfg.num_fbs = 2;
     dpi_cfg.video_timing.h_size = display_width_;
     dpi_cfg.video_timing.v_size = display_height_;
@@ -189,33 +233,62 @@ bool M5StackTab5::initialize_lcd() {
   } else if (detected_controller == DisplayController::ST7123 && lcd_handles_.panel == nullptr) {
     dpi_cfg.virtual_channel = 0;
     dpi_cfg.dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_DEFAULT;
-    // ST7123/ST7121 timing taken from M5Stack's own M5Tab5-UserDemo (known-good):
-    // 78 MHz pixel clock + 1300 Mbps lane rate, which the vendor init table
-    // (byte-identical to the demo) tunes the panel's internal PLL for;
-    // mismatched pixel clock/lane rate leaves the panel backlit but black.
-    dpi_cfg.dpi_clock_freq_mhz = 78;
+    // The ST7123 is a TDDI part: its touch engine scans during the display
+    // blanking interval and is timed against the pixel clock the vendor init
+    // table was tuned for. Running the panel faster than the reference 70 MHz
+    // (M5Stack/esp-bsp value) shrinks the blanking window and desyncs the touch
+    // scan, so the panel shows but touch never reports. Keep this at 70 MHz.
+    dpi_cfg.dpi_clock_freq_mhz = 70;
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
     dpi_cfg.in_color_format = LCD_COLOR_FMT_RGB565;
     dpi_cfg.out_color_format = LCD_COLOR_FMT_RGB565;
 #else
     dpi_cfg.pixel_format = LCD_COLOR_PIXEL_FORMAT_RGB565;
 #endif
-    // 2 frame buffers so esp_lcd_panel_draw_bitmap() can draw into an
-    // off-screen buffer and flip, instead of writing live into the buffer
-    // the DPI hardware is actively scanning out (visible tearing otherwise).
+    // 2 frame buffers, so LVGL can render straight into a frame buffer instead of
+    // the driver memcpy'ing 1.8 MB on every flush, and so the two can be
+    // swapped at the refresh boundary instead of torn through. The swap is
+    // gated by present_frame(), which waits on the on_refresh_done callback
+    // registered further down.
     dpi_cfg.num_fbs = 2;
     dpi_cfg.video_timing.h_size = display_width_;
     dpi_cfg.video_timing.v_size = display_height_;
     dpi_cfg.video_timing.hsync_back_porch = 40;
     dpi_cfg.video_timing.hsync_pulse_width = 2;
     dpi_cfg.video_timing.hsync_front_porch = 40;
-    // vsync_back_porch/front_porch retuned from the vendor defaults (4/320) to
-    // correct a vertical content offset on this board; total frame lines held
-    // constant (2 + 42 + 1280 + 282 == 2 + 4 + 1280 + 320 == 1606) so the
-    // pixel-clock/PLL tuning above is unaffected.
-    dpi_cfg.video_timing.vsync_back_porch = 42;
+    dpi_cfg.video_timing.vsync_back_porch = 8;
     dpi_cfg.video_timing.vsync_pulse_width = 2;
-    dpi_cfg.video_timing.vsync_front_porch = 282;
+    dpi_cfg.video_timing.vsync_front_porch = 220;
+#if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(6, 0, 0)
+    dpi_cfg.flags.use_dma2d = true;
+#endif
+  } else if (detected_controller == DisplayController::ST7121 && lcd_handles_.panel == nullptr) {
+    dpi_cfg.virtual_channel = 0;
+    dpi_cfg.dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_DEFAULT;
+    // Like the ST7123, the ST7121 is a TDDI part whose touch engine is timed
+    // against the pixel clock; use the M5GFX reference 70 MHz and porch set
+    // (they differ from the ST7123's: VBP 24 / VPW 20 / VFP 200).
+    dpi_cfg.dpi_clock_freq_mhz = 70;
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
+    dpi_cfg.in_color_format = LCD_COLOR_FMT_RGB565;
+    dpi_cfg.out_color_format = LCD_COLOR_FMT_RGB565;
+#else
+    dpi_cfg.pixel_format = LCD_COLOR_PIXEL_FORMAT_RGB565;
+#endif
+    // 2 frame buffers, so LVGL can render straight into a frame buffer instead of
+    // the driver memcpy'ing 1.8 MB on every flush, and so the two can be
+    // swapped at the refresh boundary instead of torn through. The swap is
+    // gated by present_frame(), which waits on the on_refresh_done callback
+    // registered further down.
+    dpi_cfg.num_fbs = 2;
+    dpi_cfg.video_timing.h_size = display_width_;
+    dpi_cfg.video_timing.v_size = display_height_;
+    dpi_cfg.video_timing.hsync_back_porch = 40;
+    dpi_cfg.video_timing.hsync_pulse_width = 2;
+    dpi_cfg.video_timing.hsync_front_porch = 40;
+    dpi_cfg.video_timing.vsync_back_porch = 24;
+    dpi_cfg.video_timing.vsync_pulse_width = 20;
+    dpi_cfg.video_timing.vsync_front_porch = 200;
 #if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(6, 0, 0)
     dpi_cfg.flags.use_dma2d = true;
 #endif
@@ -266,6 +339,14 @@ bool M5StackTab5::initialize_lcd() {
       display_driver_ = std::move(display_driver);
       display_controller_ = DisplayController::ST7123;
     }
+  } else if (detected_controller == DisplayController::ST7121) {
+    logger_.info("Initializing as ST7121");
+    auto display_driver = std::make_shared<espp::St7121>(display_config);
+    if (display_driver->initialize()) {
+      logger_.info("Successfully initialized ST7121 display controller");
+      display_driver_ = std::move(display_driver);
+      display_controller_ = DisplayController::ST7121;
+    }
   } else {
     logger_.error("Failed to detect display controller");
     return false;
@@ -289,34 +370,30 @@ bool M5StackTab5::initialize_lcd() {
 
   logger_.info("Display initialized with resolution {}x{}", display_width_, display_height_);
 
-  // Fill both DPI frame buffers with white as the default background (2 now
-  // that num_fbs=2, so whichever one the hardware scans out first isn't
-  // uninitialized memory). This also acts as a hardware smoke test that is
-  // independent of LVGL: if the panel and DSI link are working the screen
-  // turns solid white right here. If it then stays white with no UI drawn on
-  // top, the problem is in LVGL's flush path; if it stays black, the problem
-  // is the panel init / DSI link itself.
-  {
-    void *fb0 = nullptr;
-    void *fb1 = nullptr;
-    esp_err_t fb_ret = esp_lcd_dpi_panel_get_frame_buffer(lcd_handles_.panel, 2, &fb0, &fb1);
-    if (fb_ret == ESP_OK && fb0 != nullptr && fb1 != nullptr) {
-      size_t fb_size = display_width_ * display_height_ * sizeof(uint16_t);
-      memset(fb0, 0xFF, fb_size); // 0xFFFF per RGB565 pixel = white
-      memset(fb1, 0xFF, fb_size);
-      esp_cache_msync(fb0, fb_size, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
-      esp_cache_msync(fb1, fb_size, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
-      logger_.info("Filled DPI frame buffers with white ({} bytes each) as default background",
-                   fb_size);
-    } else {
-      logger_.error("Failed to get DPI frame buffer for default fill: {}", esp_err_to_name(fb_ret));
+  // The vsync latch present_frame() waits on. Created before the callbacks are
+  // registered so notify_vsync() can never see a null handle.
+  if (vsync_sem_ == nullptr) {
+    vsync_sem_ = xSemaphoreCreateBinary();
+    if (vsync_sem_ == nullptr) {
+      logger_.warn("Could not create the vsync semaphore; presenting without a vsync wait");
+      vsync_enabled_.store(false, std::memory_order_relaxed);
     }
   }
 
-  logger_.info("Register DPI panel event callback for LVGL flush ready notification");
+  // on_color_trans_done fires synchronously from esp_lcd_panel_draw_bitmap and
+  // drives the BSP's own flush() path (lv_disp_flush_ready). on_refresh_done is
+  // the one that means "the queued frame buffer is now the one being scanned
+  // out" -- see notify_vsync(). Registering it also has a cost: it enables the
+  // bridge VSYNC interrupt on chip revisions that have one (>= v3.0). On the
+  // revisions this firmware targets (CONFIG_ESP_REV_MIN_FULL=100) that event
+  // does not exist, and esp_lcd_panel_dpi.c instead invokes on_refresh_done
+  // from the DW-GDMA transfer-done callback, right after the link list has been
+  // re-armed with the current cur_fb_index. That is exactly the swap boundary,
+  // so it is the signal we want either way.
+  logger_.info("Register DPI panel event callbacks (flush ready + refresh done)");
   esp_lcd_dpi_panel_event_callbacks_t cbs = {
       .on_color_trans_done = &M5StackTab5::notify_lvgl_flush_ready,
-      .on_refresh_done = nullptr,
+      .on_refresh_done = &M5StackTab5::notify_vsync,
   };
   ret = esp_lcd_dpi_panel_register_event_callbacks(lcd_handles_.panel, &cbs, this);
   if (ret != ESP_OK) {
@@ -328,33 +405,32 @@ bool M5StackTab5::initialize_lcd() {
   return true;
 }
 
+// Scratch buffer that holds the hardware-rotated frame produced by the PPA
+// before it is handed to the panel (see flush()). Kept in PSRAM and aligned to
+// the data-cache line size, which the PPA requires for its output buffer.
 static uint16_t *third_buffer = nullptr;
-
-// Draw buffers live in PSRAM so they can be full-screen sized; internal RAM
-// cannot hold two 1280x720x2 buffers. Aligned to the larger (L2, 128 B) cache
-// line size as required for PPA/DMA2D access to external memory.
-static void *alloc_display_buffer(size_t size_bytes) {
-  void *buf = heap_caps_aligned_alloc(128, size_bytes,
-                                      MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
-  if (!buf) {
-    // not all configs tag PSRAM as DMA-capable in the heap; the PPA and DMA2D
-    // can still access it
-    buf = heap_caps_aligned_alloc(128, size_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-  }
-  return buf;
-}
+static size_t third_buffer_bytes = 0;
+// PPA (Pixel Processing Accelerator) client used to rotate the frame in
+// hardware instead of on the CPU (lv_draw_sw_rotate). CPU rotation of a
+// full-frame PSRAM buffer is slow and, because the transpose strides PSRAM,
+// asymmetric between 90 and 270 degrees; the PPA is fast and symmetric.
+static ppa_client_handle_t g_ppa_client = nullptr;
 
 bool M5StackTab5::initialize_display(size_t pixel_buffer_size) {
   logger_.info("Initializing LVGL display with pixel buffer size: {} pixels", pixel_buffer_size);
+  if (lcd_handles_.panel == nullptr) {
+    logger_.error("initialize_display() requires initialize_lcd() to have succeeded");
+    return false;
+  }
+  // The two frame buffers the DPI panel allocated (num_fbs = 2). LVGL renders
+  // into these directly; see the StaticMemoryConfig comment below.
+  void *fb0 = nullptr;
+  void *fb1 = nullptr;
+  if (esp_lcd_dpi_panel_get_frame_buffer(lcd_handles_.panel, 2, &fb0, &fb1) != ESP_OK) {
+    logger_.error("Could not get the DPI panel frame buffers");
+    return false;
+  }
   if (!display_) {
-    auto *vram0 = (Pixel *)alloc_display_buffer(pixel_buffer_size * sizeof(Pixel));
-    auto *vram1 = (Pixel *)alloc_display_buffer(pixel_buffer_size * sizeof(Pixel));
-    if (!vram0 || !vram1) {
-      logger_.error("Failed to allocate display buffers in PSRAM!");
-      heap_caps_free(vram0);
-      heap_caps_free(vram1);
-      return false;
-    }
     display_ = std::make_shared<Display<Pixel>>(
         Display<Pixel>::LvglConfig{.width = display_width_,
                                    .height = display_height_,
@@ -366,18 +442,41 @@ bool M5StackTab5::initialize_display(size_t pixel_buffer_size) {
                 [this](float brightness) { this->brightness(brightness * 100.0f); },
             .get_brightness_callback = [this]() { return this->brightness() / 100.0f; }},
         Display<Pixel>::StaticMemoryConfig{
+            // Render straight into the DPI panel's own frame buffers instead of
+            // allocating separate PSRAM draw buffers. Three wins at once:
+            //   * no per-frame draw-buffer -> frame-buffer copy,
+            //   * the driver's frame buffers are DMA/cache-line aligned, which
+            //     lv_display_set_buffers asserts on once LV_DRAW_BUF_ALIGN is
+            //     raised to 128 for the PPA draw unit (a plain heap_caps_malloc
+            //     only guarantees 4/8 and boot-loops the assert),
+            //   * with num_fbs=2 the panel flips at vsync, so no tearing.
             .pixel_buffer_size = pixel_buffer_size,
-            .vram0 = vram0,
-            .vram1 = vram1,
+            .vram0 = static_cast<Pixel *>(fb0),
+            .vram1 = static_cast<Pixel *>(fb1),
         },
         Logger::Verbosity::WARN);
   }
 
-  third_buffer = (uint16_t *)alloc_display_buffer(pixel_buffer_size * sizeof(uint16_t));
-  if (!third_buffer) {
-    logger_.error("Failed to allocate rotation buffer in PSRAM!");
-    return false;
+  // Register a PPA client for hardware rotation, and allocate the rotation
+  // scratch buffer that the PPA writes into. The PPA output buffer (external /
+  // PSRAM memory) must be aligned to the data cache line size, and both the
+  // pointer and the size must be a multiple of it.
+  if (g_ppa_client == nullptr) {
+    ppa_client_config_t ppa_cfg = {};
+    ppa_cfg.oper_type = PPA_OPERATION_SRM;
+    esp_err_t perr = ppa_register_client(&ppa_cfg, &g_ppa_client);
+    if (perr != ESP_OK) {
+      logger_.warn("Could not register PPA client ({}); rotation will fall back to software",
+                   esp_err_to_name(perr));
+      g_ppa_client = nullptr;
+    }
   }
+  // The 1.8 MB rotation scratch buffer (third_buffer) is deliberately NOT
+  // allocated any more. It existed only for M5StackTab5::flush(), which the
+  // application replaces with a direct-mode flush straight into these frame
+  // buffers. flush() already guards on `third_buffer != nullptr`, so leaving it
+  // null is safe -- and initialize_display() no longer fails outright when an
+  // allocation that nothing reads happens to fail.
 
   logger_.info("LVGL display initialized");
   return true;
@@ -426,6 +525,45 @@ void M5StackTab5::write_lcd_lines(int xs, int ys, int xe, int ye, const uint8_t 
   esp_lcd_panel_draw_bitmap(lcd_handles_.panel, xs, ys, xe + 1, ye + 1, data);
 }
 
+bool M5StackTab5::present_frame(const uint8_t *fb, uint32_t timeout_ms) {
+  if (lcd_handles_.panel == nullptr || fb == nullptr) {
+    return false;
+  }
+
+  const bool wait = vsync_enabled_.load(std::memory_order_relaxed) && vsync_sem_ != nullptr;
+
+  // Drain any swap that completed while the caller was rendering, so the take
+  // below can only be satisfied by an event that happens after this point.
+  // Must come before draw_bitmap(): a stale token would let us return while the
+  // DMA is still scanning the buffer LVGL is about to draw into.
+  if (wait) {
+    xSemaphoreTake(vsync_sem_, 0);
+  }
+
+  // Queues the swap: cache write-back, cur_fb_index = fb, and a synchronous
+  // on_color_trans_done. The DMA picks the new index up when it re-arms.
+  esp_lcd_panel_draw_bitmap(lcd_handles_.panel, 0, 0, static_cast<int>(display_width_),
+                            static_cast<int>(display_height_), fb);
+
+  if (!wait) {
+    return true;
+  }
+
+  if (xSemaphoreTake(vsync_sem_, pdMS_TO_TICKS(timeout_ms)) == pdTRUE) {
+    return true;
+  }
+
+  // A panel that has stopped refreshing must not freeze the UI, so fall through
+  // to the pre-vsync behaviour (the frame is queued; it will appear whenever the
+  // DMA next re-arms). Logged once, not once per frame.
+  if (!vsync_timeout_logged_.exchange(true, std::memory_order_relaxed)) {
+    logger_.warn("Timed out after {} ms waiting for the frame buffer swap; further timeouts will "
+                 "not be logged",
+                 timeout_ms);
+  }
+  return false;
+}
+
 void M5StackTab5::brightness(float brightness) {
   brightness = std::clamp(brightness, 0.0f, 100.0f);
   if (backlight_) {
@@ -448,9 +586,11 @@ float M5StackTab5::brightness() const {
 // DSI write helpers
 // -----------------
 
-void IRAM_ATTR M5StackTab5::flush(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
-  // Note: This function may be called from ISR context via DPI callback
-  // Avoid using floating-point operations, logging, or other coprocessor functions
+void M5StackTab5::flush(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
+  // This is LVGL's flush callback; it runs in the LVGL task context (from
+  // lv_display_flush / the LVGL timer), not from an ISR - the DPI transfer-done
+  // interrupt is handled separately in notify_lvgl_flush_ready(). Blocking work
+  // (the PPA rotation and esp_lcd_panel_draw_bitmap) is therefore safe here.
 
   if (lcd_handles_.panel == nullptr) {
     lv_display_flush_ready(disp);
@@ -463,28 +603,69 @@ void IRAM_ATTR M5StackTab5::flush(lv_display_t *disp, const lv_area_t *area, uin
   int offsety2 = area->y2;
 
   auto rotation = lv_display_get_rotation(lv_display_get_default());
-  if (rotation > LV_DISPLAY_ROTATION_0) {
-    /* SW rotation */
+  // Cache the rotation for the camera task, which must not call LVGL from its
+  // own thread. flush() runs on the LVGL (GUI) thread, so reading it here is
+  // safe; the camera task reads the cached atomic instead.
+  camera_display_rotation_.store(static_cast<uint8_t>(rotation), std::memory_order_relaxed);
+  if (rotation > LV_DISPLAY_ROTATION_0 && third_buffer != nullptr) {
     int32_t ww = lv_area_get_width(area);
     int32_t hh = lv_area_get_height(area);
     lv_color_format_t cf = lv_display_get_color_format(disp);
-    uint32_t w_stride = lv_draw_buf_width_to_stride(ww, cf);
-    uint32_t h_stride = lv_draw_buf_width_to_stride(hh, cf);
-    if (rotation == LV_DISPLAY_ROTATION_180) {
-      lv_draw_sw_rotate(px_map, third_buffer, hh, ww, h_stride, h_stride, LV_DISPLAY_ROTATION_180,
-                        cf);
-    } else if (rotation == LV_DISPLAY_ROTATION_90) {
-      // printf("%ld %ld\n", w_stride, h_stride);
-      lv_draw_sw_rotate(px_map, third_buffer, ww, hh, w_stride, h_stride, LV_DISPLAY_ROTATION_90,
-                        cf);
-      // // rotate_copy_pixel((uint16_t*)color_map, (uint16_t*)third_buffer, offsetx1, offsety1,
-      // //                   offsetx2, offsety2, LV_HOR_RES, LV_VER_RES, 270);
-      // rotate_copy_pixel((uint16_t*)color_map, (uint16_t*)third_buffer, 0, 0, offsetx2 - offsetx1,
-      //                   offsety2 - offsety1, offsetx2 - offsetx1 + 1, offsety2 - offsety1 + 1,
-      //                   270);
-    } else if (rotation == LV_DISPLAY_ROTATION_270) {
-      lv_draw_sw_rotate(px_map, third_buffer, ww, hh, w_stride, h_stride, LV_DISPLAY_ROTATION_270,
-                        cf);
+    bool rotated = false;
+    if (g_ppa_client != nullptr) {
+      // Hardware rotation via the PPA. The LVGL rotation maps directly onto the
+      // PPA rotation angle (LVGL 90 -> PPA 90, 180 -> 180, 270 -> 270); this is
+      // the mapping verified on hardware. For 90/270 the output picture
+      // width/height are swapped. If a different panel comes out turned the
+      // wrong way, swap the 90 and 270 cases here.
+      ppa_srm_rotation_angle_t angle = PPA_SRM_ROTATION_ANGLE_0;
+      uint32_t out_w = ww, out_h = hh;
+      if (rotation == LV_DISPLAY_ROTATION_90) {
+        angle = PPA_SRM_ROTATION_ANGLE_90;
+        out_w = hh;
+        out_h = ww;
+      } else if (rotation == LV_DISPLAY_ROTATION_180) {
+        angle = PPA_SRM_ROTATION_ANGLE_180;
+      } else if (rotation == LV_DISPLAY_ROTATION_270) {
+        angle = PPA_SRM_ROTATION_ANGLE_270;
+        out_w = hh;
+        out_h = ww;
+      }
+      ppa_srm_oper_config_t srm = {};
+      srm.in.buffer = px_map;
+      srm.in.pic_w = ww;
+      srm.in.pic_h = hh;
+      srm.in.block_w = ww;
+      srm.in.block_h = hh;
+      srm.in.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
+      srm.out.buffer = third_buffer;
+      srm.out.buffer_size = third_buffer_bytes;
+      srm.out.pic_w = out_w;
+      srm.out.pic_h = out_h;
+      srm.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
+      srm.rotation_angle = angle;
+      srm.scale_x = 1.0f;
+      srm.scale_y = 1.0f;
+      srm.mode = PPA_TRANS_MODE_BLOCKING;
+      // On failure third_buffer holds stale/partial data; leave rotated=false so
+      // we fall through to the software rotation below rather than flushing it.
+      rotated = (ppa_do_scale_rotate_mirror(g_ppa_client, &srm) == ESP_OK);
+    }
+    if (!rotated) {
+      // Software fallback: the PPA client failed to register or the PPA
+      // operation failed. Rotates into third_buffer, fully overwriting it.
+      uint32_t w_stride = lv_draw_buf_width_to_stride(ww, cf);
+      uint32_t h_stride = lv_draw_buf_width_to_stride(hh, cf);
+      if (rotation == LV_DISPLAY_ROTATION_180) {
+        lv_draw_sw_rotate(px_map, third_buffer, hh, ww, h_stride, h_stride, LV_DISPLAY_ROTATION_180,
+                          cf);
+      } else if (rotation == LV_DISPLAY_ROTATION_90) {
+        lv_draw_sw_rotate(px_map, third_buffer, ww, hh, w_stride, h_stride, LV_DISPLAY_ROTATION_90,
+                          cf);
+      } else if (rotation == LV_DISPLAY_ROTATION_270) {
+        lv_draw_sw_rotate(px_map, third_buffer, ww, hh, w_stride, h_stride, LV_DISPLAY_ROTATION_270,
+                          cf);
+      }
     }
     px_map = reinterpret_cast<uint8_t *>(third_buffer);
     lv_display_rotate_area(disp, const_cast<lv_area_t *>(area));
@@ -514,6 +695,22 @@ bool IRAM_ATTR M5StackTab5::notify_lvgl_flush_ready(esp_lcd_panel_handle_t panel
     tab5->display_->notify_flush_ready();
   }
   return false;
+}
+
+bool IRAM_ATTR M5StackTab5::notify_vsync(esp_lcd_panel_handle_t panel,
+                                         esp_lcd_dpi_panel_event_data_t *edata, void *user_ctx) {
+  espp::M5StackTab5 *tab5 = static_cast<espp::M5StackTab5 *>(user_ctx);
+  if (tab5 == nullptr || tab5->vsync_sem_ == nullptr) {
+    return false;
+  }
+
+  // ISR context (the DW-GDMA transfer-done handler, or the bridge VSYNC
+  // interrupt on chip revisions that have one): give the semaphore and nothing
+  // else. Returning true asks the driver to yield to the woken task, which is
+  // the LVGL task blocked in present_frame().
+  BaseType_t higher_priority_task_woken = pdFALSE;
+  xSemaphoreGiveFromISR(tab5->vsync_sem_, &higher_priority_task_woken);
+  return higher_priority_task_woken == pdTRUE;
 }
 
 void M5StackTab5::dsi_write_command(uint8_t cmd, std::span<const uint8_t> params,

@@ -11,6 +11,7 @@
 #include <driver/gpio.h>
 #include <driver/i2s_std.h>
 #include <driver/i2s_tdm.h>
+#include <driver/ppa.h>
 #include <driver/sdmmc_host.h>
 #include <driver/spi_master.h>
 #include <driver/uart.h>
@@ -22,6 +23,7 @@
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
+#include <freertos/semphr.h>
 #include <freertos/stream_buffer.h>
 #include <freertos/task.h>
 
@@ -39,6 +41,7 @@
 #include "led.hpp"
 #include "pi4ioe5v.hpp"
 #include "rx8130ce.hpp"
+#include "st7121.hpp"
 #include "st7123.hpp"
 #include "st7123touch.hpp"
 #include "touchpad_input.hpp"
@@ -49,10 +52,11 @@ namespace espp {
 /// The M5StackTab5 class provides an interface to the M5Stack Tab5 development board.
 ///
 /// The class provides access to the following features:
-/// - 5" 720p MIPI-DSI Display with GT911 multi-touch
+/// - 5" 720p MIPI-DSI Display with multi-touch (auto-detects the fitted
+///   revision: ILI9881C + GT911 touch, ST7123 TDDI, or ST7121 TDDI)
 /// - Dual audio codecs (ES8388 + ES7210 AEC)
 /// - BMI270 6-axis IMU sensor
-/// - SC2356 2MP camera via MIPI-CSI (not yet implemented)
+/// - MIPI-CSI camera (SC202CS) via the esp_video (V4L2) pipeline
 /// - ESP32-C6 wireless module (Wi-Fi 6, Thread, ZigBee)
 /// - USB-A Host and USB-C OTG ports
 /// - RS-485 industrial interface (not yet implemented)
@@ -80,8 +84,12 @@ public:
   /// Alias for the low-level display driver interface
   using DisplayDriver = espp::display_drivers::Controller;
 
-  /// Enum for display controller type
-  enum class DisplayController { UNKNOWN, ILI9881, ST7123 };
+  /// Enum for display controller type. The Tab5 has shipped with three display
+  /// revisions: ILI9881C + separate GT911 touch (original, pre Oct-2025),
+  /// ST7123 TDDI (integrated touch), and ST7121 TDDI (newest). The two ST
+  /// parts need different init sequences / DSI timing and are told apart by
+  /// their touch firmware version (1 = ST7121, 3 = ST7123).
+  enum class DisplayController { UNKNOWN, ILI9881, ST7123, ST7121 };
 
   DisplayController detect_display_controller();
 
@@ -103,15 +111,25 @@ public:
       return "ILI9881";
     case DisplayController::ST7123:
       return "ST7123";
+    case DisplayController::ST7121:
+      return "ST7121";
     default:
       return "Unknown";
     }
   }
 
+  /// Whether the controller is one of the Sitronix TDDI parts (ST7123/ST7121),
+  /// which integrate the touch engine (same protocol, I2C 0x55) with the
+  /// display driver.
+  static constexpr bool is_st_tddi(DisplayController controller) {
+    return controller == DisplayController::ST7123 || controller == DisplayController::ST7121;
+  }
+
   /// Alias for the GT911 touch controller used by the Tab5 (ILI9881 variant)
   using TouchDriver = espp::Gt911;
 
-  /// Alias for the ST7123 integrated touch controller (ST7123 variant)
+  /// Alias for the Sitronix integrated touch controller (ST7123 and ST7121
+  /// variants — both TDDI parts speak the same touch protocol at I2C 0x55)
   using St7123TouchDriver = espp::St7123Touch;
 
   /// Alias for the touchpad data used by the Tab5 touchpad
@@ -128,6 +146,13 @@ public:
 
   /// Alias for the touch callback when touch events are received
   using touch_callback_t = std::function<void(const TouchpadData &)>;
+
+  /// Alias for the camera frame callback. Called from the camera task with each
+  /// captured frame: \p data is the pixel buffer (RGB565, \p width x \p height),
+  /// valid only for the duration of the callback, and \p length is its size in
+  /// bytes. Copy the data if it needs to outlive the call.
+  using camera_frame_callback_t =
+      std::function<void(const uint8_t *data, int width, int height, size_t length)>;
 
   /// Mount point for the uSD card on the TDeck.
   static constexpr char mount_point[] = "/sdcard";
@@ -262,6 +287,43 @@ public:
   ///       before the write has completed.
   void write_lcd_lines(int xs, int ys, int xe, int ye, const uint8_t *data, uint32_t user_data);
 
+  /// Handle of the MIPI-DSI DPI panel, or nullptr before initialize_lcd().
+  /// Exposed so the application can call esp_lcd_dpi_panel_get_frame_buffer()
+  /// and hand LVGL the panel's own frame buffers to render into directly.
+  esp_lcd_panel_handle_t lcd_panel_handle() const { return lcd_handles_.panel; }
+
+  /// Present a full frame that already lives in one of the panel's own frame
+  /// buffers, and block until the panel has swapped to it.
+  ///
+  /// This is the tear-free path for LVGL's DIRECT render mode. Because \p fb
+  /// is inside a frame buffer, esp_lcd_panel_draw_bitmap() takes its no-copy
+  /// branch: it writes the cache back, points cur_fb_index at \p fb, and fires
+  /// on_color_trans_done SYNCHRONOUSLY -- so on its own it tells the caller
+  /// nothing about when the flip lands. The actual swap happens when the DSI
+  /// DMA re-arms at the end of the current frame, which is what on_refresh_done
+  /// signals. Blocking here until then keeps the renderer off the buffer the
+  /// DMA is still scanning out.
+  ///
+  /// \param fb Pointer to the frame buffer to present (from
+  ///        esp_lcd_dpi_panel_get_frame_buffer()).
+  /// \param timeout_ms How long to wait for the swap before giving up.
+  /// \return true if the swap was observed; false on a bad argument or if the
+  ///         wait timed out (the frame is still queued -- the caller should
+  ///         carry on rather than stall the UI).
+  /// \note Must not be called from an ISR; it blocks for up to one panel
+  ///       refresh period (~17 ms on the ST7123/ST7121, ~21 ms on the ILI9881).
+  bool present_frame(const uint8_t *fb, uint32_t timeout_ms = 100);
+
+  /// Enable or disable the vsync wait inside present_frame().
+  /// Disabled, present_frame() degrades to write_lcd_lines(): the frame is
+  /// queued and the call returns immediately, which is faster but can tear.
+  /// \param enabled Whether present_frame() should wait for the swap.
+  void set_vsync_enabled(bool enabled) { vsync_enabled_.store(enabled, std::memory_order_relaxed); }
+
+  /// Whether present_frame() waits for the frame-buffer swap.
+  /// \return True if the vsync wait is enabled.
+  bool vsync_enabled() const { return vsync_enabled_.load(std::memory_order_relaxed); }
+
   /////////////////////////////////////////////////////////////////////////////
   // Audio System
   /////////////////////////////////////////////////////////////////////////////
@@ -310,21 +372,117 @@ public:
   size_t audio_buffer_size() const;
 
   /// Play audio data
-  /// \param data The audio data to play
+  /// \param data The audio data to play (16-bit signed interleaved stereo)
   /// \param num_bytes The number of bytes to play
-  void play_audio(const uint8_t *data, uint32_t num_bytes);
+  /// \return The number of bytes actually queued (may be less than \p
+  ///         num_bytes if the internal stream buffer is full)
+  /// \note This function is non-blocking and queues the data for the audio
+  ///       task to play; to stream data larger than the internal buffer,
+  ///       call it repeatedly, advancing by the returned number of bytes
+  /// \note Must be called from task context, not from an ISR.
+  size_t play_audio(const uint8_t *data, uint32_t num_bytes);
 
   /// Play audio data
-  /// \param data The audio data to play
-  void play_audio(std::span<const uint8_t> data);
+  /// \param data The audio data to play (16-bit signed interleaved stereo)
+  /// \return The number of bytes actually queued (may be less than the data
+  ///         size if the internal stream buffer is full)
+  /// \note This function is non-blocking and queues the data for the audio
+  ///       task to play; to stream data larger than the internal buffer,
+  ///       call it repeatedly, advancing by the returned number of bytes
+  /// \note Must be called from task context, not from an ISR.
+  size_t play_audio(std::span<const uint8_t> data);
 
   /// Start recording audio
-  /// \param callback Function to call with recorded audio data
+  /// \param callback Function to call with recorded audio data: 16-bit
+  ///        signed interleaved stereo (ES7210 microphone 1 on the left slot,
+  ///        microphone 2 on the right) at audio_sample_rate()
   /// \return True if recording started successfully
+  /// \note The callback runs in the dedicated microphone task's context (a
+  ///       separate task from audio playback), so keep it quick and non-
+  ///       blocking and size that task's stack accordingly
   bool start_audio_recording(std::function<void(const uint8_t *data, size_t length)> callback);
 
   /// Stop recording audio
   void stop_audio_recording();
+
+  /// Set the microphone volume
+  /// \param volume The volume as a percentage (0 - 100), mapped onto the
+  ///        ES7210 analog microphone gain range (0 dB - +37.5 dB)
+  void microphone_volume(float volume);
+
+  /// Get the microphone volume
+  /// \return The microphone volume as a percentage (0 - 100)
+  float microphone_volume() const;
+
+  /////////////////////////////////////////////////////////////////////////////
+  // Camera (MIPI-CSI, SC202CS)
+  /////////////////////////////////////////////////////////////////////////////
+
+  /// Initialize the on-board MIPI-CSI camera and start streaming frames.
+  ///
+  /// Brings up the ESP32-P4 camera pipeline (MIPI-CSI receiver + ISP + sensor)
+  /// via the esp_video (V4L2) framework, configures the ISP to output RGB565,
+  /// and starts a task that delivers each captured frame to \p callback. The
+  /// camera sensor's SCCB shares the internal I2C bus.
+  ///
+  /// \param callback Function called from the camera task with each RGB565
+  ///        frame (see camera_frame_callback_t). Keep it quick and non-blocking.
+  /// \param task_config The configuration for the camera task
+  /// \return true if the camera was successfully initialized and streaming
+  ///         started, false otherwise
+  /// \note The internal I2C bus must be initialized first (the sensor is on it);
+  ///       initialize_io_expanders() must also have run (camera reset is on an
+  ///       IO expander). The callback runs in the camera task's context.
+  bool initialize_camera(const camera_frame_callback_t &callback,
+                         const espp::Task::BaseConfig &task_config = {.name = "tab5_camera",
+                                                                      .stack_size_bytes = 6 * 1024,
+                                                                      .priority = 5,
+                                                                      .core_id = 0});
+
+  /// Stop the camera stream and release the camera pipeline.
+  void stop_camera();
+
+  /// Get the width of the captured camera frames, in pixels
+  /// \return The camera frame width (0 if the camera is not initialized)
+  uint16_t camera_width() const;
+
+  /// Get the height of the captured camera frames, in pixels
+  /// \return The camera frame height (0 if the camera is not initialized)
+  uint16_t camera_height() const;
+
+  /// Assert or release the camera reset line (IO expander 0x43 P6, active-low)
+  /// \param assert_reset True to hold the camera in reset, false to release it
+  /// \return true if the IO expander write succeeded, false otherwise
+  bool camera_reset(bool assert_reset);
+
+  /// Camera preview scale: the PPA downscales each frame by this factor before
+  /// it is delivered, trading resolution for lower per-frame CPU / PSRAM cost.
+  enum class CameraScale {
+    FULL,    ///< No downscale (native, e.g. 1280x720) - sharpest, heaviest
+    HALF,    ///< 1/2 (e.g. 640x360) - the default
+    QUARTER, ///< 1/4 (e.g. 320x180) - lightest
+  };
+
+  /// Adjustable camera controls, applied by the camera task.
+  ///
+  /// Only exposes the controls that are effective on the Tab5: the preview
+  /// scale and the mirror / flip (both done in the PPA). Exposure / white
+  /// balance / color are driven by the ISP auto pipeline and are not manually
+  /// overridable here.
+  struct CameraControls {
+    CameraScale scale{CameraScale::HALF};
+    bool hmirror{false}; ///< Horizontal mirror
+    bool vflip{false};   ///< Vertical flip
+  };
+
+  /// Update the camera controls. Thread-safe: the change is applied by the
+  /// camera task on its next iteration, so this is safe to call from the GUI.
+  /// \param controls The desired controls
+  void set_camera_controls(const CameraControls &controls);
+
+  /// Get the current (last requested) camera controls.
+  /// \return The camera controls
+  CameraControls camera_controls() const;
 
   /////////////////////////////////////////////////////////////////////////////
   // IMU & Sensors
@@ -504,6 +662,7 @@ protected:
   bool update_touch();
   bool update_battery_status();
   bool audio_task_callback(std::mutex &m, std::condition_variable &cv, bool &task_notified);
+  bool microphone_task_callback(std::mutex &m, std::condition_variable &cv, bool &task_notified);
 
   // Hardware pin definitions based on Tab5 specifications
 
@@ -522,6 +681,7 @@ protected:
   static constexpr uint8_t IO43_BIT_SPK_EN = 1;   // P1
   static constexpr uint8_t IO43_BIT_LCD_RST = 4;  // P4
   static constexpr uint8_t IO43_BIT_TP_RST = 5;   // P5
+  static constexpr uint8_t IO43_BIT_CAM_RST = 6;  // P6
   static constexpr uint8_t IO44_BIT_CHG_EN = 7;   // P7
   static constexpr uint8_t IO44_BIT_CHG_STAT = 6; // P6
 
@@ -666,7 +826,7 @@ protected:
                      .scl_pullup_en = GPIO_PULLUP_ENABLE,
                      .timeout_ms = 200,
                      // Standard-mode (100 kHz) shared internal bus. At 400 kHz the
-                     // bus is marginal with this many devices on it — the ST7123
+                     // bus is marginal with this many devices on it - the ST7123
                      // touch reads time out and a hung transaction corrupts a
                      // concurrent BMI270 read (correlated touch I/O errors + IMU
                      // vector jumps while dragging). Per-device speed mixing
@@ -728,10 +888,13 @@ protected:
   // Audio system
   std::atomic<bool> audio_initialized_{false};
   std::atomic<float> volume_{50.0f};
+  // microphone volume (percent), mapped onto the ES7210 analog gain range
+  std::atomic<float> mic_volume_{70.0f};
   std::atomic<bool> mute_{false};
   std::shared_ptr<I2c::Device<uint8_t>> es8388_i2c_device_;
   std::shared_ptr<I2c::Device<uint8_t>> es7210_i2c_device_;
   std::unique_ptr<espp::Task> audio_task_{nullptr};
+  std::unique_ptr<espp::Task> microphone_task_{nullptr};
   i2s_chan_handle_t audio_tx_handle{nullptr};
   i2s_chan_handle_t audio_rx_handle{nullptr};
   i2s_std_config_t audio_std_cfg{};
@@ -741,6 +904,49 @@ protected:
   StreamBufferHandle_t audio_rx_stream;
   std::atomic<bool> recording_{false};
   std::function<void(const uint8_t *data, size_t length)> audio_rx_callback_{nullptr};
+
+  // Camera (MIPI-CSI via esp_video / V4L2)
+  bool camera_task_callback(std::mutex &m, std::condition_variable &cv, bool &task_notified);
+  std::atomic<bool> camera_initialized_{false};
+  camera_frame_callback_t camera_callback_{nullptr};
+  std::unique_ptr<espp::Task> camera_task_{nullptr};
+  int camera_fd_{-1};                // MIPI-CSI capture device (/dev/video0)
+  bool camera_video_inited_{false};  // esp_video_init() succeeded (needs deinit)
+  bool camera_logs_silenced_{false}; // ISP log tags muted (restore on stop)
+  int camera_prev_log_levels_[4]{};  // their prior levels (esp_log_level_t)
+  uint16_t camera_width_{0};
+  uint16_t camera_height_{0};
+  static constexpr int CAMERA_BUFFER_COUNT = 2;
+  void *camera_buffers_[CAMERA_BUFFER_COUNT]{nullptr, nullptr};
+  size_t camera_buffer_sizes_[CAMERA_BUFFER_COUNT]{0, 0};
+  int camera_buffer_count_{0}; // buffers VIDIOC_REQBUFS actually allocated
+  // Each captured frame is run through the PPA (Pixel Processing Accelerator)
+  // in one hardware pass to downscale it (a full-resolution frame is expensive
+  // to re-render every frame) and rotate it to match the current display
+  // orientation. The callback receives this preview buffer, not the raw frame.
+  ppa_client_handle_t camera_ppa_client_{nullptr};
+  uint8_t *camera_preview_buffer_{nullptr};
+  size_t camera_preview_bytes_{0};
+  uint16_t camera_preview_width_{0};
+  uint16_t camera_preview_height_{0};
+  // Adjustable controls: the GUI (any thread) posts a desired state here; the
+  // camera task applies it on its next iteration so all V4L2 ioctls, the PPA
+  // scale and the preview-buffer (re)allocation happen in one thread.
+  mutable std::mutex camera_controls_mutex_;
+  CameraControls camera_controls_{};
+  bool camera_controls_dirty_{false};
+  bool camera_scale_alloc_warned_{false}; // rate-limit the OOM-on-scale warning
+  CameraScale camera_active_scale_{CameraScale::HALF};
+  // Mirror / flip are done in the PPA pass; the task reads these when building
+  // the PPA operation.
+  bool camera_active_hmirror_{false};
+  bool camera_active_vflip_{false};
+  // Current display rotation (LVGL enum value 0..3), cached by the display
+  // flush (which runs on the GUI thread and already reads it) so the camera
+  // task can read the rotation without calling LVGL from its own thread.
+  std::atomic<uint8_t> camera_display_rotation_{0};
+  void apply_camera_controls();
+  bool allocate_camera_preview_buffer(CameraScale scale);
 
   // Power management
   std::atomic<bool> battery_monitoring_initialized_{false};
@@ -786,6 +992,18 @@ protected:
   void flush(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map);
   static bool notify_lvgl_flush_ready(esp_lcd_panel_handle_t panel,
                                       esp_lcd_dpi_panel_event_data_t *edata, void *user_ctx);
+  /// on_refresh_done handler: the DSI DMA has re-armed on cur_fb_index, i.e.
+  /// the frame buffer queued by the last draw_bitmap() is now the one being
+  /// scanned out. Gives vsync_sem_ so present_frame() can return.
+  static bool notify_vsync(esp_lcd_panel_handle_t panel, esp_lcd_dpi_panel_event_data_t *edata,
+                           void *user_ctx);
+
+  // Signalled from notify_vsync() once per panel refresh. Binary semaphore:
+  // present_frame() drains it before queueing a frame, then waits on it.
+  SemaphoreHandle_t vsync_sem_{nullptr};
+  std::atomic<bool> vsync_enabled_{true};
+  // Latched so a wedged panel logs once instead of once per frame.
+  std::atomic<bool> vsync_timeout_logged_{false};
 
   // DSI write helpers
   void dsi_write_command(uint8_t cmd, std::span<const uint8_t> params, uint32_t flags);

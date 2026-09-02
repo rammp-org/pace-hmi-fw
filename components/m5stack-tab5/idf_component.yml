@@ -13,6 +13,9 @@ dependencies:
   espp/rx8130ce: '>=1.0'
   espp/st7123touch: '>=1.0'
   espp/task: '>=1.0'
+  espressif/esp_cam_sensor: '>=2.0,<2.4'
+  espressif/esp_ipa: '>=2.0,<2.3'
+  espressif/esp_video: '>=2.0,<2.4'
   idf: '>=5.0'
 description: M5Stack Tab5 Board Support Package (BSP) component in C++ for ESP32-P4
 documentation: https://esp-cpp.github.io/espp/dev_boards/m5stack/m5stack_tab5.html
@@ -21,7 +24,7 @@ maintainers:
 - William Emfinger <waemfinger@gmail.com>
 repository: git://github.com/esp-cpp/espp.git
 repository_info:
-  commit_sha: a41d3d133f602af36e251f938c2599ccaf2b1ada
+  commit_sha: 615b8dfde3e14e5a40ac4d1e2c605182b9d31bfd
   path: components/m5stack-tab5
 tags:
 - cpp
@@ -32,4 +35,4 @@ tags:
 targets:
 - esp32p4
 url: https://github.com/esp-cpp/espp/tree/main/components/m5stack-tab5
-version: 1.1.5
+version: 1.2.0

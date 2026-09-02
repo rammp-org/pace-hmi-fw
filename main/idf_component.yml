@@ -14,33 +14,39 @@ dependencies:
   #   # `public` flag doesn't have an effect dependencies of the `main` component.
   #   # All dependencies of `main` are public by default.
   #   public: true
-  espp/task: ==1.1.5
-  espp/m5stack-tab5: ==1.1.5
-  espp/adc: ==1.1.5
-  espp/base_component: ==1.1.5
-  espp/base_peripheral: ==1.1.5
-  espp/bmi270: ==1.1.5
-  espp/format: ==1.1.5
-  espp/logger: ==1.1.5
-  espp/cli: ==1.1.5
-  espp/codec: ==1.1.5
-  espp/display: ==1.1.5
-  espp/display_drivers: ==1.1.5
+  espp/task: ==1.2.0
+  # espp/m5stack-tab5 is vendored into components/m5stack-tab5 so the DPI panel
+  # config (num_fbs) and the LVGL draw-buffer allocation can be modified for
+  # performance. Removed from the manifest so the component manager does not
+  # also fetch it into managed_components/ and collide with the local copy.
+  espp/adc: ==1.2.0
+  espp/base_component: ==1.2.0
+  espp/button: ==1.2.0
+  espp/base_peripheral: ==1.2.0
+  espp/bmi270: ==1.2.0
+  espp/format: ==1.2.0
+  espp/logger: ==1.2.0
+  espp/cli: ==1.2.0
+  espp/codec: ==1.2.0
+  espp/display: ==1.2.0
+  espp/display_drivers: ==1.2.0
+  # DRV2605 haptic motor driver (the motor on the PCB's JST connector)
+  espp/drv2605: ==1.2.0
   espressif/esp-dsp: ^1.8.2
-  espp/filters: ==1.1.5
-  espp/gt911: ==1.1.5
-  espp/i2c: ==1.1.5
-  espp/ina226: ==1.1.5
-  espp/input_drivers: ==1.1.5
-  espp/interrupt: ==1.1.5
-  espp/led: ==1.1.5
+  espp/filters: ==1.2.0
+  espp/gt911: ==1.2.0
+  espp/i2c: ==1.2.0
+  espp/ina226: ==1.2.0
+  espp/input_drivers: ==1.2.0
+  espp/interrupt: ==1.2.0
+  espp/led: ==1.2.0
   lvgl/lvgl: ^9.5.0
-  espp/math: ==1.1.5
-  espp/rx8130ce: ==1.1.5
-  espp/pi4ioe5v: ==1.1.5
-  espp/spi: ==1.1.5
-  espp/touch: ==1.1.5
-  espp/st7123touch: ==1.1.5
+  espp/math: ==1.2.0
+  espp/rx8130ce: ==1.2.0
+  espp/pi4ioe5v: ==1.2.0
+  espp/spi: ==1.2.0
+  espp/touch: ==1.2.0
+  espp/st7123touch: ==1.2.0
   # RTPS comms — these components first shipped in espp 1.1.6 (espp/rtps pulls
   # in espp/socket transitively; cdr is used directly for sample serialization)
   espp/rtps: ^1.1.6
