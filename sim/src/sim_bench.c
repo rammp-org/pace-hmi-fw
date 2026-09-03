@@ -74,7 +74,7 @@ static bench_button_t buttons[] = {
 /* --------------------------------------------------------------- actions --- */
 
 /** Runs a momentary function, and says loudly that it is only a proposal. */
-static void invoke(bench_button_t * b)
+static void invoke(const bench_button_t * b)
 {
     const bench_fn_t fn = b->fn;
 

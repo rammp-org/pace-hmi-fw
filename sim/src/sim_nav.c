@@ -118,14 +118,13 @@ static lv_group_t * settings_group = NULL;      /* rows inside ui_SettingsFlexPa
 static lv_obj_t * flex_current_page(void)
 {
     lv_area_t panel;
-    uint32_t i;
 
     if(!ui_FlexPanel) return NULL;
 
     lv_obj_get_coords(ui_FlexPanel, &panel);
     {
         const int32_t cx = (panel.x1 + panel.x2) / 2;
-        for(i = 0; i < lv_obj_get_child_count(ui_FlexPanel); i++) {
+        for(uint32_t i = 0; i < lv_obj_get_child_count(ui_FlexPanel); i++) {
             lv_obj_t * child = lv_obj_get_child(ui_FlexPanel, i);
             lv_area_t a;
             lv_obj_get_coords(child, &a);
@@ -637,7 +636,7 @@ static void set_locked(bool locked)
 }
 
 /* Is `page` the flex page the user is actually looking at? */
-static bool showing_flex_page(lv_obj_t * page)
+static bool showing_flex_page(const lv_obj_t * page)
 {
     return lv_screen_active() == ui_MainScreenFlex && flex_current_page() == page;
 }
