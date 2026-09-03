@@ -25,6 +25,40 @@ Navigation is joystick-only: push up and hold on a page to enter it, then hold t
 | <img src="docs/screenshots/SeatAdjustmentFlexScreen.png" width="200"> | <img src="docs/screenshots/JoystickTest.png" width="200"> | |
 | Seat functions: elevation and tilts, static or dynamic | Bars follow the raw X/Y/twist ADC values | |
 
+## Simulator
+
+| | |
+|:--:|:--:|
+| <img src="docs/screenshots/Simulator.png" width="220"> | <img src="docs/screenshots/SimulatorBench.png" width="220"> |
+| The panel, at the Tab5's real 720x1280 | The bench: D-pad, buttons, mapping mockup |
+
+`sim/` runs those screens on a PC with no Tab5 and no MCB. It compiles
+`main/ui/` unmodified against upstream LVGL, so the layout, fonts and styling
+are the real ones at the panel's real 720x1280: useful for looking at a design
+change without a board, and for feeling the push-and-hold navigation. It needs
+CMake, Ninja and a compiler; no ESP-IDF, no SDL, no Python packages.
+
+```powershell
+cd sim
+python run.py
+```
+
+That configures, builds and launches; CMake fetches LVGL itself on the first
+run. Windows only for now.
+
+It opens two windows: the panel, which is exactly 720x1280 and contains nothing
+but what the firmware drew, and a bench underneath it holding the chair's
+control surface: a D-pad and two buttons. Hold the D-pad's up key to unlock,
+the same gesture the real stick asks for; arrows or WASD work too. The MCB
+simulation is on the keyboard, since none of it is a control the chair has.
+
+Each button has a dropdown for trying out what it might do. That part is a
+labelled mockup, not firmware: the board implements one button function today.
+
+See [sim/README.md](sim/README.md) for the full key map and, more importantly,
+for what the sim is and is not evidence of. The navigation layer is a port of
+`main.cpp`, so the two can drift.
+
 ## Flashing without building
 
 The easiest route needs nothing installed at all — no Python, no esptool, not even this
