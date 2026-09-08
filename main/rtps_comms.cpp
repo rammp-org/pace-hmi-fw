@@ -298,6 +298,9 @@ bool initialize_ethernet() {
   dev_config.queue_size = 20;
 
   eth_w5500_config_t w5500_config = ETH_W5500_DEFAULT_CONFIG(kSpiHost, &dev_config);
+  // kRxPollPeriodMs is a compile-time switch: 0 services RX off the INT
+  // line, nonzero polls. Both arms are reachable by changing that constant.
+  // cppcheck-suppress knownConditionTrueFalse
   if (kRxPollPeriodMs > 0) {
     w5500_config.base.int_gpio_num = -1;
     w5500_config.base.poll_period_ms = kRxPollPeriodMs;
@@ -606,6 +609,9 @@ bool rtps_comms_start() {
   logger.info("Bringing up W5500 Ethernet (SCK={}, MOSI={}, MISO={}, CS={})",
               static_cast<int>(kPinSck), static_cast<int>(kPinMosi), static_cast<int>(kPinMiso),
               static_cast<int>(kPinCs));
+  // kRxPollPeriodMs is a compile-time switch: 0 services RX off the INT
+  // line, nonzero polls. Both arms are reachable by changing that constant.
+  // cppcheck-suppress knownConditionTrueFalse
   if (kRxPollPeriodMs > 0) {
     logger.info("RX serviced by polling every {} ms (INT line unused)", kRxPollPeriodMs);
   } else {

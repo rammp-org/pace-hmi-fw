@@ -419,7 +419,7 @@ static void mcb_status_label_observer(lv_observer_t *observer, lv_subject_t *) {
   const bool overridden = override_text != nullptr && override_text[0] != '\0';
 
   const char *text = nullptr;
-  uint32_t color = kStatusRed;
+  uint32_t color;
   if (kind == StatusKind::kDriveStatus) {
     text = overridden ? override_text : rammp_drive_status_name(value);
     // INACTIVE is a normal resting state, not a fault, so it reads grey —
@@ -883,7 +883,7 @@ static void set_locked(bool locked) {
 // Is `page` the flex page the user is actually looking at? The screen check
 // matters because the pager keeps its scroll position while the DriveScreen is
 // loaded over the top of it.
-static bool showing_flex_page(lv_obj_t *page) {
+static bool showing_flex_page(const lv_obj_t *page) {
   return lv_screen_active() == ui_MainScreenFlex && flex_current_page() == page;
 }
 
@@ -2509,6 +2509,7 @@ extern "C" void app_main(void) {
       // later resumes with a gap in this counter, the task kept running and the
       // console transport dropped the lines; a continuous sequence would mean
       // the task itself had paused
+      // cppcheck-suppress unreadVariable
       static uint32_t print_seq = 0;
       // fmt::print("#{} horiz(CH1): {}\tvert(CH0): {}\ttwist: {}\n", print_seq++,
       //            fmt_mv(horiz_mv), fmt_mv(vert_mv), fmt_mv(twist_mv));
