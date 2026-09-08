@@ -20,8 +20,8 @@ the panel's real 720x1280. What is reimplemented is the layer around them; see
 python run.py
 ```
 
-That configures, builds and launches. Needs CMake, Ninja and a C/C++ compiler
-and nothing else: no SDL, no vcpkg, no ESP-IDF, and no Python packages
+That configures, builds and launches. Needs CMake, Ninja and the MSVC
+toolchain and nothing else: no SDL, no vcpkg, no ESP-IDF, and no Python packages
 (`run.py` is stdlib only, like everything in `scripts/`). LVGL is fetched by
 CMake on the first run, which is the only step that needs the network; that
 first build takes a few minutes, and every one after it takes seconds.
@@ -250,8 +250,18 @@ real board for that), haptics, audio, or the ADC front end.
 
 ## Troubleshooting
 
-**`run.py` says no compiler.** It prints the `winget` line for LLVM or the VS
-Build Tools. Ninja is optional but much faster than the Visual Studio generator.
+**`run.py` says no MSVC toolchain.** Install the VS 2022 Build Tools with the
+'Desktop development with C++' workload; `run.py` finds them with vswhere and
+imports `vcvars64.bat` itself, so it does not have to be run from a Developer
+Command Prompt. Ninja is optional but much faster than the Visual Studio
+generator. CMake and Ninja are taken from the ESP-IDF tools directory if they
+are not on PATH -- they are ordinary host binaries there.
+
+**It picks the wrong compiler in an ESP-IDF shell.** It should not: `run.py`
+strips Espressif off PATH before running CMake, because otherwise CMake finds
+the cross-clang first and the link fails with `unable to find library
+-lkernel32`. If you see that error, something is putting a cross toolchain in
+front of MSVC in a way the filter misses.
 
 **The first build takes minutes.** It is compiling LVGL, ThorVG and the
 generated font and image tables from scratch. Later builds are incremental.
