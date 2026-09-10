@@ -94,16 +94,31 @@ CONFIG_FREERTOS_HZ=1000
 # CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
 # CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 
-# SVG rendering for the SquareLine image assets exported as raw SVG data
-# (main/ui/images/ui_img_*.c hold the .svg text verbatim). LVGL's SVG image
-# decoder is compiled out unless LV_USE_SVG is set, and LV_USE_SVG depends on
-# LV_USE_VECTOR_GRAPHIC. Vector drawing itself has no software fallback — the
-# SW draw unit's vector path is guarded on LV_USE_VECTOR_GRAPHIC && LV_USE_THORVG
-# — so ThorVG must be built in too, or SVG images render as blank rectangles.
-CONFIG_LV_USE_VECTOR_GRAPHIC=y
-CONFIG_LV_USE_THORVG=y
-CONFIG_LV_USE_THORVG_INTERNAL=y
-CONFIG_LV_USE_SVG=y
+# SVG rendering is OFF, and with it the whole vector engine.
+#
+# The SquareLine export embeds SVG assets as raw .svg text in
+# main/ui/images/ui_img_*.c, and drawing those needs LV_USE_SVG -> depends on
+# LV_USE_VECTOR_GRAPHIC -> whose only software backend is ThorVG. So one image
+# pulled in the entire vector rasteriser.
+#
+# By the end there was exactly ONE such asset left: the BootScreen wordmark.
+# It is now pre-rasterised at build time into main/boot_logo.c as an A8 alpha
+# mask, and main.cpp swaps it over the export's SVG source after ui_init (the
+# swap lives there because import_ui.ps1 mirrors main/ui/ with robocopy /MIR and
+# would put the SVG back on the next import). Re-generate that file if the logo
+# artwork changes.
+#
+# Worth ~135 KB of code: the binary SHRANK by 45 KB even after adding 89 KB of
+# raster data. It also frees internal RAM, and removes ThorVG's thread stacks as
+# the blocker on parallel rendering (see the note further down, which is now
+# blocked on something else instead).
+#
+# Turn these back on if a genuine vector asset ever returns; nothing else here
+# depends on them.
+# CONFIG_LV_USE_VECTOR_GRAPHIC is not set
+# CONFIG_LV_USE_THORVG is not set
+# CONFIG_LV_USE_THORVG_INTERNAL is not set
+# CONFIG_LV_USE_SVG is not set
 
 # --- Rendering performance (step 1) ---
 # The refresh timer is already forced to 16 ms at runtime in main.cpp; match the
@@ -111,8 +126,10 @@ CONFIG_LV_USE_SVG=y
 CONFIG_LV_DEF_REFR_PERIOD=16
 #
 # NOT re-enabling the image cache. Measured: 176.0 -> 175.5 ms (~1%), because the
-# cost is ThorVG RASTERIZING the vectors, not parsing them -- caching the parsed
-# render list does not avoid the rasterization. So it is still not worth it.
+# cost was ThorVG RASTERIZING the vectors, not parsing them -- caching the parsed
+# render list did not avoid the rasterization. That measurement is now historical
+# (ThorVG is gone, see above), but the conclusion holds for a different reason:
+# every remaining asset is already raster, so there is no decode left to cache.
 #
 # The OOM half of this argument no longer applies: it said the decoder's many
 # small nodes land in internal RAM because CMakeLists forces
@@ -154,22 +171,37 @@ CONFIG_LV_USE_PERF_MONITOR=y
 CONFIG_LV_PERF_MONITOR_ALIGN_TOP_RIGHT=y
 
 # Parallel software rendering (LV_DRAW_SW_DRAW_UNIT_CNT=2 + LV_OS_FREERTOS) is
-# OFF: it boot-loops with a stack-protection fault in ThorVG's rleRender.
+# still OFF -- but no longer for the ThorVG reason recorded here previously.
 #
-# Enabling >1 draw unit makes lv_draw_sw_init call
-# tvg_engine_init(TVG_ENGINE_SW, CNT) instead of (..., 0), which spawns ThorVG's
-# own TaskScheduler worker threads (tvgTaskScheduler.cpp uses std::thread). With
-# 1 draw unit ThorVG runs inline on the 32KB LVGL task stack and is fine.
+# That note ended with "drop LV_USE_THORVG entirely" as the next thing to try.
+# Done (see the top of this file), and it worked: with ThorVG gone the stack
+# fault in rleRender is gone and two draw units run. Measured with the built-in
+# kFpsInstrument/kFpsStress flags in main.cpp, full-screen invalidate every LVGL
+# cycle, RENDER_START -> RENDER_READY:
 #
-# Those workers get a ~2040-byte usable stack and none of the obvious knobs move
-# it -- verified by panic dumps reporting byte-identical stack bounds after:
-#   LV_DRAW_THREAD_STACK_SIZE=131072  (that governs LVGL's own swdraw threads,
-#       and note LVGL's FreeRTOS port divides bytes by sizeof(StackType_t) while
-#       ESP-IDF's xTaskCreate already takes BYTES, so it under-allocates 4x)
-#   PTHREAD_TASK_STACK_SIZE_DEFAULT=32768 (confirmed present in sdkconfig.h)
-# Next thing to try: whether LVGL's bundled ThorVG sets an explicit pthread attr
-# stack size of its own, or drop LV_USE_THORVG entirely (the only runtime SVG
-# left is the BootScreen logo; other SVGs are already pre-rasterized to PNG).
+#   cache  units | render     result
+#   256KB    1   | 84.4 ms    stable          <- chosen
+#   256KB    2   | 48.9 ms    BOOT LOOP       42% faster, but see below
+#   128KB    2   | 80.0 ms    stable          cache loss eats the gain
+#
+# The 2-unit boot loop is the DMA one, not a stack one: each draw thread's stack
+# comes out of internal RAM, which starves the pool the W5500's SPI bounce buffer
+# needs, and spi_master does not null-check that allocation (same failure as the
+# one described under the internal RAM split below). Raising
+# RESERVE_INTERNAL does NOT fix it -- FreeRTOS task stacks also qualify as
+# internal and simply eat the larger reserve; measured DMA-capable free actually
+# FELL to 3.8 KB at RESERVE_INTERNAL=98304.
+#
+# Dropping L2 cache to 128 KB frees the 128 KB of SRAM that would pay for it, and
+# is stable -- but the cache is worth more than the second core: 46% slower
+# rendering against a 42% parallel gain, i.e. 80.0 ms vs the 84.4 ms we already
+# have. Not worth threading the renderer for 5%.
+#
+# So this needs ~40 KB of internal RAM found somewhere that is not the cache.
+# Note also that LVGL's FreeRTOS port divides the stack size by
+# sizeof(StackType_t) (vanilla FreeRTOS counts words) while ESP-IDF's
+# xTaskCreate already takes BYTES -- so LV_DRAW_THREAD_STACK_SIZE under-allocates
+# 4x and has to be set to 4x whatever you actually want.
 
 # --- Internal RAM split (measured; see the table below) ---
 # Two knobs that only make sense together. The P4 has ~500 KB of internal SRAM

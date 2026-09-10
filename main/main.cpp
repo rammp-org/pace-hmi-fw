@@ -38,6 +38,7 @@
 #include "keypad_input.hpp"
 #include "oneshot_adc.hpp"
 
+#include "boot_logo.h"
 #include "rtps_comms.hpp"
 
 #include "esp_heap_caps.h"
@@ -2393,6 +2394,29 @@ extern "C" void app_main(void) {
   // the UI is 1280x720 landscape (use ROTATION_90 for the other direction).
   lv_display_set_rotation(lv_display_get_default(), LV_DISPLAY_ROTATION_0);
   ui_init();
+
+  // Swap the boot logo from the export's embedded SVG to a pre-rasterised A8
+  // mask (main/boot_logo.c). Done here rather than in the SquareLine project
+  // because import_ui.ps1 mirrors main/ui/ with robocopy /MIR and would put the
+  // SVG straight back on the next import.
+  //
+  // This is what lets LV_USE_SVG, LV_USE_THORVG and LV_USE_VECTOR_GRAPHIC all
+  // stay off: this wordmark was the only vector asset in the project, and the
+  // entire ThorVG engine was compiled in to draw it once at boot.
+  //
+  // The scale is deliberately left alone. The export draws this at
+  // lv_image_set_scale(300) and LVGL scales about the image's centre pivot, so
+  // boot_logo.c is rasterised at the size the SVG DECLARED (457x196) rather
+  // than its on-screen size -- feed it a pre-scaled source and the logo lands
+  // about 40 px from where it sits today.
+  //
+  // A8 carries no colour of its own, so the wordmark's white has to come from
+  // image_recolor. That is the same convention the export already uses for the
+  // other single-ink assets (the padlock, the arrows); it just never set one
+  // here, because a vector image brought its own fill.
+  lv_image_set_src(ui_Image3, &boot_logo);
+  lv_obj_set_style_image_recolor(ui_Image3, lv_color_white(), LV_PART_MAIN);
+  lv_obj_set_style_image_recolor_opa(ui_Image3, LV_OPA_COVER, LV_PART_MAIN);
 
   // Benchmark against the real flex UI (PNG assets only) rather than the boot
   // screen, whose SVG logo otherwise dominates every measurement. Temporary,
