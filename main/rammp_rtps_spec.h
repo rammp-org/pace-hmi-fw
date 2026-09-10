@@ -8,6 +8,9 @@
  * includes beyond <stdint.h>, no dependency on ESP-IDF or LVGL. It will move
  * into a shared component once the first exchange is proven on the bench.
  *
+ * It also holds the few strings the HMI raises about this wire on its own
+ * authority (see "HMI-raised warnings"), because they quote it.
+ *
  * `scripts/rammp_rtps.py` scrapes this file for the topic/type strings and the
  * enum values, so the python test tools cannot drift from the firmware. That
  * scraper matches `#define RAMMP_TOPIC_*` / `#define RAMMP_TYPE_*` lines and
@@ -589,6 +592,46 @@ static inline const char *rammp_actuator_result_name(uint8_t result) {
     return "?";
   }
 }
+
+/* -------------------------------------------------------------------------
+ * HMI-raised warnings
+ *
+ * Text the HMI shows on its own authority, for problems the MCB cannot report
+ * because they are about the link to it. Today that is one thing: why a
+ * push-and-hold into the drive screen was refused. Kept here rather than in
+ * the firmware because they quote the topic names and timing contract above,
+ * and building them from those macros is what stops the wording drifting from
+ * the numbers. It also means a string read off the screen in a field report
+ * can be grepped for on either board.
+ *
+ * Drawn in the same ErrorWarningPanel as an MCB fault, so bodies and footers
+ * fit RAMMP_ERROR_TEXT_LEN / RAMMP_ERROR_FOOTER_LEN, NUL included. ASCII only,
+ * as above. The RAMMP_HMI_ prefix keeps them clear of the python scraper.
+ * ---------------------------------------------------------------------- */
+
+#define RAMMP_STR_(x) #x
+#define RAMMP_STR(x) RAMMP_STR_(x)
+
+/** Panel titles: which side the refusal came from. */
+#define RAMMP_HMI_LINK_REFUSED_TITLE "DRIVE REFUSED: RTPS LINK"
+#define RAMMP_HMI_MCB_REFUSED_TITLE "DRIVE REFUSED: MCB STATE"
+
+/* One body/footer pair per link state short of connected, so the message
+   names the layer that is actually broken. */
+#define RAMMP_HMI_ETH_FAILED_TEXT "W5500 ETHERNET INIT FAILED AT BOOT"
+#define RAMMP_HMI_ETH_FAILED_FOOTER "Power-cycle HMI to retry"
+#define RAMMP_HMI_LINK_DOWN_TEXT "NO ETHERNET LINK"
+#define RAMMP_HMI_LINK_DOWN_FOOTER "Check cable/switch to MCB"
+#define RAMMP_HMI_NO_IP_TEXT "LINK UP, NO DHCP LEASE"
+#define RAMMP_HMI_NO_IP_FOOTER "Check DHCP server"
+#define RAMMP_HMI_NO_PEER_TEXT "NO McbStatus IN " RAMMP_STR(RAMMP_MCB_STATUS_TIMEOUT_MS) " MS"
+#define RAMMP_HMI_NO_PEER_FOOTER "topic " RAMMP_TOPIC_MCB_STATUS
+
+/* Linked, but system_state is not OK. The MCB's own error_text/error_footer
+   are shown when it sends them - it owns a fault's wording - and this stands
+   in for an empty error_text: a printf format taking the raw state (unsigned)
+   and its rammp_state_name(). */
+#define RAMMP_HMI_MCB_NO_TEXT_FMT "system_state=%u (%s), error_text empty"
 
 #ifdef __cplusplus
 } /* extern "C" */

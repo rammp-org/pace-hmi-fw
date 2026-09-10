@@ -81,6 +81,7 @@ extern lv_obj_t * ui_ArrowsPanel3;
 extern lv_obj_t * ui_PanelButton3;
 extern lv_obj_t * ui_PanelButtonLabel3;
 extern lv_obj_t * ui_StatusPanel;
+extern lv_obj_t * ui_ErrorWarningPanel4;
 // CUSTOM VARIABLES
 
 #ifdef __cplusplus

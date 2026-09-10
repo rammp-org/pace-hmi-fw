@@ -70,6 +70,7 @@ lv_obj_t * ui_ArrowsPanel3 = NULL;
 lv_obj_t * ui_PanelButton3 = NULL;
 lv_obj_t * ui_PanelButtonLabel3 = NULL;
 lv_obj_t * ui_StatusPanel = NULL;
+lv_obj_t * ui_ErrorWarningPanel4 = NULL;
 // event funtions
 void ui_event_Button10(lv_event_t * e)
 {
@@ -1073,6 +1074,10 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_x(ui_StatusPanel, 0);
     lv_obj_set_y(ui_StatusPanel, 50);
 
+    ui_ErrorWarningPanel4 = ui_ErrorWarningPanel_create(ui_MainScreenFlex);
+    lv_obj_set_x(ui_ErrorWarningPanel4, 0);
+    lv_obj_set_y(ui_ErrorWarningPanel4, 180);
+
     lv_obj_add_event_cb(ui_Button10, ui_event_Button10, LV_EVENT_ALL, NULL);
     lv_obj_add_event_cb(ui_Button5, ui_event_Button5, LV_EVENT_ALL, NULL);
     lv_obj_add_event_cb(ui_Button1, ui_event_Button1, LV_EVENT_ALL, NULL);
@@ -1149,5 +1154,6 @@ void ui_MainScreenFlex_screen_destroy(void)
     ui_PanelButton3 = NULL;
     ui_PanelButtonLabel3 = NULL;
     ui_StatusPanel = NULL;
+    ui_ErrorWarningPanel4 = NULL;
 
 }

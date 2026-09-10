@@ -570,8 +570,10 @@ static void speed_label_observer(lv_observer_t *observer, lv_subject_t *subject)
   lv_label_set_text_fmt(lv_observer_get_target_obj(observer), "%d.%d", tenths / 10, tenths % 10);
 }
 
-// The banner is one instance on the DriveScreen, so unlike StatusPanel/TopBar
-// this is not a per-screen loop.
+// The MCB-fault banner is one instance on the DriveScreen, so unlike
+// StatusPanel/TopBar this is not a per-screen loop. MainScreenFlex's instance
+// is a different job - saying why a push into driving was refused - and is
+// bound by bind_drive_refused_panel.
 static void bind_error_panel() {
   if (ui_ErrorWarningPanel == nullptr) {
     return;
@@ -938,12 +940,146 @@ static bool drive_permitted() {
          lv_subject_get_int(&mcb_state_subject) == RAMMP_STATE_OK;
 }
 
+/////////////////////////////////////////////////////////////////////////////
+// Saying why a push into the DriveScreen was refused
+//
+// drive_enter_gesture is gated in applies(), so a refused push does nothing at
+// all: the arc never fills. MainScreenFlex's ErrorWarningPanel fills that
+// silence with the technical cause, worded in rammp_rtps_spec.h.
+//
+// The subject records only THAT a push was refused. The panel works out WHY
+// from the link and state subjects whenever any of them changes, so it always
+// names the current cause - cable back in but no DHCP lease yet, say - rather
+// than the one at the moment of the push.
+/////////////////////////////////////////////////////////////////////////////
+
+static constexpr uint32_t kDriveRefusedShowMs = 4000; // how long one refusal stays up
+static lv_subject_t drive_refused_subject;            // 1 = a push was refused, panel up
+// Created paused and re-armed by each refusal, like haptic_label_timer, so a
+// second push restarts the countdown rather than stacking a timer.
+static lv_timer_t *drive_refused_timer = nullptr;
+
+static_assert(sizeof(RAMMP_HMI_ETH_FAILED_TEXT) <= RAMMP_ERROR_TEXT_LEN &&
+                  sizeof(RAMMP_HMI_LINK_DOWN_TEXT) <= RAMMP_ERROR_TEXT_LEN &&
+                  sizeof(RAMMP_HMI_NO_IP_TEXT) <= RAMMP_ERROR_TEXT_LEN &&
+                  sizeof(RAMMP_HMI_NO_PEER_TEXT) <= RAMMP_ERROR_TEXT_LEN,
+              "refusal body outgrows the banner it shares with MCB faults");
+static_assert(sizeof(RAMMP_HMI_ETH_FAILED_FOOTER) <= RAMMP_ERROR_FOOTER_LEN &&
+                  sizeof(RAMMP_HMI_LINK_DOWN_FOOTER) <= RAMMP_ERROR_FOOTER_LEN &&
+                  sizeof(RAMMP_HMI_NO_IP_FOOTER) <= RAMMP_ERROR_FOOTER_LEN &&
+                  sizeof(RAMMP_HMI_NO_PEER_FOOTER) <= RAMMP_ERROR_FOOTER_LEN,
+              "refusal footer outgrows the banner it shares with MCB faults");
+
+struct RefusalText {
+  const char *body;
+  const char *footer;
+};
+
+static RefusalText link_refusal_text(RtpsLinkState link) {
+  switch (link) {
+  case RtpsLinkState::ETH_FAILED:
+    return {RAMMP_HMI_ETH_FAILED_TEXT, RAMMP_HMI_ETH_FAILED_FOOTER};
+  case RtpsLinkState::LINK_DOWN:
+    return {RAMMP_HMI_LINK_DOWN_TEXT, RAMMP_HMI_LINK_DOWN_FOOTER};
+  case RtpsLinkState::NO_IP:
+    return {RAMMP_HMI_NO_IP_TEXT, RAMMP_HMI_NO_IP_FOOTER};
+  case RtpsLinkState::NO_PEER:
+    return {RAMMP_HMI_NO_PEER_TEXT, RAMMP_HMI_NO_PEER_FOOTER};
+  case RtpsLinkState::CONNECTED:
+    break;
+  }
+  return {"", ""}; // only asked when not CONNECTED
+}
+
+// Bound to the refusal flag and to everything the cause depends on, so the
+// subject argument is ignored: whichever fired, the answer depends on all.
+// Hides itself the moment driving is permitted again, so it never claims a
+// fault that has already cleared.
+static void drive_refused_panel_observer(lv_observer_t *observer, lv_subject_t *) {
+  lv_obj_t *panel = lv_observer_get_target_obj(observer);
+  if (!lv_subject_get_int(&drive_refused_subject) || drive_permitted()) {
+    lv_obj_add_flag(panel, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+  lv_obj_t *title = ui_comp_get_child(panel, UI_COMP_ERRORWARNINGPANEL_ERRORTITLELABEL);
+  lv_obj_t *body =
+      ui_comp_get_child(panel, UI_COMP_ERRORWARNINGPANEL_ERRORMESSAGECONTAINER_ERRORMESSAGELABEL);
+  lv_obj_t *footer = ui_comp_get_child(
+      panel, UI_COMP_ERRORWARNINGPANEL_ERRORMESSAGECONTAINER_ERRORMESSAGEFOOTERLABEL);
+
+  // The link comes first, as in drive_permitted(): with no live link the state
+  // subject is only the last thing the MCB said, not what it is saying now.
+  const auto link = static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject));
+  if (link != RtpsLinkState::CONNECTED) {
+    const RefusalText text = link_refusal_text(link);
+    lv_label_set_text(title, RAMMP_HMI_LINK_REFUSED_TITLE);
+    lv_label_set_text(body, text.body);
+    lv_label_set_text(footer, text.footer);
+  } else {
+    const auto state = static_cast<uint8_t>(lv_subject_get_int(&mcb_state_subject));
+    const char *error_text = lv_subject_get_string(&error_text_subject);
+    lv_label_set_text(title, RAMMP_HMI_MCB_REFUSED_TITLE);
+    if (error_text[0] != '\0') {
+      lv_label_set_text(body, error_text);
+    } else {
+      lv_label_set_text_fmt(body, RAMMP_HMI_MCB_NO_TEXT_FMT, static_cast<unsigned>(state),
+                            rammp_state_name(state));
+    }
+    lv_label_set_text(footer, lv_subject_get_string(&error_footer_subject));
+  }
+  lv_obj_remove_flag(panel, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void bind_drive_refused_panel(lv_obj_t *panel) {
+  if (panel == nullptr) {
+    return;
+  }
+  for (lv_subject_t *subject : {&drive_refused_subject, &rtps_link_subject, &mcb_state_subject,
+                                &error_text_subject, &error_footer_subject}) {
+    lv_subject_add_observer_obj(subject, drive_refused_panel_observer, panel, nullptr);
+  }
+}
+
+static void drive_refused_clear() {
+  lv_timer_pause(drive_refused_timer);
+  lv_subject_set_int(&drive_refused_subject, 0);
+}
+
+static void drive_refused_timer_cb(lv_timer_t *) { drive_refused_clear(); }
+
+// Runs from hold_poll_cb, on the same input and cadence as the gesture it
+// shadows.
+static void drive_refusal_poll() {
+  // Its own edge detector rather than joy_up_armed: armed stays true for as
+  // long as the stick is released, so it cannot tell a fresh push from a held
+  // one - and a push still held from the unlock, carried across the auto-
+  // advance onto the Drive page, is not an attempt to drive.
+  static bool was_up = false;
+  const bool up = joy_up_held();
+  const bool pushed = up && !was_up;
+  was_up = up;
+
+  const bool on_drive_page = showing_flex_page(ui_DrivePanel);
+  if (pushed && on_drive_page && !drive_permitted()) {
+    lv_subject_set_int(&drive_refused_subject, 1);
+    lv_timer_reset(drive_refused_timer);
+    lv_timer_resume(drive_refused_timer);
+    // Distinct from the STRONG_CLICK a completed hold gives, so a refusal can
+    // be felt as well as read.
+    haptic_play(espp::Drv2605::Waveform::DOUBLE_CLICK, 1);
+  } else if (lv_subject_get_int(&drive_refused_subject) && (!on_drive_page || drive_permitted())) {
+    // Clear rather than merely hide, so a cause that clears and then recurs
+    // inside the window does not bring the panel back without a new push.
+    drive_refused_clear();
+  }
+}
+
 static HoldGesture drive_enter_gesture{
     .armed = &joy_up_armed,
     .is_held = joy_up_held,
     // Gated in applies() rather than completed(), so a barred entry never even
     // starts filling the arc: nothing happens, instead of a progress animation
-    // that betrays you at the end. The STATUS panel's red STATE says why.
+    // that betrays you at the end. drive_refusal_poll says why.
     .applies = [] { return showing_flex_page(ui_DrivePanel) && drive_permitted(); },
     .completed =
         [] {
@@ -1051,6 +1187,7 @@ static HoldGesture actuators_exit_gesture{
 };
 
 static void hold_poll_cb(lv_timer_t *) {
+  drive_refusal_poll();
   hold_poll(&unlock_gesture);
   hold_poll(&drive_enter_gesture);
   hold_poll(&drive_exit_gesture);
@@ -2492,6 +2629,11 @@ extern "C" void app_main(void) {
   bind_drive_mode_button(ui_DriveModeButton2, &kModeAuto);
   lv_subject_add_observer(&drive_mode_subject, drive_mode_publish_observer, nullptr);
   bind_error_panel();
+  // Initialised before the bind: the panel's observer reads it on its first run.
+  lv_subject_init_int(&drive_refused_subject, 0);
+  drive_refused_timer = lv_timer_create(drive_refused_timer_cb, kDriveRefusedShowMs, nullptr);
+  lv_timer_pause(drive_refused_timer);
+  bind_drive_refused_panel(ui_ErrorWarningPanel4); // MainScreenFlex
   lv_timer_create(rtps_poll_cb, kRtpsPollMs, nullptr);
 
   // GPIO48 test button. The label has a built-in binding; the panel background
