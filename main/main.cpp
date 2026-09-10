@@ -594,6 +594,12 @@ static void bind_error_panel() {
 // lv_task_handler() is called under. Staleness has to be polled - nothing
 // happens when a sample fails to arrive - so the blink phase rides along here
 // rather than owning a second timer.
+// Defined with the other draw-side helpers below; re-run whenever the theme
+// changes, because _ui_switch_theme re-applies every registered themeable
+// property -- including the BG_OPA this cleared -- and would otherwise put all
+// the redundant fills straight back.
+static void strip_all_overdraw();
+
 static void rtps_poll_cb(lv_timer_t *) {
   lv_subject_set_int(&rtps_link_subject, static_cast<int32_t>(rtps_comms_link_state()));
   static uint32_t ticks = 0;
@@ -612,6 +618,9 @@ static void rtps_poll_cb(lv_timer_t *) {
   if (ui_theme_idx != last_theme) {
     last_theme = ui_theme_idx;
     lv_subject_notify(&rtps_link_subject);
+    // Same reason, different property: the theme switch restored the redundant
+    // background fills, so take them out again.
+    strip_all_overdraw();
   }
 }
 
@@ -1680,6 +1689,78 @@ static void screen_loaded_cb(lv_event_t *e) {
 // Ignoring `area` and flushing full-screen IS correct here: call_flush_cb passes
 // the buffer START (not an offset), and refr_sync_areas already copies the
 // previous frame's invalid areas forward, so both buffers stay coherent.
+// ===== TEMPORARY render benchmark + content profiler - remove before shipping =====
+// `render` is everything LVGL did between one flush finishing and the next
+// starting (the CPU cost of drawing); `present` is the vsync wait inside
+// present_frame. Measured so far, full-screen invalidate every 10 ms:
+//   MainScreenFlex  86.0 ms      empty screen  19.5 ms
+// so ~77% of a frame is content, not the frame buffer.
+static espp::Logger logger_overdraw({.tag = "overdraw", .level = espp::Logger::Verbosity::INFO});
+// Overdraw: SquareLine gives every container an opaque background, so a page
+// nested three deep repaints the same theme colour three times before anything
+// visible lands on top. Measured on MainScreenFlex with a full-screen redraw,
+// those redundant fills were ~35 ms of an 86 ms frame -- the FlexPanel, the
+// LockedPanel and the GraphicsPanel each filling the exact colour the screen
+// had already painted.
+//
+// A fill is redundant when the object is a plain opaque rectangle in exactly
+// the colour already on the screen behind it: same colour, no corner radius, no
+// gradient and no background image. Clearing bg_opa then changes nothing that
+// can be seen and removes the fill. Anything else is left alone.
+//
+// `behind` is the colour actually painted behind `obj`, threaded down the
+// recursion rather than read back off the parent -- a parent whose own fill was
+// just cleared still has its colour in its style, and reading that would stop
+// the cascade after one level.
+static bool color_eq(lv_color_t a, lv_color_t b) {
+  return a.red == b.red && a.green == b.green && a.blue == b.blue;
+}
+
+static uint32_t strip_redundant_backgrounds(lv_obj_t *obj, lv_color_t behind) {
+  uint32_t stripped = 0;
+  lv_color_t painted = behind;
+  if (lv_obj_get_style_bg_opa(obj, LV_PART_MAIN) == LV_OPA_COVER) {
+    const lv_color_t own = lv_obj_get_style_bg_color(obj, LV_PART_MAIN);
+    if (color_eq(own, behind) && lv_obj_get_style_radius(obj, LV_PART_MAIN) == 0 &&
+        lv_obj_get_style_bg_grad_dir(obj, LV_PART_MAIN) == LV_GRAD_DIR_NONE &&
+        lv_obj_get_style_bg_image_src(obj, LV_PART_MAIN) == nullptr) {
+      lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, LV_PART_MAIN);
+      stripped = 1;
+    } else {
+      painted = own;
+    }
+  }
+  for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
+    stripped += strip_redundant_backgrounds(lv_obj_get_child(obj, i), painted);
+  }
+  return stripped;
+}
+
+// The screen itself always keeps its fill: it is what the redundant children
+// were duplicating, and something has to paint the background.
+static uint32_t strip_screen_overdraw(lv_obj_t *screen) {
+  const lv_color_t base = lv_obj_get_style_bg_color(screen, LV_PART_MAIN);
+  uint32_t stripped = 0;
+  for (uint32_t i = 0; i < lv_obj_get_child_count(screen); i++) {
+    stripped += strip_redundant_backgrounds(lv_obj_get_child(screen, i), base);
+  }
+  return stripped;
+}
+
+// Every screen ui_init built. Kept in one place so the boot pass and the
+// theme-change pass cannot drift apart.
+static void strip_all_overdraw() {
+  lv_obj_t *screens[] = {ui_MainScreenFlex, ui_DriveScreen,     ui_SeatAdjustmentFlexScreen,
+                         ui_RDScreen,       ui_ActuatorsScreen, ui_JoystickTest};
+  uint32_t stripped = 0;
+  for (lv_obj_t *screen : screens) {
+    if (screen != nullptr) {
+      stripped += strip_screen_overdraw(screen);
+    }
+  }
+  logger_overdraw.info("cleared {} redundant background fills", stripped);
+}
+
 static void direct_flush_cb(lv_display_t *disp, const lv_area_t * /*area*/, uint8_t *px_map) {
   if (!lv_display_flush_is_last(disp)) {
     lv_display_flush_ready(disp);
@@ -2608,6 +2689,9 @@ extern "C" void app_main(void) {
   // which is what makes the hide safe.
   lv_sysmon_hide_performance(lv_display_get_default());
   lv_obj_add_event_cb(ui_FPSCounterButton, fps_toggle_cb, LV_EVENT_CLICKED, nullptr);
+
+  // Remove the redundant nested background fills (see strip_redundant_backgrounds).
+  strip_all_overdraw();
 
   // HAPTIC TEST settings row. CLICKED (not PRESSED) so the joystick's ENTER
   // key drives it too — the keypad indev raises the same event as a touch.

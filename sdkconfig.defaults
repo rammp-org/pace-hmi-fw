@@ -206,3 +206,34 @@ CONFIG_LV_PERF_MONITOR_ALIGN_TOP_RIGHT=y
 # boot loop above.
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=512
 CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=65536
+
+# --- Rendering performance (step 3: measured Phase 1 sweep) ---
+# Numbers below are a full-screen 1280x720 invalidate forced every 10 ms, so
+# they are a worst case -- normal use only redraws dirty areas. `render` is the
+# CPU cost of drawing a frame, excluding the vsync wait.
+#
+# Reference points measured on the way:
+#   MainScreenFlex, as it was          86.0 ms
+#   an empty screen (frame buffer)     19.6 ms   <- 77% of a frame was content
+#   after removing overdraw            62.5 ms   (see strip_redundant_backgrounds)
+#
+# Then, each lever on its own against that 62.5 ms:
+#
+#   lever                              render    verdict
+#   L2 cache 256 -> 128 KB             91.2 ms   REJECT, 46% worse
+#   LVGL rasteriser into IRAM (25 KB)  ~1% gain  REJECT, and it boot-loops:
+#                                                code in SRAM fragments the DMA
+#                                                pool the W5500 bounce buffer
+#                                                needs (see the RAM split above)
+#   flash DIO@80 -> QIO@80             53.3 ms   ACCEPT, 15% better
+#
+# The cache is emphatically worth its 256 KB of L2MEM: giving 128 KB of it back
+# to the heap cost more than the heap ever returned. And the rasteriser is not
+# instruction-fetch bound, which is why parking it in IRAM did nothing -- but
+# QIO helps anyway, because the image DATA is read from flash through the same
+# bus.
+#
+# Not taken: 512 KB L2 cache is impossible (SRAM_START is 0x4FF00000 + the cache
+# size against a 0x80000 L2MEM, so it would leave zero SRAM), PSRAM is already
+# at its 200 MHz HEX ceiling, and the panel at ~60 Hz was never the limit.
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
