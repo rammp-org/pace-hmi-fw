@@ -1893,7 +1893,7 @@ static uint32_t strip_redundant_backgrounds(lv_obj_t *obj, lv_color_t behind) {
 
 // The screen itself always keeps its fill: it is what the redundant children
 // were duplicating, and something has to paint the background.
-static uint32_t strip_screen_overdraw(lv_obj_t *screen) {
+static uint32_t strip_screen_overdraw(const lv_obj_t *screen) {
   const lv_color_t base = lv_obj_get_style_bg_color(screen, LV_PART_MAIN);
   uint32_t stripped = 0;
   for (uint32_t i = 0; i < lv_obj_get_child_count(screen); i++) {
@@ -1905,12 +1905,14 @@ static uint32_t strip_screen_overdraw(lv_obj_t *screen) {
 // Every screen ui_init built. Kept in one place so the boot pass and the
 // theme-change pass cannot drift apart.
 static void strip_all_overdraw() {
-  lv_obj_t *const screens[] = {ui_MainScreenFlex, ui_DriveScreen,     ui_SeatAdjustmentFlexScreen,
-                               ui_RDScreen,       ui_ActuatorsScreen, ui_JoystickTest};
-  const uint32_t stripped = std::accumulate(
-      std::begin(screens), std::end(screens), uint32_t{0}, [](uint32_t sum, lv_obj_t *screen) {
-        return screen != nullptr ? sum + strip_screen_overdraw(screen) : sum;
-      });
+  const lv_obj_t *const screens[] = {ui_MainScreenFlex,           ui_DriveScreen,
+                                     ui_SeatAdjustmentFlexScreen, ui_RDScreen,
+                                     ui_ActuatorsScreen,          ui_JoystickTest};
+  const uint32_t stripped =
+      std::accumulate(std::begin(screens), std::end(screens), uint32_t{0},
+                      [](uint32_t sum, const lv_obj_t *screen) {
+                        return screen != nullptr ? sum + strip_screen_overdraw(screen) : sum;
+                      });
   logger_overdraw.info("cleared {} redundant background fills", stripped);
 }
 
