@@ -182,6 +182,8 @@ static lv_indev_t *joystick_indev = nullptr;
 static lv_group_t *joystick_group = nullptr;
 static lv_group_t *seat_group = nullptr;        // seat screen, function buttons page
 static lv_group_t *seat_adjust_group = nullptr; // seat screen, adjustment page
+static lv_group_t *rd_group = nullptr;          // RDScreen, the PIN keypad
+static lv_group_t *actuators_group = nullptr;   // ActuatorsScreen, the three rows
 
 // Which FlexPanel child is currently centered in the viewport. Derived from
 // live coordinates rather than a stored index, so it stays correct no matter
@@ -673,6 +675,8 @@ static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c);
 //   DriveScreen           stick button     ui_ExitBarPress1    -> MainScreenFlex
 //   Seat / buttons page   joystick down    ui_ExitBarPull1     -> MainScreenFlex
 //   Seat / adjust page    joystick left    ui_ExitBarPushLeft  -> buttons page
+//   RDScreen              joystick down    ui_ExitBarPull2     -> MainScreenFlex
+//   ActuatorsScreen       joystick down    ui_ExitBarPull3     -> MainScreenFlex
 //
 // "Pull" is the stick toward the user, i.e. LV_KEY_DOWN; "push left" is
 // LV_KEY_LEFT. Each exit bar lives on the page it applies to, so the gestures
@@ -1004,6 +1008,38 @@ static HoldGesture seat_enter_gesture{
         },
 };
 
+/////////////////////////////////////////////////////////////////////////////
+// Leaving the R&D screens
+//
+// Both carry an ui_ExitBarPull, so both leave the same way the seat screen's
+// buttons page does: pull the stick back and hold. Neither has a matching
+// enter gesture — the RDScreen is reached by clicking the R&D DEBUG settings
+// row, and the ActuatorsScreen by getting the PIN right.
+//
+// Down does double duty on both (it steps the keypad selection on one and the
+// actuator focus on the other), so both carry the grace period for the same
+// reason the seat bars do.
+/////////////////////////////////////////////////////////////////////////////
+
+static HoldGesture rd_exit_gesture{
+    .armed = &joy_down_armed,
+    .is_held = joy_down_held,
+    .applies = [] { return lv_screen_active() == ui_RDScreen; },
+    .completed = screen_return_to_main,
+    .grace_ms = kBarGraceMs,
+};
+
+// Straight home rather than back to the PIN pad: the PIN is asked again on the
+// next visit either way (rd_pin_reset() runs on every RDScreen load), so a stop
+// at the keypad on the way out would only be a screen to pull out of twice.
+static HoldGesture actuators_exit_gesture{
+    .armed = &joy_down_armed,
+    .is_held = joy_down_held,
+    .applies = [] { return lv_screen_active() == ui_ActuatorsScreen; },
+    .completed = screen_return_to_main,
+    .grace_ms = kBarGraceMs,
+};
+
 static void hold_poll_cb(lv_timer_t *) {
   hold_poll(&unlock_gesture);
   hold_poll(&drive_enter_gesture);
@@ -1011,6 +1047,8 @@ static void hold_poll_cb(lv_timer_t *) {
   hold_poll(&seat_enter_gesture);
   hold_poll(&seat_exit_gesture);
   hold_poll(&seat_back_gesture);
+  hold_poll(&rd_exit_gesture);
+  hold_poll(&actuators_exit_gesture);
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -1166,14 +1204,272 @@ static void seat_show_buttons_page() {
   lv_group_focus_obj(seat_buttons_grid.cell[seat_buttons_grid.row][seat_buttons_grid.col]);
 }
 
+/////////////////////////////////////////////////////////////////////////////
+// RDScreen: the 4-digit PIN
+//
+// ui_Keyboard1 is an lv_keyboard in NUMBER mode with no textarea attached, so
+// LVGL's own key handling is inert and the PIN is kept here instead. The four
+// checkboxes are the only readout - they are not clickable in the export, they
+// just show how many digits are in.
+//
+// The PIN is a build-time constant. It gates an R&D screen, not anything
+// safety-related, so it is a "not by accident" barrier rather than a secret:
+// anyone holding the firmware image has it either way.
+/////////////////////////////////////////////////////////////////////////////
+
+static constexpr char kRdPin[] = "1234";
+static constexpr int kRdPinLen = sizeof(kRdPin) - 1;
+static_assert(kRdPinLen == 4, "the RDScreen draws exactly four checkboxes");
+
+// The digits typed so far, NUL-terminated so a full entry is one comparison.
+// The length lives in the subject rather than here, because that is what the
+// checkboxes are bound to; this array is only ever read to judge a full entry.
+static char rd_pin_entry[kRdPinLen + 1];
+static lv_subject_t rd_pin_len_subject;
+
+// The line above the checkboxes, which doubles as the rejection notice. A
+// subject rather than an lv_label_set_text from the keypad handler, for the
+// reason in CLAUDE.md; the buffers are static because the subject stores its
+// copy in them and both have to outlive the label bound to them.
+// Arrays rather than pointers, so the static_assert below measures the string
+// and not the pointer to it.
+static constexpr char kRdPinPromptText[] = "Enter PIN to proceed";
+static constexpr char kRdPinWrongText[] = "Incorrect PIN - try again";
+static char rd_pin_message_buf[32];
+static char rd_pin_message_prev_buf[32];
+static_assert(sizeof(rd_pin_message_buf) > sizeof(kRdPinWrongText), "label buffer too small");
+static lv_subject_t rd_pin_message_subject;
+
+// Empties the entry and puts the prompt back. Runs on every RDScreen load, so
+// the PIN is asked again on every visit rather than latching once per boot.
+static void rd_pin_reset() {
+  rd_pin_entry[0] = '\0';
+  lv_subject_set_int(&rd_pin_len_subject, 0);
+  lv_subject_copy_string(&rd_pin_message_subject, kRdPinPromptText);
+}
+
+// A key on the PIN pad. Only the digits and backspace mean anything; every
+// other key the NUMBER map carries is ignored, and none of them can leave the
+// PIN inconsistent because none of them reaches this state:
+// lv_keyboard_def_event_cb (registered by the keyboard's constructor, and
+// still running ahead of this callback) returns at its `keyboard->ta == NULL`
+// check before it would act on "+/-", ".", backspace or the cursor arrows, and
+// the two it does handle without a textarea - LV_SYMBOL_OK and
+// LV_SYMBOL_KEYBOARD - only send LV_EVENT_READY / LV_EVENT_CANCEL to the
+// keyboard itself, which nothing listens for.
+static void rd_keypad_cb(lv_event_t *e) {
+  lv_obj_t *keyboard = lv_event_get_target_obj(e);
+  const uint32_t id = lv_buttonmatrix_get_selected_button(keyboard);
+  if (id == LV_BUTTONMATRIX_BUTTON_NONE) {
+    return;
+  }
+  const char *txt = lv_buttonmatrix_get_button_text(keyboard, id);
+  if (txt == nullptr) {
+    return;
+  }
+  int len = lv_subject_get_int(&rd_pin_len_subject);
+
+  if (lv_strcmp(txt, LV_SYMBOL_BACKSPACE) == 0) {
+    if (len > 0) {
+      rd_pin_entry[--len] = '\0';
+      lv_subject_set_int(&rd_pin_len_subject, len);
+    }
+    return;
+  }
+  // The only other key worth anything is a single digit. Testing the text
+  // rather than the button index keeps this independent of the map's layout.
+  if (txt[0] < '0' || txt[0] > '9' || txt[1] != '\0') {
+    return;
+  }
+
+  rd_pin_entry[len++] = txt[0];
+  rd_pin_entry[len] = '\0';
+  lv_subject_set_int(&rd_pin_len_subject, len);
+  // Typing clears a previous rejection, so the line reads as a prompt for the
+  // entry in progress rather than a verdict on the last one.
+  lv_subject_copy_string(&rd_pin_message_subject, kRdPinPromptText);
+  if (len < kRdPinLen) {
+    return;
+  }
+
+  // Judged on the fourth digit rather than on an OK key: the checkbox row makes
+  // the length obvious, so a confirm step would add nothing. Either branch
+  // empties the entry, which is what keeps `len` below kRdPinLen above.
+  const bool correct = lv_strcmp(rd_pin_entry, kRdPin) == 0;
+  rd_pin_reset();
+  if (correct) {
+    _ui_screen_change(&ui_ActuatorsScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
+                      &ui_ActuatorsScreen_screen_init);
+    return;
+  }
+  lv_subject_copy_string(&rd_pin_message_subject, kRdPinWrongText);
+}
+
+// R&D DEBUG settings row -> the PIN screen. Reached by a tap or by the
+// joystick, since flex_key_cb sends LV_EVENT_CLICKED to the focused row.
+static void rd_open_cb(lv_event_t *) {
+  _ui_screen_change(&ui_RDScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0, &ui_RDScreen_screen_init);
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// ActuatorsScreen: joystick up/down over the rows, left/right on the -/+
+//
+// One column of three, so it reuses the seat screen's ButtonGrid for the row
+// cursor: that gives clamping at both ends (no wrap) for free.
+//
+// The -/+ buttons are in no group of their own. The row is the only thing that
+// takes focus, and left/right act on whichever row holds it - so there is one
+// cursor to keep track of instead of a second one moving inside a row.
+/////////////////////////////////////////////////////////////////////////////
+
+static ButtonGrid actuators_grid;
+
+// A row's two step buttons, passed to actuator_key_cb as its user_data. Held in
+// a table filled from the ui_* globals rather than read back off the row as
+// "the third and fourth child": the export's child order is not something to
+// depend on surviving a re-import, and a silent mix-up would swap - for +.
+struct ActuatorSteps {
+  lv_obj_t *minus;
+  lv_obj_t *plus;
+};
+static ActuatorSteps actuator_steps[kGridMaxRows];
+
+// How long a joystick press shows on a step button. Comfortably shorter than
+// the 250 ms key repeat, so holding the stick reads as one blink per step
+// rather than a button stuck down.
+static constexpr uint32_t kActuatorPressFlashMs = 120;
+
+static void actuator_flash_end_cb(lv_timer_t *timer) {
+  lv_obj_remove_state(static_cast<lv_obj_t *>(lv_timer_get_user_data(timer)), LV_STATE_PRESSED);
+}
+
+// Presses a step button on the user's behalf. The state has to be faked because
+// nothing here is a real touch: LVGL only sets LV_STATE_PRESSED from an indev
+// acting on the object itself, and the joystick's indev is acting on the row.
+//
+// Without the flash the press would be invisible - the step buttons carry no
+// handler yet, so LV_EVENT_CLICKED currently goes nowhere and left/right would
+// feel dead. The event is sent anyway: it is the seam the real actuator
+// handlers drop into, and sending it now means they need no change here.
+//
+// The timer is one-shot and carries the button, so overlapping presses need no
+// bookkeeping - each ends its own, and removing a state twice is a no-op.
+static void actuator_press(lv_obj_t *button) {
+  lv_obj_add_state(button, LV_STATE_PRESSED);
+  lv_timer_t *timer = lv_timer_create(actuator_flash_end_cb, kActuatorPressFlashMs, button);
+  lv_timer_set_repeat_count(timer, 1);
+  lv_obj_send_event(button, LV_EVENT_CLICKED, nullptr);
+}
+
+// Up/down walk the rows, left/right press the focused row's - and +.
+//
+// This replaces grid_key_cb on these rows rather than sitting beside it: the
+// grid's own left/right would move a column cursor that cannot move (one cell
+// per row), so there is nothing to share.
+//
+// Holding the stick repeats. lv_indev raises LV_EVENT_KEY again every
+// long_press_repeat_time, so left-and-hold jogs the actuator instead of
+// needing a flick per step.
+static void actuator_key_cb(lv_event_t *e) {
+  const auto *steps = static_cast<const ActuatorSteps *>(lv_event_get_user_data(e));
+  switch (lv_event_get_key(e)) {
+  case LV_KEY_LEFT:
+    actuator_press(steps->minus);
+    return;
+  case LV_KEY_RIGHT:
+    actuator_press(steps->plus);
+    return;
+  case LV_KEY_UP:
+    actuators_grid.row--;
+    break;
+  case LV_KEY_DOWN:
+    actuators_grid.row++;
+    break;
+  default:
+    return;
+  }
+  // Clamped, not wrapped, for the reason in grid_key_cb.
+  actuators_grid.row = std::clamp(actuators_grid.row, 0, actuators_grid.rows - 1);
+  lv_group_focus_obj(actuators_grid.cell[actuators_grid.row][0]);
+}
+
+// Tapping a step button makes its row the current one, so touch and the
+// joystick never disagree about which row left/right would act on. The button's
+// own press is untouched; this only moves the cursor, and costs nothing when
+// the row is already focused (lv_group_focus_obj returns early).
+static void actuator_step_click_cb(lv_event_t *e) {
+  grid_sync_cursor(&actuators_grid, lv_obj_get_parent(lv_event_get_target_obj(e)));
+}
+
+// LVGL's click-focus (indev_click_focus in lv_indev.c) remembers the last
+// CLICK_FOCUSABLE object a pointer pressed and DEFOCUSES it when the next one
+// is pressed. Every lv_obj carries that flag by default, so the step buttons
+// took part in it despite being in no group: tapping - and then + sent
+// LV_EVENT_DEFOCUSED to -, and lv_obj_event strips LV_STATE_FOCUSED on that
+// event, so a button inside a still-focused row dropped out of the focused
+// theme. Tapping the row afterwards did not repair it either, because
+// lv_group_focus_obj returns early on an already-focused object and never
+// re-sends LV_EVENT_FOCUSED.
+//
+// Nothing inside a row should have a focus life of its own, so the flag comes
+// off every descendant and actuator_focus_cb is left as the only writer of
+// LV_STATE_FOCUSED in there. Descendants only: the row itself has to stay
+// click-focusable, because that is how a tap on it reaches its group.
+static void clear_click_focusable_recursive(lv_obj_t *obj) {
+  for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
+    lv_obj_t *child = lv_obj_get_child(obj, i);
+    lv_obj_remove_flag(child, LV_OBJ_FLAG_CLICK_FOCUSABLE);
+    clear_click_focusable_recursive(child);
+  }
+}
+
+// A focused row has to look focused all the way down. LVGL only puts
+// LV_STATE_FOCUSED on the object the group focused - the row itself - but the
+// export gives every descendant its own MAIN|FOCUSED theme style, so without
+// this the row's background would invert while the labels and the -/+ buttons
+// sitting on it stayed in the unfocused theme and became unreadable. Recursive
+// because the tree is three deep in places (row -> TitleContainer ->
+// ActuatorLabels -> label).
+static void set_focused_recursive(lv_obj_t *obj, bool focused) {
+  if (focused) {
+    lv_obj_add_state(obj, LV_STATE_FOCUSED);
+  } else {
+    lv_obj_remove_state(obj, LV_STATE_FOCUSED);
+  }
+  for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
+    set_focused_recursive(lv_obj_get_child(obj, i), focused);
+  }
+}
+
+// Registered for LV_EVENT_FOCUSED and LV_EVENT_DEFOCUSED on each row. Setting
+// the row's own state here duplicates what lv_obj_event does for those two
+// events, which is harmless: both agree on the value, so the order the two
+// handlers run in does not matter.
+static void actuator_focus_cb(lv_event_t *e) {
+  set_focused_recursive(lv_event_get_target_obj(e), lv_event_get_code(e) == LV_EVENT_FOCUSED);
+}
+
 // Hands the joystick to whichever group belongs to the screen being shown.
 static void screen_loaded_cb(lv_event_t *e) {
-  if (lv_event_get_target_obj(e) == ui_SeatAdjustmentFlexScreen) {
+  lv_obj_t *screen = lv_event_get_target_obj(e);
+  if (screen == ui_SeatAdjustmentFlexScreen) {
     lv_indev_set_group(joystick_indev, seat_group);
     seat_page = 0;
     seat_buttons_grid.row = 0;
     seat_buttons_grid.col = 0;
     lv_group_focus_obj(seat_buttons_grid.cell[0][0]);
+  } else if (screen == ui_RDScreen) {
+    lv_indev_set_group(joystick_indev, rd_group);
+    rd_pin_reset();
+    // The keypad opens with nothing selected, so the first joystick nudge would
+    // be spent picking a key rather than moving between them. Index 0 is "1".
+    lv_buttonmatrix_set_selected_button(ui_Keyboard1, 0);
+    lv_group_focus_obj(ui_Keyboard1);
+  } else if (screen == ui_ActuatorsScreen) {
+    lv_indev_set_group(joystick_indev, actuators_group);
+    actuators_grid.row = 0;
+    actuators_grid.col = 0;
+    lv_group_focus_obj(actuators_grid.cell[0][0]);
   } else {
     lv_indev_set_group(joystick_indev, joystick_group);
   }
@@ -1890,10 +2186,14 @@ extern "C" void app_main(void) {
   bind_status_panel(ui_StatusPanel1); // JoystickTest
   bind_status_panel(ui_StatusPanel2); // DriveScreen
   bind_status_panel(ui_StatusPanel3); // SeatAdjustmentFlexScreen
+  bind_status_panel(ui_StatusPanel4); // RDScreen
+  bind_status_panel(ui_StatusPanel6); // ActuatorsScreen
   bind_rtps_label(ui_TopBar1);        // JoystickTest
   bind_rtps_label(ui_TopBar2);        // DriveScreen
   bind_rtps_label(ui_TopBar3);        // MainScreenFlex
   bind_rtps_label(ui_TopBar4);        // SeatAdjustmentFlexScreen
+  bind_rtps_label(ui_TopBar5);        // RDScreen
+  bind_rtps_label(ui_TopBar7);        // ActuatorsScreen
   lv_subject_add_observer_obj(&speed_tenths_subject, speed_label_observer, ui_SpeedNumber, nullptr);
   lv_subject_init_int(&drive_mode_subject, RAMMP_DRIVE_MODE_NORMAL);
   bind_drive_mode_button(ui_DriveModeButton, &kModeHolo);
@@ -1997,6 +2297,12 @@ extern "C" void app_main(void) {
   lv_bar_bind_value(ui_ExitBarPull1, &seat_exit_gesture.progress);
   lv_bar_set_range(ui_ExitBarPushLeft, 0, kHoldMax);
   lv_bar_bind_value(ui_ExitBarPushLeft, &seat_back_gesture.progress);
+  lv_subject_init_int(&rd_exit_gesture.progress, 0);
+  lv_subject_init_int(&actuators_exit_gesture.progress, 0);
+  lv_bar_set_range(ui_ExitBarPull2, 0, kHoldMax);
+  lv_bar_bind_value(ui_ExitBarPull2, &rd_exit_gesture.progress);
+  lv_bar_set_range(ui_ExitBarPull3, 0, kHoldMax);
+  lv_bar_bind_value(ui_ExitBarPull3, &actuators_exit_gesture.progress);
   lv_timer_create(hold_poll_cb, kHoldPollMs, nullptr);
 
   // SeatAdjustmentFlexScreen. Both grids are built here rather than declared
@@ -2083,6 +2389,8 @@ extern "C" void app_main(void) {
   lv_obj_add_event_cb(ui_SeatAdjustmentFlexScreen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED,
                       nullptr);
   lv_obj_add_event_cb(ui_MainScreenFlex, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, nullptr);
+  lv_obj_add_event_cb(ui_RDScreen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, nullptr);
+  lv_obj_add_event_cb(ui_ActuatorsScreen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, nullptr);
 
   // Freeze the pager until the unlock hands it over. Each of these closes one
   // route into it, and they are genuinely independent — see paging_subject.
@@ -2126,6 +2434,72 @@ extern "C" void app_main(void) {
                                        static_cast<uint32_t>(kHapticBuzzDuration.count()), nullptr);
   lv_timer_pause(haptic_label_timer);
   lv_obj_add_event_cb(ui_HapticTestButton, haptic_test_cb, LV_EVENT_CLICKED, nullptr);
+
+  // R&D DEBUG settings row -> the PIN screen.
+  lv_obj_add_event_cb(ui_Button1, rd_open_cb, LV_EVENT_CLICKED, nullptr);
+
+  // RDScreen: the PIN pad and its four checkboxes.
+  //
+  // The checkboxes need no observer of their own - each one is CHECKED exactly
+  // when the entry has reached it, which lv_obj_bind_state_if_ge says directly.
+  lv_subject_init_int(&rd_pin_len_subject, 0);
+  lv_subject_init_string(&rd_pin_message_subject, rd_pin_message_buf, rd_pin_message_prev_buf,
+                         sizeof(rd_pin_message_buf), kRdPinPromptText);
+  lv_label_bind_text(ui_SeatFunctionsLabel2, &rd_pin_message_subject, nullptr);
+  lv_obj_t *rd_checkboxes[kRdPinLen] = {ui_Checkbox1, ui_Checkbox2, ui_Checkbox3, ui_Checkbox4};
+  for (int i = 0; i < kRdPinLen; i++) {
+    lv_obj_bind_state_if_ge(rd_checkboxes[i], &rd_pin_len_subject, LV_STATE_CHECKED, i + 1);
+  }
+  lv_obj_add_event_cb(ui_Keyboard1, rd_keypad_cb, LV_EVENT_VALUE_CHANGED, nullptr);
+
+  // A button matrix does its own 2D arrow navigation and its own ENTER press
+  // (lv_buttonmatrix.c, LV_EVENT_KEY), so the keypad needs nothing but a group
+  // to be in. What it does NOT bring is a focused look: the export styles only
+  // LV_PART_ITEMS in its default state, so the key the joystick is sitting on
+  // would be indistinguishable from the rest of the pad. The matrix draws its
+  // selected button with its own FOCUSED state applied, so styling that part
+  // is all it takes.
+  rd_group = lv_group_create();
+  lv_group_add_obj(rd_group, ui_Keyboard1);
+  static constexpr lv_style_selector_t kItemsFocused =
+      static_cast<lv_style_selector_t>(LV_PART_ITEMS) |
+      static_cast<lv_style_selector_t>(LV_STATE_FOCUSED);
+  ui_object_set_themeable_style_property(ui_Keyboard1, kItemsFocused, LV_STYLE_BORDER_COLOR,
+                                         _ui_theme_color_focused);
+  ui_object_set_themeable_style_property(ui_Keyboard1, kItemsFocused, LV_STYLE_BORDER_OPA,
+                                         _ui_theme_alpha_focused);
+  lv_obj_set_style_border_width(ui_Keyboard1, 4, kItemsFocused);
+
+  // ActuatorsScreen: one column of three rows.
+  actuators_grid.rows = 3;
+  actuators_grid.cols[0] = 1;
+  actuators_grid.cell[0][0] = ui_Actuator1;
+  actuators_grid.cols[1] = 1;
+  actuators_grid.cell[1][0] = ui_Actuator2;
+  actuators_grid.cols[2] = 1;
+  actuators_grid.cell[2][0] = ui_Actuator3;
+
+  actuator_steps[0] = {ui_MinusButton1, ui_PlusButton1};
+  actuator_steps[1] = {ui_MinusButton2, ui_PlusButton2};
+  actuator_steps[2] = {ui_MinusButton3, ui_PlusButton3};
+
+  actuators_group = lv_group_create();
+  for (int r = 0; r < actuators_grid.rows; r++) {
+    lv_obj_t *row = actuators_grid.cell[r][0];
+    lv_group_add_obj(actuators_group, row);
+    lv_obj_add_event_cb(row, actuator_key_cb, LV_EVENT_KEY, &actuator_steps[r]);
+    lv_obj_add_event_cb(row, grid_click_cb, LV_EVENT_CLICKED, &actuators_grid);
+    lv_obj_add_event_cb(row, actuator_focus_cb, LV_EVENT_FOCUSED, nullptr);
+    lv_obj_add_event_cb(row, actuator_focus_cb, LV_EVENT_DEFOCUSED, nullptr);
+    lv_obj_add_event_cb(actuator_steps[r].minus, actuator_step_click_cb, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_event_cb(actuator_steps[r].plus, actuator_step_click_cb, LV_EVENT_CLICKED, nullptr);
+    // SquareLine exports the state each object was previewed in, and every row
+    // and every widget inside it was drawn focused - so all three rows would
+    // come up focused at once and stay that way. Clearing it here leaves
+    // actuator_focus_cb as the only thing that sets it.
+    set_focused_recursive(row, false);
+    clear_click_focusable_recursive(row);
+  }
 
   // The overlay hardcodes LVGL's 14 px default font (lv_sysmon_create sets no
   // font at all), which is unreadable on a 1280x720 panel at arm's length.

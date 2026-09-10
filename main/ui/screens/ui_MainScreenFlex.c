@@ -89,6 +89,15 @@ void ui_event_Button5(lv_event_t * e)
     }
 }
 
+void ui_event_Button1(lv_event_t * e)
+{
+    lv_event_code_t event_code = lv_event_get_code(e);
+
+    if(event_code == LV_EVENT_CLICKED) {
+        _ui_screen_change(&ui_RDScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0, &ui_RDScreen_screen_init);
+    }
+}
+
 // build funtions
 
 void ui_MainScreenFlex_screen_init(void)
@@ -1066,6 +1075,7 @@ void ui_MainScreenFlex_screen_init(void)
 
     lv_obj_add_event_cb(ui_Button10, ui_event_Button10, LV_EVENT_ALL, NULL);
     lv_obj_add_event_cb(ui_Button5, ui_event_Button5, LV_EVENT_ALL, NULL);
+    lv_obj_add_event_cb(ui_Button1, ui_event_Button1, LV_EVENT_ALL, NULL);
 
 }
 

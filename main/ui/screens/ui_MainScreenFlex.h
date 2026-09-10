@@ -54,6 +54,7 @@ extern lv_obj_t * ui_Button5;
 extern lv_obj_t * ui_ButtonLabel5;
 extern lv_obj_t * ui_Button6;
 extern lv_obj_t * ui_ButtonLabel6;
+extern void ui_event_Button1(lv_event_t * e);
 extern lv_obj_t * ui_Button1;
 extern lv_obj_t * ui_ButtonLabel1;
 extern lv_obj_t * ui_Button2;

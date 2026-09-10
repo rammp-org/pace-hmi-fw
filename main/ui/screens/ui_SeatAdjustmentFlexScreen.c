@@ -32,7 +32,6 @@ lv_obj_t * ui_SeatButtonLabel5 = NULL;
 lv_obj_t * ui_SeatButton6 = NULL;
 lv_obj_t * ui_SeatButtonContainer6 = NULL;
 lv_obj_t * ui_SeatButtonLabel6 = NULL;
-lv_obj_t * ui_ExitBarPull1 = NULL;
 lv_obj_t * ui_SeatAdjustmentPanel = NULL;
 lv_obj_t * ui_AngleSettingLabel = NULL;
 lv_obj_t * ui_AngleIndicator = NULL;
@@ -54,6 +53,7 @@ lv_obj_t * ui_SeatAdjustmentButton5 = NULL;
 lv_obj_t * ui_SeatAdjustmentButtonContainer5 = NULL;
 lv_obj_t * ui_SeatAdjustmentButtonLabel5 = NULL;
 lv_obj_t * ui_ExitBarPushLeft = NULL;
+lv_obj_t * ui_ExitBarPull1 = NULL;
 lv_obj_t * ui_ErrorWarningPanel1 = NULL;
 lv_obj_t * ui_StatusPanel3 = NULL;
 // event funtions
@@ -405,12 +405,6 @@ void ui_SeatAdjustmentFlexScreen_screen_init(void)
     lv_obj_set_style_text_align(ui_SeatButtonLabel6, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(ui_SeatButtonLabel6, &ui_font_IBMPlexSansMedium53, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_ExitBarPull1 = ui_ExitBarPull_create(ui_SeatFunctionsButtonsPanel);
-    lv_obj_set_x(ui_ExitBarPull1, 0);
-    lv_obj_set_y(ui_ExitBarPull1, -10);
-
-    //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
-
     ui_SeatAdjustmentPanel = lv_obj_create(ui_SeatAdjustmentScreenFlexPanel);
     lv_obj_set_width(ui_SeatAdjustmentPanel, 720);
     lv_obj_set_height(ui_SeatAdjustmentPanel, 900);
@@ -686,6 +680,12 @@ void ui_SeatAdjustmentFlexScreen_screen_init(void)
 
     //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
 
+    ui_ExitBarPull1 = ui_ExitBarPull_create(ui_SeatAdjustmentFlexScreen);
+    lv_obj_set_x(ui_ExitBarPull1, 0);
+    lv_obj_set_y(ui_ExitBarPull1, -10);
+
+    //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
+
     ui_ErrorWarningPanel1 = ui_ErrorWarningPanel_create(ui_SeatAdjustmentFlexScreen);
     lv_obj_set_x(ui_ErrorWarningPanel1, 0);
     lv_obj_set_y(ui_ErrorWarningPanel1, 180);
@@ -728,7 +728,6 @@ void ui_SeatAdjustmentFlexScreen_screen_destroy(void)
     ui_SeatButton6 = NULL;
     ui_SeatButtonContainer6 = NULL;
     ui_SeatButtonLabel6 = NULL;
-    ui_ExitBarPull1 = NULL;
     ui_SeatAdjustmentPanel = NULL;
     ui_AngleSettingLabel = NULL;
     ui_AngleIndicator = NULL;
@@ -750,6 +749,7 @@ void ui_SeatAdjustmentFlexScreen_screen_destroy(void)
     ui_SeatAdjustmentButtonContainer5 = NULL;
     ui_SeatAdjustmentButtonLabel5 = NULL;
     ui_ExitBarPushLeft = NULL;
+    ui_ExitBarPull1 = NULL;
     ui_ErrorWarningPanel1 = NULL;
     ui_StatusPanel3 = NULL;
 
