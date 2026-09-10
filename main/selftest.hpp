@@ -56,9 +56,9 @@ enum class SelfTestTrigger {
 };
 
 /// Call once from app_main, after ui_init and before the LVGL task starts (it
-/// builds the overlay without taking the LVGL lock) and before
-/// rtps_comms_start (it registers the self-test RTPS handlers).
-void selftest_init(SelfTestPlatform platform);
+/// sets up the overlay's subjects and render hooks without taking the LVGL
+/// lock) and before rtps_comms_start (it registers the self-test RTPS handlers).
+void selftest_init(SelfTestPlatform config);
 
 /// Start a run, from any task. Returns false if one is already running, or if
 /// `run_id` repeats the last remote run (a resent command). `run_id` is echoed

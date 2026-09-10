@@ -56,13 +56,10 @@ static_assert(std::size(kSpec) == ST_COUNT);
 static_assert(ST_COUNT < 256, "the report carries the check index as a uint8_t");
 
 constexpr bool spec_fits_the_wire() {
-  for (const Spec &s : kSpec) {
-    if (std::string_view(s.name).size() >= RAMMP_SELFTEST_NAME_LEN ||
-        std::string_view(s.unit).size() >= RAMMP_SELFTEST_UNIT_LEN || s.lo > s.hi) {
-      return false;
-    }
-  }
-  return true;
+  return std::all_of(std::begin(kSpec), std::end(kSpec), [](const Spec &s) {
+    return std::string_view(s.name).size() < RAMMP_SELFTEST_NAME_LEN &&
+           std::string_view(s.unit).size() < RAMMP_SELFTEST_UNIT_LEN && s.lo <= s.hi;
+  });
 }
 static_assert(spec_fits_the_wire(),
               "a selftest_spec.h name or unit is too long for the report, or has lo > hi");
@@ -373,7 +370,7 @@ private:
     publish_result(id);
   }
 
-  void publish_result(uint8_t id) {
+  void publish_result(uint8_t id) const {
     const Spec &s = kSpec[id];
     const Outcome &o = out_[id];
     rammp_selftest_report_t report{};
@@ -402,7 +399,7 @@ private:
   }
 
   void publish_marker(uint8_t kind, int32_t value, int32_t lo, int32_t hi,
-                      std::string_view detail) {
+                      std::string_view detail) const {
     rammp_selftest_report_t report{};
     report.run_id = run_id_;
     report.kind = kind;
@@ -900,7 +897,7 @@ private:
     lv_subject_copy_string(&ui_status_subject, text.c_str());
   }
 
-  void ui_refresh() {
+  void ui_refresh() const {
     if (!ui_ready || !platform.lvgl_mutex) {
       return;
     }
@@ -977,9 +974,7 @@ bool prepare_overlay() {
   char *title = alloc_text(kTitleLen);
   char *status = alloc_text(kStatusLen);
   std::array<char *, kColumns> columns{};
-  for (auto &c : columns) {
-    c = alloc_text(kColumnLen);
-  }
+  std::generate(columns.begin(), columns.end(), [] { return alloc_text(kColumnLen); });
   if (!title || !status ||
       std::any_of(columns.begin(), columns.end(), [](char *c) { return !c; })) {
     logger.error("no PSRAM for the overlay text; results go to serial and RTPS only");
@@ -1028,8 +1023,8 @@ void create_overlay_locked() {
 
 } // namespace
 
-void selftest_init(SelfTestPlatform p) {
-  platform = std::move(p);
+void selftest_init(SelfTestPlatform config) {
+  platform = std::move(config);
   ui_ready = prepare_overlay();
   lv_display_t *display = lv_display_get_default();
   lv_display_add_event_cb(display, render_start_cb, LV_EVENT_RENDER_START, nullptr);
