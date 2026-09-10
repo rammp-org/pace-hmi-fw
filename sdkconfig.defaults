@@ -117,8 +117,15 @@ CONFIG_FREERTOS_HZ=1000
 # depends on them.
 # CONFIG_LV_USE_VECTOR_GRAPHIC is not set
 # CONFIG_LV_USE_THORVG is not set
-# CONFIG_LV_USE_THORVG_INTERNAL is not set
 # CONFIG_LV_USE_SVG is not set
+#
+# Deliberately not listed: LV_USE_THORVG_INTERNAL. It is a member of LVGL's
+# "Use ThorVG config" choice, which LV_USE_THORVG=n already hides, and setting
+# a choice's only listed member to n without selecting another crashes the
+# kconfgen in CI's esp-idf v6.0 image ("'NoneType' object has no attribute
+# 'name'"). The newer esp-idf-kconfig installed locally tolerates it, so a
+# local build will not catch this -- and CI generates sdkconfig from this file
+# alone, since sdkconfig itself is gitignored.
 
 # --- Rendering performance (step 1) ---
 # The refresh timer is already forced to 16 ms at runtime in main.cpp; match the

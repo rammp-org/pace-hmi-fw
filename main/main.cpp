@@ -11,6 +11,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <numeric>
 #include <optional>
 #include <stdlib.h>
 #include <vector>
@@ -1802,7 +1803,7 @@ static void actuator_focus_cb(lv_event_t *e) {
 
 // Hands the joystick to whichever group belongs to the screen being shown.
 static void screen_loaded_cb(lv_event_t *e) {
-  lv_obj_t *screen = lv_event_get_target_obj(e);
+  const lv_obj_t *screen = lv_event_get_target_obj(e);
   if (screen == ui_SeatAdjustmentFlexScreen) {
     lv_indev_set_group(joystick_indev, seat_group);
     seat_page = 0;
@@ -1904,14 +1905,12 @@ static uint32_t strip_screen_overdraw(lv_obj_t *screen) {
 // Every screen ui_init built. Kept in one place so the boot pass and the
 // theme-change pass cannot drift apart.
 static void strip_all_overdraw() {
-  lv_obj_t *screens[] = {ui_MainScreenFlex, ui_DriveScreen,     ui_SeatAdjustmentFlexScreen,
-                         ui_RDScreen,       ui_ActuatorsScreen, ui_JoystickTest};
-  uint32_t stripped = 0;
-  for (lv_obj_t *screen : screens) {
-    if (screen != nullptr) {
-      stripped += strip_screen_overdraw(screen);
-    }
-  }
+  lv_obj_t *const screens[] = {ui_MainScreenFlex, ui_DriveScreen,     ui_SeatAdjustmentFlexScreen,
+                               ui_RDScreen,       ui_ActuatorsScreen, ui_JoystickTest};
+  const uint32_t stripped = std::accumulate(
+      std::begin(screens), std::end(screens), uint32_t{0}, [](uint32_t sum, lv_obj_t *screen) {
+        return screen != nullptr ? sum + strip_screen_overdraw(screen) : sum;
+      });
   logger_overdraw.info("cleared {} redundant background fills", stripped);
 }
 
