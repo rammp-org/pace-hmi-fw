@@ -597,8 +597,8 @@ static inline const char *rammp_actuator_result_name(uint8_t result) {
  * HMI-raised warnings
  *
  * Text the HMI shows on its own authority, for problems the MCB cannot report
- * because they are about the link to it. Today that is one thing: why a
- * push-and-hold into the drive screen was refused. Kept here rather than in
+ * because they are about the link to it: why a push-and-hold into the drive
+ * screen was refused, or why driving was cut short. Kept here rather than in
  * the firmware because they quote the topic names and timing contract above,
  * and building them from those macros is what stops the wording drifting from
  * the numbers. It also means a string read off the screen in a field report
@@ -615,6 +615,9 @@ static inline const char *rammp_actuator_result_name(uint8_t result) {
 /** Panel titles: which side the refusal came from. */
 #define RAMMP_HMI_LINK_REFUSED_TITLE "DRIVE REFUSED: RTPS LINK"
 #define RAMMP_HMI_MCB_REFUSED_TITLE "DRIVE REFUSED: MCB STATE"
+/** The same causes on the drive screen, where they cut a drive short. */
+#define RAMMP_HMI_LINK_LOST_TITLE "RTPS LINK LOST"
+#define RAMMP_HMI_MCB_FAULT_TITLE "MCB STATE FAULT"
 
 /* One body/footer pair per link state short of connected, so the message
    names the layer that is actually broken. */

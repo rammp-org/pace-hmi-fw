@@ -570,29 +570,6 @@ static void speed_label_observer(lv_observer_t *observer, lv_subject_t *subject)
   lv_label_set_text_fmt(lv_observer_get_target_obj(observer), "%d.%d", tenths / 10, tenths % 10);
 }
 
-// The MCB-fault banner is one instance on the DriveScreen, so unlike
-// StatusPanel/TopBar this is not a per-screen loop. MainScreenFlex's instance
-// is a different job - saying why a push into driving was refused - and is
-// bound by bind_drive_refused_panel.
-static void bind_error_panel() {
-  if (ui_ErrorWarningPanel == nullptr) {
-    return;
-  }
-  // Visible whenever the state is anything other than OK. Using _if_eq against
-  // OK rather than _if_not_eq against ERROR is deliberate: a value neither
-  // board knows raises the banner instead of silently hiding it.
-  lv_obj_bind_flag_if_eq(ui_ErrorWarningPanel, &mcb_state_subject, LV_OBJ_FLAG_HIDDEN,
-                         RAMMP_STATE_OK);
-  lv_label_bind_text(
-      ui_comp_get_child(ui_ErrorWarningPanel,
-                        UI_COMP_ERRORWARNINGPANEL_ERRORMESSAGECONTAINER_ERRORMESSAGELABEL),
-      &error_text_subject, nullptr);
-  lv_label_bind_text(
-      ui_comp_get_child(ui_ErrorWarningPanel,
-                        UI_COMP_ERRORWARNINGPANEL_ERRORMESSAGECONTAINER_ERRORMESSAGEFOOTERLABEL),
-      &error_footer_subject, nullptr);
-}
-
 // Runs on the LVGL task, so the subject writes are already covered by the lock
 // lv_task_handler() is called under. Staleness has to be polled - nothing
 // happens when a sample fails to arrive - so the blink phase rides along here
@@ -941,16 +918,18 @@ static bool drive_permitted() {
 }
 
 /////////////////////////////////////////////////////////////////////////////
-// Saying why a push into the DriveScreen was refused
+// Saying why driving is not permitted
 //
-// drive_enter_gesture is gated in applies(), so a refused push does nothing at
-// all: the arc never fills. MainScreenFlex's ErrorWarningPanel fills that
-// silence with the technical cause, worded in rammp_rtps_spec.h.
+// Two ErrorWarningPanels, one cause. On MainScreenFlex: why a push into the
+// DriveScreen was refused - drive_enter_gesture is gated in applies(), so a
+// refused push otherwise does nothing at all. On the DriveScreen: why driving
+// was cut short, by the link dropping or the MCB faulting mid-drive. Both
+// word the cause from rammp_rtps_spec.h.
 //
-// The subject records only THAT a push was refused. The panel works out WHY
-// from the link and state subjects whenever any of them changes, so it always
-// names the current cause - cable back in but no DHCP lease yet, say - rather
-// than the one at the moment of the push.
+// drive_refused_subject records only THAT a push was refused. Both panels work
+// out WHY from the link and state subjects whenever any of them changes, so
+// they always name the current cause - cable back in but no DHCP lease yet,
+// say - rather than the one at the moment it first went wrong.
 /////////////////////////////////////////////////////////////////////////////
 
 static constexpr uint32_t kDriveRefusedShowMs = 4000; // how long one refusal stays up
@@ -991,16 +970,11 @@ static RefusalText link_refusal_text(RtpsLinkState link) {
   return {"", ""}; // only asked when not CONNECTED
 }
 
-// Bound to the refusal flag and to everything the cause depends on, so the
-// subject argument is ignored: whichever fired, the answer depends on all.
-// Hides itself the moment driving is permitted again, so it never claims a
-// fault that has already cleared.
-static void drive_refused_panel_observer(lv_observer_t *observer, lv_subject_t *) {
-  lv_obj_t *panel = lv_observer_get_target_obj(observer);
-  if (!lv_subject_get_int(&drive_refused_subject) || drive_permitted()) {
-    lv_obj_add_flag(panel, LV_OBJ_FLAG_HIDDEN);
-    return;
-  }
+// Fills an ErrorWarningPanel with why driving is not permitted right now. The
+// titles are the caller's, because the same cause reads differently as a
+// refused push and as a drive cut short; so is visibility.
+static void fill_drive_blocked_panel(lv_obj_t *panel, const char *link_title,
+                                     const char *mcb_title) {
   lv_obj_t *title = ui_comp_get_child(panel, UI_COMP_ERRORWARNINGPANEL_ERRORTITLELABEL);
   lv_obj_t *body =
       ui_comp_get_child(panel, UI_COMP_ERRORWARNINGPANEL_ERRORMESSAGECONTAINER_ERRORMESSAGELABEL);
@@ -1012,13 +986,13 @@ static void drive_refused_panel_observer(lv_observer_t *observer, lv_subject_t *
   const auto link = static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject));
   if (link != RtpsLinkState::CONNECTED) {
     const RefusalText text = link_refusal_text(link);
-    lv_label_set_text(title, RAMMP_HMI_LINK_REFUSED_TITLE);
+    lv_label_set_text(title, link_title);
     lv_label_set_text(body, text.body);
     lv_label_set_text(footer, text.footer);
   } else {
     const auto state = static_cast<uint8_t>(lv_subject_get_int(&mcb_state_subject));
     const char *error_text = lv_subject_get_string(&error_text_subject);
-    lv_label_set_text(title, RAMMP_HMI_MCB_REFUSED_TITLE);
+    lv_label_set_text(title, mcb_title);
     if (error_text[0] != '\0') {
       lv_label_set_text(body, error_text);
     } else {
@@ -1027,6 +1001,27 @@ static void drive_refused_panel_observer(lv_observer_t *observer, lv_subject_t *
     }
     lv_label_set_text(footer, lv_subject_get_string(&error_footer_subject));
   }
+}
+
+// Binds `cb` on `panel` to every subject the cause depends on, so the subject
+// argument each observer gets is ignored: whichever fired, the answer depends
+// on all of them.
+static void bind_to_drive_blocked_cause(lv_obj_t *panel, lv_observer_cb_t cb) {
+  for (lv_subject_t *subject :
+       {&rtps_link_subject, &mcb_state_subject, &error_text_subject, &error_footer_subject}) {
+    lv_subject_add_observer_obj(subject, cb, panel, nullptr);
+  }
+}
+
+// MainScreenFlex. Hides itself the moment driving is permitted again, so it
+// never claims a fault that has already cleared.
+static void drive_refused_panel_observer(lv_observer_t *observer, lv_subject_t *) {
+  lv_obj_t *panel = lv_observer_get_target_obj(observer);
+  if (!lv_subject_get_int(&drive_refused_subject) || drive_permitted()) {
+    lv_obj_add_flag(panel, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+  fill_drive_blocked_panel(panel, RAMMP_HMI_LINK_REFUSED_TITLE, RAMMP_HMI_MCB_REFUSED_TITLE);
   lv_obj_remove_flag(panel, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -1034,10 +1029,31 @@ static void bind_drive_refused_panel(lv_obj_t *panel) {
   if (panel == nullptr) {
     return;
   }
-  for (lv_subject_t *subject : {&drive_refused_subject, &rtps_link_subject, &mcb_state_subject,
-                                &error_text_subject, &error_footer_subject}) {
-    lv_subject_add_observer_obj(subject, drive_refused_panel_observer, panel, nullptr);
+  lv_subject_add_observer_obj(&drive_refused_subject, drive_refused_panel_observer, panel, nullptr);
+  bind_to_drive_blocked_cause(panel, drive_refused_panel_observer);
+}
+
+// DriveScreen. No push to wait for here: entry already required a live link
+// and an OK state, so anything else means it was lost mid-drive. The banner
+// stays up for as long as that lasts rather than timing out, and clears by
+// itself when the link and state recover. A state neither board knows counts
+// as not OK (drive_permitted compares against OK), so it raises the banner
+// rather than silently hiding it.
+static void drive_screen_warning_observer(lv_observer_t *observer, lv_subject_t *) {
+  lv_obj_t *panel = lv_observer_get_target_obj(observer);
+  if (drive_permitted()) {
+    lv_obj_add_flag(panel, LV_OBJ_FLAG_HIDDEN);
+    return;
   }
+  fill_drive_blocked_panel(panel, RAMMP_HMI_LINK_LOST_TITLE, RAMMP_HMI_MCB_FAULT_TITLE);
+  lv_obj_remove_flag(panel, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void bind_drive_screen_warning_panel(lv_obj_t *panel) {
+  if (panel == nullptr) {
+    return;
+  }
+  bind_to_drive_blocked_cause(panel, drive_screen_warning_observer);
 }
 
 static void drive_refused_clear() {
@@ -2628,7 +2644,7 @@ extern "C" void app_main(void) {
   bind_drive_mode_button(ui_DriveModeButton1, &kModeNormal);
   bind_drive_mode_button(ui_DriveModeButton2, &kModeAuto);
   lv_subject_add_observer(&drive_mode_subject, drive_mode_publish_observer, nullptr);
-  bind_error_panel();
+  bind_drive_screen_warning_panel(ui_ErrorWarningPanel); // DriveScreen
   // Initialised before the bind: the panel's observer reads it on its first run.
   lv_subject_init_int(&drive_refused_subject, 0);
   drive_refused_timer = lv_timer_create(drive_refused_timer_cb, kDriveRefusedShowMs, nullptr);
