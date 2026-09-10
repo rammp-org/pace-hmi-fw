@@ -11,6 +11,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <numeric>
 #include <optional>
 #include <stdlib.h>
@@ -41,6 +42,7 @@
 
 #include "boot_logo.h"
 #include "rtps_comms.hpp"
+#include "selftest.hpp"
 
 #include "esp_heap_caps.h"
 #include "esp_lcd_mipi_dsi.h"
@@ -268,6 +270,10 @@ static void flex_key_cb(lv_event_t *e) {
 // espp::I2c and BasePeripheral are both mutex-protected, so sharing the bus
 // with the IMU/touch/expander traffic from other tasks is safe.
 static espp::Drv2605 *haptic = nullptr;
+// Raw register reads from the same DRV2605, for the self test: the espp driver
+// covers playback but not the STATUS and GO registers a diagnostic is read back
+// through. Set by init_haptic, alongside `haptic`.
+static std::function<bool(uint8_t, uint8_t, uint8_t *, size_t)> drv2605_read_register;
 
 // One ALERT_1000MS effect per sequencer slot, so the buzz lasts one second per
 // slot. Keep kHapticBuzzDuration in step with kHapticBuzzSlots: it is what the
@@ -1203,16 +1209,28 @@ static HoldGesture actuators_exit_gesture{
     .grace_ms = kBarGraceMs,
 };
 
+static HoldGesture *const kHoldGestures[] = {
+    &unlock_gesture,    &drive_enter_gesture, &drive_exit_gesture, &seat_enter_gesture,
+    &seat_exit_gesture, &seat_back_gesture,   &rd_exit_gesture,    &actuators_exit_gesture,
+};
+
 static void hold_poll_cb(lv_timer_t *) {
+  // The self-test overlay owns the stick while it is up (see the keypad read in
+  // app_main). Cancel anything mid-fill rather than let it complete - and
+  // navigate - behind the overlay.
+  if (selftest_ui_visible()) {
+    for (HoldGesture *g : kHoldGestures) {
+      if (g->holding) {
+        g->holding = false;
+        hold_reset(g);
+      }
+    }
+    return;
+  }
   drive_refusal_poll();
-  hold_poll(&unlock_gesture);
-  hold_poll(&drive_enter_gesture);
-  hold_poll(&drive_exit_gesture);
-  hold_poll(&seat_enter_gesture);
-  hold_poll(&seat_exit_gesture);
-  hold_poll(&seat_back_gesture);
-  hold_poll(&rd_exit_gesture);
-  hold_poll(&actuators_exit_gesture);
+  for (HoldGesture *g : kHoldGestures) {
+    hold_poll(g);
+  }
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -1987,7 +2005,53 @@ static void init_haptic(espp::Logger &logger, espp::I2c &i2c) {
   // Only published once the library is selected, so a half-configured driver
   // can never be reached from the button.
   haptic = &drv2605;
+  drv2605_read_register = espp::make_i2c_addressed_read_register(drv2605_i2c_device);
   logger.info("DRV2605 ready: HAPTIC TEST plays a {} ms buzz", kHapticBuzzDuration.count());
+}
+
+// DRV2605 registers the self test reads back (datasheet, register map).
+static constexpr uint8_t kDrv2605RegStatus = 0x00; // DEVICE_ID[7:5] DIAG_RESULT[3] OT[1] OC[0]
+static constexpr uint8_t kDrv2605RegGo = 0x0C;
+
+static std::optional<uint8_t> drv2605_status() {
+  uint8_t status = 0;
+  if (!drv2605_read_register ||
+      !drv2605_read_register(espp::Drv2605::DEFAULT_ADDRESS, kDrv2605RegStatus, &status, 1)) {
+    return std::nullopt;
+  }
+  return status;
+}
+
+// Plays one click and waits for the chip to report it done: GO self-clears when
+// the sequence has finished. That proves the I2C path, the sequencer and the
+// output stage run end to end - not that a motor is attached. The chip's own
+// actuator diagnostic would, but on the bench unit it reported DIAG_RESULT in
+// open- and closed-loop mode alike, so it cannot be told apart from a missing
+// motor and is not used (see hap.drv_play in selftest_spec.h).
+static std::optional<bool> drv2605_play_click(std::string &detail) {
+  if (!haptic || !drv2605_read_register) {
+    detail = "DRV2605 not initialised";
+    return std::nullopt;
+  }
+  if (!haptic_play(espp::Drv2605::Waveform::STRONG_CLICK, 1)) {
+    detail = "could not start the click";
+    return false;
+  }
+  const int64_t started = esp_timer_get_time();
+  uint8_t go = 1;
+  while ((go & 1) != 0 && esp_timer_get_time() - started < 1000 * 1000) {
+    std::this_thread::sleep_for(10ms);
+    if (!drv2605_read_register(espp::Drv2605::DEFAULT_ADDRESS, kDrv2605RegGo, &go, 1)) {
+      detail = "GO read failed";
+      return std::nullopt;
+    }
+  }
+  if ((go & 1) != 0) {
+    detail = "click never finished (GO stuck)";
+    return false;
+  }
+  detail = fmt::format("finished in ~{} ms", (esp_timer_get_time() - started) / 1000);
+  return true;
 }
 
 // DA7280 haptic driver bring-up test: read-only register probe, no driver
@@ -2282,6 +2346,7 @@ extern "C" void app_main(void) {
   // as real frame buffers (tracking dirty areas across both) so a flush is a
   // vsync-gated flip (see direct_flush_cb) rather than a copy. DIRECT requires
   // rotation 0, which is what this panel runs at.
+  bool direct_render = false; // reported by the self test
   {
     void *fb0 = nullptr;
     void *fb1 = nullptr;
@@ -2297,6 +2362,7 @@ extern "C" void app_main(void) {
       lv_display_set_buffers(lv_display_get_default(), fb0, fb1, fb_bytes,
                              LV_DISPLAY_RENDER_MODE_DIRECT);
       lv_display_set_flush_cb(lv_display_get_default(), direct_flush_cb);
+      direct_render = true;
       logger.info("LVGL rendering directly into the DSI frame buffers (DIRECT mode)");
     } else {
       logger.error("Could not get DPI frame buffers ({}); leaving BSP flush in place",
@@ -2687,6 +2753,16 @@ extern "C" void app_main(void) {
   logger.info("Adding joystick keypad input device...");
   static espp::KeypadInput joystick_keypad(
       {.read = [](bool *up, bool *down, bool *left, bool *right, bool *enter, bool *escape) {
+        // While the self-test overlay is up it owns the stick: nothing reaches
+        // the screens behind it, and the stick button closes it once the run
+        // has finished. This read runs on the LVGL task, under its lock.
+        if (selftest_ui_visible()) {
+          *left = *right = *up = *down = *enter = *escape = false;
+          if (select_key.exchange(false)) {
+            selftest_ui_dismiss();
+          }
+          return;
+        }
         const uint32_t key = joy_key.load(); // held, so LVGL can repeat it
         *left = key == LV_KEY_LEFT;
         *right = key == LV_KEY_RIGHT;
@@ -2890,6 +2966,57 @@ extern "C" void app_main(void) {
 
   // R&D DEBUG settings row -> the PIN screen.
   lv_obj_add_event_cb(ui_Button1, rd_open_cb, LV_EVENT_CLICKED, nullptr);
+
+  // R&D SELF TEST settings row. The checks and their limits are in
+  // selftest_spec.h; selftest.cpp measures them. A PC can also start a run over
+  // RTPS (scripts/rtps_selftest.py), which is why this comes before
+  // rtps_comms_start: selftest_init registers the self-test RTPS handlers.
+  lv_obj_add_event_cb(
+      ui_Button6, [](lv_event_t *) { selftest_request(SelfTestTrigger::LOCAL, 0); },
+      LV_EVENT_CLICKED, nullptr);
+  selftest_init({
+      .lvgl_mutex = &lvgl_mutex,
+      .imu_accel_mg = []() -> std::optional<int32_t> {
+        // the cached reading the data display task keeps fresh, so no bus traffic
+        auto imu = espp::M5StackTab5::get().imu();
+        if (!imu) {
+          return std::nullopt;
+        }
+        const auto a = imu->get_accelerometer();
+        return static_cast<int32_t>(
+            std::lround(std::sqrt(a.x * a.x + a.y * a.y + a.z * a.z) * 1000.0f));
+      },
+      .rtc_seconds = []() -> std::optional<int64_t> {
+        std::tm now{};
+        if (!espp::M5StackTab5::get().get_rtc_time(now)) {
+          return std::nullopt;
+        }
+        return static_cast<int64_t>(std::mktime(&now));
+      },
+      .battery_mv = []() -> std::optional<int32_t> {
+        const auto battery = espp::M5StackTab5::get().get_battery_status();
+        // is_present only says the INA226 answered. Under 5 V is no 2S pack at
+        // all (see pwr.vbat in selftest_spec.h), so report it as absent.
+        if (!battery.is_present || battery.voltage_v < 5.0f) {
+          return std::nullopt;
+        }
+        return static_cast<int32_t>(std::lround(battery.voltage_v * 1000.0f));
+      },
+      // 0..100: app_main sets 75.0f
+      .backlight_percent = []() -> int32_t {
+        return static_cast<int32_t>(std::lround(espp::M5StackTab5::get().brightness()));
+      },
+      .i2c_probe =
+          [](uint8_t address) {
+            return espp::M5StackTab5::get().internal_i2c().probe_device(address);
+          },
+      .boot_i2c_devices = found_addresses,
+      .drv2605_status = drv2605_status,
+      .drv2605_play = drv2605_play_click,
+      .da7280_found = std::find(found_addresses.begin(), found_addresses.end(), kDa7280Address) !=
+                      found_addresses.end(),
+      .direct_render = direct_render,
+  });
 
   // RDScreen: the PIN pad and its four checkboxes.
   //
@@ -3306,6 +3433,7 @@ extern "C" void app_main(void) {
     // channel definitions above
     auto twist_mv = twist_adc.read_mv(twist_channel);
 
+    bool adc_published = false;
     if (vert_mv && horiz_mv && twist_mv) {
       // raw mV -> calibrated [-1,1] per axis: circular deadzone on the X/Y
       // gimbal, twist mapped independently by its own range mapper. X is the
@@ -3362,10 +3490,16 @@ extern "C" void app_main(void) {
       // the mapper, not here.
       // quiet no-op until RTPS is up and a subscriber is discovered
       auto to_mv = [](float v) { return static_cast<uint32_t>(std::max(v, 0.0f)); };
-      rtps_comms_publish_adc(to_mv(*horiz_mv), to_mv(*vert_mv), to_mv(*twist_mv),
-                             joy_button_pressed.load() ? RAMMP_BUTTON_JOYSTICK : 0u,
-                             drive_mode_published.load());
+      adc_published = rtps_comms_publish_adc(to_mv(*horiz_mv), to_mv(*vert_mv), to_mv(*twist_mv),
+                                             joy_button_pressed.load() ? RAMMP_BUTTON_JOYSTICK : 0u,
+                                             drive_mode_published.load());
     }
+    // Every cycle, valid or not: the self test measures the loop's cadence and
+    // how often a read fails, as well as the values. A no-op unless a run is
+    // capturing. X is the horizontal channel, as everywhere above.
+    selftest_note_adc(vert_mv && horiz_mv && twist_mv, horiz_mv.value_or(0.0f),
+                      vert_mv.value_or(0.0f), twist_mv.value_or(0.0f), adc_published,
+                      joy_button_pressed.load());
 
     if (log_this_cycle) {
       auto fmt_mv = [](const std::optional<float> &v) {

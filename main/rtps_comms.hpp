@@ -62,6 +62,28 @@ void rtps_comms_on_actuator_state(std::function<void(const rammp_actuator_state_
 /// chose to ignore: either way the displayed value simply does not move.
 bool rtps_comms_publish_actuator_command(uint8_t req_id, uint8_t actuator_id, int8_t steps);
 
+/// McbStatus arrivals since the last rtps_comms_mcb_stats_reset(), for the
+/// self test's period, gap and loss checks.
+struct RtpsMcbStats {
+  uint32_t samples = 0;   ///< samples decoded
+  uint32_t lost = 0;      ///< samples missing from the seq sequence
+  int64_t first_us = 0;   ///< esp_timer time of the first sample
+  int64_t last_us = 0;    ///< esp_timer time of the latest sample
+  int64_t max_gap_us = 0; ///< longest time between two consecutive samples
+};
+void rtps_comms_mcb_stats_reset();
+RtpsMcbStats rtps_comms_mcb_stats();
+
+/// Self-test hooks (see "Self test" in rammp_rtps_spec.h). Register before
+/// rtps_comms_start(); the handlers run on the RTPS receive task.
+void rtps_comms_on_selftest_run(std::function<void(uint8_t run_id)> handler);
+/// `peer_rx` is the peer's count of pings received, or -1 when the pong was a
+/// plain echo of the ping and carries no count.
+void rtps_comms_on_selftest_pong(std::function<void(uint16_t seq, int peer_rx)> handler);
+/// Both return false, quietly, until the participant is up and a peer matched.
+bool rtps_comms_publish_selftest_ping(uint16_t seq);
+bool rtps_comms_publish_selftest_report(const rammp_selftest_report_t &report);
+
 /// Publish one joystick ADC snapshot (millivolts) on RAMMP_TOPIC_JOYSTICK_ADC.
 /// Safe to call from any task; returns false (without logging) until the
 /// participant is running and a subscriber on the topic has been discovered.

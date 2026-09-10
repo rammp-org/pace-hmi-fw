@@ -548,6 +548,172 @@ static inline bool rammp_actuator_state_decode(const uint8_t *in, size_t in_size
 }
 
 /* -------------------------------------------------------------------------
+ * Self test
+ *
+ * The HMI can run its self test (main/selftest_spec.h holds every check and
+ * its limits) on request over RTPS, so a firmware change can be checked
+ * objectively from a bench PC rather than by reading the code:
+ * scripts/rtps_selftest.py asks for a run, collects the report and exits
+ * non-zero on any failure.
+ *
+ *   report  HMI -> PC  rammp/selftest/report: one sample per check,
+ *                      bracketed by a STARTED and a FINISHED sample. The topic
+ *                      is best-effort, so the whole report is sent again after
+ *                      FINISHED; a reader de-duplicates on (run_id, kind, index).
+ *
+ * Everything else rides the bench UInt32 pair above - HMI_COUNTER out,
+ * HMI_COMMAND in - tagged in the top nibble, rather than on topics of its own.
+ * That is forced, not chosen: espp/rtps's embedded limits give a participant
+ * five best-effort readers and five writers, discovery (SPDP) takes one of
+ * each, and the HMI was already using every reader. (With the report writer
+ * the writers are full too: a new HMI topic means raising those limits first.)
+ * The pair was built as a publish -> echo round trip anyway, which is what a
+ * ping is.
+ *
+ *   run   PC -> HMI on HMI_COMMAND   TAG_RUN  | run_id [7:0]
+ *   ping  HMI -> PC on HMI_COUNTER   TAG_PING | seq [15:0]
+ *   pong  PC -> HMI on HMI_COMMAND   TAG_PONG | peer_rx [27:16] | seq [15:0]
+ *
+ * peer_rx counts the pings of this probe run the peer has received (seq 0
+ * opens one), which lets the HMI tell uplink loss from downlink. A plain echo
+ * of the ping (rtps_host.py --echo-received) also works as a pong, just
+ * without that split. Untagged values - the counter's own 1, 2, 3 - keep their
+ * bring-up meaning. A run id is 1..255; a repeat of the last one is ignored,
+ * so a request can be resent until its STARTED sample arrives.
+ *
+ * A production MCB need not implement any of this. Without a peer answering
+ * pings, a run started from the HMI's own R&D SELF TEST row reports the
+ * peer-dependent checks as SKIP rather than FAIL.
+ * ---------------------------------------------------------------------- */
+
+#define RAMMP_TOPIC_SELFTEST_REPORT "rammp/selftest/report"
+#define RAMMP_TYPE_SELFTEST_REPORT "rammp/msg/SelfTestReport"
+
+#define RAMMP_SELFTEST_TAG_MASK 0xF0000000u
+#define RAMMP_SELFTEST_TAG_PING 0x50000000u
+#define RAMMP_SELFTEST_TAG_PONG 0xA0000000u
+#define RAMMP_SELFTEST_TAG_RUN 0xC0000000u
+
+/** One check's verdict. */
+enum {
+  RAMMP_SELFTEST_RESULT_PASS = 0,
+  RAMMP_SELFTEST_RESULT_FAIL = 1,
+  RAMMP_SELFTEST_RESULT_SKIP = 2, /**< could not be measured, and not required on this run */
+};
+
+/** Which part of a run a report sample is. */
+enum {
+  RAMMP_SELFTEST_KIND_STARTED = 0,  /**< count = checks to come, detail = firmware version */
+  RAMMP_SELFTEST_KIND_RESULT = 1,   /**< one check */
+  RAMMP_SELFTEST_KIND_FINISHED = 2, /**< value/lo/hi = pass/fail/skip totals, detail = timing */
+};
+
+/** Report text fields, NUL included. ASCII only, as for the MCB's labels. */
+#define RAMMP_SELFTEST_NAME_LEN 24
+#define RAMMP_SELFTEST_UNIT_LEN 8
+#define RAMMP_SELFTEST_DETAIL_LEN 48
+
+/**
+ * HMI -> PC, one per check. Limits are inclusive; a side with no limit
+ * carries INT32_MIN / INT32_MAX. `value` means nothing on a SKIP.
+ *
+ * The eight leading bytes put the int32 fields on a 4-byte boundary, so
+ * classic CDR inserts no padding. Wire size: RAMMP_SELFTEST_REPORT_CDR_SIZE.
+ */
+typedef struct rammp_selftest_report {
+  uint8_t run_id; /**< the command's id; 0 = started on the HMI itself */
+  uint8_t kind;   /**< one of RAMMP_SELFTEST_KIND_* */
+  uint8_t index;  /**< this check's position in the run, 0-based */
+  uint8_t count;  /**< checks in the run */
+  uint8_t result; /**< one of RAMMP_SELFTEST_RESULT_* */
+  uint8_t reserved[3];
+  int32_t value;
+  int32_t lo;
+  int32_t hi;
+  char name[RAMMP_SELFTEST_NAME_LEN];     /**< "mem.int_free" */
+  char unit[RAMMP_SELFTEST_UNIT_LEN];     /**< "KB" */
+  char detail[RAMMP_SELFTEST_DETAIL_LEN]; /**< why it failed or was skipped, or context */
+} rammp_selftest_report_t;
+
+#define RAMMP_SELFTEST_REPORT_PAYLOAD_SIZE                                                         \
+  (8 + 3 * 4 + RAMMP_SELFTEST_NAME_LEN + RAMMP_SELFTEST_UNIT_LEN + RAMMP_SELFTEST_DETAIL_LEN)
+#define RAMMP_SELFTEST_REPORT_CDR_SIZE (RAMMP_CDR_HEADER_SIZE + RAMMP_SELFTEST_REPORT_PAYLOAD_SIZE)
+
+static inline size_t rammp_selftest_report_encode(const rammp_selftest_report_t *report,
+                                                  uint8_t *out, size_t out_size) {
+  size_t i, offset;
+  if (report == NULL || out == NULL || out_size < RAMMP_SELFTEST_REPORT_CDR_SIZE) {
+    return 0;
+  }
+  out[0] = 0x00; /* CDR_LE */
+  out[1] = 0x01;
+  out[2] = 0x00;
+  out[3] = 0x00;
+  out[4] = report->run_id;
+  out[5] = report->kind;
+  out[6] = report->index;
+  out[7] = report->count;
+  out[8] = report->result;
+  out[9] = 0;
+  out[10] = 0;
+  out[11] = 0;
+  rammp_write_u32_le(out + 12, (uint32_t)report->value);
+  rammp_write_u32_le(out + 16, (uint32_t)report->lo);
+  rammp_write_u32_le(out + 20, (uint32_t)report->hi);
+  offset = 24;
+  for (i = 0; i < RAMMP_SELFTEST_NAME_LEN; ++i) {
+    out[offset + i] = (uint8_t)report->name[i];
+  }
+  offset += RAMMP_SELFTEST_NAME_LEN;
+  for (i = 0; i < RAMMP_SELFTEST_UNIT_LEN; ++i) {
+    out[offset + i] = (uint8_t)report->unit[i];
+  }
+  offset += RAMMP_SELFTEST_UNIT_LEN;
+  for (i = 0; i < RAMMP_SELFTEST_DETAIL_LEN; ++i) {
+    out[offset + i] = (uint8_t)report->detail[i];
+  }
+  return RAMMP_SELFTEST_REPORT_CDR_SIZE;
+}
+
+static inline bool rammp_selftest_report_decode(const uint8_t *in, size_t in_size,
+                                                rammp_selftest_report_t *report) {
+  size_t i, offset;
+  if (in == NULL || report == NULL || in_size < RAMMP_SELFTEST_REPORT_CDR_SIZE) {
+    return false;
+  }
+  if (in[0] != 0x00 || in[1] != 0x01) {
+    return false;
+  }
+  report->run_id = in[4];
+  report->kind = in[5];
+  report->index = in[6];
+  report->count = in[7];
+  report->result = in[8];
+  report->reserved[0] = 0;
+  report->reserved[1] = 0;
+  report->reserved[2] = 0;
+  report->value = (int32_t)rammp_read_u32_le(in + 12);
+  report->lo = (int32_t)rammp_read_u32_le(in + 16);
+  report->hi = (int32_t)rammp_read_u32_le(in + 20);
+  offset = 24;
+  for (i = 0; i < RAMMP_SELFTEST_NAME_LEN; ++i) {
+    report->name[i] = (char)in[offset + i];
+  }
+  offset += RAMMP_SELFTEST_NAME_LEN;
+  for (i = 0; i < RAMMP_SELFTEST_UNIT_LEN; ++i) {
+    report->unit[i] = (char)in[offset + i];
+  }
+  offset += RAMMP_SELFTEST_UNIT_LEN;
+  for (i = 0; i < RAMMP_SELFTEST_DETAIL_LEN; ++i) {
+    report->detail[i] = (char)in[offset + i];
+  }
+  report->name[RAMMP_SELFTEST_NAME_LEN - 1] = '\0';
+  report->unit[RAMMP_SELFTEST_UNIT_LEN - 1] = '\0';
+  report->detail[RAMMP_SELFTEST_DETAIL_LEN - 1] = '\0';
+  return true;
+}
+
+/* -------------------------------------------------------------------------
  * Display names
  *
  * Shared so the MCB's logs and the HMI's labels use the same words for the

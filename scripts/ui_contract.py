@@ -60,6 +60,7 @@ PARENTS: dict[str, str] = {
     # settings rows the firmware wires handlers onto
     "ui_SettingsFlexPanel": "ui_SettingsMenu",
     "ui_Button1": "ui_SettingsFlexPanel",           # R&D DEBUG -> RDScreen
+    "ui_Button6": "ui_SettingsFlexPanel",           # R&D SELF TEST -> selftest_request
     "ui_FPSCounterButton": "ui_SettingsFlexPanel",
     "ui_HapticTestButton": "ui_SettingsFlexPanel",
 
@@ -113,6 +114,7 @@ PARENTS: dict[str, str] = {
 # text gives it away.
 LABELS: dict[str, str] = {
     "ui_ButtonLabel1": "R&D DEBUG",       # the row that opens ui_RDScreen
+    "ui_ButtonLabel6": "R&D SELF TEST",   # the row that starts the self test
     "ui_FPSCounterLabel": "FPS COUNTER",
     "ui_HapticTestLabel": "HAPTIC TEST",
     # the four live seat functions, in the order seat_buttons_grid expects

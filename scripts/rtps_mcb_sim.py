@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import random
 import socket
 import sys
 import threading
@@ -143,6 +144,96 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
             entity_index=len(self.local_readers),
         ))
 
+        # ---- self test ---------------------------------------------------
+        # Every run of the HMI's self test needs a peer: its RTPS checks time
+        # pings against it and read McbStatus from it. Serving that here means
+        # this simulator, the GUI and rtps_selftest.py all answer a run however
+        # it was started - over RTPS, or from the HMI's own R&D SELF TEST row.
+        self.adc_rx_count = 0
+        self.selftest_ping_rx = 0
+        self._selftest_last_ping_seq = -1
+        # Random start: the HMI ignores a command repeating the last run id it
+        # acted on, and a restarted script counting from 1 could do exactly that.
+        self.selftest_run_id = random.randint(1, 255)
+        #: run_id -> {(kind, index): spec.SelfTestResult}; run 0 = started on the HMI
+        self.selftest_reports: dict[int, dict[tuple[int, int], spec.SelfTestResult]] = {}
+        #: run_id -> time.monotonic() its FINISHED sample first arrived
+        self.selftest_finished_at: dict[int, float] = {}
+        # The run request and the pongs go out on the bench command topic, and
+        # the pings arrive on the bench counter topic - tagged, because the
+        # HMI has no RTPS readers to spare for topics of their own (see "Self
+        # test" in the spec header).
+        self._selftest_command_writer = rtps_host.WriterConfig(
+            topic_name=spec.TOPIC_HMI_COMMAND,
+            type_name=spec.TYPE_UINT32,
+            reliable=False,
+            entity_index=len(self.local_writers),
+        )
+        self.local_writers.append(self._selftest_command_writer)
+        for topic, type_name in ((spec.TOPIC_HMI_COUNTER, spec.TYPE_UINT32),
+                                 (spec.TOPIC_SELFTEST_REPORT, spec.TYPE_SELFTEST_REPORT)):
+            self.local_readers.append(rtps_host.ReaderConfig(
+                topic_name=topic,
+                type_name=type_name,
+                reliable=False,
+                entity_index=len(self.local_readers),
+            ))
+
+    def _send_on(self, writer: rtps_host.WriterConfig, cdr_payload: bytes) -> int:
+        """Publish one sample on `writer`; returns how many targets it went to."""
+        payload = self.build_data_message(writer, cdr_payload)
+        targets = self._build_user_targets(writer)
+        for destination in targets:
+            self.send_user_datagram(payload, destination)
+        return len(targets)
+
+    def send_selftest_command(self, run_id: int) -> int:
+        """(Re)send the run request for `run_id`. Safe to repeat: the HMI acts once."""
+        return self._send_on(self._selftest_command_writer, spec.pack_selftest_run(run_id))
+
+    def request_selftest(self) -> int:
+        """Ask the HMI for a new self-test run; returns its run id."""
+        self.selftest_run_id = self.selftest_run_id % 255 + 1  # 1..255, never 0
+        self.send_selftest_command(self.selftest_run_id)
+        return self.selftest_run_id
+
+    def _answer_selftest_ping(self, payload: bytes) -> None:
+        value = spec.unpack_uint32(payload)
+        seq = spec.selftest_ping_seq(value) if value is not None else None
+        if seq is None:
+            return  # the counter's own bring-up heartbeat, not a ping
+        # Count what arrives so the HMI can tell pings lost on the way here
+        # from pongs lost on the way back. seq 0 opens a probe run; a seq going
+        # backwards means that opening ping itself was lost.
+        if seq == 0 or seq <= self._selftest_last_ping_seq:
+            self.selftest_ping_rx = 0
+        self._selftest_last_ping_seq = seq
+        self.selftest_ping_rx += 1
+        self._send_on(self._selftest_command_writer,
+                      spec.pack_selftest_pong(seq, self.selftest_ping_rx))
+
+    def _note_selftest_result(self, r: spec.SelfTestResult) -> None:
+        if r.kind == spec.SELFTEST_KIND_STARTED:
+            # STARTED is sent once, and only at the start: a new run under the
+            # same id (every HMI-started run is id 0) replaces the old one
+            self.selftest_reports[r.run_id] = {}
+            self.selftest_finished_at.pop(r.run_id, None)
+            rtps_host.log(f"[selftest] run {r.run_id}: started on firmware {r.detail}, "
+                          f"{r.count} checks")
+        run = self.selftest_reports.setdefault(r.run_id, {})
+        key = (r.kind, r.index)
+        is_new = key not in run
+        run[key] = r
+        if not is_new:
+            return  # the end-of-run repeat of a sample already logged
+        if r.kind == spec.SELFTEST_KIND_RESULT:
+            rtps_host.log(f"[selftest] {spec.format_selftest_result(r)}")
+        elif r.kind == spec.SELFTEST_KIND_FINISHED:
+            self.selftest_finished_at[r.run_id] = time.monotonic()
+            verdict = "PASS" if r.lo == 0 else "FAIL"
+            rtps_host.log(f"[selftest] run {r.run_id}: {verdict} - {r.value} pass, {r.lo} fail, "
+                          f"{r.hi} skip in {r.detail}")
+
     def apply_actuator_command(self, req_id: int, actuator_id: int, steps: int) -> int:
         """Judge one request from the HMI and return the RESULT_* verdict.
 
@@ -201,6 +292,13 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
                 sample = spec.unpack_adc_xy_twist(payload)
                 if sample is not None:
                     self.joystick = sample
+                    self.adc_rx_count += 1
+            elif topic == spec.TOPIC_HMI_COUNTER:
+                self._answer_selftest_ping(payload)
+            elif topic == spec.TOPIC_SELFTEST_REPORT:
+                result = spec.unpack_selftest_report(payload)
+                if result is not None:
+                    self._note_selftest_result(result)
             elif topic == spec.TOPIC_ACTUATOR_COMMAND:
                 command = spec.unpack_actuator_command(payload)
                 if command is None:

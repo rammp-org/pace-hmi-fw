@@ -86,6 +86,8 @@ constexpr std::string_view kActuatorCommandTopic = RAMMP_TOPIC_ACTUATOR_COMMAND;
 constexpr std::string_view kActuatorCommandTypeName = RAMMP_TYPE_ACTUATOR_COMMAND;
 constexpr std::string_view kActuatorStateTopic = RAMMP_TOPIC_ACTUATOR_STATE;
 constexpr std::string_view kActuatorStateTypeName = RAMMP_TYPE_ACTUATOR_STATE;
+constexpr std::string_view kSelfTestReportTopic = RAMMP_TOPIC_SELFTEST_REPORT;
+constexpr std::string_view kSelfTestReportTypeName = RAMMP_TYPE_SELFTEST_REPORT;
 
 constexpr auto kPublishPeriod = 2s;
 
@@ -118,6 +120,41 @@ std::unique_ptr<espp::Task> publish_task;
 std::function<void(float)> brightness_handler;
 std::function<void(const rammp_mcb_status_t &)> mcb_status_handler;
 std::function<void(const rammp_actuator_state_t &)> actuator_state_handler;
+std::function<void(uint8_t)> selftest_run_handler;
+std::function<void(uint16_t, int)> selftest_pong_handler;
+
+// McbStatus arrival statistics for the self test, updated on the RTPS receive
+// task and read from the self-test task.
+std::mutex mcb_stats_mutex;
+RtpsMcbStats mcb_stats;
+uint8_t mcb_stats_last_seq = 0;
+
+void note_mcb_status_arrival(int64_t now_us, uint8_t seq) {
+  std::lock_guard<std::mutex> lock(mcb_stats_mutex);
+  if (mcb_stats.samples == 0) {
+    mcb_stats.first_us = now_us;
+  } else {
+    mcb_stats.max_gap_us = std::max(mcb_stats.max_gap_us, now_us - mcb_stats.last_us);
+    // seq wraps at 256, so a step of more than one is that many samples
+    // missed. A large jump is a restarted publisher, not a loss, and 0 is a
+    // duplicate.
+    const auto step = static_cast<uint8_t>(seq - mcb_stats_last_seq);
+    if (step > 1 && step < 64) {
+      mcb_stats.lost += step - 1u;
+    }
+  }
+  mcb_stats.samples++;
+  mcb_stats.last_us = now_us;
+  mcb_stats_last_seq = seq;
+}
+
+std::vector<uint8_t> serialize_selftest_report(const rammp_selftest_report_t &report) {
+  std::vector<uint8_t> out(RAMMP_SELFTEST_REPORT_CDR_SIZE);
+  if (rammp_selftest_report_encode(&report, out.data(), out.size()) == 0) {
+    return {};
+  }
+  return out;
+}
 
 // UInt32 CDR helpers (little-endian CDR with the 4-byte encapsulation header,
 // the on-the-wire format DDS expects for user data). espp/cdr derives the
@@ -462,7 +499,27 @@ bool start_participant() {
                   logger.warn("Received sample on '{}' that failed CDR decode", kCmdTopic);
                   return;
                 }
-                logger.info("Received echo/cmd on '{}': {}", kCmdTopic, *value);
+                // Self-test traffic shares this topic, tagged in the top nibble
+                // (see "Self test" in rammp_rtps_spec.h). Pongs arrive 25 times
+                // a second during a run, so only untagged values are logged.
+                const uint32_t tag = *value & RAMMP_SELFTEST_TAG_MASK;
+                if (tag == RAMMP_SELFTEST_TAG_RUN) {
+                  const auto run_id = static_cast<uint8_t>(*value & 0xFFu);
+                  logger.info("Self-test run {} requested", run_id);
+                  if (selftest_run_handler) {
+                    selftest_run_handler(run_id);
+                  }
+                } else if (tag == RAMMP_SELFTEST_TAG_PONG || tag == RAMMP_SELFTEST_TAG_PING) {
+                  // a PING coming back is a plain echo: a pong with no count
+                  if (selftest_pong_handler) {
+                    selftest_pong_handler(static_cast<uint16_t>(*value & 0xFFFFu),
+                                          tag == RAMMP_SELFTEST_TAG_PONG
+                                              ? static_cast<int>((*value >> 16) & 0xFFFu)
+                                              : -1);
+                  }
+                } else {
+                  logger.info("Received echo/cmd on '{}': {}", kCmdTopic, *value);
+                }
               },
       })) {
     logger.error("Failed to add reader for '{}'", kCmdTopic);
@@ -513,6 +570,7 @@ bool start_participant() {
                 // liveness evidence for rtps_comms_link_state(); stamped before
                 // the handler runs so a slow observer cannot age the link
                 last_status_us = esp_timer_get_time();
+                note_mcb_status_arrival(last_status_us.load(), status->seq);
                 // the MCB republishes on a period, so log only what changes —
                 // otherwise this floods at the status rate
                 static std::optional<rammp_mcb_status_t> last;
@@ -594,6 +652,20 @@ bool start_participant() {
   }
   logger.info("Added reader '{}' [{}]", kActuatorStateTopic, kActuatorStateTypeName);
 
+  // The self-test report. The rest of the self-test traffic rides the bench
+  // counter/command pair; "Self test" in rammp_rtps_spec.h says why. This is
+  // the fifth best-effort writer (SPDP holds one), which fills espp/rtps's
+  // embedded pool.
+  if (!participant->add_writer({
+          .topic = std::string(kSelfTestReportTopic),
+          .type_name = std::string(kSelfTestReportTypeName),
+          .reliability = espp::RtpsParticipant::Reliability::BEST_EFFORT,
+      })) {
+    logger.error("Failed to add writer for '{}'", kSelfTestReportTopic);
+    return false;
+  }
+  logger.info("Added writer '{}' [{}]", kSelfTestReportTopic, kSelfTestReportTypeName);
+
   logger.info("RTPS participant '{}' up on {} (domain fixed at build time)", kNodeName, ip_address);
   logger.info("Publishing '{}' every {} s, listening on '{}'", kCounterTopic,
               std::chrono::duration_cast<std::chrono::seconds>(kPublishPeriod).count(), kCmdTopic);
@@ -650,6 +722,39 @@ void rtps_comms_on_mcb_status(std::function<void(const rammp_mcb_status_t &)> ha
 
 void rtps_comms_on_actuator_state(std::function<void(const rammp_actuator_state_t &)> handler) {
   actuator_state_handler = std::move(handler);
+}
+
+void rtps_comms_on_selftest_run(std::function<void(uint8_t)> handler) {
+  selftest_run_handler = std::move(handler);
+}
+
+void rtps_comms_on_selftest_pong(std::function<void(uint16_t, int)> handler) {
+  selftest_pong_handler = std::move(handler);
+}
+
+void rtps_comms_mcb_stats_reset() {
+  std::lock_guard<std::mutex> lock(mcb_stats_mutex);
+  mcb_stats = RtpsMcbStats{};
+}
+
+RtpsMcbStats rtps_comms_mcb_stats() {
+  std::lock_guard<std::mutex> lock(mcb_stats_mutex);
+  return mcb_stats;
+}
+
+bool rtps_comms_publish_selftest_ping(uint16_t seq) {
+  if (!participant || !participant->is_started() || !peer_matched) {
+    return false;
+  }
+  // on the counter topic, alongside the bring-up heartbeat: see rammp_rtps_spec.h
+  return participant->publish(kCounterTopic, serialize_uint32(RAMMP_SELFTEST_TAG_PING | seq));
+}
+
+bool rtps_comms_publish_selftest_report(const rammp_selftest_report_t &report) {
+  if (!participant || !participant->is_started() || !peer_matched) {
+    return false;
+  }
+  return participant->publish(kSelfTestReportTopic, serialize_selftest_report(report));
 }
 
 RtpsLinkState rtps_comms_link_state() {

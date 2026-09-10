@@ -411,8 +411,29 @@ class McbPanel:
         ttk.Spinbox(frame, from_=0.5, to=30.0, increment=0.5, width=5,
                     textvariable=self.dwell_var).pack(side="left")
 
+        # The HMI's self test (checks and limits in main/selftest_spec.h). The
+        # harness answers its pings and logs the report as it arrives; this only
+        # asks for a run. rtps_selftest.py does the same from a terminal.
+        ttk.Button(frame, text="Run self test", command=self._run_selftest).pack(
+            side="left", padx=(24, 0))
+
         self.status_label = ttk.Label(frame, text="idle")
         self.status_label.pack(side="right")
+
+    def _run_selftest(self) -> None:
+        if self.harness is None:
+            self._append_log("[gui] connect before running the self test")
+            return
+        run_id = self.harness.request_selftest()
+        self._append_log(f"[selftest] requested run {run_id}; results follow in this log")
+        self.root.after(1000, self._selftest_resend, run_id, 1)
+
+    def _selftest_resend(self, run_id: int, attempt: int) -> None:
+        """Resend until the HMI says it started: the command topic is best-effort."""
+        if self.harness is None or run_id in self.harness.selftest_reports or attempt >= 6:
+            return
+        self.harness.send_selftest_command(run_id)
+        self.root.after(1000, self._selftest_resend, run_id, attempt + 1)
 
     def _toggle_drive_view(self) -> None:
         """Open (or close) the car window.

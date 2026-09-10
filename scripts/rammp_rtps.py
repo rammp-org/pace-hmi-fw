@@ -247,6 +247,119 @@ def unpack_adc_xy_twist(payload: bytes) -> tuple[int, int, int, int, int] | None
     return struct.unpack_from("<IIIII", payload, 4)
 
 
+# ------------------------------------------------------------------ self test
+
+#: {0: 'PASS', 1: 'FAIL', 2: 'SKIP'}
+SELFTEST_RESULT_NAMES = _group("SELFTEST_RESULT_")
+#: what a report carries for "no limit on this side"
+INT32_MIN = -(2 ** 31)
+INT32_MAX = 2 ** 31 - 1
+
+#: matches rammp_selftest_report_encode(): five bytes, three of padding, three
+#: int32 and the three fixed text fields
+_SELFTEST_REPORT_FORMAT = (
+    f"<BBBBB3xiii{SELFTEST_NAME_LEN}s{SELFTEST_UNIT_LEN}s{SELFTEST_DETAIL_LEN}s"  # noqa: F821
+)
+_SELFTEST_REPORT_CDR_SIZE = len(CDR_LE_HEADER) + struct.calcsize(_SELFTEST_REPORT_FORMAT)
+
+
+class SelfTestResult(NamedTuple):
+    """One rammp_selftest_report_t sample: a check, or a run's start/summary."""
+
+    run_id: int
+    kind: int
+    index: int
+    count: int
+    result: int
+    value: int
+    lo: int
+    hi: int
+    name: str
+    unit: str
+    detail: str
+
+
+def pack_uint32(value: int) -> bytes:
+    """A std_msgs/UInt32 sample, as the bench counter/command topics carry."""
+    return CDR_LE_HEADER + struct.pack("<I", value & 0xFFFFFFFF)
+
+
+def unpack_uint32(payload: bytes) -> int | None:
+    if len(payload) < len(CDR_LE_HEADER) + 4 or payload[:2] != CDR_LE_HEADER[:2]:
+        return None
+    return struct.unpack_from("<I", payload, len(CDR_LE_HEADER))[0]
+
+
+# The self test's run request and ping/pong ride the bench UInt32 pair, tagged
+# in the top nibble; "Self test" in the spec header says why.
+def pack_selftest_run(run_id: int) -> bytes:
+    """Ask for a self-test run (PC -> HMI on TOPIC_HMI_COMMAND)."""
+    return pack_uint32(SELFTEST_TAG_RUN | (run_id & 0xFF))  # noqa: F821
+
+
+def selftest_ping_seq(value: int) -> int | None:
+    """The seq of a ping seen on TOPIC_HMI_COUNTER, or None for the heartbeat."""
+    if value & SELFTEST_TAG_MASK != SELFTEST_TAG_PING:  # noqa: F821
+        return None
+    return value & 0xFFFF
+
+
+def pack_selftest_pong(seq: int, peer_rx: int) -> bytes:
+    """Answer a ping (PC -> HMI on TOPIC_HMI_COMMAND); peer_rx saturates at 4095."""
+    return pack_uint32(SELFTEST_TAG_PONG | (min(peer_rx, 0xFFF) << 16) | (seq & 0xFFFF))  # noqa: F821
+
+
+def pack_selftest_report(r: SelfTestResult) -> bytes:
+    """Serialize a rammp_selftest_report_t (HMI -> PC); for tests of the tools."""
+    return CDR_LE_HEADER + struct.pack(
+        _SELFTEST_REPORT_FORMAT, r.run_id & 0xFF, r.kind & 0xFF, r.index & 0xFF, r.count & 0xFF,
+        r.result & 0xFF, r.value, r.lo, r.hi,
+        encode_label(r.name, SELFTEST_NAME_LEN),  # noqa: F821
+        encode_label(r.unit, SELFTEST_UNIT_LEN),  # noqa: F821
+        encode_label(r.detail, SELFTEST_DETAIL_LEN),  # noqa: F821
+    )
+
+
+def unpack_selftest_report(payload: bytes) -> SelfTestResult | None:
+    if len(payload) < _SELFTEST_REPORT_CDR_SIZE or payload[:2] != CDR_LE_HEADER[:2]:
+        return None
+    (run_id, kind, index, count, result, value, lo, hi, name, unit,
+     detail) = struct.unpack_from(_SELFTEST_REPORT_FORMAT, payload, len(CDR_LE_HEADER))
+    return SelfTestResult(run_id, kind, index, count, result, value, lo, hi,
+                          _decode_field(name), _decode_field(unit), _decode_field(detail))
+
+
+def _selftest_yes_no(r: SelfTestResult) -> bool:
+    return r.lo == 1 and r.hi == 1 and not r.unit
+
+
+def format_selftest_value(r: SelfTestResult, value: int | None = None) -> str:
+    """A value as the HMI shows it: '182 KB', 'yes', '0.7%'. Mirrors selftest.cpp."""
+    value = r.value if value is None else value
+    if _selftest_yes_no(r):
+        return "yes" if value else "no"
+    if r.unit == "0.1%":
+        return f"{value / 10:.1f}%"
+    return f"{value} {r.unit}" if r.unit else str(value)
+
+
+def format_selftest_limits(r: SelfTestResult) -> str:
+    if r.lo == r.hi:
+        return "yes" if _selftest_yes_no(r) else f"= {format_selftest_value(r, r.lo)}"
+    if r.lo == INT32_MIN:
+        return f"<= {format_selftest_value(r, r.hi)}"
+    if r.hi == INT32_MAX:
+        return f">= {format_selftest_value(r, r.lo)}"
+    return f"{format_selftest_value(r, r.lo)} .. {format_selftest_value(r, r.hi)}"
+
+
+def format_selftest_result(r: SelfTestResult, detail: str | None = None) -> str:
+    """One row of the report table, in the same columns as the HMI's serial log."""
+    measured = "-" if r.result == SELFTEST_RESULT_SKIP else format_selftest_value(r)  # noqa: F821
+    return (f"{SELFTEST_RESULT_NAMES.get(r.result, '?'):<4}  {r.name:<18} {measured:>14}  "
+            f"{format_selftest_limits(r):<20} {r.detail if detail is None else detail}")
+
+
 if __name__ == "__main__":
     print(f"spec header: {HEADER_PATH}\n")
     print("topics and types:")
