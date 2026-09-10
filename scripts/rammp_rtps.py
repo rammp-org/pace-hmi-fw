@@ -23,7 +23,7 @@ from __future__ import annotations
 import os
 import re
 import struct
-from typing import Dict
+from typing import Dict, List, NamedTuple
 
 HEADER_RELATIVE_PATH = os.path.join("main", "rammp_rtps_spec.h")
 
@@ -85,6 +85,57 @@ DRIVE_STATUS_NAMES = _group("DRIVE_STATUS_")
 STATE_NAMES = _group("STATE_")
 #: {0: 'NORMAL', 1: 'HOLO', 2: 'AUTO'} — the HMI's drive-mode buttons
 DRIVE_MODE_NAMES = _group("DRIVE_MODE_")
+#: {0: 'OK', 1: 'AT_MIN', ...} — the MCB's verdict on an actuator request
+ACTUATOR_RESULT_NAMES = _group("ACTUATOR_RESULT_")
+
+
+class Actuator(NamedTuple):
+    """One row of RAMMP_ACTUATOR_TABLE in the spec header.
+
+    Values are raw integers in the actuator's own units; `decimals` says where
+    the display puts the point, so 2500 with decimals=1 reads as "250.0". The
+    HMI and the MCB both index actuators by `id`, which is the row's position.
+    """
+
+    id: int
+    name: str
+    short: str
+    label: str
+    min_value: int
+    max_value: int
+    step: int
+    decimals: int
+    unit: str
+
+    def format(self, raw: int) -> str:
+        """Raw units as the HMI's row draws them, e.g. 126 -> '12.6'."""
+        return f"{raw / (10 ** self.decimals):.{self.decimals}f}"
+
+    def parse(self, text: str) -> int:
+        """Inverse of format(): '12.6' -> 126, rounded and clamped to range."""
+        raw = int(round(float(text) * (10 ** self.decimals)))
+        return max(self.min_value, min(self.max_value, raw))
+
+
+# X(0, ELEVATION, "M1", "Elevation", 0, 2500, 50, 1, "mm")
+_ACTUATOR_RE = re.compile(
+    r"""^\s*X\(\s*(\d+)\s*,\s*([A-Z0-9_]+)\s*,\s*"([^"]*)"\s*,\s*"([^"]*)"\s*,"""
+    r"""\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(\d+)\s*,\s*"([^"]*)"\s*\)""",
+    re.M,
+)
+
+#: every actuator in the header's X-macro table, in wire-id order
+ACTUATORS: List[Actuator] = [
+    Actuator(int(i), name, short, label, int(lo), int(hi), int(step), int(dec), unit)
+    for i, name, short, label, lo, hi, step, dec, unit in _ACTUATOR_RE.findall(_HEADER_TEXT)
+]
+
+if not ACTUATORS:
+    raise RuntimeError(f"{HEADER_PATH}: RAMMP_ACTUATOR_TABLE parsed to nothing")
+if [a.id for a in ACTUATORS] != list(range(len(ACTUATORS))):
+    raise RuntimeError(f"{HEADER_PATH}: actuator ids must be 0..N-1 in table order")
+if len(ACTUATORS) > ACTUATOR_MAX:  # noqa: F821  (scraped into globals above)
+    raise RuntimeError(f"{HEADER_PATH}: {len(ACTUATORS)} actuators exceeds RAMMP_ACTUATOR_MAX")
 
 #: 4-byte CDR encapsulation header: little-endian classic CDR (xcdr1)
 CDR_LE_HEADER = b"\x00\x01\x00\x00"
@@ -139,6 +190,56 @@ def unpack_mcb_status(payload: bytes):
             _decode_field(err_raw), _decode_field(foot_raw))
 
 
+#: matches rammp_actuator_command_encode() in the spec header
+_ACTUATOR_COMMAND_FORMAT = "<BBbB"
+#: matches rammp_actuator_state_encode(); the int32 array is fixed length so a
+#: state message is always the same size regardless of how many exist
+_ACTUATOR_STATE_FORMAT = f"<BBBB{ACTUATOR_MAX}i"  # noqa: F821  (scraped)
+_ACTUATOR_STATE_CDR_SIZE = len(CDR_LE_HEADER) + struct.calcsize(_ACTUATOR_STATE_FORMAT)
+_ACTUATOR_COMMAND_CDR_SIZE = len(CDR_LE_HEADER) + struct.calcsize(_ACTUATOR_COMMAND_FORMAT)
+
+
+def pack_actuator_command(req_id: int, actuator_id: int, steps: int) -> bytes:
+    """Serialize a rammp_actuator_command_t (joystick -> MCB)."""
+    return CDR_LE_HEADER + struct.pack(
+        _ACTUATOR_COMMAND_FORMAT, req_id & 0xFF, actuator_id & 0xFF,
+        max(-128, min(127, int(steps))), 0,
+    )
+
+
+def unpack_actuator_command(payload: bytes) -> tuple[int, int, int] | None:
+    """(req_id, actuator_id, steps), or None if this isn't one."""
+    if len(payload) < _ACTUATOR_COMMAND_CDR_SIZE or payload[:2] != CDR_LE_HEADER[:2]:
+        return None
+    req_id, actuator_id, steps, _reserved = struct.unpack_from(
+        _ACTUATOR_COMMAND_FORMAT, payload, len(CDR_LE_HEADER)
+    )
+    return (req_id, actuator_id, steps)
+
+
+def pack_actuator_state(values, req_id: int = 0, result: int = 0, seq: int = 0) -> bytes:
+    """Serialize a rammp_actuator_state_t (MCB -> joystick).
+
+    `values` is the raw value per actuator in table order; it sets `count`, and
+    the fixed-length wire array is zero-filled beyond it.
+    """
+    raw = list(values)[:ACTUATOR_MAX]  # noqa: F821  (scraped)
+    padded = raw + [0] * (ACTUATOR_MAX - len(raw))  # noqa: F821
+    return CDR_LE_HEADER + struct.pack(
+        _ACTUATOR_STATE_FORMAT, req_id & 0xFF, result & 0xFF, len(raw), seq & 0xFF, *padded
+    )
+
+
+def unpack_actuator_state(payload: bytes) -> tuple[int, int, int, list[int]] | None:
+    """(req_id, result, seq, values) with values trimmed to `count`."""
+    if len(payload) < _ACTUATOR_STATE_CDR_SIZE or payload[:2] != CDR_LE_HEADER[:2]:
+        return None
+    fields = struct.unpack_from(_ACTUATOR_STATE_FORMAT, payload, len(CDR_LE_HEADER))
+    req_id, result, count, seq = fields[:4]
+    count = min(count, ACTUATOR_MAX)  # noqa: F821
+    return (req_id, result, seq, list(fields[4:4 + count]))
+
+
 def unpack_adc_xy_twist(payload: bytes) -> tuple[int, int, int, int, int] | None:
     """(x_mv, y_mv, twist_mv, buttons, drive_mode) from the joystick sample."""
     if len(payload) < 24 or payload[:2] != CDR_LE_HEADER[:2]:
@@ -157,3 +258,11 @@ if __name__ == "__main__":
     print("\nnumbers:")
     for key in sorted(NUMBERS):
         print(f"  {key:<24} {NUMBERS[key]}")
+    print("\nactuators:")
+    for actuator in ACTUATORS:
+        print(
+            f"  {actuator.id}  {actuator.short:<4} {actuator.label:<16} "
+            f"{actuator.format(actuator.min_value):>7} .. "
+            f"{actuator.format(actuator.max_value):<7} "
+            f"step {actuator.format(actuator.step)} {actuator.unit}"
+        )

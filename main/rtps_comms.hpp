@@ -47,6 +47,21 @@ void rtps_comms_on_brightness(std::function<void(float percent)> handler);
 /// subject while holding the LVGL mutex.
 void rtps_comms_on_mcb_status(std::function<void(const rammp_mcb_status_t &status)> handler);
 
+/// Register the handler invoked on every actuator state sample from the MCB
+/// (RAMMP_TOPIC_ACTUATOR_STATE). Call before rtps_comms_start(). Runs on the
+/// RTPS receive task, so the same rule applies as for the status handler:
+/// reach the UI only through a subject, holding the LVGL mutex.
+void rtps_comms_on_actuator_state(std::function<void(const rammp_actuator_state_t &)> handler);
+
+/// Ask the MCB to move one actuator by `steps` of its spec'd step size.
+///
+/// The HMI never moves an actuator itself — this is a request, and the answer
+/// arrives asynchronously as an actuator-state sample carrying the same
+/// `req_id`. Returns false (quietly) if the participant is not up or no peer
+/// has been discovered, which is indistinguishable from a request the MCB
+/// chose to ignore: either way the displayed value simply does not move.
+bool rtps_comms_publish_actuator_command(uint8_t req_id, uint8_t actuator_id, int8_t steps);
+
 /// Publish one joystick ADC snapshot (millivolts) on RAMMP_TOPIC_JOYSTICK_ADC.
 /// Safe to call from any task; returns false (without logging) until the
 /// participant is running and a subscriber on the topic has been discovered.

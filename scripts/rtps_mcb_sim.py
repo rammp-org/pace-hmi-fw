@@ -105,16 +105,117 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
         # discovery round confusing the picture.
         self.paused = False
 
+        # ---- actuators -------------------------------------------------
+        # The MCB owns every actuator position; the HMI only ever asks. These
+        # are the values it asks about, seeded to the middle of each range so a
+        # fresh bench session can step in both directions.
+        self.actuator_values = [
+            (a.min_value + a.max_value) // 2 for a in spec.ACTUATORS
+        ]
+        # Per-actuator override for the next request: None accepts it, an
+        # RAMMP_ACTUATOR_RESULT_* value refuses it with that reason. This is
+        # the whole point of the bench tool — the HMI's refusal paths are hard
+        # to reach on a real chair without driving something into a hard stop.
+        self.actuator_reject: list[int | None] = [None] * len(spec.ACTUATORS)
+        self.actuator_req_id = 0
+        self.actuator_result = spec.ACTUATOR_RESULT_OK
+        self.actuator_seq = 0
+        # Set by apply_actuator_command so the next run-loop tick publishes
+        # immediately rather than waiting out the period: a reply that took up
+        # to half a second would make every press feel broken.
+        self.actuator_dirty = True
+
+        # A second writer and a second reader, appended rather than passed
+        # through argparse: RtpsHostHarness builds one writer from
+        # --publish-topic and gives every --subscribe-topic the same type name,
+        # and these two need their own topic/type pairs. Everything downstream
+        # (SEDP announcement, target discovery) already loops over these lists.
+        self.local_writers.append(rtps_host.WriterConfig(
+            topic_name=spec.TOPIC_ACTUATOR_STATE,
+            type_name=spec.TYPE_ACTUATOR_STATE,
+            reliable=False,
+            entity_index=len(self.local_writers),
+        ))
+        self.local_readers.append(rtps_host.ReaderConfig(
+            topic_name=spec.TOPIC_ACTUATOR_COMMAND,
+            type_name=spec.TYPE_ACTUATOR_COMMAND,
+            reliable=False,
+            entity_index=len(self.local_readers),
+        ))
+
+    def apply_actuator_command(self, req_id: int, actuator_id: int, steps: int) -> int:
+        """Judge one request from the HMI and return the RESULT_* verdict.
+
+        Clamping lives here rather than on the HMI for the same reason it lives
+        on a real MCB: one board owns the position, so there is only ever one
+        opinion about whether a move is allowed.
+        """
+        self.actuator_req_id = req_id
+        self.actuator_dirty = True
+        if not 0 <= actuator_id < len(spec.ACTUATORS):
+            self.actuator_result = spec.ACTUATOR_RESULT_UNKNOWN_ID
+            return self.actuator_result
+
+        actuator = spec.ACTUATORS[actuator_id]
+        override = self.actuator_reject[actuator_id]
+        if override is not None:
+            self.actuator_result = override
+            return self.actuator_result
+
+        current = self.actuator_values[actuator_id]
+        target = current + steps * actuator.step
+        if target < actuator.min_value:
+            # Report the limit rather than moving part way. A partial move
+            # would leave the HMI showing a number the user did not ask for
+            # and no indication that anything was refused.
+            self.actuator_result = spec.ACTUATOR_RESULT_AT_MIN
+        elif target > actuator.max_value:
+            self.actuator_result = spec.ACTUATOR_RESULT_AT_MAX
+        else:
+            self.actuator_values[actuator_id] = target
+            self.actuator_result = spec.ACTUATOR_RESULT_OK
+        return self.actuator_result
+
+    def publish_actuator_state(self) -> None:
+        """Send the whole actuator state, as a reply and as the heartbeat."""
+        if not self.local_writers or len(self.local_writers) < 2:
+            return
+        writer = self.local_writers[1]
+        payload = self.build_data_message(
+            writer,
+            spec.pack_actuator_state(self.actuator_values, self.actuator_req_id,
+                                     self.actuator_result, self.actuator_seq),
+        )
+        for destination in self._build_user_targets(writer):
+            self.send_user_datagram(payload, destination)
+        self.actuator_seq = (self.actuator_seq + 1) & 0xFF
+        self.actuator_dirty = False
+
     def handle_user_packet(self, packet: bytes, sender_ip: str, sender_port: int) -> None:
-        """Capture joystick samples; everything else falls through to the base."""
+        """Capture joystick samples and actuator requests."""
         for guid_prefix, writer_id, payload, reader_id in rtps_host.parse_rtps_data_messages(
             packet
         ):
-            if self.topic_for_sample(guid_prefix, writer_id, reader_id) != spec.TOPIC_JOYSTICK_ADC:
-                continue
-            sample = spec.unpack_adc_xy_twist(payload)
-            if sample is not None:
-                self.joystick = sample
+            topic = self.topic_for_sample(guid_prefix, writer_id, reader_id)
+            if topic == spec.TOPIC_JOYSTICK_ADC:
+                sample = spec.unpack_adc_xy_twist(payload)
+                if sample is not None:
+                    self.joystick = sample
+            elif topic == spec.TOPIC_ACTUATOR_COMMAND:
+                command = spec.unpack_actuator_command(payload)
+                if command is None:
+                    continue
+                req_id, actuator_id, steps = command
+                result = self.apply_actuator_command(req_id, actuator_id, steps)
+                name = (spec.ACTUATORS[actuator_id].short
+                        if 0 <= actuator_id < len(spec.ACTUATORS) else f"#{actuator_id}")
+                rtps_host.log(
+                    f"[actuator] req {req_id}: {name} {steps:+d} step -> "
+                    f"{spec.ACTUATOR_RESULT_NAMES.get(result, '?')}"
+                )
+                # Answer immediately. The periodic republish below is the
+                # convergence path, not the reply path.
+                self.publish_actuator_state()
 
     @property
     def center_y(self) -> float:
@@ -154,6 +255,10 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
         """Called by the harness run loop every --period seconds."""
         if self.paused:
             return
+        # Actuator state rides the same tick. Republished even when unchanged,
+        # so a joystick that just booted or just reconnected learns where the
+        # actuators are without the user having to press anything.
+        self.publish_actuator_state()
         # Advance the emulated speed on real elapsed time. Clamped so a long
         # gap (a pause, a breakpoint) cannot lurch the number across its range
         # in a single step.

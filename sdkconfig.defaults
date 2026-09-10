@@ -112,10 +112,14 @@ CONFIG_LV_DEF_REFR_PERIOD=16
 #
 # NOT re-enabling the image cache. Measured: 176.0 -> 175.5 ms (~1%), because the
 # cost is ThorVG RASTERIZING the vectors, not parsing them -- caching the parsed
-# render list does not avoid the rasterization. It also allocates from INTERNAL
-# RAM, not PSRAM: CMakeLists forces LV_USE_STDLIB_MALLOC=LV_STDLIB_CLIB, and
-# CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384 keeps the decoder's many small nodes
-# internal. A 4 MB budget against ~400 KB of free internal RAM is a latent OOM.
+# render list does not avoid the rasterization. So it is still not worth it.
+#
+# The OOM half of this argument no longer applies: it said the decoder's many
+# small nodes land in internal RAM because CMakeLists forces
+# LV_USE_STDLIB_MALLOC=LV_STDLIB_CLIB and ALWAYSINTERNAL was 16384. That knob is
+# 512 now (see the internal RAM split below), so those nodes would go to PSRAM
+# and a 4 MB budget is no longer a latent OOM. The ~1% is the reason to leave it
+# off, not the memory.
 
 # --- Rendering performance (step 2: PPA draw unit) ---
 # LVGL 9.5 ships an Espressif PPA draw unit that runs rect fills and RGB565
@@ -166,3 +170,39 @@ CONFIG_LV_PERF_MONITOR_ALIGN_TOP_RIGHT=y
 # Next thing to try: whether LVGL's bundled ThorVG sets an explicit pthread attr
 # stack size of its own, or drop LV_USE_THORVG entirely (the only runtime SVG
 # left is the BootScreen logo; other SVGs are already pre-rasterized to PNG).
+
+# --- Internal RAM split (measured; see the table below) ---
+# Two knobs that only make sense together. The P4 has ~500 KB of internal SRAM
+# and 32 MB of PSRAM; what goes where decides both whether the board boots with
+# Ethernet attached and how fast LVGL renders.
+#
+# ALWAYSINTERNAL is the size below which malloc() PREFERS internal RAM. At the
+# 16384 default that is every LVGL allocation, so ui_init's ~118 KB of widgets
+# and styles landed in internal RAM and stayed there. Internal was then full by
+# the time the RTPS participant started, and LVGL's per-frame draw allocations
+# spilled to PSRAM instead -- exactly backwards. The widget tree is touched
+# once per object per frame; the draw buffers are touched per pixel.
+#
+# RESERVE_INTERNAL is a pool held back from ordinary malloc for requests that
+# can ONLY be served from internal RAM. The W5500's SPI transactions need a
+# DMA-capable bounce buffer allocated late -- after ui_init and after the RTPS
+# participant -- and spi_master does not check that allocation for NULL. When
+# it ran dry the board took a load access fault in memcpy and boot-looped ~13 s
+# in, as soon as DHCP handed out an address. Lowering ALWAYSINTERNAL puts MORE
+# buffers in PSRAM and so needs MORE bounce buffers, which is the second reason
+# this is raised rather than left at its 32768 default.
+#
+# Measured with a full-screen invalidate every 10 ms, steady state after RTPS
+# start (render = CPU time to draw a frame, excluding the vsync wait):
+#
+#   reserve  always  | render    internal free  result
+#   32768    4096    |    --           --       BOOT LOOP (DMA pool dry)
+#   65536    16384   |  142 ms      25.7 KB     no crash, visibly laggy
+#   32768    512     | 85.7 ms      37.4 KB     ok
+#   65536    512     | 85.7 ms      37.4 KB     ok  <- chosen
+#
+# 512 rather than 0 so genuinely tiny allocations stay internal. The two 512
+# rows perform identically, so the larger reserve is free headroom against the
+# boot loop above.
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=512
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=65536

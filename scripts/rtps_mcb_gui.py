@@ -98,11 +98,24 @@ class McbPanel:
         self.config = rtps_net.load_config()
 
         root.title("RAMMP MCB simulator")
-        self._build_connection()
-        self._build_status_controls()
-        self._build_error_banner()
-        self._build_joystick()
-        self._build_cycle()
+        # The panels used to stack straight onto the root. They are on a
+        # notebook now because the actuator table is tall enough that sharing
+        # one column with everything else pushed the log off-screen. The log
+        # stays outside it: it is how you tell whether anything is working, and
+        # that should not depend on which tab is showing.
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill="both", expand=True, padx=4, pady=(4, 0))
+        status_tab = ttk.Frame(self.notebook)
+        actuator_tab = ttk.Frame(self.notebook)
+        self.notebook.add(status_tab, text="Status")
+        self.notebook.add(actuator_tab, text="Actuators")
+
+        self._build_connection(status_tab)
+        self._build_status_controls(status_tab)
+        self._build_error_banner(status_tab)
+        self._build_joystick(status_tab)
+        self._build_cycle(status_tab)
+        self._build_actuators(actuator_tab)
         self._build_log()
         root.after(TICK_MS, self._tick)
         root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -112,8 +125,8 @@ class McbPanel:
 
     # ---------------------------------------------------------------- widgets
 
-    def _build_connection(self) -> None:
-        frame = ttk.LabelFrame(self.root, text="Connection", padding=8)
+    def _build_connection(self, parent: tk.Widget) -> None:
+        frame = ttk.LabelFrame(parent, text="Connection", padding=8)
         frame.pack(fill="x", padx=8, pady=(8, 4))
 
         ttk.Label(frame, text="Board").grid(row=0, column=0, sticky="w")
@@ -158,23 +171,24 @@ class McbPanel:
             foreground="#666666",
         ).grid(row=2, column=0, columnspan=6, sticky="w", pady=(6, 0))
 
-    def _build_status_controls(self) -> None:
+    def _build_status_controls(self, parent: tk.Widget) -> None:
         self.drive_text_var = tk.StringVar()
         self.state_text_var = tk.StringVar()
         self.drive_raw_var = tk.StringVar(value=str(spec.DRIVE_STATUS_INACTIVE))
         self.state_raw_var = tk.StringVar(value=str(spec.STATE_OK))
 
         self._build_one_status(
-            "Drive status", spec.DRIVE_STATUS_NAMES, self.drive_raw_var, self.drive_text_var,
+            parent, "Drive status", spec.DRIVE_STATUS_NAMES, self.drive_raw_var, self.drive_text_var,
             self._set_drive, self._set_drive_raw,
         )
         self._build_one_status(
-            "State", spec.STATE_NAMES, self.state_raw_var, self.state_text_var,
+            parent, "State", spec.STATE_NAMES, self.state_raw_var, self.state_text_var,
             self._set_state, self._set_state_raw,
         )
 
-    def _build_one_status(self, title, names, raw_var, text_var, on_preset, on_raw) -> None:
-        frame = ttk.LabelFrame(self.root, text=title, padding=8)
+    def _build_one_status(self, parent, title, names, raw_var, text_var, on_preset,
+                          on_raw) -> None:
+        frame = ttk.LabelFrame(parent, text=title, padding=8)
         frame.pack(fill="x", padx=8, pady=4)
 
         column = 0
@@ -208,8 +222,8 @@ class McbPanel:
             frame, text=f"max {spec.MCB_TEXT_LEN - 1} chars, ASCII", foreground="#666666"
         ).grid(row=1, column=column + 2, padx=(8, 0), pady=(8, 0), sticky="w")
 
-    def _build_error_banner(self) -> None:
-        frame = ttk.LabelFrame(self.root, text="Error banner", padding=8)
+    def _build_error_banner(self, parent: tk.Widget) -> None:
+        frame = ttk.LabelFrame(parent, text="Error banner", padding=8)
         frame.pack(fill="x", padx=8, pady=4)
 
         self.error_text_var = tk.StringVar(value=DEFAULT_ERROR_TEXT)
@@ -237,9 +251,9 @@ class McbPanel:
             foreground="#666666",
         ).grid(row=2, column=0, columnspan=4, sticky="w", pady=(6, 0))
 
-    def _build_joystick(self) -> None:
+    def _build_joystick(self, parent: tk.Widget) -> None:
         """Read-only view of what the joystick is publishing back to us."""
-        frame = ttk.LabelFrame(self.root, text="Joystick (from the HMI)", padding=8)
+        frame = ttk.LabelFrame(parent, text="Joystick (from the HMI)", padding=8)
         frame.pack(fill="x", padx=8, pady=4)
 
         self.axis_bars = {}
@@ -260,8 +274,133 @@ class McbPanel:
         self.speed_label = ttk.Label(frame, text="emulated speed: 0.0")
         self.speed_label.grid(row=3, column=2, sticky="w", pady=(6, 0))
 
-    def _build_cycle(self) -> None:
-        frame = ttk.Frame(self.root, padding=(8, 4))
+    def _build_actuators(self, parent: tk.Widget) -> None:
+        """One row per actuator in the shared spec table.
+
+        The MCB owns these values, so this tab IS the MCB as far as the HMI is
+        concerned: what the entries hold is what the joystick will be told, and
+        the reject dropdown is how a refusal the bench cannot otherwise produce
+        (an interlock, a stalled motor) gets in front of the HMI.
+        """
+        frame = ttk.LabelFrame(parent, text="Actuator values (the MCB owns these)", padding=8)
+        frame.pack(fill="x", padx=8, pady=4)
+
+        for column, heading in enumerate(("", "Actuator", "Value", "Range", "Next request")):
+            ttk.Label(frame, text=heading, foreground="#666666").grid(
+                row=0, column=column, sticky="w", padx=4, pady=(0, 4)
+            )
+
+        #: per-actuator widgets and vars, indexed to match spec.ACTUATORS
+        self.actuator_value_vars: list[tk.StringVar] = []
+        self.actuator_entries: list[ttk.Entry] = []
+        self.actuator_reject_vars: list[tk.StringVar] = []
+
+        # "accept" plus every refusal the spec names, so a new RESULT_ in the
+        # header turns up here without touching this file.
+        reject_choices = ["accept"] + [
+            name for value, name in sorted(spec.ACTUATOR_RESULT_NAMES.items())
+            if value != spec.ACTUATOR_RESULT_OK
+        ]
+
+        for index, actuator in enumerate(spec.ACTUATORS):
+            row = index + 1
+            ttk.Label(frame, text=actuator.short, width=4).grid(row=row, column=0, sticky="w",
+                                                                padx=4)
+            ttk.Label(frame, text=actuator.label, width=16).grid(row=row, column=1, sticky="w",
+                                                                 padx=4)
+
+            value_var = tk.StringVar(value="-")
+            entry = ttk.Entry(frame, textvariable=value_var, width=9, justify="right")
+            entry.grid(row=row, column=2, padx=4, pady=1)
+            # Enter applies; the tick refreshes the box only while it is not
+            # focused, so a value arriving from a joystick press cannot
+            # overwrite what someone is halfway through typing.
+            entry.bind("<Return>", lambda _event, i=index: self._set_actuator(i))
+            self.actuator_value_vars.append(value_var)
+            self.actuator_entries.append(entry)
+
+            ttk.Label(
+                frame,
+                text=f"{actuator.format(actuator.min_value)} .. "
+                     f"{actuator.format(actuator.max_value)} {actuator.unit}"
+                     f"  (step {actuator.format(actuator.step)})",
+                foreground="#666666",
+            ).grid(row=row, column=3, sticky="w", padx=4)
+
+            reject_var = tk.StringVar(value="accept")
+            ttk.Combobox(frame, textvariable=reject_var, values=reject_choices, width=11,
+                         state="readonly").grid(row=row, column=4, padx=4)
+            self.actuator_reject_vars.append(reject_var)
+
+        buttons = ttk.Frame(frame)
+        buttons.grid(row=len(spec.ACTUATORS) + 1, column=0, columnspan=5, sticky="w", pady=(8, 0))
+        ttk.Button(buttons, text="Apply values", command=self._set_all_actuators).pack(side="left")
+        ttk.Button(buttons, text="Centre all", command=self._centre_actuators).pack(side="left",
+                                                                                    padx=(8, 0))
+        ttk.Button(buttons, text="Accept all", command=self._accept_all_actuators).pack(
+            side="left", padx=(8, 0))
+        ttk.Label(
+            frame,
+            text="Values update live as the HMI's - and + requests are accepted. Set one here to "
+                 "put an actuator somewhere directly \u2014 the HMI is told on the next publish.",
+            foreground="#666666", wraplength=560, justify="left",
+        ).grid(row=len(spec.ACTUATORS) + 2, column=0, columnspan=5, sticky="w", pady=(6, 0))
+
+    def _set_actuator(self, index: int) -> None:
+        """Push one typed value into the harness, clamped to the spec range."""
+        if self.harness is None:
+            return
+        actuator = spec.ACTUATORS[index]
+        try:
+            raw = actuator.parse(self.actuator_value_vars[index].get())
+        except ValueError:
+            # Put the harness's value back rather than leaving the typo in
+            # place looking like it took effect.
+            self.actuator_value_vars[index].set(
+                actuator.format(self.harness.actuator_values[index])
+            )
+            return
+        self.harness.actuator_values[index] = raw
+        self.harness.actuator_dirty = True
+        self.root.focus_set()  # drop focus so the tick resumes refreshing the box
+
+    def _set_all_actuators(self) -> None:
+        for index in range(len(spec.ACTUATORS)):
+            self._set_actuator(index)
+
+    def _centre_actuators(self) -> None:
+        if self.harness is None:
+            return
+        for index, actuator in enumerate(spec.ACTUATORS):
+            self.harness.actuator_values[index] = (actuator.min_value + actuator.max_value) // 2
+        self.harness.actuator_dirty = True
+        self.root.focus_set()
+
+    def _accept_all_actuators(self) -> None:
+        for var in self.actuator_reject_vars:
+            var.set("accept")
+
+    def _update_actuators(self) -> None:
+        """Called from _tick: harness -> value boxes, dropdowns -> harness."""
+        if self.harness is None:
+            return
+        name_to_result = {name: value for value, name in spec.ACTUATOR_RESULT_NAMES.items()}
+        focused = self.root.focus_get()
+        for index, actuator in enumerate(spec.ACTUATORS):
+            if self.actuator_entries[index] is not focused:
+                text = actuator.format(self.harness.actuator_values[index])
+                if self.actuator_value_vars[index].get() != text:
+                    self.actuator_value_vars[index].set(text)
+            # Pushed every tick rather than on a change event: it is one
+            # assignment, and it means a dropdown set before connecting is in
+            # force the moment a harness exists.
+            choice = self.actuator_reject_vars[index].get()
+            self.harness.actuator_reject[index] = (
+                None if choice == "accept" else name_to_result.get(choice)
+            )
+
+    def _build_cycle(self, parent: tk.Widget) -> None:
+        frame = ttk.Frame(parent, padding=(8, 4))
         frame.pack(fill="x")
 
         self.cycle_button = ttk.Button(frame, text="Start cycle", command=self._toggle_cycle)
@@ -658,6 +797,7 @@ class McbPanel:
             # publisher's own tick cannot double-integrate.
             self.harness.step_speed()
             self._update_joystick()
+            self._update_actuators()
             targets = max(0, self.harness.announced_targets)
             paused = " PAUSED" if self.harness.paused else ""
             self.status_label.configure(

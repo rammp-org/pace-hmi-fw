@@ -82,6 +82,10 @@ constexpr std::string_view kAdcTopic = RAMMP_TOPIC_JOYSTICK_ADC;
 constexpr std::string_view kAdcTypeName = RAMMP_TYPE_ADC_XY_TWIST;
 constexpr std::string_view kMcbStatusTopic = RAMMP_TOPIC_MCB_STATUS;
 constexpr std::string_view kMcbStatusTypeName = RAMMP_TYPE_MCB_STATUS;
+constexpr std::string_view kActuatorCommandTopic = RAMMP_TOPIC_ACTUATOR_COMMAND;
+constexpr std::string_view kActuatorCommandTypeName = RAMMP_TYPE_ACTUATOR_COMMAND;
+constexpr std::string_view kActuatorStateTopic = RAMMP_TOPIC_ACTUATOR_STATE;
+constexpr std::string_view kActuatorStateTypeName = RAMMP_TYPE_ACTUATOR_STATE;
 
 constexpr auto kPublishPeriod = 2s;
 
@@ -113,6 +117,7 @@ std::unique_ptr<espp::Task> publish_task;
 // participant starts; called from the RTPS receive task when a sample arrives
 std::function<void(float)> brightness_handler;
 std::function<void(const rammp_mcb_status_t &)> mcb_status_handler;
+std::function<void(const rammp_actuator_state_t &)> actuator_state_handler;
 
 // UInt32 CDR helpers (little-endian CDR with the 4-byte encapsulation header,
 // the on-the-wire format DDS expects for user data). espp/cdr derives the
@@ -138,6 +143,26 @@ std::vector<uint8_t> serialize_adc(uint32_t x_mv, uint32_t y_mv, uint32_t twist_
   auto bytes =
       cdr::serialize<cdr::xcdr1>(rammp_adc_xy_twist_t{x_mv, y_mv, twist_mv, buttons, drive_mode});
   return bytes ? to_uint8(*bytes) : std::vector<uint8_t>{};
+}
+
+std::vector<uint8_t> serialize_actuator_command(uint8_t req_id, uint8_t actuator_id, int8_t steps) {
+  // Hand-written codec from the shared spec, like McbStatus and for the same
+  // reason: the MCB may be plain C with only that header to go on.
+  const rammp_actuator_command_t command{req_id, actuator_id, steps, 0};
+  std::vector<uint8_t> out(RAMMP_ACTUATOR_COMMAND_CDR_SIZE);
+  if (rammp_actuator_command_encode(&command, out.data(), out.size()) == 0) {
+    return {};
+  }
+  return out;
+}
+
+std::optional<rammp_actuator_state_t>
+deserialize_actuator_state(std::span<const uint8_t> cdr_payload) {
+  rammp_actuator_state_t state{};
+  if (!rammp_actuator_state_decode(cdr_payload.data(), cdr_payload.size(), &state)) {
+    return std::nullopt;
+  }
+  return state;
 }
 
 std::optional<rammp_mcb_status_t> deserialize_mcb_status(std::span<const uint8_t> cdr_payload) {
@@ -369,6 +394,15 @@ bool start_participant() {
   logger.info("Creating RTPS participant '{}' (interface {})", kNodeName, ip_address);
   // lwIP allocates TX pbufs from internal DRAM; if this is low, sends to a
   // not-yet-ARP-resolved peer fail with ENOMEM
+  // DMA-capable free, logged next to the internal figure because it is the one
+  // that actually bites here and the two are not interchangeable. The W5500's
+  // SPI transactions need a DMA bounce buffer allocated AFTER this point, and
+  // spi_master does not check the allocation for NULL - it boot-looped on a
+  // load access fault when this pool ran dry. If this number is small, raise
+  // CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL rather than hunting the symptom.
+  logger.info("DMA-capable heap: {} free, {} largest block",
+              heap_caps_get_free_size(MALLOC_CAP_DMA),
+              heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
   logger.info("Internal heap: {} free, {} largest block",
               heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
               heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
@@ -519,6 +553,47 @@ bool start_participant() {
   }
   logger.info("Added reader '{}' [{}]", kMcbStatusTopic, kMcbStatusTypeName);
 
+  // Actuator requests out, actuator state in. The HMI owns neither the values
+  // nor the decision to change them — see rammp_rtps_spec.h.
+  if (!participant->add_writer({
+          .topic = std::string(kActuatorCommandTopic),
+          .type_name = std::string(kActuatorCommandTypeName),
+          .reliability = espp::RtpsParticipant::Reliability::BEST_EFFORT,
+      })) {
+    logger.error("Failed to add writer for '{}'", kActuatorCommandTopic);
+    return false;
+  }
+  logger.info("Added writer '{}' [{}]", kActuatorCommandTopic, kActuatorCommandTypeName);
+
+  if (!participant->add_reader({
+          .topic = std::string(kActuatorStateTopic),
+          .type_name = std::string(kActuatorStateTypeName),
+          .reliability = espp::RtpsParticipant::Reliability::BEST_EFFORT,
+          .on_sample =
+              [](std::span<const uint8_t> cdr) {
+                auto state = deserialize_actuator_state(cdr);
+                if (!state) {
+                  logger.warn("Received sample on '{}' that failed CDR decode",
+                              kActuatorStateTopic);
+                  return;
+                }
+                // Logged only when the verdict is not a plain OK: this topic
+                // republishes every RAMMP_ACTUATOR_STATE_PERIOD_MS, so logging
+                // every sample would bury everything else.
+                if (state->result != RAMMP_ACTUATOR_RESULT_OK) {
+                  logger.info("Actuator request {} -> {}", state->req_id,
+                              rammp_actuator_result_name(state->result));
+                }
+                if (actuator_state_handler) {
+                  actuator_state_handler(*state);
+                }
+              },
+      })) {
+    logger.error("Failed to add reader for '{}'", kActuatorStateTopic);
+    return false;
+  }
+  logger.info("Added reader '{}' [{}]", kActuatorStateTopic, kActuatorStateTypeName);
+
   logger.info("RTPS participant '{}' up on {} (domain fixed at build time)", kNodeName, ip_address);
   logger.info("Publishing '{}' every {} s, listening on '{}'", kCounterTopic,
               std::chrono::duration_cast<std::chrono::seconds>(kPublishPeriod).count(), kCmdTopic);
@@ -573,6 +648,10 @@ void rtps_comms_on_mcb_status(std::function<void(const rammp_mcb_status_t &)> ha
   mcb_status_handler = std::move(handler);
 }
 
+void rtps_comms_on_actuator_state(std::function<void(const rammp_actuator_state_t &)> handler) {
+  actuator_state_handler = std::move(handler);
+}
+
 RtpsLinkState rtps_comms_link_state() {
   if (eth_failed) {
     return RtpsLinkState::ETH_FAILED;
@@ -588,6 +667,16 @@ RtpsLinkState rtps_comms_link_state() {
     return RtpsLinkState::CONNECTED;
   }
   return RtpsLinkState::NO_PEER;
+}
+
+bool rtps_comms_publish_actuator_command(uint8_t req_id, uint8_t actuator_id, int8_t steps) {
+  // Same quiet-no-op guards as the ADC publisher: a button press with no link
+  // is not an error worth logging on every repeat of a held key.
+  if (!participant || !participant->is_started() || !peer_matched) {
+    return false;
+  }
+  return participant->publish(kActuatorCommandTopic,
+                              serialize_actuator_command(req_id, actuator_id, steps));
 }
 
 bool rtps_comms_publish_adc(uint32_t x_mv, uint32_t y_mv, uint32_t twist_mv, uint32_t buttons,
