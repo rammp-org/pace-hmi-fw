@@ -45,24 +45,10 @@ TWIST_RATE = 2.2
 #: Radians per second of steering at full lock, at full speed. Scaled by speed
 #: so the car cannot pirouette while stopped — that is what twist is for.
 STEER_RATE = 2.0
-#: Fraction of full deflection below which an axis counts as centred.
-DEADZONE = 0.15
 #: World units between road centre lines.
 ROAD_SPACING = 400.0
 #: Width of a road in world units.
 ROAD_WIDTH = 110.0
-
-
-def _deflection(value_mv: float, center_mv: float) -> float:
-    """Signed -1..+1 deflection of one axis, with the deadzone applied."""
-    half_scale = spec.JOYSTICK_FULL_SCALE_MV / 2.0
-    raw = (value_mv - center_mv) / half_scale
-    if abs(raw) < DEADZONE:
-        return 0.0
-    # Rescale so the axis starts from zero at the edge of the deadzone rather
-    # than jumping to DEADZONE's worth of input the moment it is crossed.
-    scaled = (abs(raw) - DEADZONE) / (1.0 - DEADZONE)
-    return math.copysign(min(scaled, 1.0), raw)
 
 
 class CarModel:
@@ -83,11 +69,6 @@ class CarModel:
         #: Last deflections applied, for the window to display.
         self.inputs = (0.0, 0.0, 0.0)
         self._last_update: Optional[float] = None
-        # Measured resting position of each axis. A real stick does not rest at
-        # the spec's nominal centre (1506 mV against 1650 on this board), and an
-        # uncorrected offset makes the deadzone lopsided.
-        self._center = [float(spec.JOYSTICK_CENTER_MV)] * 3
-        self._center_samples = 0
 
     @property
     def max_speed(self) -> float:
@@ -97,16 +78,6 @@ class CarModel:
     def speed_tenths(self) -> int:
         """The number the HMI shows, derived from the car rather than beside it."""
         return max(0, min(int(round(self.speed * 10)), spec.SPEED_MAX_TENTHS))
-
-    def note_center_sample(self, x_mv: int, y_mv: int, twist_mv: int, samples: int) -> bool:
-        """Fold one at-rest sample into the measured centre. True while learning."""
-        if self._center_samples >= samples:
-            return False
-        n = self._center_samples
-        for index, value in enumerate((x_mv, y_mv, twist_mv)):
-            self._center[index] = (self._center[index] * n + value) / (n + 1)
-        self._center_samples += 1
-        return True
 
     def update(self, sample: Optional[tuple], drive_mode: Optional[int] = None) -> None:
         """Advance the car to now, given the latest joystick sample."""
@@ -119,15 +90,11 @@ class CarModel:
         self._last_update = now
         if sample is None or dt <= 0.0:
             return
-        x_mv, y_mv, twist_mv = sample[0], sample[1], sample[2]
         if drive_mode is not None:
             self.drive_mode = drive_mode
 
-        # X: right on the stick reads above centre. Y: forward reads BELOW
-        # centre (see the spec header), so it is negated to make "push" positive.
-        steer = _deflection(x_mv, self._center[0])
-        throttle = -_deflection(y_mv, self._center[1])
-        twist = _deflection(twist_mv, self._center[2])
+        # Already -1..+1, centred and deadzoned by the HMI: +x right, +y forward.
+        steer, throttle, twist = sample[0], sample[1], sample[2]
         self.inputs = (steer, throttle, twist)
 
         # Twist is independent of drive mode: it always spins the chair in place.

@@ -44,21 +44,17 @@ extern "C" {
 #define RAMMP_TOPIC_MCB_STATUS "rammp/mcb/status"
 #define RAMMP_TYPE_MCB_STATUS "rammp/msg/McbStatus"
 
-/** joystick -> MCB: raw stick position, one sample per ADC cycle (~30 Hz). */
+/** joystick -> MCB: stick position, one sample per ADC cycle (~30 Hz). */
 #define RAMMP_TOPIC_JOYSTICK_ADC "rammp/joystick/adc"
 #define RAMMP_TYPE_ADC_XY_TWIST "rammp/msg/AdcXYTwist"
 
-/* The joystick publishes RAW millivolts, deliberately: the firmware's own
-   calibration is measured from this stream, so it must not arrive pre-cooked.
-   A consumer needs these two numbers to interpret it. Centre is the resting
-   position of every axis, full scale is the supply, so deflection on any axis
-   runs +/- (FULL_SCALE / 2).
+/* Each axis arrives normalized to -1.0 .. +1.0, already calibrated by the HMI:
+   0 at rest, deadzones applied (a radial one on the X/Y gimbal, its own on
+   twist) and X/Y clamped to the unit circle. The MCB uses the numbers as they
+   are; it needs no centre, range or deadzone of its own.
 
-   Sign: pushing the stick FORWARD makes the vertical axis read BELOW centre.
-   The firmware's range mapper inverts on the way to its own UI, but that
-   inversion is not applied to what goes on the wire. */
-#define RAMMP_JOYSTICK_CENTER_MV 1650
-#define RAMMP_JOYSTICK_FULL_SCALE_MV 3300
+   Sign: +x = stick RIGHT, +y = stick FORWARD, +twist = the direction the twist
+   pot's voltage rises. */
 
 /** Bits in rammp_adc_xy_twist_t.buttons. */
 #define RAMMP_BUTTON_JOYSTICK 0x00000001u
@@ -271,20 +267,22 @@ static inline bool rammp_mcb_status_decode(const uint8_t *in, size_t in_size,
   return true;
 }
 
-/** joystick -> MCB stick position in millivolts, plus button state.
- *  Wire size: 16 bytes. Serialized by reflection (every field is uint32),
- *  not by a hand-written codec like McbStatus. */
+/** joystick -> MCB stick position, normalized -1..+1 (see RAMMP_TOPIC_JOYSTICK_ADC),
+ *  plus button state. Wire size: 24 bytes including the encapsulation header.
+ *  Serialized by reflection (every field is 4 bytes, so no padding), not by a
+ *  hand-written codec like McbStatus. The floats are IEEE-754 binary32,
+ *  little-endian like everything else here. */
 typedef struct rammp_adc_xy_twist {
-  uint32_t x_mv;
-  uint32_t y_mv;
-  uint32_t twist_mv;
+  float x;             /**< -1 left .. +1 right */
+  float y;             /**< -1 back .. +1 forward */
+  float twist;         /**< -1 .. +1 */
   uint32_t buttons;    /**< bitfield of RAMMP_BUTTON_*; bit set = pressed */
   uint32_t drive_mode; /**< one of RAMMP_DRIVE_MODE_*, chosen on the HMI */
 } rammp_adc_xy_twist_t;
 /* NOTE: this message has outgrown the name "AdcXYTwist" — it now carries button
-   and drive-mode state as well as the raw axes. Worth renaming to JoystickState
-   on the next change that touches both ends anyway; not done here to avoid
-   churning the topic name for a field addition. */
+   and drive-mode state, and calibrated axes rather than ADC readings. Worth renaming to
+   JoystickState on the next change that touches both ends anyway; not done here to avoid churning
+   the topic name for a field addition. */
 
 /* -------------------------------------------------------------------------
  * Actuators
@@ -302,8 +300,8 @@ typedef struct rammp_adc_xy_twist {
  * too - keep new entries on one line in that shape.
  *
  * Values are raw integers in the actuator's own units, scaled by `decimals`
- * for display only: 2500 with decimals=1 shows as "250.0". Nothing on the wire
- * is floating point, so there is no float format for the two boards to agree
+ * for display only: 2500 with decimals=1 shows as "250.0". Nothing in these
+ * messages is floating point, so there is no float format for the two boards to agree
  * on, and min/max/step stay exact.
  * ---------------------------------------------------------------------- */
 

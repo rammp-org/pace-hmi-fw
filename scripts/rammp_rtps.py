@@ -240,11 +240,15 @@ def unpack_actuator_state(payload: bytes) -> tuple[int, int, int, list[int]] | N
     return (req_id, result, seq, list(fields[4:4 + count]))
 
 
-def unpack_adc_xy_twist(payload: bytes) -> tuple[int, int, int, int, int] | None:
-    """(x_mv, y_mv, twist_mv, buttons, drive_mode) from the joystick sample."""
+def unpack_adc_xy_twist(payload: bytes) -> tuple[float, float, float, int, int] | None:
+    """(x, y, twist, buttons, drive_mode) from the joystick sample.
+
+    Axes are -1..+1, calibrated by the HMI: +x right, +y forward, deadzones
+    already applied (see RAMMP_TOPIC_JOYSTICK_ADC in the spec header).
+    """
     if len(payload) < 24 or payload[:2] != CDR_LE_HEADER[:2]:
         return None
-    return struct.unpack_from("<IIIII", payload, 4)
+    return struct.unpack_from("<fffII", payload, 4)
 
 
 # ------------------------------------------------------------------ self test

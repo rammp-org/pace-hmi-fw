@@ -92,11 +92,11 @@ void rtps_comms_on_selftest_pong(std::function<void(uint16_t seq, int peer_rx)> 
 bool rtps_comms_publish_selftest_ping(uint16_t seq);
 bool rtps_comms_publish_selftest_report(const rammp_selftest_report_t &report);
 
-/// Publish one joystick ADC snapshot (millivolts) on RAMMP_TOPIC_JOYSTICK_ADC.
-/// Safe to call from any task; returns false (without logging) until the
-/// participant is running and a subscriber on the topic has been discovered.
-bool rtps_comms_publish_adc(uint32_t x_mv, uint32_t y_mv, uint32_t twist_mv, uint32_t buttons,
-                            uint32_t drive_mode);
+/// Publish one calibrated joystick sample (each axis -1..+1) on
+/// RAMMP_TOPIC_JOYSTICK_ADC. Safe to call from any task; returns false (without
+/// logging) until the participant is running and a subscriber on the topic has
+/// been discovered.
+bool rtps_comms_publish_adc(float x, float y, float twist, uint32_t buttons, uint32_t drive_mode);
 
 /// Bring up Ethernet, then start the RTPS participant + publish task in the
 /// background as soon as DHCP assigns an IP (no timeout — also covers a cable

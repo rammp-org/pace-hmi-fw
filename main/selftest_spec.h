@@ -93,7 +93,7 @@ enum {
  *            ~7 ms a frame). Depends on which screen is up, so compare runs
  *            started from the same place.
  *
- * joy.*      Nominal rest is RAMMP_JOYSTICK_CENTER_MV = 1650; real sticks rest
+ * joy.*      Raw ADC mV. Nominal rest is 1650 (half the 3300 mV supply); real sticks rest
  *            up to ~150 mV away (1506 mV on the bench board), hence the width
  *            of the *_rest windows. The twist pot is on ADC2, sampled oneshot:
  *            ~60 mV peak-to-peak where X/Y read ~1 mV.

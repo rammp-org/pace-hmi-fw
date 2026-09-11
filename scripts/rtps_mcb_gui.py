@@ -834,23 +834,17 @@ class McbPanel:
                 self.axis_labels[axis].configure(text="no data")
             self.button_label.configure(text="button: no data")
             return
-        x_mv, y_mv, twist_mv, buttons = sample[0], sample[1], sample[2], sample[3]
-        half_scale = spec.JOYSTICK_FULL_SCALE_MV / 2.0
-        # Shown against the spec's nominal centre, not the measured one: the
-        # standing offset of a real stick is worth seeing rather than hiding.
-        # Only the speed emulation corrects for it.
-        for axis, mv in (("X", x_mv), ("Y", y_mv), ("Twist", twist_mv)):
-            deflection = (mv - spec.JOYSTICK_CENTER_MV) / half_scale
-            self.axis_bars[axis]["value"] = max(0, min(100, 50 + deflection * 50))
-            self.axis_labels[axis].configure(text=f"{mv:4d} mV  ({deflection:+.2f})")
+        x, y, twist, buttons = sample[0], sample[1], sample[2], sample[3]
+        # Already -1..+1 and calibrated on the HMI (+Y forward).
+        for axis, value in (("X", x), ("Y", y), ("Twist", twist)):
+            self.axis_bars[axis]["value"] = max(0, min(100, 50 + value * 50))
+            self.axis_labels[axis].configure(text=f"{value:+.2f}")
         mode = spec.DRIVE_MODE_NAMES.get(sample[4] if len(sample) > 4 else None, "?")
         pressed = bool(buttons & spec.BUTTON_JOYSTICK)
         self.button_label.configure(
             text=f"button: {'PRESSED' if pressed else 'released'}   mode: {mode}")
         self.speed_label.configure(
-            text=f"emulated speed: {self.harness.speed_tenths / 10:.1f}"
-                 f"   (Y rest {self.harness.center_y:.0f} mV)"
-        )
+            text=f"emulated speed: {self.harness.speed_tenths / 10:.1f}")
 
     def _on_close(self) -> None:
         self._disconnect()

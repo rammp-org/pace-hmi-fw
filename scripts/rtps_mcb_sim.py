@@ -55,11 +55,6 @@ SPEED_FULL_TRAVEL_SECONDS = 3.0
 #: firmware has its own, tighter deadzone; this one only has to stop a resting
 #: stick from drifting the number.
 SPEED_DEADZONE = 0.15
-#: Samples averaged after connecting to establish where the stick actually
-#: rests. About half a second at the firmware's 30 Hz publish rate — long
-#: enough to average out ADC noise, short enough that it is over before anyone
-#: has touched the stick.
-CENTER_SAMPLE_COUNT = 15
 
 
 class McbStatusPublisher(rtps_host.RtpsHostHarness):
@@ -80,7 +75,8 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
         # this; the CLI just leaves it at zero.
         self.speed_tenths = 0
         # Latest joystick sample: (x, y, twist, buttons, drive_mode), or None.
-        self.joystick: tuple[int, int, int, int, int] | None = None
+        # Axes are -1..+1, already calibrated by the HMI.
+        self.joystick: tuple[float, float, float, int, int] | None = None
         # The chair being simulated. It is the single source of speed: what the
         # Tab5 displays is read straight off it, so the number on the screen and
         # the car in the drive view cannot disagree. Accepted from the caller so
@@ -91,14 +87,6 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
         # instead of being lost to integer rounding every step.
         self._speed = 0.0
         self._last_speed_step = time.monotonic()
-        # Measured resting position of the vertical axis. The spec's nominal
-        # centre assumes an ideal divider; a real stick sits somewhere near it
-        # (1506 mV against a nominal 1650 on the bench board). Left uncorrected
-        # that standing offset makes the deadzone lopsided — pulling back would
-        # trip far sooner than pushing forward — so take the first samples after
-        # connecting, while the stick is at rest, as the true zero.
-        self._center_y: float | None = None
-        self._center_samples = 0
         self.seq = 0
         self.announced_targets = -1
         # Stop publishing without tearing the participant down, so the HMI's
@@ -315,12 +303,6 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
                 # convergence path, not the reply path.
                 self.publish_actuator_state()
 
-    @property
-    def center_y(self) -> float:
-        """Measured resting position of the vertical axis, or the spec nominal
-        until enough samples have arrived to establish it."""
-        return self._center_y if self._center_y is not None else spec.JOYSTICK_CENTER_MV
-
     def step_speed(self, _dt: float = 0.0) -> None:
         """Advance the simulated chair and take its speed.
 
@@ -331,9 +313,6 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
         """
         if self.joystick is None:
             return
-        x_mv, y_mv, twist_mv = self.joystick[0], self.joystick[1], self.joystick[2]
-        if self.car.note_center_sample(x_mv, y_mv, twist_mv, CENTER_SAMPLE_COUNT):
-            return  # still learning where the stick rests; do not drive on it yet
         drive_mode = self.joystick[4] if len(self.joystick) > 4 else None
         self.car.update(self.joystick, drive_mode)
         self.speed_tenths = self.car.speed_tenths

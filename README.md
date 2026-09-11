@@ -142,6 +142,6 @@ The MCB is the master and owns the vehicle state; the HMI is a slave that displa
 | topic | type | direction and payload |
 | --- | --- | --- |
 | `rammp/mcb/status` | `rammp/msg/McbStatus` | MCB → HMI: drive status, system state, speed, plus optional label and error-banner text overrides |
-| `rammp/joystick/adc` | `rammp/msg/AdcXYTwist` | HMI → MCB: raw X/Y/twist millivolts, button bits and the selected drive mode, ~30 Hz |
+| `rammp/joystick/adc` | `rammp/msg/AdcXYTwist` | HMI → MCB: X/Y/twist normalized to -1..+1 (float32), button bits and the selected drive mode, ~30 Hz |
 
-Both are best-effort with no durability and serialize as classic little-endian CDR: a 4-byte encapsulation header followed by the fields in declaration order. `McbStatus` must be republished every 500 ms even when nothing changed — after 2 s of silence the HMI treats the link as lost and greys out the labels. Joystick values are deliberately raw millivolts (1650 centre, 3300 full scale); calibration is the consumer's job.
+Both are best-effort with no durability and serialize as classic little-endian CDR: a 4-byte encapsulation header followed by the fields in declaration order. `McbStatus` must be republished every 500 ms even when nothing changed — after 2 s of silence the HMI treats the link as lost and greys out the labels. Joystick axes arrive already calibrated by the HMI (0 at rest, deadzones applied, +X right, +Y forward), so the MCB uses them as-is.

@@ -3442,9 +3442,10 @@ extern "C" void app_main(void) {
   adc.start();
   static espp::OneshotAdc twist_adc({.unit = ADC_UNIT_2, .channels = {twist_channel}});
 
-  // Joystick calibration. These are the numbers to tune per unit: run
-  // scripts/rtps_adc_plot.py, note the resting mV of each axis and the mV at
-  // full deflection each way, and put them here. The values below are the
+  // Joystick calibration. These are the numbers to tune per unit: note the
+  // resting mV of each axis and the mV at full deflection each way from the
+  // serial log (the commented-out print at the bottom of the ADC task — RTPS
+  // carries the calibrated values, not mV), and put them here. The values below are the
   // ideal-divider defaults (0-3300 mV, centered) and WILL be off on real
   // hardware.
   //
@@ -3546,15 +3547,10 @@ extern "C" void app_main(void) {
         lv_subject_set_int(&adc_twist_subject, static_cast<int32_t>(stick.z() * 100.0f));
       }
 
-      // stream the RAW snapshot to the PC (rtps_adc_plot.py); this is what the
-      // calibration constants above get measured from, so it stays in mV.
-      // Ordered by logical axis (X = horizontal, Y = vertical) to match the
-      // rest of the code, but the values are untouched: the vertical trace
-      // still falls as the stick moves up, since invert_output is applied by
-      // the mapper, not here.
+      // send the MCB the same calibrated -1..+1 values the bars show (+Y
+      // forward, deadzones applied), so it needs no calibration of its own.
       // quiet no-op until RTPS is up and a subscriber is discovered
-      auto to_mv = [](float v) { return static_cast<uint32_t>(std::max(v, 0.0f)); };
-      adc_published = rtps_comms_publish_adc(to_mv(*horiz_mv), to_mv(*vert_mv), to_mv(*twist_mv),
+      adc_published = rtps_comms_publish_adc(stick.x(), stick.y(), stick.z(),
                                              joy_button_pressed.load() ? RAMMP_BUTTON_JOYSTICK : 0u,
                                              drive_mode_published.load());
     }
