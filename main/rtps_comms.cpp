@@ -774,6 +774,38 @@ RtpsLinkState rtps_comms_link_state() {
   return RtpsLinkState::NO_PEER;
 }
 
+const char *rtps_comms_link_state_name(RtpsLinkState state) {
+  switch (state) {
+  case RtpsLinkState::ETH_FAILED:
+    return "ETH_FAILED";
+  case RtpsLinkState::LINK_DOWN:
+    return "LINK_DOWN";
+  case RtpsLinkState::NO_IP:
+    return "NO_IP";
+  case RtpsLinkState::NO_PEER:
+    return "NO_PEER";
+  case RtpsLinkState::CONNECTED:
+    return "CONNECTED";
+  }
+  return "?";
+}
+
+std::string rtps_comms_link_state_meaning(RtpsLinkState state) {
+  switch (state) {
+  case RtpsLinkState::ETH_FAILED:
+    return "W5500 did not answer at boot";
+  case RtpsLinkState::LINK_DOWN:
+    return "no Ethernet link: cable unplugged?";
+  case RtpsLinkState::NO_IP:
+    return "link up, but no DHCP lease";
+  case RtpsLinkState::NO_PEER:
+    return fmt::format("MCB not answering: no McbStatus in {} ms", RAMMP_MCB_STATUS_TIMEOUT_MS);
+  case RtpsLinkState::CONNECTED:
+    return "McbStatus arriving";
+  }
+  return "?";
+}
+
 bool rtps_comms_publish_actuator_command(uint8_t req_id, uint8_t actuator_id, int8_t steps) {
   // Same quiet-no-op guards as the ADC publisher: a button press with no link
   // is not an error worth logging on every repeat of a held key.

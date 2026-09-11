@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <string>
 
 #include "rammp_rtps_spec.h"
 
@@ -35,6 +36,13 @@ enum class RtpsLinkState {
 /// matching an endpoint does not mean anyone is publishing, so live samples
 /// inside RAMMP_MCB_STATUS_TIMEOUT_MS are the only honest evidence of a peer.
 RtpsLinkState rtps_comms_link_state();
+
+/// The enum name, for logs ("NO_PEER").
+const char *rtps_comms_link_state_name(RtpsLinkState state);
+
+/// What the state means for whoever reads it: the likely cause, not the enum
+/// name. Shared by the link-change log and the self-test report.
+std::string rtps_comms_link_state_meaning(RtpsLinkState state);
 
 /// Register the handler invoked when a brightness command (percent, clamped
 /// to 0-100) arrives on the brightness topic. Call before rtps_comms_start().

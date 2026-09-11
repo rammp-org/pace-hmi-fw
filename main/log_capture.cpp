@@ -159,14 +159,15 @@ uint32_t log_capture_count() {
   return count;
 }
 
-void log_capture_visit(const std::function<void(LogLevel, std::string_view)> &visit) {
+uint32_t log_capture_visit(const std::function<void(LogLevel, std::string_view)> &visit) {
   std::lock_guard<std::mutex> lock(ring_mutex);
   if (ring == nullptr) {
-    return;
+    return 0;
   }
   const uint32_t kept = std::min<uint32_t>(count, kLogCaptureLines);
   for (uint32_t i = count - kept; i < count; ++i) {
     const Line &line = ring[i % kLogCaptureLines];
     visit(line.level, std::string_view(line.text, line.len));
   }
+  return count;
 }

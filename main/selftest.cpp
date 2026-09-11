@@ -255,24 +255,6 @@ void on_pong(uint16_t seq, int peer_rx) {
   }
 }
 
-// What each link state means for whoever is reading the report: the likely
-// cause, not the enum name.
-std::string link_state_meaning(RtpsLinkState state) {
-  switch (state) {
-  case RtpsLinkState::ETH_FAILED:
-    return "W5500 did not answer at boot";
-  case RtpsLinkState::LINK_DOWN:
-    return "no Ethernet link: cable unplugged?";
-  case RtpsLinkState::NO_IP:
-    return "link up, but no DHCP lease";
-  case RtpsLinkState::NO_PEER:
-    return fmt::format("MCB not answering: no McbStatus in {} ms", RAMMP_MCB_STATUS_TIMEOUT_MS);
-  case RtpsLinkState::CONNECTED:
-    return "McbStatus arriving";
-  }
-  return "?";
-}
-
 const char *reset_reason_name(esp_reset_reason_t reason) {
   switch (reason) {
   case ESP_RST_POWERON:
@@ -485,7 +467,7 @@ private:
       // re-probe of an empty list passes by doing nothing.
       std::vector<uint8_t> now;
       std::string found;
-      for (uint8_t address = 1; address < 128; ++address) {
+      for (uint8_t address = 0x08; address <= 0x77; ++address) { // non-reserved, as at boot
         if (platform.i2c_probe(address)) {
           now.push_back(address);
           found += fmt::format(" {:02x}", address);
@@ -571,7 +553,7 @@ private:
   void check_network() {
     const RtpsLinkState state = rtps_comms_link_state();
     const auto rank = static_cast<int>(state);
-    const std::string detail = link_state_meaning(state);
+    const std::string detail = rtps_comms_link_state_meaning(state);
     // ranks: ETH_FAILED < LINK_DOWN < NO_IP < NO_PEER < CONNECTED
     // the cause goes on the row that fails, not on every row: "McbStatus
     // arriving" beside a passing Ethernet link only muddies what it proves

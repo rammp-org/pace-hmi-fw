@@ -589,8 +589,32 @@ static void speed_label_observer(lv_observer_t *observer, lv_subject_t *subject)
 // the redundant fills straight back.
 static void strip_all_overdraw();
 
+// Every change of the link state goes to the serial log, and so to the
+// LogScreen: the TopBar shows where the link is now, the log keeps when it
+// changed. Warnings on the way down, info on the way up.
+static void log_link_change(RtpsLinkState state) {
+  static espp::Logger link_logger({.tag = "rtps_link", .level = espp::Logger::Verbosity::INFO});
+  static std::optional<RtpsLinkState> last;
+  if (last == state) {
+    return;
+  }
+  const std::string meaning = rtps_comms_link_state_meaning(state);
+  if (!last) {
+    link_logger.info("{} ({})", rtps_comms_link_state_name(state), meaning);
+  } else if (state > *last) {
+    link_logger.info("{} -> {} ({})", rtps_comms_link_state_name(*last),
+                     rtps_comms_link_state_name(state), meaning);
+  } else {
+    link_logger.warn("{} -> {} ({})", rtps_comms_link_state_name(*last),
+                     rtps_comms_link_state_name(state), meaning);
+  }
+  last = state;
+}
+
 static void rtps_poll_cb(lv_timer_t *) {
-  lv_subject_set_int(&rtps_link_subject, static_cast<int32_t>(rtps_comms_link_state()));
+  const RtpsLinkState state = rtps_comms_link_state();
+  log_link_change(state);
+  lv_subject_set_int(&rtps_link_subject, static_cast<int32_t>(state));
   static uint32_t ticks = 0;
   // flip every other tick: a 500 ms half-period, i.e. a 1 Hz blink
   lv_subject_set_int(&rtps_blink_subject, static_cast<int32_t>((++ticks / 2) & 1u));
@@ -2311,7 +2335,9 @@ extern "C" void app_main(void) {
   logger.info("Probing internal I2C bus...");
   auto &i2c = tab5.internal_i2c();
   std::vector<uint8_t> found_addresses;
-  for (uint8_t address = 1; address < 128; address++) {
+  // 0x08..0x77 only: the rest are reserved, and a glitched ACK there once put
+  // 0x01 in this list, which the self test then reported as a lost device.
+  for (uint8_t address = 0x08; address <= 0x77; address++) {
     if (i2c.probe_device(address)) {
       found_addresses.push_back(address);
     }
@@ -3209,7 +3235,12 @@ extern "C" void app_main(void) {
        },
        .task_config = {
            .name = "lv_task",
-           .stack_size_bytes = 32 * 1024,
+           // Measured peak ~6 KB (self test mem.stk_lvgl: 26964 B of 32 KB
+           // never used). The stack is internal DMA-capable RAM, which RTPS
+           // start-up runs dry on: at 32 KB the W5500 driver's bounce buffer
+           // failed to allocate and the board boot-looped. mem.stk_lvgl
+           // guards the headroom.
+           .stack_size_bytes = 16 * 1024,
            .priority = 20,
            .core_id = 1,
        }});

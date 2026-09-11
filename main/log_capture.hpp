@@ -39,5 +39,6 @@ bool log_capture_active();
 uint32_t log_capture_count();
 
 /// Visit the lines kept, oldest first. Holds the ring's lock throughout, so
-/// `visit` must be quick and must not print.
-void log_capture_visit(const std::function<void(LogLevel, std::string_view)> &visit);
+/// `visit` must be quick and must not print. Returns log_capture_count() as of
+/// the lines visited.
+uint32_t log_capture_visit(const std::function<void(LogLevel, std::string_view)> &visit);

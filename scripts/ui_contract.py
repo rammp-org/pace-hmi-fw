@@ -75,6 +75,8 @@ PARENTS: dict[str, str] = {
 
     # LogScreen: log_view.cpp points this text area at the captured serial log
     "ui_TextArea1": "ui_LogScreenPanelInner",
+    "ui_GoToOldestButton": "ui_LogScreenPanel",
+    "ui_GoToNewestButton": "ui_LogScreenPanel",
 
     # RDScreen PIN entry
     "ui_SeatFunctionsButtonsPanel1": "ui_SeatAdjustmentScreenFlexPanel1",
@@ -123,6 +125,8 @@ LABELS: dict[str, str] = {
     "ui_ButtonLabel6": "R&D SELF TEST",   # the row that starts the self test
     "ui_FPSCounterLabel": "FPS COUNTER",
     "ui_HapticTestLabel": "HAPTIC TEST",
+    "ui_GoToOldestButtonLabel": "Oldest",   # log_view.cpp: scroll to the top
+    "ui_GoToNewestButtonLabel": "Newest",   # log_view.cpp: scroll to the end
     # the four live seat functions, in the order seat_buttons_grid expects
     "ui_SeatButtonLabel1": "Elevation",
     "ui_SeatButtonLabel2": "Real Tilt",
