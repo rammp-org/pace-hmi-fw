@@ -1,3 +1,3 @@
-[submodule "components/rammp-rtps"]
-	path = components/rammp-rtps
+[submodule "external/rammp-rtps"]
+	path = external/rammp-rtps
 	url = git@github.com:rammp-org/rammp-rtps.git

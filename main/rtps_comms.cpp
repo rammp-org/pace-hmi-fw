@@ -31,7 +31,9 @@
 
 #include "cdr.hpp"
 #include "logger.hpp"
+#include "messages/joystic_message.hpp"
 #include "rtps_participant.hpp"
+#include "rtps_pubsub.hpp"
 #include "task.hpp"
 
 using namespace std::chrono_literals;
@@ -80,6 +82,8 @@ constexpr std::string_view kBrightnessTopic = RAMMP_TOPIC_HMI_BRIGHTNESS;
 constexpr std::string_view kUInt32TypeName = RAMMP_TYPE_UINT32;
 constexpr std::string_view kAdcTopic = RAMMP_TOPIC_JOYSTICK_ADC;
 constexpr std::string_view kAdcTypeName = RAMMP_TYPE_ADC_XY_TWIST;
+constexpr std::string_view kXYTwistTopic = RAMMP_TOPIC_JOYSTICK_XY_TWIST;
+constexpr std::string_view kXYTwistTypeName = RAMMP_TYPE_XY_TWIST;
 constexpr std::string_view kMcbStatusTopic = RAMMP_TOPIC_MCB_STATUS;
 constexpr std::string_view kMcbStatusTypeName = RAMMP_TYPE_MCB_STATUS;
 
@@ -107,6 +111,7 @@ std::string ip_address;
 esp_netif_ip_info_t ip_info{}; // valid once got_ip is true (gateway used for the ping test)
 
 std::unique_ptr<espp::RtpsParticipant> participant;
+std::unique_ptr<espp::Publisher<rammp_xy_twist_t>> xy_twist_publisher;
 std::unique_ptr<espp::Task> publish_task;
 
 // set by rtps_comms_on_brightness() / rtps_comms_on_mcb_status() before the
@@ -417,6 +422,17 @@ bool start_participant() {
     return false;
   }
   logger.info("Added writer '{}' [{}]", kAdcTopic, kAdcTypeName);
+  xy_twist_publisher = std::make_unique<espp::Publisher<rammp_xy_twist_t>>(
+      *participant, espp::Publisher<rammp_xy_twist_t>::Config{
+                        .topic = std::string(kXYTwistTopic),
+                        .type_name = std::string(kXYTwistTypeName),
+                        .reliability = espp::RtpsParticipant::Reliability::BEST_EFFORT,
+                    });
+  if (!xy_twist_publisher->is_valid()) {
+    logger.error("Failed to add writer for '{}'", kXYTwistTopic);
+    return false;
+  }
+  logger.info("Added typed publisher '{}' [{}]", kXYTwistTopic, kXYTwistTypeName);
   if (!participant->add_reader({
           .topic = std::string(kCmdTopic),
           .type_name = std::string(kUInt32TypeName),
@@ -603,6 +619,18 @@ bool rtps_comms_publish_adc(uint32_t x_mv, uint32_t y_mv, uint32_t twist_mv, uin
   }
   // publish() is internally mutex-guarded, safe alongside the counter task
   return participant->publish(kAdcTopic, serialize_adc(x_mv, y_mv, twist_mv, buttons, drive_mode));
+}
+
+bool rtps_comms_publish_xy_twist(float x, float y, float twist, uint32_t buttons,
+                                 uint32_t drive_mode) {
+  if (!participant || !participant->is_started() || !xy_twist_publisher ||
+      !xy_twist_publisher->is_valid()) {
+    return false;
+  }
+  if (!peer_matched) {
+    return false;
+  }
+  return xy_twist_publisher->publish(rammp_xy_twist_t{x, y, twist, buttons, drive_mode});
 }
 
 bool rtps_comms_start() {

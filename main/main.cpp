@@ -2496,9 +2496,11 @@ extern "C" void app_main(void) {
       // the mapper, not here.
       // quiet no-op until RTPS is up and a subscriber is discovered
       auto to_mv = [](float v) { return static_cast<uint32_t>(std::max(v, 0.0f)); };
+      const uint32_t buttons = joy_button_pressed.load() ? RAMMP_BUTTON_JOYSTICK : 0u;
+      const uint32_t drive_mode = drive_mode_published.load();
       rtps_comms_publish_adc(to_mv(*horiz_mv), to_mv(*vert_mv), to_mv(*twist_mv),
-                             joy_button_pressed.load() ? RAMMP_BUTTON_JOYSTICK : 0u,
-                             drive_mode_published.load());
+                             buttons, drive_mode);
+      rtps_comms_publish_xy_twist(stick.x(), stick.y(), stick.z(), buttons, drive_mode);
     }
 
     if (log_this_cycle) {
