@@ -76,7 +76,7 @@ void ui_SeatAdjustmentFlexScreen_screen_init(void)
     //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
 
     ui_SeatAdjustmentScreenFlexPanel = lv_obj_create(ui_SeatAdjustmentFlexScreen);
-    lv_obj_set_width(ui_SeatAdjustmentScreenFlexPanel, 760);
+    lv_obj_set_width(ui_SeatAdjustmentScreenFlexPanel, 720);
     lv_obj_set_height(ui_SeatAdjustmentScreenFlexPanel, LV_SIZE_CONTENT);    /// 923
     lv_obj_set_x(ui_SeatAdjustmentScreenFlexPanel, 0);
     lv_obj_set_y(ui_SeatAdjustmentScreenFlexPanel, 195);
@@ -89,16 +89,19 @@ void ui_SeatAdjustmentFlexScreen_screen_init(void)
                        LV_OBJ_FLAG_SCROLL_CHAIN);     /// Flags
     lv_obj_set_scrollbar_mode(ui_SeatAdjustmentScreenFlexPanel, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_scroll_dir(ui_SeatAdjustmentScreenFlexPanel, LV_DIR_HOR);
-    lv_obj_set_scroll_snap_x(ui_SeatAdjustmentScreenFlexPanel, LV_SCROLL_SNAP_START);
     ui_object_set_themeable_style_property(ui_SeatAdjustmentScreenFlexPanel, LV_PART_MAIN | LV_STATE_DEFAULT,
                                            LV_STYLE_BG_COLOR, _ui_theme_color_background);
     ui_object_set_themeable_style_property(ui_SeatAdjustmentScreenFlexPanel, LV_PART_MAIN | LV_STATE_DEFAULT,
                                            LV_STYLE_BG_OPA, _ui_theme_alpha_background);
     lv_obj_set_style_border_side(ui_SeatAdjustmentScreenFlexPanel, LV_BORDER_SIDE_NONE, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_SeatAdjustmentScreenFlexPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_SeatAdjustmentScreenFlexPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_SeatAdjustmentScreenFlexPanel, 20, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_SeatAdjustmentScreenFlexPanel, 20, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_SeatFunctionsButtonsPanel = lv_obj_create(ui_SeatAdjustmentScreenFlexPanel);
     lv_obj_set_width(ui_SeatFunctionsButtonsPanel, 720);
-    lv_obj_set_height(ui_SeatFunctionsButtonsPanel, 1050);
+    lv_obj_set_height(ui_SeatFunctionsButtonsPanel, 900);
     lv_obj_set_align(ui_SeatFunctionsButtonsPanel, LV_ALIGN_TOP_MID);
     lv_obj_set_flex_flow(ui_SeatFunctionsButtonsPanel, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(ui_SeatFunctionsButtonsPanel, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);

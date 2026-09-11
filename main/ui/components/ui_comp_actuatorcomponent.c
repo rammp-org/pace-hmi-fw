@@ -113,7 +113,7 @@ lv_obj_t * ui_ActuatorComponent_create(lv_obj_t * comp_parent)
     lv_obj_t * cui_ValueContainer1;
     cui_ValueContainer1 = lv_obj_create(cui_ActuatorComponent);
     lv_obj_remove_style_all(cui_ValueContainer1);
-    lv_obj_set_width(cui_ValueContainer1, 136);
+    lv_obj_set_width(cui_ValueContainer1, 200);
     lv_obj_set_height(cui_ValueContainer1, 98);
     lv_obj_set_align(cui_ValueContainer1, LV_ALIGN_CENTER);
     lv_obj_add_state(cui_ValueContainer1, LV_STATE_FOCUSED);       /// States
@@ -121,7 +121,7 @@ lv_obj_t * ui_ActuatorComponent_create(lv_obj_t * comp_parent)
 
     lv_obj_t * cui_ActuatorShortLabel1;
     cui_ActuatorShortLabel1 = lv_label_create(cui_ValueContainer1);
-    lv_obj_set_width(cui_ActuatorShortLabel1, 130);
+    lv_obj_set_width(cui_ActuatorShortLabel1, 200);
     lv_obj_set_height(cui_ActuatorShortLabel1, LV_SIZE_CONTENT);    /// 98
     lv_obj_set_align(cui_ActuatorShortLabel1, LV_ALIGN_CENTER);
     lv_label_set_long_mode(cui_ActuatorShortLabel1, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
@@ -131,7 +131,7 @@ lv_obj_t * ui_ActuatorComponent_create(lv_obj_t * comp_parent)
                                            _ui_theme_color_text);
     ui_object_set_themeable_style_property(cui_ActuatorShortLabel1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
                                            _ui_theme_alpha_text);
-    lv_obj_set_style_text_align(cui_ActuatorShortLabel1, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_align(cui_ActuatorShortLabel1, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(cui_ActuatorShortLabel1, &ui_font_IBMPlexSansMedium53, LV_PART_MAIN | LV_STATE_DEFAULT);
     ui_object_set_themeable_style_property(cui_ActuatorShortLabel1, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_background);

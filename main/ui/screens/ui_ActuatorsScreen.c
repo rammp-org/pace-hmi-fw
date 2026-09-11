@@ -35,13 +35,13 @@ void ui_ActuatorsScreen_screen_init(void)
     //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
 
     ui_RDScreenFlexPanel = lv_obj_create(ui_ActuatorsScreen);
-    lv_obj_set_width(ui_RDScreenFlexPanel, 760);
+    lv_obj_set_width(ui_RDScreenFlexPanel, 720);
     lv_obj_set_height(ui_RDScreenFlexPanel, LV_SIZE_CONTENT);    /// 923
     lv_obj_set_x(ui_RDScreenFlexPanel, 0);
     lv_obj_set_y(ui_RDScreenFlexPanel, 195);
     lv_obj_set_align(ui_RDScreenFlexPanel, LV_ALIGN_TOP_MID);
     lv_obj_set_flex_flow(ui_RDScreenFlexPanel, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(ui_RDScreenFlexPanel, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(ui_RDScreenFlexPanel, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER);
     lv_obj_add_flag(ui_RDScreenFlexPanel, LV_OBJ_FLAG_SCROLL_WITH_ARROW | LV_OBJ_FLAG_SCROLL_ONE);     /// Flags
     lv_obj_remove_flag(ui_RDScreenFlexPanel,
                        LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM |
@@ -57,7 +57,7 @@ void ui_ActuatorsScreen_screen_init(void)
 
     ui_RDScreenFlexPanelInner = lv_obj_create(ui_RDScreenFlexPanel);
     lv_obj_set_width(ui_RDScreenFlexPanelInner, 720);
-    lv_obj_set_height(ui_RDScreenFlexPanelInner, 1050);
+    lv_obj_set_height(ui_RDScreenFlexPanelInner, 900);
     lv_obj_set_align(ui_RDScreenFlexPanelInner, LV_ALIGN_TOP_MID);
     lv_obj_set_flex_flow(ui_RDScreenFlexPanelInner, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(ui_RDScreenFlexPanelInner, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
@@ -90,7 +90,7 @@ void ui_ActuatorsScreen_screen_init(void)
 
     ui_ActuatorsFlexPanel = lv_obj_create(ui_RDScreenFlexPanelInner);
     lv_obj_set_width(ui_ActuatorsFlexPanel, 720);
-    lv_obj_set_height(ui_ActuatorsFlexPanel, 850);
+    lv_obj_set_height(ui_ActuatorsFlexPanel, 900);
     lv_obj_set_x(ui_ActuatorsFlexPanel, 0);
     lv_obj_set_y(ui_ActuatorsFlexPanel, -37);
     lv_obj_set_align(ui_ActuatorsFlexPanel, LV_ALIGN_TOP_MID);
@@ -112,9 +112,9 @@ void ui_ActuatorsScreen_screen_init(void)
     lv_obj_set_style_pad_column(ui_ActuatorsFlexPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_object_set_themeable_style_property(ui_ActuatorsFlexPanel, LV_PART_SCROLLBAR | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
-                                           _ui_theme_color_text);
+                                           _ui_theme_color_background);
     ui_object_set_themeable_style_property(ui_ActuatorsFlexPanel, LV_PART_SCROLLBAR | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
-                                           _ui_theme_alpha_text);
+                                           _ui_theme_alpha_background);
 
     ui_ActuatorComponent = ui_ActuatorComponent_create(ui_ActuatorsFlexPanel);
     lv_obj_set_x(ui_ActuatorComponent, 0);

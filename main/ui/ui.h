@@ -38,6 +38,7 @@ extern "C" {
 #include "screens/ui_SeatAdjustmentFlexScreen.h"
 #include "screens/ui_RDScreen.h"
 #include "screens/ui_ActuatorsScreen.h"
+#include "screens/ui_LogScreen.h"
 
 ///////////////////// VARIABLES ////////////////////
 

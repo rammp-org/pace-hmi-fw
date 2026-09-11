@@ -12,12 +12,15 @@ lv_obj_t * ui_StatusPanel_create(lv_obj_t * comp_parent)
 
     lv_obj_t * cui_StatusPanel;
     cui_StatusPanel = lv_obj_create(comp_parent);
-    lv_obj_set_width(cui_StatusPanel, 722);
+    lv_obj_set_width(cui_StatusPanel, 720);
     lv_obj_set_height(cui_StatusPanel, 130);
     lv_obj_set_x(cui_StatusPanel, 0);
     lv_obj_set_y(cui_StatusPanel, 50);
     lv_obj_set_align(cui_StatusPanel, LV_ALIGN_TOP_MID);
-    lv_obj_remove_flag(cui_StatusPanel, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_flex_flow(cui_StatusPanel, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(cui_StatusPanel, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER);
+    lv_obj_remove_flag(cui_StatusPanel, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_ELASTIC |
+                       LV_OBJ_FLAG_SCROLL_MOMENTUM | LV_OBJ_FLAG_SCROLL_CHAIN);     /// Flags
     lv_obj_set_style_radius(cui_StatusPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     ui_object_set_themeable_style_property(cui_StatusPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
                                            _ui_theme_color_background);
@@ -27,10 +30,12 @@ lv_obj_t * ui_StatusPanel_create(lv_obj_t * comp_parent)
     lv_obj_set_style_border_opa(cui_StatusPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_border_width(cui_StatusPanel, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_border_side(cui_StatusPanel, LV_BORDER_SIDE_NONE, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(cui_StatusPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(cui_StatusPanel, -1, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     lv_obj_t * cui_StatusPanelLeft;
     cui_StatusPanelLeft = lv_obj_create(cui_StatusPanel);
-    lv_obj_set_width(cui_StatusPanelLeft, 500);
+    lv_obj_set_width(cui_StatusPanelLeft, 502);
     lv_obj_set_height(cui_StatusPanelLeft, 130);
     lv_obj_set_x(cui_StatusPanelLeft, -20);
     lv_obj_set_y(cui_StatusPanelLeft, 0);
@@ -72,7 +77,7 @@ lv_obj_t * ui_StatusPanel_create(lv_obj_t * comp_parent)
 
     lv_obj_t * cui_StatusPanelRight;
     cui_StatusPanelRight = lv_obj_create(cui_StatusPanel);
-    lv_obj_set_width(cui_StatusPanelRight, 223);
+    lv_obj_set_width(cui_StatusPanelRight, 222);
     lv_obj_set_height(cui_StatusPanelRight, 130);
     lv_obj_set_x(cui_StatusPanelRight, 479);
     lv_obj_set_y(cui_StatusPanelRight, 0);

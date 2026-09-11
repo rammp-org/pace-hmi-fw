@@ -40,13 +40,13 @@ void ui_RDScreen_screen_init(void)
     //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
 
     ui_SeatAdjustmentScreenFlexPanel1 = lv_obj_create(ui_RDScreen);
-    lv_obj_set_width(ui_SeatAdjustmentScreenFlexPanel1, 760);
+    lv_obj_set_width(ui_SeatAdjustmentScreenFlexPanel1, 720);
     lv_obj_set_height(ui_SeatAdjustmentScreenFlexPanel1, LV_SIZE_CONTENT);    /// 923
     lv_obj_set_x(ui_SeatAdjustmentScreenFlexPanel1, 0);
     lv_obj_set_y(ui_SeatAdjustmentScreenFlexPanel1, 195);
     lv_obj_set_align(ui_SeatAdjustmentScreenFlexPanel1, LV_ALIGN_TOP_MID);
     lv_obj_set_flex_flow(ui_SeatAdjustmentScreenFlexPanel1, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(ui_SeatAdjustmentScreenFlexPanel1, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
+    lv_obj_set_flex_align(ui_SeatAdjustmentScreenFlexPanel1, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_CENTER);
     lv_obj_add_flag(ui_SeatAdjustmentScreenFlexPanel1,
                     LV_OBJ_FLAG_SCROLL_WITH_ARROW | LV_OBJ_FLAG_SCROLL_ONE);     /// Flags
@@ -64,7 +64,7 @@ void ui_RDScreen_screen_init(void)
 
     ui_SeatFunctionsButtonsPanel1 = lv_obj_create(ui_SeatAdjustmentScreenFlexPanel1);
     lv_obj_set_width(ui_SeatFunctionsButtonsPanel1, 720);
-    lv_obj_set_height(ui_SeatFunctionsButtonsPanel1, 1050);
+    lv_obj_set_height(ui_SeatFunctionsButtonsPanel1, 900);
     lv_obj_set_align(ui_SeatFunctionsButtonsPanel1, LV_ALIGN_TOP_MID);
     lv_obj_set_flex_flow(ui_SeatFunctionsButtonsPanel1, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(ui_SeatFunctionsButtonsPanel1, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);

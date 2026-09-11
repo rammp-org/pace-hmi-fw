@@ -46,8 +46,8 @@ lv_obj_t * ui_Button6 = NULL;
 lv_obj_t * ui_ButtonLabel6 = NULL;
 lv_obj_t * ui_Button1 = NULL;
 lv_obj_t * ui_ButtonLabel1 = NULL;
-lv_obj_t * ui_Button2 = NULL;
-lv_obj_t * ui_ButtonLabel2 = NULL;
+lv_obj_t * ui_SystemLogsButton = NULL;
+lv_obj_t * ui_SystemLogsButtonLabel = NULL;
 lv_obj_t * ui_FPSCounterButton = NULL;
 lv_obj_t * ui_FPSCounterLabel = NULL;
 lv_obj_t * ui_HapticTestButton = NULL;
@@ -96,6 +96,15 @@ void ui_event_Button1(lv_event_t * e)
 
     if(event_code == LV_EVENT_CLICKED) {
         _ui_screen_change(&ui_RDScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0, &ui_RDScreen_screen_init);
+    }
+}
+
+void ui_event_SystemLogsButton(lv_event_t * e)
+{
+    lv_event_code_t event_code = lv_event_get_code(e);
+
+    if(event_code == LV_EVENT_CLICKED) {
+        _ui_screen_change(&ui_LogScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0, &ui_LogScreen_screen_init);
     }
 }
 
@@ -665,42 +674,42 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_style_text_align(ui_ButtonLabel1, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(ui_ButtonLabel1, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_Button2 = lv_button_create(ui_SettingsFlexPanel);
-    lv_obj_set_width(ui_Button2, 620);
-    lv_obj_set_height(ui_Button2, 100);
-    lv_obj_set_x(ui_Button2, 0);
-    lv_obj_set_y(ui_Button2, 340);
-    lv_obj_set_align(ui_Button2, LV_ALIGN_TOP_MID);
-    lv_obj_add_flag(ui_Button2, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
-    lv_obj_remove_flag(ui_Button2, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_radius(ui_Button2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_Button2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+    ui_SystemLogsButton = lv_button_create(ui_SettingsFlexPanel);
+    lv_obj_set_width(ui_SystemLogsButton, 620);
+    lv_obj_set_height(ui_SystemLogsButton, 100);
+    lv_obj_set_x(ui_SystemLogsButton, 0);
+    lv_obj_set_y(ui_SystemLogsButton, 340);
+    lv_obj_set_align(ui_SystemLogsButton, LV_ALIGN_TOP_MID);
+    lv_obj_add_flag(ui_SystemLogsButton, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
+    lv_obj_remove_flag(ui_SystemLogsButton, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_radius(ui_SystemLogsButton, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_SystemLogsButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
                                            _ui_theme_color_background);
-    ui_object_set_themeable_style_property(ui_Button2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+    ui_object_set_themeable_style_property(ui_SystemLogsButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
                                            _ui_theme_alpha_background);
-    ui_object_set_themeable_style_property(ui_Button2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
+    ui_object_set_themeable_style_property(ui_SystemLogsButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
                                            _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_Button2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
+    ui_object_set_themeable_style_property(ui_SystemLogsButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
                                            _ui_theme_alpha_text);
-    lv_obj_set_style_border_width(ui_Button2, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_Button2, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_BORDER_COLOR,
+    lv_obj_set_style_border_width(ui_SystemLogsButton, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_SystemLogsButton, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_BORDER_COLOR,
                                            _ui_theme_color_focused);
-    ui_object_set_themeable_style_property(ui_Button2, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_BORDER_OPA,
+    ui_object_set_themeable_style_property(ui_SystemLogsButton, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_BORDER_OPA,
                                            _ui_theme_alpha_focused);
 
-    ui_ButtonLabel2 = lv_label_create(ui_Button2);
-    lv_obj_set_width(ui_ButtonLabel2, 540);
-    lv_obj_set_height(ui_ButtonLabel2, 50);
-    lv_obj_set_x(ui_ButtonLabel2, 20);
-    lv_obj_set_y(ui_ButtonLabel2, 0);
-    lv_obj_set_align(ui_ButtonLabel2, LV_ALIGN_LEFT_MID);
-    lv_label_set_text(ui_ButtonLabel2, "SOFTWARE UPDATE");
-    ui_object_set_themeable_style_property(ui_ButtonLabel2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+    ui_SystemLogsButtonLabel = lv_label_create(ui_SystemLogsButton);
+    lv_obj_set_width(ui_SystemLogsButtonLabel, 540);
+    lv_obj_set_height(ui_SystemLogsButtonLabel, 50);
+    lv_obj_set_x(ui_SystemLogsButtonLabel, 20);
+    lv_obj_set_y(ui_SystemLogsButtonLabel, 0);
+    lv_obj_set_align(ui_SystemLogsButtonLabel, LV_ALIGN_LEFT_MID);
+    lv_label_set_text(ui_SystemLogsButtonLabel, "SYSTEM LOGS");
+    ui_object_set_themeable_style_property(ui_SystemLogsButtonLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_ButtonLabel2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+    ui_object_set_themeable_style_property(ui_SystemLogsButtonLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
                                            _ui_theme_alpha_text);
-    lv_obj_set_style_text_align(ui_ButtonLabel2, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_ButtonLabel2, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_align(ui_SystemLogsButtonLabel, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_SystemLogsButtonLabel, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_FPSCounterButton = lv_button_create(ui_SettingsFlexPanel);
     lv_obj_set_width(ui_FPSCounterButton, 620);
@@ -805,7 +814,7 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_x(ui_ButtonLabel7, 20);
     lv_obj_set_y(ui_ButtonLabel7, 0);
     lv_obj_set_align(ui_ButtonLabel7, LV_ALIGN_LEFT_MID);
-    lv_label_set_text(ui_ButtonLabel7, "ABOUT3");
+    lv_label_set_text(ui_ButtonLabel7, "SOFTWARE UPDATE");
     ui_object_set_themeable_style_property(ui_ButtonLabel7, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_text);
     ui_object_set_themeable_style_property(ui_ButtonLabel7, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
@@ -1081,6 +1090,7 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_add_event_cb(ui_Button10, ui_event_Button10, LV_EVENT_ALL, NULL);
     lv_obj_add_event_cb(ui_Button5, ui_event_Button5, LV_EVENT_ALL, NULL);
     lv_obj_add_event_cb(ui_Button1, ui_event_Button1, LV_EVENT_ALL, NULL);
+    lv_obj_add_event_cb(ui_SystemLogsButton, ui_event_SystemLogsButton, LV_EVENT_ALL, NULL);
 
 }
 
@@ -1130,8 +1140,8 @@ void ui_MainScreenFlex_screen_destroy(void)
     ui_ButtonLabel6 = NULL;
     ui_Button1 = NULL;
     ui_ButtonLabel1 = NULL;
-    ui_Button2 = NULL;
-    ui_ButtonLabel2 = NULL;
+    ui_SystemLogsButton = NULL;
+    ui_SystemLogsButtonLabel = NULL;
     ui_FPSCounterButton = NULL;
     ui_FPSCounterLabel = NULL;
     ui_HapticTestButton = NULL;
