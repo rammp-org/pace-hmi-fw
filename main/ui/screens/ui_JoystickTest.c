@@ -75,8 +75,14 @@ void ui_JoystickTest_screen_init(void)
     lv_obj_set_height(ui_AxesPanel, 280);
     lv_obj_set_align(ui_AxesPanel, LV_ALIGN_CENTER);
     lv_obj_remove_flag(ui_AxesPanel, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_bg_color(ui_AxesPanel, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(ui_AxesPanel, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_AxesPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_AxesPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_AxesPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_AxesPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
+                                           _ui_theme_alpha_text);
 
     ui_XBar = lv_bar_create(ui_AxesPanel);
     lv_bar_set_value(ui_XBar, 50, LV_ANIM_OFF);
@@ -180,6 +186,10 @@ void ui_JoystickTest_screen_init(void)
                                            _ui_theme_color_background);
     ui_object_set_themeable_style_property(ui_ButtonPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
                                            _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_ButtonPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_ButtonPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
+                                           _ui_theme_alpha_text);
 
     ui_ButtonCounter = lv_label_create(ui_ButtonPanel);
     lv_obj_set_width(ui_ButtonCounter, LV_SIZE_CONTENT);   /// 1

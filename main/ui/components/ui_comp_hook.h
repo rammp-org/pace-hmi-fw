@@ -10,6 +10,7 @@
 extern "C" {
 #endif
 
+void ui_comp_ActuatorComponent_create_hook(lv_obj_t * comp);
 void ui_comp_ArrowsPanel_create_hook(lv_obj_t * comp);
 void ui_comp_ErrorWarningPanel_create_hook(lv_obj_t * comp);
 void ui_comp_ExitBarPress_create_hook(lv_obj_t * comp);
@@ -18,7 +19,6 @@ void ui_comp_ExitBarPushLeft_create_hook(lv_obj_t * comp);
 void ui_comp_StatusPanel_create_hook(lv_obj_t * comp);
 void ui_comp_TopBar_create_hook(lv_obj_t * comp);
 void ui_comp_UnlockArc_create_hook(lv_obj_t * comp);
-void ui_comp_ActuatorComponent_create_hook(lv_obj_t * comp);
 
 #ifdef __cplusplus
 } /*extern "C"*/
