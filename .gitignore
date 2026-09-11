@@ -33,6 +33,7 @@
 build/
 sdkconfig
 sdkconfig.old
+dependencies.lock
 managed_components/
 
 # precompiled/ is build output, not source. Every `idf.py build` refreshes it (see the
