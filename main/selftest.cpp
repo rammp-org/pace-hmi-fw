@@ -175,6 +175,11 @@ bool ui_ready = false;
 // DMA-capable pool the W5500 depends on - for a panel that is up a few times a
 // day. The subjects and their PSRAM text outlive them. LVGL lock held.
 lv_obj_t *overlay_panel = nullptr;
+// Stands in for the panel while the render check has it hidden: a blinking
+// "Timing screen redraws" strip, so the vanishing panel does not look like a
+// crash. Built and deleted with the panel. 0/1 in ui_banner_subject.
+lv_obj_t *overlay_banner = nullptr;
+lv_subject_t ui_banner_subject;
 void create_overlay_locked();
 // mirrors of ui state readable from any task without the LVGL lock
 std::atomic<bool> ui_shown{false};
@@ -499,10 +504,15 @@ private:
     }
 
     const auto vbat = platform.battery_mv ? platform.battery_mv() : std::nullopt;
-    if (vbat) {
-      record(ST_PWR_VBAT, *vbat);
+    if (!vbat) {
+      unmeasurable(ST_PWR_VBAT, "battery monitor did not answer");
+    } else if (*vbat < 5000) {
+      // no 2S pack reads this low (pwr.vbat in selftest_spec.h); the raw
+      // reading goes in the detail, because the bench unit flips between this
+      // and a full pack on one boot
+      unmeasurable(ST_PWR_VBAT, fmt::format("reads {} mV: taken as no pack fitted", *vbat));
     } else {
-      unmeasurable(ST_PWR_VBAT, "no battery present");
+      record(ST_PWR_VBAT, *vbat);
     }
   }
 
@@ -750,7 +760,7 @@ private:
     // Measured with the overlay hidden: it is a full-screen opaque panel of
     // recoloured text, and LVGL still draws the screen beneath it, so timing
     // with it up measures this test rather than the UI.
-    overlay_shown(false);
+    render_banner(true);
     uint64_t total_us = 0;
     uint32_t max_us = 0;
     uint32_t frames = 0;
@@ -775,7 +785,7 @@ private:
       frames++;
       vTaskDelay(pdMS_TO_TICKS(20));
     }
-    overlay_shown(true);
+    render_banner(false);
     if (frames == 0) {
       unmeasurable(ST_TIME_RENDER_AVG, "no frame rendered");
       unmeasurable(ST_TIME_RENDER_MAX, "no frame rendered");
@@ -929,14 +939,16 @@ private:
     ui_shown = true;
   }
 
-  // Hides or reshows the panel without ending the run: ui_shown stays set, so
-  // the joystick stays with the overlay throughout.
-  void overlay_shown(bool shown) {
+  // The render check's swap: the panel hides so the redraws timed are the UI's
+  // own, and the blinking banner shows in its place so that does not look like
+  // a crash. ui_shown stays set throughout, so the joystick stays with the test.
+  static void render_banner(bool on) {
     if (!ui_ready || !platform.lvgl_mutex) {
       return;
     }
     std::lock_guard<std::recursive_mutex> lock(*platform.lvgl_mutex);
-    lv_subject_set_int(&ui_visible_subject, shown ? 1 : 0);
+    lv_subject_set_int(&ui_visible_subject, on ? 0 : 1);
+    lv_subject_set_int(&ui_banner_subject, on ? 1 : 0);
   }
 
   void status(const std::string &text) {
@@ -1079,6 +1091,7 @@ bool prepare_overlay() {
     return false;
   }
   lv_subject_init_int(&ui_visible_subject, 0);
+  lv_subject_init_int(&ui_banner_subject, 0);
   lv_subject_init_string(&ui_title_subject, title, nullptr, kTitleLen, "");
   lv_subject_init_string(&ui_status_subject, status, nullptr, kStatusLen, "");
   for (int i = 0; i < kMaxColumns; ++i) {
@@ -1086,6 +1099,33 @@ bool prepare_overlay() {
   }
 
   return true;
+}
+
+void banner_blink_exec(void *var, int32_t value) {
+  lv_obj_set_style_opa(static_cast<lv_obj_t *>(var), static_cast<lv_opa_t>(value), LV_PART_MAIN);
+}
+
+// Blinks the banner's text while the banner is up. A hard 1 Hz on/off rather
+// than a fade: a fade redraws the strip every frame, and those frames would
+// land in the very redraw timings the banner is announcing. The animation's
+// var is the label, so LVGL deletes it with the label.
+void banner_blink_observer(lv_observer_t *observer, lv_subject_t *subject) {
+  lv_obj_t *label = lv_observer_get_target_obj(observer);
+  lv_anim_delete(label, banner_blink_exec);
+  lv_obj_set_style_opa(label, LV_OPA_COVER, LV_PART_MAIN);
+  if (lv_subject_get_int(subject) == 0) {
+    return;
+  }
+  lv_anim_t a;
+  lv_anim_init(&a);
+  lv_anim_set_var(&a, label);
+  lv_anim_set_exec_cb(&a, banner_blink_exec);
+  lv_anim_set_values(&a, LV_OPA_COVER, LV_OPA_TRANSP);
+  lv_anim_set_duration(&a, 500);
+  lv_anim_set_reverse_duration(&a, 500);
+  lv_anim_set_path_cb(&a, lv_anim_path_step);
+  lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+  lv_anim_start(&a);
 }
 
 void create_overlay_locked() {
@@ -1129,6 +1169,28 @@ void create_overlay_locked() {
     lv_label_bind_text(make_label(column, &lv_font_montserrat_24, LV_SIZE_CONTENT),
                        &ui_column_subject[i], nullptr);
   }
+
+  // The render-check banner. A transparent full-screen layer that swallows
+  // touches - the real screen shows through while the panel is hidden, but is
+  // not to be used mid-test - with a strip across the top. Transparent costs
+  // nothing to draw and the strip is small, so the redraws being timed are
+  // still essentially the UI's own.
+  lv_obj_t *guard = lv_obj_create(lv_layer_top());
+  overlay_banner = guard;
+  lv_obj_remove_style_all(guard);
+  lv_obj_set_size(guard, LV_PCT(100), LV_PCT(100));
+  lv_obj_add_flag(guard, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_remove_flag(guard, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_bind_flag_if_eq(guard, &ui_banner_subject, LV_OBJ_FLAG_HIDDEN, 0);
+  lv_obj_t *strip = make_box(guard, LV_PCT(100));
+  lv_obj_set_style_bg_color(strip, lv_color_hex(0x0B0F14), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(strip, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_pad_all(strip, kMargin, LV_PART_MAIN);
+  lv_obj_t *banner = make_label(strip, &lv_font_montserrat_34, LV_PCT(100));
+  lv_obj_set_style_text_color(banner, lv_color_hex(kColourSkip), LV_PART_MAIN);
+  lv_obj_set_style_text_align(banner, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+  lv_label_set_text(banner, "Timing screen redraws...");
+  lv_subject_add_observer_obj(&ui_banner_subject, banner_blink_observer, banner, nullptr);
 }
 
 } // namespace
@@ -1214,10 +1276,15 @@ void selftest_ui_dismiss() {
     return;
   }
   lv_subject_set_int(&ui_visible_subject, 0);
+  lv_subject_set_int(&ui_banner_subject, 0);
   ui_shown = false;
+  // async: this is often called from the panel's own click handler
   if (overlay_panel != nullptr) {
-    // async: this is often called from the panel's own click handler
     lv_obj_delete_async(overlay_panel);
     overlay_panel = nullptr;
+  }
+  if (overlay_banner != nullptr) {
+    lv_obj_delete_async(overlay_banner);
+    overlay_banner = nullptr;
   }
 }

@@ -76,6 +76,9 @@ enum {
  *            without a pack, so a reading under 5 V - one boot read 4.27 V,
  *            the bench unit's pack reads 8.39 - is taken as no pack fitted
  *            (SKIP) rather than as a pack no protection circuit would allow.
+ *            Unexplained so far: the bench unit has read 8.39 V and then under
+ *            5 V on the same boot, minutes apart. The SKIP detail carries the
+ *            raw reading so that can be chased down.
  *
  * hap.*      Not the chip's own actuator diagnostic: on the bench unit it
  *            reported DIAG_RESULT in open- and closed-loop mode alike, so it
@@ -84,9 +87,11 @@ enum {
  *            attached.
  *
  * time.render_*  RENDER_START..RENDER_READY for one full-screen invalidate,
- *            flush and vsync wait included, overlay hidden: 88 ms mean, 91 ms
- *            worst (MainScreenFlex). Depends on which screen is up, so compare
- *            runs started from the same place.
+ *            flush and vsync wait included, on MainScreenFlex with the results
+ *            panel hidden and only its small blinking banner up: 95 ms mean,
+ *            103 ms worst (88 / 91 with nothing up at all - the blink costs
+ *            ~7 ms a frame). Depends on which screen is up, so compare runs
+ *            started from the same place.
  *
  * joy.*      Nominal rest is RAMMP_JOYSTICK_CENTER_MV = 1650; real sticks rest
  *            up to ~150 mV away (1506 mV on the bench board), hence the width

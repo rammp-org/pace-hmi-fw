@@ -2995,9 +2995,10 @@ extern "C" void app_main(void) {
       },
       .battery_mv = []() -> std::optional<int32_t> {
         const auto battery = espp::M5StackTab5::get().get_battery_status();
-        // is_present only says the INA226 answered. Under 5 V is no 2S pack at
-        // all (see pwr.vbat in selftest_spec.h), so report it as absent.
-        if (!battery.is_present || battery.voltage_v < 5.0f) {
+        // is_present only says the INA226 answered. Whether the reading is a
+        // pack at all is the self test's call (pwr.vbat in selftest_spec.h),
+        // so the raw voltage goes through and can be seen in its detail.
+        if (!battery.is_present) {
           return std::nullopt;
         }
         return static_cast<int32_t>(std::lround(battery.voltage_v * 1000.0f));
