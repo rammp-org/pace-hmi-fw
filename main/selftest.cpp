@@ -77,6 +77,32 @@ std::string format_value(const Spec &s, int32_t value) {
   return s.unit[0] ? fmt::format("{} {}", value, s.unit) : fmt::format("{}", value);
 }
 
+/// format_value, shortened for the overlay's narrow columns: microseconds of a
+/// millisecond or more as ms, and byte or KB counts of ten thousand or more a
+/// unit up, each to one decimal. Only the screen uses it; the serial log and
+/// the report keep the spec's own units. (At full length the widest row was
+/// 361 px against a 340 px column on the 720 px screen.)
+std::string compact_value(const Spec &s, int32_t value) {
+  // one decimal only while it still matters: "4.9 ms" but "88 ms". With the
+  // decimal kept everywhere the widest row fitted its column by 1 px, so any
+  // longer reading on a failing run would have been cut off again.
+  const auto scaled = [](float v, const char *unit) {
+    return std::abs(v) < 10.0f ? fmt::format("{:.1f} {}", v, unit)
+                               : fmt::format("{:.0f} {}", v, unit);
+  };
+  const std::string_view unit(s.unit);
+  if (unit == "us" && std::abs(value) >= 1000) {
+    return scaled(value / 1000.0f, "ms");
+  }
+  if (unit == "B" && value >= 10000) {
+    return scaled(value / 1024.0f, "KB");
+  }
+  if (unit == "KB" && value >= 10000) {
+    return scaled(value / 1024.0f, "MB");
+  }
+  return format_value(s, value);
+}
+
 std::string format_limits(const Spec &s) {
   if (s.lo == s.hi) {
     return is_yes_no(s) ? "yes" : fmt::format("= {}", format_value(s, s.lo));
@@ -123,11 +149,16 @@ constexpr UBaseType_t kTaskPriority = 3;
 // the run's task only ever calls lv_subject_* under the LVGL lock.
 /////////////////////////////////////////////////////////////////////////////
 
-constexpr int kColumns = 3;
-constexpr int kRowsPerColumn = (ST_COUNT + kColumns - 1) / kColumns;
+constexpr int kMaxColumns = 3;
 constexpr size_t kTitleLen = 128;
 constexpr size_t kStatusLen = 256;
-constexpr size_t kColumnLen = 64 * kRowsPerColumn;
+constexpr size_t kColumnLen = 64 * ST_COUNT; // PSRAM; room for every row in one column
+// The rows fill as many columns as the display is wide enough for: two on the
+// Tab5's 720 px portrait canvas, three at 1100 px or more. Measured from the
+// display rather than assumed - the first version assumed 1280 px landscape and
+// put the second column half off the screen and the third wholly off it.
+int ui_columns = 2;
+int ui_rows_per_column = (ST_COUNT + 1) / 2;
 
 constexpr uint32_t kColourPass = 0x2ECC71;
 constexpr uint32_t kColourFail = 0xFF5050;
@@ -137,7 +168,7 @@ constexpr uint32_t kColourPending = 0x707070;
 lv_subject_t ui_visible_subject; // 0/1, bound to the overlay's HIDDEN flag
 lv_subject_t ui_title_subject;
 lv_subject_t ui_status_subject;
-lv_subject_t ui_column_subject[kColumns];
+lv_subject_t ui_column_subject[kMaxColumns];
 bool ui_ready = false;
 // The panel's widgets exist only while it is up: built when a run starts and
 // deleted on dismiss, so ~2 KB of LVGL objects do not sit in internal RAM - the
@@ -218,18 +249,20 @@ void on_pong(uint16_t seq, int peer_rx) {
   }
 }
 
-const char *link_state_name(RtpsLinkState state) {
+// What each link state means for whoever is reading the report: the likely
+// cause, not the enum name.
+std::string link_state_meaning(RtpsLinkState state) {
   switch (state) {
   case RtpsLinkState::ETH_FAILED:
-    return "ETH_FAILED";
+    return "W5500 did not answer at boot";
   case RtpsLinkState::LINK_DOWN:
-    return "LINK_DOWN";
+    return "no Ethernet link: cable unplugged?";
   case RtpsLinkState::NO_IP:
-    return "NO_IP";
+    return "link up, but no DHCP lease";
   case RtpsLinkState::NO_PEER:
-    return "NO_PEER";
+    return fmt::format("MCB not answering: no McbStatus in {} ms", RAMMP_MCB_STATUS_TIMEOUT_MS);
   case RtpsLinkState::CONNECTED:
-    return "CONNECTED";
+    return "McbStatus arriving";
   }
   return "?";
 }
@@ -517,10 +550,14 @@ private:
   void check_network() {
     const RtpsLinkState state = rtps_comms_link_state();
     const auto rank = static_cast<int>(state);
-    const std::string detail = fmt::format("link state: {}", link_state_name(state));
+    const std::string detail = link_state_meaning(state);
     // ranks: ETH_FAILED < LINK_DOWN < NO_IP < NO_PEER < CONNECTED
-    record(ST_NET_LINK, rank >= static_cast<int>(RtpsLinkState::NO_IP) ? 1 : 0, detail);
-    record(ST_NET_IP, rank >= static_cast<int>(RtpsLinkState::NO_PEER) ? 1 : 0, detail);
+    // the cause goes on the row that fails, not on every row: "McbStatus
+    // arriving" beside a passing Ethernet link only muddies what it proves
+    const bool link = rank >= static_cast<int>(RtpsLinkState::NO_IP);
+    const bool lease = rank >= static_cast<int>(RtpsLinkState::NO_PEER);
+    record(ST_NET_LINK, link ? 1 : 0, link ? std::string() : detail);
+    record(ST_NET_IP, lease ? 1 : 0, lease ? std::string() : detail);
     if (state == RtpsLinkState::CONNECTED) {
       record(ST_RTPS_LINK, 1);
     } else {
@@ -826,11 +863,12 @@ private:
     }
     publish_marker(RAMMP_SELFTEST_KIND_FINISHED, pass, fail, skip, timing);
 
-    status(fmt::format("#{:06x} {}#   {} pass   {} fail   {} skip   ({}.{} s)   -   tap, or "
-                       "press the stick button, to close",
+    status(fmt::format("#{:06x} {}#  {} pass, {} fail, {} skip ({}.{} s)\n"
+                       "Tap, or press the stick button, to close",
                        passed ? kColourPass : kColourFail, passed ? "ALL PASSED" : "FAILED", pass,
                        fail, skip, elapsed_ms / 1000, (elapsed_ms % 1000) / 100));
     ui_refresh();
+    log_overlay_layout();
     ui_finished = true;
     logger.info("run {} finished: {} ({} pass, {} fail, {} skip)", run_id_,
                 passed ? "PASS" : "FAIL", pass, fail, skip);
@@ -847,17 +885,30 @@ private:
     }
   }
 
+  // A symbol rather than the word: on a two-column 720 px screen each column is
+  // ~340 px, and "PASS " cost a row a sixth of that.
+  static const char *result_symbol(uint8_t result) {
+    switch (result) {
+    case RAMMP_SELFTEST_RESULT_PASS:
+      return LV_SYMBOL_OK;
+    case RAMMP_SELFTEST_RESULT_FAIL:
+      return LV_SYMBOL_CLOSE;
+    default:
+      return LV_SYMBOL_MINUS;
+    }
+  }
+
   std::string row_text(uint8_t i) const {
     const Spec &s = kSpec[i];
     const Outcome &o = out_[i];
     if (!o.done) {
-      return fmt::format("#{:06x} ....# {}", kColourPending, s.name);
+      return fmt::format("#{:06x} .  {}#", kColourPending, s.name);
     }
     const uint32_t colour = o.result == RAMMP_SELFTEST_RESULT_PASS   ? kColourPass
                             : o.result == RAMMP_SELFTEST_RESULT_FAIL ? kColourFail
                                                                      : kColourSkip;
-    return fmt::format("#{:06x} {}# {}  {}", colour, result_tag(o.result), s.name,
-                       o.measured ? format_value(s, o.value) : "-");
+    return fmt::format("#{:06x} {}# {} {}", colour, result_symbol(o.result), s.name,
+                       o.measured ? compact_value(s, o.value) : "-");
   }
 
   // --- overlay ----------------------------------------------------------------
@@ -870,7 +921,7 @@ private:
     std::lock_guard<std::recursive_mutex> lock(*platform.lvgl_mutex);
     create_overlay_locked();
     lv_subject_copy_string(&ui_title_subject,
-                           fmt::format("R&D SELF TEST   -   run {} ({})   -   {}", run_id_,
+                           fmt::format("R&D SELF TEST  -  run {} ({})\n{}", run_id_,
                                        remote_ ? "remote" : "local", version_)
                                .c_str());
     refresh_columns_locked();
@@ -905,11 +956,46 @@ private:
     refresh_columns_locked();
   }
 
+  // The overlay's measured geometry, to the serial log: nobody watching the
+  // log can see the screen, and a clipped or off-screen layout is otherwise
+  // invisible from here.
+  static void log_overlay_layout() {
+    if (!ui_ready || !platform.lvgl_mutex) {
+      return;
+    }
+    std::lock_guard<std::recursive_mutex> lock(*platform.lvgl_mutex);
+    if (overlay_panel == nullptr) {
+      return;
+    }
+    lv_obj_update_layout(overlay_panel);
+    lv_display_t *display = lv_display_get_default();
+    const int32_t width = lv_display_get_horizontal_resolution(display);
+    const int32_t height = lv_display_get_vertical_resolution(display);
+    lv_obj_t *rows = lv_obj_get_child(overlay_panel, -1);
+    int32_t column_width = 0;
+    int32_t widest = 0;
+    int32_t bottom = 0;
+    for (uint32_t i = 0; i < lv_obj_get_child_count(rows); ++i) {
+      lv_obj_t *column = lv_obj_get_child(rows, static_cast<int32_t>(i));
+      lv_obj_t *label = lv_obj_get_child(column, 0);
+      lv_area_t area;
+      lv_obj_get_coords(label, &area);
+      column_width = lv_obj_get_width(column);
+      widest = std::max(widest, lv_obj_get_width(label));
+      bottom = std::max(bottom, area.y2);
+    }
+    logger.info("overlay: {}x{} display, {} columns of {} px, widest rows {} px{}, last row ends "
+                "at y={}{}",
+                width, height, ui_columns, column_width, widest,
+                widest > column_width ? " (CLIPPED)" : "", bottom,
+                bottom >= height ? " (OFF SCREEN)" : "");
+  }
+
   void refresh_columns_locked() const {
-    for (int column = 0; column < kColumns; ++column) {
+    for (int column = 0; column < ui_columns; ++column) {
       std::string text;
-      for (int row = 0; row < kRowsPerColumn; ++row) {
-        const int i = column * kRowsPerColumn + row;
+      for (int row = 0; row < ui_rows_per_column; ++row) {
+        const int i = column * ui_rows_per_column + row;
         if (i >= ST_COUNT) {
           break;
         }
@@ -955,15 +1041,24 @@ char *alloc_text(size_t size) {
   return buf;
 }
 
-lv_obj_t *make_label(lv_obj_t *parent, const lv_font_t *font, int32_t x, int32_t y, int32_t w) {
+lv_obj_t *make_label(lv_obj_t *parent, const lv_font_t *font, int32_t width) {
   lv_obj_t *label = lv_label_create(parent);
-  lv_obj_set_pos(label, x, y);
-  lv_obj_set_width(label, w);
+  lv_obj_set_width(label, width);
   lv_obj_set_style_text_font(label, font, LV_PART_MAIN);
   lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
   lv_label_set_recolor(label, true);
-  lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_CLIP);
   return label;
+}
+
+// A plain layout box: no style, and neither clickable nor scrollable, so a tap
+// anywhere on the overlay falls through to the panel's dismiss handler.
+lv_obj_t *make_box(lv_obj_t *parent, int32_t width) {
+  lv_obj_t *box = lv_obj_create(parent);
+  lv_obj_remove_style_all(box);
+  lv_obj_set_size(box, width, LV_SIZE_CONTENT);
+  lv_obj_remove_flag(box, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_remove_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+  return box;
 }
 
 void overlay_clicked_cb(lv_event_t *) { selftest_ui_dismiss(); }
@@ -971,9 +1066,12 @@ void overlay_clicked_cb(lv_event_t *) { selftest_ui_dismiss(); }
 // The overlay's subjects and their text buffers, once at boot. The widgets
 // that bind to them come and go with each run (create_overlay_locked).
 bool prepare_overlay() {
+  const int32_t width = lv_display_get_horizontal_resolution(lv_display_get_default());
+  ui_columns = width >= 1100 ? 3 : 2;
+  ui_rows_per_column = (ST_COUNT + ui_columns - 1) / ui_columns;
   char *title = alloc_text(kTitleLen);
   char *status = alloc_text(kStatusLen);
-  std::array<char *, kColumns> columns{};
+  std::array<char *, kMaxColumns> columns{};
   std::generate(columns.begin(), columns.end(), [] { return alloc_text(kColumnLen); });
   if (!title || !status ||
       std::any_of(columns.begin(), columns.end(), [](char *c) { return !c; })) {
@@ -983,7 +1081,7 @@ bool prepare_overlay() {
   lv_subject_init_int(&ui_visible_subject, 0);
   lv_subject_init_string(&ui_title_subject, title, nullptr, kTitleLen, "");
   lv_subject_init_string(&ui_status_subject, status, nullptr, kStatusLen, "");
-  for (int i = 0; i < kColumns; ++i) {
+  for (int i = 0; i < kMaxColumns; ++i) {
     lv_subject_init_string(&ui_column_subject[i], columns[i], nullptr, kColumnLen, "");
   }
 
@@ -1007,16 +1105,28 @@ void create_overlay_locked() {
   lv_obj_add_event_cb(panel, overlay_clicked_cb, LV_EVENT_CLICKED, nullptr);
   lv_obj_bind_flag_if_eq(panel, &ui_visible_subject, LV_OBJ_FLAG_HIDDEN, 0);
 
-  constexpr int32_t kMargin = 20;
-  constexpr int32_t kWidth = 1280 - 2 * kMargin;
-  lv_label_bind_text(make_label(panel, &lv_font_montserrat_34, kMargin, 14, kWidth),
-                     &ui_title_subject, nullptr);
-  lv_label_bind_text(make_label(panel, &lv_font_montserrat_24, kMargin, 64, kWidth),
-                     &ui_status_subject, nullptr);
-  constexpr int32_t kColumnWidth = kWidth / kColumns;
-  for (int i = 0; i < kColumns; ++i) {
-    lv_label_bind_text(make_label(panel, &lv_font_montserrat_24, kMargin + i * kColumnWidth, 120,
-                                  kColumnWidth - 8),
+  // A column of title, status and rows, so a title or status that wraps
+  // pushes the rows down instead of drawing over them.
+  constexpr int32_t kMargin = 16;
+  lv_obj_set_style_pad_all(panel, kMargin, LV_PART_MAIN);
+  lv_obj_set_style_pad_row(panel, 12, LV_PART_MAIN);
+  lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
+  lv_label_bind_text(make_label(panel, &lv_font_montserrat_34, LV_PCT(100)), &ui_title_subject,
+                     nullptr);
+  lv_label_bind_text(make_label(panel, &lv_font_montserrat_24, LV_PCT(100)), &ui_status_subject,
+                     nullptr);
+
+  // One box per column, each exactly its share of the width. The label inside
+  // sizes to its text and never wraps; the box clips it. A row too long for
+  // its column is therefore cut short instead of wrapping onto a second line,
+  // which would push every row beneath it out of line with the other column.
+  const int32_t width = lv_display_get_horizontal_resolution(lv_display_get_default());
+  const int32_t column_width = (width - 2 * kMargin) / ui_columns;
+  lv_obj_t *rows = make_box(panel, LV_PCT(100));
+  lv_obj_set_flex_flow(rows, LV_FLEX_FLOW_ROW);
+  for (int i = 0; i < ui_columns; ++i) {
+    lv_obj_t *column = make_box(rows, column_width);
+    lv_label_bind_text(make_label(column, &lv_font_montserrat_24, LV_SIZE_CONTENT),
                        &ui_column_subject[i], nullptr);
   }
 }

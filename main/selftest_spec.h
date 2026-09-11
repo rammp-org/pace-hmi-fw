@@ -21,9 +21,13 @@
  * `need` decides what a check that cannot be measured counts as:
  *   ST_REQUIRED  FAIL - the hardware or feature is expected on every unit
  *   ST_OPTIONAL  SKIP - fitted on some units only
- *   ST_REMOTE    FAIL when the run was requested over RTPS (a peer is known
- *                to be there), SKIP when started from the HMI's own settings
- *                row, where nothing may be answering
+ *   ST_REMOTE    FAIL when the run was requested over RTPS (a self-test peer
+ *                is known to be there), SKIP when started from the HMI's own
+ *                settings row. Only the ping checks use it: they need a peer
+ *                that answers self-test pings, which a production MCB does not.
+ *                Everything that needs the MCB itself (McbStatus arriving, its
+ *                timing, a subscriber for the joystick stream) is REQUIRED, so
+ *                an unplugged cable or a silent MCB fails wherever it is run.
  *
  * The limits come from measurements on the bench unit, with margin for
  * unit-to-unit spread. A check that fails on a healthy unit means the limit
@@ -59,7 +63,9 @@ enum {
  * mem.*      End of a run: internal 30 KB free (least since boot 25), largest
  *            block 22. DMA-capable RAM is the tight one - the W5500's SPI
  *            bounce buffers come from it, and it running dry has boot-looped
- *            this board. 43 KB free when RTPS starts, 5 KB free mid-run, and
+ *            this board. 43 KB free when RTPS starts, 4..7 KB free at the end
+ *            of a run (mem.dma_free, whole KB, so its limit sits well under
+ *            that to keep rounding from flapping it), and
  *            its low-water mark is ~2.4 KB BEFORE the self test runs: normal
  *            operation alone takes it within a few hundred bytes of one
  *            Ethernet frame. mem.dma_min and mem.dma_block sit near their
@@ -97,11 +103,22 @@ enum {
   X(SYS_RESET, "sys.clean_reset", "", 1, 1, ST_REQUIRED, "Last reset not a panic/WDT/brownout")    \
   X(SYS_CPU, "sys.cpu_mhz", "MHz", 360, 360, ST_REQUIRED, "CPU runs at the configured clock")      \
   X(SYS_UPTIME, "sys.uptime", "s", 0, ST_ANY_HI, ST_REQUIRED, "Seconds since boot (context)")      \
+  /* network and RTPS - first, so the link is the first thing read on screen */                    \
+  X(NET_LINK, "net.eth_link", "", 1, 1, ST_REQUIRED, "Ethernet link up (W5500)")                   \
+  X(NET_IP, "net.ip", "", 1, 1, ST_REQUIRED, "DHCP lease held")                                    \
+  X(RTPS_LINK, "rtps.mcb_link", "", 1, 1, ST_REQUIRED, "MCB answering (McbStatus arriving)")       \
+  X(RTPS_MCB_PERIOD, "rtps.mcb_period", "ms", 400, 600, ST_REQUIRED, "McbStatus period, mean")     \
+  X(RTPS_MCB_GAP, "rtps.mcb_gap", "ms", 0, 1000, ST_REQUIRED, "Longest McbStatus gap")             \
+  X(RTPS_MCB_LOSS, "rtps.mcb_loss", "0.1%", 0, 100, ST_REQUIRED, "McbStatus lost (seq gaps)")      \
+  X(RTPS_ADC_HZ, "rtps.adc_hz", "Hz", 25, 32, ST_REQUIRED, "Joystick samples published per s")     \
+  X(RTPS_RTT_P50, "rtps.rtt_p50", "us", 0, 20000, ST_REMOTE, "Ping round trip, median")            \
+  X(RTPS_RTT_P99, "rtps.rtt_p99", "us", 0, 250000, ST_REMOTE, "Ping round trip, 99th percentile")  \
+  X(RTPS_PING_LOSS, "rtps.ping_loss", "0.1%", 0, 20, ST_REMOTE, "Pings with no pong")              \
   /* memory */                                                                                     \
   X(MEM_INT_FREE, "mem.int_free", "KB", 16, ST_ANY_HI, ST_REQUIRED, "Internal RAM free now")       \
   X(MEM_INT_MIN, "mem.int_min", "KB", 12, ST_ANY_HI, ST_REQUIRED, "Least internal RAM since boot") \
   X(MEM_INT_BLOCK, "mem.int_block", "KB", 12, ST_ANY_HI, ST_REQUIRED, "Largest internal block")    \
-  X(MEM_DMA_FREE, "mem.dma_free", "KB", 4, ST_ANY_HI, ST_REQUIRED, "DMA-capable RAM free")         \
+  X(MEM_DMA_FREE, "mem.dma_free", "KB", 2, ST_ANY_HI, ST_REQUIRED, "DMA-capable RAM free")         \
   X(MEM_DMA_MIN, "mem.dma_min", "B", 1536, ST_ANY_HI, ST_REQUIRED, "Least DMA RAM since boot")     \
   X(MEM_DMA_BLOCK, "mem.dma_block", "B", 1536, ST_ANY_HI, ST_REQUIRED, "Largest DMA block")        \
   X(MEM_PSRAM_FREE, "mem.psram_free", "KB", 8192, ST_ANY_HI, ST_REQUIRED, "PSRAM free")            \
@@ -136,17 +153,6 @@ enum {
   X(JOY_X_NOISE, "joy.x_noise", "mV", 0, 30, ST_REQUIRED, "X peak-to-peak noise at rest")          \
   X(JOY_Y_NOISE, "joy.y_noise", "mV", 0, 30, ST_REQUIRED, "Y peak-to-peak noise at rest")          \
   X(JOY_TWIST_NOISE, "joy.twist_noise", "mV", 0, 120, ST_REQUIRED, "Twist peak-to-peak noise")     \
-  X(JOY_BUTTON, "joy.button_idle", "", 1, 1, ST_REQUIRED, "Stick button not stuck pressed")        \
-  /* network and RTPS */                                                                           \
-  X(NET_LINK, "net.eth_link", "", 1, 1, ST_REQUIRED, "Ethernet link up (W5500)")                   \
-  X(NET_IP, "net.ip", "", 1, 1, ST_REQUIRED, "DHCP lease held")                                    \
-  X(RTPS_LINK, "rtps.mcb_link", "", 1, 1, ST_REMOTE, "McbStatus arriving (link CONNECTED)")        \
-  X(RTPS_MCB_PERIOD, "rtps.mcb_period", "ms", 400, 600, ST_REMOTE, "McbStatus period, mean")       \
-  X(RTPS_MCB_GAP, "rtps.mcb_gap", "ms", 0, 1000, ST_REMOTE, "Longest McbStatus gap")               \
-  X(RTPS_MCB_LOSS, "rtps.mcb_loss", "0.1%", 0, 100, ST_REMOTE, "McbStatus lost (seq gaps)")        \
-  X(RTPS_ADC_HZ, "rtps.adc_hz", "Hz", 25, 32, ST_REMOTE, "Joystick samples published per second")  \
-  X(RTPS_RTT_P50, "rtps.rtt_p50", "us", 0, 20000, ST_REMOTE, "Ping round trip, median")            \
-  X(RTPS_RTT_P99, "rtps.rtt_p99", "us", 0, 250000, ST_REMOTE, "Ping round trip, 99th percentile")  \
-  X(RTPS_PING_LOSS, "rtps.ping_loss", "0.1%", 0, 20, ST_REMOTE, "Pings with no pong")
+  X(JOY_BUTTON, "joy.button_idle", "", 1, 1, ST_REQUIRED, "Stick button not stuck pressed")
 
 #endif /* SELFTEST_SPEC_H */
