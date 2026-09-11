@@ -17,12 +17,14 @@ lv_obj_t * ui_TwistBar = NULL;
 lv_obj_t * ui_Label3 = NULL;
 lv_obj_t * ui_ButtonPanel = NULL;
 lv_obj_t * ui_ButtonCounter = NULL;
+lv_obj_t * ui_CalibrateJoystickButton = NULL;
+lv_obj_t * ui_CalibrateJoystickButtonLabel = NULL;
 lv_obj_t * ui_ExitButton = NULL;
 lv_obj_t * ui_PanelButtonLabel5 = NULL;
 lv_obj_t * ui_TopBar1 = NULL;
 lv_obj_t * ui_StatusPanel1 = NULL;
-lv_obj_t * ui_TextPanel4 = NULL;
-lv_obj_t * ui_Info5 = NULL;
+lv_obj_t * ui_JoystickTextPanel = NULL;
+lv_obj_t * ui_JoystickInstructionsLabel = NULL;
 // event funtions
 void ui_event_ExitButton(lv_event_t * e)
 {
@@ -202,6 +204,37 @@ void ui_JoystickTest_screen_init(void)
                                            _ui_theme_alpha_text);
     lv_obj_set_style_text_font(ui_ButtonCounter, &lv_font_montserrat_30, LV_PART_MAIN | LV_STATE_DEFAULT);
 
+    ui_CalibrateJoystickButton = lv_button_create(ui_LockedPanel2);
+    lv_obj_set_width(ui_CalibrateJoystickButton, 500);
+    lv_obj_set_height(ui_CalibrateJoystickButton, 100);
+    lv_obj_set_x(ui_CalibrateJoystickButton, 0);
+    lv_obj_set_y(ui_CalibrateJoystickButton, -260);
+    lv_obj_set_align(ui_CalibrateJoystickButton, LV_ALIGN_BOTTOM_MID);
+    lv_obj_add_flag(ui_CalibrateJoystickButton, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
+    lv_obj_remove_flag(ui_CalibrateJoystickButton, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_radius(ui_CalibrateJoystickButton, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_CalibrateJoystickButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_CalibrateJoystickButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_CalibrateJoystickButton, LV_PART_MAIN | LV_STATE_DEFAULT,
+                                           LV_STYLE_BORDER_COLOR, _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_CalibrateJoystickButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
+                                           _ui_theme_alpha_text);
+    lv_obj_set_style_border_width(ui_CalibrateJoystickButton, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_CalibrateJoystickButtonLabel = lv_label_create(ui_CalibrateJoystickButton);
+    lv_obj_set_width(ui_CalibrateJoystickButtonLabel, 280);
+    lv_obj_set_height(ui_CalibrateJoystickButtonLabel, 50);
+    lv_obj_set_align(ui_CalibrateJoystickButtonLabel, LV_ALIGN_CENTER);
+    lv_label_set_text(ui_CalibrateJoystickButtonLabel, "CALIBRATE");
+    ui_object_set_themeable_style_property(ui_CalibrateJoystickButtonLabel, LV_PART_MAIN | LV_STATE_DEFAULT,
+                                           LV_STYLE_TEXT_COLOR, _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_CalibrateJoystickButtonLabel, LV_PART_MAIN | LV_STATE_DEFAULT,
+                                           LV_STYLE_TEXT_OPA, _ui_theme_alpha_text);
+    lv_obj_set_style_text_align(ui_CalibrateJoystickButtonLabel, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_CalibrateJoystickButtonLabel, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
+
     ui_ExitButton = lv_button_create(ui_LockedPanel2);
     lv_obj_set_width(ui_ExitButton, 500);
     lv_obj_set_height(ui_ExitButton, 150);
@@ -243,31 +276,31 @@ void ui_JoystickTest_screen_init(void)
     lv_obj_set_x(ui_StatusPanel1, 0);
     lv_obj_set_y(ui_StatusPanel1, 50);
 
-    ui_TextPanel4 = lv_label_create(ui_JoystickTest);
-    lv_obj_set_width(ui_TextPanel4, 660);
-    lv_obj_set_height(ui_TextPanel4, 200);
-    lv_obj_set_x(ui_TextPanel4, 0);
-    lv_obj_set_y(ui_TextPanel4, 200);
-    lv_obj_set_align(ui_TextPanel4, LV_ALIGN_TOP_MID);
-    lv_label_set_text(ui_TextPanel4, "JOYSTICK TEST");
-    ui_object_set_themeable_style_property(ui_TextPanel4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+    ui_JoystickTextPanel = lv_label_create(ui_JoystickTest);
+    lv_obj_set_width(ui_JoystickTextPanel, 660);
+    lv_obj_set_height(ui_JoystickTextPanel, 300);
+    lv_obj_set_x(ui_JoystickTextPanel, 0);
+    lv_obj_set_y(ui_JoystickTextPanel, 200);
+    lv_obj_set_align(ui_JoystickTextPanel, LV_ALIGN_TOP_MID);
+    lv_label_set_text(ui_JoystickTextPanel, "JOYSTICK TEST");
+    ui_object_set_themeable_style_property(ui_JoystickTextPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_TextPanel4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+    ui_object_set_themeable_style_property(ui_JoystickTextPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
                                            _ui_theme_alpha_text);
-    lv_obj_set_style_text_font(ui_TextPanel4, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_JoystickTextPanel, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_Info5 = lv_label_create(ui_TextPanel4);
-    lv_obj_set_width(ui_Info5, 660);
-    lv_obj_set_height(ui_Info5, 150);
-    lv_obj_set_x(ui_Info5, 0);
-    lv_obj_set_y(ui_Info5, 100);
-    lv_obj_set_align(ui_Info5, LV_ALIGN_TOP_MID);
-    lv_label_set_text(ui_Info5, "Move the Joystick. The sliders should correlate with the movement");
-    ui_object_set_themeable_style_property(ui_Info5, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_Info5, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+    ui_JoystickInstructionsLabel = lv_label_create(ui_JoystickTextPanel);
+    lv_obj_set_width(ui_JoystickInstructionsLabel, 660);
+    lv_obj_set_height(ui_JoystickInstructionsLabel, 200);
+    lv_obj_set_x(ui_JoystickInstructionsLabel, 0);
+    lv_obj_set_y(ui_JoystickInstructionsLabel, 100);
+    lv_obj_set_align(ui_JoystickInstructionsLabel, LV_ALIGN_TOP_MID);
+    lv_label_set_text(ui_JoystickInstructionsLabel, "Move the Joystick. The sliders should correlate with the movement");
+    ui_object_set_themeable_style_property(ui_JoystickInstructionsLabel, LV_PART_MAIN | LV_STATE_DEFAULT,
+                                           LV_STYLE_TEXT_COLOR, _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_JoystickInstructionsLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
                                            _ui_theme_alpha_text);
-    lv_obj_set_style_text_font(ui_Info5, &lv_font_montserrat_34, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_JoystickInstructionsLabel, &lv_font_montserrat_34, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     lv_obj_add_event_cb(ui_ExitButton, ui_event_ExitButton, LV_EVENT_ALL, NULL);
 
@@ -290,11 +323,13 @@ void ui_JoystickTest_screen_destroy(void)
     ui_Label3 = NULL;
     ui_ButtonPanel = NULL;
     ui_ButtonCounter = NULL;
+    ui_CalibrateJoystickButton = NULL;
+    ui_CalibrateJoystickButtonLabel = NULL;
     ui_ExitButton = NULL;
     ui_PanelButtonLabel5 = NULL;
     ui_TopBar1 = NULL;
     ui_StatusPanel1 = NULL;
-    ui_TextPanel4 = NULL;
-    ui_Info5 = NULL;
+    ui_JoystickTextPanel = NULL;
+    ui_JoystickInstructionsLabel = NULL;
 
 }

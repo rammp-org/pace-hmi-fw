@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cmath>
 #include <cstring>
 #include <iterator>
 #include <memory>
@@ -647,15 +648,18 @@ private:
   }
 
   void judge_adc() {
+    const auto cal_centers =
+        platform.joystick_cal_centers_mv ? platform.joystick_cal_centers_mv() : std::nullopt;
+    record(ST_JOY_CAL, cal_centers ? 1 : 0, cal_centers ? "" : "defaults in use: press CALIBRATE");
     AdcCapture c;
     {
       std::lock_guard<std::mutex> lock(adc_mutex);
       c = adc_capture;
     }
     if (c.cycles == 0) {
-      for (Id id :
-           {ST_TIME_ADC_AVG, ST_TIME_ADC_MAX, ST_JOY_VALID, ST_JOY_X, ST_JOY_Y, ST_JOY_TWIST,
-            ST_JOY_X_NOISE, ST_JOY_Y_NOISE, ST_JOY_TWIST_NOISE, ST_JOY_BUTTON, ST_RTPS_ADC_HZ}) {
+      for (Id id : {ST_TIME_ADC_AVG, ST_TIME_ADC_MAX, ST_JOY_VALID, ST_JOY_X, ST_JOY_Y,
+                    ST_JOY_TWIST, ST_JOY_X_NOISE, ST_JOY_Y_NOISE, ST_JOY_TWIST_NOISE, ST_JOY_X_CAL,
+                    ST_JOY_Y_CAL, ST_JOY_TWIST_CAL, ST_JOY_BUTTON, ST_RTPS_ADC_HZ}) {
         unmeasurable(id, "ADC task not running");
       }
       return;
@@ -672,15 +676,25 @@ private:
            fmt::format("{} of {} cycles", c.valid, c.cycles));
     const Id rest[3] = {ST_JOY_X, ST_JOY_Y, ST_JOY_TWIST};
     const Id noise[3] = {ST_JOY_X_NOISE, ST_JOY_Y_NOISE, ST_JOY_TWIST_NOISE};
+    const Id cal_off[3] = {ST_JOY_X_CAL, ST_JOY_Y_CAL, ST_JOY_TWIST_CAL};
     for (int axis = 0; axis < 3; ++axis) {
       if (c.valid == 0) {
         unmeasurable(rest[axis], "no valid sample");
         unmeasurable(noise[axis], "no valid sample");
+        unmeasurable(cal_off[axis], "no valid sample");
         continue;
       }
-      record(rest[axis], static_cast<int32_t>(c.sum[axis] / c.valid),
+      const double mean = c.sum[axis] / c.valid;
+      record(rest[axis], static_cast<int32_t>(mean),
              fmt::format("{:.0f}..{:.0f} mV", c.min[axis], c.max[axis]));
       record(noise[axis], static_cast<int32_t>(c.max[axis] - c.min[axis]));
+      if (cal_centers) {
+        const float center = (*cal_centers)[axis];
+        record(cal_off[axis], static_cast<int32_t>(std::lround(std::fabs(mean - center))),
+               fmt::format("rest {:.0f}, calibrated {:.0f} mV", mean, center));
+      } else {
+        unmeasurable(cal_off[axis], "no saved calibration");
+      }
     }
     record(ST_JOY_BUTTON, c.button_seen ? 0 : 1,
            c.button_seen ? "pressed during the at-rest capture" : "");

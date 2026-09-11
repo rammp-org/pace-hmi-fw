@@ -96,7 +96,14 @@ enum {
  * joy.*      Raw ADC mV. Nominal rest is 1650 (half the 3300 mV supply); real sticks rest
  *            up to ~150 mV away (1506 mV on the bench board), hence the width
  *            of the *_rest windows. The twist pot is on ADC2, sampled oneshot:
- *            ~60 mV peak-to-peak where X/Y read ~1 mV.
+ *            ~60 mV peak-to-peak where X/Y read ~1 mV (twist_noise is after
+ *            the ADC task averages 8 reads, before its lowpass).
+ *
+ * joy.*_cal_off  How far the at-rest reading has wandered from the centre the
+ *            saved calibration measured. X/Y's 40 mV is well inside the
+ *            stick's 0.10 radial deadzone (~150 mV), twist's 50 mV inside its
+ *            60 mV centre deadband: past those, rest starts leaking out as
+ *            motion. SKIP with nothing saved - joy.cal_saved fails for that.
  *
  * rtps.rtt_* The bench PC reaches the board over Tailscale: p50 5 ms, p99
  *            15..107 ms, worst 142 ms. On a direct LAN expect a fraction of
@@ -159,6 +166,11 @@ enum {
   X(JOY_X_NOISE, "joy.x_noise", "mV", 0, 30, ST_REQUIRED, "X peak-to-peak noise at rest")          \
   X(JOY_Y_NOISE, "joy.y_noise", "mV", 0, 30, ST_REQUIRED, "Y peak-to-peak noise at rest")          \
   X(JOY_TWIST_NOISE, "joy.twist_noise", "mV", 0, 120, ST_REQUIRED, "Twist peak-to-peak noise")     \
+  X(JOY_CAL, "joy.cal_saved", "", 1, 1, ST_REQUIRED, "Joystick calibration saved in flash")        \
+  X(JOY_X_CAL, "joy.x_cal_off", "mV", 0, 40, ST_OPTIONAL, "X rest vs its calibrated centre")       \
+  X(JOY_Y_CAL, "joy.y_cal_off", "mV", 0, 40, ST_OPTIONAL, "Y rest vs its calibrated centre")       \
+  X(JOY_TWIST_CAL, "joy.twist_cal_off", "mV", 0, 50, ST_OPTIONAL,                                  \
+    "Twist rest vs calibrated centre")                                                             \
   X(JOY_BUTTON, "joy.button_idle", "", 1, 1, ST_REQUIRED, "Stick button not stuck pressed")
 
 #endif /* SELFTEST_SPEC_H */

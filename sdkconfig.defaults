@@ -19,6 +19,9 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_360=y
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+# espp::FileSystem (LittleFS) mounts the partition with this label, at
+# /storage. First boot formats it. Holds the joystick calibration.
+CONFIG_ESPP_FILE_SYSTEM_PARTITION_LABEL="storage"
 
 # PSRAM - required for the MIPI DSI frame buffer (matches the m5stack-tab5
 # BSP example's config)

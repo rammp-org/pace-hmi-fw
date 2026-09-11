@@ -98,6 +98,12 @@ PARENTS: dict[str, str] = {
     "ui_SeatAdjustmentButton1": "ui_SeatAdjustmentPanel",
     "ui_SeatAdjustmentButton5": "ui_SeatAdjustmentPanel",
 
+    # JoystickTest: joystick_cal.cpp runs its calibration from this button
+    # and prompts in this label
+    "ui_CalibrateJoystickButton": "ui_LockedPanel2",
+    "ui_CalibrateJoystickButtonLabel": "ui_CalibrateJoystickButton",
+    "ui_JoystickInstructionsLabel": "ui_JoystickTextPanel",
+
     # one StatusPanel and one TopBar per screen, each bound to MCB telemetry by
     # number -- the single most renumbering-prone thing in the project
     "ui_StatusPanel": "ui_MainScreenFlex",
@@ -125,6 +131,7 @@ LABELS: dict[str, str] = {
     "ui_ButtonLabel6": "R&D SELF TEST",   # the row that starts the self test
     "ui_FPSCounterLabel": "FPS COUNTER",
     "ui_HapticTestLabel": "HAPTIC TEST",
+    "ui_CalibrateJoystickButtonLabel": "CALIBRATE",  # joystick_cal.cpp's button
     "ui_GoToOldestButtonLabel": "Oldest",   # log_view.cpp: scroll to the top
     "ui_GoToNewestButtonLabel": "Newest",   # log_view.cpp: scroll to the end
     # the four live seat functions, in the order seat_buttons_grid expects

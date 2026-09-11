@@ -14,6 +14,7 @@
  * publishes it on rammp/selftest/report.
  */
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <mutex>
@@ -48,6 +49,10 @@ struct SelfTestPlatform {
   bool da7280_found = false;
   /// LVGL is rendering straight into the DSI frame buffers (DIRECT mode).
   bool direct_render = false;
+  /// Rest position in raw mV of each joystick axis (horizontal, vertical,
+  /// twist) in the saved calibration; nullopt while the compiled-in defaults
+  /// are in use because nothing is saved.
+  std::function<std::optional<std::array<float, 3>>()> joystick_cal_centers_mv;
 };
 
 enum class SelfTestTrigger {

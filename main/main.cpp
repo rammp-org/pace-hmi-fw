@@ -24,6 +24,7 @@
 
 #include "kalman_filter.hpp"
 #include "madgwick_filter.hpp"
+#include "simple_lowpass_filter.hpp"
 
 #include "ui.h"
 // StatusPanel is a SquareLine *component*, so its children are reached by index
@@ -41,6 +42,7 @@
 #include "oneshot_adc.hpp"
 
 #include "boot_logo.h"
+#include "joystick_cal.hpp"
 #include "log_capture.hpp"
 #include "log_view.hpp"
 #include "rtps_comms.hpp"
@@ -474,6 +476,57 @@ static void bind_status_panel(lv_obj_t *panel) {
                               &kDriveStatusKind);
   lv_subject_add_observer_obj(&state_text_subject, mcb_status_label_observer, state_label,
                               &kStateKind);
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// Joystick mapping
+//
+// How far each axis travels is measured per unit (joystick_cal.cpp, the
+// CALIBRATE button on the JoystickTest screen). What is done with that travel
+// is fixed here.
+/////////////////////////////////////////////////////////////////////////////
+
+// X/Y are one circular gimbal, so their per-axis deadbands are 0 and the
+// deadzone lives on the vector radius instead. The APEM HF44S10 has a square
+// gate, but the output stays CIRCULAR: a corner reads ~(0.71, 0.71) rather
+// than (1, 1), so the MCB never sees a speed above 1.
+static constexpr float kStickCenterDeadzoneRadius = 0.10f;
+static constexpr float kStickRangeDeadzone = 0.05f;
+// Twist is a separate pot on its own axis, so it carries its own deadbands.
+static constexpr float kTwistCenterDeadbandMv = 60.0f;
+static constexpr float kTwistRangeDeadbandMv = 40.0f;
+
+// AXIS WIRING: the gimbal pots are cross-wired relative to the channel names.
+// ADC1_CH1 (GPIO17) is the HORIZONTAL axis and reads higher to the right, so
+// it feeds the joystick's X with no inversion. ADC1_CH0 (GPIO16) is the
+// VERTICAL axis and reads *lower* moving up, so it feeds Y with invert_output
+// — after which +Y is up, as the rest of the code assumes. Twist reads higher
+// clockwise. Fixed here so every consumer (UI bars, the keypad pager, RTPS)
+// sees correct axes without compensating itself; joystick_cal.cpp's step
+// prompts rely on the same directions.
+static espp::FloatRangeMapper::Config stick_horizontal_config(const JoystickCal &cal) {
+  const JoystickAxisCal &a = cal[JOY_HORIZONTAL];
+  return {.center = a.center_mv, .minimum = a.min_mv, .maximum = a.max_mv};
+}
+
+static espp::FloatRangeMapper::Config stick_vertical_config(const JoystickCal &cal) {
+  const JoystickAxisCal &a = cal[JOY_VERTICAL];
+  return {.center = a.center_mv, .minimum = a.min_mv, .maximum = a.max_mv, .invert_output = true};
+}
+
+static espp::FloatRangeMapper::Config stick_twist_config(const JoystickCal &cal) {
+  const JoystickAxisCal &a = cal[JOY_TWIST];
+  return {.center = a.center_mv,
+          .center_deadband = kTwistCenterDeadbandMv,
+          .minimum = a.min_mv,
+          .maximum = a.max_mv,
+          .range_deadband = kTwistRangeDeadbandMv};
+}
+
+static void stick_apply_cal(espp::Joystick &stick, const JoystickCal &cal) {
+  stick.set_calibration(stick_horizontal_config(cal), stick_vertical_config(cal),
+                        kStickCenterDeadzoneRadius, kStickRangeDeadzone);
+  stick.set_z_calibration(stick_twist_config(cal));
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -2708,7 +2761,7 @@ extern "C" void app_main(void) {
 
   // Bind the Settings-screen axis bars to the ADC subjects (observer pattern).
   // Bars show the calibrated joystick position as a percentage: -100..+100,
-  // centered at 0. Raw millivolts still go to RTPS (see the ADC task).
+  // centered at 0; RTPS carries the same values as -1..+1 (see the ADC task).
   lv_subject_init_int(&adc_x_subject, 0);
   lv_subject_init_int(&adc_y_subject, 0);
   lv_subject_init_int(&adc_twist_subject, 0);
@@ -2767,6 +2820,18 @@ extern "C" void app_main(void) {
   lv_timer_pause(drive_refused_timer);
   bind_drive_refused_panel(ui_ErrorWarningPanel4); // MainScreenFlex
   lv_timer_create(rtps_poll_cb, kRtpsPollMs, nullptr);
+
+  // CALIBRATE on the JoystickTest screen. Its prompts blink on the RTPS
+  // indicator's phase, so this comes after rtps_blink_subject is initialised.
+  joystick_cal_init_ui({.screen = ui_JoystickTest,
+                        .button = ui_CalibrateJoystickButton,
+                        .button_label = ui_CalibrateJoystickButtonLabel,
+                        .instructions = ui_JoystickInstructionsLabel,
+                        .blink = &rtps_blink_subject,
+                        .feedback = [] {
+                          haptic_play(espp::Drv2605::Waveform::STRONG_CLICK, 1);
+                          play_click(espp::M5StackTab5::get());
+                        }});
 
   // GPIO48 test button. The label has a built-in binding; the panel background
   // is a style property with no binding, so it gets an observer bound to the
@@ -3075,6 +3140,14 @@ extern "C" void app_main(void) {
       .da7280_found = std::find(found_addresses.begin(), found_addresses.end(), kDa7280Address) !=
                       found_addresses.end(),
       .direct_render = direct_render,
+      .joystick_cal_centers_mv = []() -> std::optional<std::array<float, 3>> {
+        if (!joystick_cal_saved()) {
+          return std::nullopt;
+        }
+        const JoystickCal cal = joystick_cal_current();
+        return std::array<float, 3>{cal[JOY_HORIZONTAL].center_mv, cal[JOY_VERTICAL].center_mv,
+                                    cal[JOY_TWIST].center_mv};
+      },
   });
 
   // RDScreen: the PIN pad and its four checkboxes.
@@ -3442,43 +3515,21 @@ extern "C" void app_main(void) {
   adc.start();
   static espp::OneshotAdc twist_adc({.unit = ADC_UNIT_2, .channels = {twist_channel}});
 
-  // Joystick calibration. These are the numbers to tune per unit: note the
-  // resting mV of each axis and the mV at full deflection each way from the
-  // serial log (the commented-out print at the bottom of the ADC task — RTPS
-  // carries the calibrated values, not mV), and put them here. The values below are the
-  // ideal-divider defaults (0-3300 mV, centered) and WILL be off on real
-  // hardware.
-  //
-  // X/Y are one circular gimbal, so their per-axis deadbands are 0 and the
-  // deadzone lives on the vector radius instead (center_deadzone_radius /
-  // range_deadzone below). Twist is a separate pot on its own axis, so it
-  // carries its own center/range deadbands.
-  //
-  // AXIS WIRING: the gimbal pots are cross-wired relative to the channel
-  // names. ADC1_CH1 (GPIO17) is the HORIZONTAL axis and reads higher to the
-  // right, so it feeds the joystick's X with no inversion. ADC1_CH0 (GPIO16)
-  // is the VERTICAL axis and reads *lower* moving up, so it feeds Y with
-  // invert_output — after which +Y is up, as the rest of the code assumes.
-  // Fixed here at the calibration level so every consumer (UI bars, the
-  // keypad pager, RTPS) sees correct axes without compensating itself.
-  static constexpr espp::FloatRangeMapper::Config kHorizontalCal{
-      .center = 1650.0f, .center_deadband = 0.0f, .minimum = 0.0f, .maximum = 3300.0f};
-  static constexpr espp::FloatRangeMapper::Config kVerticalCal{.center = 1650.0f,
-                                                               .center_deadband = 0.0f,
-                                                               .minimum = 0.0f,
-                                                               .maximum = 3300.0f,
-                                                               .invert_output = true};
-  static constexpr espp::FloatRangeMapper::Config kTwistCal{.center = 1650.0f,
-                                                            .center_deadband = 60.0f,
-                                                            .minimum = 0.0f,
-                                                            .maximum = 3300.0f,
-                                                            .range_deadband = 40.0f};
-  static espp::Joystick stick({.x_calibration = kHorizontalCal,
-                               .y_calibration = kVerticalCal,
-                               .z_calibration = kTwistCal,
+  // Joystick calibration: where each axis rests and the two ends of its travel,
+  // in raw mV. Measured per unit by CALIBRATE on the JoystickTest screen and
+  // kept in flash (joystick_cal.cpp); these ideal-divider values are only what
+  // a unit that was never calibrated runs on, and WILL be off on real hardware.
+  // How the travel is mapped (deadzones, axis wiring) is under "Joystick
+  // mapping" at the top of this file.
+  static constexpr JoystickAxisCal kIdealAxis{
+      .min_mv = 0.0f, .center_mv = 1650.0f, .max_mv = 3300.0f};
+  const JoystickCal joystick_cal = joystick_cal_load({kIdealAxis, kIdealAxis, kIdealAxis});
+  static espp::Joystick stick({.x_calibration = stick_horizontal_config(joystick_cal),
+                               .y_calibration = stick_vertical_config(joystick_cal),
+                               .z_calibration = stick_twist_config(joystick_cal),
                                .type = espp::Joystick::Type::CIRCULAR,
-                               .center_deadzone_radius = 0.10f,
-                               .range_deadzone = 0.05f,
+                               .center_deadzone_radius = kStickCenterDeadzoneRadius,
+                               .range_deadzone = kStickRangeDeadzone,
                                .log_level = espp::Logger::Verbosity::WARN});
 
   // customization knobs: sampling/LVGL/RTPS cadence, and how often the serial
@@ -3486,6 +3537,12 @@ extern "C" void app_main(void) {
   // console-flood pattern that starved LVGL once before.
   static constexpr auto kAdcUpdatePeriod = 33ms; // 30 Hz: ADC read, LVGL bars, RTPS publish
   static constexpr int kAdcLogDivider = 6;       // serial log every Nth cycle (~5 Hz)
+  // Twist is the noisy axis (~50 mV peak-to-peak at rest, where X/Y read ~1
+  // mV): each cycle averages this many oneshot reads of it, which costs no
+  // lag, then lowpasses the result to iron out what is left. 80 ms is short
+  // enough that the chair does not feel late to turn.
+  static constexpr int kTwistOversample = 8;
+  static espp::SimpleLowpassFilter twist_lowpass({.time_constant = 0.08f});
   auto adc_task_fn = [&adc, &channels](std::mutex &m, std::condition_variable &cv) {
     static uint32_t cycle = 0;
     const bool log_this_cycle = (cycle++ % kAdcLogDivider) == 0;
@@ -3495,15 +3552,40 @@ extern "C" void app_main(void) {
     auto vert_mv = adc.get_mv(channels[0]);  // ADC1_CH0 (GPIO16)
     auto horiz_mv = adc.get_mv(channels[1]); // ADC1_CH1 (GPIO17)
     // twist pot on ADC2 (GPIO52), sampled oneshot — see comment at the
-    // channel definitions above
-    auto twist_mv = twist_adc.read_mv(twist_channel);
+    // channel definitions above — and averaged (kTwistOversample)
+    std::optional<float> twist_mv;
+    {
+      float sum = 0.0f;
+      int reads = 0;
+      for (int i = 0; i < kTwistOversample; ++i) {
+        if (auto mv = twist_adc.read_mv(twist_channel)) {
+          sum += *mv;
+          ++reads;
+        }
+      }
+      if (reads > 0) {
+        twist_mv = sum / static_cast<float>(reads);
+      }
+    }
 
     bool adc_published = false;
     if (vert_mv && horiz_mv && twist_mv) {
+      // A calibration run just finished: switch to it here, between two
+      // samples, on the task that owns the stick.
+      if (auto cal = joystick_cal_take_new()) {
+        stick_apply_cal(stick, *cal);
+      }
+      const float twist_smoothed = twist_lowpass(*twist_mv);
+      joystick_cal_note_raw(*horiz_mv, *vert_mv, twist_smoothed);
+      // While a calibration run owns the stick nothing downstream may act on
+      // it: the user is being told to push it to every end in turn.
+      const bool calibrating = joystick_cal_running();
+
       // raw mV -> calibrated [-1,1] per axis: circular deadzone on the X/Y
       // gimbal, twist mapped independently by its own range mapper. X is the
-      // horizontal channel, Y the vertical one (inverted by kVerticalCal).
-      stick.update(*horiz_mv, *vert_mv, *twist_mv);
+      // horizontal channel, Y the vertical one (inverted, see "Joystick
+      // mapping").
+      stick.update(*horiz_mv, *vert_mv, twist_smoothed);
 
       // Analog -> keypad level. Schmitt trigger (engage past kKeyEngage, release
       // below kKeyRelease) so the boundary can't chatter; between the two
@@ -3524,7 +3606,9 @@ extern "C" void app_main(void) {
         const float x = stick.x();
         const float y = stick.y();
         const float mag = std::max(std::abs(x), std::abs(y));
-        if (mag > kKeyEngage) {
+        if (calibrating) {
+          engaged = false; // "hold LEFT" must not page the menus or exit
+        } else if (mag > kKeyEngage) {
           engaged = true;
         } else if (mag < kKeyRelease) {
           engaged = false;
@@ -3534,7 +3618,7 @@ extern "C" void app_main(void) {
         } else if (std::abs(x) >= std::abs(y)) {
           joy_key.store(x > 0 ? LV_KEY_RIGHT : LV_KEY_LEFT);
         } else {
-          // +Y is up after kVerticalCal's inversion, and up the list is prev
+          // +Y is up after the vertical axis's inversion, and up the list is prev
           joy_key.store(y > 0 ? LV_KEY_UP : LV_KEY_DOWN);
         }
       }
@@ -3548,11 +3632,14 @@ extern "C" void app_main(void) {
       }
 
       // send the MCB the same calibrated -1..+1 values the bars show (+Y
-      // forward, deadzones applied), so it needs no calibration of its own.
+      // forward, deadzones applied), so it needs no calibration of its own;
+      // centred while a calibration run sweeps the stick, so nothing drives
+      // on it. The bars keep moving, to show the stick is being read.
       // quiet no-op until RTPS is up and a subscriber is discovered
-      adc_published = rtps_comms_publish_adc(stick.x(), stick.y(), stick.z(),
-                                             joy_button_pressed.load() ? RAMMP_BUTTON_JOYSTICK : 0u,
-                                             drive_mode_published.load());
+      adc_published = rtps_comms_publish_adc(
+          calibrating ? 0.0f : stick.x(), calibrating ? 0.0f : stick.y(),
+          calibrating ? 0.0f : stick.z(), joy_button_pressed.load() ? RAMMP_BUTTON_JOYSTICK : 0u,
+          drive_mode_published.load());
     }
     // Every cycle, valid or not: the self test measures the loop's cadence and
     // how often a read fails, as well as the values. A no-op unless a run is

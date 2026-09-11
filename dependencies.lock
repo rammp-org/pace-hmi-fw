@@ -181,6 +181,24 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 1.2.0
+  espp/file_system:
+    component_hash: c0312604226337bd1fbd379b502eb27818e7d23ce989124dd0f7b0a949d3e13d
+    dependencies:
+    - name: espp/base_component
+      registry_url: https://components.espressif.com
+      require: private
+      version: '>=1.0'
+    - name: idf
+      require: private
+      version: '>=5.0'
+    - name: joltwallet/littlefs
+      registry_url: https://components.espressif.com
+      require: private
+      version: 1.20.1
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.2.0
   espp/filters:
     component_hash: 5ea654ccdc7118bd4b6881f7b8f6d7315da58dcd14e5ab515189d68d41483d2c
     dependencies:
@@ -374,7 +392,7 @@ dependencies:
       require: private
       version: '>=5.2'
     source:
-      registry_url: https://components.espressif.com
+      registry_url: https://components.espressif.com/
       type: service
     version: 1.2.0
   espp/rtps:
@@ -440,7 +458,7 @@ dependencies:
       require: private
       version: '>=5.0'
     source:
-      registry_url: https://components.espressif.com
+      registry_url: https://components.espressif.com/
       type: service
     version: 1.2.0
   espp/spi:
@@ -508,7 +526,7 @@ dependencies:
       require: private
       version: '>=5.0'
     source:
-      registry_url: https://components.espressif.com
+      registry_url: https://components.espressif.com/
       type: service
     version: 1.2.0
   espp/touch:
@@ -719,6 +737,16 @@ dependencies:
     source:
       type: idf
     version: 6.0.0
+  joltwallet/littlefs:
+    component_hash: 8e12955f47e27e6070b76715a96d6c75fc2b44f069e8c33679332d9bdd3120c4
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com
+      type: service
+    version: 1.20.1
   lvgl/lvgl:
     component_hash: 184e532558c1c45fefed631f3e235423d22582aafb4630f3e8885c35281a49ae
     dependencies: []
@@ -738,6 +766,7 @@ direct_dependencies:
 - espp/display
 - espp/display_drivers
 - espp/drv2605
+- espp/file_system
 - espp/filters
 - espp/format
 - espp/gt911
@@ -749,11 +778,14 @@ direct_dependencies:
 - espp/logger
 - espp/math
 - espp/pi4ioe5v
+- espp/reflect_cpp
 - espp/rtps
 - espp/rx8130ce
+- espp/socket
 - espp/spi
 - espp/st7123touch
 - espp/task
+- espp/thread_pool
 - espp/touch
 - espressif/esp-dsp
 - espressif/esp_cam_sensor
@@ -762,6 +794,6 @@ direct_dependencies:
 - espressif/w5500
 - idf
 - lvgl/lvgl
-manifest_hash: 78aac7c8bca0fbf06f129fdce9ecf16689cd67305b11316987d36fae91de8c08
+manifest_hash: 919304641a16cbf18334d8f8948040d12954308b406b2678b781b90acbd50bb5
 target: esp32p4
 version: 3.0.0
