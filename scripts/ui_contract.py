@@ -98,6 +98,12 @@ PARENTS: dict[str, str] = {
     "ui_SeatAdjustmentButton1": "ui_SeatAdjustmentPanel",
     "ui_SeatAdjustmentButton5": "ui_SeatAdjustmentPanel",
 
+    # ErrorWarningPanels main.cpp raises: entry refused (drive or seat page),
+    # and link/MCB lost on the drive and seat screens
+    "ui_ErrorWarningPanel4": "ui_MainScreenFlex",
+    "ui_ErrorWarningPanel": "ui_DriveScreen",
+    "ui_ErrorWarningPanel1": "ui_SeatAdjustmentFlexScreen",
+
     # JoystickTest: joystick_cal.cpp runs its calibration from this button
     # and prompts in this label
     "ui_CalibrateJoystickButton": "ui_LockedPanel2",

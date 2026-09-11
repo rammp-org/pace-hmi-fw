@@ -10,8 +10,8 @@
 #include <string>
 #include <utility>
 
-#include "file_system.hpp"
 #include "logger.hpp"
+#include "storage.hpp"
 
 namespace {
 
@@ -68,8 +68,6 @@ std::optional<JoystickCal> pending; // a finished run, for the ADC task to apply
 std::atomic<bool> running{false};
 std::atomic<float> latest_mv[3];
 
-std::string file_path() { return (espp::FileSystem::get_root_path() / kFileName).string(); }
-
 std::string describe(const JoystickCal &cal) {
   std::string out;
   for (int i = 0; i < 3; ++i) {
@@ -119,29 +117,14 @@ std::optional<JoystickCal> read_file(const std::string &path) {
 }
 
 bool write_file(const JoystickCal &cal) {
-  const std::string path = file_path();
-  const std::string temp = path + ".tmp";
-  {
-    std::ofstream out(temp, std::ios::trunc);
-    out << "# joystick calibration, raw ADC mV: min center max\n";
-    out << "version " << kFileVersion << "\n";
-    for (int i = 0; i < 3; ++i) {
-      out << fmt::format("{} {:.1f} {:.1f} {:.1f}\n", kAxisNames[i], cal[i].min_mv,
-                         cal[i].center_mv, cal[i].max_mv);
-    }
-    out.flush();
-    if (!out) {
-      logger.error("could not write {}", temp);
-      return false;
-    }
+  std::string text = fmt::format("# joystick calibration, raw ADC mV: min center max\n"
+                                 "version {}\n",
+                                 kFileVersion);
+  for (int i = 0; i < 3; ++i) {
+    text += fmt::format("{} {:.1f} {:.1f} {:.1f}\n", kAxisNames[i], cal[i].min_mv, cal[i].center_mv,
+                        cal[i].max_mv);
   }
-  // Written aside and renamed over the old one (LittleFS renames atomically),
-  // so a reset mid-save leaves the previous calibration, never half of one.
-  if (std::rename(temp.c_str(), path.c_str()) != 0) {
-    logger.error("could not rename {} to {}", temp, path);
-    return false;
-  }
-  return true;
+  return storage_write(kFileName, text);
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -383,8 +366,7 @@ void button_label_observer(lv_observer_t *observer, lv_subject_t *subject) {
 } // namespace
 
 JoystickCal joystick_cal_load(const JoystickCal &defaults) {
-  espp::FileSystem::get(); // mounts it, formatting a blank partition on first boot
-  const std::string path = file_path();
+  const std::string path = storage_path(kFileName);
   const auto saved = read_file(path);
   std::lock_guard<std::mutex> lock(cal_mutex);
   if (saved && plausible(*saved)) {

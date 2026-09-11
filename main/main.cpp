@@ -12,9 +12,13 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <ctime>
 #include <numeric>
 #include <optional>
 #include <stdlib.h>
+#include <sys/time.h>
 #include <vector>
 
 #include "m5stack-tab5.hpp"
@@ -47,6 +51,7 @@
 #include "log_view.hpp"
 #include "rtps_comms.hpp"
 #include "selftest.hpp"
+#include "settings.hpp"
 
 #include "esp_heap_caps.h"
 #include "esp_lcd_mipi_dsi.h"
@@ -687,6 +692,136 @@ static void rtps_poll_cb(lv_timer_t *) {
     // Same reason, different property: the theme switch restored the redundant
     // background fills, so take them out again.
     strip_all_overdraw();
+    // CHANGE THEME is the export's own handler (ui_events.cpp); this is where
+    // firmware first sees the result, so it is saved from here.
+    settings_set_theme(ui_theme_idx);
+  }
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// Backlight
+//
+// One brightness setting, 5..100 %, whoever changes it: the RTPS brightness
+// command, the Tab5's side button, and a settings slider once the export has
+// one (bind_brightness_slider). Saved a second after it stops changing, so
+// dragging a slider is one flash write rather than one per step.
+/////////////////////////////////////////////////////////////////////////////
+
+static constexpr uint32_t kBrightnessSaveDelayMs = 1000;
+static lv_subject_t brightness_subject; // backlight %, kBrightnessMin..MaxPercent
+static lv_timer_t *brightness_save_timer = nullptr;
+
+static void brightness_save_cb(lv_timer_t *timer) {
+  lv_timer_pause(timer);
+  settings_set_brightness(lv_subject_get_int(&brightness_subject));
+}
+
+static void brightness_observer(lv_observer_t *, lv_subject_t *subject) {
+  espp::M5StackTab5::get().brightness(static_cast<float>(lv_subject_get_int(subject)));
+  if (brightness_save_timer != nullptr) { // null on the first run, at bind time
+    lv_timer_reset(brightness_save_timer);
+    lv_timer_resume(brightness_save_timer);
+  }
+}
+
+// Any task. Clamped, so nothing can turn the screen fully off.
+static void brightness_set(int percent) {
+  std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
+  lv_subject_set_int(&brightness_subject,
+                     std::clamp(percent, kBrightnessMinPercent, kBrightnessMaxPercent));
+}
+
+// The Tab5's side button: the next of 25/50/75/100 % above the current level.
+static void brightness_step() {
+  std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
+  const int32_t now = lv_subject_get_int(&brightness_subject);
+  int32_t next = 25;
+  for (int32_t level : {25, 50, 75, 100}) {
+    if (level > now) {
+      next = level;
+      break;
+    }
+  }
+  lv_subject_set_int(&brightness_subject, next);
+}
+
+// For the settings slider, once the export has one: call it after ui_init
+// with the other bindings, e.g. bind_brightness_slider(ui_BrightnessSlider).
+[[maybe_unused]] static void bind_brightness_slider(lv_obj_t *slider) {
+  lv_slider_set_range(slider, kBrightnessMinPercent, kBrightnessMaxPercent);
+  lv_slider_bind_value(slider, &brightness_subject);
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// TopBar clock
+//
+// The MCB sends its local time in every McbStatus. It sets the system clock
+// and the RTC, so the time keeps running through a lost link, and across a
+// reboot without the MCB. Clock1 on every TopBar shows the system clock. No
+// TZ is set, so the system clock simply holds local time and nothing converts.
+/////////////////////////////////////////////////////////////////////////////
+
+static constexpr uint32_t kClockPollMs = 1000;
+static constexpr int64_t kClockMaxDriftS = 2; // disagree by more and the MCB wins
+static std::atomic<bool> clock_valid{false};
+static lv_subject_t clock_subject;
+static char clock_buf[8];
+static char clock_prev_buf[8];
+
+// An RTC that lost power reads 2000; anything before 2025 is not a real time.
+static bool clock_plausible(const std::tm &t) { return t.tm_year >= 125; }
+
+// Any task.
+static void clock_set(const std::tm &local) {
+  std::tm copy = local;
+  const timeval tv{.tv_sec = mktime(&copy), .tv_usec = 0};
+  settimeofday(&tv, nullptr);
+  clock_valid = true;
+}
+
+// RTPS receive task.
+static void clock_note_mcb_time(const rammp_mcb_status_t &status) {
+  if (status.month < 1 || status.month > 12 || status.day < 1 || status.day > 31 ||
+      status.hour > 23 || status.minute > 59 || status.second > 59) {
+    return; // month 0: the MCB does not know the time
+  }
+  std::tm t{};
+  t.tm_year = 100 + status.year;
+  t.tm_mon = status.month - 1;
+  t.tm_mday = status.day;
+  t.tm_hour = status.hour;
+  t.tm_min = status.minute;
+  t.tm_sec = status.second;
+  const time_t mcb = mktime(&t); // also fills tm_wday for the RTC
+  if (clock_valid && std::llabs(static_cast<int64_t>(mcb - time(nullptr))) <= kClockMaxDriftS) {
+    return;
+  }
+  clock_set(t);
+  static espp::Logger clock_logger({.tag = "clock", .level = espp::Logger::Verbosity::INFO});
+  if (espp::M5StackTab5::get().set_rtc_time(t)) {
+    clock_logger.info("set from the MCB: {:%Y-%m-%d %H:%M:%S}", t);
+  } else {
+    clock_logger.warn("set from the MCB, but the RTC write failed");
+  }
+}
+
+// LVGL task.
+static void clock_poll_cb(lv_timer_t *) {
+  char text[sizeof(clock_buf)] = "--:--";
+  if (clock_valid) {
+    const time_t now = time(nullptr);
+    std::tm t{};
+    gmtime_r(&now, &t);
+    snprintf(text, sizeof(text), "%02d:%02d", t.tm_hour, t.tm_min);
+  }
+  if (strcmp(lv_subject_get_string(&clock_subject), text) != 0) {
+    lv_subject_copy_string(&clock_subject, text);
+  }
+}
+
+static void bind_clock_label(lv_obj_t *bar) {
+  if (bar != nullptr) {
+    lv_label_bind_text(ui_comp_get_child(bar, UI_COMP_TOPBAR_CLOCK1), &clock_subject, nullptr);
   }
 }
 
@@ -994,10 +1129,11 @@ static void screen_return_to_main() {
                     &ui_MainScreenFlex_screen_init);
 }
 
-// Is the MCB currently telling us the chair is fit to drive? Requires a live
+// Is the MCB currently telling us the chair is fit to drive, or to move the
+// seat? Requires a live
 // link as well as an OK state: if the status is stale we do not KNOW the state,
 // and "unknown" is not "known good" on a device that moves someone.
-static bool drive_permitted() {
+static bool mcb_ready() {
   return static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) ==
              RtpsLinkState::CONNECTED &&
          lv_subject_get_int(&mcb_state_subject) == RAMMP_STATE_OK;
@@ -1006,23 +1142,26 @@ static bool drive_permitted() {
 /////////////////////////////////////////////////////////////////////////////
 // Saying why driving is not permitted
 //
-// Two ErrorWarningPanels, one cause. On MainScreenFlex: why a push into the
-// DriveScreen was refused - drive_enter_gesture is gated in applies(), so a
-// refused push otherwise does nothing at all. On the DriveScreen: why driving
-// was cut short, by the link dropping or the MCB faulting mid-drive. Both
-// word the cause from rammp_rtps_spec.h.
+// One cause, three ErrorWarningPanels. On MainScreenFlex: why a push into the
+// DriveScreen or the SeatAdjustmentFlexScreen was refused - both enter
+// gestures are gated in applies(), so a refused push otherwise does nothing at
+// all. On the DriveScreen and the SeatAdjustmentFlexScreen: why it was cut
+// short, by the link dropping or the MCB faulting. All word the cause from
+// rammp_rtps_spec.h.
 //
-// drive_refused_subject records only THAT a push was refused. Both panels work
+// entry_refused_subject records only THAT a push was refused. Both panels work
 // out WHY from the link and state subjects whenever any of them changes, so
 // they always name the current cause - cable back in but no DHCP lease yet,
 // say - rather than the one at the moment it first went wrong.
 /////////////////////////////////////////////////////////////////////////////
 
 static constexpr uint32_t kDriveRefusedShowMs = 4000; // how long one refusal stays up
-static lv_subject_t drive_refused_subject;            // 1 = a push was refused, panel up
+// Which push was refused, so the panel can say which.
+enum : int32_t { kRefusedNone = 0, kRefusedDrive = 1, kRefusedSeat = 2 };
+static lv_subject_t entry_refused_subject; // kRefused*; panel up unless None
 // Created paused and re-armed by each refusal, like haptic_label_timer, so a
 // second push restarts the countdown rather than stacking a timer.
-static lv_timer_t *drive_refused_timer = nullptr;
+static lv_timer_t *entry_refused_timer = nullptr;
 
 static_assert(sizeof(RAMMP_HMI_ETH_FAILED_TEXT) <= RAMMP_ERROR_TEXT_LEN &&
                   sizeof(RAMMP_HMI_LINK_DOWN_TEXT) <= RAMMP_ERROR_TEXT_LEN &&
@@ -1067,7 +1206,7 @@ static void fill_drive_blocked_panel(lv_obj_t *panel, const char *link_title,
   lv_obj_t *footer = ui_comp_get_child(
       panel, UI_COMP_ERRORWARNINGPANEL_ERRORMESSAGECONTAINER_ERRORMESSAGEFOOTERLABEL);
 
-  // The link comes first, as in drive_permitted(): with no live link the state
+  // The link comes first, as in mcb_ready(): with no live link the state
   // subject is only the last thing the MCB said, not what it is saying now.
   const auto link = static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject));
   if (link != RtpsLinkState::CONNECTED) {
@@ -1099,35 +1238,40 @@ static void bind_to_drive_blocked_cause(lv_obj_t *panel, lv_observer_cb_t cb) {
   }
 }
 
-// MainScreenFlex. Hides itself the moment driving is permitted again, so it
-// never claims a fault that has already cleared.
-static void drive_refused_panel_observer(lv_observer_t *observer, lv_subject_t *) {
+// MainScreenFlex. Says which entry was refused, and hides itself the moment
+// the MCB is ready again, so it never claims a fault that has already cleared.
+static void entry_refused_panel_observer(lv_observer_t *observer, lv_subject_t *) {
   lv_obj_t *panel = lv_observer_get_target_obj(observer);
-  if (!lv_subject_get_int(&drive_refused_subject) || drive_permitted()) {
+  const int32_t refused = lv_subject_get_int(&entry_refused_subject);
+  if (refused == kRefusedNone || mcb_ready()) {
     lv_obj_add_flag(panel, LV_OBJ_FLAG_HIDDEN);
     return;
   }
-  fill_drive_blocked_panel(panel, RAMMP_HMI_LINK_REFUSED_TITLE, RAMMP_HMI_MCB_REFUSED_TITLE);
+  if (refused == kRefusedSeat) {
+    fill_drive_blocked_panel(panel, RAMMP_HMI_SEAT_LINK_REFUSED_TITLE,
+                             RAMMP_HMI_SEAT_MCB_REFUSED_TITLE);
+  } else {
+    fill_drive_blocked_panel(panel, RAMMP_HMI_LINK_REFUSED_TITLE, RAMMP_HMI_MCB_REFUSED_TITLE);
+  }
   lv_obj_remove_flag(panel, LV_OBJ_FLAG_HIDDEN);
 }
 
-static void bind_drive_refused_panel(lv_obj_t *panel) {
+static void bind_entry_refused_panel(lv_obj_t *panel) {
   if (panel == nullptr) {
     return;
   }
-  lv_subject_add_observer_obj(&drive_refused_subject, drive_refused_panel_observer, panel, nullptr);
-  bind_to_drive_blocked_cause(panel, drive_refused_panel_observer);
+  lv_subject_add_observer_obj(&entry_refused_subject, entry_refused_panel_observer, panel, nullptr);
+  bind_to_drive_blocked_cause(panel, entry_refused_panel_observer);
 }
 
-// DriveScreen. No push to wait for here: entry already required a live link
-// and an OK state, so anything else means it was lost mid-drive. The banner
-// stays up for as long as that lasts rather than timing out, and clears by
-// itself when the link and state recover. A state neither board knows counts
-// as not OK (drive_permitted compares against OK), so it raises the banner
-// rather than silently hiding it.
+// DriveScreen and SeatAdjustmentFlexScreen. No push to wait for here: entry already required a live
+// link and an OK state, so anything else means it was lost mid-drive. The banner stays up for as
+// long as that lasts rather than timing out, and clears by itself when the link and state recover.
+// A state neither board knows counts as not OK (mcb_ready compares against OK), so it raises the
+// banner rather than silently hiding it.
 static void drive_screen_warning_observer(lv_observer_t *observer, lv_subject_t *) {
   lv_obj_t *panel = lv_observer_get_target_obj(observer);
-  if (drive_permitted()) {
+  if (mcb_ready()) {
     lv_obj_add_flag(panel, LV_OBJ_FLAG_HIDDEN);
     return;
   }
@@ -1135,23 +1279,23 @@ static void drive_screen_warning_observer(lv_observer_t *observer, lv_subject_t 
   lv_obj_remove_flag(panel, LV_OBJ_FLAG_HIDDEN);
 }
 
-static void bind_drive_screen_warning_panel(lv_obj_t *panel) {
+static void bind_mcb_lost_panel(lv_obj_t *panel) {
   if (panel == nullptr) {
     return;
   }
   bind_to_drive_blocked_cause(panel, drive_screen_warning_observer);
 }
 
-static void drive_refused_clear() {
-  lv_timer_pause(drive_refused_timer);
-  lv_subject_set_int(&drive_refused_subject, 0);
+static void entry_refused_clear() {
+  lv_timer_pause(entry_refused_timer);
+  lv_subject_set_int(&entry_refused_subject, 0);
 }
 
-static void drive_refused_timer_cb(lv_timer_t *) { drive_refused_clear(); }
+static void entry_refused_timer_cb(lv_timer_t *) { entry_refused_clear(); }
 
 // Runs from hold_poll_cb, on the same input and cadence as the gesture it
 // shadows.
-static void drive_refusal_poll() {
+static void entry_refusal_poll() {
   // Its own edge detector rather than joy_up_armed: armed stays true for as
   // long as the stick is released, so it cannot tell a fresh push from a held
   // one - and a push still held from the unlock, carried across the auto-
@@ -1161,18 +1305,21 @@ static void drive_refusal_poll() {
   const bool pushed = up && !was_up;
   was_up = up;
 
-  const bool on_drive_page = showing_flex_page(ui_DrivePanel);
-  if (pushed && on_drive_page && !drive_permitted()) {
-    lv_subject_set_int(&drive_refused_subject, 1);
-    lv_timer_reset(drive_refused_timer);
-    lv_timer_resume(drive_refused_timer);
+  const int32_t page = showing_flex_page(ui_DrivePanel)           ? kRefusedDrive
+                       : showing_flex_page(ui_SeatAdjustmentMenu) ? kRefusedSeat
+                                                                  : kRefusedNone;
+  const int32_t refused = lv_subject_get_int(&entry_refused_subject);
+  if (pushed && page != kRefusedNone && !mcb_ready()) {
+    lv_subject_set_int(&entry_refused_subject, page);
+    lv_timer_reset(entry_refused_timer);
+    lv_timer_resume(entry_refused_timer);
     // Distinct from the STRONG_CLICK a completed hold gives, so a refusal can
     // be felt as well as read.
     haptic_play(espp::Drv2605::Waveform::DOUBLE_CLICK, 1);
-  } else if (lv_subject_get_int(&drive_refused_subject) && (!on_drive_page || drive_permitted())) {
+  } else if (refused != kRefusedNone && (refused != page || mcb_ready())) {
     // Clear rather than merely hide, so a cause that clears and then recurs
     // inside the window does not bring the panel back without a new push.
-    drive_refused_clear();
+    entry_refused_clear();
   }
 }
 
@@ -1181,8 +1328,8 @@ static HoldGesture drive_enter_gesture{
     .is_held = joy_up_held,
     // Gated in applies() rather than completed(), so a barred entry never even
     // starts filling the arc: nothing happens, instead of a progress animation
-    // that betrays you at the end. drive_refusal_poll says why.
-    .applies = [] { return showing_flex_page(ui_DrivePanel) && drive_permitted(); },
+    // that betrays you at the end. entry_refusal_poll says why.
+    .applies = [] { return showing_flex_page(ui_DrivePanel) && mcb_ready(); },
     .completed =
         [] {
           _ui_screen_change(&ui_DriveScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
@@ -1244,7 +1391,9 @@ static HoldGesture seat_back_gesture{
 static HoldGesture seat_enter_gesture{
     .armed = &joy_up_armed,
     .is_held = joy_up_held,
-    .applies = [] { return showing_flex_page(ui_SeatAdjustmentMenu); },
+    // Gated like drive_enter_gesture: the seat moves through the MCB, so it
+    // needs the same live link and OK state. entry_refusal_poll says why not.
+    .applies = [] { return showing_flex_page(ui_SeatAdjustmentMenu) && mcb_ready(); },
     .completed =
         [] {
           // The seat screen has a pager of its own, and unlike the MainScreenFlex
@@ -1318,7 +1467,7 @@ static void hold_poll_cb(lv_timer_t *) {
     }
     return;
   }
-  drive_refusal_poll();
+  entry_refusal_poll();
   for (HoldGesture *g : kHoldGestures) {
     hold_poll(g);
   }
@@ -2582,24 +2731,14 @@ extern "C" void app_main(void) {
     return;
   }
 
-  // only set the time if the year is before 2024
-  if (current_time.tm_year < 124) {
-    // set the RTC time to a known value (2024-01-15 14:30:45)
-    // Set time using std::tm
-    std::tm time = {};
-    time.tm_year = 124; // 2024 - 1900
-    time.tm_mon = 0;    // January (0-based)
-    time.tm_mday = 15;  // 15th
-    time.tm_hour = 14;  // 2 PM
-    time.tm_min = 30;
-    time.tm_sec = 45;
-    time.tm_wday = 1; // Monday
-    if (!tab5.set_rtc_time(time)) {
-      logger.error("Failed to set RTC time");
-      return;
-    }
+  // The RTC holds the MCB's local time (see "TopBar clock"). One that lost
+  // power reads a date long gone; the clock then shows --:-- until the MCB
+  // sends the time.
+  if (clock_plausible(current_time)) {
+    clock_set(current_time);
+    logger.info("RTC time {:%Y-%m-%d %H:%M:%S}", current_time);
   } else {
-    logger.info("RTC time is already set to a valid value {:%Y-%m-%d %H:%M:%S}", current_time);
+    logger.warn("RTC not set ({:%Y-%m-%d}); the clock waits for the MCB", current_time);
   }
 
   logger.info("Initializing battery management...");
@@ -2624,13 +2763,7 @@ extern "C" void app_main(void) {
   auto button_callback = [&](const auto &state) {
     logger.info("Button state: {}", state.active);
     if (state.active) {
-      // Cycle through brightness levels: 25%, 50%, 75%, 100%
-      static int brightness_level = 0;
-      float brightness_values[] = {0.25f, 0.5f, 0.75f, 1.0f};
-      brightness_level = (brightness_level + 1) % 4;
-      float new_brightness = brightness_values[brightness_level];
-      tab5.brightness(new_brightness);
-      logger.info("Set brightness to {:.0f}%", new_brightness * 100);
+      brightness_step();
     }
   };
   if (!tab5.initialize_button(button_callback)) {
@@ -2759,6 +2892,20 @@ extern "C" void app_main(void) {
   // sample_ui_home_init();
   // lv_screen_load(sample_ui_home_screen);
 
+  // Saved settings (settings.cpp). The theme goes on before anything is drawn
+  // (the boot overdraw pass further down runs after it, as it must: a theme
+  // switch re-adds the fills that pass removes). The backlight is applied as
+  // its observer is added.
+  settings_load();
+  if (const uint8_t theme = settings_theme();
+      theme != ui_theme_idx && (theme == UI_THEME_DEFAULT || theme == UI_THEME_DAY)) {
+    ui_theme_set(theme);
+  }
+  lv_subject_init_int(&brightness_subject, settings_brightness());
+  lv_subject_add_observer(&brightness_subject, brightness_observer, nullptr);
+  brightness_save_timer = lv_timer_create(brightness_save_cb, kBrightnessSaveDelayMs, nullptr);
+  lv_timer_pause(brightness_save_timer);
+
   // Bind the Settings-screen axis bars to the ADC subjects (observer pattern).
   // Bars show the calibrated joystick position as a percentage: -100..+100,
   // centered at 0; RTPS carries the same values as -1..+1 (see the ADC task).
@@ -2807,18 +2954,26 @@ extern "C" void app_main(void) {
   bind_rtps_label(ui_TopBar5);        // RDScreen
   bind_rtps_label(ui_TopBar6);        // LogScreen
   bind_rtps_label(ui_TopBar7);        // ActuatorsScreen
+  lv_subject_init_string(&clock_subject, clock_buf, clock_prev_buf, sizeof(clock_buf), "--:--");
+  for (lv_obj_t *bar :
+       {ui_TopBar1, ui_TopBar2, ui_TopBar3, ui_TopBar4, ui_TopBar5, ui_TopBar6, ui_TopBar7}) {
+    bind_clock_label(bar);
+  }
+  clock_poll_cb(nullptr); // the RTC's time, when it had one, from the first frame
+  lv_timer_create(clock_poll_cb, kClockPollMs, nullptr);
   lv_subject_add_observer_obj(&speed_tenths_subject, speed_label_observer, ui_SpeedNumber, nullptr);
   lv_subject_init_int(&drive_mode_subject, RAMMP_DRIVE_MODE_NORMAL);
   bind_drive_mode_button(ui_DriveModeButton, &kModeHolo);
   bind_drive_mode_button(ui_DriveModeButton1, &kModeNormal);
   bind_drive_mode_button(ui_DriveModeButton2, &kModeAuto);
   lv_subject_add_observer(&drive_mode_subject, drive_mode_publish_observer, nullptr);
-  bind_drive_screen_warning_panel(ui_ErrorWarningPanel); // DriveScreen
+  bind_mcb_lost_panel(ui_ErrorWarningPanel);  // DriveScreen
+  bind_mcb_lost_panel(ui_ErrorWarningPanel1); // SeatAdjustmentFlexScreen
   // Initialised before the bind: the panel's observer reads it on its first run.
-  lv_subject_init_int(&drive_refused_subject, 0);
-  drive_refused_timer = lv_timer_create(drive_refused_timer_cb, kDriveRefusedShowMs, nullptr);
-  lv_timer_pause(drive_refused_timer);
-  bind_drive_refused_panel(ui_ErrorWarningPanel4); // MainScreenFlex
+  lv_subject_init_int(&entry_refused_subject, 0);
+  entry_refused_timer = lv_timer_create(entry_refused_timer_cb, kDriveRefusedShowMs, nullptr);
+  lv_timer_pause(entry_refused_timer);
+  bind_entry_refused_panel(ui_ErrorWarningPanel4); // MainScreenFlex
   lv_timer_create(rtps_poll_cb, kRtpsPollMs, nullptr);
 
   // CALIBRATE on the JoystickTest screen. Its prompts blink on the RTPS
@@ -3274,7 +3429,11 @@ extern "C" void app_main(void) {
   logger.info("Starting LVGL task...");
   espp::Task lv_task(
       {.callback = [](std::mutex &m, std::condition_variable &cv) -> bool {
-         auto start_time = std::chrono::high_resolution_clock::now();
+         // steady_clock, never high_resolution_clock: on ESP-IDF that one is the
+         // wall clock, which the MCB's time moves (see "TopBar clock"), and
+         // wait_until on a wall clock that steps back sleeps out the whole step
+         // - the screen froze for as long as the clock went back.
+         auto start_time = std::chrono::steady_clock::now();
          {
            std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
            if (kFpsStress) {
@@ -3301,8 +3460,7 @@ extern "C" void app_main(void) {
          // Always yield at least one tick: once a render cycle exceeds 8 ms
          // the deadline is already past and wait_until returns without
          // yielding, which pins core 1 at priority 20 and starves IDLE1.
-         const auto deadline =
-             std::max(start_time + 8ms, std::chrono::high_resolution_clock::now() + 1ms);
+         const auto deadline = std::max(start_time + 8ms, std::chrono::steady_clock::now() + 1ms);
          cv.wait_until(lock, deadline, []() { return false; });
          return false;
        },
@@ -3338,8 +3496,7 @@ extern "C" void app_main(void) {
   tab5.mute(false);
   tab5.volume(60.0f);
 
-  // set the brightness to 75%
-  tab5.brightness(75.0f);
+  // (brightness is the saved setting, applied when brightness_subject is bound)
 
   // make a task to read out various data such as IMU, battery monitoring, etc.
   // and print it to screen
@@ -3682,12 +3839,13 @@ extern "C" void app_main(void) {
   // remote command can't turn the screen fully off. brightness() drives the
   // backlight directly (no LVGL), so it's safe from the RTPS receive task.
   rtps_comms_on_brightness(
-      [](float percent) { espp::M5StackTab5::get().brightness(std::max(percent, 5.0f)); });
+      [](float percent) { brightness_set(static_cast<int>(std::lround(percent))); });
   // MCB status -> the two StatusPanel labels. Runs on the RTPS receive task,
   // so it only writes subjects — and takes the LVGL lock to do it, because
   // lv_subject_set_int runs the observers synchronously on this task and they
   // touch widgets.
   rtps_comms_on_mcb_status([](const rammp_mcb_status_t &status) {
+    clock_note_mcb_time(status); // no LVGL: sets the system clock and the RTC
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
     lv_subject_set_int(&drive_status_subject, status.drive_status);
     lv_subject_set_int(&mcb_state_subject, status.system_state);

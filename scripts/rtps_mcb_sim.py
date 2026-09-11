@@ -32,6 +32,7 @@ rtps_adc_plot.py (12) by using participant id 13.
 from __future__ import annotations
 
 import argparse
+import datetime
 import os
 import random
 import socket
@@ -347,7 +348,8 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
             writer,
             spec.pack_mcb_status(self.drive_status, self.system_state, self.flags, self.seq,
                                  self.speed_tenths, self.drive_text, self.state_text,
-                                 self.error_text, self.error_footer),
+                                 self.error_text, self.error_footer,
+                                 clock=datetime.datetime.now()),  # sets the HMI's clock
         )
         targets = self._build_user_targets(writer)
         for destination in targets:

@@ -20,6 +20,7 @@ style appear here for free.
 
 from __future__ import annotations
 
+import datetime
 import os
 import re
 import struct
@@ -31,8 +32,10 @@ _DEFINE_RE = re.compile(r'^\s*#define\s+RAMMP_((?:TOPIC|TYPE)_[A-Z0-9_]+)\s+"([^
 _ENUM_RE = re.compile(r"^\s*RAMMP_([A-Z0-9_]+)\s*=\s*(\d+)\s*,", re.M)
 # Accepts decimal and hex, with the C integer suffixes: bitmasks in a wire
 # spec are naturally written 0x...u, and those must scrape like any other.
+# A trailing /* comment */ or // comment is allowed.
 _NUMBER_RE = re.compile(
-    r"^\s*#define\s+RAMMP_([A-Z0-9_]+)\s+(0[xX][0-9a-fA-F]+|\d+)[uUlL]*\s*$", re.M
+    r"^\s*#define\s+RAMMP_([A-Z0-9_]+)\s+(0[xX][0-9a-fA-F]+|\d+)[uUlL]*\s*(?:/\*.*?\*/|//.*)?\s*$",
+    re.M,
 )
 
 
@@ -144,7 +147,7 @@ CDR_LE_HEADER = b"\x00\x01\x00\x00"
 #: struct format for the payload behind the encapsulation header, matching
 #: rammp_mcb_status_encode() in the spec header
 _MCB_STATUS_FORMAT = (
-    f"<BBBBB{MCB_TEXT_LEN}s{MCB_TEXT_LEN}s{ERROR_TEXT_LEN}s{ERROR_FOOTER_LEN}s"
+    f"<BBBBB6B{MCB_TEXT_LEN}s{MCB_TEXT_LEN}s{ERROR_TEXT_LEN}s{ERROR_FOOTER_LEN}s"
 )
 _MCB_STATUS_CDR_SIZE = len(CDR_LE_HEADER) + struct.calcsize(_MCB_STATUS_FORMAT)
 
@@ -166,28 +169,32 @@ def encode_label(text: str, limit: int = MCB_TEXT_LEN) -> bytes:
 
 def pack_mcb_status(drive_status: int, system_state: int, flags: int = 0, seq: int = 0,
                     speed_tenths: int = 0, drive_text: str = "", state_text: str = "",
-                    error_text: str = "", error_footer: str = "") -> bytes:
-    """Serialize a rammp_mcb_status_t, matching rammp_mcb_status_encode()."""
+                    error_text: str = "", error_footer: str = "",
+                    clock: datetime.datetime | None = None) -> bytes:
+    """Serialize a rammp_mcb_status_t, matching rammp_mcb_status_encode().
+
+    `clock` is the MCB's local time; None sends month 0, "time unknown".
+    """
+    when = (0,) * 6 if clock is None else (
+        clock.hour, clock.minute, clock.second, clock.day, clock.month,
+        max(0, min(clock.year - 2000, 255)))
     return CDR_LE_HEADER + struct.pack(
         _MCB_STATUS_FORMAT,
         drive_status & 0xFF, system_state & 0xFF, flags & 0xFF, seq & 0xFF,
-        max(0, min(int(speed_tenths), SPEED_MAX_TENTHS)),
+        max(0, min(int(speed_tenths), SPEED_MAX_TENTHS)), *when,
         encode_label(drive_text), encode_label(state_text),
         encode_label(error_text, ERROR_TEXT_LEN), encode_label(error_footer, ERROR_FOOTER_LEN),
     )
 
 
 def unpack_mcb_status(payload: bytes):
-    """(drive, state, flags, seq, speed_tenths, drive_text, state_text,
-    error_text, error_footer), or None if this isn't one."""
+    """(drive, state, flags, seq, speed_tenths, hour, minute, second, day, month,
+    year_since_2000, drive_text, state_text, error_text, error_footer), or None
+    if this isn't one."""
     if len(payload) < _MCB_STATUS_CDR_SIZE or payload[:2] != CDR_LE_HEADER[:2]:
         return None
-    drive, state, flags, seq, speed, drive_raw, state_raw, err_raw, foot_raw = struct.unpack_from(
-        _MCB_STATUS_FORMAT, payload, len(CDR_LE_HEADER)
-    )
-    return (drive, state, flags, seq, speed,
-            _decode_field(drive_raw), _decode_field(state_raw),
-            _decode_field(err_raw), _decode_field(foot_raw))
+    fields = struct.unpack_from(_MCB_STATUS_FORMAT, payload, len(CDR_LE_HEADER))
+    return (*fields[:11], *(_decode_field(raw) for raw in fields[11:]))
 
 
 #: matches rammp_actuator_command_encode() in the spec header
