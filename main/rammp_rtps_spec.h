@@ -170,14 +170,16 @@ static inline const rammp_actuator_spec_t *rammp_actuator_table(uint8_t *count) 
   return table;
 }
 
-typedef struct rammp_actuator_command { /* HMI -> MCB */
-  uint8_t req_id;                       /* +1 per command, wraps; echoed back in the state */
-  uint8_t actuator_id;                  /* table row */
-  int8_t steps;                         /* -1 = one "-" press, +1 = one "+" press */
-  uint8_t reserved;                     /* send 0 */
+/* HMI -> MCB */
+typedef struct rammp_actuator_command {
+  uint8_t req_id;      /* +1 per command, wraps; echoed back in the state */
+  uint8_t actuator_id; /* table row */
+  int8_t steps;        /* -1 = one "-" press, +1 = one "+" press */
+  uint8_t reserved;    /* send 0 */
 } rammp_actuator_command_t;
 
-typedef struct rammp_actuator_state { /* MCB -> HMI, on change and periodically */
+/* MCB -> HMI, on change and periodically */
+typedef struct rammp_actuator_state {
   uint8_t req_id;                     /* command this answers; 0 = none yet */
   uint8_t result;                     /* RAMMP_ACTUATOR_RESULT_* */
   uint8_t count;                      /* valid entries in values[] */
