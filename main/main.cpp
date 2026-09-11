@@ -41,6 +41,8 @@
 #include "oneshot_adc.hpp"
 
 #include "boot_logo.h"
+#include "log_capture.hpp"
+#include "log_view.hpp"
 #include "rtps_comms.hpp"
 #include "selftest.hpp"
 
@@ -1209,9 +1211,21 @@ static HoldGesture actuators_exit_gesture{
     .grace_ms = kBarGraceMs,
 };
 
+// The LogScreen exits on the stick button, like the DriveScreen: up and down
+// page through the log there, so neither can double as a pull-to-exit.
+static HoldGesture log_exit_gesture{
+    .armed = &joy_button_armed,
+    .is_held = joy_button_held,
+    .applies = [] { return lv_screen_active() == ui_LogScreen; },
+    .completed = screen_return_to_main,
+    // the button is also select, so a tap would tick the bar and snap back
+    .grace_ms = kBarGraceMs,
+};
+
 static HoldGesture *const kHoldGestures[] = {
-    &unlock_gesture,    &drive_enter_gesture, &drive_exit_gesture, &seat_enter_gesture,
-    &seat_exit_gesture, &seat_back_gesture,   &rd_exit_gesture,    &actuators_exit_gesture,
+    &unlock_gesture,     &drive_enter_gesture,    &drive_exit_gesture,
+    &seat_enter_gesture, &seat_exit_gesture,      &seat_back_gesture,
+    &rd_exit_gesture,    &actuators_exit_gesture, &log_exit_gesture,
 };
 
 static void hold_poll_cb(lv_timer_t *) {
@@ -1838,6 +1852,9 @@ static void screen_loaded_cb(lv_event_t *e) {
   } else if (screen == ui_ActuatorsScreen) {
     lv_indev_set_group(joystick_indev, actuators_group);
     actuator_focus(0);
+  } else if (screen == ui_LogScreen && log_view_group() != nullptr) {
+    lv_indev_set_group(joystick_indev, log_view_group());
+    log_view_on_load();
   } else {
     lv_indev_set_group(joystick_indev, joystick_group);
   }
@@ -1923,9 +1940,10 @@ static uint32_t strip_screen_overdraw(const lv_obj_t *screen) {
 // Every screen ui_init built. Kept in one place so the boot pass and the
 // theme-change pass cannot drift apart.
 static void strip_all_overdraw() {
-  const lv_obj_t *const screens[] = {ui_MainScreenFlex,           ui_DriveScreen,
-                                     ui_SeatAdjustmentFlexScreen, ui_RDScreen,
-                                     ui_ActuatorsScreen,          ui_JoystickTest};
+  const lv_obj_t *const screens[] = {
+      ui_MainScreenFlex, ui_DriveScreen,     ui_SeatAdjustmentFlexScreen,
+      ui_RDScreen,       ui_ActuatorsScreen, ui_JoystickTest,
+      ui_LogScreen};
   const uint32_t stripped =
       std::accumulate(std::begin(screens), std::end(screens), uint32_t{0},
                       [](uint32_t sum, const lv_obj_t *screen) {
@@ -2279,6 +2297,9 @@ static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c) {
 }
 
 extern "C" void app_main(void) {
+  // First, so the LogScreen has everything printed from here on - including
+  // what the tasks started below print.
+  log_capture_start();
   espp::Logger logger({.tag = "M5Stack Tab5 Example", .level = espp::Logger::Verbosity::INFO});
   logger.info("Starting example!");
 
@@ -2698,12 +2719,14 @@ extern "C" void app_main(void) {
   bind_status_panel(ui_StatusPanel2); // DriveScreen
   bind_status_panel(ui_StatusPanel3); // SeatAdjustmentFlexScreen
   bind_status_panel(ui_StatusPanel4); // RDScreen
+  bind_status_panel(ui_StatusPanel5); // LogScreen
   bind_status_panel(ui_StatusPanel6); // ActuatorsScreen
   bind_rtps_label(ui_TopBar1);        // JoystickTest
   bind_rtps_label(ui_TopBar2);        // DriveScreen
   bind_rtps_label(ui_TopBar3);        // MainScreenFlex
   bind_rtps_label(ui_TopBar4);        // SeatAdjustmentFlexScreen
   bind_rtps_label(ui_TopBar5);        // RDScreen
+  bind_rtps_label(ui_TopBar6);        // LogScreen
   bind_rtps_label(ui_TopBar7);        // ActuatorsScreen
   lv_subject_add_observer_obj(&speed_tenths_subject, speed_label_observer, ui_SpeedNumber, nullptr);
   lv_subject_init_int(&drive_mode_subject, RAMMP_DRIVE_MODE_NORMAL);
@@ -2829,7 +2852,15 @@ extern "C" void app_main(void) {
   lv_bar_bind_value(ui_ExitBarPull2, &rd_exit_gesture.progress);
   lv_bar_set_range(ui_ExitBarPull3, 0, kHoldMax);
   lv_bar_bind_value(ui_ExitBarPull3, &actuators_exit_gesture.progress);
+  lv_subject_init_int(&log_exit_gesture.progress, 0);
+  lv_bar_set_range(ui_ExitBarPress2, 0, kHoldMax);
+  lv_bar_bind_value(ui_ExitBarPress2, &log_exit_gesture.progress);
   lv_timer_create(hold_poll_cb, kHoldPollMs, nullptr);
+
+  // LogScreen: TextArea1 shows the serial output log_capture has kept. Its
+  // ErrorWarningPanel5 is deliberately left unbound (hidden): a link-lost
+  // banner would cover the log at exactly the moment someone wants to read it.
+  log_view_init();
 
   // SeatAdjustmentFlexScreen. Both grids are built here rather than declared
   // with initialisers because the ui_* globals only exist once ui_init has run.
@@ -2917,6 +2948,7 @@ extern "C" void app_main(void) {
   lv_obj_add_event_cb(ui_MainScreenFlex, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, nullptr);
   lv_obj_add_event_cb(ui_RDScreen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, nullptr);
   lv_obj_add_event_cb(ui_ActuatorsScreen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, nullptr);
+  lv_obj_add_event_cb(ui_LogScreen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, nullptr);
 
   // Freeze the pager until the unlock hands it over. Each of these closes one
   // route into it, and they are genuinely independent — see paging_subject.

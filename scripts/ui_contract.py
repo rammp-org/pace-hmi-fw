@@ -71,6 +71,10 @@ PARENTS: dict[str, str] = {
     "ui_ExitBarPushLeft": "ui_SeatAdjustmentPanel",
     "ui_ExitBarPull2": "ui_RDScreen",
     "ui_ExitBarPull3": "ui_ActuatorsScreen",
+    "ui_ExitBarPress2": "ui_LogScreen",
+
+    # LogScreen: log_view.cpp points this text area at the captured serial log
+    "ui_TextArea1": "ui_LogScreenPanelInner",
 
     # RDScreen PIN entry
     "ui_SeatFunctionsButtonsPanel1": "ui_SeatAdjustmentScreenFlexPanel1",
@@ -99,12 +103,14 @@ PARENTS: dict[str, str] = {
     "ui_StatusPanel2": "ui_DriveScreen",
     "ui_StatusPanel3": "ui_SeatAdjustmentFlexScreen",
     "ui_StatusPanel4": "ui_RDScreen",
+    "ui_StatusPanel5": "ui_LogScreen",
     "ui_StatusPanel6": "ui_ActuatorsScreen",
     "ui_TopBar1": "ui_JoystickTest",
     "ui_TopBar2": "ui_DriveScreen",
     "ui_TopBar3": "ui_MainScreenFlex",
     "ui_TopBar4": "ui_SeatAdjustmentFlexScreen",
     "ui_TopBar5": "ui_RDScreen",
+    "ui_TopBar6": "ui_LogScreen",
     "ui_TopBar7": "ui_ActuatorsScreen",
 }
 

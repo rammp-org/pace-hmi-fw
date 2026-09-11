@@ -58,6 +58,7 @@ CONFIG_ETH_USE_SPI_ETHERNET=y
 # Font sizes referenced by the SquareLine UI export (main/ui/screens). Any size
 # used there must be enabled here or the build fails on an undeclared
 # lv_font_montserrat_<N>.
+CONFIG_LV_FONT_MONTSERRAT_20=y
 CONFIG_LV_FONT_MONTSERRAT_24=y
 CONFIG_LV_FONT_MONTSERRAT_30=y
 CONFIG_LV_FONT_MONTSERRAT_32=y

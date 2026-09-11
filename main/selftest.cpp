@@ -21,6 +21,7 @@
 #include "freertos/task.h"
 #include "lvgl.h"
 
+#include "log_capture.hpp"
 #include "logger.hpp"
 #include "rtps_comms.hpp"
 #include "selftest_spec.h"
@@ -333,6 +334,7 @@ public:
     // Low-water marks as they stood before this run touched anything, so the
     // memory checks can tell the firmware's own worst case from the test's.
     int_min_before_ = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    log_count_before_ = log_capture_count();
     dma_min_before_ = heap_caps_get_minimum_free_size(MALLOC_CAP_DMA);
     const int64_t start_us = esp_timer_get_time();
     version_ = esp_app_get_description()->version;
@@ -364,6 +366,7 @@ public:
     status("Haptic check - the motor clicks once");
     check_haptic_play();
 
+    check_log();
     // last, so the low-water mark and the stacks cover everything above
     check_memory();
 
@@ -462,6 +465,14 @@ private:
     record(ST_SYS_RESET, clean ? 1 : 0, fmt::format("reset reason: {}", reset_reason_name(reason)));
     record(ST_SYS_CPU, esp_clk_cpu_freq() / 1000000);
     record(ST_SYS_UPTIME, static_cast<int32_t>(esp_timer_get_time() / 1000000));
+  }
+
+  // The run prints its own progress, so by now a working capture has grown; one
+  // that is stuck, or that something has routed stdout around, has not.
+  void check_log() {
+    const uint32_t now = log_capture_count();
+    record(ST_LOG_CAPTURE, log_capture_active() && now > log_count_before_ ? 1 : 0,
+           fmt::format("{} lines since boot, {} this run", now, now - log_count_before_));
   }
 
   void check_board() {
@@ -1023,6 +1034,7 @@ private:
   const char *version_ = "";
   size_t int_min_before_ = 0;
   size_t dma_min_before_ = 0;
+  uint32_t log_count_before_ = 0;
   std::array<Outcome, ST_COUNT> out_{};
 };
 

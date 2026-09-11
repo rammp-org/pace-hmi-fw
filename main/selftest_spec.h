@@ -108,6 +108,7 @@ enum {
   X(SYS_RESET, "sys.clean_reset", "", 1, 1, ST_REQUIRED, "Last reset not a panic/WDT/brownout")    \
   X(SYS_CPU, "sys.cpu_mhz", "MHz", 360, 360, ST_REQUIRED, "CPU runs at the configured clock")      \
   X(SYS_UPTIME, "sys.uptime", "s", 0, ST_ANY_HI, ST_REQUIRED, "Seconds since boot (context)")      \
+  X(LOG_CAPTURE, "log.capture", "", 1, 1, ST_REQUIRED, "Serial output reaches the log screen")     \
   /* network and RTPS - first, so the link is the first thing read on screen */                    \
   X(NET_LINK, "net.eth_link", "", 1, 1, ST_REQUIRED, "Ethernet link up (W5500)")                   \
   X(NET_IP, "net.ip", "", 1, 1, ST_REQUIRED, "DHCP lease held")                                    \
