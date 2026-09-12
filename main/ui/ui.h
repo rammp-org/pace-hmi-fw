@@ -39,6 +39,8 @@ extern "C" {
 #include "screens/ui_RDScreen.h"
 #include "screens/ui_ActuatorsScreen.h"
 #include "screens/ui_LogScreen.h"
+#include "screens/ui_SpecificSettingScreen.h"
+#include "screens/ui_GenericActionsScreen.h"
 
 ///////////////////// VARIABLES ////////////////////
 
@@ -55,6 +57,7 @@ LV_IMG_DECLARE(ui_img_arrow_left_png);    // assets/arrow_left.png
 LV_IMG_DECLARE(ui_img_arrow_png);    // assets/arrow.png
 LV_IMG_DECLARE(ui_img_107617181);    // assets/turbo-rasterized.png
 LV_IMG_DECLARE(ui_img_rammp_wheelchair_png);    // assets/rammp_wheelchair.png
+LV_IMG_DECLARE(ui_img_action_png);    // assets/action.png
 
 // FONTS
 LV_FONT_DECLARE(ui_font_IBMPlexSansBold82);

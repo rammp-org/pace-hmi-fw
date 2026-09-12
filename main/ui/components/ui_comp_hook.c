@@ -44,3 +44,7 @@ void ui_comp_ExitBarPushLeft_create_hook(lv_obj_t * comp)
 void ui_comp_ActuatorComponent_create_hook(lv_obj_t * comp)
 {
 }
+
+void ui_comp_GenericActionsComponent1_create_hook(lv_obj_t * comp)
+{
+}

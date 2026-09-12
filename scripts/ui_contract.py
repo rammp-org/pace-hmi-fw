@@ -59,10 +59,11 @@ PARENTS: dict[str, str] = {
 
     # settings rows the firmware wires handlers onto
     "ui_SettingsFlexPanel": "ui_SettingsMenu",
-    "ui_Button1": "ui_SettingsFlexPanel",           # R&D DEBUG -> RDScreen
-    "ui_Button6": "ui_SettingsFlexPanel",           # R&D SELF TEST -> selftest_request
+    "ui_Button1": "ui_SettingsFlexPanel",           # DEBUG ACTUATORS -> RDScreen
+    "ui_Button6": "ui_SettingsFlexPanel",           # SELF TEST -> selftest_request
     "ui_FPSCounterButton": "ui_SettingsFlexPanel",
     "ui_HapticTestButton": "ui_SettingsFlexPanel",
+    "ui_ScreenBrightnessButton": "ui_SettingsFlexPanel",  # -> SpecificSettingScreen
 
     # exit gestures: each bar has to be on the screen its gesture applies to,
     # or it fills a bar the user cannot see
@@ -70,7 +71,7 @@ PARENTS: dict[str, str] = {
     "ui_ExitBarPull1": "ui_SeatAdjustmentFlexScreen",
     "ui_ExitBarPushLeft": "ui_SeatAdjustmentPanel",
     "ui_ExitBarPull2": "ui_RDScreen",
-    "ui_ExitBarPull3": "ui_ActuatorsScreen",
+    "ui_ExitBarPull4": "ui_SpecificSettingScreen",
     "ui_ExitBarPress2": "ui_LogScreen",
 
     # LogScreen: log_view.cpp points this text area at the captured serial log
@@ -88,9 +89,13 @@ PARENTS: dict[str, str] = {
     "ui_Keyboard1": "ui_SeatFunctionsButtonsPanel1",
     "ui_SeatFunctionsLabel2": "ui_SeatFunctionsButtonsPanel1",
 
-    # ActuatorsScreen: main.cpp deletes this template and builds one per
-    # actuator in RAMMP_ACTUATOR_TABLE, into this panel
-    "ui_ActuatorComponent": "ui_ActuatorsFlexPanel",
+    # SpecificSettingScreen: main.cpp fills in the title and instructions per
+    # page, deletes the Parameter1 template, and builds each page's rows into
+    # SpecificSettingsRows
+    "ui_SettingTitleLabel": "ui_SpecificSettingsInnerPanel",
+    "ui_BriefInstructionsLabel": "ui_SpecificSettingsInnerPanel",
+    "ui_Parameter1": "ui_SpecificSettingsRows",
+    "ui_ErrorWarningPanel6": "ui_SpecificSettingScreen",
 
     # seat screen grids
     "ui_SeatButton1": "ui_SeatFunctionsButtonsPanel",
@@ -118,14 +123,14 @@ PARENTS: dict[str, str] = {
     "ui_StatusPanel3": "ui_SeatAdjustmentFlexScreen",
     "ui_StatusPanel4": "ui_RDScreen",
     "ui_StatusPanel5": "ui_LogScreen",
-    "ui_StatusPanel6": "ui_ActuatorsScreen",
+    "ui_StatusPanel7": "ui_SpecificSettingScreen",
     "ui_TopBar1": "ui_JoystickTest",
     "ui_TopBar2": "ui_DriveScreen",
     "ui_TopBar3": "ui_MainScreenFlex",
     "ui_TopBar4": "ui_SeatAdjustmentFlexScreen",
     "ui_TopBar5": "ui_RDScreen",
     "ui_TopBar6": "ui_LogScreen",
-    "ui_TopBar7": "ui_ActuatorsScreen",
+    "ui_TopBar8": "ui_SpecificSettingScreen",
 }
 
 # Labels that identify a widget by its ROLE. A settings row is only "the R&D
@@ -133,10 +138,11 @@ PARENTS: dict[str, str] = {
 # above still passes (it is still some row on the settings panel) and only the
 # text gives it away.
 LABELS: dict[str, str] = {
-    "ui_ButtonLabel1": "R&D DEBUG",       # the row that opens ui_RDScreen
-    "ui_ButtonLabel6": "R&D SELF TEST",   # the row that starts the self test
+    "ui_ButtonLabel1": "DEBUG ACTUATORS",  # the row that opens ui_RDScreen
+    "ui_ButtonLabel6": "SELF TEST",        # the row that starts the self test
     "ui_FPSCounterLabel": "FPS COUNTER",
     "ui_HapticTestLabel": "HAPTIC TEST",
+    "ui_ButtonLabel7": "SCREEN BRIGHTNESS",  # opens the brightness settings page
     "ui_CalibrateJoystickButtonLabel": "CALIBRATE",  # joystick_cal.cpp's button
     "ui_GoToOldestButtonLabel": "Oldest",   # log_view.cpp: scroll to the top
     "ui_GoToNewestButtonLabel": "Newest",   # log_view.cpp: scroll to the end

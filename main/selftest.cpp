@@ -937,10 +937,9 @@ private:
     ui_finished = false;
     std::lock_guard<std::recursive_mutex> lock(*platform.lvgl_mutex);
     create_overlay_locked();
-    lv_subject_copy_string(&ui_title_subject,
-                           fmt::format("R&D SELF TEST  -  run {} ({})\n{}", run_id_,
-                                       remote_ ? "remote" : "local", version_)
-                               .c_str());
+    lv_subject_copy_string(&ui_title_subject, fmt::format("SELF TEST  -  run {} ({})\n{}", run_id_,
+                                                          remote_ ? "remote" : "local", version_)
+                                                  .c_str());
     refresh_columns_locked();
     lv_subject_set_int(&ui_visible_subject, 1);
     ui_shown = true;

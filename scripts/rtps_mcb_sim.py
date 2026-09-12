@@ -137,7 +137,7 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
         # Every run of the HMI's self test needs a peer: its RTPS checks time
         # pings against it and read McbStatus from it. Serving that here means
         # this simulator, the GUI and rtps_selftest.py all answer a run however
-        # it was started - over RTPS, or from the HMI's own R&D SELF TEST row.
+        # it was started - over RTPS, or from the HMI's own SELF TEST row.
         self.adc_rx_count = 0
         self.selftest_ping_rx = 0
         self._selftest_last_ping_seq = -1

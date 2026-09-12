@@ -23,6 +23,7 @@ extern uint32_t LV_EVENT_GET_COMP_CHILD;
 #include "ui_comp_exitbarpress.h"
 #include "ui_comp_exitbarpull.h"
 #include "ui_comp_exitbarpushleft.h"
+#include "ui_comp_genericactionscomponent1.h"
 #include "ui_comp_statuspanel.h"
 #include "ui_comp_topbar.h"
 #include "ui_comp_unlockarc.h"

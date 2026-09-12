@@ -9,7 +9,7 @@ instead of by reading the code:
   python rtps_selftest.py                  # run once; exit 0 pass, 1 fail, 2 no answer
   python rtps_selftest.py --json out.json  # also save the report
   python rtps_selftest.py --serve          # answer pings and print every report, for
-                                           # runs started from the HMI's R&D SELF TEST row
+                                           # runs started from the HMI's SELF TEST row
 
 It plays the MCB while it runs (it is an rtps_mcb_sim.McbStatusPublisher): the
 HMI's RTPS checks need McbStatus arriving and their pings answered, and a run
@@ -212,7 +212,7 @@ def judge(run_id: int, got: dict, rows: dict[str, SpecRow]) -> tuple[int, dict]:
 
 def serve(harness: rtps_mcb_sim.McbStatusPublisher, rows: dict[str, SpecRow]) -> int:
     print("serving: pings answered, McbStatus published. Start a run from the HMI's "
-          "R&D SELF TEST row; Ctrl-C to stop.", flush=True)
+          "SELF TEST row; Ctrl-C to stop.", flush=True)
     shown: set[tuple[int, float]] = set()
     try:
         while True:

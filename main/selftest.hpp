@@ -7,7 +7,7 @@
  * What is checked, and the limits each check is held to, live in
  * selftest_spec.h - that header is the spec. This module only measures.
  *
- * A run starts from the R&D SELF TEST settings row (selftest_request LOCAL) or
+ * A run starts from the SELF TEST settings row (selftest_request LOCAL) or
  * from a PC over RTPS (see "Self test" in rammp_rtps_spec.h). Either
  * way it runs on its own short-lived task, shows progress and results on an
  * overlay above whatever screen is up, prints the table to the serial log and
@@ -56,7 +56,7 @@ struct SelfTestPlatform {
 };
 
 enum class SelfTestTrigger {
-  LOCAL,  ///< the R&D SELF TEST row; peer-dependent checks SKIP without a peer
+  LOCAL,  ///< the SELF TEST row; peer-dependent checks SKIP without a peer
   REMOTE, ///< an RTPS command; a peer is known to exist, so they FAIL instead
 };
 

@@ -5,7 +5,7 @@
  * THIS FILE IS THE SPEC. A firmware change is checked by running the self test
  * and reading PASS/FAIL against these rows, not by reading the code:
  *
- *   - on the device:  Settings -> R&D SELF TEST (results on screen and serial)
+ *   - on the device:  Settings -> SELF TEST (results on screen and serial)
  *   - from a PC:      python scripts/rtps_selftest.py  (exit 0 = all passed)
  *
  * To tighten or loosen a check, change its limits here. To add one, add a row

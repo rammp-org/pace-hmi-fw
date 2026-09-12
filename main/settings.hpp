@@ -11,8 +11,12 @@
 
 #include <cstdint>
 
-constexpr int kBrightnessMinPercent = 5; // never fully dark: nothing could turn it back on
-constexpr int kBrightnessMaxPercent = 100;
+#include "settings_spec.h"
+
+// From the spec table. Never 0: a dark screen could not be turned back on.
+constexpr int kBrightnessMinPercent = SETTINGS_BRIGHTNESS_MIN;
+constexpr int kBrightnessMaxPercent = SETTINGS_BRIGHTNESS_MAX;
+static_assert(kBrightnessMinPercent > 0, "the backlight must not be able to go fully dark");
 
 /// Read the file. Call once from app_main, before the getters.
 void settings_load();
