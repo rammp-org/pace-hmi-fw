@@ -45,6 +45,7 @@
 #include "keypad_input.hpp"
 #include "oneshot_adc.hpp"
 
+#include "actions_spec.h"
 #include "boot_logo.h"
 #include "joystick_cal.hpp"
 #include "log_capture.hpp"
@@ -55,6 +56,7 @@
 
 #include "esp_heap_caps.h"
 #include "esp_lcd_mipi_dsi.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 
 using namespace std::chrono_literals;
@@ -875,11 +877,13 @@ static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c);
 //   LockedPanel           joystick up      ui_UnlockArc   unlocks driving mode
 //   DrivePanel            joystick up      ui_UnlockArc1  -> DriveScreen
 //   SeatAdjustmentMenu    joystick up      ui_UnlockArc2  -> SeatAdjustmentFlexScreen
+//   GenericActionsPanel1  joystick up      ui_UnlockArc3  -> GenericActionsScreen
 //   DriveScreen           stick button     ui_ExitBarPress1    -> MainScreenFlex
 //   Seat / buttons page   joystick down    ui_ExitBarPull1     -> MainScreenFlex
 //   Seat / adjust page    joystick left    ui_ExitBarPushLeft  -> buttons page
 //   RDScreen              joystick down    ui_ExitBarPull2     -> MainScreenFlex
 //   SpecificSettingScreen joystick down    ui_ExitBarPull4     -> MainScreenFlex
+//   GenericActionsScreen  joystick down    ui_ExitBarPull5     -> MainScreenFlex
 //
 // "Pull" is the stick toward the user, i.e. LV_KEY_DOWN; "push left" is
 // LV_KEY_LEFT. Each exit bar lives on the page it applies to, so the gestures
@@ -1126,6 +1130,9 @@ static void screen_return_to_main() {
 // page comes after the settings_spec.h pages.
 static constexpr int32_t kActuatorsPage = SETTINGS_PAGE_COUNT;
 static void setting_page_open(int32_t page);
+static void settings_screen_ensure();
+static void actions_screen_ensure();
+static void actions_open();
 
 // Is the MCB currently telling us the chair is fit to drive, or to move the
 // seat? Requires a live
@@ -1436,6 +1443,25 @@ static HoldGesture settings_exit_gesture{
     .grace_ms = kBarGraceMs,
 };
 
+// Into the GenericActionsScreen. Not gated on the MCB: most actions are local,
+// and the ones that are not grey themselves out on the screen.
+static HoldGesture actions_enter_gesture{
+    .armed = &joy_up_armed,
+    .is_held = joy_up_held,
+    .applies = [] { return showing_flex_page(ui_GenericActionsPanel1); },
+    .completed = actions_open,
+};
+
+// Out of it, like the settings and R&D screens. Down also walks the buttons,
+// hence the grace period.
+static HoldGesture actions_exit_gesture{
+    .armed = &joy_down_armed,
+    .is_held = joy_down_held,
+    .applies = [] { return lv_screen_active() == ui_GenericActionsScreen; },
+    .completed = screen_return_to_main,
+    .grace_ms = kBarGraceMs,
+};
+
 // The LogScreen exits on the stick button, like the DriveScreen: up and down
 // page through the log there, so neither can double as a pull-to-exit.
 static HoldGesture log_exit_gesture{
@@ -1448,9 +1474,9 @@ static HoldGesture log_exit_gesture{
 };
 
 static HoldGesture *const kHoldGestures[] = {
-    &unlock_gesture,     &drive_enter_gesture,   &drive_exit_gesture,
-    &seat_enter_gesture, &seat_exit_gesture,     &seat_back_gesture,
-    &rd_exit_gesture,    &settings_exit_gesture, &log_exit_gesture,
+    &unlock_gesture,    &drive_enter_gesture,   &drive_exit_gesture,   &seat_enter_gesture,
+    &seat_exit_gesture, &seat_back_gesture,     &rd_exit_gesture,      &settings_exit_gesture,
+    &log_exit_gesture,  &actions_enter_gesture, &actions_exit_gesture,
 };
 
 static void hold_poll_cb(lv_timer_t *) {
@@ -1750,9 +1776,8 @@ static void rd_open_cb(lv_event_t *) {
 //              so. That keeps a limit or an interlock one decision made in one
 //              place, instead of two boards disagreeing about where the seat is.
 //
-// Memory: ui_init builds the screen once and never frees it, like every
-// screen. What grows with a page is its rows, so those exist only while the
-// screen is up: built by setting_page_open, deleted when the screen unloads.
+// Memory: the screen and its rows exist only while it is up - see "Screens
+// built on demand".
 /////////////////////////////////////////////////////////////////////////////
 
 // A row's fixed description, from either table.
@@ -2171,6 +2196,7 @@ static void setting_row_add(const StepperSpec &spec, lv_subject_t *value, bool a
 
 // Fills the screen for `page` and shows it. LVGL task (a click handler).
 static void setting_page_open(int32_t page) {
+  settings_screen_ensure(); // built on demand: see "Screens built on demand"
   setting_rows_clear();
   const SettingPageText &text =
       page == kActuatorsPage ? kActuatorsPageText : kSettingPageText[page];
@@ -2195,7 +2221,171 @@ static void setting_page_open(int32_t page) {
                     &ui_SpecificSettingScreen_screen_init);
 }
 
-static void setting_screen_unloaded_cb(lv_event_t *) { setting_rows_clear(); }
+/////////////////////////////////////////////////////////////////////////////
+// GenericActionsScreen: a list of one-press actions
+//
+// Entered by holding the stick up on the GENERIC ACTIONS pager page, left by
+// pulling and holding. One button per entry in actions_spec.h: the spec gives
+// each its title, subtitle and whether it needs the MCB; kActionRun below says
+// what it does. Up/down move between buttons; the stick button (or a tap) runs
+// the focused one.
+//
+// A button that needs the MCB greys out while mcb_ready() is false, so it says
+// nothing would happen before anyone presses it - and the local actions stay
+// reachable, which a full-screen banner would not allow.
+//
+// Like the SpecificSettingScreen, the screen and its buttons exist only
+// while it is up - see "Screens built on demand".
+/////////////////////////////////////////////////////////////////////////////
+
+// What each action does. LVGL task (a click).
+static void action_haptic_test() {
+  haptic_play(espp::Drv2605::Waveform::ALERT_1000MS, kHapticBuzzSlots);
+}
+
+static void action_self_test() { selftest_request(SelfTestTrigger::LOCAL, 0); }
+
+// An RTPS command: the request a "+" press on the actuators page makes. The
+// seat moves only if the MCB agrees, and a refusal flashes on that page.
+static void action_seat_up() {
+  actuator_req_id++;
+  actuator_req_target[actuator_req_id] = RAMMP_ACTUATOR_ELEVATION;
+  rtps_comms_publish_actuator_command(actuator_req_id, RAMMP_ACTUATOR_ELEVATION, +1);
+}
+
+static void action_restart_hmi() {
+  static espp::Logger action_logger({.tag = "actions", .level = espp::Logger::Verbosity::INFO});
+  action_logger.warn("restart requested from the actions screen");
+  esp_restart();
+}
+
+// In actions_spec.h order.
+static void (*const kActionRun[])() = {
+    action_haptic_test, // ACTION_HAPTIC_TEST
+    action_self_test,   // ACTION_SELF_TEST
+    action_seat_up,     // ACTION_SEAT_UP
+    action_restart_hmi, // ACTION_RESTART_HMI
+};
+static_assert(std::size(kActionRun) == ACTION_COUNT,
+              "every actions_spec.h entry needs its function here");
+
+struct ActionSpec {
+  const char *title;
+  const char *subtitle;
+  bool needs_mcb;
+};
+
+static constexpr ActionSpec kActionSpecs[] = {
+#define ACTIONS_ROW(name_, title_, subtitle_, mcb_) {title_, subtitle_, (mcb_) != 0},
+    ACTIONS_TABLE(ACTIONS_ROW)
+#undef ACTIONS_ROW
+};
+
+static lv_obj_t *action_buttons[ACTION_COUNT];
+static int action_button_count; // buttons on screen; 0 while it is not up
+static int action_cursor;       // which button the joystick is on
+static lv_group_t *actions_group = nullptr;
+
+// The component has no focused look of its own, and a cursor nobody can see
+// is no cursor: the theme's focus colour on a thicker border, as the seat
+// buttons do. A greyed button fades the whole thing, labels included.
+static constexpr lv_style_selector_t kActionFocused =
+    static_cast<lv_style_selector_t>(LV_PART_MAIN) |
+    static_cast<lv_style_selector_t>(LV_STATE_FOCUSED);
+static constexpr lv_style_selector_t kActionDisabled =
+    static_cast<lv_style_selector_t>(LV_PART_MAIN) |
+    static_cast<lv_style_selector_t>(LV_STATE_DISABLED);
+
+// Clamped rather than wrapped, for the reason in grid_key_cb.
+static void action_focus(int index) {
+  if (action_button_count == 0) {
+    return;
+  }
+  action_cursor = std::clamp(index, 0, action_button_count - 1);
+  lv_group_focus_obj(action_buttons[action_cursor]);
+}
+
+// Greys an MCB action while the MCB could not act on it. Bound to every
+// subject mcb_ready() reads, so it follows the link and the state both.
+static void action_ready_observer(lv_observer_t *observer, lv_subject_t *) {
+  lv_obj_set_state(lv_observer_get_target_obj(observer), LV_STATE_DISABLED, !mcb_ready());
+}
+
+// A tap, or the stick button on the focused one (the keypad indev turns ENTER
+// into LV_EVENT_CLICKED). The DISABLED check covers the joystick path, which
+// LVGL does not filter the way it filters a touch.
+static void action_click_cb(lv_event_t *e) {
+  lv_obj_t *button = lv_event_get_target_obj(e);
+  if (lv_obj_has_state(button, LV_STATE_DISABLED)) {
+    return;
+  }
+  const auto index = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
+  action_focus(index);
+  kActionRun[index]();
+}
+
+// Up/down walk the buttons. The keypad indev hands arrow keys to the focused
+// object rather than moving the group itself.
+static void action_key_cb(lv_event_t *e) {
+  switch (lv_event_get_key(e)) {
+  case LV_KEY_UP:
+    action_focus(action_cursor - 1);
+    return;
+  case LV_KEY_DOWN:
+    action_focus(action_cursor + 1);
+    return;
+  default:
+    return;
+  }
+}
+
+// Deleting a button takes its observers and events with it and drops it from
+// actions_group; the theme manager forgets it too.
+static void actions_clear() {
+  for (int i = 0; i < action_button_count; i++) {
+    lv_obj_delete(action_buttons[i]);
+  }
+  action_button_count = 0;
+  action_cursor = 0;
+}
+
+// Builds the buttons and shows the screen. LVGL task (a hold gesture).
+static void actions_open() {
+  actions_screen_ensure(); // built on demand: see "Screens built on demand"
+  actions_clear();
+  for (int i = 0; i < ACTION_COUNT; i++) {
+    const ActionSpec &spec = kActionSpecs[i];
+    lv_obj_t *button = ui_GenericActionsComponent1_create(ui_GenericActionsFlexPanel);
+    action_buttons[action_button_count++] = button;
+    lv_label_set_text(
+        ui_comp_get_child(
+            button,
+            UI_COMP_GENERICACTIONSCOMPONENT1_GENERICACTIONSELEMENTCONTAINER1_GENERICACTIONSELEMENTTITLE1),
+        spec.title);
+    lv_label_set_text(
+        ui_comp_get_child(
+            button,
+            UI_COMP_GENERICACTIONSCOMPONENT1_GENERICACTIONSELEMENTCONTAINER1_GENERICACTIONSELEMENTSUBTITLE1),
+        spec.subtitle);
+    ui_object_set_themeable_style_property(button, kActionFocused, LV_STYLE_BORDER_COLOR,
+                                           _ui_theme_color_focused);
+    ui_object_set_themeable_style_property(button, kActionFocused, LV_STYLE_BORDER_OPA,
+                                           _ui_theme_alpha_focused);
+    lv_obj_set_style_border_width(button, 6, kActionFocused);
+    lv_obj_set_style_opa(button, LV_OPA_40, kActionDisabled);
+    if (spec.needs_mcb) {
+      bind_to_drive_blocked_cause(button, action_ready_observer);
+    }
+    lv_group_add_obj(actions_group, button);
+    lv_obj_add_event_cb(button, action_key_cb, LV_EVENT_KEY, nullptr);
+    lv_obj_add_event_cb(button, action_click_cb, LV_EVENT_CLICKED,
+                        reinterpret_cast<void *>(static_cast<intptr_t>(i)));
+    // Only the button takes part in focus; see clear_click_focusable_recursive.
+    clear_click_focusable_recursive(button);
+  }
+  _ui_screen_change(&ui_GenericActionsScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
+                    &ui_GenericActionsScreen_screen_init);
+}
 
 // Hands the joystick to whichever group belongs to the screen being shown.
 static void screen_loaded_cb(lv_event_t *e) {
@@ -2216,6 +2406,9 @@ static void screen_loaded_cb(lv_event_t *e) {
   } else if (screen == ui_SpecificSettingScreen) {
     lv_indev_set_group(joystick_indev, setting_group);
     setting_focus(0);
+  } else if (screen == ui_GenericActionsScreen) {
+    lv_indev_set_group(joystick_indev, actions_group);
+    action_focus(0);
   } else if (screen == ui_LogScreen && log_view_group() != nullptr) {
     lv_indev_set_group(joystick_indev, log_view_group());
     log_view_on_load();
@@ -2302,18 +2495,114 @@ static uint32_t strip_screen_overdraw(const lv_obj_t *screen) {
 }
 
 // Every screen ui_init built. Kept in one place so the boot pass and the
-// theme-change pass cannot drift apart.
+// theme-change pass cannot drift apart. The screens built on demand are
+// nullptr while they do not exist, and skipped.
 static void strip_all_overdraw() {
   const lv_obj_t *const screens[] = {
       ui_MainScreenFlex, ui_DriveScreen,           ui_SeatAdjustmentFlexScreen,
       ui_RDScreen,       ui_SpecificSettingScreen, ui_JoystickTest,
-      ui_LogScreen};
+      ui_LogScreen,      ui_GenericActionsScreen};
   const uint32_t stripped =
       std::accumulate(std::begin(screens), std::end(screens), uint32_t{0},
                       [](uint32_t sum, const lv_obj_t *screen) {
                         return screen != nullptr ? sum + strip_screen_overdraw(screen) : sum;
                       });
   logger_overdraw.info("cleared {} redundant background fills", stripped);
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// Screens built on demand
+//
+// ui_init builds every screen at boot, and every widget lands in internal RAM
+// - the DMA-capable pool the W5500's SPI bounce buffer is later allocated from,
+// with no NULL check behind it. With the SpecificSettingScreen and the
+// GenericActionsScreen both resident that pool bottomed out at 415 B, after the
+// board had already boot-looped on it. So these two are destroyed right after
+// ui_init, built when opened, and destroyed again once left: at most one exists
+// at a time, and neither while RTPS starts.
+//
+// Everything the firmware hangs on one of them - StatusPanel and TopBar
+// bindings, exit bar, warning panel, load hooks - is redone by its *_ensure
+// function each time it is built. All of it is object-bound, so it goes with
+// the screen.
+/////////////////////////////////////////////////////////////////////////////
+
+// Deferred with lv_async_call: the SCREEN_UNLOADED event that asks for it is
+// the screen's own, and an object is not deleted from inside its own event.
+// Skipped if the screen was shown again in between.
+static void settings_screen_destroy_cb(void *) {
+  if (ui_SpecificSettingScreen != nullptr && lv_screen_active() != ui_SpecificSettingScreen) {
+    ui_SpecificSettingScreen_screen_destroy();
+  }
+}
+
+static void setting_screen_unloaded_cb(lv_event_t *) {
+  setting_rows_clear(); // rows first, so the press-flash timer forgets its button
+  lv_async_call(settings_screen_destroy_cb, nullptr);
+}
+
+static void actions_screen_destroy_cb(void *) {
+  if (ui_GenericActionsScreen != nullptr && lv_screen_active() != ui_GenericActionsScreen) {
+    ui_GenericActionsScreen_screen_destroy();
+  }
+}
+
+static void actions_screen_unloaded_cb(lv_event_t *) {
+  actions_clear();
+  lv_async_call(actions_screen_destroy_cb, nullptr);
+}
+
+static void settings_screen_ensure() {
+  if (ui_SpecificSettingScreen != nullptr) {
+    return;
+  }
+  ui_SpecificSettingScreen_screen_init();
+  // Parameter1 is only the row template: setting_page_open builds the rows.
+  // The component's own delete handler frees the child-index array it made.
+  lv_obj_delete(ui_Parameter1);
+  ui_Parameter1 = nullptr;
+  bind_status_panel(ui_StatusPanel7);
+  bind_rtps_label(ui_TopBar8);
+  bind_clock_label(ui_TopBar8);
+  lv_bar_set_range(ui_ExitBarPull4, 0, kHoldMax);
+  lv_bar_bind_value(ui_ExitBarPull4, &settings_exit_gesture.progress);
+  bind_to_drive_blocked_cause(ui_ErrorWarningPanel6, setting_warning_observer);
+  lv_subject_add_observer_obj(&setting_page_subject, setting_warning_observer,
+                              ui_ErrorWarningPanel6, nullptr);
+  lv_obj_add_event_cb(ui_SpecificSettingScreen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, nullptr);
+  lv_obj_add_event_cb(ui_SpecificSettingScreen, setting_screen_unloaded_cb,
+                      LV_EVENT_SCREEN_UNLOADED, nullptr);
+  strip_screen_overdraw(ui_SpecificSettingScreen);
+}
+
+static void actions_screen_ensure() {
+  if (ui_GenericActionsScreen != nullptr) {
+    return;
+  }
+  ui_GenericActionsScreen_screen_init();
+  // Everything in the flex panel but the title is a placeholder drawn in
+  // SquareLine: actions_open builds one button per actions_spec.h entry.
+  // Deleted without naming them, so adding or removing placeholders in
+  // SquareLine needs no change here.
+  for (int32_t i = static_cast<int32_t>(lv_obj_get_child_count(ui_GenericActionsFlexPanel)) - 1;
+       i >= 0; i--) {
+    lv_obj_t *child = lv_obj_get_child(ui_GenericActionsFlexPanel, i);
+    if (child != ui_GenericActionsTitle) {
+      lv_obj_delete(child);
+    }
+  }
+  bind_status_panel(ui_StatusPanel8);
+  bind_rtps_label(ui_TopBar9);
+  bind_clock_label(ui_TopBar9);
+  lv_bar_set_range(ui_ExitBarPull5, 0, kHoldMax);
+  lv_bar_bind_value(ui_ExitBarPull5, &actions_exit_gesture.progress);
+  // Its ErrorWarningPanel stays down: an action that needs the MCB greys out
+  // instead (action_ready_observer), which keeps the local ones reachable.
+  lv_obj_add_flag(ui_ErrorWarningPanel7, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_event_cb(ui_GenericActionsScreen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, nullptr);
+  lv_obj_add_event_cb(ui_GenericActionsScreen, actions_screen_unloaded_cb, LV_EVENT_SCREEN_UNLOADED,
+                      nullptr);
+  strip_screen_overdraw(ui_GenericActionsScreen);
 }
 
 static void direct_flush_cb(lv_display_t *disp, const lv_area_t * /*area*/, uint8_t *px_map) {
@@ -2985,6 +3274,17 @@ extern "C" void app_main(void) {
   // the UI is 1280x720 landscape (use ROTATION_90 for the other direction).
   lv_display_set_rotation(lv_display_get_default(), LV_DISPLAY_ROTATION_0);
   ui_init();
+  // ui_init builds every screen, and this one is dead: the actuators are a
+  // page of the SpecificSettingScreen now. Its widget tree sits in internal
+  // RAM, and the W5500's SPI bounce buffer is allocated from the same
+  // DMA-capable pool when RTPS starts - with the Generic Actions screen added
+  // that pool ran dry and the board boot-looped (spi_master does not check the
+  // allocation). Delete the screen in SquareLine and this line goes too: the
+  // build fails on it, which is the reminder.
+  ui_ActuatorsScreen_screen_destroy();
+  // Built on demand instead: see "Screens built on demand".
+  ui_SpecificSettingScreen_screen_destroy();
+  ui_GenericActionsScreen_screen_destroy();
 
   // Swap the boot logo from the export's embedded SVG to a pre-rasterised A8
   // mask (main/boot_logo.c). Done here rather than in the SquareLine project
@@ -3084,17 +3384,14 @@ extern "C" void app_main(void) {
   bind_status_panel(ui_StatusPanel3); // SeatAdjustmentFlexScreen
   bind_status_panel(ui_StatusPanel4); // RDScreen
   bind_status_panel(ui_StatusPanel5); // LogScreen
-  bind_status_panel(ui_StatusPanel7); // SpecificSettingScreen
   bind_rtps_label(ui_TopBar1);        // JoystickTest
   bind_rtps_label(ui_TopBar2);        // DriveScreen
   bind_rtps_label(ui_TopBar3);        // MainScreenFlex
   bind_rtps_label(ui_TopBar4);        // SeatAdjustmentFlexScreen
   bind_rtps_label(ui_TopBar5);        // RDScreen
   bind_rtps_label(ui_TopBar6);        // LogScreen
-  bind_rtps_label(ui_TopBar8);        // SpecificSettingScreen
   lv_subject_init_string(&clock_subject, clock_buf, clock_prev_buf, sizeof(clock_buf), "--:--");
-  for (lv_obj_t *bar :
-       {ui_TopBar1, ui_TopBar2, ui_TopBar3, ui_TopBar4, ui_TopBar5, ui_TopBar6, ui_TopBar8}) {
+  for (lv_obj_t *bar : {ui_TopBar1, ui_TopBar2, ui_TopBar3, ui_TopBar4, ui_TopBar5, ui_TopBar6}) {
     bind_clock_label(bar);
   }
   clock_poll_cb(nullptr); // the RTC's time, when it had one, from the first frame
@@ -3225,6 +3522,8 @@ extern "C" void app_main(void) {
   lv_arc_bind_value(ui_UnlockArc, &unlock_gesture.progress);
   lv_arc_bind_value(ui_UnlockArc1, &drive_enter_gesture.progress);
   lv_arc_bind_value(ui_UnlockArc2, &seat_enter_gesture.progress);
+  lv_subject_init_int(&actions_enter_gesture.progress, 0);
+  lv_arc_bind_value(ui_UnlockArc3, &actions_enter_gesture.progress);
   lv_subject_init_int(&seat_exit_gesture.progress, 0);
   lv_subject_init_int(&seat_back_gesture.progress, 0);
   lv_bar_set_range(ui_ExitBarPress1, 0, kHoldMax);
@@ -3237,8 +3536,7 @@ extern "C" void app_main(void) {
   lv_subject_init_int(&settings_exit_gesture.progress, 0);
   lv_bar_set_range(ui_ExitBarPull2, 0, kHoldMax);
   lv_bar_bind_value(ui_ExitBarPull2, &rd_exit_gesture.progress);
-  lv_bar_set_range(ui_ExitBarPull4, 0, kHoldMax);
-  lv_bar_bind_value(ui_ExitBarPull4, &settings_exit_gesture.progress);
+  lv_subject_init_int(&actions_exit_gesture.progress, 0);
   lv_subject_init_int(&log_exit_gesture.progress, 0);
   lv_bar_set_range(ui_ExitBarPress2, 0, kHoldMax);
   lv_bar_bind_value(ui_ExitBarPress2, &log_exit_gesture.progress);
@@ -3334,7 +3632,6 @@ extern "C" void app_main(void) {
                       nullptr);
   lv_obj_add_event_cb(ui_MainScreenFlex, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, nullptr);
   lv_obj_add_event_cb(ui_RDScreen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, nullptr);
-  lv_obj_add_event_cb(ui_SpecificSettingScreen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, nullptr);
   lv_obj_add_event_cb(ui_LogScreen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, nullptr);
 
   // Freeze the pager until the unlock hands it over. Each of these closes one
@@ -3350,6 +3647,7 @@ extern "C" void app_main(void) {
   // flex page, and the new SeatAdjustmentFlexScreen took the old name for one of
   // its own children. Binding the wrong one still compiles and fails silently.
   lv_obj_bind_flag_if_eq(ui_SeatAdjustmentMenu, &paging_subject, LV_OBJ_FLAG_HIDDEN, 0);
+  lv_obj_bind_flag_if_eq(ui_GenericActionsPanel1, &paging_subject, LV_OBJ_FLAG_HIDDEN, 0);
   lv_obj_bind_flag_if_eq(ui_SettingsMenu, &paging_subject, LV_OBJ_FLAG_HIDDEN, 0);
 
   // Focus group for the settings rows. Built by walking the children rather
@@ -3486,12 +3784,8 @@ extern "C" void app_main(void) {
                                          _ui_theme_alpha_focused);
   lv_obj_set_style_border_width(ui_Keyboard1, 4, kItemsFocused);
 
-  // SpecificSettingScreen. The export builds one ActuatorComponent,
-  // Parameter1, as the row template; setting_page_open builds the real rows,
-  // so it goes. The component's own delete handler frees the child-index array
-  // it allocated.
-  lv_obj_delete(ui_Parameter1);
-  ui_Parameter1 = nullptr;
+  // SpecificSettingScreen: what outlives the screen, which is built on demand
+  // (settings_screen_ensure).
 
   // The wire message carries a fixed-size array, so the table cannot outgrow
   // it without both boards being rebuilt.
@@ -3509,13 +3803,8 @@ extern "C" void app_main(void) {
   lv_timer_pause(press_flash_timer);
   setting_group = lv_group_create();
 
-  // Initialised before the panel binds: its observer reads it on the first run.
+  // Initialised before the screen's warning panel ever binds to it.
   lv_subject_init_int(&setting_page_subject, SETTINGS_PAGE_SCREEN_BRIGHTNESS);
-  bind_to_drive_blocked_cause(ui_ErrorWarningPanel6, setting_warning_observer);
-  lv_subject_add_observer_obj(&setting_page_subject, setting_warning_observer,
-                              ui_ErrorWarningPanel6, nullptr);
-  lv_obj_add_event_cb(ui_SpecificSettingScreen, setting_screen_unloaded_cb,
-                      LV_EVENT_SCREEN_UNLOADED, nullptr);
 
   // SCREEN BRIGHTNESS settings row. Joystick select reaches it too: the
   // settings group holds every row on the panel.
@@ -3523,6 +3812,10 @@ extern "C" void app_main(void) {
       ui_ScreenBrightnessButton,
       [](lv_event_t *) { setting_page_open(SETTINGS_PAGE_SCREEN_BRIGHTNESS); }, LV_EVENT_CLICKED,
       nullptr);
+
+  // GenericActionsScreen: what outlives the screen, which is built on demand
+  // (actions_screen_ensure).
+  actions_group = lv_group_create();
 
   // The overlay hardcodes LVGL's 14 px default font (lv_sysmon_create sets no
   // font at all), which is unreadable on a 1280x720 panel at arm's length.

@@ -97,6 +97,18 @@ PARENTS: dict[str, str] = {
     "ui_Parameter1": "ui_SpecificSettingsRows",
     "ui_ErrorWarningPanel6": "ui_SpecificSettingScreen",
 
+    # GenericActionsScreen: entered by holding up on this pager page (its arc
+    # shows the hold); main.cpp deletes the component instances and builds one
+    # per entry in actions_spec.h into the flex panel
+    "ui_GenericActionsPanel1": "ui_FlexPanel",
+    "ui_UnlockArc3": "ui_GraphicsPanel3",
+    "ui_GenericActionsFlexPanel": "ui_GenericActionsPanel",
+    "ui_GenericActionsTitle": "ui_GenericActionsFlexPanel",
+    "ui_ExitBarPull5": "ui_GenericActionsScreen",
+    "ui_ErrorWarningPanel7": "ui_GenericActionsScreen",
+    "ui_StatusPanel8": "ui_GenericActionsScreen",
+    "ui_TopBar9": "ui_GenericActionsScreen",
+
     # seat screen grids
     "ui_SeatButton1": "ui_SeatFunctionsButtonsPanel",
     "ui_SeatButton6": "ui_SeatFunctionsButtonsPanel",
