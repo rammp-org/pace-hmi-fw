@@ -25,21 +25,20 @@
  *                    .reliability = Rtps::Reliability::BEST_EFFORT});
  *
  *   // every RAMMP_DIAG_PERIOD_MS; one item per RAMMP_DIAG_TABLE row, raw integers
+ *   // T1 = 30.5 C, 1.50 A, 45.0 deg; T2 = 29.8 C, 1.20 A, -9.0 deg
  *   rammp::Diagnostics diag{.seq = seq++,
- *                           .items = {{.values = {305, 150, 450}},    // T1: 30.5 C, 1.50 A, 45.0
- * deg
- *                                     {.values = {298, 120, -90}}}};  // T2
+ *                           .items = {{.values = {305, 150, 450}},
+ *                                     {.values = {298, 120, -90}}}};
  *   if (auto bytes = cdr::serialize<cdr::xcdr1>(diag))
  *     rtps.publish(RAMMP_TOPIC_MCB_DIAGNOSTICS, rammp::as_u8(*bytes));
  *
- *   // and the other way: the HMI's actuator requests
+ *   // and the other way: the HMI's actuator requests (answer with an ActuatorState)
  *   rtps.add_reader({.topic = RAMMP_TOPIC_ACTUATOR_COMMAND,
  *                    .type_name = RAMMP_TYPE_ACTUATOR_COMMAND,
  *                    .reliability = Rtps::Reliability::BEST_EFFORT,
  *                    .on_sample = [](std::span<const uint8_t> data) {
  *                      auto cmd = cdr::deserialize<rammp::ActuatorCommand>(std::as_bytes(data));
- *                      if (cmd) move_actuator(cmd->actuator_id, cmd->steps); // then send
- * ActuatorState
+ *                      if (cmd) move_actuator(cmd->actuator_id, cmd->steps);
  *                    }});
  */
 
