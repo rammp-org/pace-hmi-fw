@@ -38,7 +38,7 @@ static lv_subject_t adc_y_subject;
 static lv_subject_t adc_twist_subject;
 
 /* MCB status, as reported by sim_nav_on_mcb_status(). Values are the
- * RAMMP_DRIVE_STATUS_* / RAMMP_STATE_* enums from rammp_rtps_spec.hpp. */
+ * RAMMP_DRIVE_STATUS_* / RAMMP_STATE_* enums from messages/joystick_message.hpp. */
 static lv_subject_t drive_status_subject;
 static lv_subject_t mcb_state_subject;
 /* Optional label overrides from the MCB. Empty means "use the enum's name". */
@@ -1216,7 +1216,7 @@ void sim_nav_go_home(void) { screen_return_to_main(); }
 
 void sim_nav_next_drive_mode(void) {
   const int32_t mode = lv_subject_get_int(&drive_mode_subject);
-  /* HOLO / Normal / Auto, in the order rammp_rtps_spec.hpp numbers them. */
+  /* HOLO / Normal / Auto, in the order messages/joystick_message.hpp numbers them. */
   lv_subject_set_int(&drive_mode_subject, (mode + 1) % (RAMMP_DRIVE_MODE_AUTO + 1));
 }
 

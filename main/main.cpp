@@ -104,7 +104,7 @@ static lv_subject_t adc_twist_subject;
 // MCB status, as reported over RTPS. The joystick is a slave here: these two
 // hold whatever the Main Control Board last said, and every StatusPanel on
 // every screen follows them. Values are the rammp::DriveStatus /
-// rammp::SystemState enums from rammp_rtps_spec.hpp.
+// rammp::SystemState enums from messages/joystick_message.hpp.
 static lv_subject_t drive_status_subject;
 static lv_subject_t mcb_state_subject;
 // Optional label overrides from the MCB. Empty means "use the enum's name",
@@ -1161,7 +1161,7 @@ static bool mcb_ready() {
 // gestures are gated in applies(), so a refused push otherwise does nothing at
 // all. On the DriveScreen and the SeatAdjustmentFlexScreen: why it was cut
 // short, by the link dropping or the MCB faulting. All word the cause from
-// rammp_rtps_spec.hpp.
+// hmi_rtps_spec.hpp.
 //
 // entry_refused_subject records only THAT a push was refused. Both panels work
 // out WHY from the link and state subjects whenever any of them changes, so
@@ -2410,7 +2410,7 @@ static void actions_open() {
 // DiagnosticsScreen: live readings from the MCB
 //
 // Opened from the DIAGNOSTICS settings row, left by pulling and holding. One
-// row per entry in RAMMP_DIAG_TABLE (rammp_rtps_spec.hpp): short label, label,
+// row per entry in RAMMP_DIAG_TABLE (messages/joystick_message.hpp): short label, label,
 // and up to three readings, each under its unit. The MCB publishes them all on
 // rammp::kMcbDiagnostics every rammp::kDiagPeriod; they land in
 // diag_value (subjects, set under the LVGL lock by the RTPS handler in

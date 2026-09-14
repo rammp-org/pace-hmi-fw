@@ -5,7 +5,7 @@ The firmware publishes one sample per ADC cycle (30 Hz by default) on the
 joystick ADC topic: three little-endian uint32 millivolt values (x, y, twist)
 behind the standard 4-byte CDR encapsulation header. The topic and type names
 and the payload decoder all come from ``rammp_rtps.py``, which scrapes
-``main/rammp_rtps_spec.hpp`` — the same wire spec the firmware builds against.
+the RTPS spec headers — the same wire spec the firmware builds against.
 
 This script reuses the RTPS machinery from ``rtps_host.py`` (same directory)
 for discovery and reception, and matplotlib for display:
@@ -35,9 +35,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import rtps_host  # noqa: E402
 import rtps_net  # noqa: E402  (path setup must run first)
+import rammp_rtps as spec  # noqa: E402
 
-ADC_TOPIC = "espp/rtps_example/adc"
-ADC_TYPE_NAME = "rammp/msg/AdcXYTwist"
+ADC_TOPIC = spec.TOPIC_JOYSTICK_XY_TWIST
+ADC_TYPE_NAME = spec.TYPE_XY_TWIST
 
 
 def deserialize_adc_cdr(payload: bytes) -> tuple[int, int, int] | None:
@@ -65,7 +66,7 @@ class AdcPlotHarness(rtps_host.RtpsHostHarness):
         ):
             if self.topic_for_sample(guid_prefix, writer_id, reader_id) != ADC_TOPIC:
                 continue
-            values = spec.unpack_adc_xy_twist(serialized_payload)
+            values = spec.unpack_xy_twist(serialized_payload)
             if values is None:
                 continue
             self.samples.append((time.monotonic(), *values))

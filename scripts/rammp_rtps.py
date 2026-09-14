@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Python view of the RAMMP RTPS wire spec, read from the C++ header.
 
-``main/rammp_rtps_spec.hpp`` is the single source of truth for topics, type names,
-enum values and tables shared by the joystick HMI and the Main Control Board.
-This module parses the header at import time and mirrors its message structs,
+``messages/joystick_message.hpp`` (the shared rammp-rtps spec, a git submodule) holds
+the topics, type names, enums and tables every RAMMP device shares, and
+``main/hmi_rtps_spec.hpp`` what only this HMI adds (timing, limits, bench topics).
+This module parses both headers at import time and mirrors its message structs,
 encoded the way espp/cdr encodes them (XCDR1).
 
     import rammp_rtps as spec
@@ -24,7 +25,10 @@ import re
 import struct
 from typing import Dict, List, NamedTuple
 
-HEADER_RELATIVE_PATH = os.path.join("main", "rammp_rtps_spec.hpp")
+HEADER_RELATIVE_PATH = os.path.join("main", "hmi_rtps_spec.hpp")
+SHARED_HEADER_RELATIVE_PATH = os.path.join(
+    "external", "rammp-rtps", "components", "rammp_rtps_messages", "include", "messages",
+    "joystick_message.hpp")
 
 # inline constexpr Topic<McbStatus> kMcbStatus{"rammp/mcb/status", "rammp/msg/McbStatus"};
 _TOPIC_RE = re.compile(r'Topic<(\w+)>\s+k(\w+)\{\s*"([^"]*)"\s*,\s*"([^"]*)"\s*\}')
@@ -38,30 +42,39 @@ _NUMBER_RE = re.compile(
 
 
 def _snake(name: str) -> str:
-    """McbStatus -> MCB_STATUS, AdcXYTwist -> ADC_XY_TWIST, SelfTestKind -> SELFTEST_KIND."""
+    """McbStatus -> MCB_STATUS, XYTwist -> XY_TWIST, SelfTestKind -> SELFTEST_KIND."""
     name = name.replace("SelfTest", "Selftest").replace("UInt", "Uint")
     return re.sub(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", "_", name).upper()
 
 
-def find_header() -> str:
-    """Locate rammp_rtps_spec.hpp by walking up from this file to the repo root."""
+def find_header(relative: str = HEADER_RELATIVE_PATH) -> str:
+    """Locate a spec header by walking up from this file to the repo root."""
     directory = os.path.dirname(os.path.abspath(__file__))
     while True:
-        candidate = os.path.join(directory, HEADER_RELATIVE_PATH)
+        candidate = os.path.join(directory, relative)
         if os.path.isfile(candidate):
             return candidate
         parent = os.path.dirname(directory)
         if parent == directory:
             raise FileNotFoundError(
-                f"could not find {HEADER_RELATIVE_PATH} above {os.path.dirname(__file__)}"
+                f"could not find {relative} above {os.path.dirname(__file__)}"
+                " (for the shared spec: git submodule update --init)"
             )
         directory = parent
 
 
+#: this HMI's additions (timing, display limits, bench topics), beside selftest_spec.h
 HEADER_PATH = find_header()
-with open(HEADER_PATH, encoding="utf-8") as _header_file:
-    # the legacy codecs at the bottom are #if 0'd out: not part of the spec
-    _HEADER_TEXT = _header_file.read().split("#if 0", 1)[0]
+#: the shared messages, topics and tables (the rammp-rtps submodule)
+SHARED_HEADER_PATH = find_header(SHARED_HEADER_RELATIVE_PATH)
+
+
+def _read_spec(path: str) -> str:
+    with open(path, encoding="utf-8") as spec_file:
+        return spec_file.read().split("#if 0", 1)[0]  # the legacy codecs are #if 0'd out
+
+
+_HEADER_TEXT = _read_spec(SHARED_HEADER_PATH) + "\n" + _read_spec(HEADER_PATH)
 
 #: TOPIC_* (topic names) and TYPE_* (DDS type names)
 STRINGS: Dict[str, str] = {}
@@ -142,9 +155,9 @@ ACTUATORS: List[Actuator] = [
 ]
 
 if not ACTUATORS:
-    raise RuntimeError(f"{HEADER_PATH}: RAMMP_ACTUATOR_TABLE parsed to nothing")
+    raise RuntimeError(f"{SHARED_HEADER_PATH}: RAMMP_ACTUATOR_TABLE parsed to nothing")
 if [a.id for a in ACTUATORS] != list(range(len(ACTUATORS))):
-    raise RuntimeError(f"{HEADER_PATH}: actuator ids must be 0..N-1 in table order")
+    raise RuntimeError(f"{SHARED_HEADER_PATH}: actuator ids must be 0..N-1 in table order")
 
 
 class DiagItem(NamedTuple):
@@ -177,9 +190,9 @@ DIAGNOSTICS: List[DiagItem] = [
 ]
 
 if not DIAGNOSTICS:
-    raise RuntimeError(f"{HEADER_PATH}: RAMMP_DIAG_TABLE parsed to nothing")
+    raise RuntimeError(f"{SHARED_HEADER_PATH}: RAMMP_DIAG_TABLE parsed to nothing")
 if [d.id for d in DIAGNOSTICS] != list(range(len(DIAGNOSTICS))):
-    raise RuntimeError(f"{HEADER_PATH}: diagnostics ids must be 0..N-1 in table order")
+    raise RuntimeError(f"{SHARED_HEADER_PATH}: diagnostics ids must be 0..N-1 in table order")
 
 # ------------------------------------------------------------------ CDR (XCDR1)
 # What espp/cdr puts on the wire for the spec's C++ structs: header 00 01 00 00,
@@ -197,7 +210,7 @@ MSG_MCB_STATUS = [
     ("day", "B"), ("month", "B"), ("year", "B"),
     ("drive_text", "str"), ("state_text", "str"), ("error_text", "str"), ("error_footer", "str"),
 ]
-MSG_ADC_XY_TWIST = [("x", "f"), ("y", "f"), ("twist", "f"), ("buttons", "I"), ("drive_mode", "I")]
+MSG_XY_TWIST = [("x", "f"), ("y", "f"), ("twist", "f"), ("buttons", "I"), ("drive_mode", "I")]
 MSG_ACTUATOR_COMMAND = [("req_id", "B"), ("actuator_id", "B"), ("steps", "b")]
 MSG_ACTUATOR_STATE = [("req_id", "B"), ("result", "B"), ("seq", "B"), ("values", ("seq", "i"))]
 MSG_DIAGNOSTICS = [("seq", "B"), ("items", ("seq", [("values", ("seq", "i"))]))]
@@ -331,9 +344,9 @@ def unpack_diagnostics(payload: bytes) -> tuple[int, list[list[int]]] | None:
     return None if message is None else (message[0], [item[0] for item in message[1]])
 
 
-def unpack_adc_xy_twist(payload: bytes) -> tuple[float, float, float, int, int] | None:
+def unpack_xy_twist(payload: bytes) -> tuple[float, float, float, int, int] | None:
     """(x, y, twist, buttons, drive_mode): axes -1..+1, calibrated by the HMI."""
-    return decode(MSG_ADC_XY_TWIST, payload)
+    return decode(MSG_XY_TWIST, payload)
 
 
 # ------------------------------------------------------------------ self test
@@ -432,7 +445,7 @@ def format_selftest_result(r: SelfTestResult, detail: str | None = None) -> str:
 
 
 if __name__ == "__main__":
-    print(f"spec header: {HEADER_PATH}\n")
+    print(f"spec headers: {SHARED_HEADER_PATH}\n              {HEADER_PATH}\n")
     print("topics and types:")
     for key in sorted(STRINGS):
         print(f"  {key:<24} {STRINGS[key]}")

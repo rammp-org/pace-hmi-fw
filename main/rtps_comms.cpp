@@ -69,7 +69,7 @@ std::unique_ptr<espp::Task> heartbeat_task;
 
 // HMI -> MCB / PC
 Publisher<rammp::UInt32> counter_pub;
-Publisher<rammp::AdcXYTwist> joystick_pub;
+Publisher<rammp::XYTwist> joystick_pub;
 Publisher<rammp::ActuatorCommand> actuator_pub;
 Publisher<rammp::SelfTestReport> report_pub;
 
@@ -371,7 +371,7 @@ bool start_participant() {
 
   // 4 writers + 5 readers, plus SPDP's pair: the budget set in sdkconfig.defaults
   counter_pub = make_publisher(rammp::kHmiCounter);
-  joystick_pub = make_publisher(rammp::kJoystickAdc);
+  joystick_pub = make_publisher(rammp::kJoystickXYTwist);
   actuator_pub = make_publisher(rammp::kActuatorCommand);
   report_pub = make_publisher(rammp::kSelfTestReport);
   const bool ok = counter_pub && joystick_pub && actuator_pub && report_pub &&
@@ -427,7 +427,7 @@ void rtps_comms_on_selftest_pong(std::function<void(uint16_t, int)> handler) {
 
 bool rtps_comms_publish_adc(float x, float y, float twist, rammp::Buttons buttons,
                             rammp::DriveMode drive_mode) {
-  return publish(joystick_pub, rammp::AdcXYTwist{x, y, twist, buttons, drive_mode});
+  return publish(joystick_pub, rammp::XYTwist{x, y, twist, buttons, drive_mode});
 }
 
 bool rtps_comms_publish_actuator_command(uint8_t req_id, rammp::ActuatorId actuator, int8_t steps) {

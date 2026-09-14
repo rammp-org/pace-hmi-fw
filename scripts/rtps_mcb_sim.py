@@ -6,7 +6,7 @@ StatusPanel show whatever arrives on ``rammp/mcb/status``. This script plays the
 MCB from a laptop so that path can be exercised without the real board.
 
 Topics, type names, enum values and the wire layout all come from
-``rammp_rtps.py``, which scrapes ``main/rammp_rtps_spec.hpp`` — the same header the
+``rammp_rtps.py``, which scrapes the RTPS spec headers — the same header the
 firmware builds against, so there is nothing here to keep in sync by hand.
 
 Usage:
@@ -292,8 +292,8 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
             packet
         ):
             topic = self.topic_for_sample(guid_prefix, writer_id, reader_id)
-            if topic == spec.TOPIC_JOYSTICK_ADC:
-                sample = spec.unpack_adc_xy_twist(payload)
+            if topic == spec.TOPIC_JOYSTICK_XY_TWIST:
+                sample = spec.unpack_xy_twist(payload)
                 if sample is not None:
                     self.joystick = sample
                     self.adc_rx_count += 1
@@ -451,8 +451,8 @@ def build_harness_args(cli: argparse.Namespace) -> argparse.Namespace:
         enclave="/",
         # Subscribe to the joystick stream as well as publishing status, so the
         # emulated speed can follow the stick.
-        subscribe_topic=[spec.TOPIC_JOYSTICK_ADC],
-        subscribe_type_name=spec.TYPE_ADC_XY_TWIST,
+        subscribe_topic=[spec.TOPIC_JOYSTICK_XY_TWIST],
+        subscribe_type_name=spec.TYPE_XY_TWIST,
         publish_topic=spec.TOPIC_MCB_STATUS,
         publish_value=0,  # unused: publish_now() is overridden
         publish_interval=cli.period,

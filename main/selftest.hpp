@@ -8,7 +8,7 @@
  * selftest_spec.h - that header is the spec. This module only measures.
  *
  * A run starts from the SELF TEST settings row (selftest_request LOCAL) or
- * from a PC over RTPS (see "Self test" in rammp_rtps_spec.hpp). Either
+ * from a PC over RTPS (see "Self test" in hmi_rtps_spec.hpp). Either
  * way it runs on its own short-lived task, shows progress and results on an
  * overlay above whatever screen is up, prints the table to the serial log and
  * publishes it on rammp/selftest/report.

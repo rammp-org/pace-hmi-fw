@@ -11,6 +11,7 @@ Firmware for the RAMMP wheelchair HMI: an M5Stack Tab5 (ESP32-P4) on the [RAMMP 
 - WIP: haptic motor over I2C
 
 ## Build and flash
+- Clone with the shared RTPS spec: `git clone --recursive` (or `git submodule update --init`).
 - With ESP-IDF v6.0: `idf.py build flash monitor`
 - Without a toolchain: download the programmer from **Actions → Build and Package Main → Artifacts** and run it.
 - Or put the [release](https://github.com/rammp-org/pace-hmi-fw/releases) images in `precompiled/` and run `.\flash_precompiled.ps1` (needs esptool v5+).
@@ -51,8 +52,9 @@ Saved settings live in LittleFS (`/storage`), so they survive a reboot.
 
 ## RTPS
 
-- The spec is `main/rammp_rtps_spec.hpp`: topics, enums, tables and the message structs.
-- Its top has an example: an MCB on the same espp / ESP-IDF stack sending Diagnostics.
+- The shared spec is [rammp-rtps](https://github.com/rammp-org/rammp-rtps), the git submodule `external/rammp-rtps`.
+- `messages/joystick_message.hpp` there holds every message, topic, enum and table the MCB and the HMI share. Its top has an espp example.
+- `main/hmi_rtps_spec.hpp` adds what only this HMI needs: timing, display limits, the bench self-test topics.
 - Messages are plain C++ structs serialized by espp/cdr as **XCDR1** (classic CDR), so any DDS / ROS 2 stack can talk to it.
 - Every topic is best-effort; the MCB resends its state periodically.
 - The MCB owns the chair's state; the HMI shows it and asks for changes.
@@ -62,7 +64,7 @@ Saved settings live in LittleFS (`/storage`), so they survive a reboot.
 | `rammp/mcb/status` | `McbStatus` | MCB → HMI, 2 Hz | drive status, state, speed, clock, label and error text |
 | `rammp/actuator/state` | `ActuatorState` | MCB → HMI, 2 Hz + on change | actuator positions, verdict on the last command |
 | `rammp/mcb/diagnostics` | `Diagnostics` | MCB → HMI, 2 Hz | readings for each `RAMMP_DIAG_TABLE` row |
-| `rammp/joystick/adc` | `AdcXYTwist` | HMI → MCB, ~30 Hz | calibrated X / Y / twist (-1..+1), buttons, drive mode |
+| `rammp/joystick/xy_twist` | `XYTwist` | HMI → MCB, ~30 Hz | calibrated X / Y / twist (-1..+1), buttons, drive mode |
 | `rammp/actuator/command` | `ActuatorCommand` | HMI → MCB, per press | move actuator N by ±steps |
 | `rammp/hmi/counter`, `command`, `brightness` | `std_msgs/UInt32` | bench PC | heartbeat, self-test run / ping, backlight % |
 | `rammp/selftest/report` | `SelfTestReport` | HMI → PC | one per self-test check |
@@ -71,7 +73,7 @@ Example: an MCB (same espp / ESP-IDF stack) sending Diagnostics:
 
 ```cpp
 #include "rtps_pubsub.hpp"
-#include "rammp_rtps_spec.hpp"
+#include "messages.hpp" // rammp-rtps
 
 espp::RtpsParticipant rtps({.interface_address = my_ip});
 rtps.start();
@@ -95,11 +97,11 @@ How the messages reach the screens:
 - Each -/+ press sends an **ActuatorCommand**, and the row shows what the MCB answers.
 - **Diagnostics** → the DIAGNOSTICS rows; the rate label shows the arrival Hz.
 - No Diagnostics for 2 s → every row turns red and blinks.
-- **AdcXYTwist** goes out continuously once the MCB is found.
+- **XYTwist** goes out continuously once the MCB is found.
 
 ### Adding an actuator or a diagnostics item
 
-One line in `main/rammp_rtps_spec.hpp`; the HMI screen and the Python tools pick it up.
+One line in `messages/joystick_message.hpp` (rammp-rtps); the HMI screen and the Python tools pick it up.
 
 ```c
 // RAMMP_ACTUATOR_TABLE: X(id, NAME, short, label, min, max, step, decimals, unit)

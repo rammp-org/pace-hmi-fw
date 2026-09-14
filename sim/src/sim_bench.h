@@ -18,7 +18,7 @@
  * The button-mapping dropdowns are a MOCKUP, not a feature.
  *
  * The firmware has one button. main.cpp brings up a single espp::Button on
- * GPIO48 and rammp_rtps_spec.hpp defines a single bit, RAMMP_BUTTON_JOYSTICK.
+ * GPIO48 and messages/joystick_message.hpp defines a single bit, RAMMP_BUTTON_JOYSTICK.
  * Everything else the dropdowns offer is a *proposal*: a way to feel what a
  * second button might be for before anyone commits it to the firmware and the
  * wire spec, which is the order those changes have to happen in.

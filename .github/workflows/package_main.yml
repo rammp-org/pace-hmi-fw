@@ -32,6 +32,7 @@ jobs:
       uses: actions/checkout@v7
       with:
         fetch-depth: 0
+        submodules: recursive
 
     - name: Build Main Code
       uses: espressif/esp-idf-ci-action@v1

@@ -4,26 +4,12 @@ cmake_minimum_required(VERSION 3.20)
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
-# add the component directories that we want to use
-set(EXTRA_COMPONENT_DIRS
-
-  # NOTE: if you add any custom components, you should add them to a
-  #       `components/` folder within this repository and update the line below
-  #       to point to it.
-  #
-  # "components/"
-
-  # NOTE: if we didn't use the idf-component-manager to get the espp
-  #       dependencies, we could instead have ESPP be a submodule within our
-  #       'components' folder, which would mean we'd need to add it to the DIRS:
-  #
-  # "components/espp/components/"
-  #
-  # NOTE: alternatively, we could install espp system-wide, so we could just
-  #       point it to wherever we have espp installed.
-  #
-  # "/path/to/espp/components/"
-)
+# The shared RTPS spec (messages, topics, tables): the rammp-rtps git submodule.
+set(RAMMP_RTPS_COMPONENTS "${CMAKE_CURRENT_LIST_DIR}/external/rammp-rtps/components")
+if(NOT EXISTS "${RAMMP_RTPS_COMPONENTS}/rammp_rtps_messages")
+  message(FATAL_ERROR "Missing the rammp-rtps submodule: run git submodule update --init")
+endif()
+set(EXTRA_COMPONENT_DIRS "${RAMMP_RTPS_COMPONENTS}")
 
 set(
   COMPONENTS
