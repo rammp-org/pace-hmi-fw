@@ -122,13 +122,13 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
         # and these two need their own topic/type pairs. Everything downstream
         # (SEDP announcement, target discovery) already loops over these lists.
         self.local_writers.append(rtps_host.WriterConfig(
-            topic_name=spec.TOPIC_ACTUATOR_STATE,
+            topic_name=spec.TOPIC_MCB_ACTUATOR_STATE,
             type_name=spec.TYPE_ACTUATOR_STATE,
             reliable=False,
             entity_index=len(self.local_writers),
         ))
         self.local_readers.append(rtps_host.ReaderConfig(
-            topic_name=spec.TOPIC_ACTUATOR_COMMAND,
+            topic_name=spec.TOPIC_JOYSTICK_ACTUATOR_COMMAND,
             type_name=spec.TYPE_ACTUATOR_COMMAND,
             reliable=False,
             entity_index=len(self.local_readers),
@@ -303,7 +303,7 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
                 result = spec.unpack_selftest_report(payload)
                 if result is not None:
                     self._note_selftest_result(result)
-            elif topic == spec.TOPIC_ACTUATOR_COMMAND:
+            elif topic == spec.TOPIC_JOYSTICK_ACTUATOR_COMMAND:
                 command = spec.unpack_actuator_command(payload)
                 if command is None:
                     continue

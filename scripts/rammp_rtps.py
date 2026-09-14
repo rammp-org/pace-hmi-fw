@@ -12,8 +12,8 @@ encoded the way espp/cdr encodes them (XCDR1).
     spec.DRIVE_STATUS_ACTIVE     # 1
     spec.pack_mcb_status(spec.DRIVE_STATUS_ACTIVE, spec.SYSTEM_STATE_OK)
 
-C++ names become UPPER_SNAKE: ``Topic<McbStatus> kMcbStatus`` gives TOPIC_MCB_STATUS
-and TYPE_MCB_STATUS, ``DriveStatus::ACTIVE`` gives DRIVE_STATUS_ACTIVE, and
+Names lose the RAMMP_ prefix or become UPPER_SNAKE: ``RAMMP_TOPIC_MCB_STATUS`` gives
+TOPIC_MCB_STATUS, ``DriveStatus::ACTIVE`` gives DRIVE_STATUS_ACTIVE, and
 ``milliseconds kMcbStatusPeriod{500}`` gives MCB_STATUS_PERIOD_MS.
 """
 
@@ -30,8 +30,8 @@ SHARED_HEADER_RELATIVE_PATH = os.path.join(
     "external", "rammp-rtps", "components", "rammp_rtps_messages", "include", "messages",
     "joystick_message.hpp")
 
-# inline constexpr Topic<McbStatus> kMcbStatus{"rammp/mcb/status", "rammp/msg/McbStatus"};
-_TOPIC_RE = re.compile(r'Topic<(\w+)>\s+k(\w+)\{\s*"([^"]*)"\s*,\s*"([^"]*)"\s*\}')
+# #define RAMMP_TOPIC_MCB_STATUS "rammp/mcb/status" / #define RAMMP_TYPE_MCB_STATUS "..."
+_DEFINE_RE = re.compile(r'^\s*#define\s+RAMMP_((?:TOPIC|TYPE)_[A-Z0-9_]+)\s+"([^"]*)"', re.M)
 # enum class DriveStatus : uint8_t { INACTIVE = 0, ... };
 _ENUM_RE = re.compile(r"enum class (\w+)\s*:\s*\w+\s*\{(.*?)\};", re.S)
 _MEMBER_RE = re.compile(r"\b([A-Z][A-Z0-9_]*)\s*=\s*(0[xX][0-9a-fA-F]+|\d+)\b")
@@ -77,10 +77,7 @@ def _read_spec(path: str) -> str:
 _HEADER_TEXT = _read_spec(SHARED_HEADER_PATH) + "\n" + _read_spec(HEADER_PATH)
 
 #: TOPIC_* (topic names) and TYPE_* (DDS type names)
-STRINGS: Dict[str, str] = {}
-for _message, _name, _topic, _type in _TOPIC_RE.findall(_HEADER_TEXT):
-    STRINGS["TOPIC_" + _snake(_name)] = _topic
-    STRINGS["TYPE_" + _snake(_message)] = _type
+STRINGS: Dict[str, str] = dict(_DEFINE_RE.findall(_HEADER_TEXT))
 #: every enumerator, as ENUM_MEMBER (DRIVE_STATUS_ACTIVE)
 ENUMS: Dict[str, int] = {
     f"{_snake(enum)}_{member}": int(value, 0)

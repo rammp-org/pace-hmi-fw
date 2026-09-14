@@ -372,13 +372,13 @@ bool start_participant() {
   // 4 writers + 5 readers, plus SPDP's pair: the budget set in sdkconfig.defaults
   counter_pub = make_publisher(rammp::kHmiCounter);
   joystick_pub = make_publisher(rammp::kJoystickXYTwist);
-  actuator_pub = make_publisher(rammp::kActuatorCommand);
+  actuator_pub = make_publisher(rammp::kJoystickActuatorCommand);
   report_pub = make_publisher(rammp::kSelfTestReport);
   const bool ok = counter_pub && joystick_pub && actuator_pub && report_pub &&
                   subscribe(rammp::kHmiCommand, on_command) &&
                   subscribe(rammp::kHmiBrightness, on_brightness) &&
                   subscribe(rammp::kMcbStatus, on_mcb_status) &&
-                  subscribe(rammp::kActuatorState, on_actuator_state) &&
+                  subscribe(rammp::kMcbActuatorState, on_actuator_state) &&
                   subscribe(rammp::kMcbDiagnostics, on_diagnostics);
   if (!ok) {
     return false;

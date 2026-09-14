@@ -18,6 +18,14 @@
 
 #include "messages/joystick_message.hpp"
 
+/* Bench PC <-> HMI topics and types (a production MCB can ignore these) */
+#define RAMMP_TOPIC_HMI_COUNTER "rammp/hmi/counter"         /* HMI -> PC: heartbeat, ping */
+#define RAMMP_TOPIC_HMI_COMMAND "rammp/hmi/command"         /* PC -> HMI: self-test run, pong */
+#define RAMMP_TOPIC_HMI_BRIGHTNESS "rammp/hmi/brightness"   /* PC -> HMI: backlight % */
+#define RAMMP_TYPE_UINT32 "std_msgs/msg/UInt32"             /* the three above */
+#define RAMMP_TOPIC_SELFTEST_REPORT "rammp/selftest/report" /* HMI -> PC */
+#define RAMMP_TYPE_SELFTEST_REPORT "rammp/msg/SelfTestReport"
+
 namespace rammp {
 
 using std::chrono::milliseconds;
@@ -70,11 +78,11 @@ struct SelfTestReport {
   std::string detail;    // context, or why it failed
 };
 
-inline constexpr Topic<UInt32> kHmiCounter{"rammp/hmi/counter", "std_msgs/msg/UInt32"};
-inline constexpr Topic<UInt32> kHmiCommand{"rammp/hmi/command", "std_msgs/msg/UInt32"};
-inline constexpr Topic<UInt32> kHmiBrightness{"rammp/hmi/brightness", "std_msgs/msg/UInt32"};
-inline constexpr Topic<SelfTestReport> kSelfTestReport{"rammp/selftest/report",
-                                                       "rammp/msg/SelfTestReport"};
+inline constexpr Topic<UInt32> kHmiCounter{RAMMP_TOPIC_HMI_COUNTER, RAMMP_TYPE_UINT32};
+inline constexpr Topic<UInt32> kHmiCommand{RAMMP_TOPIC_HMI_COMMAND, RAMMP_TYPE_UINT32};
+inline constexpr Topic<UInt32> kHmiBrightness{RAMMP_TOPIC_HMI_BRIGHTNESS, RAMMP_TYPE_UINT32};
+inline constexpr Topic<SelfTestReport> kSelfTestReport{RAMMP_TOPIC_SELFTEST_REPORT,
+                                                       RAMMP_TYPE_SELFTEST_REPORT};
 
 /* The self test rides the UInt32 bench topics, tagged in the top nibble:
      run   PC  -> HMI  kHmiCommand  RUN  | run_id[7:0]     1..255, a repeat is ignored

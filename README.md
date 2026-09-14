@@ -62,10 +62,10 @@ Saved settings live in LittleFS (`/storage`), so they survive a reboot.
 | topic | type | direction | carries |
 | --- | --- | --- | --- |
 | `rammp/mcb/status` | `McbStatus` | MCB → HMI, 2 Hz | drive status, state, speed, clock, label and error text |
-| `rammp/actuator/state` | `ActuatorState` | MCB → HMI, 2 Hz + on change | actuator positions, verdict on the last command |
+| `rammp/mcb/actuator_state` | `ActuatorState` | MCB → HMI, 2 Hz + on change | actuator positions, verdict on the last command |
 | `rammp/mcb/diagnostics` | `Diagnostics` | MCB → HMI, 2 Hz | readings for each `RAMMP_DIAG_TABLE` row |
 | `rammp/joystick/xy_twist` | `XYTwist` | HMI → MCB, ~30 Hz | calibrated X / Y / twist (-1..+1), buttons, drive mode |
-| `rammp/actuator/command` | `ActuatorCommand` | HMI → MCB, per press | move actuator N by ±steps |
+| `rammp/joystick/actuator_command` | `ActuatorCommand` | HMI → MCB, per press | move actuator N by ±steps |
 | `rammp/hmi/counter`, `command`, `brightness` | `std_msgs/UInt32` | bench PC | heartbeat, self-test run / ping, backlight % |
 | `rammp/selftest/report` | `SelfTestReport` | HMI → PC | one per self-test check |
 
