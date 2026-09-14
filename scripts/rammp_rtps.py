@@ -34,7 +34,7 @@ SHARED_HEADER_RELATIVE_PATH = os.path.join(
 _TOPIC_RE = re.compile(r'Topic<(\w+)>\s+k(\w+)\{\s*"([^"]*)"\s*,\s*"([^"]*)"\s*\}')
 # enum class DriveStatus : uint8_t { INACTIVE = 0, ... };
 _ENUM_RE = re.compile(r"enum class (\w+)\s*:\s*\w+\s*\{(.*?)\};", re.S)
-_MEMBER_RE = re.compile(r"^\s*([A-Z][A-Z0-9_]*)\s*=\s*(0[xX][0-9a-fA-F]+|\d+)\s*,", re.M)
+_MEMBER_RE = re.compile(r"\b([A-Z][A-Z0-9_]*)\s*=\s*(0[xX][0-9a-fA-F]+|\d+)\b")
 # inline constexpr milliseconds kMcbStatusPeriod{500};  inline constexpr size_t kMcbTextLen = 16;
 _NUMBER_RE = re.compile(
     r"^inline constexpr ([\w:]+) k(\w+)\s*(?:=\s*|\{)(0[xX][0-9a-fA-F]+|\d+)\}?;", re.M
