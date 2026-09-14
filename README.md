@@ -51,7 +51,7 @@ Saved settings live in LittleFS (`/storage`), so they survive a reboot.
 
 ## RTPS
 
-- The spec is `main/rammp_rtps_spec.h`: topics, enums, tables and the message structs.
+- The spec is `main/rammp_rtps_spec.hpp`: topics, enums, tables and the message structs.
 - Its top has an example: an MCB on the same espp / ESP-IDF stack sending Diagnostics.
 - Messages are plain C++ structs serialized by espp/cdr as **XCDR1** (classic CDR), so any DDS / ROS 2 stack can talk to it.
 - Every topic is best-effort; the MCB resends its state periodically.
@@ -71,7 +71,7 @@ Example: an MCB (same espp / ESP-IDF stack) sending Diagnostics:
 
 ```cpp
 #include "rtps_pubsub.hpp"
-#include "rammp_rtps_spec.h"
+#include "rammp_rtps_spec.hpp"
 
 espp::RtpsParticipant rtps({.interface_address = my_ip});
 rtps.start();
@@ -99,7 +99,7 @@ How the messages reach the screens:
 
 ### Adding an actuator or a diagnostics item
 
-One line in `main/rammp_rtps_spec.h`; the HMI screen and the Python tools pick it up.
+One line in `main/rammp_rtps_spec.hpp`; the HMI screen and the Python tools pick it up.
 
 ```c
 // RAMMP_ACTUATOR_TABLE: X(id, NAME, short, label, min, max, step, decimals, unit)

@@ -33,7 +33,7 @@
 #define LV_USE_OS LV_OS_WINDOWS
 
 /* ------------------------------------------------------------------ fonts */
-/* CONFIG_LV_FONT_MONTSERRAT_{24,30,32,34,48}. 14 is LV_FONT_DEFAULT. */
+/* CONFIG_LV_FONT_MONTSERRAT_{20,24,28,30,32,34,48}. 14 is LV_FONT_DEFAULT. */
 #define LV_FONT_MONTSERRAT_14 1
 #define LV_FONT_MONTSERRAT_20 1
 #define LV_FONT_MONTSERRAT_24 1

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Python view of the RAMMP RTPS wire spec, read from the C++ header.
 
-``main/rammp_rtps_spec.h`` is the single source of truth for topics, type names,
+``main/rammp_rtps_spec.hpp`` is the single source of truth for topics, type names,
 enum values and tables shared by the joystick HMI and the Main Control Board.
 This module parses the header at import time and mirrors its message structs,
 encoded the way espp/cdr encodes them (XCDR1).
@@ -24,7 +24,7 @@ import re
 import struct
 from typing import Dict, List, NamedTuple
 
-HEADER_RELATIVE_PATH = os.path.join("main", "rammp_rtps_spec.h")
+HEADER_RELATIVE_PATH = os.path.join("main", "rammp_rtps_spec.hpp")
 
 # inline constexpr Topic<McbStatus> kMcbStatus{"rammp/mcb/status", "rammp/msg/McbStatus"};
 _TOPIC_RE = re.compile(r'Topic<(\w+)>\s+k(\w+)\{\s*"([^"]*)"\s*,\s*"([^"]*)"\s*\}')
@@ -44,7 +44,7 @@ def _snake(name: str) -> str:
 
 
 def find_header() -> str:
-    """Locate rammp_rtps_spec.h by walking up from this file to the repo root."""
+    """Locate rammp_rtps_spec.hpp by walking up from this file to the repo root."""
     directory = os.path.dirname(os.path.abspath(__file__))
     while True:
         candidate = os.path.join(directory, HEADER_RELATIVE_PATH)

@@ -5,7 +5,7 @@ The firmware publishes one sample per ADC cycle (30 Hz by default) on the
 joystick ADC topic: three little-endian uint32 millivolt values (x, y, twist)
 behind the standard 4-byte CDR encapsulation header. The topic and type names
 and the payload decoder all come from ``rammp_rtps.py``, which scrapes
-``main/rammp_rtps_spec.h`` — the same wire spec the firmware builds against.
+``main/rammp_rtps_spec.hpp`` — the same wire spec the firmware builds against.
 
 This script reuses the RTPS machinery from ``rtps_host.py`` (same directory)
 for discovery and reception, and matplotlib for display:

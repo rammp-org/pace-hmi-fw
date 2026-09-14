@@ -1,5 +1,5 @@
 /*
- * rammp_rtps_spec.h - RAMMP RTPS wire spec (C++20), shared by the HMI and the MCB.
+ * rammp_rtps_spec.hpp - RAMMP RTPS wire spec (C++20), shared by the HMI and the MCB.
  *
  * - Encoding: espp/cdr, XCDR1 (classic little-endian CDR, what DDS / ROS 2 peers speak).
  * - The structs below ARE the wire layout: fields in order, no hand-written codec.
@@ -17,7 +17,7 @@
  * Example: an MCB on the same espp / esp-idf stack sending Diagnostics to the HMI
  *
  *   #include "rtps_pubsub.hpp"
- *   #include "rammp_rtps_spec.h"
+ *   #include "rammp_rtps_spec.hpp"
  *
  *   espp::RtpsParticipant rtps({.interface_address = my_ip});
  *   rtps.start();

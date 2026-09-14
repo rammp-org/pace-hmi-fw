@@ -70,7 +70,7 @@ firmware actually implements, and it is what the drive screen's press-and-hold
 exit listens to. Its caption says `GPIO48  in firmware`, in green.
 
 **BUTTON 2** exists on the chair but has no pin in the firmware: `main.cpp`
-brings up exactly one `espp::Button` and `rammp_rtps_spec.h` defines exactly one
+brings up exactly one `espp::Button` and `rammp_rtps_spec.hpp` defines exactly one
 button bit.
 
 Under each button is a dropdown that assigns it a function. **This is a mockup,
@@ -97,7 +97,7 @@ can only announce themselves, and that is the useful part of the answer: the
 screen would need something new before either mapping means anything.
 
 Both buttons can be set to "Joystick button", so the mapping can be tried both
-ways round. When a mapping earns its place, put it in `rammp_rtps_spec.h` and
+ways round. When a mapping earns its place, put it in `rammp_rtps_spec.hpp` and
 `main.cpp` first, then mirror it here.
 
 ## Driving it
@@ -226,7 +226,7 @@ So, when you change:
 - **a subject or a binding**, mirror it in `sim_nav.c`. If a widget stops updating in the sim but works on the board, a missing binding here is the first thing to check.
 - **an LVGL Kconfig option** in `sdkconfig.defaults`, mirror it in `lv_conf.h`. Kconfig `select`s dependencies automatically and a plain `lv_conf.h` does not, so a new option may need its dependencies spelled out too. `LV_USE_VECTOR_GRAPHIC` needing `LV_USE_MATRIX` and `LV_USE_FLOAT` is the worked example already in the file.
 - **anything under `main/ui/`**, nothing: that tree is compiled as-is, and `import_ui.ps1` can rewrite it freely. The CMake glob picks up new screens and components without edits.
-- **the button hardware**, in this order: add the bit to `rammp_rtps_spec.h`, read the pin in `main.cpp`, and only then move the function out of the mockup's proposal list in `sim_bench.c` and mark it `in_firmware`. The mockup exists to inform that decision, never to record it.
+- **the button hardware**, in this order: add the bit to `rammp_rtps_spec.hpp`, read the pin in `main.cpp`, and only then move the function out of the mockup's proposal list in `sim_bench.c` and mark it `in_firmware`. The mockup exists to inform that decision, never to record it.
 
 The one thing here that is deliberately *not* a mirror of anything is the
 button-mapping dropdown. It has no counterpart in `main.cpp` and is not

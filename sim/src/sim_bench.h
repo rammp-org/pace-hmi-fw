@@ -18,7 +18,7 @@
  * The button-mapping dropdowns are a MOCKUP, not a feature.
  *
  * The firmware has one button. main.cpp brings up a single espp::Button on
- * GPIO48 and rammp_rtps_spec.h defines a single bit, RAMMP_BUTTON_JOYSTICK.
+ * GPIO48 and rammp_rtps_spec.hpp defines a single bit, RAMMP_BUTTON_JOYSTICK.
  * Everything else the dropdowns offer is a *proposal*: a way to feel what a
  * second button might be for before anyone commits it to the firmware and the
  * wire spec, which is the order those changes have to happen in.
@@ -40,11 +40,11 @@ extern "C" {
 #endif
 
 /** Size of the bench window, in display pixels. */
-#define SIM_BENCH_WIDTH  380
+#define SIM_BENCH_WIDTH 380
 #define SIM_BENCH_HEIGHT 430
 
 /** Builds the controls onto `display`'s active screen. */
-void sim_bench_init(lv_display_t * display);
+void sim_bench_init(lv_display_t *display);
 
 /**
  * True while a button currently mapped to the joystick button is held.

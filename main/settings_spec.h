@@ -4,7 +4,7 @@
  * - A page is a title, a line of instructions, and every parameter that names
  *   it, in table order. More rows on a page = more X lines.
  * - Values are integers; `decimals` is display only (755, 1 -> "75.5").
- * - HMI-only: nothing here crosses the wire (see rammp_rtps_spec.h for that).
+ * - HMI-only: nothing here crosses the wire (see rammp_rtps_spec.hpp for that).
  */
 
 #ifndef SETTINGS_SPEC_H

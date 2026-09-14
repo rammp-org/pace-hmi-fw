@@ -6,7 +6,7 @@
  *   state is not OK).
  * - What a button DOES is main.cpp's kActionRun table, in the same order: a
  *   local function, or a request to the MCB over RTPS.
- * - HMI-only: nothing here crosses the wire (see rammp_rtps_spec.h for that).
+ * - HMI-only: nothing here crosses the wire (see rammp_rtps_spec.hpp for that).
  */
 
 #ifndef ACTIONS_SPEC_H

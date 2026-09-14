@@ -6,7 +6,7 @@ StatusPanel show whatever arrives on ``rammp/mcb/status``. This script plays the
 MCB from a laptop so that path can be exercised without the real board.
 
 Topics, type names, enum values and the wire layout all come from
-``rammp_rtps.py``, which scrapes ``main/rammp_rtps_spec.h`` — the same header the
+``rammp_rtps.py``, which scrapes ``main/rammp_rtps_spec.hpp`` — the same header the
 firmware builds against, so there is nothing here to keep in sync by hand.
 
 Usage:

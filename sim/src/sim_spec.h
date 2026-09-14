@@ -1,5 +1,5 @@
 /*
- * The constants the desktop sim needs from main/rammp_rtps_spec.h, which is C++
+ * The constants the desktop sim needs from main/rammp_rtps_spec.hpp, which is C++
  * and so cannot be included from this C build. A hand-kept mirror, like
  * sim_nav.c is of main.cpp: keep the values in step with the spec.
  */

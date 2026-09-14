@@ -1,12 +1,12 @@
 #pragma once
 
-// W5500 SPI Ethernet + the HMI's RTPS participant. Topics and messages: rammp_rtps_spec.h.
+// W5500 SPI Ethernet + the HMI's RTPS participant. Topics and messages: rammp_rtps_spec.hpp.
 
 #include <cstdint>
 #include <functional>
 #include <string>
 
-#include "rammp_rtps_spec.h"
+#include "rammp_rtps_spec.hpp"
 
 /// The link to the MCB, worst to best (the TopBar RTPS indicator colours).
 enum class RtpsLinkState {
