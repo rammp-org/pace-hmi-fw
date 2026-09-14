@@ -5,25 +5,24 @@ cmake_minimum_required(VERSION 3.20)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
 # add the component directories that we want to use
-set(EXTRA_COMPONENT_DIRS
+set(EXTRA_COMPONENT_DIRS)
 
-  # NOTE: if you add any custom components, you should add them to a
-  #       `components/` folder within this repository and update the line below
-  #       to point to it.
-  #
-  "external/rammp-rtps/components/"
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/external/rammp-rtps/components")
+  list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/external/rammp-rtps/components")
+else()
+  message(FATAL_ERROR "Missing external/rammp-rtps submodule. Run: git submodule update --init --recursive")
+endif()
 
-  # NOTE: if we didn't use the idf-component-manager to get the espp
-  #       dependencies, we could instead have ESPP be a submodule within our
-  #       'components' folder, which would mean we'd need to add it to the DIRS:
-  #
-  # "components/espp/components/"
-  #
-  # NOTE: alternatively, we could install espp system-wide, so we could just
-  #       point it to wherever we have espp installed.
-  #
-  # "/path/to/espp/components/"
-)
+# NOTE: if we didn't use the idf-component-manager to get the espp
+#       dependencies, we could instead have ESPP be a submodule within our
+#       'components' folder, which would mean we'd need to add it to the DIRS:
+#
+# "components/espp/components/"
+#
+# NOTE: alternatively, we could install espp system-wide, so we could just
+#       point it to wherever we have espp installed.
+#
+# "/path/to/espp/components/"
 
 set(
   COMPONENTS

@@ -32,7 +32,8 @@ jobs:
     steps:
     - name: Checkout repo
       uses: actions/checkout@v7
-      # TODO: update this if you have submodules
+      with:
+        submodules: recursive
 
     - name: Build main
       uses: espressif/esp-idf-ci-action@v1
