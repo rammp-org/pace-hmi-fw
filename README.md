@@ -101,19 +101,24 @@ How the messages reach the screens:
 
 ### Adding an actuator or a diagnostics item
 
-One line in `messages/joystick_message.hpp` (rammp-rtps); the HMI screen and the Python tools pick it up.
+One row in the shared table (rammp-rtps) and one row of screen names here; the HMI screen and the Python tools pick them up.
 
 ```c
-// RAMMP_ACTUATOR_TABLE: X(id, NAME, short, label, min, max, step, decimals, unit)
-  X(4, HEADREST, "M5", "Headrest", 0, 900, 25, 1, "deg")
+// messages/joystick_message.hpp, RAMMP_ACTUATOR_TABLE: X(id, NAME, min, max, step, decimals, unit)
+  X(4, HEADREST, 0, 900, 25, 1, "deg")
+// main/hmi_rtps_spec.hpp, RAMMP_HMI_ACTUATOR_LABELS: XL(NAME, short, label)
+  XL(HEADREST, "M5", "Headrest")
 
-// RAMMP_DIAG_TABLE: D(id, NAME, short, label, unit1, dec1, unit2, dec2, unit3, dec3)
-  D(3, TEST_4, "T4", "Test actuator 4", "Temp [C]", 1, "Current [A]", 2, "Pos [deg]", 1)
+// messages/joystick_message.hpp, RAMMP_DIAG_TABLE: D(id, NAME, unit1, dec1, unit2, dec2, unit3, dec3)
+  D(3, TEST_4, "Temp [C]", 1, "Current [A]", 2, "Pos [deg]", 1)
+// main/hmi_rtps_spec.hpp, RAMMP_HMI_DIAG_LABELS: DL(NAME, short, label)
+  DL(TEST_4, "T4", "Test actuator 4")
 ```
 
 - `id` is the next number, in table order.
 - Every row except the last ends with `\`.
-- Values are raw integers; `decimals` is display only (250 with 1 shows "25.0").
+- Values are raw integers in units of 10^-decimals `unit` (250 with 1 decimal is 25.0).
+- The label rows must list the shared rows in the same order, or the firmware does not compile.
 - A diagnostics unit of `""` hides that reading.
 - The MCB must send one more value (`ActuatorState.values` / `Diagnostics.items`), in table order.
 

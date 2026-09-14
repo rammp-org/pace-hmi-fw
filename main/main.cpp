@@ -2224,7 +2224,8 @@ static void setting_page_open(int32_t page) {
   if (page == kActuatorsPage) {
     const auto &specs = rammp::kActuators;
     for (uint8_t i = 0; i < actuator_count; i++) {
-      setting_row_add({specs[i].short_name, specs[i].label, specs[i].min_value, specs[i].max_value,
+      const auto &name = rammp::kActuatorLabels[i];
+      setting_row_add({name.short_name, name.label, specs[i].min_value, specs[i].max_value,
                        specs[i].step, specs[i].decimals, nullptr},
                       &actuator_value[i], true);
     }
@@ -2586,11 +2587,11 @@ static void diagnostics_open() {
     lv_label_set_text(
         ui_comp_get_child(
             row, UI_COMP_DIAGNOSTICCOMPONENT_DIAGNOSTICSROW1_ACTUATORLABELS2_ACTUATOR1SHORTLABEL2),
-        specs[i].short_name);
+        rammp::kDiagLabels[i].short_name);
     lv_label_set_text(
         ui_comp_get_child(
             row, UI_COMP_DIAGNOSTICCOMPONENT_DIAGNOSTICSROW1_ACTUATORLABELS2_ACTUATOR1LABEL1),
-        specs[i].label);
+        rammp::kDiagLabels[i].label);
     for (uint8_t f = 0; f < rammp::kDiagFields; f++) {
       if (specs[i].unit[f][0] == '\0') { // a reading this item does not have
         lv_obj_add_flag(ui_comp_get_child(row, kDiagFieldIds[f].container), LV_OBJ_FLAG_HIDDEN);
