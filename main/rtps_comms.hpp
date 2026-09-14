@@ -61,6 +61,19 @@ void rtps_comms_on_mcb_status(std::function<void(const rammp_mcb_status_t &statu
 /// reach the UI only through a subject, holding the LVGL mutex.
 void rtps_comms_on_actuator_state(std::function<void(const rammp_actuator_state_t &)> handler);
 
+/// Register the handler invoked on every diagnostics sample from the MCB
+/// (RAMMP_TOPIC_MCB_DIAGNOSTICS). Call before rtps_comms_start(). RTPS receive
+/// task: reach the UI only through a subject, holding the LVGL mutex.
+void rtps_comms_on_diagnostics(std::function<void(const rammp_diagnostics_t &)> handler);
+
+/// When diagnostics last arrived, and how fast they have been arriving (over
+/// the samples of the last 4 s, at most 8). Any task.
+struct RtpsDiagStats {
+  int64_t last_us = 0;        ///< esp_timer time of the latest sample; 0 = never
+  int32_t rate_tenths_hz = 0; ///< arrival rate in tenths of a Hz; 0 with fewer than 2
+};
+RtpsDiagStats rtps_comms_diag_stats();
+
 /// Ask the MCB to move one actuator by `steps` of its spec'd step size.
 ///
 /// The HMI never moves an actuator itself — this is a request, and the answer

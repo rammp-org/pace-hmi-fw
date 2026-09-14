@@ -28,6 +28,8 @@ extern "C" {
 #define RAMMP_TYPE_MCB_STATUS "rammp/msg/McbStatus"
 #define RAMMP_TOPIC_ACTUATOR_STATE "rammp/actuator/state" /* rammp_actuator_state_t */
 #define RAMMP_TYPE_ACTUATOR_STATE "rammp/msg/ActuatorState"
+#define RAMMP_TOPIC_MCB_DIAGNOSTICS "rammp/mcb/diagnostics" /* rammp_diagnostics_t */
+#define RAMMP_TYPE_DIAGNOSTICS "rammp/msg/Diagnostics"
 
 /* HMI -> MCB */
 #define RAMMP_TOPIC_JOYSTICK_ADC "rammp/joystick/adc" /* rammp_adc_xy_twist_t, ~30 Hz */
@@ -48,6 +50,8 @@ extern "C" {
 #define RAMMP_MCB_STATUS_PERIOD_MS 500     /* MCB sends McbStatus this often, changed or not */
 #define RAMMP_MCB_STATUS_TIMEOUT_MS 2000   /* HMI: no McbStatus this long = link lost */
 #define RAMMP_ACTUATOR_STATE_PERIOD_MS 500 /* MCB resends ActuatorState this often */
+#define RAMMP_DIAG_PERIOD_MS 500           /* MCB sends Diagnostics this often */
+#define RAMMP_DIAG_TIMEOUT_MS 2000         /* HMI: none this long = stale, shown red and blinking */
 
 /* ==== McbStatus (MCB -> HMI) ============================================ */
 
@@ -192,6 +196,61 @@ typedef struct rammp_actuator_state {
   (RAMMP_CDR_HEADER_SIZE + RAMMP_ACTUATOR_COMMAND_PAYLOAD_SIZE)
 #define RAMMP_ACTUATOR_STATE_PAYLOAD_SIZE (4 + 4 * RAMMP_ACTUATOR_MAX)
 #define RAMMP_ACTUATOR_STATE_CDR_SIZE (RAMMP_CDR_HEADER_SIZE + RAMMP_ACTUATOR_STATE_PAYLOAD_SIZE)
+
+/* ==== Diagnostics (MCB -> HMI) ========================================== */
+
+/* Live readings from the actuators and anything else worth watching. Values
+   are raw integers; `decN` is for display only (2345 with dec 2 shows "23.45"). */
+
+#define RAMMP_DIAG_MAX 8    /* items in values[]; changing it changes the wire */
+#define RAMMP_DIAG_FIELDS 3 /* readings per item */
+
+/* D(id, NAME, short, label, unit1, dec1, unit2, dec2, unit3, dec3); id = row index.
+   A unit of "" leaves that reading out. */
+#define RAMMP_DIAG_TABLE(D)                                                                        \
+  D(0, TEST_1, "T1", "Test actuator 1", "Temp [C]", 1, "Current [A]", 2, "Pos [deg]", 1)           \
+  D(1, TEST_2, "T2", "Test actuator 2", "Temp [C]", 1, "Current [A]", 2, "Pos [deg]", 1)           \
+  D(2, TEST_3, "T3", "Test actuator 3", "Temp [C]", 1, "Current [A]", 2, "Pos [deg]", 1)
+
+#define RAMMP_DIAG_COUNT_ONE(...) +1
+#define RAMMP_DIAG_COUNT (0 RAMMP_DIAG_TABLE(RAMMP_DIAG_COUNT_ONE))
+
+typedef struct rammp_diag_spec {
+  uint8_t id;                          /* row index; position in values[] */
+  const char *short_name;              /* "T1" */
+  const char *label;                   /* "Test actuator 1" */
+  const char *unit[RAMMP_DIAG_FIELDS]; /* "Temp [C]"; "" = reading unused */
+  uint8_t decimals[RAMMP_DIAG_FIELDS]; /* display only */
+} rammp_diag_spec_t;
+
+/* The table as an array; `count` gets its length (may be NULL). */
+static inline const rammp_diag_spec_t *rammp_diag_table(uint8_t *count) {
+  static const rammp_diag_spec_t table[] = {
+#define RAMMP_DIAG_ROW(id_, name_, short_, label_, u1_, d1_, u2_, d2_, u3_, d3_)                   \
+  {(uint8_t)(id_),                                                                                 \
+   short_,                                                                                         \
+   label_,                                                                                         \
+   {u1_, u2_, u3_},                                                                                \
+   {(uint8_t)(d1_), (uint8_t)(d2_), (uint8_t)(d3_)}},
+      RAMMP_DIAG_TABLE(RAMMP_DIAG_ROW)
+#undef RAMMP_DIAG_ROW
+  };
+  if (count != NULL) {
+    *count = (uint8_t)(sizeof(table) / sizeof(table[0]));
+  }
+  return table;
+}
+
+/* MCB -> HMI, every RAMMP_DIAG_PERIOD_MS */
+typedef struct rammp_diagnostics {
+  uint8_t seq;                                       /* +1 per message, wraps */
+  uint8_t count;                                     /* valid items in values[] */
+  uint8_t reserved[2];                               /* send 0 */
+  int32_t values[RAMMP_DIAG_MAX][RAMMP_DIAG_FIELDS]; /* raw, [table row][reading] */
+} rammp_diagnostics_t;
+
+#define RAMMP_DIAG_PAYLOAD_SIZE (4 + 4 * RAMMP_DIAG_MAX * RAMMP_DIAG_FIELDS)
+#define RAMMP_DIAG_CDR_SIZE (RAMMP_CDR_HEADER_SIZE + RAMMP_DIAG_PAYLOAD_SIZE)
 
 /* ==== Self test (bench only; checks in main/selftest_spec.h) ============ */
 
@@ -441,6 +500,41 @@ static inline bool rammp_selftest_report_decode(const uint8_t *in, size_t in_siz
   r->name[RAMMP_SELFTEST_NAME_LEN - 1] = '\0';
   r->unit[RAMMP_SELFTEST_UNIT_LEN - 1] = '\0';
   r->detail[RAMMP_SELFTEST_DETAIL_LEN - 1] = '\0';
+  return true;
+}
+
+static inline size_t rammp_diagnostics_encode(const rammp_diagnostics_t *d, uint8_t *out,
+                                              size_t out_size) {
+  size_t i, f;
+  if (d == NULL || out == NULL || out_size < RAMMP_DIAG_CDR_SIZE) {
+    return 0;
+  }
+  rammp_cdr_header(out);
+  out[4] = d->seq;
+  out[5] = d->count;
+  out[6] = out[7] = 0;
+  for (i = 0; i < RAMMP_DIAG_MAX; ++i) {
+    for (f = 0; f < RAMMP_DIAG_FIELDS; ++f) {
+      rammp_write_u32_le(out + 8 + 4 * (i * RAMMP_DIAG_FIELDS + f), (uint32_t)d->values[i][f]);
+    }
+  }
+  return RAMMP_DIAG_CDR_SIZE;
+}
+
+static inline bool rammp_diagnostics_decode(const uint8_t *in, size_t in_size,
+                                            rammp_diagnostics_t *d) {
+  size_t i, f;
+  if (in == NULL || d == NULL || in_size < RAMMP_DIAG_CDR_SIZE || !rammp_cdr_ok(in)) {
+    return false;
+  }
+  d->seq = in[4];
+  d->count = in[5] > RAMMP_DIAG_MAX ? RAMMP_DIAG_MAX : in[5]; /* never trust a count */
+  d->reserved[0] = d->reserved[1] = 0;
+  for (i = 0; i < RAMMP_DIAG_MAX; ++i) {
+    for (f = 0; f < RAMMP_DIAG_FIELDS; ++f) {
+      d->values[i][f] = (int32_t)rammp_read_u32_le(in + 8 + 4 * (i * RAMMP_DIAG_FIELDS + f));
+    }
+  }
   return true;
 }
 

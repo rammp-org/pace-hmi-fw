@@ -109,6 +109,8 @@ class McbPanel:
         actuator_tab = ttk.Frame(self.notebook)
         self.notebook.add(status_tab, text="Status")
         self.notebook.add(actuator_tab, text="Actuators")
+        diagnostics_tab = ttk.Frame(self.notebook)
+        self.notebook.add(diagnostics_tab, text="Diagnostics")
 
         self._build_connection(status_tab)
         self._build_status_controls(status_tab)
@@ -116,6 +118,7 @@ class McbPanel:
         self._build_joystick(status_tab)
         self._build_cycle(status_tab)
         self._build_actuators(actuator_tab)
+        self._build_diagnostics(diagnostics_tab)
         self._build_log()
         root.after(TICK_MS, self._tick)
         root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -398,6 +401,37 @@ class McbPanel:
             self.harness.actuator_reject[index] = (
                 None if choice == "accept" else name_to_result.get(choice)
             )
+
+    def _build_diagnostics(self, parent: tk.Widget) -> None:
+        """Fake readings for every item in the spec's RAMMP_DIAG_TABLE.
+
+        Sent with each status tick. Untick to stop them: the HMI's Diagnostics
+        screen should turn red and blink within RAMMP_DIAG_TIMEOUT_MS.
+        """
+        frame = ttk.LabelFrame(parent, text="Diagnostics (fake readings)", padding=8)
+        frame.pack(fill="x", padx=8, pady=4)
+        self.diagnostics_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(frame, text="Send diagnostics", variable=self.diagnostics_var).pack(
+            anchor="w")
+        self.diagnostics_label = ttk.Label(frame, text="not connected", font=("Consolas", 10),
+                                           justify="left")
+        self.diagnostics_label.pack(anchor="w", pady=(6, 0))
+
+    def _update_diagnostics(self) -> None:
+        self.harness.diagnostics_enabled = self.diagnostics_var.get()
+        if not self.harness.diagnostics_enabled:
+            self.diagnostics_label.configure(text="STOPPED - the HMI should show them stale")
+            return
+        values = self.harness.diagnostics_values
+        if not values:
+            self.diagnostics_label.configure(text="no readings sent yet")
+            return
+        lines = []
+        for item, readings in zip(spec.DIAGNOSTICS, values):
+            parts = [f"{unit} {item.format(raw, field)}"
+                     for field, (unit, raw) in enumerate(zip(item.units, readings)) if unit]
+            lines.append(f"{item.short} {item.label}: " + ", ".join(parts))
+        self.diagnostics_label.configure(text="\n".join(lines))
 
     def _build_cycle(self, parent: tk.Widget) -> None:
         frame = ttk.Frame(parent, padding=(8, 4))
@@ -819,6 +853,7 @@ class McbPanel:
             self.harness.step_speed()
             self._update_joystick()
             self._update_actuators()
+            self._update_diagnostics()
             targets = max(0, self.harness.announced_targets)
             paused = " PAUSED" if self.harness.paused else ""
             self.status_label.configure(

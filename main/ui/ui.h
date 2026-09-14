@@ -41,6 +41,7 @@ extern "C" {
 #include "screens/ui_LogScreen.h"
 #include "screens/ui_SpecificSettingScreen.h"
 #include "screens/ui_GenericActionsScreen.h"
+#include "screens/ui_DiagnosticsScreen.h"
 
 ///////////////////// VARIABLES ////////////////////
 

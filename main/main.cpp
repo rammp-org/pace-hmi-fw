@@ -671,6 +671,8 @@ static void log_link_change(RtpsLinkState state) {
   last = state;
 }
 
+static void diag_poll(); // DiagnosticsScreen, further down
+
 static void rtps_poll_cb(lv_timer_t *) {
   const RtpsLinkState state = rtps_comms_link_state();
   log_link_change(state);
@@ -678,6 +680,7 @@ static void rtps_poll_cb(lv_timer_t *) {
   static uint32_t ticks = 0;
   // flip every other tick: a 500 ms half-period, i.e. a 1 Hz blink
   lv_subject_set_int(&rtps_blink_subject, static_cast<int32_t>((++ticks / 2) & 1u));
+  diag_poll(); // diagnostics staleness rides the same 250 ms tick
 
   // Defensive: if the RTPS label's text colour/opacity are registered as
   // themeable in the SquareLine project, ui_theme_set() re-applies the theme's
@@ -884,6 +887,7 @@ static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c);
 //   RDScreen              joystick down    ui_ExitBarPull2     -> MainScreenFlex
 //   SpecificSettingScreen joystick down    ui_ExitBarPull4     -> MainScreenFlex
 //   GenericActionsScreen  joystick down    ui_ExitBarPull5     -> MainScreenFlex
+//   DiagnosticsScreen     joystick down    ui_ExitBarPull6     -> MainScreenFlex
 //
 // "Pull" is the stick toward the user, i.e. LV_KEY_DOWN; "push left" is
 // LV_KEY_LEFT. Each exit bar lives on the page it applies to, so the gestures
@@ -1133,6 +1137,8 @@ static void setting_page_open(int32_t page);
 static void settings_screen_ensure();
 static void actions_screen_ensure();
 static void actions_open();
+static void diagnostics_screen_ensure();
+static void diagnostics_open();
 
 // Is the MCB currently telling us the chair is fit to drive, or to move the
 // seat? Requires a live
@@ -1462,6 +1468,15 @@ static HoldGesture actions_exit_gesture{
     .grace_ms = kBarGraceMs,
 };
 
+// Out of the DiagnosticsScreen. Down also walks the rows, hence the grace.
+static HoldGesture diag_exit_gesture{
+    .armed = &joy_down_armed,
+    .is_held = joy_down_held,
+    .applies = [] { return lv_screen_active() == ui_DiagnosticsScreen; },
+    .completed = screen_return_to_main,
+    .grace_ms = kBarGraceMs,
+};
+
 // The LogScreen exits on the stick button, like the DriveScreen: up and down
 // page through the log there, so neither can double as a pull-to-exit.
 static HoldGesture log_exit_gesture{
@@ -1476,7 +1491,7 @@ static HoldGesture log_exit_gesture{
 static HoldGesture *const kHoldGestures[] = {
     &unlock_gesture,    &drive_enter_gesture,   &drive_exit_gesture,   &seat_enter_gesture,
     &seat_exit_gesture, &seat_back_gesture,     &rd_exit_gesture,      &settings_exit_gesture,
-    &log_exit_gesture,  &actions_enter_gesture, &actions_exit_gesture,
+    &log_exit_gesture,  &actions_enter_gesture, &actions_exit_gesture, &diag_exit_gesture,
 };
 
 static void hold_poll_cb(lv_timer_t *) {
@@ -2387,6 +2402,217 @@ static void actions_open() {
                     &ui_GenericActionsScreen_screen_init);
 }
 
+/////////////////////////////////////////////////////////////////////////////
+// DiagnosticsScreen: live readings from the MCB
+//
+// Opened from the DIAGNOSTICS settings row, left by pulling and holding. One
+// row per entry in RAMMP_DIAG_TABLE (rammp_rtps_spec.h): short label, label,
+// and up to three readings, each under its unit. The MCB publishes them all on
+// RAMMP_TOPIC_MCB_DIAGNOSTICS every RAMMP_DIAG_PERIOD_MS; they land in
+// diag_value (subjects, set under the LVGL lock by the RTPS handler in
+// app_main) and the rows observe them.
+//
+// DiagnosticsFreqLabel shows how fast they are arriving ("2.0 Hz - Live").
+// Once nothing has arrived for RAMMP_DIAG_TIMEOUT_MS - or nothing ever has -
+// every row's text and the label turn red and blink: readings the MCB stopped
+// sending must not sit there looking current.
+//
+// The red comes through LV_STATE_USER_1. The labels' text colours are themed
+// for DEFAULT and FOCUSED, and a style on a higher state outranks both without
+// touching anything the theme manager re-applies on a theme change.
+//
+// Built on demand like the settings and actions screens (see "Screens built
+// on demand").
+/////////////////////////////////////////////////////////////////////////////
+
+static_assert(RAMMP_DIAG_COUNT <= RAMMP_DIAG_MAX, "RAMMP_DIAG_TABLE has outgrown RAMMP_DIAG_MAX");
+static_assert(RAMMP_DIAG_FIELDS == 3, "the DiagnosticComponent has exactly three readings");
+
+// Each reading's container, units label and value label in the component.
+struct DiagFieldIds {
+  int container;
+  int units;
+  int value;
+};
+static constexpr DiagFieldIds kDiagFieldIds[RAMMP_DIAG_FIELDS] = {
+    {UI_COMP_DIAGNOSTICCOMPONENT_DIAGNOSTICSVALUECONTAINER1,
+     UI_COMP_DIAGNOSTICCOMPONENT_DIAGNOSTICSVALUECONTAINER1_DIAGNOSTICSUNITS1,
+     UI_COMP_DIAGNOSTICCOMPONENT_DIAGNOSTICSVALUECONTAINER1_DIAGNOSTICSVALUE1},
+    {UI_COMP_DIAGNOSTICCOMPONENT_DIAGNOSTICSVALUECONTAINER2,
+     UI_COMP_DIAGNOSTICCOMPONENT_DIAGNOSTICSVALUECONTAINER2_DIAGNOSTICSUNITS2,
+     UI_COMP_DIAGNOSTICCOMPONENT_DIAGNOSTICSVALUECONTAINER2_DIAGNOSTICSVALUE2},
+    {UI_COMP_DIAGNOSTICCOMPONENT_DIAGNOSTICSVALUECONTAINER3,
+     UI_COMP_DIAGNOSTICCOMPONENT_DIAGNOSTICSVALUECONTAINER3_DIAGNOSTICSUNITS3,
+     UI_COMP_DIAGNOSTICCOMPONENT_DIAGNOSTICSVALUECONTAINER3_DIAGNOSTICSVALUE3},
+};
+
+// Readings, raw, [table row][reading]; kValueUnknown until the MCB sends one.
+// Static: the rows' observers point at them, and they keep updating with no
+// screen up.
+static lv_subject_t diag_value[RAMMP_DIAG_MAX][RAMMP_DIAG_FIELDS];
+static lv_subject_t diag_stale_subject; // 1 = nothing within RAMMP_DIAG_TIMEOUT_MS, or ever
+static lv_subject_t diag_rate_subject;  // arrival rate, tenths of a Hz
+
+// Which reading a value observer shows; static so an observer can point at it.
+struct DiagField {
+  uint8_t item;
+  uint8_t field;
+};
+static DiagField diag_fields[RAMMP_DIAG_MAX][RAMMP_DIAG_FIELDS];
+
+static lv_obj_t *diag_rows[RAMMP_DIAG_MAX];
+static int diag_row_count; // rows on screen; 0 while it is not up
+static int diag_cursor;    // which row the joystick is on
+static lv_group_t *diag_group = nullptr;
+
+static constexpr lv_style_selector_t kDiagStale = static_cast<lv_style_selector_t>(LV_PART_MAIN) |
+                                                  static_cast<lv_style_selector_t>(LV_STATE_USER_1);
+static constexpr uint32_t kDiagStaleColour = 0xFF5050; // the self test's FAIL red
+
+// Keeps diag_stale_subject and diag_rate_subject current. LVGL task, from
+// rtps_poll_cb: staleness has to be polled - nothing happens when a sample
+// fails to arrive.
+static void diag_poll() {
+  const RtpsDiagStats stats = rtps_comms_diag_stats();
+  const bool stale =
+      stats.last_us == 0 || esp_timer_get_time() - stats.last_us > RAMMP_DIAG_TIMEOUT_MS * 1000LL;
+  lv_subject_set_int(&diag_stale_subject, stale ? 1 : 0);
+  lv_subject_set_int(&diag_rate_subject, stale ? 0 : stats.rate_tenths_hz);
+}
+
+// A reading, scaled by its decimals. stepper_format's StepperSpec carries the
+// decimals; the rest of it does not apply here.
+static void diag_value_observer(lv_observer_t *observer, lv_subject_t *subject) {
+  const auto *field = static_cast<const DiagField *>(lv_observer_get_user_data(observer));
+  lv_obj_t *label = lv_observer_get_target_obj(observer);
+  const int32_t raw = lv_subject_get_int(subject);
+  if (raw == kValueUnknown) {
+    lv_label_set_text(label, "--");
+    return;
+  }
+  const rammp_diag_spec_t &spec = rammp_diag_table(nullptr)[field->item];
+  const StepperSpec format{nullptr, nullptr, 0, 0, 0, spec.decimals[field->field], nullptr};
+  char text[24];
+  stepper_format(format, raw, text, sizeof(text));
+  lv_label_set_text(label, text);
+}
+
+static lv_opa_t diag_blink_opa() {
+  return lv_subject_get_int(&rtps_blink_subject) ? LV_OPA_COVER : LV_OPA_TRANSP;
+}
+
+// Every label under `obj` takes LV_STATE_USER_1 while stale, whose style is
+// red text at the blink's opacity.
+static void diag_mark_stale(lv_obj_t *obj, bool stale, lv_opa_t opa) {
+  for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
+    lv_obj_t *child = lv_obj_get_child(obj, i);
+    if (lv_obj_check_type(child, &lv_label_class)) {
+      lv_obj_set_style_text_color(child, lv_color_hex(kDiagStaleColour), kDiagStale);
+      lv_obj_set_style_text_opa(child, opa, kDiagStale);
+      lv_obj_set_state(child, LV_STATE_USER_1, stale);
+    }
+    diag_mark_stale(child, stale, opa);
+  }
+}
+
+// Bound to each row, on the stale and blink subjects both.
+static void diag_row_stale_observer(lv_observer_t *observer, lv_subject_t *) {
+  diag_mark_stale(lv_observer_get_target_obj(observer),
+                  lv_subject_get_int(&diag_stale_subject) != 0, diag_blink_opa());
+}
+
+// DiagnosticsFreqLabel, on the rate, stale and blink subjects.
+static void diag_freq_observer(lv_observer_t *observer, lv_subject_t *) {
+  lv_obj_t *label = lv_observer_get_target_obj(observer);
+  const bool stale = lv_subject_get_int(&diag_stale_subject) != 0;
+  if (stale) {
+    lv_label_set_text(label, "No data");
+  } else {
+    const int32_t rate = lv_subject_get_int(&diag_rate_subject);
+    lv_label_set_text_fmt(label, "%d.%d Hz - Live", static_cast<int>(rate / 10),
+                          static_cast<int>(rate % 10));
+  }
+  lv_obj_set_style_text_color(label, lv_color_hex(kDiagStaleColour), kDiagStale);
+  lv_obj_set_style_text_opa(label, diag_blink_opa(), kDiagStale);
+  lv_obj_set_state(label, LV_STATE_USER_1, stale);
+}
+
+// Clamped rather than wrapped, for the reason in grid_key_cb.
+static void diag_focus(int index) {
+  if (diag_row_count == 0) {
+    return;
+  }
+  diag_cursor = std::clamp(index, 0, diag_row_count - 1);
+  lv_group_focus_obj(diag_rows[diag_cursor]);
+}
+
+// Up/down walk the rows, which scrolls a long table into view.
+static void diag_key_cb(lv_event_t *e) {
+  switch (lv_event_get_key(e)) {
+  case LV_KEY_UP:
+    diag_focus(diag_cursor - 1);
+    return;
+  case LV_KEY_DOWN:
+    diag_focus(diag_cursor + 1);
+    return;
+  default:
+    return;
+  }
+}
+
+// Deleting a row takes its observers and events with it and drops it from
+// diag_group; the theme manager forgets it too.
+static void diag_rows_clear() {
+  for (int i = 0; i < diag_row_count; i++) {
+    lv_obj_delete(diag_rows[i]);
+  }
+  diag_row_count = 0;
+  diag_cursor = 0;
+}
+
+// Builds the rows and shows the screen. LVGL task (a click).
+static void diagnostics_open() {
+  diagnostics_screen_ensure(); // built on demand: see "Screens built on demand"
+  diag_rows_clear();
+  uint8_t count = 0;
+  const rammp_diag_spec_t *specs = rammp_diag_table(&count);
+  for (uint8_t i = 0; i < count; i++) {
+    lv_obj_t *row = ui_DiagnosticComponent_create(ui_DiagnosticsFlexRows);
+    diag_rows[diag_row_count++] = row;
+    lv_label_set_text(
+        ui_comp_get_child(
+            row, UI_COMP_DIAGNOSTICCOMPONENT_DIAGNOSTICSROW1_ACTUATORLABELS2_ACTUATOR1SHORTLABEL2),
+        specs[i].short_name);
+    lv_label_set_text(
+        ui_comp_get_child(
+            row, UI_COMP_DIAGNOSTICCOMPONENT_DIAGNOSTICSROW1_ACTUATORLABELS2_ACTUATOR1LABEL1),
+        specs[i].label);
+    for (uint8_t f = 0; f < RAMMP_DIAG_FIELDS; f++) {
+      if (specs[i].unit[f][0] == '\0') { // a reading this item does not have
+        lv_obj_add_flag(ui_comp_get_child(row, kDiagFieldIds[f].container), LV_OBJ_FLAG_HIDDEN);
+        continue;
+      }
+      lv_label_set_text(ui_comp_get_child(row, kDiagFieldIds[f].units), specs[i].unit[f]);
+      diag_fields[i][f] = {i, f};
+      lv_subject_add_observer_obj(&diag_value[i][f], diag_value_observer,
+                                  ui_comp_get_child(row, kDiagFieldIds[f].value),
+                                  &diag_fields[i][f]);
+    }
+    lv_subject_add_observer_obj(&diag_stale_subject, diag_row_stale_observer, row, nullptr);
+    lv_subject_add_observer_obj(&rtps_blink_subject, diag_row_stale_observer, row, nullptr);
+    lv_group_add_obj(diag_group, row);
+    lv_obj_add_event_cb(row, diag_key_cb, LV_EVENT_KEY, nullptr);
+    lv_obj_add_event_cb(row, setting_focus_cb, LV_EVENT_FOCUSED, nullptr);
+    lv_obj_add_event_cb(row, setting_focus_cb, LV_EVENT_DEFOCUSED, nullptr);
+    // Exported in its focused preview state, like the actuator rows; the
+    // focus callbacks are left as the only writers of LV_STATE_FOCUSED.
+    set_focused_recursive(row, false);
+    clear_click_focusable_recursive(row);
+  }
+  _ui_screen_change(&ui_DiagnosticsScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
+                    &ui_DiagnosticsScreen_screen_init);
+}
+
 // Hands the joystick to whichever group belongs to the screen being shown.
 static void screen_loaded_cb(lv_event_t *e) {
   const lv_obj_t *screen = lv_event_get_target_obj(e);
@@ -2409,6 +2635,9 @@ static void screen_loaded_cb(lv_event_t *e) {
   } else if (screen == ui_GenericActionsScreen) {
     lv_indev_set_group(joystick_indev, actions_group);
     action_focus(0);
+  } else if (screen == ui_DiagnosticsScreen) {
+    lv_indev_set_group(joystick_indev, diag_group);
+    diag_focus(0);
   } else if (screen == ui_LogScreen && log_view_group() != nullptr) {
     lv_indev_set_group(joystick_indev, log_view_group());
     log_view_on_load();
@@ -2501,7 +2730,7 @@ static void strip_all_overdraw() {
   const lv_obj_t *const screens[] = {
       ui_MainScreenFlex, ui_DriveScreen,           ui_SeatAdjustmentFlexScreen,
       ui_RDScreen,       ui_SpecificSettingScreen, ui_JoystickTest,
-      ui_LogScreen,      ui_GenericActionsScreen};
+      ui_LogScreen,      ui_GenericActionsScreen,  ui_DiagnosticsScreen};
   const uint32_t stripped =
       std::accumulate(std::begin(screens), std::end(screens), uint32_t{0},
                       [](uint32_t sum, const lv_obj_t *screen) {
@@ -2603,6 +2832,45 @@ static void actions_screen_ensure() {
   lv_obj_add_event_cb(ui_GenericActionsScreen, actions_screen_unloaded_cb, LV_EVENT_SCREEN_UNLOADED,
                       nullptr);
   strip_screen_overdraw(ui_GenericActionsScreen);
+}
+
+static void diagnostics_screen_destroy_cb(void *) {
+  if (ui_DiagnosticsScreen != nullptr && lv_screen_active() != ui_DiagnosticsScreen) {
+    ui_DiagnosticsScreen_screen_destroy();
+  }
+}
+
+static void diagnostics_screen_unloaded_cb(lv_event_t *) {
+  diag_rows_clear();
+  lv_async_call(diagnostics_screen_destroy_cb, nullptr);
+}
+
+static void diagnostics_screen_ensure() {
+  if (ui_DiagnosticsScreen != nullptr) {
+    return;
+  }
+  ui_DiagnosticsScreen_screen_init();
+  // Everything in the rows panel is SquareLine's template: diagnostics_open
+  // builds one row per RAMMP_DIAG_TABLE entry instead.
+  for (int32_t i = static_cast<int32_t>(lv_obj_get_child_count(ui_DiagnosticsFlexRows)) - 1; i >= 0;
+       i--) {
+    lv_obj_delete(lv_obj_get_child(ui_DiagnosticsFlexRows, i));
+  }
+  bind_status_panel(ui_StatusPanel9);
+  bind_rtps_label(ui_TopBar10);
+  bind_clock_label(ui_TopBar10);
+  lv_bar_set_range(ui_ExitBarPull6, 0, kHoldMax);
+  lv_bar_bind_value(ui_ExitBarPull6, &diag_exit_gesture.progress);
+  // The red, blinking readings are this screen's warning: the ErrorWarningPanel
+  // would cover exactly what someone opened the screen to look at.
+  lv_obj_add_flag(ui_ErrorWarningPanel8, LV_OBJ_FLAG_HIDDEN);
+  for (lv_subject_t *subject : {&diag_rate_subject, &diag_stale_subject, &rtps_blink_subject}) {
+    lv_subject_add_observer_obj(subject, diag_freq_observer, ui_DiagnosticsFreqLabel, nullptr);
+  }
+  lv_obj_add_event_cb(ui_DiagnosticsScreen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, nullptr);
+  lv_obj_add_event_cb(ui_DiagnosticsScreen, diagnostics_screen_unloaded_cb,
+                      LV_EVENT_SCREEN_UNLOADED, nullptr);
+  strip_screen_overdraw(ui_DiagnosticsScreen);
 }
 
 static void direct_flush_cb(lv_display_t *disp, const lv_area_t * /*area*/, uint8_t *px_map) {
@@ -3285,6 +3553,7 @@ extern "C" void app_main(void) {
   // Built on demand instead: see "Screens built on demand".
   ui_SpecificSettingScreen_screen_destroy();
   ui_GenericActionsScreen_screen_destroy();
+  ui_DiagnosticsScreen_screen_destroy();
 
   // Swap the boot logo from the export's embedded SVG to a pre-rasterised A8
   // mask (main/boot_logo.c). Done here rather than in the SquareLine project
@@ -3409,6 +3678,15 @@ extern "C" void app_main(void) {
   entry_refused_timer = lv_timer_create(entry_refused_timer_cb, kDriveRefusedShowMs, nullptr);
   lv_timer_pause(entry_refused_timer);
   bind_entry_refused_panel(ui_ErrorWarningPanel4); // MainScreenFlex
+  // Diagnostics readings, and whether they are live: before the poll timer
+  // that keeps the latter current, and before any RTPS sample can land.
+  for (auto &item : diag_value) {
+    for (auto &reading : item) {
+      lv_subject_init_int(&reading, kValueUnknown);
+    }
+  }
+  lv_subject_init_int(&diag_stale_subject, 1);
+  lv_subject_init_int(&diag_rate_subject, 0);
   lv_timer_create(rtps_poll_cb, kRtpsPollMs, nullptr);
 
   // CALIBRATE on the JoystickTest screen. Its prompts blink on the RTPS
@@ -3537,6 +3815,7 @@ extern "C" void app_main(void) {
   lv_bar_set_range(ui_ExitBarPull2, 0, kHoldMax);
   lv_bar_bind_value(ui_ExitBarPull2, &rd_exit_gesture.progress);
   lv_subject_init_int(&actions_exit_gesture.progress, 0);
+  lv_subject_init_int(&diag_exit_gesture.progress, 0);
   lv_subject_init_int(&log_exit_gesture.progress, 0);
   lv_bar_set_range(ui_ExitBarPress2, 0, kHoldMax);
   lv_bar_bind_value(ui_ExitBarPress2, &log_exit_gesture.progress);
@@ -3816,6 +4095,15 @@ extern "C" void app_main(void) {
   // GenericActionsScreen: what outlives the screen, which is built on demand
   // (actions_screen_ensure).
   actions_group = lv_group_create();
+
+  // DiagnosticsScreen: what outlives the screen, which is built on demand
+  // (diagnostics_screen_ensure). The DIAGNOSTICS row carries a SquareLine
+  // screen-change action, which would build the screen without any of that,
+  // so firmware takes the click instead.
+  diag_group = lv_group_create();
+  lv_obj_remove_event_cb(ui_DiagnosticsButton, ui_event_DiagnosticsButton);
+  lv_obj_add_event_cb(
+      ui_DiagnosticsButton, [](lv_event_t *) { diagnostics_open(); }, LV_EVENT_CLICKED, nullptr);
 
   // The overlay hardcodes LVGL's 14 px default font (lv_sysmon_create sets no
   // font at all), which is unreadable on a 1280x720 panel at arm's length.
@@ -4270,6 +4558,16 @@ extern "C" void app_main(void) {
   rtps_comms_on_actuator_state([](const rammp_actuator_state_t &state) {
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
     actuator_apply_state(state);
+  });
+  // Diagnostics -> diag_value. RTPS receive task, so subjects only, under the
+  // LVGL lock (the rows' observers run on this task and touch widgets).
+  rtps_comms_on_diagnostics([](const rammp_diagnostics_t &diag) {
+    std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
+    for (uint8_t i = 0; i < diag.count && i < RAMMP_DIAG_COUNT; i++) {
+      for (int f = 0; f < RAMMP_DIAG_FIELDS; f++) {
+        lv_subject_set_int(&diag_value[i][f], diag.values[i][f]);
+      }
+    }
   });
   if (!rtps_comms_start()) {
     logger.warn("RTPS comms not started (Ethernet bring-up failed)");

@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import math
 import os
 import random
 import socket
@@ -132,6 +133,20 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
             reliable=False,
             entity_index=len(self.local_readers),
         ))
+
+        # Diagnostics: fake, slowly changing readings for every item in the
+        # spec's RAMMP_DIAG_TABLE, sent with each status tick. Turning them off
+        # (the GUI's checkbox) is how the HMI's stale display gets tested.
+        self.diagnostics_enabled = True
+        self.diagnostics_seq = 0
+        self.diagnostics_values: list[list[int]] = []
+        self._diagnostics_writer = rtps_host.WriterConfig(
+            topic_name=spec.TOPIC_MCB_DIAGNOSTICS,
+            type_name=spec.TYPE_DIAGNOSTICS,
+            reliable=False,
+            entity_index=len(self.local_writers),
+        )
+        self.local_writers.append(self._diagnostics_writer)
 
         # ---- self test ---------------------------------------------------
         # Every run of the HMI's self test needs a peer: its RTPS checks time
@@ -329,6 +344,24 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
             + (" [PAUSED]" if self.paused else "")
         )
 
+    def publish_diagnostics(self) -> None:
+        """Fake readings for every diagnostics item: slow sine waves, offset
+        per item so the rows do not move in step."""
+        if not self.diagnostics_enabled:
+            return
+        t = time.monotonic()
+        values = []
+        for item in spec.DIAGNOSTICS:
+            readings = (30.0 + 5.0 * math.sin(t / 7.0 + item.id),       # temperature
+                        1.5 + math.sin(t / 2.0 + item.id),               # current
+                        45.0 * math.sin(t / 5.0 + 2.0 * item.id))        # position
+            values.append([round(v * 10 ** places)
+                           for v, places in zip(readings, item.decimals)])
+        self.diagnostics_values = values
+        self._send_on(self._diagnostics_writer,
+                      spec.pack_diagnostics(values, self.diagnostics_seq))
+        self.diagnostics_seq = (self.diagnostics_seq + 1) & 0xFF
+
     def publish_now(self) -> None:
         """Called by the harness run loop every --period seconds."""
         if self.paused:
@@ -337,6 +370,7 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
         # so a joystick that just booted or just reconnected learns where the
         # actuators are without the user having to press anything.
         self.publish_actuator_state()
+        self.publish_diagnostics()
         # Advance the emulated speed on real elapsed time. Clamped so a long
         # gap (a pause, a breakpoint) cannot lurch the number across its range
         # in a single step.

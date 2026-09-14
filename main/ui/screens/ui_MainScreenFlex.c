@@ -63,7 +63,7 @@ lv_obj_t * ui_Button6 = NULL;
 lv_obj_t * ui_ButtonLabel6 = NULL;
 lv_obj_t * ui_SystemLogsButton = NULL;
 lv_obj_t * ui_SystemLogsButtonLabel = NULL;
-lv_obj_t * ui_Button8 = NULL;
+lv_obj_t * ui_DiagnosticsButton = NULL;
 lv_obj_t * ui_ButtonLabel8 = NULL;
 lv_obj_t * ui_Button9 = NULL;
 lv_obj_t * ui_ButtonLabel9 = NULL;
@@ -114,6 +114,15 @@ void ui_event_SystemLogsButton(lv_event_t * e)
 
     if(event_code == LV_EVENT_CLICKED) {
         _ui_screen_change(&ui_LogScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0, &ui_LogScreen_screen_init);
+    }
+}
+
+void ui_event_DiagnosticsButton(lv_event_t * e)
+{
+    lv_event_code_t event_code = lv_event_get_code(e);
+
+    if(event_code == LV_EVENT_CLICKED) {
+        _ui_screen_change(&ui_DiagnosticsScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0, &ui_DiagnosticsScreen_screen_init);
     }
 }
 
@@ -936,36 +945,36 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_set_style_text_align(ui_SystemLogsButtonLabel, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(ui_SystemLogsButtonLabel, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_Button8 = lv_button_create(ui_SettingsFlexPanel);
-    lv_obj_set_width(ui_Button8, 620);
-    lv_obj_set_height(ui_Button8, 100);
-    lv_obj_set_x(ui_Button8, 0);
-    lv_obj_set_y(ui_Button8, 340);
-    lv_obj_set_align(ui_Button8, LV_ALIGN_TOP_MID);
-    lv_obj_add_flag(ui_Button8, LV_OBJ_FLAG_HIDDEN | LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
-    lv_obj_remove_flag(ui_Button8, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_radius(ui_Button8, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_Button8, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+    ui_DiagnosticsButton = lv_button_create(ui_SettingsFlexPanel);
+    lv_obj_set_width(ui_DiagnosticsButton, 620);
+    lv_obj_set_height(ui_DiagnosticsButton, 100);
+    lv_obj_set_x(ui_DiagnosticsButton, 0);
+    lv_obj_set_y(ui_DiagnosticsButton, 340);
+    lv_obj_set_align(ui_DiagnosticsButton, LV_ALIGN_TOP_MID);
+    lv_obj_add_flag(ui_DiagnosticsButton, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
+    lv_obj_remove_flag(ui_DiagnosticsButton, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_radius(ui_DiagnosticsButton, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_DiagnosticsButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
                                            _ui_theme_color_background);
-    ui_object_set_themeable_style_property(ui_Button8, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+    ui_object_set_themeable_style_property(ui_DiagnosticsButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
                                            _ui_theme_alpha_background);
-    ui_object_set_themeable_style_property(ui_Button8, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
+    ui_object_set_themeable_style_property(ui_DiagnosticsButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
                                            _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_Button8, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
+    ui_object_set_themeable_style_property(ui_DiagnosticsButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
                                            _ui_theme_alpha_text);
-    lv_obj_set_style_border_width(ui_Button8, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_Button8, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_BORDER_COLOR,
+    lv_obj_set_style_border_width(ui_DiagnosticsButton, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_DiagnosticsButton, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_BORDER_COLOR,
                                            _ui_theme_color_focused);
-    ui_object_set_themeable_style_property(ui_Button8, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_BORDER_OPA,
+    ui_object_set_themeable_style_property(ui_DiagnosticsButton, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_BORDER_OPA,
                                            _ui_theme_alpha_focused);
 
-    ui_ButtonLabel8 = lv_label_create(ui_Button8);
+    ui_ButtonLabel8 = lv_label_create(ui_DiagnosticsButton);
     lv_obj_set_width(ui_ButtonLabel8, 540);
     lv_obj_set_height(ui_ButtonLabel8, 50);
     lv_obj_set_x(ui_ButtonLabel8, 20);
     lv_obj_set_y(ui_ButtonLabel8, 0);
     lv_obj_set_align(ui_ButtonLabel8, LV_ALIGN_LEFT_MID);
-    lv_label_set_text(ui_ButtonLabel8, "ABOUT4");
+    lv_label_set_text(ui_ButtonLabel8, "DIAGNOSTICS");
     ui_object_set_themeable_style_property(ui_ButtonLabel8, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_text);
     ui_object_set_themeable_style_property(ui_ButtonLabel8, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
@@ -1205,6 +1214,7 @@ void ui_MainScreenFlex_screen_init(void)
     lv_obj_add_event_cb(ui_Button1, ui_event_Button1, LV_EVENT_ALL, NULL);
     lv_obj_add_event_cb(ui_Button10, ui_event_Button10, LV_EVENT_ALL, NULL);
     lv_obj_add_event_cb(ui_SystemLogsButton, ui_event_SystemLogsButton, LV_EVENT_ALL, NULL);
+    lv_obj_add_event_cb(ui_DiagnosticsButton, ui_event_DiagnosticsButton, LV_EVENT_ALL, NULL);
 
 }
 
@@ -1271,7 +1281,7 @@ void ui_MainScreenFlex_screen_destroy(void)
     ui_ButtonLabel6 = NULL;
     ui_SystemLogsButton = NULL;
     ui_SystemLogsButtonLabel = NULL;
-    ui_Button8 = NULL;
+    ui_DiagnosticsButton = NULL;
     ui_ButtonLabel8 = NULL;
     ui_Button9 = NULL;
     ui_ButtonLabel9 = NULL;

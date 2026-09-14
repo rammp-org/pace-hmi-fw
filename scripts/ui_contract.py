@@ -64,6 +64,7 @@ PARENTS: dict[str, str] = {
     "ui_FPSCounterButton": "ui_SettingsFlexPanel",
     "ui_HapticTestButton": "ui_SettingsFlexPanel",
     "ui_ScreenBrightnessButton": "ui_SettingsFlexPanel",  # -> SpecificSettingScreen
+    "ui_DiagnosticsButton": "ui_SettingsFlexPanel",  # -> DiagnosticsScreen
 
     # exit gestures: each bar has to be on the screen its gesture applies to,
     # or it fills a bar the user cannot see
@@ -108,6 +109,15 @@ PARENTS: dict[str, str] = {
     "ui_ErrorWarningPanel7": "ui_GenericActionsScreen",
     "ui_StatusPanel8": "ui_GenericActionsScreen",
     "ui_TopBar9": "ui_GenericActionsScreen",
+
+    # DiagnosticsScreen: main.cpp drives the rate label, deletes the template
+    # component and builds one per entry in RAMMP_DIAG_TABLE into the rows panel
+    "ui_DiagnosticsFreqLabel": "ui_DiagnosticsTitleContainer",
+    "ui_DiagnosticsFlexRows": "ui_SpecificSettingsInnerPanel1",
+    "ui_ExitBarPull6": "ui_DiagnosticsScreen",
+    "ui_ErrorWarningPanel8": "ui_DiagnosticsScreen",
+    "ui_StatusPanel9": "ui_DiagnosticsScreen",
+    "ui_TopBar10": "ui_DiagnosticsScreen",
 
     # seat screen grids
     "ui_SeatButton1": "ui_SeatFunctionsButtonsPanel",
@@ -155,6 +165,7 @@ LABELS: dict[str, str] = {
     "ui_FPSCounterLabel": "FPS COUNTER",
     "ui_HapticTestLabel": "HAPTIC TEST",
     "ui_ButtonLabel7": "SCREEN BRIGHTNESS",  # opens the brightness settings page
+    "ui_ButtonLabel8": "DIAGNOSTICS",  # opens the DiagnosticsScreen
     "ui_CalibrateJoystickButtonLabel": "CALIBRATE",  # joystick_cal.cpp's button
     "ui_GoToOldestButtonLabel": "Oldest",   # log_view.cpp: scroll to the top
     "ui_GoToNewestButtonLabel": "Newest",   # log_view.cpp: scroll to the end

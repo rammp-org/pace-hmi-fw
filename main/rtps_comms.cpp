@@ -86,6 +86,8 @@ constexpr std::string_view kActuatorCommandTopic = RAMMP_TOPIC_ACTUATOR_COMMAND;
 constexpr std::string_view kActuatorCommandTypeName = RAMMP_TYPE_ACTUATOR_COMMAND;
 constexpr std::string_view kActuatorStateTopic = RAMMP_TOPIC_ACTUATOR_STATE;
 constexpr std::string_view kActuatorStateTypeName = RAMMP_TYPE_ACTUATOR_STATE;
+constexpr std::string_view kDiagTopic = RAMMP_TOPIC_MCB_DIAGNOSTICS;
+constexpr std::string_view kDiagTypeName = RAMMP_TYPE_DIAGNOSTICS;
 constexpr std::string_view kSelfTestReportTopic = RAMMP_TOPIC_SELFTEST_REPORT;
 constexpr std::string_view kSelfTestReportTypeName = RAMMP_TYPE_SELFTEST_REPORT;
 
@@ -120,6 +122,14 @@ std::unique_ptr<espp::Task> publish_task;
 std::function<void(float)> brightness_handler;
 std::function<void(const rammp_mcb_status_t &)> mcb_status_handler;
 std::function<void(const rammp_actuator_state_t &)> actuator_state_handler;
+std::function<void(const rammp_diagnostics_t &)> diagnostics_handler;
+
+// When the last few diagnostics samples arrived, for the rate the
+// DiagnosticsScreen shows. The RTPS receive task writes, the LVGL task reads.
+constexpr size_t kDiagArrivals = 8;
+std::mutex diag_stats_mutex;
+int64_t diag_arrival_us[kDiagArrivals] = {};
+uint32_t diag_arrival_total = 0;
 std::function<void(uint8_t)> selftest_run_handler;
 std::function<void(uint16_t, int)> selftest_pong_handler;
 
@@ -199,6 +209,14 @@ deserialize_actuator_state(std::span<const uint8_t> cdr_payload) {
     return std::nullopt;
   }
   return state;
+}
+
+std::optional<rammp_diagnostics_t> deserialize_diagnostics(std::span<const uint8_t> cdr_payload) {
+  rammp_diagnostics_t diag{};
+  if (!rammp_diagnostics_decode(cdr_payload.data(), cdr_payload.size(), &diag)) {
+    return std::nullopt;
+  }
+  return diag;
 }
 
 std::optional<rammp_mcb_status_t> deserialize_mcb_status(std::span<const uint8_t> cdr_payload) {
@@ -651,6 +669,34 @@ bool start_participant() {
   }
   logger.info("Added reader '{}' [{}]", kActuatorStateTopic, kActuatorStateTypeName);
 
+  // The MCB's diagnostics. The sixth best-effort reader: espp/rtps's embedded
+  // profile allows five, so this one needs main/rtps_limits_hmi.hpp.
+  if (!participant->add_reader({
+          .topic = std::string(kDiagTopic),
+          .type_name = std::string(kDiagTypeName),
+          .reliability = espp::RtpsParticipant::Reliability::BEST_EFFORT,
+          .on_sample =
+              [](std::span<const uint8_t> cdr) {
+                auto diag = deserialize_diagnostics(cdr);
+                if (!diag) {
+                  logger.warn("Received sample on '{}' that failed CDR decode", kDiagTopic);
+                  return;
+                }
+                {
+                  std::lock_guard<std::mutex> lock(diag_stats_mutex);
+                  diag_arrival_us[diag_arrival_total % kDiagArrivals] = esp_timer_get_time();
+                  diag_arrival_total++;
+                }
+                if (diagnostics_handler) {
+                  diagnostics_handler(*diag);
+                }
+              },
+      })) {
+    logger.error("Failed to add reader for '{}'", kDiagTopic);
+    return false;
+  }
+  logger.info("Added reader '{}' [{}]", kDiagTopic, kDiagTypeName);
+
   // The self-test report. The rest of the self-test traffic rides the bench
   // counter/command pair; "Self test" in rammp_rtps_spec.h says why. This is
   // the fifth best-effort writer (SPDP holds one), which fills espp/rtps's
@@ -721,6 +767,38 @@ void rtps_comms_on_mcb_status(std::function<void(const rammp_mcb_status_t &)> ha
 
 void rtps_comms_on_actuator_state(std::function<void(const rammp_actuator_state_t &)> handler) {
   actuator_state_handler = std::move(handler);
+}
+
+void rtps_comms_on_diagnostics(std::function<void(const rammp_diagnostics_t &)> handler) {
+  diagnostics_handler = std::move(handler);
+}
+
+RtpsDiagStats rtps_comms_diag_stats() {
+  std::lock_guard<std::mutex> lock(diag_stats_mutex);
+  RtpsDiagStats stats;
+  if (diag_arrival_total == 0) {
+    return stats;
+  }
+  // Only the samples of the last few seconds: after a gap, a window that still
+  // held the sample from before it read a resumed 2 Hz stream as 0.4 Hz.
+  constexpr int64_t kRateWindowUs = 4'000'000;
+  const uint32_t stored = std::min<uint32_t>(diag_arrival_total, kDiagArrivals);
+  const int64_t newest = diag_arrival_us[(diag_arrival_total - 1) % kDiagArrivals];
+  uint32_t n = 1;
+  int64_t oldest = newest;
+  while (n < stored) {
+    const int64_t earlier = diag_arrival_us[(diag_arrival_total - 1 - n) % kDiagArrivals];
+    if (newest - earlier > kRateWindowUs) {
+      break;
+    }
+    oldest = earlier;
+    n++;
+  }
+  stats.last_us = newest;
+  if (n >= 2 && newest > oldest) {
+    stats.rate_tenths_hz = static_cast<int32_t>((n - 1) * 10'000'000LL / (newest - oldest));
+  }
+  return stats;
 }
 
 void rtps_comms_on_selftest_run(std::function<void(uint8_t)> handler) {

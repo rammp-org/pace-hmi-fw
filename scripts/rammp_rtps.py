@@ -140,6 +140,43 @@ if [a.id for a in ACTUATORS] != list(range(len(ACTUATORS))):
 if len(ACTUATORS) > ACTUATOR_MAX:  # noqa: F821  (scraped into globals above)
     raise RuntimeError(f"{HEADER_PATH}: {len(ACTUATORS)} actuators exceeds RAMMP_ACTUATOR_MAX")
 
+
+class DiagItem(NamedTuple):
+    """One row of RAMMP_DIAG_TABLE: up to three readings, each with its unit."""
+
+    id: int
+    name: str
+    short: str
+    label: str
+    units: tuple  # three unit labels; "" = reading unused
+    decimals: tuple  # three decimal counts, display only
+
+    def format(self, raw: int, field: int) -> str:
+        """A raw reading as the HMI draws it, e.g. 2345 with 2 decimals -> '23.45'."""
+        places = self.decimals[field]
+        return f"{raw / (10 ** places):.{places}f}"
+
+
+# D(0, TEST_1, "T1", "Test actuator 1", "Temp [C]", 1, "Current [A]", 2, "Pos [deg]", 1)
+_DIAG_RE = re.compile(
+    r"""^\s*D\(\s*(\d+)\s*,\s*([A-Z0-9_]+)\s*,\s*"([^"]*)"\s*,\s*"([^"]*)"\s*,"""
+    r"""\s*"([^"]*)"\s*,\s*(\d+)\s*,\s*"([^"]*)"\s*,\s*(\d+)\s*,\s*"([^"]*)"\s*,\s*(\d+)\s*\)""",
+    re.M,
+)
+
+#: every item in the header's diagnostics table, in wire order
+DIAGNOSTICS: List[DiagItem] = [
+    DiagItem(int(i), name, short, label, (u1, u2, u3), (int(d1), int(d2), int(d3)))
+    for i, name, short, label, u1, d1, u2, d2, u3, d3 in _DIAG_RE.findall(_HEADER_TEXT)
+]
+
+if not DIAGNOSTICS:
+    raise RuntimeError(f"{HEADER_PATH}: RAMMP_DIAG_TABLE parsed to nothing")
+if [d.id for d in DIAGNOSTICS] != list(range(len(DIAGNOSTICS))):
+    raise RuntimeError(f"{HEADER_PATH}: diagnostics ids must be 0..N-1 in table order")
+if len(DIAGNOSTICS) > DIAG_MAX:  # noqa: F821  (scraped into globals above)
+    raise RuntimeError(f"{HEADER_PATH}: {len(DIAGNOSTICS)} diagnostics exceeds RAMMP_DIAG_MAX")
+
 #: 4-byte CDR encapsulation header: little-endian classic CDR (xcdr1)
 CDR_LE_HEADER = b"\x00\x01\x00\x00"
 
@@ -245,6 +282,35 @@ def unpack_actuator_state(payload: bytes) -> tuple[int, int, int, list[int]] | N
     req_id, result, count, seq = fields[:4]
     count = min(count, ACTUATOR_MAX)  # noqa: F821
     return (req_id, result, seq, list(fields[4:4 + count]))
+
+
+#: matches rammp_diagnostics_encode(): four bytes, then [item][reading] int32
+_DIAG_FORMAT = f"<BBBB{DIAG_MAX * DIAG_FIELDS}i"  # noqa: F821  (scraped)
+_DIAG_CDR_SIZE = len(CDR_LE_HEADER) + struct.calcsize(_DIAG_FORMAT)
+
+
+def pack_diagnostics(values, seq: int = 0) -> bytes:
+    """Serialize a rammp_diagnostics_t (MCB -> HMI).
+
+    `values` holds one list of raw readings per item, in table order; it sets
+    `count`, and the fixed-size wire array is zero-filled beyond it.
+    """
+    rows = [(list(row) + [0] * DIAG_FIELDS)[:DIAG_FIELDS]  # noqa: F821
+            for row in list(values)[:DIAG_MAX]]  # noqa: F821
+    flat = [v for row in rows for v in row]
+    flat += [0] * (DIAG_MAX * DIAG_FIELDS - len(flat))  # noqa: F821
+    return CDR_LE_HEADER + struct.pack(_DIAG_FORMAT, seq & 0xFF, len(rows), 0, 0, *flat)
+
+
+def unpack_diagnostics(payload: bytes) -> tuple[int, list[list[int]]] | None:
+    """(seq, readings per item) with the items trimmed to `count`."""
+    if len(payload) < _DIAG_CDR_SIZE or payload[:2] != CDR_LE_HEADER[:2]:
+        return None
+    fields = struct.unpack_from(_DIAG_FORMAT, payload, len(CDR_LE_HEADER))
+    seq, count = fields[0], min(fields[1], DIAG_MAX)  # noqa: F821
+    flat = fields[4:]
+    return seq, [list(flat[i * DIAG_FIELDS:(i + 1) * DIAG_FIELDS])  # noqa: F821
+                 for i in range(count)]
 
 
 def unpack_adc_xy_twist(payload: bytes) -> tuple[float, float, float, int, int] | None:
