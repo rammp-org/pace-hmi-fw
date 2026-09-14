@@ -281,3 +281,8 @@ CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=65536
 # size against a 0x80000 L2MEM, so it would leave zero SRAM), PSRAM is already
 # at its 200 MHz HEX ceiling, and the panel at ~60 Hz was never the limit.
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+
+# espp/rtps endpoint pools. SPDP takes 1 best-effort writer + 1 reader; the HMI
+# adds 4 writers (the default 5 fits) and 5 readers, so one more reader slot.
+CONFIG_RTPS_LIMIT_NUM_STATELESS_READERS=6
+CONFIG_RTPS_LIMIT_MAX_NUM_READER_CALLBACKS=6

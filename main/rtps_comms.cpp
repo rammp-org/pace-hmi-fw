@@ -7,7 +7,6 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <span>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -27,13 +26,14 @@
 #include "lwip/ip_addr.h"
 #include "ping/ping_sock.h"
 
-#include "cdr.hpp"
 #include "logger.hpp"
 #include "rtps_participant.hpp"
+#include "rtps_pubsub.hpp"
 #include "task.hpp"
 
 using namespace std::chrono_literals;
 using Rtps = espp::RtpsParticipant;
+template <class T> using Publisher = std::unique_ptr<espp::Publisher<T>>;
 
 namespace {
 
@@ -57,13 +57,20 @@ espp::Logger logger({.tag = "rtps_comms", .level = espp::Logger::Verbosity::INFO
 std::atomic<bool> eth_failed{false};
 std::atomic<bool> link_up{false};
 std::atomic<bool> got_ip{false};
-std::atomic<bool> peer_matched{false};  // a latch: espp 1.2.0 only reports "matched"
-std::atomic<int64_t> last_status_us{0}; // last McbStatus, esp_timer time; 0 = never
+std::atomic<bool> peer_matched{false};    // a latch: espp only reports "matched"
+std::atomic<bool> endpoints_ready{false}; // every publisher below exists
+std::atomic<int64_t> last_status_us{0};   // last McbStatus, esp_timer time; 0 = never
 std::string ip_address;
 esp_netif_ip_info_t ip_info{};
 
 std::unique_ptr<Rtps> participant;
 std::unique_ptr<espp::Task> heartbeat_task;
+
+// HMI -> MCB / PC
+Publisher<rammp::UInt32> counter_pub;
+Publisher<rammp::AdcXYTwist> joystick_pub;
+Publisher<rammp::ActuatorCommand> actuator_pub;
+Publisher<rammp::SelfTestReport> report_pub;
 
 std::function<void(float)> brightness_handler;
 std::function<void(const rammp::McbStatus &)> mcb_status_handler;
@@ -81,43 +88,31 @@ int64_t diag_arrival_us[kDiagArrivals] = {};
 uint32_t diag_arrival_total = 0;
 
 ///////////////////////////////////////////////////////////////////////////////
-// Messages: every one goes through espp/cdr (XCDR1)
+// Typed endpoints: espp serializes every message (XCDR1)
 
-template <class T> bool publish(const char *topic, const T &msg) {
-  if (!participant || !participant->is_started() || !peer_matched) {
-    return false; // no one to send to yet
+template <class T> Publisher<T> make_publisher(const char *topic, const char *type) {
+  auto pub = std::make_unique<espp::Publisher<T>>(
+      *participant, typename espp::Publisher<T>::Config{.topic = topic, .type_name = type});
+  if (!pub->is_valid()) {
+    logger.error("Could not add writer '{}' (CONFIG_RTPS_LIMIT_* in sdkconfig.defaults)", topic);
+    return nullptr;
   }
-  auto bytes = cdr::serialize<cdr::xcdr1>(msg);
-  return bytes && participant->publish(topic, rammp::as_u8(*bytes));
+  return pub;
 }
 
-bool add_writer(const char *topic, const char *type) {
-  const bool ok = participant->add_writer(
-      {.topic = topic, .type_name = type, .reliability = Rtps::Reliability::BEST_EFFORT});
-  if (!ok) {
-    logger.error("Could not add writer '{}' (endpoint limits: rtps_limits_hmi.hpp)", topic);
+// The reader lives on the participant, so the Subscriber object itself can go.
+template <class T> bool subscribe(const char *topic, const char *type, void (*on_msg)(const T &)) {
+  const espp::Subscriber<T> sub(*participant,
+                                {.topic = topic, .type_name = type, .on_message = on_msg});
+  if (!sub.is_valid()) {
+    logger.error("Could not add reader '{}' (CONFIG_RTPS_LIMIT_* in sdkconfig.defaults)", topic);
   }
-  return ok;
+  return sub.is_valid();
 }
 
-template <class T> bool add_reader(const char *topic, const char *type, void (*on_msg)(const T &)) {
-  const bool ok = participant->add_reader({
-      .topic = topic,
-      .type_name = type,
-      .reliability = Rtps::Reliability::BEST_EFFORT,
-      .on_sample =
-          [topic, on_msg](std::span<const uint8_t> data) {
-            if (auto msg = cdr::deserialize<T>(std::as_bytes(data))) {
-              on_msg(*msg);
-            } else {
-              logger.warn("'{}': sample failed CDR decode", topic);
-            }
-          },
-  });
-  if (!ok) {
-    logger.error("Could not add reader '{}' (endpoint limits: rtps_limits_hmi.hpp)", topic);
-  }
-  return ok;
+// Quiet until the endpoints exist and a peer has matched: no one to send to yet.
+template <class T> bool publish(const Publisher<T> &pub, const T &msg) {
+  return endpoints_ready && peer_matched && pub->publish(msg);
 }
 
 // PC -> HMI bench command. The self test's run and pong ride it, tagged in the top nibble.
@@ -132,8 +127,7 @@ void on_command(const rammp::UInt32 &msg) {
   } else if (tag == RAMMP_SELFTEST_TAG_PONG || tag == RAMMP_SELFTEST_TAG_PING) {
     const int peer_rx = tag == RAMMP_SELFTEST_TAG_PONG ? static_cast<int>((v >> 16) & 0xFFFu) : -1;
     if (selftest_pong_handler) {
-      selftest_pong_handler(static_cast<uint16_t>(v & 0xFFFFu),
-                            peer_rx); // a PING back = plain echo
+      selftest_pong_handler(static_cast<uint16_t>(v & 0xFFFFu), peer_rx); // PING back = echo
     }
   } else {
     logger.info("Command/echo: {}", v);
@@ -187,7 +181,12 @@ void on_mcb_status(const rammp::McbStatus &s) {
 }
 
 void on_actuator_state(const rammp::ActuatorState &s) {
-  if (s.result != RAMMP_ACTUATOR_RESULT_OK) { // it repeats: log refusals only
+  static size_t last_count = SIZE_MAX; // it repeats: log the first sample and refusals only
+  if (s.values.size() != last_count) {
+    last_count = s.values.size();
+    logger.info("ActuatorState arriving: {} actuators", last_count);
+  }
+  if (s.result != RAMMP_ACTUATOR_RESULT_OK) {
     logger.info("Actuator request {} -> {}", s.req_id, rammp_actuator_result_name(s.result));
   }
   if (actuator_state_handler) {
@@ -196,6 +195,11 @@ void on_actuator_state(const rammp::ActuatorState &s) {
 }
 
 void on_diagnostics(const rammp::Diagnostics &d) {
+  static size_t last_count = SIZE_MAX; // log the first sample, then only a changed item count
+  if (d.items.size() != last_count) {
+    last_count = d.items.size();
+    logger.info("Diagnostics arriving: {} items", last_count);
+  }
   {
     std::lock_guard<std::mutex> lock(stats_mutex);
     diag_arrival_us[diag_arrival_total++ % kDiagArrivals] = esp_timer_get_time();
@@ -360,27 +364,32 @@ bool start_participant() {
     return false;
   }
 
-  // 4 writers + 5 readers: with SPDP's pair that is the whole budget (rtps_limits_hmi.hpp)
+  // 4 writers + 5 readers, plus SPDP's pair: the budget set in sdkconfig.defaults
+  counter_pub = make_publisher<rammp::UInt32>(RAMMP_TOPIC_HMI_COUNTER, RAMMP_TYPE_UINT32);
+  joystick_pub =
+      make_publisher<rammp::AdcXYTwist>(RAMMP_TOPIC_JOYSTICK_ADC, RAMMP_TYPE_ADC_XY_TWIST);
+  actuator_pub = make_publisher<rammp::ActuatorCommand>(RAMMP_TOPIC_ACTUATOR_COMMAND,
+                                                        RAMMP_TYPE_ACTUATOR_COMMAND);
+  report_pub = make_publisher<rammp::SelfTestReport>(RAMMP_TOPIC_SELFTEST_REPORT,
+                                                     RAMMP_TYPE_SELFTEST_REPORT);
   const bool ok =
-      add_writer(RAMMP_TOPIC_HMI_COUNTER, RAMMP_TYPE_UINT32) &&
-      add_writer(RAMMP_TOPIC_JOYSTICK_ADC, RAMMP_TYPE_ADC_XY_TWIST) &&
-      add_writer(RAMMP_TOPIC_ACTUATOR_COMMAND, RAMMP_TYPE_ACTUATOR_COMMAND) &&
-      add_writer(RAMMP_TOPIC_SELFTEST_REPORT, RAMMP_TYPE_SELFTEST_REPORT) &&
-      add_reader(RAMMP_TOPIC_HMI_COMMAND, RAMMP_TYPE_UINT32, on_command) &&
-      add_reader(RAMMP_TOPIC_HMI_BRIGHTNESS, RAMMP_TYPE_UINT32, on_brightness) &&
-      add_reader(RAMMP_TOPIC_MCB_STATUS, RAMMP_TYPE_MCB_STATUS, on_mcb_status) &&
-      add_reader(RAMMP_TOPIC_ACTUATOR_STATE, RAMMP_TYPE_ACTUATOR_STATE, on_actuator_state) &&
-      add_reader(RAMMP_TOPIC_MCB_DIAGNOSTICS, RAMMP_TYPE_DIAGNOSTICS, on_diagnostics);
+      counter_pub && joystick_pub && actuator_pub && report_pub &&
+      subscribe(RAMMP_TOPIC_HMI_COMMAND, RAMMP_TYPE_UINT32, on_command) &&
+      subscribe(RAMMP_TOPIC_HMI_BRIGHTNESS, RAMMP_TYPE_UINT32, on_brightness) &&
+      subscribe(RAMMP_TOPIC_MCB_STATUS, RAMMP_TYPE_MCB_STATUS, on_mcb_status) &&
+      subscribe(RAMMP_TOPIC_ACTUATOR_STATE, RAMMP_TYPE_ACTUATOR_STATE, on_actuator_state) &&
+      subscribe(RAMMP_TOPIC_MCB_DIAGNOSTICS, RAMMP_TYPE_DIAGNOSTICS, on_diagnostics);
   if (!ok) {
     return false;
   }
+  endpoints_ready = true;
   logger.info("RTPS up on {}", ip_address);
 
   // bench heartbeat: a counter on RAMMP_TOPIC_HMI_COUNTER every kHeartbeatPeriod
   heartbeat_task = std::make_unique<espp::Task>(espp::Task::Config{
       .callback = [](std::mutex &m, std::condition_variable &cv) -> bool {
         static uint32_t counter = 0;
-        if (publish(RAMMP_TOPIC_HMI_COUNTER, rammp::UInt32{++counter}) && counter % 10 == 1) {
+        if (publish(counter_pub, rammp::UInt32{++counter}) && counter % 10 == 1) {
           logger.info("Heartbeat {}", counter);
         }
         std::unique_lock<std::mutex> lock(m);
@@ -416,19 +425,19 @@ void rtps_comms_on_selftest_pong(std::function<void(uint16_t, int)> handler) {
 }
 
 bool rtps_comms_publish_adc(float x, float y, float twist, uint32_t buttons, uint32_t drive_mode) {
-  return publish(RAMMP_TOPIC_JOYSTICK_ADC, rammp::AdcXYTwist{x, y, twist, buttons, drive_mode});
+  return publish(joystick_pub, rammp::AdcXYTwist{x, y, twist, buttons, drive_mode});
 }
 
 bool rtps_comms_publish_actuator_command(uint8_t req_id, uint8_t actuator_id, int8_t steps) {
-  return publish(RAMMP_TOPIC_ACTUATOR_COMMAND, rammp::ActuatorCommand{req_id, actuator_id, steps});
+  return publish(actuator_pub, rammp::ActuatorCommand{req_id, actuator_id, steps});
 }
 
 bool rtps_comms_publish_selftest_ping(uint16_t seq) {
-  return publish(RAMMP_TOPIC_HMI_COUNTER, rammp::UInt32{RAMMP_SELFTEST_TAG_PING | seq});
+  return publish(counter_pub, rammp::UInt32{RAMMP_SELFTEST_TAG_PING | seq});
 }
 
 bool rtps_comms_publish_selftest_report(const rammp::SelfTestReport &report) {
-  return publish(RAMMP_TOPIC_SELFTEST_REPORT, report);
+  return publish(report_pub, report);
 }
 
 RtpsDiagStats rtps_comms_diag_stats() {

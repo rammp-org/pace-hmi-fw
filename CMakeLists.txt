@@ -59,13 +59,6 @@ set(
 # running it dry boot-loops the board. See that file.
 idf_build_set_property(COMPILE_DEFINITIONS "LV_USE_STDLIB_MALLOC=LV_STDLIB_CUSTOM" APPEND)
 
-# espp/rtps limits: its embedded profile with one more best-effort reader, for
-# rammp/mcb/diagnostics (see main/rtps_limits_hmi.hpp). espp/rtps's config.hpp
-# includes whatever RTPS_CONFIG_HEADER names. Global, like the define above, so
-# the library and everything that includes its headers agree on the sizes.
-idf_build_set_property(COMPILE_DEFINITIONS
-                       "RTPS_CONFIG_HEADER=\"${CMAKE_CURRENT_LIST_DIR}/main/rtps_limits_hmi.hpp\"" APPEND)
-
 project(rammp-hmi-p4)
 
 set(CMAKE_CXX_STANDARD 20)
