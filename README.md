@@ -95,6 +95,24 @@ How the messages reach the screens:
 - No Diagnostics for 2 s → every row turns red and blinks.
 - **AdcXYTwist** goes out continuously once the MCB is found.
 
+### Adding an actuator or a diagnostics item
+
+One line in `main/rammp_rtps_spec.h`; the HMI screen and the Python tools pick it up.
+
+```c
+// RAMMP_ACTUATOR_TABLE: X(id, NAME, short, label, min, max, step, decimals, unit)
+  X(4, HEADREST, "M5", "Headrest", 0, 900, 25, 1, "deg")
+
+// RAMMP_DIAG_TABLE: D(id, NAME, short, label, unit1, dec1, unit2, dec2, unit3, dec3)
+  D(3, TEST_4, "T4", "Test actuator 4", "Temp [C]", 1, "Current [A]", 2, "Pos [deg]", 1)
+```
+
+- `id` is the next number, in table order.
+- Every row except the last ends with `\`.
+- Values are raw integers; `decimals` is display only (250 with 1 shows "25.0").
+- A diagnostics unit of `""` hides that reading.
+- The MCB must send one more value (`ActuatorState.values` / `Diagnostics.items`), in table order.
+
 ## Testing
 
 | command | what it does |

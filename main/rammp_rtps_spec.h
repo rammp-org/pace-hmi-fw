@@ -118,6 +118,10 @@ enum {
 /* The MCB owns every position; the HMI sends step requests and shows what comes back.
    Values are raw integers; `decimals` is display only (2500 with 1 shows "250.0"). */
 
+/* To add an actuator, add ONE X(...) row: next id, and a trailing `\` on every row but the
+   last. The DEBUG ACTUATORS page and the python tools pick it up; the MCB then sends one
+   more value in ActuatorState.values and accepts the new id in ActuatorCommand. */
+
 /* X(id, NAME, short, label, min, max, step, decimals, unit); id = row index */
 #define RAMMP_ACTUATOR_TABLE(X)                                                                    \
   X(0, ELEVATION, "M1", "Elevation", 0, 2500, 50, 1, "mm")                                         \
@@ -177,6 +181,9 @@ static inline const rammp_actuator_spec_t *rammp_actuator_table(uint8_t *count) 
    raw integers; `decN` is display only (2345 with 2 shows "23.45"). */
 
 #define RAMMP_DIAG_FIELDS 3 /* readings per item the HMI shows */
+
+/* To add a diagnostics item, add ONE D(...) row: next id, same `\` rule. The
+   DiagnosticsScreen and the python tools pick it up; the MCB then sends one more DiagItem. */
 
 /* D(id, NAME, short, label, unit1, dec1, unit2, dec2, unit3, dec3); id = row index.
    A unit of "" leaves that reading out. */
