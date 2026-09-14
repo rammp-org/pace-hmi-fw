@@ -178,7 +178,7 @@ class McbPanel:
         self.drive_text_var = tk.StringVar()
         self.state_text_var = tk.StringVar()
         self.drive_raw_var = tk.StringVar(value=str(spec.DRIVE_STATUS_INACTIVE))
-        self.state_raw_var = tk.StringVar(value=str(spec.STATE_OK))
+        self.state_raw_var = tk.StringVar(value=str(spec.SYSTEM_STATE_OK))
 
         self._build_one_status(
             parent, "Drive status", spec.DRIVE_STATUS_NAMES, self.drive_raw_var, self.drive_text_var,
@@ -762,11 +762,11 @@ class McbPanel:
         exercises link loss and recovery.
         """
         return [
-            (spec.DRIVE_STATUS_INACTIVE, spec.STATE_OK, False),
-            (spec.DRIVE_STATUS_ACTIVE, spec.STATE_OK, False),
-            (spec.DRIVE_STATUS_ACTIVE, spec.STATE_ERROR, False),
-            (spec.DRIVE_STATUS_INACTIVE, spec.STATE_ERROR, False),
-            (spec.DRIVE_STATUS_INACTIVE, spec.STATE_OK, True),
+            (spec.DRIVE_STATUS_INACTIVE, spec.SYSTEM_STATE_OK, False),
+            (spec.DRIVE_STATUS_ACTIVE, spec.SYSTEM_STATE_OK, False),
+            (spec.DRIVE_STATUS_ACTIVE, spec.SYSTEM_STATE_ERROR, False),
+            (spec.DRIVE_STATUS_INACTIVE, spec.SYSTEM_STATE_ERROR, False),
+            (spec.DRIVE_STATUS_INACTIVE, spec.SYSTEM_STATE_OK, True),
         ]
 
     def _toggle_cycle(self) -> None:
@@ -875,7 +875,7 @@ class McbPanel:
             self.axis_bars[axis]["value"] = max(0, min(100, 50 + value * 50))
             self.axis_labels[axis].configure(text=f"{value:+.2f}")
         mode = spec.DRIVE_MODE_NAMES.get(sample[4] if len(sample) > 4 else None, "?")
-        pressed = bool(buttons & spec.BUTTON_JOYSTICK)
+        pressed = bool(buttons & spec.BUTTONS_JOYSTICK)
         self.button_label.configure(
             text=f"button: {'PRESSED' if pressed else 'released'}   mode: {mode}")
         self.speed_label.configure(

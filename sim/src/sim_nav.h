@@ -11,7 +11,7 @@
 #define SIM_NAV_H
 
 #include "lvgl.h"
-#include "rammp_rtps_spec.h"
+#include "sim_spec.h"
 
 #ifdef __cplusplus
 extern "C" {

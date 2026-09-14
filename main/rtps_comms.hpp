@@ -13,7 +13,7 @@ enum class RtpsLinkState {
   ETH_FAILED, ///< W5500 bring-up failed at boot
   LINK_DOWN,  ///< no Ethernet link
   NO_IP,      ///< link up, no DHCP lease
-  NO_PEER,    ///< no McbStatus within RAMMP_MCB_STATUS_TIMEOUT_MS (or never)
+  NO_PEER,    ///< no McbStatus within rammp::kMcbStatusTimeout (or never)
   CONNECTED,  ///< McbStatus arriving
 };
 RtpsLinkState rtps_comms_link_state();                          ///< any task
@@ -32,8 +32,9 @@ void rtps_comms_on_selftest_pong(std::function<void(uint16_t seq, int peer_rx)> 
 
 // Publishers: any task. They return false, quietly, until the participant is up
 // and a peer has matched.
-bool rtps_comms_publish_adc(float x, float y, float twist, uint32_t buttons, uint32_t drive_mode);
-bool rtps_comms_publish_actuator_command(uint8_t req_id, uint8_t actuator_id, int8_t steps);
+bool rtps_comms_publish_adc(float x, float y, float twist, rammp::Buttons buttons,
+                            rammp::DriveMode drive_mode);
+bool rtps_comms_publish_actuator_command(uint8_t req_id, rammp::ActuatorId actuator, int8_t steps);
 bool rtps_comms_publish_selftest_ping(uint16_t seq);
 bool rtps_comms_publish_selftest_report(const rammp::SelfTestReport &report);
 

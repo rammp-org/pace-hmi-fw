@@ -103,8 +103,8 @@ static lv_subject_t adc_y_subject;
 static lv_subject_t adc_twist_subject;
 // MCB status, as reported over RTPS. The joystick is a slave here: these two
 // hold whatever the Main Control Board last said, and every StatusPanel on
-// every screen follows them. Values are the RAMMP_DRIVE_STATUS_* /
-// RAMMP_STATE_* enums from rammp_rtps_spec.h.
+// every screen follows them. Values are the rammp::DriveStatus /
+// rammp::SystemState enums from rammp_rtps_spec.h.
 static lv_subject_t drive_status_subject;
 static lv_subject_t mcb_state_subject;
 // Optional label overrides from the MCB. Empty means "use the enum's name",
@@ -113,10 +113,10 @@ static lv_subject_t mcb_state_subject;
 // buffer, same as the seat-function and haptic labels further down.
 static lv_subject_t drive_text_subject;
 static lv_subject_t state_text_subject;
-static char drive_text_buf[RAMMP_MCB_TEXT_LEN];
-static char drive_text_prev_buf[RAMMP_MCB_TEXT_LEN];
-static char state_text_buf[RAMMP_MCB_TEXT_LEN];
-static char state_text_prev_buf[RAMMP_MCB_TEXT_LEN];
+static char drive_text_buf[rammp::kMcbTextLen];
+static char drive_text_prev_buf[rammp::kMcbTextLen];
+static char state_text_buf[rammp::kMcbTextLen];
+static char state_text_prev_buf[rammp::kMcbTextLen];
 
 // Drive-screen readouts the MCB owns: the big speed number, and the body and
 // footer of the error banner. Speed is carried as tenths so the wire stays
@@ -124,10 +124,10 @@ static char state_text_prev_buf[RAMMP_MCB_TEXT_LEN];
 static lv_subject_t speed_tenths_subject;
 static lv_subject_t error_text_subject;
 static lv_subject_t error_footer_subject;
-static char error_text_buf[RAMMP_ERROR_TEXT_LEN];
-static char error_text_prev_buf[RAMMP_ERROR_TEXT_LEN];
-static char error_footer_buf[RAMMP_ERROR_FOOTER_LEN];
-static char error_footer_prev_buf[RAMMP_ERROR_FOOTER_LEN];
+static char error_text_buf[rammp::kErrorTextLen];
+static char error_text_prev_buf[rammp::kErrorTextLen];
+static char error_footer_buf[rammp::kErrorFooterLen];
+static char error_footer_prev_buf[rammp::kErrorFooterLen];
 
 // Joystick button, mirrored out of the LVGL world so the ADC task can publish
 // it alongside the stick position without taking the LVGL lock.
@@ -138,7 +138,7 @@ static std::atomic<bool> joy_button_pressed{false};
 // to the MCB with every joystick sample. Mirrored into an atomic for the same
 // reason as the button: the ADC task must not take the LVGL lock to read it.
 static lv_subject_t drive_mode_subject;
-static std::atomic<uint32_t> drive_mode_published{RAMMP_DRIVE_MODE_NORMAL};
+static std::atomic<rammp::DriveMode> drive_mode_published{rammp::DriveMode::NORMAL};
 
 // Link health behind those two, polled from rtps_comms (RtpsLinkState). Drives
 // the TopBar's RTPS indicator, and greys the status labels when it is not
@@ -442,16 +442,18 @@ static void mcb_status_label_observer(lv_observer_t *observer, lv_subject_t *) {
   const char *text = nullptr;
   uint32_t color;
   if (kind == StatusKind::kDriveStatus) {
-    text = overridden ? override_text : rammp_drive_status_name(value);
+    const auto status = static_cast<rammp::DriveStatus>(value);
+    text = overridden ? override_text : rammp::to_string(status);
     // INACTIVE is a normal resting state, not a fault, so it reads grey —
     // red is reserved for a value neither board knows, which is what an MCB
     // running ahead of this firmware would send.
-    color = value == RAMMP_DRIVE_STATUS_ACTIVE     ? kStatusGreen
-            : value == RAMMP_DRIVE_STATUS_INACTIVE ? kStatusGrey
-                                                   : kStatusRed;
+    color = status == rammp::DriveStatus::ACTIVE     ? kStatusGreen
+            : status == rammp::DriveStatus::INACTIVE ? kStatusGrey
+                                                     : kStatusRed;
   } else {
-    text = overridden ? override_text : rammp_state_name(value);
-    color = value == RAMMP_STATE_OK ? kStatusGreen : kStatusRed;
+    const auto state = static_cast<rammp::SystemState>(value);
+    text = overridden ? override_text : rammp::to_string(state);
+    color = state == rammp::SystemState::OK ? kStatusGreen : kStatusRed;
   }
   lv_label_set_text(label, text);
   lv_obj_set_style_text_color(label, lv_color_hex(color), LV_PART_MAIN);
@@ -597,12 +599,12 @@ static void bind_rtps_label(lv_obj_t *bar) {
 /////////////////////////////////////////////////////////////////////////////
 
 // Paired with the button that selects it, so one callback serves all three.
-static uint32_t kModeHolo = RAMMP_DRIVE_MODE_HOLO;
-static uint32_t kModeNormal = RAMMP_DRIVE_MODE_NORMAL;
-static uint32_t kModeAuto = RAMMP_DRIVE_MODE_AUTO;
+static rammp::DriveMode kModeHolo = rammp::DriveMode::HOLO;
+static rammp::DriveMode kModeNormal = rammp::DriveMode::NORMAL;
+static rammp::DriveMode kModeAuto = rammp::DriveMode::AUTO;
 
 static void drive_mode_click_cb(lv_event_t *e) {
-  const auto *mode = static_cast<const uint32_t *>(lv_event_get_user_data(e));
+  const auto *mode = static_cast<const rammp::DriveMode *>(lv_event_get_user_data(e));
   lv_subject_set_int(&drive_mode_subject, static_cast<int32_t>(*mode));
 }
 
@@ -611,12 +613,12 @@ static void drive_mode_click_cb(lv_event_t *e) {
 // themeable and would fight a hardcoded highlight.
 static void drive_mode_button_observer(lv_observer_t *observer, lv_subject_t *subject) {
   lv_obj_t *button = lv_observer_get_target_obj(observer);
-  const auto mine = *static_cast<const uint32_t *>(lv_observer_get_user_data(observer));
-  const bool selected = static_cast<uint32_t>(lv_subject_get_int(subject)) == mine;
+  const auto mine = *static_cast<const rammp::DriveMode *>(lv_observer_get_user_data(observer));
+  const bool selected = static_cast<rammp::DriveMode>(lv_subject_get_int(subject)) == mine;
   lv_obj_set_style_border_width(button, selected ? 8 : 2, LV_PART_MAIN);
 }
 
-static void bind_drive_mode_button(lv_obj_t *button, uint32_t *mode) {
+static void bind_drive_mode_button(lv_obj_t *button, rammp::DriveMode *mode) {
   if (button == nullptr) {
     return;
   }
@@ -626,7 +628,7 @@ static void bind_drive_mode_button(lv_obj_t *button, uint32_t *mode) {
 
 // Mirrors the subject out to the ADC task, which cannot take the LVGL lock.
 static void drive_mode_publish_observer(lv_observer_t *, lv_subject_t *subject) {
-  drive_mode_published.store(static_cast<uint32_t>(lv_subject_get_int(subject)));
+  drive_mode_published.store(static_cast<rammp::DriveMode>(lv_subject_get_int(subject)));
 }
 
 // The speed arrives as tenths; the label wants "N.N". No built-in binding
@@ -635,7 +637,7 @@ static void speed_label_observer(lv_observer_t *observer, lv_subject_t *subject)
   // int32_t is long on this target, so narrow explicitly rather than hand a
   // long to a "%d" that -Werror=format would reject
   const int tenths =
-      static_cast<int>(std::clamp<int32_t>(lv_subject_get_int(subject), 0, RAMMP_SPEED_MAX_TENTHS));
+      static_cast<int>(std::clamp<int32_t>(lv_subject_get_int(subject), 0, rammp::kSpeedMaxTenths));
   lv_label_set_text_fmt(lv_observer_get_target_obj(observer), "%d.%d", tenths / 10, tenths % 10);
 }
 
@@ -1147,7 +1149,8 @@ static void diagnostics_open();
 static bool mcb_ready() {
   return static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) ==
              RtpsLinkState::CONNECTED &&
-         lv_subject_get_int(&mcb_state_subject) == RAMMP_STATE_OK;
+         static_cast<rammp::SystemState>(lv_subject_get_int(&mcb_state_subject)) ==
+             rammp::SystemState::OK;
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -1174,15 +1177,15 @@ static lv_subject_t entry_refused_subject; // kRefused*; panel up unless None
 // second push restarts the countdown rather than stacking a timer.
 static lv_timer_t *entry_refused_timer = nullptr;
 
-static_assert(sizeof(RAMMP_HMI_ETH_FAILED_TEXT) <= RAMMP_ERROR_TEXT_LEN &&
-                  sizeof(RAMMP_HMI_LINK_DOWN_TEXT) <= RAMMP_ERROR_TEXT_LEN &&
-                  sizeof(RAMMP_HMI_NO_IP_TEXT) <= RAMMP_ERROR_TEXT_LEN &&
-                  sizeof(RAMMP_HMI_NO_PEER_TEXT) <= RAMMP_ERROR_TEXT_LEN,
+static_assert(sizeof(rammp::kHmiEthFailedText) <= rammp::kErrorTextLen &&
+                  sizeof(rammp::kHmiLinkDownText) <= rammp::kErrorTextLen &&
+                  sizeof(rammp::kHmiNoIpText) <= rammp::kErrorTextLen &&
+                  sizeof(rammp::kHmiNoPeerText) <= rammp::kErrorTextLen,
               "refusal body outgrows the banner it shares with MCB faults");
-static_assert(sizeof(RAMMP_HMI_ETH_FAILED_FOOTER) <= RAMMP_ERROR_FOOTER_LEN &&
-                  sizeof(RAMMP_HMI_LINK_DOWN_FOOTER) <= RAMMP_ERROR_FOOTER_LEN &&
-                  sizeof(RAMMP_HMI_NO_IP_FOOTER) <= RAMMP_ERROR_FOOTER_LEN &&
-                  sizeof(RAMMP_HMI_NO_PEER_FOOTER) <= RAMMP_ERROR_FOOTER_LEN,
+static_assert(sizeof(rammp::kHmiEthFailedFooter) <= rammp::kErrorFooterLen &&
+                  sizeof(rammp::kHmiLinkDownFooter) <= rammp::kErrorFooterLen &&
+                  sizeof(rammp::kHmiNoIpFooter) <= rammp::kErrorFooterLen &&
+                  sizeof(rammp::kHmiNoPeerFooter) <= rammp::kErrorFooterLen,
               "refusal footer outgrows the banner it shares with MCB faults");
 
 struct RefusalText {
@@ -1193,13 +1196,13 @@ struct RefusalText {
 static RefusalText link_refusal_text(RtpsLinkState link) {
   switch (link) {
   case RtpsLinkState::ETH_FAILED:
-    return {RAMMP_HMI_ETH_FAILED_TEXT, RAMMP_HMI_ETH_FAILED_FOOTER};
+    return {rammp::kHmiEthFailedText, rammp::kHmiEthFailedFooter};
   case RtpsLinkState::LINK_DOWN:
-    return {RAMMP_HMI_LINK_DOWN_TEXT, RAMMP_HMI_LINK_DOWN_FOOTER};
+    return {rammp::kHmiLinkDownText, rammp::kHmiLinkDownFooter};
   case RtpsLinkState::NO_IP:
-    return {RAMMP_HMI_NO_IP_TEXT, RAMMP_HMI_NO_IP_FOOTER};
+    return {rammp::kHmiNoIpText, rammp::kHmiNoIpFooter};
   case RtpsLinkState::NO_PEER:
-    return {RAMMP_HMI_NO_PEER_TEXT, RAMMP_HMI_NO_PEER_FOOTER};
+    return {rammp::kHmiNoPeerText, rammp::kHmiNoPeerFooter};
   case RtpsLinkState::CONNECTED:
     break;
   }
@@ -1226,14 +1229,14 @@ static void fill_drive_blocked_panel(lv_obj_t *panel, const char *link_title,
     lv_label_set_text(body, text.body);
     lv_label_set_text(footer, text.footer);
   } else {
-    const auto state = static_cast<uint8_t>(lv_subject_get_int(&mcb_state_subject));
+    const auto state = static_cast<rammp::SystemState>(lv_subject_get_int(&mcb_state_subject));
     const char *error_text = lv_subject_get_string(&error_text_subject);
     lv_label_set_text(title, mcb_title);
     if (error_text[0] != '\0') {
       lv_label_set_text(body, error_text);
     } else {
-      lv_label_set_text_fmt(body, RAMMP_HMI_MCB_NO_TEXT_FMT, static_cast<unsigned>(state),
-                            rammp_state_name(state));
+      lv_label_set_text_fmt(body, rammp::kHmiMcbNoTextFmt, static_cast<unsigned>(state),
+                            rammp::to_string(state));
     }
     lv_label_set_text(footer, lv_subject_get_string(&error_footer_subject));
   }
@@ -1259,10 +1262,10 @@ static void entry_refused_panel_observer(lv_observer_t *observer, lv_subject_t *
     return;
   }
   if (refused == kRefusedSeat) {
-    fill_drive_blocked_panel(panel, RAMMP_HMI_SEAT_LINK_REFUSED_TITLE,
-                             RAMMP_HMI_SEAT_MCB_REFUSED_TITLE);
+    fill_drive_blocked_panel(panel, rammp::kHmiSeatLinkRefusedTitle,
+                             rammp::kHmiSeatMcbRefusedTitle);
   } else {
-    fill_drive_blocked_panel(panel, RAMMP_HMI_LINK_REFUSED_TITLE, RAMMP_HMI_MCB_REFUSED_TITLE);
+    fill_drive_blocked_panel(panel, rammp::kHmiLinkRefusedTitle, rammp::kHmiMcbRefusedTitle);
   }
   lv_obj_remove_flag(panel, LV_OBJ_FLAG_HIDDEN);
 }
@@ -1286,7 +1289,7 @@ static void drive_screen_warning_observer(lv_observer_t *observer, lv_subject_t 
     lv_obj_add_flag(panel, LV_OBJ_FLAG_HIDDEN);
     return;
   }
-  fill_drive_blocked_panel(panel, RAMMP_HMI_LINK_LOST_TITLE, RAMMP_HMI_MCB_FAULT_TITLE);
+  fill_drive_blocked_panel(panel, rammp::kHmiLinkLostTitle, rammp::kHmiMcbFaultTitle);
   lv_obj_remove_flag(panel, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -1850,7 +1853,7 @@ static lv_subject_t *const kSettingParamValue[] = {
 static_assert(std::size(kSettingParamValue) == SETTINGS_PARAM_COUNT,
               "every settings_spec.h parameter needs its subject here");
 
-static constexpr int kSettingRowsMax = std::max<int>(RAMMP_ACTUATOR_COUNT, SETTINGS_PARAM_COUNT);
+static constexpr int kSettingRowsMax = std::max<int>(rammp::kActuatorCount, SETTINGS_PARAM_COUNT);
 static SettingRow setting_rows[kSettingRowsMax];
 static int setting_row_count; // rows on the page that is up; 0 while the screen is not
 static int setting_cursor;    // which row the joystick is on
@@ -1861,7 +1864,7 @@ static lv_subject_t setting_page_subject;
 
 // Raw value per actuator, in the table's units. Static: the rows' observers
 // point at them, and the MCB keeps them current with no page up.
-static lv_subject_t actuator_value[RAMMP_ACTUATOR_COUNT];
+static lv_subject_t actuator_value[rammp::kActuatorCount];
 static uint8_t actuator_count; // actuators in the table
 
 // What a value reads before it is known - only ever an actuator the MCB has
@@ -1877,8 +1880,8 @@ static constexpr int32_t kValueUnknown = INT32_MIN;
 static lv_subject_t actuator_reject_subject;
 static constexpr int32_t kActuatorRejectNone = -1;
 static constexpr uint32_t kActuatorRejectFlashMs = 900;
-static int32_t actuator_reject_pack(uint8_t id, uint8_t result) {
-  return static_cast<int32_t>(id) | (static_cast<int32_t>(result) << 8);
+static int32_t actuator_reject_pack(rammp::ActuatorId id, rammp::ActuatorResult result) {
+  return static_cast<int32_t>(rammp::index_of(id)) | (static_cast<int32_t>(result) << 8);
 }
 static uint8_t actuator_reject_id(int32_t packed) { return static_cast<uint8_t>(packed & 0xFF); }
 
@@ -1970,7 +1973,7 @@ static uint8_t actuator_flashed_req_id; // the request the current flash belongs
 // says which REQUEST it answers but not which actuator that request was for,
 // so the mapping is kept on this side. One byte per possible req_id is exact
 // and needs no expiry.
-static uint8_t actuator_req_target[256];
+static rammp::ActuatorId actuator_req_target[256];
 static bool actuator_flashed_any;
 static lv_timer_t *actuator_reject_timer = nullptr;
 
@@ -1979,10 +1982,10 @@ static void actuator_apply_state(const rammp::ActuatorState &state) {
   for (size_t i = 0; i < known; i++) {
     lv_subject_set_int(&actuator_value[i], state.values[i]);
   }
-  if (state.result == RAMMP_ACTUATOR_RESULT_OK) {
+  if (state.result == rammp::ActuatorResult::OK) {
     return;
   }
-  // This topic republishes every RAMMP_ACTUATOR_STATE_PERIOD_MS carrying the
+  // This topic republishes every rammp::kActuatorStatePeriod carrying the
   // same verdict, so flash once per REQUEST rather than once per sample -
   // otherwise a single refusal would blink twice a second until the next press.
   if (actuator_flashed_any && state.req_id == actuator_flashed_req_id) {
@@ -1990,8 +1993,9 @@ static void actuator_apply_state(const rammp::ActuatorState &state) {
   }
   actuator_flashed_req_id = state.req_id;
   actuator_flashed_any = true;
-  const uint8_t target = actuator_req_target[state.req_id];
-  if (state.result == RAMMP_ACTUATOR_RESULT_UNKNOWN_ID || target >= actuator_count) {
+  const rammp::ActuatorId target = actuator_req_target[state.req_id];
+  if (state.result == rammp::ActuatorResult::UNKNOWN_ID ||
+      rammp::index_of(target) >= actuator_count) {
     return; // no row to flash: the MCB does not have this actuator at all
   }
   lv_subject_set_int(&actuator_reject_subject, actuator_reject_pack(target, state.result));
@@ -2053,8 +2057,9 @@ static void setting_step(const SettingRow *row, int direction) {
   if (lv_subject_get_int(&setting_page_subject) == kActuatorsPage) {
     // A request: the value moves only when the MCB's state sample says so.
     actuator_req_id++;
-    actuator_req_target[actuator_req_id] = static_cast<uint8_t>(row->index);
-    rtps_comms_publish_actuator_command(actuator_req_id, static_cast<uint8_t>(row->index),
+    const rammp::ActuatorId actuator = rammp::kActuators[row->index].id;
+    actuator_req_target[actuator_req_id] = actuator;
+    rtps_comms_publish_actuator_command(actuator_req_id, actuator,
                                         static_cast<int8_t>(direction < 0 ? -1 : 1));
     return;
   }
@@ -2148,7 +2153,7 @@ static void setting_warning_observer(lv_observer_t *observer, lv_subject_t *) {
     lv_obj_add_flag(panel, LV_OBJ_FLAG_HIDDEN);
     return;
   }
-  fill_drive_blocked_panel(panel, RAMMP_HMI_LINK_LOST_TITLE, RAMMP_HMI_MCB_FAULT_TITLE);
+  fill_drive_blocked_panel(panel, rammp::kHmiLinkLostTitle, rammp::kHmiMcbFaultTitle);
   lv_obj_remove_flag(panel, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -2217,7 +2222,7 @@ static void setting_page_open(int32_t page) {
   lv_label_set_text(ui_SettingTitleLabel, text.title);
   lv_label_set_text(ui_BriefInstructionsLabel, text.instructions);
   if (page == kActuatorsPage) {
-    const rammp_actuator_spec_t *specs = rammp_actuator_table(nullptr);
+    const auto &specs = rammp::kActuators;
     for (uint8_t i = 0; i < actuator_count; i++) {
       setting_row_add({specs[i].short_name, specs[i].label, specs[i].min_value, specs[i].max_value,
                        specs[i].step, specs[i].decimals, nullptr},
@@ -2263,8 +2268,8 @@ static void action_self_test() { selftest_request(SelfTestTrigger::LOCAL, 0); }
 // seat moves only if the MCB agrees, and a refusal flashes on that page.
 static void action_seat_up() {
   actuator_req_id++;
-  actuator_req_target[actuator_req_id] = RAMMP_ACTUATOR_ELEVATION;
-  rtps_comms_publish_actuator_command(actuator_req_id, RAMMP_ACTUATOR_ELEVATION, +1);
+  actuator_req_target[actuator_req_id] = rammp::ActuatorId::ELEVATION;
+  rtps_comms_publish_actuator_command(actuator_req_id, rammp::ActuatorId::ELEVATION, +1);
 }
 
 static void action_restart_hmi() {
@@ -2407,12 +2412,12 @@ static void actions_open() {
 // Opened from the DIAGNOSTICS settings row, left by pulling and holding. One
 // row per entry in RAMMP_DIAG_TABLE (rammp_rtps_spec.h): short label, label,
 // and up to three readings, each under its unit. The MCB publishes them all on
-// RAMMP_TOPIC_MCB_DIAGNOSTICS every RAMMP_DIAG_PERIOD_MS; they land in
+// rammp::kMcbDiagnostics every rammp::kDiagPeriod; they land in
 // diag_value (subjects, set under the LVGL lock by the RTPS handler in
 // app_main) and the rows observe them.
 //
 // DiagnosticsFreqLabel shows how fast they are arriving ("2.0 Hz - Live").
-// Once nothing has arrived for RAMMP_DIAG_TIMEOUT_MS - or nothing ever has -
+// Once nothing has arrived for rammp::kDiagTimeout - or nothing ever has -
 // every row's text and the label turn red and blink: readings the MCB stopped
 // sending must not sit there looking current.
 //
@@ -2424,7 +2429,7 @@ static void actions_open() {
 // on demand").
 /////////////////////////////////////////////////////////////////////////////
 
-static_assert(RAMMP_DIAG_FIELDS == 3, "the DiagnosticComponent has exactly three readings");
+static_assert(rammp::kDiagFields == 3, "the DiagnosticComponent has exactly three readings");
 
 // Each reading's container, units label and value label in the component.
 struct DiagFieldIds {
@@ -2432,7 +2437,7 @@ struct DiagFieldIds {
   int units;
   int value;
 };
-static constexpr DiagFieldIds kDiagFieldIds[RAMMP_DIAG_FIELDS] = {
+static constexpr DiagFieldIds kDiagFieldIds[rammp::kDiagFields] = {
     {UI_COMP_DIAGNOSTICCOMPONENT_DIAGNOSTICSVALUECONTAINER1,
      UI_COMP_DIAGNOSTICCOMPONENT_DIAGNOSTICSVALUECONTAINER1_DIAGNOSTICSUNITS1,
      UI_COMP_DIAGNOSTICCOMPONENT_DIAGNOSTICSVALUECONTAINER1_DIAGNOSTICSVALUE1},
@@ -2447,8 +2452,8 @@ static constexpr DiagFieldIds kDiagFieldIds[RAMMP_DIAG_FIELDS] = {
 // Readings, raw, [table row][reading]; kValueUnknown until the MCB sends one.
 // Static: the rows' observers point at them, and they keep updating with no
 // screen up.
-static lv_subject_t diag_value[RAMMP_DIAG_COUNT][RAMMP_DIAG_FIELDS];
-static lv_subject_t diag_stale_subject; // 1 = nothing within RAMMP_DIAG_TIMEOUT_MS, or ever
+static lv_subject_t diag_value[rammp::kDiagCount][rammp::kDiagFields];
+static lv_subject_t diag_stale_subject; // 1 = nothing within rammp::kDiagTimeout, or ever
 static lv_subject_t diag_rate_subject;  // arrival rate, tenths of a Hz
 
 // Which reading a value observer shows; static so an observer can point at it.
@@ -2456,9 +2461,9 @@ struct DiagField {
   uint8_t item;
   uint8_t field;
 };
-static DiagField diag_fields[RAMMP_DIAG_COUNT][RAMMP_DIAG_FIELDS];
+static DiagField diag_fields[rammp::kDiagCount][rammp::kDiagFields];
 
-static lv_obj_t *diag_rows[RAMMP_DIAG_COUNT];
+static lv_obj_t *diag_rows[rammp::kDiagCount];
 static int diag_row_count; // rows on screen; 0 while it is not up
 static int diag_cursor;    // which row the joystick is on
 static lv_group_t *diag_group = nullptr;
@@ -2473,7 +2478,9 @@ static constexpr uint32_t kDiagStaleColour = 0xFF5050; // the self test's FAIL r
 static void diag_poll() {
   const RtpsDiagStats stats = rtps_comms_diag_stats();
   const bool stale =
-      stats.last_us == 0 || esp_timer_get_time() - stats.last_us > RAMMP_DIAG_TIMEOUT_MS * 1000LL;
+      stats.last_us == 0 ||
+      esp_timer_get_time() - stats.last_us >
+          std::chrono::duration_cast<std::chrono::microseconds>(rammp::kDiagTimeout).count();
   lv_subject_set_int(&diag_stale_subject, stale ? 1 : 0);
   lv_subject_set_int(&diag_rate_subject, stale ? 0 : stats.rate_tenths_hz);
 }
@@ -2488,7 +2495,7 @@ static void diag_value_observer(lv_observer_t *observer, lv_subject_t *subject) 
     lv_label_set_text(label, "--");
     return;
   }
-  const rammp_diag_spec_t &spec = rammp_diag_table(nullptr)[field->item];
+  const rammp::DiagSpec &spec = rammp::kDiagItems[field->item];
   const StepperSpec format{nullptr, nullptr, 0, 0, 0, spec.decimals[field->field], nullptr};
   char text[24];
   stepper_format(format, raw, text, sizeof(text));
@@ -2572,9 +2579,8 @@ static void diag_rows_clear() {
 static void diagnostics_open() {
   diagnostics_screen_ensure(); // built on demand: see "Screens built on demand"
   diag_rows_clear();
-  uint8_t count = 0;
-  const rammp_diag_spec_t *specs = rammp_diag_table(&count);
-  for (uint8_t i = 0; i < count; i++) {
+  const auto &specs = rammp::kDiagItems;
+  for (uint8_t i = 0; i < rammp::kDiagCount; i++) {
     lv_obj_t *row = ui_DiagnosticComponent_create(ui_DiagnosticsFlexRows);
     diag_rows[diag_row_count++] = row;
     lv_label_set_text(
@@ -2585,7 +2591,7 @@ static void diagnostics_open() {
         ui_comp_get_child(
             row, UI_COMP_DIAGNOSTICCOMPONENT_DIAGNOSTICSROW1_ACTUATORLABELS2_ACTUATOR1LABEL1),
         specs[i].label);
-    for (uint8_t f = 0; f < RAMMP_DIAG_FIELDS; f++) {
+    for (uint8_t f = 0; f < rammp::kDiagFields; f++) {
       if (specs[i].unit[f][0] == '\0') { // a reading this item does not have
         lv_obj_add_flag(ui_comp_get_child(row, kDiagFieldIds[f].container), LV_OBJ_FLAG_HIDDEN);
         continue;
@@ -3628,8 +3634,8 @@ extern "C" void app_main(void) {
   // the chair is not accepting drive commands, so INACTIVE/OK is the honest
   // default. The export draws a green "ACTIVE", so the initial observer run
   // repaints it grey — that is the point, not a flicker to design away.
-  lv_subject_init_int(&drive_status_subject, RAMMP_DRIVE_STATUS_INACTIVE);
-  lv_subject_init_int(&mcb_state_subject, RAMMP_STATE_OK);
+  lv_subject_init_int(&drive_status_subject, static_cast<int32_t>(rammp::DriveStatus::INACTIVE));
+  lv_subject_init_int(&mcb_state_subject, static_cast<int32_t>(rammp::SystemState::OK));
   // Initialised before the panels bind, because their observers read it on the
   // first run. LINK_DOWN at boot is true and self-correcting: the poll timer
   // has the real answer a quarter second later.
@@ -3664,7 +3670,7 @@ extern "C" void app_main(void) {
   clock_poll_cb(nullptr); // the RTC's time, when it had one, from the first frame
   lv_timer_create(clock_poll_cb, kClockPollMs, nullptr);
   lv_subject_add_observer_obj(&speed_tenths_subject, speed_label_observer, ui_SpeedNumber, nullptr);
-  lv_subject_init_int(&drive_mode_subject, RAMMP_DRIVE_MODE_NORMAL);
+  lv_subject_init_int(&drive_mode_subject, static_cast<int32_t>(rammp::DriveMode::NORMAL));
   bind_drive_mode_button(ui_DriveModeButton, &kModeHolo);
   bind_drive_mode_button(ui_DriveModeButton1, &kModeNormal);
   bind_drive_mode_button(ui_DriveModeButton2, &kModeAuto);
@@ -4064,7 +4070,7 @@ extern "C" void app_main(void) {
   // SpecificSettingScreen: what outlives the screen, which is built on demand
   // (settings_screen_ensure).
 
-  rammp_actuator_table(&actuator_count);
+  actuator_count = static_cast<uint8_t>(rammp::kActuatorCount);
   for (uint8_t i = 0; i < actuator_count; i++) {
     lv_subject_init_int(&actuator_value[i], kValueUnknown);
   }
@@ -4487,7 +4493,8 @@ extern "C" void app_main(void) {
       // quiet no-op until RTPS is up and a subscriber is discovered
       adc_published = rtps_comms_publish_adc(
           calibrating ? 0.0f : stick.x(), calibrating ? 0.0f : stick.y(),
-          calibrating ? 0.0f : stick.z(), joy_button_pressed.load() ? RAMMP_BUTTON_JOYSTICK : 0u,
+          calibrating ? 0.0f : stick.z(),
+          joy_button_pressed.load() ? rammp::Buttons::JOYSTICK : rammp::Buttons::NONE,
           drive_mode_published.load());
     }
     // Every cycle, valid or not: the self test measures the loop's cadence and
@@ -4540,8 +4547,8 @@ extern "C" void app_main(void) {
   rtps_comms_on_mcb_status([](const rammp::McbStatus &status) {
     clock_note_mcb_time(status); // no LVGL: sets the system clock and the RTC
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
-    lv_subject_set_int(&drive_status_subject, status.drive_status);
-    lv_subject_set_int(&mcb_state_subject, status.system_state);
+    lv_subject_set_int(&drive_status_subject, static_cast<int32_t>(status.drive_status));
+    lv_subject_set_int(&mcb_state_subject, static_cast<int32_t>(status.system_state));
     lv_subject_set_int(&speed_tenths_subject, status.speed_tenths);
     // copy_string cuts each text to its subject's buffer (RAMMP_*_LEN)
     lv_subject_copy_string(&drive_text_subject, status.drive_text.c_str());
@@ -4555,9 +4562,9 @@ extern "C" void app_main(void) {
   });
   rtps_comms_on_diagnostics([](const rammp::Diagnostics &diag) {
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
-    for (size_t i = 0; i < std::min<size_t>(diag.items.size(), RAMMP_DIAG_COUNT); i++) {
+    for (size_t i = 0; i < std::min<size_t>(diag.items.size(), rammp::kDiagCount); i++) {
       const auto &values = diag.items[i].values;
-      for (size_t f = 0; f < std::min<size_t>(values.size(), RAMMP_DIAG_FIELDS); f++) {
+      for (size_t f = 0; f < std::min<size_t>(values.size(), rammp::kDiagFields); f++) {
         lv_subject_set_int(&diag_value[i][f], values[f]);
       }
     }

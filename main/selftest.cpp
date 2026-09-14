@@ -294,7 +294,7 @@ struct Outcome {
   bool done = false;     // reached by the runner at all
   bool measured = false; // false = could not be measured, see detail
   int32_t value = 0;
-  uint8_t result = RAMMP_SELFTEST_RESULT_SKIP;
+  rammp::SelfTestResult result = rammp::SelfTestResult::SKIP;
   std::string detail;
 };
 
@@ -315,7 +315,7 @@ public:
     logger.info("run {} ({}) starting on firmware {}", run_id_, remote_ ? "remote" : "local",
                 version_);
     ui_begin();
-    publish_marker(RAMMP_SELFTEST_KIND_STARTED, 0, 0, 0, version_);
+    publish_marker(rammp::SelfTestKind::STARTED, 0, 0, 0, version_);
 
     status("Checking the board");
     check_system();
@@ -349,7 +349,7 @@ public:
         // a spec row with nothing behind it must not pass by omission
         out_[i] = Outcome{.done = true,
                           .measured = false,
-                          .result = RAMMP_SELFTEST_RESULT_FAIL,
+                          .result = rammp::SelfTestResult::FAIL,
                           .detail = "not measured by this firmware"};
         publish_result(i);
       }
@@ -369,8 +369,8 @@ private:
     o.measured = true;
     o.value = value;
     o.detail = std::move(detail);
-    o.result =
-        (value >= s.lo && value <= s.hi) ? RAMMP_SELFTEST_RESULT_PASS : RAMMP_SELFTEST_RESULT_FAIL;
+    o.result = (value >= s.lo && value <= s.hi) ? rammp::SelfTestResult::PASS
+                                                : rammp::SelfTestResult::FAIL;
     publish_result(id);
   }
 
@@ -381,7 +381,7 @@ private:
     o.measured = false;
     o.detail = std::move(reason);
     const bool required = s.need == ST_REQUIRED || (s.need == ST_REMOTE && remote_);
-    o.result = required ? RAMMP_SELFTEST_RESULT_FAIL : RAMMP_SELFTEST_RESULT_SKIP;
+    o.result = required ? rammp::SelfTestResult::FAIL : rammp::SelfTestResult::SKIP;
     publish_result(id);
   }
 
@@ -390,7 +390,7 @@ private:
     const Outcome &o = out_[id];
     rammp::SelfTestReport report{};
     report.run_id = run_id_;
-    report.kind = RAMMP_SELFTEST_KIND_RESULT;
+    report.kind = rammp::SelfTestKind::RESULT;
     report.index = id;
     report.count = ST_COUNT;
     report.result = o.result;
@@ -413,7 +413,7 @@ private:
     }
   }
 
-  void publish_marker(uint8_t kind, int32_t value, int32_t lo, int32_t hi,
+  void publish_marker(rammp::SelfTestKind kind, int32_t value, int32_t lo, int32_t hi,
                       std::string_view detail) const {
     rammp::SelfTestReport report{};
     report.run_id = run_id_;
@@ -422,7 +422,7 @@ private:
     report.value = value;
     report.lo = lo;
     report.hi = hi;
-    report.name = kind == RAMMP_SELFTEST_KIND_STARTED ? "started" : "summary";
+    report.name = kind == rammp::SelfTestKind::STARTED ? "started" : "summary";
     report.detail = std::string(detail);
     send_report(report);
   }
@@ -836,9 +836,9 @@ private:
     int32_t fail = 0;
     int32_t skip = 0;
     for (const Outcome &o : out_) {
-      pass += o.result == RAMMP_SELFTEST_RESULT_PASS;
-      fail += o.result == RAMMP_SELFTEST_RESULT_FAIL;
-      skip += o.result == RAMMP_SELFTEST_RESULT_SKIP;
+      pass += o.result == rammp::SelfTestResult::PASS;
+      fail += o.result == rammp::SelfTestResult::FAIL;
+      skip += o.result == rammp::SelfTestResult::SKIP;
     }
     const bool passed = fail == 0;
 
@@ -862,13 +862,13 @@ private:
                elapsed_ms, version_);
 
     const std::string timing = fmt::format("{} ms", elapsed_ms);
-    publish_marker(RAMMP_SELFTEST_KIND_FINISHED, pass, fail, skip, timing);
+    publish_marker(rammp::SelfTestKind::FINISHED, pass, fail, skip, timing);
     // The report topic is best-effort: send it all once more so a reader that
     // dropped a sample can complete the table (it de-duplicates on index).
     for (uint8_t i = 0; i < ST_COUNT; ++i) {
       publish_result(i);
     }
-    publish_marker(RAMMP_SELFTEST_KIND_FINISHED, pass, fail, skip, timing);
+    publish_marker(rammp::SelfTestKind::FINISHED, pass, fail, skip, timing);
 
     status(fmt::format("#{:06x} {}#  {} pass, {} fail, {} skip ({}.{} s)\n"
                        "Tap, or press the stick button, to close",
@@ -881,11 +881,11 @@ private:
                 passed ? "PASS" : "FAIL", pass, fail, skip);
   }
 
-  static const char *result_tag(uint8_t result) {
+  static const char *result_tag(rammp::SelfTestResult result) {
     switch (result) {
-    case RAMMP_SELFTEST_RESULT_PASS:
+    case rammp::SelfTestResult::PASS:
       return "PASS";
-    case RAMMP_SELFTEST_RESULT_FAIL:
+    case rammp::SelfTestResult::FAIL:
       return "FAIL";
     default:
       return "SKIP";
@@ -894,11 +894,11 @@ private:
 
   // A symbol rather than the word: on a two-column 720 px screen each column is
   // ~340 px, and "PASS " cost a row a sixth of that.
-  static const char *result_symbol(uint8_t result) {
+  static const char *result_symbol(rammp::SelfTestResult result) {
     switch (result) {
-    case RAMMP_SELFTEST_RESULT_PASS:
+    case rammp::SelfTestResult::PASS:
       return LV_SYMBOL_OK;
-    case RAMMP_SELFTEST_RESULT_FAIL:
+    case rammp::SelfTestResult::FAIL:
       return LV_SYMBOL_CLOSE;
     default:
       return LV_SYMBOL_MINUS;
@@ -911,9 +911,9 @@ private:
     if (!o.done) {
       return fmt::format("#{:06x} .  {}#", kColourPending, s.name);
     }
-    const uint32_t colour = o.result == RAMMP_SELFTEST_RESULT_PASS   ? kColourPass
-                            : o.result == RAMMP_SELFTEST_RESULT_FAIL ? kColourFail
-                                                                     : kColourSkip;
+    const uint32_t colour = o.result == rammp::SelfTestResult::PASS   ? kColourPass
+                            : o.result == rammp::SelfTestResult::FAIL ? kColourFail
+                                                                      : kColourSkip;
     return fmt::format("#{:06x} {}# {} {}", colour, result_symbol(o.result), s.name,
                        o.measured ? compact_value(s, o.value) : "-");
   }

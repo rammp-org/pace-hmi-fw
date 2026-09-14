@@ -21,9 +21,9 @@
 
 /* The firmware forces LV_USE_STDLIB_MALLOC=LV_STDLIB_CLIB (CMakeLists.txt) so
  * draw buffers land in internal RAM rather than PSRAM. Same choice here. */
-#define LV_USE_STDLIB_MALLOC   LV_STDLIB_CLIB
-#define LV_USE_STDLIB_STRING   LV_STDLIB_CLIB
-#define LV_USE_STDLIB_SPRINTF  LV_STDLIB_CLIB
+#define LV_USE_STDLIB_MALLOC LV_STDLIB_CLIB
+#define LV_USE_STDLIB_STRING LV_STDLIB_CLIB
+#define LV_USE_STDLIB_SPRINTF LV_STDLIB_CLIB
 
 /* Required by the Win32 backend, which runs its window and message loop on a
  * thread of its own and needs LVGL's lock to hand frames across. The firmware
@@ -35,7 +35,9 @@
 /* ------------------------------------------------------------------ fonts */
 /* CONFIG_LV_FONT_MONTSERRAT_{24,30,32,34,48}. 14 is LV_FONT_DEFAULT. */
 #define LV_FONT_MONTSERRAT_14 1
+#define LV_FONT_MONTSERRAT_20 1
 #define LV_FONT_MONTSERRAT_24 1
+#define LV_FONT_MONTSERRAT_28 1
 #define LV_FONT_MONTSERRAT_30 1
 #define LV_FONT_MONTSERRAT_32 1
 #define LV_FONT_MONTSERRAT_34 1
@@ -49,9 +51,9 @@
 /* CONFIG_LV_USE_VECTOR_GRAPHIC / THORVG / SVG. The boot screen's RAMMP
  * wordmark (ui_img_rammp_type_white_svg) is stored as SVG text and decoded at
  * runtime; without these it renders as nothing. */
-#define LV_USE_VECTOR_GRAPHIC  1
+#define LV_USE_VECTOR_GRAPHIC 1
 #define LV_USE_THORVG_INTERNAL 1
-#define LV_USE_SVG             1
+#define LV_USE_SVG 1
 
 /* Neither of these appears in sdkconfig.defaults, and neither can be dropped.
  * LVGL's Kconfig chains them (LV_USE_VECTOR_GRAPHIC selects LV_USE_MATRIX,
@@ -60,7 +62,7 @@
  * without MATRIX, lv_matrix_t stays an incomplete type and every vector/SVG
  * header fails to compile; without FLOAT, lv_matrix.h #errors outright. */
 #define LV_USE_MATRIX 1
-#define LV_USE_FLOAT  1
+#define LV_USE_FLOAT 1
 
 /* ThorVG rasterises on LVGL's draw thread and LVGL refuses to build it on the
  * default 8 KB stack. sdkconfig.defaults works around the same limit on the
@@ -72,7 +74,7 @@
 /* CONFIG_LV_USE_SYSMON / PERF_MONITOR / PERF_MONITOR_ALIGN_TOP_RIGHT. Keeps
  * the FPS button on the settings page working, though the number it shows is
  * a desktop CPU's, not the P4's. */
-#define LV_USE_SYSMON       1
+#define LV_USE_SYSMON 1
 #define LV_USE_PERF_MONITOR 1
 #define LV_USE_PERF_MONITOR_POS LV_ALIGN_TOP_RIGHT
 

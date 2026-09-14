@@ -1,116 +1,136 @@
 /*
- * rammp_rtps_spec.h - RAMMP RTPS wire spec, shared by the HMI and the MCB.
+ * rammp_rtps_spec.h - RAMMP RTPS wire spec (C++20), shared by the HMI and the MCB.
  *
  * - Encoding: espp/cdr, XCDR1 (classic little-endian CDR, what DDS / ROS 2 peers speak).
- * - The C++ structs below ARE the wire layout: fields in order, no hand-written codec.
- * - IDL mapping: uint8_t=octet, int8_t=int8, int32_t=long, uint32_t=unsigned long,
- *   float=float, std::string=string, std::vector<T>=sequence<T>.
+ * - The structs below ARE the wire layout: fields in order, no hand-written codec.
+ * - Every enum is scoped with a fixed wire width (`enum class X : uint8_t`), and every
+ *   topic carries its message type (Topic<McbStatus>), so the wrong value, message or
+ *   handler for a topic does not compile.
+ * - IDL mapping: uint8_t / enum : uint8_t = octet, int8_t = int8, int32_t = long,
+ *   uint32_t / enum : uint32_t = unsigned long, float = float, std::string = string,
+ *   std::vector<T> = sequence<T>.
  * - Roles: the MCB owns the vehicle state; the HMI shows it and asks.
  * - Every topic is best-effort, no durability: state is resent periodically.
- * - Constants, enums and tables are plain C (the desktop sim includes them too).
- * - scripts/rammp_rtps.py scrapes this file (`#define RAMMP_X value`, `RAMMP_X = n,`)
- *   and mirrors the structs: change both together.
+ * - scripts/rammp_rtps.py reads this file (topics, enums, constants, table rows) and
+ *   mirrors the structs: change both together.
  *
  * Example: an MCB on the same espp / esp-idf stack sending Diagnostics to the HMI
  *
- *   #include "cdr.hpp"
- *   #include "rtps_participant.hpp"
+ *   #include "rtps_pubsub.hpp"
  *   #include "rammp_rtps_spec.h"
  *
- *   using Rtps = espp::RtpsParticipant;
- *   Rtps rtps({.interface_address = my_ip});
+ *   espp::RtpsParticipant rtps({.interface_address = my_ip});
  *   rtps.start();
- *   rtps.add_writer({.topic = RAMMP_TOPIC_MCB_DIAGNOSTICS,
- *                    .type_name = RAMMP_TYPE_DIAGNOSTICS,
- *                    .reliability = Rtps::Reliability::BEST_EFFORT});
+ *   espp::Publisher<rammp::Diagnostics> diag_pub(rtps, {.topic = rammp::kMcbDiagnostics.name,
+ *                                                       .type_name = rammp::kMcbDiagnostics.type});
  *
- *   // every RAMMP_DIAG_PERIOD_MS; one item per RAMMP_DIAG_TABLE row, raw integers
+ *   // every kDiagPeriod; one item per RAMMP_DIAG_TABLE row, raw integers
  *   // T1 = 30.5 C, 1.50 A, 45.0 deg; T2 = 29.8 C, 1.20 A, -9.0 deg
- *   rammp::Diagnostics diag{.seq = seq++,
- *                           .items = {{.values = {305, 150, 450}},
- *                                     {.values = {298, 120, -90}}}};
- *   if (auto bytes = cdr::serialize<cdr::xcdr1>(diag))
- *     rtps.publish(RAMMP_TOPIC_MCB_DIAGNOSTICS, rammp::as_u8(*bytes));
+ *   diag_pub.publish({.seq = seq++,
+ *                     .items = {{.values = {305, 150, 450}}, {.values = {298, 120, -90}}}});
  *
  *   // and the other way: the HMI's actuator requests (answer with an ActuatorState)
- *   rtps.add_reader({.topic = RAMMP_TOPIC_ACTUATOR_COMMAND,
- *                    .type_name = RAMMP_TYPE_ACTUATOR_COMMAND,
- *                    .reliability = Rtps::Reliability::BEST_EFFORT,
- *                    .on_sample = [](std::span<const uint8_t> data) {
- *                      auto cmd = cdr::deserialize<rammp::ActuatorCommand>(std::as_bytes(data));
- *                      if (cmd) move_actuator(cmd->actuator_id, cmd->steps);
- *                    }});
+ *   espp::Subscriber<rammp::ActuatorCommand> cmd_sub(
+ *       rtps, {.topic = rammp::kActuatorCommand.name,
+ *              .type_name = rammp::kActuatorCommand.type,
+ *              .on_message = [](const rammp::ActuatorCommand &cmd) {
+ *                move_actuator(cmd.actuator_id, cmd.steps); // actuator_id is an ActuatorId
+ *              }});
  */
 
-#ifndef RAMMP_RTPS_SPEC_H
-#define RAMMP_RTPS_SPEC_H
+#pragma once
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+#include <array>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+namespace rammp {
+
+using std::chrono::milliseconds;
 
 /* ==== Topic and type names: the only place they are spelled ============== */
 /* ROS 2 later? Change them here only ("rt/..." topics, "pkg::msg::dds_::Name_" types). */
 
-/* MCB -> HMI */
-#define RAMMP_TOPIC_MCB_STATUS "rammp/mcb/status" /* rammp::McbStatus */
-#define RAMMP_TYPE_MCB_STATUS "rammp/msg/McbStatus"
-#define RAMMP_TOPIC_ACTUATOR_STATE "rammp/actuator/state" /* rammp::ActuatorState */
-#define RAMMP_TYPE_ACTUATOR_STATE "rammp/msg/ActuatorState"
-#define RAMMP_TOPIC_MCB_DIAGNOSTICS "rammp/mcb/diagnostics" /* rammp::Diagnostics */
-#define RAMMP_TYPE_DIAGNOSTICS "rammp/msg/Diagnostics"
+struct McbStatus;
+struct ActuatorState;
+struct Diagnostics;
+struct AdcXYTwist;
+struct ActuatorCommand;
+struct UInt32;
+struct SelfTestReport;
 
-/* HMI -> MCB */
-#define RAMMP_TOPIC_JOYSTICK_ADC "rammp/joystick/adc" /* rammp::AdcXYTwist, ~30 Hz */
-#define RAMMP_TYPE_ADC_XY_TWIST "rammp/msg/AdcXYTwist"
-#define RAMMP_TOPIC_ACTUATOR_COMMAND "rammp/actuator/command" /* rammp::ActuatorCommand */
-#define RAMMP_TYPE_ACTUATOR_COMMAND "rammp/msg/ActuatorCommand"
+/// A DDS topic and type name, tied to the message it carries.
+template <class Message> struct Topic {
+  const char *name; // DDS topic name
+  const char *type; // DDS type name
+};
 
-/* Bench PC <-> HMI. A production MCB can ignore these. */
-#define RAMMP_TOPIC_HMI_COUNTER "rammp/hmi/counter"       /* HMI -> PC: heartbeat, self-test ping */
-#define RAMMP_TOPIC_HMI_COMMAND "rammp/hmi/command"       /* PC -> HMI: self-test run and pong */
-#define RAMMP_TOPIC_HMI_BRIGHTNESS "rammp/hmi/brightness" /* PC -> HMI: backlight %, 5..100 */
-#define RAMMP_TYPE_UINT32 "std_msgs/msg/UInt32"           /* rammp::UInt32, the three above */
-#define RAMMP_TOPIC_SELFTEST_REPORT "rammp/selftest/report" /* HMI -> PC: rammp::SelfTestReport */
-#define RAMMP_TYPE_SELFTEST_REPORT "rammp/msg/SelfTestReport"
+// MCB -> HMI
+inline constexpr Topic<McbStatus> kMcbStatus{"rammp/mcb/status", "rammp/msg/McbStatus"};
+inline constexpr Topic<ActuatorState> kActuatorState{"rammp/actuator/state",
+                                                     "rammp/msg/ActuatorState"};
+inline constexpr Topic<Diagnostics> kMcbDiagnostics{"rammp/mcb/diagnostics",
+                                                    "rammp/msg/Diagnostics"};
+
+// HMI -> MCB
+inline constexpr Topic<AdcXYTwist> kJoystickAdc{"rammp/joystick/adc", "rammp/msg/AdcXYTwist"};
+inline constexpr Topic<ActuatorCommand> kActuatorCommand{"rammp/actuator/command",
+                                                         "rammp/msg/ActuatorCommand"};
+
+// Bench PC <-> HMI. A production MCB can ignore these.
+inline constexpr Topic<UInt32> kHmiCounter{"rammp/hmi/counter", "std_msgs/msg/UInt32"};
+inline constexpr Topic<UInt32> kHmiCommand{"rammp/hmi/command", "std_msgs/msg/UInt32"};
+inline constexpr Topic<UInt32> kHmiBrightness{"rammp/hmi/brightness", "std_msgs/msg/UInt32"};
+inline constexpr Topic<SelfTestReport> kSelfTestReport{"rammp/selftest/report",
+                                                       "rammp/msg/SelfTestReport"};
 
 /* ==== Timing ============================================================ */
 
-#define RAMMP_MCB_STATUS_PERIOD_MS 500     /* MCB sends McbStatus this often, changed or not */
-#define RAMMP_MCB_STATUS_TIMEOUT_MS 2000   /* HMI: no McbStatus this long = link lost */
-#define RAMMP_ACTUATOR_STATE_PERIOD_MS 500 /* MCB resends ActuatorState this often */
-#define RAMMP_DIAG_PERIOD_MS 500           /* MCB sends Diagnostics this often */
-#define RAMMP_DIAG_TIMEOUT_MS 2000         /* HMI: none this long = stale, shown red and blinking */
+inline constexpr milliseconds kMcbStatusPeriod{500};     // MCB sends McbStatus this often
+inline constexpr milliseconds kMcbStatusTimeout{2000};   // HMI: none this long = link lost
+inline constexpr milliseconds kActuatorStatePeriod{500}; // MCB resends ActuatorState
+inline constexpr milliseconds kDiagPeriod{500};          // MCB sends Diagnostics
+inline constexpr milliseconds kDiagTimeout{2000};        // HMI: none this long = stale, red
 
 /* ==== McbStatus ========================================================= */
 
-enum {
-  RAMMP_DRIVE_STATUS_INACTIVE = 0, /* chair ignores the stick */
-  RAMMP_DRIVE_STATUS_ACTIVE = 1,   /* chair drives on the stick */
+enum class DriveStatus : uint8_t {
+  INACTIVE = 0, // chair ignores the stick
+  ACTIVE = 1,   // chair drives on the stick
 };
 
-enum {
-  RAMMP_STATE_OK = 0,
-  RAMMP_STATE_ERROR = 1, /* HMI blocks drive/seat and shows error_text */
+enum class SystemState : uint8_t {
+  OK = 0,
+  ERROR = 1, // HMI blocks drive/seat and shows error_text
 };
 
-#define RAMMP_SPEED_MAX_TENTHS 99 /* speed_tenths 0..99, shown as 0.0..9.9 */
-#define RAMMP_MCB_TEXT_LEN 16     /* HMI shows up to 15 chars of drive_text / state_text */
-#define RAMMP_ERROR_TEXT_LEN 64   /* HMI shows up to 63 chars of error_text */
-#define RAMMP_ERROR_FOOTER_LEN 32 /* HMI shows up to 31 chars of error_footer */
+inline constexpr uint8_t kSpeedMaxTenths = 99; // speed_tenths 0..99, shown as 0.0..9.9
+inline constexpr size_t kMcbTextLen = 16;      // HMI shows up to 15 chars of drive/state_text
+inline constexpr size_t kErrorTextLen = 64;    // HMI shows up to 63 chars of error_text
+inline constexpr size_t kErrorFooterLen = 32;  // HMI shows up to 31 chars of error_footer
 
 /* ==== Joystick ========================================================== */
 
-#define RAMMP_BUTTON_JOYSTICK 0x00000001u /* buttons bit: the stick's button */
+enum class Buttons : uint32_t { // a bit set; 1 = pressed
+  NONE = 0x0,
+  JOYSTICK = 0x1, // the stick's button
+};
+constexpr Buttons operator|(Buttons a, Buttons b) {
+  return static_cast<Buttons>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+}
+constexpr bool has(Buttons set, Buttons button) {
+  return (static_cast<uint32_t>(set) & static_cast<uint32_t>(button)) != 0;
+}
 
-enum {
-  RAMMP_DRIVE_MODE_NORMAL = 0, /* car-like: Y drives, X steers */
-  RAMMP_DRIVE_MODE_HOLO = 1,   /* holonomic: X/Y is the velocity vector */
-  RAMMP_DRIVE_MODE_AUTO = 2,   /* reserved, not implemented */
+enum class DriveMode : uint32_t {
+  NORMAL = 0, // car-like: Y drives, X steers
+  HOLO = 1,   // holonomic: X/Y is the velocity vector
+  AUTO = 2,   // reserved, not implemented
 };
 
 /* ==== Actuators ========================================================= */
@@ -119,8 +139,8 @@ enum {
    Values are raw integers; `decimals` is display only (2500 with 1 shows "250.0"). */
 
 /* To add an actuator, add ONE X(...) row: next id, and a trailing `\` on every row but the
-   last. The DEBUG ACTUATORS page and the python tools pick it up; the MCB then sends one
-   more value in ActuatorState.values and accepts the new id in ActuatorCommand. */
+   last. ActuatorId, the DEBUG ACTUATORS page and the python tools pick it up; the MCB then
+   sends one more value in ActuatorState.values and accepts the new id in ActuatorCommand. */
 
 /* X(id, NAME, short, label, min, max, step, decimals, unit); id = row index */
 #define RAMMP_ACTUATOR_TABLE(X)                                                                    \
@@ -129,58 +149,48 @@ enum {
   X(2, FORWARD_TILT, "M3", "Forward Tilt", 0, 450, 25, 1, "deg")                                   \
   X(3, SIDE_TILT, "M4", "Side Tilt", -300, 300, 25, 1, "deg")
 
-#define RAMMP_ACTUATOR_COUNT_ONE(...) +1
-#define RAMMP_ACTUATOR_COUNT (0 RAMMP_ACTUATOR_TABLE(RAMMP_ACTUATOR_COUNT_ONE))
-
-/* RAMMP_ACTUATOR_ELEVATION = 0, ... */
-enum {
-#define RAMMP_ACTUATOR_ENUM(id_, name_, short_, label_, min_, max_, step_, dec_, unit_)            \
-  RAMMP_ACTUATOR_##name_ = id_,
-  RAMMP_ACTUATOR_TABLE(RAMMP_ACTUATOR_ENUM)
-#undef RAMMP_ACTUATOR_ENUM
+enum class ActuatorId : uint8_t { // ELEVATION = 0, ... (the table's rows)
+#define RAMMP_ACTUATOR_ID(id_, name_, ...) name_ = id_,
+  RAMMP_ACTUATOR_TABLE(RAMMP_ACTUATOR_ID)
+#undef RAMMP_ACTUATOR_ID
 };
+
+struct ActuatorSpec {
+  ActuatorId id;
+  const char *short_name; // "M1"
+  const char *label;      // "Elevation"
+  int32_t min_value;      // raw units
+  int32_t max_value;      // raw units
+  int32_t step;           // raw units per press
+  uint8_t decimals;       // display only
+  const char *unit;       // "mm"
+};
+
+inline constexpr std::array kActuators{
+#define RAMMP_ACTUATOR_ROW(id_, name_, short_, label_, min_, max_, step_, dec_, unit_)             \
+  ActuatorSpec{ActuatorId::name_, short_, label_, min_, max_, step_, dec_, unit_},
+    RAMMP_ACTUATOR_TABLE(RAMMP_ACTUATOR_ROW)
+#undef RAMMP_ACTUATOR_ROW
+};
+inline constexpr size_t kActuatorCount = kActuators.size();
+
+constexpr size_t index_of(ActuatorId id) { return static_cast<size_t>(id); }
 
 /* The MCB's verdict on a command. Anything but OK = value unchanged. */
-enum {
-  RAMMP_ACTUATOR_RESULT_OK = 0,
-  RAMMP_ACTUATOR_RESULT_AT_MIN = 1,     /* already at its low end */
-  RAMMP_ACTUATOR_RESULT_AT_MAX = 2,     /* already at its high end */
-  RAMMP_ACTUATOR_RESULT_INHIBITED = 3,  /* refused now: interlock, fault, driving */
-  RAMMP_ACTUATOR_RESULT_UNKNOWN_ID = 4, /* no such actuator */
+enum class ActuatorResult : uint8_t {
+  OK = 0,
+  AT_MIN = 1,     // already at its low end
+  AT_MAX = 2,     // already at its high end
+  INHIBITED = 3,  // refused now: interlock, fault, driving
+  UNKNOWN_ID = 4, // no such actuator
 };
-
-typedef struct rammp_actuator_spec {
-  uint8_t id;             /* row index; what goes on the wire */
-  const char *short_name; /* "M1" */
-  const char *label;      /* "Elevation" */
-  int32_t min_value;      /* raw units */
-  int32_t max_value;      /* raw units */
-  int32_t step;           /* raw units per press */
-  uint8_t decimals;       /* display only */
-  const char *unit;       /* "mm" */
-} rammp_actuator_spec_t;
-
-/* The table as an array; `count` gets its length (may be NULL). */
-static inline const rammp_actuator_spec_t *rammp_actuator_table(uint8_t *count) {
-  static const rammp_actuator_spec_t table[] = {
-#define RAMMP_ACTUATOR_ROW(id_, name_, short_, label_, min_, max_, step_, dec_, unit_)             \
-  {(uint8_t)(id_),  short_,           label_,          (int32_t)(min_),                            \
-   (int32_t)(max_), (int32_t)(step_), (uint8_t)(dec_), unit_},
-      RAMMP_ACTUATOR_TABLE(RAMMP_ACTUATOR_ROW)
-#undef RAMMP_ACTUATOR_ROW
-  };
-  if (count != NULL) {
-    *count = (uint8_t)(sizeof(table) / sizeof(table[0]));
-  }
-  return table;
-}
 
 /* ==== Diagnostics ======================================================= */
 
 /* Live readings from the actuators and anything else worth watching. Values are
    raw integers; `decN` is display only (2345 with 2 shows "23.45"). */
 
-#define RAMMP_DIAG_FIELDS 3 /* readings per item the HMI shows */
+inline constexpr size_t kDiagFields = 3; // readings per item the HMI shows
 
 /* To add a diagnostics item, add ONE D(...) row: next id, same `\` rule. The
    DiagnosticsScreen and the python tools pick it up; the MCB then sends one more DiagItem. */
@@ -192,137 +202,73 @@ static inline const rammp_actuator_spec_t *rammp_actuator_table(uint8_t *count) 
   D(1, TEST_2, "T2", "Test actuator 2", "Temp [C]", 1, "Current [A]", 2, "Pos [deg]", 1)           \
   D(2, TEST_3, "T3", "Test actuator 3", "Temp [C]", 1, "Current [A]", 2, "Pos [deg]", 1)
 
-#define RAMMP_DIAG_COUNT_ONE(...) +1
-#define RAMMP_DIAG_COUNT (0 RAMMP_DIAG_TABLE(RAMMP_DIAG_COUNT_ONE))
+enum class DiagId : uint8_t { // TEST_1 = 0, ... (the table's rows)
+#define RAMMP_DIAG_ID(id_, name_, ...) name_ = id_,
+  RAMMP_DIAG_TABLE(RAMMP_DIAG_ID)
+#undef RAMMP_DIAG_ID
+};
 
-typedef struct rammp_diag_spec {
-  uint8_t id;                          /* row index; position in items */
-  const char *short_name;              /* "T1" */
-  const char *label;                   /* "Test actuator 1" */
-  const char *unit[RAMMP_DIAG_FIELDS]; /* "Temp [C]"; "" = reading unused */
-  uint8_t decimals[RAMMP_DIAG_FIELDS]; /* display only */
-} rammp_diag_spec_t;
+struct DiagSpec {
+  DiagId id;
+  const char *short_name;                     // "T1"
+  const char *label;                          // "Test actuator 1"
+  std::array<const char *, kDiagFields> unit; // "Temp [C]"; "" = reading unused
+  std::array<uint8_t, kDiagFields> decimals;  // display only
+};
 
-/* The table as an array; `count` gets its length (may be NULL). */
-static inline const rammp_diag_spec_t *rammp_diag_table(uint8_t *count) {
-  static const rammp_diag_spec_t table[] = {
+inline constexpr std::array kDiagItems{
 #define RAMMP_DIAG_ROW(id_, name_, short_, label_, u1_, d1_, u2_, d2_, u3_, d3_)                   \
-  {(uint8_t)(id_),                                                                                 \
-   short_,                                                                                         \
-   label_,                                                                                         \
-   {u1_, u2_, u3_},                                                                                \
-   {(uint8_t)(d1_), (uint8_t)(d2_), (uint8_t)(d3_)}},
-      RAMMP_DIAG_TABLE(RAMMP_DIAG_ROW)
+  DiagSpec{DiagId::name_, short_, label_, {u1_, u2_, u3_}, {d1_, d2_, d3_}},
+    RAMMP_DIAG_TABLE(RAMMP_DIAG_ROW)
 #undef RAMMP_DIAG_ROW
-  };
-  if (count != NULL) {
-    *count = (uint8_t)(sizeof(table) / sizeof(table[0]));
-  }
-  return table;
-}
+};
+inline constexpr size_t kDiagCount = kDiagItems.size();
 
 /* ==== Self test (bench only; checks in main/selftest_spec.h) ============ */
 
 /* Rides the UInt32 bench topics, tagged in the top nibble:
-     run   PC  -> HMI  HMI_COMMAND  TAG_RUN  | run_id[7:0]     1..255, a repeat is ignored
-     ping  HMI -> PC   HMI_COUNTER  TAG_PING | seq[15:0]
-     pong  PC  -> HMI  HMI_COMMAND  TAG_PONG | peer_rx[27:16] | seq[15:0]
+     run   PC  -> HMI  kHmiCommand  RUN  | run_id[7:0]     1..255, a repeat is ignored
+     ping  HMI -> PC   kHmiCounter  PING | seq[15:0]
+     pong  PC  -> HMI  kHmiCommand  PONG | peer_rx[27:16] | seq[15:0]
    Untagged values are the plain heartbeat. The report is STARTED, one RESULT
    per check, FINISHED, then all of it again: dedupe on (run_id, kind, index). */
 
-#define RAMMP_SELFTEST_TAG_MASK 0xF0000000u
-#define RAMMP_SELFTEST_TAG_PING 0x50000000u
-#define RAMMP_SELFTEST_TAG_PONG 0xA0000000u
-#define RAMMP_SELFTEST_TAG_RUN 0xC0000000u
+inline constexpr uint32_t kSelfTestTagMask = 0xF0000000;
 
-enum {
-  RAMMP_SELFTEST_RESULT_PASS = 0,
-  RAMMP_SELFTEST_RESULT_FAIL = 1,
-  RAMMP_SELFTEST_RESULT_SKIP = 2, /* not measurable, and not required */
+enum class SelfTestTag : uint32_t {
+  NONE = 0x00000000, // the plain heartbeat
+  PING = 0x50000000,
+  PONG = 0xA0000000,
+  RUN = 0xC0000000,
+};
+constexpr SelfTestTag tag_of(uint32_t value) {
+  return static_cast<SelfTestTag>(value & kSelfTestTagMask);
+}
+constexpr uint32_t tagged(SelfTestTag tag, uint32_t payload) {
+  return static_cast<uint32_t>(tag) | (payload & ~kSelfTestTagMask);
+}
+
+enum class SelfTestResult : uint8_t {
+  PASS = 0,
+  FAIL = 1,
+  SKIP = 2, // not measurable, and not required
 };
 
-enum {
-  RAMMP_SELFTEST_KIND_STARTED = 0,  /* count = checks to come, detail = firmware version */
-  RAMMP_SELFTEST_KIND_RESULT = 1,   /* one check */
-  RAMMP_SELFTEST_KIND_FINISHED = 2, /* value/lo/hi = pass/fail/skip totals */
+enum class SelfTestKind : uint8_t {
+  STARTED = 0,  // count = checks to come, detail = firmware version
+  RESULT = 1,   // one check
+  FINISHED = 2, // value/lo/hi = pass/fail/skip totals
 };
 
-/* ==== Names, for logs and labels ======================================== */
+/* ==== Messages (serialized by espp/cdr) ================================= */
 
-static inline const char *rammp_drive_status_name(uint8_t v) {
-  return v == RAMMP_DRIVE_STATUS_INACTIVE ? "INACTIVE"
-         : v == RAMMP_DRIVE_STATUS_ACTIVE ? "ACTIVE"
-                                          : "?";
-}
-
-static inline const char *rammp_state_name(uint8_t v) {
-  return v == RAMMP_STATE_OK ? "OK" : v == RAMMP_STATE_ERROR ? "ERROR" : "?";
-}
-
-static inline const char *rammp_actuator_result_name(uint8_t v) {
-  switch (v) {
-  case RAMMP_ACTUATOR_RESULT_OK:
-    return "OK";
-  case RAMMP_ACTUATOR_RESULT_AT_MIN:
-    return "AT_MIN";
-  case RAMMP_ACTUATOR_RESULT_AT_MAX:
-    return "AT_MAX";
-  case RAMMP_ACTUATOR_RESULT_INHIBITED:
-    return "INHIBITED";
-  case RAMMP_ACTUATOR_RESULT_UNKNOWN_ID:
-    return "UNKNOWN_ID";
-  default:
-    return "?";
-  }
-}
-
-/* ==== HMI-raised warnings =============================================== */
-
-/* The HMI's own text about the link, shown in the same banner as an MCB fault,
-   so each fits RAMMP_ERROR_TEXT_LEN / RAMMP_ERROR_FOOTER_LEN. */
-
-#define RAMMP_STR_(x) #x
-#define RAMMP_STR(x) RAMMP_STR_(x)
-
-#define RAMMP_HMI_LINK_REFUSED_TITLE "DRIVE REFUSED: RTPS LINK" /* drive entry refused */
-#define RAMMP_HMI_MCB_REFUSED_TITLE "DRIVE REFUSED: MCB STATE"
-#define RAMMP_HMI_SEAT_LINK_REFUSED_TITLE "SEAT REFUSED: RTPS LINK" /* seat entry refused */
-#define RAMMP_HMI_SEAT_MCB_REFUSED_TITLE "SEAT REFUSED: MCB STATE"
-#define RAMMP_HMI_LINK_LOST_TITLE "RTPS LINK LOST" /* lost on drive/seat screen */
-#define RAMMP_HMI_MCB_FAULT_TITLE "MCB STATE FAULT"
-
-/* body / footer per link state short of connected */
-#define RAMMP_HMI_ETH_FAILED_TEXT "W5500 ETHERNET INIT FAILED AT BOOT"
-#define RAMMP_HMI_ETH_FAILED_FOOTER "Power-cycle HMI to retry"
-#define RAMMP_HMI_LINK_DOWN_TEXT "NO ETHERNET LINK"
-#define RAMMP_HMI_LINK_DOWN_FOOTER "Check cable/switch to MCB"
-#define RAMMP_HMI_NO_IP_TEXT "LINK UP, NO DHCP LEASE"
-#define RAMMP_HMI_NO_IP_FOOTER "Check DHCP server"
-#define RAMMP_HMI_NO_PEER_TEXT "NO McbStatus IN " RAMMP_STR(RAMMP_MCB_STATUS_TIMEOUT_MS) " MS"
-#define RAMMP_HMI_NO_PEER_FOOTER "topic " RAMMP_TOPIC_MCB_STATUS
-
-/* state != OK with an empty error_text: printf(state, rammp_state_name(state)) */
-#define RAMMP_HMI_MCB_NO_TEXT_FMT "system_state=%u (%s), error_text empty"
-
-#ifdef __cplusplus
-} /* extern "C" */
-
-/* ==== Messages (C++, serialized by espp/cdr) ============================= */
-
-#include <cstddef>
-#include <span>
-#include <string>
-#include <vector>
-
-namespace rammp {
-
-/* MCB -> HMI, every RAMMP_MCB_STATUS_PERIOD_MS */
+/* MCB -> HMI, every kMcbStatusPeriod */
 struct McbStatus {
-  uint8_t drive_status;         // RAMMP_DRIVE_STATUS_*
-  uint8_t system_state;         // RAMMP_STATE_*
+  DriveStatus drive_status;     // what the chair does with the stick
+  SystemState system_state;     // OK, or a fault that blocks drive/seat
   uint8_t flags;                // reserved, send 0
   uint8_t seq;                  // +1 per message, wraps
-  uint8_t speed_tenths;         // 0..RAMMP_SPEED_MAX_TENTHS
+  uint8_t speed_tenths;         // 0..kSpeedMaxTenths
   uint8_t hour, minute, second; // MCB local time
   uint8_t day, month, year;     // month 0 = time unknown (HMI ignores it); year since 2000
   std::string drive_text;       // "" = show the drive_status name
@@ -333,29 +279,29 @@ struct McbStatus {
 
 /* HMI -> MCB. Calibrated: 0 at rest, deadzones applied, X/Y within the unit circle. */
 struct AdcXYTwist {
-  float x;             // -1 left .. +1 right
-  float y;             // -1 back .. +1 forward
-  float twist;         // -1 counter-clockwise .. +1 clockwise (always rotates in place)
-  uint32_t buttons;    // RAMMP_BUTTON_* bits, 1 = pressed
-  uint32_t drive_mode; // RAMMP_DRIVE_MODE_*, chosen on the HMI
+  float x;              // -1 left .. +1 right
+  float y;              // -1 back .. +1 forward
+  float twist;          // -1 counter-clockwise .. +1 clockwise (always rotates in place)
+  Buttons buttons;      // pressed buttons
+  DriveMode drive_mode; // chosen on the HMI
 };
 
 /* HMI -> MCB: move one actuator by `steps` of its table step */
 struct ActuatorCommand {
-  uint8_t req_id;      // +1 per command, wraps; echoed back in ActuatorState
-  uint8_t actuator_id; // RAMMP_ACTUATOR_TABLE row
-  int8_t steps;        // -1 = one "-" press, +1 = one "+" press
+  uint8_t req_id;         // +1 per command, wraps; echoed back in ActuatorState
+  ActuatorId actuator_id; // RAMMP_ACTUATOR_TABLE row
+  int8_t steps;           // -1 = one "-" press, +1 = one "+" press
 };
 
-/* MCB -> HMI, on change and every RAMMP_ACTUATOR_STATE_PERIOD_MS */
+/* MCB -> HMI, on change and every kActuatorStatePeriod */
 struct ActuatorState {
   uint8_t req_id;              // command this answers; 0 = none yet
-  uint8_t result;              // RAMMP_ACTUATOR_RESULT_*
+  ActuatorResult result;       // verdict on that command
   uint8_t seq;                 // +1 per message, wraps
   std::vector<int32_t> values; // one per table row, raw units
 };
 
-/* MCB -> HMI, every RAMMP_DIAG_PERIOD_MS */
+/* MCB -> HMI, every kDiagPeriod */
 struct DiagItem {
   std::vector<int32_t> values; // raw readings, in RAMMP_DIAG_TABLE unit order
 };
@@ -371,18 +317,84 @@ struct UInt32 {
 
 /* HMI -> PC, one per self-test check plus the start/summary markers */
 struct SelfTestReport {
-  uint8_t run_id;     // from the run command; 0 = started on the HMI
-  uint8_t kind;       // RAMMP_SELFTEST_KIND_*
-  uint8_t index;      // check position, 0-based
-  uint8_t count;      // checks in the run
-  uint8_t result;     // RAMMP_SELFTEST_RESULT_*
-  int32_t value;      // meaningless on SKIP
-  int32_t lo;         // inclusive; INT32_MIN = no limit
-  int32_t hi;         // inclusive; INT32_MAX = no limit
-  std::string name;   // "mem.int_free"
-  std::string unit;   // "KB"
-  std::string detail; // context, or why it failed
+  uint8_t run_id;        // from the run command; 0 = started on the HMI
+  SelfTestKind kind;     // STARTED, RESULT or FINISHED
+  uint8_t index;         // check position, 0-based
+  uint8_t count;         // checks in the run
+  SelfTestResult result; // PASS, FAIL or SKIP
+  int32_t value;         // meaningless on SKIP
+  int32_t lo;            // inclusive; INT32_MIN = no limit
+  int32_t hi;            // inclusive; INT32_MAX = no limit
+  std::string name;      // "mem.int_free"
+  std::string unit;      // "KB"
+  std::string detail;    // context, or why it failed
 };
+
+/* ==== Names, for logs and labels ======================================== */
+
+constexpr const char *to_string(DriveStatus v) {
+  switch (v) {
+  case DriveStatus::INACTIVE:
+    return "INACTIVE";
+  case DriveStatus::ACTIVE:
+    return "ACTIVE";
+  }
+  return "?";
+}
+
+constexpr const char *to_string(SystemState v) {
+  switch (v) {
+  case SystemState::OK:
+    return "OK";
+  case SystemState::ERROR:
+    return "ERROR";
+  }
+  return "?";
+}
+
+constexpr const char *to_string(ActuatorResult v) {
+  switch (v) {
+  case ActuatorResult::OK:
+    return "OK";
+  case ActuatorResult::AT_MIN:
+    return "AT_MIN";
+  case ActuatorResult::AT_MAX:
+    return "AT_MAX";
+  case ActuatorResult::INHIBITED:
+    return "INHIBITED";
+  case ActuatorResult::UNKNOWN_ID:
+    return "UNKNOWN_ID";
+  }
+  return "?";
+}
+
+/* ==== HMI-raised warnings =============================================== */
+
+/* The HMI's own text about the link, shown in the same banner as an MCB fault,
+   so each fits kErrorTextLen / kErrorFooterLen. */
+
+inline constexpr char kHmiLinkRefusedTitle[] = "DRIVE REFUSED: RTPS LINK"; // drive entry refused
+inline constexpr char kHmiMcbRefusedTitle[] = "DRIVE REFUSED: MCB STATE";
+inline constexpr char kHmiSeatLinkRefusedTitle[] = "SEAT REFUSED: RTPS LINK"; // seat refused
+inline constexpr char kHmiSeatMcbRefusedTitle[] = "SEAT REFUSED: MCB STATE";
+inline constexpr char kHmiLinkLostTitle[] = "RTPS LINK LOST"; // lost on drive/seat screen
+inline constexpr char kHmiMcbFaultTitle[] = "MCB STATE FAULT";
+
+/* body / footer per link state short of connected */
+inline constexpr char kHmiEthFailedText[] = "W5500 ETHERNET INIT FAILED AT BOOT";
+inline constexpr char kHmiEthFailedFooter[] = "Power-cycle HMI to retry";
+inline constexpr char kHmiLinkDownText[] = "NO ETHERNET LINK";
+inline constexpr char kHmiLinkDownFooter[] = "Check cable/switch to MCB";
+inline constexpr char kHmiNoIpText[] = "LINK UP, NO DHCP LEASE";
+inline constexpr char kHmiNoIpFooter[] = "Check DHCP server";
+inline constexpr char kHmiNoPeerText[] = "NO McbStatus IN 2000 MS";
+inline constexpr char kHmiNoPeerFooter[] = "topic rammp/mcb/status";
+static_assert(kMcbStatusTimeout == milliseconds{2000}, "update kHmiNoPeerText");
+static_assert(std::string_view(kHmiNoPeerFooter).ends_with(kMcbStatus.name),
+              "update kHmiNoPeerFooter");
+
+/* state != OK with an empty error_text: printf(state number, to_string(state)) */
+inline constexpr char kHmiMcbNoTextFmt[] = "system_state=%u (%s), error_text empty";
 
 /* cdr::serialize() gives std::byte; RtpsParticipant::publish() takes uint8_t */
 inline std::span<const uint8_t> as_u8(std::span<const std::byte> bytes) {
@@ -391,14 +403,16 @@ inline std::span<const uint8_t> as_u8(std::span<const std::byte> bytes) {
 
 } // namespace rammp
 
-#endif /* __cplusplus */
-
 /* ==== Legacy hand-written codecs: replaced by espp/cdr, NOT the wire format ====
-   Kept commented out for reference only (fixed-size C arrays, no CDR library). */
+   Kept commented out for reference only (plain C, fixed-size arrays, no CDR library). */
 #if 0
 
+#define RAMMP_MCB_TEXT_LEN 16
+#define RAMMP_ERROR_TEXT_LEN 64
+#define RAMMP_ERROR_FOOTER_LEN 32
 #define RAMMP_ACTUATOR_MAX 8
 #define RAMMP_DIAG_MAX 8
+#define RAMMP_DIAG_FIELDS 3
 #define RAMMP_SELFTEST_NAME_LEN 24
 #define RAMMP_SELFTEST_UNIT_LEN 8
 #define RAMMP_SELFTEST_DETAIL_LEN 48
@@ -654,5 +668,3 @@ static inline bool rammp_diagnostics_decode(const uint8_t *in, size_t in_size,
 }
 
 #endif /* legacy codecs */
-
-#endif /* RAMMP_RTPS_SPEC_H */

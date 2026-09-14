@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""Python view of the RAMMP RTPS wire spec, scraped from the C header.
+"""Python view of the RAMMP RTPS wire spec, read from the C++ header.
 
 ``main/rammp_rtps_spec.h`` is the single source of truth for topics, type names,
 enum values and tables shared by the joystick HMI and the Main Control Board.
-This module parses the header at import time and mirrors its C++ message
-structs, encoded the way espp/cdr encodes them (XCDR1).
+This module parses the header at import time and mirrors its message structs,
+encoded the way espp/cdr encodes them (XCDR1).
 
     import rammp_rtps as spec
     spec.TOPIC_MCB_STATUS        # 'rammp/mcb/status'
     spec.DRIVE_STATUS_ACTIVE     # 1
-    spec.pack_mcb_status(spec.DRIVE_STATUS_ACTIVE, spec.STATE_OK)
+    spec.pack_mcb_status(spec.DRIVE_STATUS_ACTIVE, spec.SYSTEM_STATE_OK)
 
-Names lose the ``RAMMP_`` prefix on the way in, so ``RAMMP_TOPIC_MCB_STATUS``
-becomes ``TOPIC_MCB_STATUS``.
+C++ names become UPPER_SNAKE: ``Topic<McbStatus> kMcbStatus`` gives TOPIC_MCB_STATUS
+and TYPE_MCB_STATUS, ``DriveStatus::ACTIVE`` gives DRIVE_STATUS_ACTIVE, and
+``milliseconds kMcbStatusPeriod{500}`` gives MCB_STATUS_PERIOD_MS.
 """
 
 from __future__ import annotations
@@ -25,13 +26,21 @@ from typing import Dict, List, NamedTuple
 
 HEADER_RELATIVE_PATH = os.path.join("main", "rammp_rtps_spec.h")
 
-_DEFINE_RE = re.compile(r'^\s*#define\s+RAMMP_((?:TOPIC|TYPE)_[A-Z0-9_]+)\s+"([^"]*)"', re.M)
-_ENUM_RE = re.compile(r"^\s*RAMMP_([A-Z0-9_]+)\s*=\s*(\d+)\s*,", re.M)
-# decimal or hex, C integer suffixes allowed, optional trailing comment
+# inline constexpr Topic<McbStatus> kMcbStatus{"rammp/mcb/status", "rammp/msg/McbStatus"};
+_TOPIC_RE = re.compile(r'Topic<(\w+)>\s+k(\w+)\{\s*"([^"]*)"\s*,\s*"([^"]*)"\s*\}')
+# enum class DriveStatus : uint8_t { INACTIVE = 0, ... };
+_ENUM_RE = re.compile(r"enum class (\w+)\s*:\s*\w+\s*\{(.*?)\};", re.S)
+_MEMBER_RE = re.compile(r"^\s*([A-Z][A-Z0-9_]*)\s*=\s*(0[xX][0-9a-fA-F]+|\d+)\s*,", re.M)
+# inline constexpr milliseconds kMcbStatusPeriod{500};  inline constexpr size_t kMcbTextLen = 16;
 _NUMBER_RE = re.compile(
-    r"^\s*#define\s+RAMMP_([A-Z0-9_]+)\s+(0[xX][0-9a-fA-F]+|\d+)[uUlL]*\s*(?:/\*.*?\*/|//.*)?\s*$",
-    re.M,
+    r"^inline constexpr ([\w:]+) k(\w+)\s*(?:=\s*|\{)(0[xX][0-9a-fA-F]+|\d+)\}?;", re.M
 )
+
+
+def _snake(name: str) -> str:
+    """McbStatus -> MCB_STATUS, AdcXYTwist -> ADC_XY_TWIST, SelfTestKind -> SELFTEST_KIND."""
+    name = name.replace("SelfTest", "Selftest").replace("UInt", "Uint")
+    return re.sub(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", "_", name).upper()
 
 
 def find_header() -> str:
@@ -54,17 +63,25 @@ with open(HEADER_PATH, encoding="utf-8") as _header_file:
     # the legacy codecs at the bottom are #if 0'd out: not part of the spec
     _HEADER_TEXT = _header_file.read().split("#if 0", 1)[0]
 
-#: every string #define in the header, keyed without the RAMMP_ prefix
-STRINGS: Dict[str, str] = {name: value for name, value in _DEFINE_RE.findall(_HEADER_TEXT)}
-#: every enumerator in the header, keyed without the RAMMP_ prefix
-ENUMS: Dict[str, int] = {name: int(value) for name, value in _ENUM_RE.findall(_HEADER_TEXT)}
-#: every numeric #define (timing, display limits), keyed without the RAMMP_ prefix
+#: TOPIC_* (topic names) and TYPE_* (DDS type names)
+STRINGS: Dict[str, str] = {}
+for _message, _name, _topic, _type in _TOPIC_RE.findall(_HEADER_TEXT):
+    STRINGS["TOPIC_" + _snake(_name)] = _topic
+    STRINGS["TYPE_" + _snake(_message)] = _type
+#: every enumerator, as ENUM_MEMBER (DRIVE_STATUS_ACTIVE)
+ENUMS: Dict[str, int] = {
+    f"{_snake(enum)}_{member}": int(value, 0)
+    for enum, body in _ENUM_RE.findall(_HEADER_TEXT)
+    for member, value in _MEMBER_RE.findall(body)
+}
+#: every numeric constant (timing gets a _MS suffix)
 NUMBERS: Dict[str, int] = {
-    name: int(value, 0) for name, value in _NUMBER_RE.findall(_HEADER_TEXT)
+    _snake(name) + ("_MS" if kind == "milliseconds" else ""): int(value, 0)
+    for kind, name, value in _NUMBER_RE.findall(_HEADER_TEXT)
 }
 
-if not STRINGS or not ENUMS:
-    raise RuntimeError(f"{HEADER_PATH} parsed to nothing — has its #define/enum style changed?")
+if not STRINGS or not ENUMS or not NUMBERS:
+    raise RuntimeError(f"{HEADER_PATH} parsed to nothing — has its C++ style changed?")
 
 globals().update(STRINGS)
 globals().update(ENUMS)
@@ -78,10 +95,10 @@ def _group(prefix: str) -> Dict[int, str]:
     }
 
 
-#: {0: 'INACTIVE', 1: 'ACTIVE'} — mirrors rammp_drive_status_name() in the header
+#: {0: 'INACTIVE', 1: 'ACTIVE'} — DriveStatus
 DRIVE_STATUS_NAMES = _group("DRIVE_STATUS_")
-#: {0: 'OK', 1: 'ERROR'} — mirrors rammp_state_name() in the header
-STATE_NAMES = _group("STATE_")
+#: {0: 'OK', 1: 'ERROR'} — SystemState
+STATE_NAMES = _group("SYSTEM_STATE_")
 #: {0: 'NORMAL', 1: 'HOLO', 2: 'AUTO'} — the HMI's drive-mode buttons
 DRIVE_MODE_NAMES = _group("DRIVE_MODE_")
 #: {0: 'OK', 1: 'AT_MIN', ...} — the MCB's verdict on an actuator request

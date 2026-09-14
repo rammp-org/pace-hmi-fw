@@ -66,7 +66,7 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
                  car: "rtps_drive_game.CarModel | None" = None) -> None:
         super().__init__(args)
         self.drive_status = spec.DRIVE_STATUS_INACTIVE
-        self.system_state = spec.STATE_OK
+        self.system_state = spec.SYSTEM_STATE_OK
         self.flags = 0
         # label overrides; empty means "let the HMI use the enum's own name"
         self.drive_text = ""
@@ -498,9 +498,9 @@ def run_interactive(harness: McbStatusPublisher) -> None:
         elif command in ("i", "inactive"):
             harness.drive_status = spec.DRIVE_STATUS_INACTIVE
         elif command == "ok":
-            harness.system_state = spec.STATE_OK
+            harness.system_state = spec.SYSTEM_STATE_OK
         elif command in ("e", "err", "error"):
-            harness.system_state = spec.STATE_ERROR
+            harness.system_state = spec.SYSTEM_STATE_ERROR
         elif command == "et" or command.startswith("et "):
             harness.error_text = command[3:].strip()
         elif command == "ef" or command.startswith("ef "):
@@ -535,10 +535,10 @@ def run_interactive(harness: McbStatusPublisher) -> None:
 
 def run_cycle(harness: McbStatusPublisher, dwell: float) -> None:
     combinations = [
-        (spec.DRIVE_STATUS_INACTIVE, spec.STATE_OK),
-        (spec.DRIVE_STATUS_ACTIVE, spec.STATE_OK),
-        (spec.DRIVE_STATUS_ACTIVE, spec.STATE_ERROR),
-        (spec.DRIVE_STATUS_INACTIVE, spec.STATE_ERROR),
+        (spec.DRIVE_STATUS_INACTIVE, spec.SYSTEM_STATE_OK),
+        (spec.DRIVE_STATUS_ACTIVE, spec.SYSTEM_STATE_OK),
+        (spec.DRIVE_STATUS_ACTIVE, spec.SYSTEM_STATE_ERROR),
+        (spec.DRIVE_STATUS_INACTIVE, spec.SYSTEM_STATE_ERROR),
     ]
     stale_gap = max(dwell, spec.MCB_STATUS_TIMEOUT_MS / 1000.0 + 1.0)
     print(f"Cycling every {dwell:.1f}s; Ctrl-C to stop.")

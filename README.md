@@ -70,21 +70,23 @@ Saved settings live in LittleFS (`/storage`), so they survive a reboot.
 Example: an MCB (same espp / ESP-IDF stack) sending Diagnostics:
 
 ```cpp
-#include "cdr.hpp"
-#include "rtps_participant.hpp"
+#include "rtps_pubsub.hpp"
 #include "rammp_rtps_spec.h"
 
 espp::RtpsParticipant rtps({.interface_address = my_ip});
 rtps.start();
-rtps.add_writer({.topic = RAMMP_TOPIC_MCB_DIAGNOSTICS, .type_name = RAMMP_TYPE_DIAGNOSTICS,
-                 .reliability = espp::RtpsParticipant::Reliability::BEST_EFFORT});
+const auto &topic = rammp::kMcbDiagnostics; // a Topic<rammp::Diagnostics>
+espp::Publisher<rammp::Diagnostics> pub(rtps, {.topic = topic.name, .type_name = topic.type});
 
-rammp::Diagnostics diag{.seq = seq++, .items = {{.values = {305, 150, 450}}}}; // T1: 30.5 C, 1.50 A, 45.0 deg
-if (auto bytes = cdr::serialize<cdr::xcdr1>(diag))
-  rtps.publish(RAMMP_TOPIC_MCB_DIAGNOSTICS, rammp::as_u8(*bytes));
+pub.publish({.seq = seq++, .items = {{.values = {305, 150, 450}}}}); // T1: 30.5 C, 1.50 A, 45.0 deg
 ```
 
-Receiving works the same way: `add_reader({..., .on_sample = ...})`, then `cdr::deserialize<rammp::ActuatorCommand>(std::as_bytes(data))`.
+Receiving works the same way: `espp::Subscriber<rammp::ActuatorCommand>` with an `.on_message` callback.
+
+The spec is C++20 and strictly typed:
+- Every enum is scoped with a fixed wire width (`enum class DriveStatus : uint8_t`), so a raw number or the wrong enum does not compile.
+- Every topic carries its message type (`Topic<McbStatus>`), so the wrong message or handler for a topic does not compile.
+- Timings are `std::chrono::milliseconds`; names come from typed `to_string(...)` overloads.
 
 How the messages reach the screens:
 - **McbStatus** → the status labels on every screen, the drive speed, the error banner, and the TopBar clock.
