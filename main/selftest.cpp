@@ -57,14 +57,11 @@ constexpr Spec kSpec[] = {
 static_assert(std::size(kSpec) == ST_COUNT);
 static_assert(ST_COUNT < 256, "the report carries the check index as a uint8_t");
 
-constexpr bool spec_fits_the_wire() {
-  return std::all_of(std::begin(kSpec), std::end(kSpec), [](const Spec &s) {
-    return std::string_view(s.name).size() < RAMMP_SELFTEST_NAME_LEN &&
-           std::string_view(s.unit).size() < RAMMP_SELFTEST_UNIT_LEN && s.lo <= s.hi;
-  });
+constexpr bool spec_limits_ok() {
+  return std::all_of(std::begin(kSpec), std::end(kSpec),
+                     [](const Spec &s) { return s.lo <= s.hi; });
 }
-static_assert(spec_fits_the_wire(),
-              "a selftest_spec.h name or unit is too long for the report, or has lo > hi");
+static_assert(spec_limits_ok(), "a selftest_spec.h row has lo > hi");
 
 bool is_yes_no(const Spec &s) { return s.lo == 1 && s.hi == 1 && s.unit[0] == '\0'; }
 
@@ -289,12 +286,6 @@ const char *reset_reason_name(esp_reset_reason_t reason) {
   }
 }
 
-void copy_field(char *dst, size_t size, std::string_view src) {
-  const size_t n = std::min(src.size(), size - 1);
-  std::memcpy(dst, src.data(), n);
-  std::memset(dst + n, 0, size - n);
-}
-
 /////////////////////////////////////////////////////////////////////////////
 // One run
 /////////////////////////////////////////////////////////////////////////////
@@ -397,7 +388,7 @@ private:
   void publish_result(uint8_t id) const {
     const Spec &s = kSpec[id];
     const Outcome &o = out_[id];
-    rammp_selftest_report_t report{};
+    rammp::SelfTestReport report{};
     report.run_id = run_id_;
     report.kind = RAMMP_SELFTEST_KIND_RESULT;
     report.index = id;
@@ -406,9 +397,9 @@ private:
     report.value = o.value;
     report.lo = s.lo;
     report.hi = s.hi;
-    copy_field(report.name, sizeof(report.name), s.name);
-    copy_field(report.unit, sizeof(report.unit), s.unit);
-    copy_field(report.detail, sizeof(report.detail), o.detail);
+    report.name = s.name;
+    report.unit = s.unit;
+    report.detail = o.detail;
     send_report(report);
   }
 
@@ -416,7 +407,7 @@ private:
   // sends them, so samples published back to back can overwrite each other
   // before they go out - the bench lost the first check that way, twice. A
   // short gap after each one keeps the queue from ever holding a third.
-  static void send_report(const rammp_selftest_report_t &report) {
+  static void send_report(const rammp::SelfTestReport &report) {
     if (rtps_comms_publish_selftest_report(report)) {
       vTaskDelay(pdMS_TO_TICKS(10));
     }
@@ -424,16 +415,15 @@ private:
 
   void publish_marker(uint8_t kind, int32_t value, int32_t lo, int32_t hi,
                       std::string_view detail) const {
-    rammp_selftest_report_t report{};
+    rammp::SelfTestReport report{};
     report.run_id = run_id_;
     report.kind = kind;
     report.count = ST_COUNT;
     report.value = value;
     report.lo = lo;
     report.hi = hi;
-    copy_field(report.name, sizeof(report.name),
-               kind == RAMMP_SELFTEST_KIND_STARTED ? "started" : "summary");
-    copy_field(report.detail, sizeof(report.detail), detail);
+    report.name = kind == RAMMP_SELFTEST_KIND_STARTED ? "started" : "summary";
+    report.detail = std::string(detail);
     send_report(report);
   }
 

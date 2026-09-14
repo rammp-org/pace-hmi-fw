@@ -7,6 +7,7 @@
 #include <fstream>
 #include <limits>
 #include <mutex>
+#include <numeric>
 #include <string>
 #include <utility>
 
@@ -156,10 +157,8 @@ struct Window {
     return hi - lo;
   }
   float mean(int axis) const {
-    float sum = 0.0f;
-    for (int i = 0; i < count; ++i) {
-      sum += samples[i][axis];
-    }
+    const float sum = std::accumulate(std::begin(samples), std::begin(samples) + count, 0.0f,
+                                      [axis](float acc, const auto &s) { return acc + s[axis]; });
     return sum / static_cast<float>(count);
   }
 };

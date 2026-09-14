@@ -23,7 +23,7 @@ void settings_load();
 
 /// UI theme index (ui_themes.h). Default 0, UI_THEME_DEFAULT.
 uint8_t settings_theme();
-void settings_set_theme(uint8_t theme);
+void settings_set_theme(uint8_t value);
 
 /// Backlight %, kBrightnessMinPercent..kBrightnessMaxPercent. Default 75.
 int settings_brightness();

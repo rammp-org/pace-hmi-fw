@@ -63,7 +63,7 @@ struct JoystickCalUi {
 
 /// Bind the run to its widgets. Same context as main.cpp's other bindings:
 /// after ui_init, before the LVGL task runs, and after `blink` is initialised.
-void joystick_cal_init_ui(const JoystickCalUi &ui);
+void joystick_cal_init_ui(const JoystickCalUi &config);
 
 /// ADC task, every cycle it read all three axes: the values the stick is fed.
 void joystick_cal_note_raw(float horizontal_mv, float vertical_mv, float twist_mv);

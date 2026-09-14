@@ -778,7 +778,7 @@ static void clock_set(const std::tm &local) {
 }
 
 // RTPS receive task.
-static void clock_note_mcb_time(const rammp_mcb_status_t &status) {
+static void clock_note_mcb_time(const rammp::McbStatus &status) {
   if (status.month < 1 || status.month > 12 || status.day < 1 || status.day > 31 ||
       status.hour > 23 || status.minute > 59 || status.second > 59) {
     return; // month 0: the MCB does not know the time
@@ -1850,7 +1850,7 @@ static lv_subject_t *const kSettingParamValue[] = {
 static_assert(std::size(kSettingParamValue) == SETTINGS_PARAM_COUNT,
               "every settings_spec.h parameter needs its subject here");
 
-static constexpr int kSettingRowsMax = std::max<int>(RAMMP_ACTUATOR_MAX, SETTINGS_PARAM_COUNT);
+static constexpr int kSettingRowsMax = std::max<int>(RAMMP_ACTUATOR_COUNT, SETTINGS_PARAM_COUNT);
 static SettingRow setting_rows[kSettingRowsMax];
 static int setting_row_count; // rows on the page that is up; 0 while the screen is not
 static int setting_cursor;    // which row the joystick is on
@@ -1861,7 +1861,7 @@ static lv_subject_t setting_page_subject;
 
 // Raw value per actuator, in the table's units. Static: the rows' observers
 // point at them, and the MCB keeps them current with no page up.
-static lv_subject_t actuator_value[RAMMP_ACTUATOR_MAX];
+static lv_subject_t actuator_value[RAMMP_ACTUATOR_COUNT];
 static uint8_t actuator_count; // actuators in the table
 
 // What a value reads before it is known - only ever an actuator the MCB has
@@ -1974,11 +1974,10 @@ static uint8_t actuator_req_target[256];
 static bool actuator_flashed_any;
 static lv_timer_t *actuator_reject_timer = nullptr;
 
-static void actuator_apply_state(const rammp_actuator_state_t &state) {
-  for (uint8_t i = 0; i < actuator_count; i++) {
-    if (i < state.count) {
-      lv_subject_set_int(&actuator_value[i], state.values[i]);
-    }
+static void actuator_apply_state(const rammp::ActuatorState &state) {
+  const size_t known = std::min<size_t>(actuator_count, state.values.size());
+  for (size_t i = 0; i < known; i++) {
+    lv_subject_set_int(&actuator_value[i], state.values[i]);
   }
   if (state.result == RAMMP_ACTUATOR_RESULT_OK) {
     return;
@@ -2425,7 +2424,6 @@ static void actions_open() {
 // on demand").
 /////////////////////////////////////////////////////////////////////////////
 
-static_assert(RAMMP_DIAG_COUNT <= RAMMP_DIAG_MAX, "RAMMP_DIAG_TABLE has outgrown RAMMP_DIAG_MAX");
 static_assert(RAMMP_DIAG_FIELDS == 3, "the DiagnosticComponent has exactly three readings");
 
 // Each reading's container, units label and value label in the component.
@@ -2449,7 +2447,7 @@ static constexpr DiagFieldIds kDiagFieldIds[RAMMP_DIAG_FIELDS] = {
 // Readings, raw, [table row][reading]; kValueUnknown until the MCB sends one.
 // Static: the rows' observers point at them, and they keep updating with no
 // screen up.
-static lv_subject_t diag_value[RAMMP_DIAG_MAX][RAMMP_DIAG_FIELDS];
+static lv_subject_t diag_value[RAMMP_DIAG_COUNT][RAMMP_DIAG_FIELDS];
 static lv_subject_t diag_stale_subject; // 1 = nothing within RAMMP_DIAG_TIMEOUT_MS, or ever
 static lv_subject_t diag_rate_subject;  // arrival rate, tenths of a Hz
 
@@ -2458,9 +2456,9 @@ struct DiagField {
   uint8_t item;
   uint8_t field;
 };
-static DiagField diag_fields[RAMMP_DIAG_MAX][RAMMP_DIAG_FIELDS];
+static DiagField diag_fields[RAMMP_DIAG_COUNT][RAMMP_DIAG_FIELDS];
 
-static lv_obj_t *diag_rows[RAMMP_DIAG_MAX];
+static lv_obj_t *diag_rows[RAMMP_DIAG_COUNT];
 static int diag_row_count; // rows on screen; 0 while it is not up
 static int diag_cursor;    // which row the joystick is on
 static lv_group_t *diag_group = nullptr;
@@ -4066,10 +4064,6 @@ extern "C" void app_main(void) {
   // SpecificSettingScreen: what outlives the screen, which is built on demand
   // (settings_screen_ensure).
 
-  // The wire message carries a fixed-size array, so the table cannot outgrow
-  // it without both boards being rebuilt.
-  static_assert(RAMMP_ACTUATOR_COUNT <= RAMMP_ACTUATOR_MAX,
-                "RAMMP_ACTUATOR_TABLE has outgrown RAMMP_ACTUATOR_MAX");
   rammp_actuator_table(&actuator_count);
   for (uint8_t i = 0; i < actuator_count; i++) {
     lv_subject_init_int(&actuator_value[i], kValueUnknown);
@@ -4542,30 +4536,29 @@ extern "C" void app_main(void) {
   // so it only writes subjects — and takes the LVGL lock to do it, because
   // lv_subject_set_int runs the observers synchronously on this task and they
   // touch widgets.
-  rtps_comms_on_mcb_status([](const rammp_mcb_status_t &status) {
+  // RTPS handlers run on the RTPS task: subjects only, under the LVGL lock.
+  rtps_comms_on_mcb_status([](const rammp::McbStatus &status) {
     clock_note_mcb_time(status); // no LVGL: sets the system clock and the RTC
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
     lv_subject_set_int(&drive_status_subject, status.drive_status);
     lv_subject_set_int(&mcb_state_subject, status.system_state);
-    // decode() guarantees these are NUL-terminated within RAMMP_MCB_TEXT_LEN,
-    // which is exactly the size the subjects were initialised with
-    lv_subject_copy_string(&drive_text_subject, status.drive_text);
-    lv_subject_copy_string(&state_text_subject, status.state_text);
     lv_subject_set_int(&speed_tenths_subject, status.speed_tenths);
-    lv_subject_copy_string(&error_text_subject, status.error_text);
-    lv_subject_copy_string(&error_footer_subject, status.error_footer);
+    // copy_string cuts each text to its subject's buffer (RAMMP_*_LEN)
+    lv_subject_copy_string(&drive_text_subject, status.drive_text.c_str());
+    lv_subject_copy_string(&state_text_subject, status.state_text.c_str());
+    lv_subject_copy_string(&error_text_subject, status.error_text.c_str());
+    lv_subject_copy_string(&error_footer_subject, status.error_footer.c_str());
   });
-  rtps_comms_on_actuator_state([](const rammp_actuator_state_t &state) {
+  rtps_comms_on_actuator_state([](const rammp::ActuatorState &state) {
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
     actuator_apply_state(state);
   });
-  // Diagnostics -> diag_value. RTPS receive task, so subjects only, under the
-  // LVGL lock (the rows' observers run on this task and touch widgets).
-  rtps_comms_on_diagnostics([](const rammp_diagnostics_t &diag) {
+  rtps_comms_on_diagnostics([](const rammp::Diagnostics &diag) {
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
-    for (uint8_t i = 0; i < diag.count && i < RAMMP_DIAG_COUNT; i++) {
-      for (int f = 0; f < RAMMP_DIAG_FIELDS; f++) {
-        lv_subject_set_int(&diag_value[i][f], diag.values[i][f]);
+    for (size_t i = 0; i < std::min<size_t>(diag.items.size(), RAMMP_DIAG_COUNT); i++) {
+      const auto &values = diag.items[i].values;
+      for (size_t f = 0; f < std::min<size_t>(values.size(), RAMMP_DIAG_FIELDS); f++) {
+        lv_subject_set_int(&diag_value[i][f], values[f]);
       }
     }
   });
