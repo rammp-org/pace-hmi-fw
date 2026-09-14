@@ -23,8 +23,12 @@ Firmware for the RAMMP wheelchair HMI: an M5Stack Tab5 (ESP32-P4) on the [RAMMP 
 |:--:|:--:|:--:|
 | <img src="docs/screenshots/BootScreen.png" width="200"> | <img src="docs/screenshots/MainScreenFlex.png" width="200"> | <img src="docs/screenshots/DriveScreen.png" width="200"> |
 | Boot splash | Home pager | Drive: speed, drive mode |
-| <img src="docs/screenshots/SeatAdjustmentFlexScreen.png" width="200"> | <img src="docs/screenshots/JoystickTest.png" width="200"> | |
-| Seat functions | Joystick test | |
+| <img src="docs/screenshots/SeatAdjustmentFlexScreen.png" width="200"> | <img src="docs/screenshots/GenericActionsScreen.png" width="200"> | <img src="docs/screenshots/SpecificSettingScreen.png" width="200"> |
+| Seat functions | Generic actions | Setting page (brightness, actuators) |
+| <img src="docs/screenshots/RDScreen.png" width="200"> | <img src="docs/screenshots/DiagnosticsScreen.png" width="200"> | <img src="docs/screenshots/LogScreen.png" width="200"> |
+| PIN before DEBUG ACTUATORS | Live MCB diagnostics | System logs |
+| <img src="docs/screenshots/JoystickTest.png" width="200"> | | |
+| Joystick test and calibration | | |
 
 - **Drive / Seat**: only enter while the MCB link is up and its state is OK; otherwise a red banner says why.
 - **Generic actions**: one row per entry in `main/actions_spec.h` (haptic test, self test, seat up, restart).
@@ -62,6 +66,25 @@ Saved settings live in LittleFS (`/storage`), so they survive a reboot.
 | `rammp/actuator/command` | `ActuatorCommand` | HMI → MCB, per press | move actuator N by ±steps |
 | `rammp/hmi/counter`, `command`, `brightness` | `std_msgs/UInt32` | bench PC | heartbeat, self-test run / ping, backlight % |
 | `rammp/selftest/report` | `SelfTestReport` | HMI → PC | one per self-test check |
+
+Example: an MCB (same espp / ESP-IDF stack) sending Diagnostics:
+
+```cpp
+#include "cdr.hpp"
+#include "rtps_participant.hpp"
+#include "rammp_rtps_spec.h"
+
+espp::RtpsParticipant rtps({.interface_address = my_ip});
+rtps.start();
+rtps.add_writer({.topic = RAMMP_TOPIC_MCB_DIAGNOSTICS, .type_name = RAMMP_TYPE_DIAGNOSTICS,
+                 .reliability = espp::RtpsParticipant::Reliability::BEST_EFFORT});
+
+rammp::Diagnostics diag{.seq = seq++, .items = {{.values = {305, 150, 450}}}}; // T1: 30.5 C, 1.50 A, 45.0 deg
+if (auto bytes = cdr::serialize<cdr::xcdr1>(diag))
+  rtps.publish(RAMMP_TOPIC_MCB_DIAGNOSTICS, rammp::as_u8(*bytes));
+```
+
+Receiving works the same way: `add_reader({..., .on_sample = ...})`, then `cdr::deserialize<rammp::ActuatorCommand>(std::as_bytes(data))`.
 
 How the messages reach the screens:
 - **McbStatus** → the status labels on every screen, the drive speed, the error banner, and the TopBar clock.
