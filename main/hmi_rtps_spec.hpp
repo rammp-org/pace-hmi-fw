@@ -3,15 +3,14 @@
  *
  * - The shared messages, topics, enums and tables (every RAMMP device):
  *   messages/joystick_message.hpp, in the rammp-rtps submodule (external/rammp-rtps).
- * - Here, what no other device needs: the screen names for the shared tables, names and
- *   helpers, this HMI's timing and display limits, its bench-only self-test topics and
- *   the warning texts it raises itself. Same rules: scoped enums, typed topics, C++20.
+ * - Here, what no other device needs: names and helpers, this HMI's timing and
+ *   display limits, its bench-only self-test topics and the warning texts it raises
+ *   itself. Same rules: scoped enums, typed topics, C++20.
  * - scripts/rammp_rtps.py reads both files.
  */
 
 #pragma once
 
-#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -32,61 +31,9 @@ namespace rammp {
 
 using std::chrono::milliseconds;
 
-/* ==== Screen names for the shared tables ================================ */
-
-/* One row per RAMMP_ACTUATOR_TABLE / RAMMP_DIAG_TABLE row, in the same order (a missing or
-   misplaced row does not compile). XL(NAME, short, label) / DL(NAME, short, label) */
-#define RAMMP_HMI_ACTUATOR_LABELS(XL)                                                              \
-  XL(ELEVATION, "M1", "Elevation")                                                                 \
-  XL(REAR_TILT, "M2", "Rear Tilt")                                                                 \
-  XL(FORWARD_TILT, "M3", "Forward Tilt")                                                           \
-  XL(SIDE_TILT, "M4", "Side Tilt")
-
-#define RAMMP_HMI_DIAG_LABELS(DL)                                                                  \
-  DL(TEST_1, "T1", "Test actuator 1")                                                              \
-  DL(TEST_2, "T2", "Test actuator 2")                                                              \
-  DL(TEST_3, "T3", "Test actuator 3")
-
-template <class Id> struct Label {
-  Id id;
-  const char *short_name; // "M1"
-  const char *label;      // "Elevation"
-};
-
-inline constexpr std::array kActuatorLabels{
-#define RAMMP_HMI_ACTUATOR_LABEL(name_, short_, label_)                                            \
-  Label<ActuatorId>{ActuatorId::name_, short_, label_},
-    RAMMP_HMI_ACTUATOR_LABELS(RAMMP_HMI_ACTUATOR_LABEL)
-#undef RAMMP_HMI_ACTUATOR_LABEL
-};
-
-inline constexpr std::array kDiagLabels{
-#define RAMMP_HMI_DIAG_LABEL(name_, short_, label_) Label<DiagId>{DiagId::name_, short_, label_},
-    RAMMP_HMI_DIAG_LABELS(RAMMP_HMI_DIAG_LABEL)
-#undef RAMMP_HMI_DIAG_LABEL
-};
-
-// Each label row names the shared row at the same position.
-template <class Labels, class Rows>
-constexpr bool rows_match(const Labels &labels, const Rows &rows) {
-  if (labels.size() != rows.size()) {
-    return false;
-  }
-  for (size_t i = 0; i < rows.size(); i++) {
-    if (labels[i].id != rows[i].id) {
-      return false;
-    }
-  }
-  return true;
-}
-static_assert(rows_match(kActuatorLabels, kActuators),
-              "RAMMP_HMI_ACTUATOR_LABELS must list RAMMP_ACTUATOR_TABLE's rows, in order");
-static_assert(rows_match(kDiagLabels, kDiagItems),
-              "RAMMP_HMI_DIAG_LABELS must list RAMMP_DIAG_TABLE's rows, in order");
-
 /* ==== Names and helpers ================================================= */
 
-// ActuatorId -> its row in kActuators, kActuatorLabels and ActuatorState.values: to
+// ActuatorId -> its row in kActuators and ActuatorState.values: to
 // range-check the MCB's answer and find the row a refused step flashes.
 constexpr size_t index_of(ActuatorId id) { return static_cast<size_t>(id); }
 

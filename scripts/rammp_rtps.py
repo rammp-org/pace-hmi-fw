@@ -138,20 +138,17 @@ class Actuator(NamedTuple):
         return max(self.min_value, min(self.max_value, raw))
 
 
-# shared:  X(0, ELEVATION, 0, 2500, 50, 1, "mm")      this HMI:  XL(ELEVATION, "M1", "Elevation")
+# X(0, ELEVATION, "M1", "Elevation", 0, 2500, 50, 1, "mm")
 _ACTUATOR_RE = re.compile(
-    r"""^\s*X\(\s*(\d+)\s*,\s*([A-Z0-9_]+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,"""
-    r"""\s*(\d+)\s*,\s*"([^"]*)"\s*\)""",
+    r"""^\s*X\(\s*(\d+)\s*,\s*([A-Z0-9_]+)\s*,\s*"([^"]*)"\s*,\s*"([^"]*)"\s*,"""
+    r"""\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(\d+)\s*,\s*"([^"]*)"\s*\)""",
     re.M,
 )
-_ACTUATOR_LABEL_RE = re.compile(r"""^\s*XL\(\s*([A-Z0-9_]+)\s*,\s*"([^"]*)"\s*,\s*"([^"]*)"\s*\)""", re.M)
-_ACTUATOR_LABELS = {name: (short, label) for name, short, label in _ACTUATOR_LABEL_RE.findall(_HEADER_TEXT)}
 
-#: every actuator: the shared table row plus this HMI's names for it, in wire-id order
+#: every actuator in the shared X-macro table, in wire-id order
 ACTUATORS: List[Actuator] = [
-    Actuator(int(i), name, *_ACTUATOR_LABELS.get(name, (name, name)), int(lo), int(hi), int(step),
-             int(dec), unit)
-    for i, name, lo, hi, step, dec, unit in _ACTUATOR_RE.findall(_HEADER_TEXT)
+    Actuator(int(i), name, short, label, int(lo), int(hi), int(step), int(dec), unit)
+    for i, name, short, label, lo, hi, step, dec, unit in _ACTUATOR_RE.findall(_HEADER_TEXT)
 ]
 
 if not ACTUATORS:
@@ -176,21 +173,17 @@ class DiagItem(NamedTuple):
         return f"{raw / (10 ** places):.{places}f}"
 
 
-# shared:  D(0, TEST_1, "Temp [C]", 1, "Current [A]", 2, "Pos [deg]", 1)
-# this HMI:  DL(TEST_1, "T1", "Test actuator 1")
+# D(0, TEST_1, "T1", "Test actuator 1", "Temp [C]", 1, "Current [A]", 2, "Pos [deg]", 1)
 _DIAG_RE = re.compile(
-    r"""^\s*D\(\s*(\d+)\s*,\s*([A-Z0-9_]+)\s*,"""
+    r"""^\s*D\(\s*(\d+)\s*,\s*([A-Z0-9_]+)\s*,\s*"([^"]*)"\s*,\s*"([^"]*)"\s*,"""
     r"""\s*"([^"]*)"\s*,\s*(\d+)\s*,\s*"([^"]*)"\s*,\s*(\d+)\s*,\s*"([^"]*)"\s*,\s*(\d+)\s*\)""",
     re.M,
 )
-_DIAG_LABEL_RE = re.compile(r"""^\s*DL\(\s*([A-Z0-9_]+)\s*,\s*"([^"]*)"\s*,\s*"([^"]*)"\s*\)""", re.M)
-_DIAG_LABELS = {name: (short, label) for name, short, label in _DIAG_LABEL_RE.findall(_HEADER_TEXT)}
 
-#: every diagnostics item: the shared table row plus this HMI's names for it, in wire order
+#: every item in the shared diagnostics table, in wire order
 DIAGNOSTICS: List[DiagItem] = [
-    DiagItem(int(i), name, *_DIAG_LABELS.get(name, (name, name)), (u1, u2, u3),
-             (int(d1), int(d2), int(d3)))
-    for i, name, u1, d1, u2, d2, u3, d3 in _DIAG_RE.findall(_HEADER_TEXT)
+    DiagItem(int(i), name, short, label, (u1, u2, u3), (int(d1), int(d2), int(d3)))
+    for i, name, short, label, u1, d1, u2, d2, u3, d3 in _DIAG_RE.findall(_HEADER_TEXT)
 ]
 
 if not DIAGNOSTICS:
