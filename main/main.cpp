@@ -4485,19 +4485,10 @@ extern "C" void app_main(void) {
       // centred while a calibration run sweeps the stick, so nothing drives
       // on it. The bars keep moving, to show the stick is being read.
       // quiet no-op until RTPS is up and a subscriber is discovered
-<<<<<<< HEAD
-      auto to_mv = [](float v) { return static_cast<uint32_t>(std::max(v, 0.0f)); };
-      const uint32_t buttons = joy_button_pressed.load() ? RAMMP_BUTTON_JOYSTICK : 0u;
-      const uint32_t drive_mode = drive_mode_published.load();
-      rtps_comms_publish_adc(to_mv(*horiz_mv), to_mv(*vert_mv), to_mv(*twist_mv),
-                             buttons, drive_mode);
-      rtps_comms_publish_xy_twist(stick.x(), stick.y(), stick.z(), buttons, drive_mode);
-=======
       adc_published = rtps_comms_publish_adc(
           calibrating ? 0.0f : stick.x(), calibrating ? 0.0f : stick.y(),
           calibrating ? 0.0f : stick.z(), joy_button_pressed.load() ? RAMMP_BUTTON_JOYSTICK : 0u,
           drive_mode_published.load());
->>>>>>> main
     }
     // Every cycle, valid or not: the self test measures the loop's cadence and
     // how often a read fails, as well as the values. A no-op unless a run is

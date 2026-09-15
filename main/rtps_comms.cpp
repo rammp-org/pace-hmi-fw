@@ -49,41 +49,9 @@ constexpr gpio_num_t kPinInt = GPIO_NUM_4;
 constexpr int kSpiClockMhz = 20;   // W5500 max is 33; 20 tolerates jumper wires
 constexpr int kRxPollPeriodMs = 0; // 0 = RX on the INT line; N = poll every N ms (rules out INT)
 
-<<<<<<< HEAD
-// RTPS settings. The domain is fixed at build time by the engine
-// (RtpsParticipant::Config::DOMAIN_ID, default 0 = the ROS_DOMAIN_ID default)
-// and is no longer settable per participant.
-//
-// Every topic and type name comes from rammp_rtps_spec.h so the MCB and the
-// python test tools cannot drift from us. A writer only has send destinations
-// once a remote reader on the same topic is discovered, so a name mismatch
-// shows up as a "No send destinations" warning rather than an error.
-//
-// For a ROS 2 peer instead, use pre-mangled ROS 2 wire names — e.g. type
-// "std_msgs::msg::dds_::UInt32_" — since the espp rtps component emits names
-// verbatim.
-//
-// The counter/command pair still matches the espp python host harness
-// (rtps_host.py --publish-topic/--subscribe-topic): it echoes every value
-// back, giving a full publish->echo->receive round trip for bring-up.
-constexpr std::string_view kNodeName = "rammp_hmi";
-constexpr std::string_view kCounterTopic = RAMMP_TOPIC_HMI_COUNTER;
-constexpr std::string_view kCmdTopic = RAMMP_TOPIC_HMI_COMMAND;
-constexpr std::string_view kBrightnessTopic = RAMMP_TOPIC_HMI_BRIGHTNESS;
-constexpr std::string_view kUInt32TypeName = RAMMP_TYPE_UINT32;
-constexpr std::string_view kAdcTopic = RAMMP_TOPIC_JOYSTICK_ADC;
-constexpr std::string_view kAdcTypeName = RAMMP_TYPE_ADC_XY_TWIST;
-constexpr std::string_view kXYTwistTopic = RAMMP_TOPIC_JOYSTICK_XY_TWIST;
-constexpr std::string_view kXYTwistTypeName = RAMMP_TYPE_XY_TWIST;
-constexpr std::string_view kMcbStatusTopic = RAMMP_TOPIC_MCB_STATUS;
-constexpr std::string_view kMcbStatusTypeName = RAMMP_TYPE_MCB_STATUS;
-
-constexpr auto kPublishPeriod = 2s;
-=======
 constexpr auto kHeartbeatPeriod = 2s; // bench counter on RAMMP_TOPIC_HMI_COUNTER
 constexpr int64_t kMcbStatusTimeoutUs = RAMMP_MCB_STATUS_TIMEOUT_MS * 1000LL;
 constexpr int64_t kDiagRateWindowUs = 4'000'000;
->>>>>>> main
 
 espp::Logger logger({.tag = "rtps_comms", .level = espp::Logger::Verbosity::INFO});
 
@@ -96,14 +64,8 @@ std::atomic<int64_t> last_status_us{0}; // last McbStatus, esp_timer time; 0 = n
 std::string ip_address;
 esp_netif_ip_info_t ip_info{};
 
-<<<<<<< HEAD
-std::unique_ptr<espp::RtpsParticipant> participant;
-std::unique_ptr<espp::Publisher<rammp_xy_twist_t>> xy_twist_publisher;
-std::unique_ptr<espp::Task> publish_task;
-=======
 std::unique_ptr<Rtps> participant;
 std::unique_ptr<espp::Task> heartbeat_task;
->>>>>>> main
 
 std::function<void(float)> brightness_handler;
 std::function<void(const rammp::McbStatus &)> mcb_status_handler;
@@ -414,49 +376,7 @@ bool start_participant() {
   if (!ok) {
     return false;
   }
-<<<<<<< HEAD
-  logger.info("Added writer '{}' [{}]", kCounterTopic, kUInt32TypeName);
-  if (!participant->add_writer({
-          .topic = std::string(kAdcTopic),
-          .type_name = std::string(kAdcTypeName),
-          .reliability = espp::RtpsParticipant::Reliability::BEST_EFFORT,
-      })) {
-    logger.error("Failed to add writer for '{}'", kAdcTopic);
-    return false;
-  }
-  logger.info("Added writer '{}' [{}]", kAdcTopic, kAdcTypeName);
-  xy_twist_publisher = std::make_unique<espp::Publisher<rammp_xy_twist_t>>(
-      *participant, espp::Publisher<rammp_xy_twist_t>::Config{
-                        .topic = std::string(kXYTwistTopic),
-                        .type_name = std::string(kXYTwistTypeName),
-                        .reliability = espp::RtpsParticipant::Reliability::BEST_EFFORT,
-                    });
-  if (!xy_twist_publisher->is_valid()) {
-    logger.error("Failed to add writer for '{}'", kXYTwistTopic);
-    return false;
-  }
-  logger.info("Added typed publisher '{}' [{}]", kXYTwistTopic, kXYTwistTypeName);
-  if (!participant->add_reader({
-          .topic = std::string(kCmdTopic),
-          .type_name = std::string(kUInt32TypeName),
-          .reliability = espp::RtpsParticipant::Reliability::BEST_EFFORT,
-          .on_sample =
-              [](std::span<const uint8_t> cdr) {
-                auto value = deserialize_uint32(cdr);
-                if (!value) {
-                  logger.warn("Received sample on '{}' that failed CDR decode", kCmdTopic);
-                  return;
-                }
-                logger.info("Received echo/cmd on '{}': {}", kCmdTopic, *value);
-              },
-      })) {
-    logger.error("Failed to add reader for '{}'", kCmdTopic);
-    return false;
-  }
-  logger.info("Added reader '{}' [{}]", kCmdTopic, kUInt32TypeName);
-=======
   logger.info("RTPS up on {}", ip_address);
->>>>>>> main
 
   // bench heartbeat: a counter on RAMMP_TOPIC_HMI_COUNTER every kHeartbeatPeriod
   heartbeat_task = std::make_unique<espp::Task>(espp::Task::Config{

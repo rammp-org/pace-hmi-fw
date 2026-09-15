@@ -44,20 +44,6 @@ struct RtpsDiagStats {
 };
 RtpsDiagStats rtps_comms_diag_stats();
 
-<<<<<<< HEAD
-/// Publish one normalized joystick snapshot on RAMMP_TOPIC_JOYSTICK_XY_TWIST.
-/// Axis values are calibrated -1.0..1.0. Safe to call from any task; returns
-/// false (without logging) until the participant is running and a subscriber on
-/// the topic has been discovered.
-bool rtps_comms_publish_xy_twist(float x, float y, float twist, uint32_t buttons,
-                                 uint32_t drive_mode);
-
-/// Bring up Ethernet, then start the RTPS participant + publish task in the
-/// background as soon as DHCP assigns an IP (no timeout — also covers a cable
-/// plugged in after boot). Returns quickly; progress is logged.
-/// @return true if Ethernet bring-up succeeded, false otherwise —
-///         the HMI keeps running without comms in that case.
-=======
 /// McbStatus arrivals since the last reset, for the self test.
 struct RtpsMcbStats {
   uint32_t samples = 0;   ///< samples decoded
@@ -71,5 +57,4 @@ RtpsMcbStats rtps_comms_mcb_stats();
 
 /// Brings up Ethernet, then starts RTPS in the background once DHCP gives an IP
 /// (no timeout, so a cable plugged in later works). False = no W5500; the HMI runs on.
->>>>>>> main
 bool rtps_comms_start();
