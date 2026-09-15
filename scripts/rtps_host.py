@@ -532,6 +532,9 @@ class RtpsHostHarness:
         # same cap, but keyed by (address, port) for peers seeded by hand — they
         # are never discovered via SPDP, so they have no participant GUID
         self.peer_sedp_counts: Dict[Tuple[str, int], int] = {}
+        # Each endpoint's SEDP announcement, built once and then resent
+        # verbatim; see _sedp_announcement for why the bytes must not change.
+        self._sedp_messages: Dict[Tuple[str, int], bytes] = {}
         self.joined_user_multicast_groups: Set[str] = set()
 
         # Peers to reach without multicast discovery (see seed_peer_discovery).
@@ -802,6 +805,32 @@ class RtpsHostHarness:
             payload,
         )
 
+    def _sedp_announcement(self, endpoint) -> bytes:
+        """This endpoint's SEDP message, built once and resent verbatim.
+
+        The peer's builtin SEDP reader is reliable, so it only accepts sequence
+        numbers in order. Rebuilding the message for every repeat gave each
+        copy a fresh number, so one announcement lost from a burst stalled every
+        later one for good - no repeat ever carried the number it was waiting
+        for. Seen on the bench over Tailscale: of seven announcements the HMI
+        took the first four, and the readers behind the lost fifth never
+        matched. Resending the same bytes lets a repeat fill exactly the hole,
+        and a peer that already has it drops the duplicate.
+        """
+        is_writer = isinstance(endpoint, WriterConfig)
+        key = ("pub" if is_writer else "sub", endpoint.entity_index)
+        message = self._sedp_messages.get(key)
+        if message is None:
+            message = (self.build_sedp_publication_message(endpoint) if is_writer
+                       else self.build_sedp_subscription_message(endpoint))
+            self._sedp_messages[key] = message
+        return message
+
+    def _sedp_announcements(self) -> List[bytes]:
+        """Every local endpoint's announcement, writers then readers, in a fixed order."""
+        return ([self._sedp_announcement(writer) for writer in self.local_writers]
+                + [self._sedp_announcement(reader) for reader in self.local_readers])
+
     def build_data_message(self, writer: WriterConfig, cdr_payload: bytes) -> bytes:
         # Standard RTPS: the DATA serializedPayload is exactly the CDR-encapsulated sample.
         writer_entity_id = entity_id_for_index(writer.entity_index, USER_WRITER_NO_KEY_KIND)
@@ -864,16 +893,17 @@ class RtpsHostHarness:
                 # dedupes by GUID (findRemoteParticipant -> refresh, not add).
                 if not self._send_metatraffic(spdp, target):
                     continue  # nothing listening on this id; try the next
-                # SEDP does not: embeddedRTPS adds a proxy per announcement with
-                # no dedupe, so repeating forever exhausts its pool.
+                # SEDP does not: embeddedRTPS adds a proxy per announcement it
+                # accepts with no dedupe, so repeating forever could exhaust its
+                # pool. (The copies are verbatim, so a peer that already took
+                # one drops the repeat; the cap is belt and braces.)
                 sent = self.peer_sedp_counts.get(target, 0)
                 if sent >= self.SEDP_ANNOUNCE_REPEATS:
                     continue
                 self.peer_sedp_counts[target] = sent + 1
-                for writer in self.local_writers:
-                    self._send_metatraffic(self.build_sedp_publication_message(writer), target)
-                for reader in self.local_readers:
-                    self._send_metatraffic(self.build_sedp_subscription_message(reader), target)
+                for message in self._sedp_announcements():
+                    self._send_metatraffic(message, target)
+                    time.sleep(self.SEDP_SEND_GAP_S)
 
     def send_spdp_announce_now(self) -> None:
         payload = self.build_spdp_announce_message()
@@ -903,7 +933,13 @@ class RtpsHostHarness:
                 (participant.address, participant.ports.metatraffic_unicast),
             )
 
-    SEDP_ANNOUNCE_REPEATS = 3
+    # Rounds of SEDP per peer. Each round can repair one hole left by the ones
+    # before it (see _sedp_announcement), so this is how many losses discovery
+    # survives.
+    SEDP_ANNOUNCE_REPEATS = 5
+    # Gap between the announcements in a round. Sent back to back, a round is
+    # a burst the HMI's W5500 does not always take whole.
+    SEDP_SEND_GAP_S = 0.005
 
     def send_sedp_announcements_to(self, participant: ParticipantProxy) -> None:
         target = (participant.address, participant.ports.metatraffic_unicast)
@@ -913,10 +949,9 @@ class RtpsHostHarness:
         if sent >= self.SEDP_ANNOUNCE_REPEATS:
             return
         self.sedp_announce_counts[participant.participant_guid] = sent + 1
-        for writer in self.local_writers:
-            self.metatraffic_unicast_sock.sendto(self.build_sedp_publication_message(writer), target)
-        for reader in self.local_readers:
-            self.metatraffic_unicast_sock.sendto(self.build_sedp_subscription_message(reader), target)
+        for message in self._sedp_announcements():
+            self.metatraffic_unicast_sock.sendto(message, target)
+            time.sleep(self.SEDP_SEND_GAP_S)
 
     def send_discovery_now(self) -> None:
         self.send_spdp_announce_now()
@@ -1472,7 +1507,7 @@ def run_self_test() -> int:
     parsed = parse_rtps_data_messages(message)
     check("one DATA submessage parsed", len(parsed) == 1)
     if parsed:
-        got_prefix, got_writer_id, payload = parsed[0]
+        got_prefix, got_writer_id, payload, _reader_id = parsed[0]
         check("guid_prefix recovered", got_prefix == prefix)
         check("writer_id recovered", got_writer_id == writer_id)
         check("serializedPayload is raw CDR (no framing)", payload == cdr)

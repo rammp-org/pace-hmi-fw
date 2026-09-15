@@ -2,9 +2,9 @@
 """Python view of the RAMMP RTPS wire spec, scraped from the C header.
 
 ``main/rammp_rtps_spec.h`` is the single source of truth for topics, type names,
-enum values and message layouts shared by the joystick HMI and the Main Control
-Board. Rather than keeping a hand-written copy here (which drifts the first time
-someone edits only one side), this module parses the header at import time.
+enum values and tables shared by the joystick HMI and the Main Control Board.
+This module parses the header at import time and mirrors its C++ message
+structs, encoded the way espp/cdr encodes them (XCDR1).
 
     import rammp_rtps as spec
     spec.TOPIC_MCB_STATUS        # 'rammp/mcb/status'
@@ -12,27 +12,25 @@ someone edits only one side), this module parses the header at import time.
     spec.pack_mcb_status(spec.DRIVE_STATUS_ACTIVE, spec.STATE_OK)
 
 Names lose the ``RAMMP_`` prefix on the way in, so ``RAMMP_TOPIC_MCB_STATUS``
-becomes ``TOPIC_MCB_STATUS``. The parser matches the two shapes the header
-documents — ``#define RAMMP_TOPIC_*``/``RAMMP_TYPE_*`` string defines and
-``RAMMP_<GROUP>_<NAME> = <int>,`` enumerators — so new entries written in that
-style appear here for free.
+becomes ``TOPIC_MCB_STATUS``.
 """
 
 from __future__ import annotations
 
+import datetime
 import os
 import re
 import struct
-from typing import Dict
+from typing import Dict, List, NamedTuple
 
 HEADER_RELATIVE_PATH = os.path.join("main", "rammp_rtps_spec.h")
 
 _DEFINE_RE = re.compile(r'^\s*#define\s+RAMMP_((?:TOPIC|TYPE)_[A-Z0-9_]+)\s+"([^"]*)"', re.M)
 _ENUM_RE = re.compile(r"^\s*RAMMP_([A-Z0-9_]+)\s*=\s*(\d+)\s*,", re.M)
-# Accepts decimal and hex, with the C integer suffixes: bitmasks in a wire
-# spec are naturally written 0x...u, and those must scrape like any other.
+# decimal or hex, C integer suffixes allowed, optional trailing comment
 _NUMBER_RE = re.compile(
-    r"^\s*#define\s+RAMMP_([A-Z0-9_]+)\s+(0[xX][0-9a-fA-F]+|\d+)[uUlL]*\s*$", re.M
+    r"^\s*#define\s+RAMMP_([A-Z0-9_]+)\s+(0[xX][0-9a-fA-F]+|\d+)[uUlL]*\s*(?:/\*.*?\*/|//.*)?\s*$",
+    re.M,
 )
 
 
@@ -53,13 +51,14 @@ def find_header() -> str:
 
 HEADER_PATH = find_header()
 with open(HEADER_PATH, encoding="utf-8") as _header_file:
-    _HEADER_TEXT = _header_file.read()
+    # the legacy codecs at the bottom are #if 0'd out: not part of the spec
+    _HEADER_TEXT = _header_file.read().split("#if 0", 1)[0]
 
 #: every string #define in the header, keyed without the RAMMP_ prefix
 STRINGS: Dict[str, str] = {name: value for name, value in _DEFINE_RE.findall(_HEADER_TEXT)}
 #: every enumerator in the header, keyed without the RAMMP_ prefix
 ENUMS: Dict[str, int] = {name: int(value) for name, value in _ENUM_RE.findall(_HEADER_TEXT)}
-#: every numeric #define (the timing contract), keyed without the RAMMP_ prefix
+#: every numeric #define (timing, display limits), keyed without the RAMMP_ prefix
 NUMBERS: Dict[str, int] = {
     name: int(value, 0) for name, value in _NUMBER_RE.findall(_HEADER_TEXT)
 }
@@ -85,65 +84,334 @@ DRIVE_STATUS_NAMES = _group("DRIVE_STATUS_")
 STATE_NAMES = _group("STATE_")
 #: {0: 'NORMAL', 1: 'HOLO', 2: 'AUTO'} — the HMI's drive-mode buttons
 DRIVE_MODE_NAMES = _group("DRIVE_MODE_")
+#: {0: 'OK', 1: 'AT_MIN', ...} — the MCB's verdict on an actuator request
+ACTUATOR_RESULT_NAMES = _group("ACTUATOR_RESULT_")
+
+
+class Actuator(NamedTuple):
+    """One row of RAMMP_ACTUATOR_TABLE: raw integer values, `decimals` for display."""
+
+    id: int
+    name: str
+    short: str
+    label: str
+    min_value: int
+    max_value: int
+    step: int
+    decimals: int
+    unit: str
+
+    def format(self, raw: int) -> str:
+        """Raw units as the HMI's row draws them, e.g. 126 -> '12.6'."""
+        return f"{raw / (10 ** self.decimals):.{self.decimals}f}"
+
+    def parse(self, text: str) -> int:
+        """Inverse of format(): '12.6' -> 126, rounded and clamped to range."""
+        raw = int(round(float(text) * (10 ** self.decimals)))
+        return max(self.min_value, min(self.max_value, raw))
+
+
+# X(0, ELEVATION, "M1", "Elevation", 0, 2500, 50, 1, "mm")
+_ACTUATOR_RE = re.compile(
+    r"""^\s*X\(\s*(\d+)\s*,\s*([A-Z0-9_]+)\s*,\s*"([^"]*)"\s*,\s*"([^"]*)"\s*,"""
+    r"""\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(\d+)\s*,\s*"([^"]*)"\s*\)""",
+    re.M,
+)
+
+#: every actuator in the header's X-macro table, in wire-id order
+ACTUATORS: List[Actuator] = [
+    Actuator(int(i), name, short, label, int(lo), int(hi), int(step), int(dec), unit)
+    for i, name, short, label, lo, hi, step, dec, unit in _ACTUATOR_RE.findall(_HEADER_TEXT)
+]
+
+if not ACTUATORS:
+    raise RuntimeError(f"{HEADER_PATH}: RAMMP_ACTUATOR_TABLE parsed to nothing")
+if [a.id for a in ACTUATORS] != list(range(len(ACTUATORS))):
+    raise RuntimeError(f"{HEADER_PATH}: actuator ids must be 0..N-1 in table order")
+
+
+class DiagItem(NamedTuple):
+    """One row of RAMMP_DIAG_TABLE: up to three readings, each with its unit."""
+
+    id: int
+    name: str
+    short: str
+    label: str
+    units: tuple  # three unit labels; "" = reading unused
+    decimals: tuple  # three decimal counts, display only
+
+    def format(self, raw: int, field: int) -> str:
+        """A raw reading as the HMI draws it, e.g. 2345 with 2 decimals -> '23.45'."""
+        places = self.decimals[field]
+        return f"{raw / (10 ** places):.{places}f}"
+
+
+# D(0, TEST_1, "T1", "Test actuator 1", "Temp [C]", 1, "Current [A]", 2, "Pos [deg]", 1)
+_DIAG_RE = re.compile(
+    r"""^\s*D\(\s*(\d+)\s*,\s*([A-Z0-9_]+)\s*,\s*"([^"]*)"\s*,\s*"([^"]*)"\s*,"""
+    r"""\s*"([^"]*)"\s*,\s*(\d+)\s*,\s*"([^"]*)"\s*,\s*(\d+)\s*,\s*"([^"]*)"\s*,\s*(\d+)\s*\)""",
+    re.M,
+)
+
+#: every item in the header's diagnostics table, in wire order
+DIAGNOSTICS: List[DiagItem] = [
+    DiagItem(int(i), name, short, label, (u1, u2, u3), (int(d1), int(d2), int(d3)))
+    for i, name, short, label, u1, d1, u2, d2, u3, d3 in _DIAG_RE.findall(_HEADER_TEXT)
+]
+
+if not DIAGNOSTICS:
+    raise RuntimeError(f"{HEADER_PATH}: RAMMP_DIAG_TABLE parsed to nothing")
+if [d.id for d in DIAGNOSTICS] != list(range(len(DIAGNOSTICS))):
+    raise RuntimeError(f"{HEADER_PATH}: diagnostics ids must be 0..N-1 in table order")
+
+# ------------------------------------------------------------------ CDR (XCDR1)
+# What espp/cdr puts on the wire for the spec's C++ structs: header 00 01 00 00,
+# little-endian, each primitive aligned to its size from the first payload byte,
+# string = uint32 length (NUL included) + bytes + NUL, sequence = uint32 count + items.
 
 #: 4-byte CDR encapsulation header: little-endian classic CDR (xcdr1)
 CDR_LE_HEADER = b"\x00\x01\x00\x00"
 
+# The C++ structs, field for field. A type is a struct format char, "str",
+# ("seq", element type) or a nested field list (a struct).
+MSG_MCB_STATUS = [
+    ("drive_status", "B"), ("system_state", "B"), ("flags", "B"), ("seq", "B"),
+    ("speed_tenths", "B"), ("hour", "B"), ("minute", "B"), ("second", "B"),
+    ("day", "B"), ("month", "B"), ("year", "B"),
+    ("drive_text", "str"), ("state_text", "str"), ("error_text", "str"), ("error_footer", "str"),
+]
+MSG_ADC_XY_TWIST = [("x", "f"), ("y", "f"), ("twist", "f"), ("buttons", "I"), ("drive_mode", "I")]
+MSG_ACTUATOR_COMMAND = [("req_id", "B"), ("actuator_id", "B"), ("steps", "b")]
+MSG_ACTUATOR_STATE = [("req_id", "B"), ("result", "B"), ("seq", "B"), ("values", ("seq", "i"))]
+MSG_DIAGNOSTICS = [("seq", "B"), ("items", ("seq", [("values", ("seq", "i"))]))]
+MSG_UINT32 = [("data", "I")]
+MSG_SELFTEST_REPORT = [
+    ("run_id", "B"), ("kind", "B"), ("index", "B"), ("count", "B"), ("result", "B"),
+    ("value", "i"), ("lo", "i"), ("hi", "i"), ("name", "str"), ("unit", "str"), ("detail", "str"),
+]
 
-#: struct format for the payload behind the encapsulation header, matching
-#: rammp_mcb_status_encode() in the spec header
-_MCB_STATUS_FORMAT = (
-    f"<BBBBB{MCB_TEXT_LEN}s{MCB_TEXT_LEN}s{ERROR_TEXT_LEN}s{ERROR_FOOTER_LEN}s"
-)
-_MCB_STATUS_CDR_SIZE = len(CDR_LE_HEADER) + struct.calcsize(_MCB_STATUS_FORMAT)
+
+def _write(out: bytearray, kind, value) -> None:
+    if isinstance(kind, list):  # a struct: value is a tuple in field order
+        for (_name, field_kind), field_value in zip(kind, value):
+            _write(out, field_kind, field_value)
+    elif isinstance(kind, tuple):  # ("seq", element)
+        _write(out, "I", len(value))
+        for element in value:
+            _write(out, kind[1], element)
+    elif kind == "str":
+        data = value.encode("ascii", "ignore")
+        _write(out, "I", len(data) + 1)
+        out.extend(data + b"\0")
+    else:
+        size = struct.calcsize(kind)
+        out.extend(b"\0" * (-len(out) % size))
+        out.extend(struct.pack("<" + kind, value))
 
 
-def _decode_field(raw: bytes) -> str:
-    """Text up to the first NUL, as the C decoder reads it."""
-    return raw.split(b"\0", 1)[0].decode("ascii", "replace")
+def _read(buf: bytes, pos: int, kind):
+    """(value, position after it)."""
+    if isinstance(kind, list):
+        values = []
+        for _name, field_kind in kind:
+            value, pos = _read(buf, pos, field_kind)
+            values.append(value)
+        return tuple(values), pos
+    if isinstance(kind, tuple):
+        count, pos = _read(buf, pos, "I")
+        if count > len(buf) - pos:
+            raise ValueError("sequence runs past the end")
+        items = []
+        for _ in range(count):
+            item, pos = _read(buf, pos, kind[1])
+            items.append(item)
+        return items, pos
+    if kind == "str":
+        length, pos = _read(buf, pos, "I")
+        if pos + length > len(buf):
+            raise ValueError("string runs past the end")
+        return buf[pos:pos + length].split(b"\0", 1)[0].decode("ascii", "replace"), pos + length
+    size = struct.calcsize(kind)
+    pos += -pos % size
+    return struct.unpack_from("<" + kind, buf, pos)[0], pos + size
 
 
-def encode_label(text: str, limit: int = MCB_TEXT_LEN) -> bytes:
-    """ASCII-encode a text field, truncated to leave room for the NUL.
+def encode(fields, *values) -> bytes:
+    """One message: CDR_LE_HEADER + its XCDR1 payload (values in field order)."""
+    out = bytearray()
+    _write(out, fields, values)
+    return CDR_LE_HEADER + bytes(out)
 
-    The HMI draws these with LVGL's built-in Montserrat faces, which have no
-    glyphs outside ASCII, so anything else is dropped rather than sent as bytes
-    that would render blank.
-    """
-    return text.encode("ascii", "ignore")[: limit - 1]  # struct's 's' NUL-pads
+
+def decode(fields, payload: bytes):
+    """The message's values as a tuple in field order, or None if it does not decode."""
+    if len(payload) < len(CDR_LE_HEADER) or payload[:2] != CDR_LE_HEADER[:2]:
+        return None
+    try:
+        return _read(payload[len(CDR_LE_HEADER):], 0, fields)[0]
+    except (struct.error, ValueError):
+        return None
+
+
+def _text(text: str, limit: int) -> str:
+    """ASCII only (the HMI's fonts have nothing else), cut to what the HMI shows."""
+    return text.encode("ascii", "ignore")[: limit - 1].decode("ascii")
 
 
 def pack_mcb_status(drive_status: int, system_state: int, flags: int = 0, seq: int = 0,
                     speed_tenths: int = 0, drive_text: str = "", state_text: str = "",
-                    error_text: str = "", error_footer: str = "") -> bytes:
-    """Serialize a rammp_mcb_status_t, matching rammp_mcb_status_encode()."""
-    return CDR_LE_HEADER + struct.pack(
-        _MCB_STATUS_FORMAT,
+                    error_text: str = "", error_footer: str = "",
+                    clock: datetime.datetime | None = None) -> bytes:
+    """A rammp::McbStatus. `clock` is the MCB's local time; None sends month 0, "unknown"."""
+    when = (0,) * 6 if clock is None else (
+        clock.hour, clock.minute, clock.second, clock.day, clock.month,
+        max(0, min(clock.year - 2000, 255)))
+    return encode(
+        MSG_MCB_STATUS,
         drive_status & 0xFF, system_state & 0xFF, flags & 0xFF, seq & 0xFF,
-        max(0, min(int(speed_tenths), SPEED_MAX_TENTHS)),
-        encode_label(drive_text), encode_label(state_text),
-        encode_label(error_text, ERROR_TEXT_LEN), encode_label(error_footer, ERROR_FOOTER_LEN),
+        max(0, min(int(speed_tenths), SPEED_MAX_TENTHS)), *when,  # noqa: F821  (scraped)
+        _text(drive_text, MCB_TEXT_LEN), _text(state_text, MCB_TEXT_LEN),  # noqa: F821
+        _text(error_text, ERROR_TEXT_LEN), _text(error_footer, ERROR_FOOTER_LEN),  # noqa: F821
     )
 
 
 def unpack_mcb_status(payload: bytes):
-    """(drive, state, flags, seq, speed_tenths, drive_text, state_text,
-    error_text, error_footer), or None if this isn't one."""
-    if len(payload) < _MCB_STATUS_CDR_SIZE or payload[:2] != CDR_LE_HEADER[:2]:
-        return None
-    drive, state, flags, seq, speed, drive_raw, state_raw, err_raw, foot_raw = struct.unpack_from(
-        _MCB_STATUS_FORMAT, payload, len(CDR_LE_HEADER)
-    )
-    return (drive, state, flags, seq, speed,
-            _decode_field(drive_raw), _decode_field(state_raw),
-            _decode_field(err_raw), _decode_field(foot_raw))
+    """(drive, state, flags, seq, speed_tenths, hour, minute, second, day, month,
+    year_since_2000, drive_text, state_text, error_text, error_footer), or None."""
+    return decode(MSG_MCB_STATUS, payload)
 
 
-def unpack_adc_xy_twist(payload: bytes) -> tuple[int, int, int, int, int] | None:
-    """(x_mv, y_mv, twist_mv, buttons, drive_mode) from the joystick sample."""
-    if len(payload) < 24 or payload[:2] != CDR_LE_HEADER[:2]:
+def pack_actuator_command(req_id: int, actuator_id: int, steps: int) -> bytes:
+    """A rammp::ActuatorCommand (HMI -> MCB)."""
+    return encode(MSG_ACTUATOR_COMMAND, req_id & 0xFF, actuator_id & 0xFF,
+                  max(-128, min(127, int(steps))))
+
+
+def unpack_actuator_command(payload: bytes) -> tuple[int, int, int] | None:
+    """(req_id, actuator_id, steps), or None."""
+    return decode(MSG_ACTUATOR_COMMAND, payload)
+
+
+def pack_actuator_state(values, req_id: int = 0, result: int = 0, seq: int = 0) -> bytes:
+    """A rammp::ActuatorState (MCB -> HMI); `values` = raw value per table row."""
+    return encode(MSG_ACTUATOR_STATE, req_id & 0xFF, result & 0xFF, seq & 0xFF,
+                  [int(v) for v in values])
+
+
+def unpack_actuator_state(payload: bytes) -> tuple[int, int, int, list[int]] | None:
+    """(req_id, result, seq, values), or None."""
+    return decode(MSG_ACTUATOR_STATE, payload)
+
+
+def pack_diagnostics(values, seq: int = 0) -> bytes:
+    """A rammp::Diagnostics (MCB -> HMI); `values` = one list of raw readings per item."""
+    return encode(MSG_DIAGNOSTICS, seq & 0xFF, [([int(v) for v in row],) for row in values])
+
+
+def unpack_diagnostics(payload: bytes) -> tuple[int, list[list[int]]] | None:
+    """(seq, readings per item), or None."""
+    message = decode(MSG_DIAGNOSTICS, payload)
+    return None if message is None else (message[0], [item[0] for item in message[1]])
+
+
+def unpack_adc_xy_twist(payload: bytes) -> tuple[float, float, float, int, int] | None:
+    """(x, y, twist, buttons, drive_mode): axes -1..+1, calibrated by the HMI."""
+    return decode(MSG_ADC_XY_TWIST, payload)
+
+
+# ------------------------------------------------------------------ self test
+
+#: {0: 'PASS', 1: 'FAIL', 2: 'SKIP'}
+SELFTEST_RESULT_NAMES = _group("SELFTEST_RESULT_")
+#: what a report carries for "no limit on this side"
+INT32_MIN = -(2 ** 31)
+INT32_MAX = 2 ** 31 - 1
+
+
+class SelfTestResult(NamedTuple):
+    """One rammp::SelfTestReport: a check, or a run's start/summary."""
+
+    run_id: int
+    kind: int
+    index: int
+    count: int
+    result: int
+    value: int
+    lo: int
+    hi: int
+    name: str
+    unit: str
+    detail: str
+
+
+def pack_uint32(value: int) -> bytes:
+    """A std_msgs/UInt32 sample, as the bench counter/command topics carry."""
+    return encode(MSG_UINT32, value & 0xFFFFFFFF)
+
+
+def unpack_uint32(payload: bytes) -> int | None:
+    message = decode(MSG_UINT32, payload)
+    return None if message is None else message[0]
+
+
+# The self test's run request and ping/pong ride the bench UInt32 pair, tagged
+# in the top nibble; "Self test" in the spec header says why.
+def pack_selftest_run(run_id: int) -> bytes:
+    """Ask for a self-test run (PC -> HMI on TOPIC_HMI_COMMAND)."""
+    return pack_uint32(SELFTEST_TAG_RUN | (run_id & 0xFF))  # noqa: F821
+
+
+def selftest_ping_seq(value: int) -> int | None:
+    """The seq of a ping seen on TOPIC_HMI_COUNTER, or None for the heartbeat."""
+    if value & SELFTEST_TAG_MASK != SELFTEST_TAG_PING:  # noqa: F821
         return None
-    return struct.unpack_from("<IIIII", payload, 4)
+    return value & 0xFFFF
+
+
+def pack_selftest_pong(seq: int, peer_rx: int) -> bytes:
+    """Answer a ping (PC -> HMI on TOPIC_HMI_COMMAND); peer_rx saturates at 4095."""
+    return pack_uint32(SELFTEST_TAG_PONG | (min(peer_rx, 0xFFF) << 16) | (seq & 0xFFFF))  # noqa: F821
+
+
+def pack_selftest_report(r: SelfTestResult) -> bytes:
+    """A rammp::SelfTestReport (HMI -> PC); for tests of the tools."""
+    return encode(MSG_SELFTEST_REPORT, *r)
+
+
+def unpack_selftest_report(payload: bytes) -> SelfTestResult | None:
+    message = decode(MSG_SELFTEST_REPORT, payload)
+    return None if message is None else SelfTestResult(*message)
+
+
+def _selftest_yes_no(r: SelfTestResult) -> bool:
+    return r.lo == 1 and r.hi == 1 and not r.unit
+
+
+def format_selftest_value(r: SelfTestResult, value: int | None = None) -> str:
+    """A value as the HMI shows it: '182 KB', 'yes', '0.7%'. Mirrors selftest.cpp."""
+    value = r.value if value is None else value
+    if _selftest_yes_no(r):
+        return "yes" if value else "no"
+    if r.unit == "0.1%":
+        return f"{value / 10:.1f}%"
+    return f"{value} {r.unit}" if r.unit else str(value)
+
+
+def format_selftest_limits(r: SelfTestResult) -> str:
+    if r.lo == r.hi:
+        return "yes" if _selftest_yes_no(r) else f"= {format_selftest_value(r, r.lo)}"
+    if r.lo == INT32_MIN:
+        return f"<= {format_selftest_value(r, r.hi)}"
+    if r.hi == INT32_MAX:
+        return f">= {format_selftest_value(r, r.lo)}"
+    return f"{format_selftest_value(r, r.lo)} .. {format_selftest_value(r, r.hi)}"
+
+
+def format_selftest_result(r: SelfTestResult, detail: str | None = None) -> str:
+    """One row of the report table, in the same columns as the HMI's serial log."""
+    measured = "-" if r.result == SELFTEST_RESULT_SKIP else format_selftest_value(r)  # noqa: F821
+    return (f"{SELFTEST_RESULT_NAMES.get(r.result, '?'):<4}  {r.name:<18} {measured:>14}  "
+            f"{format_selftest_limits(r):<20} {r.detail if detail is None else detail}")
 
 
 if __name__ == "__main__":
@@ -157,3 +425,11 @@ if __name__ == "__main__":
     print("\nnumbers:")
     for key in sorted(NUMBERS):
         print(f"  {key:<24} {NUMBERS[key]}")
+    print("\nactuators:")
+    for actuator in ACTUATORS:
+        print(
+            f"  {actuator.id}  {actuator.short:<4} {actuator.label:<16} "
+            f"{actuator.format(actuator.min_value):>7} .. "
+            f"{actuator.format(actuator.max_value):<7} "
+            f"step {actuator.format(actuator.step)} {actuator.unit}"
+        )

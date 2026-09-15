@@ -2,146 +2,128 @@
 
 <img src="docs/screenshots/MainScreenFlex.png" alt="Main Screen" width="260">
 
-## Description
-This FW drives the RAMMP Wheelchair HMI (Human-Machine-Interface). This FW is meant to run on a TAB5 attached to the [RAMMP HMI PCB](https://github.com/rammp-org/pace-hmi-pcb)
+Firmware for the RAMMP wheelchair HMI: an M5Stack Tab5 (ESP32-P4) on the [RAMMP HMI PCB](https://github.com/rammp-org/pace-hmi-pcb).
 
-## Compatible Hardware
-- The FW runs on a TAB5 tablet (ESP32-P4)
-- [RAMMP HMI PCB](https://github.com/rammp-org/pace-hmi-pcb)
-- 3D Joystick (Hall Sensor) via ADCs
-- Up to 4 buttons via GPIO
-- WIP: Haptic Motor feedback via I2C (requires haptic driver)
-- Ethernet for RTPS comms via W5500 ethernet controller
+## Hardware
+- Tab5 (ESP32-P4), 720x1280 portrait touch panel
+- 3D hall joystick (X / Y / twist) on the ADCs, up to 4 buttons on GPIO
+- W5500 SPI Ethernet for RTPS
+- WIP: haptic motor over I2C
+
+## Build and flash
+- With ESP-IDF v6.0: `idf.py build flash monitor`
+- Without a toolchain: download the programmer from **Actions → Build and Package Main → Artifacts** and run it.
+- Or put the [release](https://github.com/rammp-org/pace-hmi-fw/releases) images in `precompiled/` and run `.\flash_precompiled.ps1` (needs esptool v5+).
 
 ## Screens
-The UI is designed in SquareLine Studio 1.6.1 in [pace-hmi-gui](https://github.com/rammp-org/pace-hmi-gui); `main/ui/` is that project's C export, mirrored in by `import_ui.ps1` — edit the design there, not here.
-
-Navigation is joystick-only: push up and hold on a page to enter it, then hold the joystick button (or pull, on the seat screen) to come back. The prompt at the bottom of each screen says which.
+- Joystick only: **push up and hold** to enter, **pull and hold** (or hold the button) to leave. The bottom prompt says which.
+- The UI is designed in SquareLine Studio ([pace-hmi-gui](https://github.com/rammp-org/pace-hmi-gui)); `main/ui/` is its export (`import_ui.ps1`). Don't edit it here.
 
 | | | |
 |:--:|:--:|:--:|
 | <img src="docs/screenshots/BootScreen.png" width="200"> | <img src="docs/screenshots/MainScreenFlex.png" width="200"> | <img src="docs/screenshots/DriveScreen.png" width="200"> |
-| Splash while the display, ADCs and Ethernet come up | Home pager; push & hold the joystick to unlock driving | Speed, remaining range and drive mode (Holo / Normal / Auto) |
-| <img src="docs/screenshots/SeatAdjustmentFlexScreen.png" width="200"> | <img src="docs/screenshots/JoystickTest.png" width="200"> | |
-| Seat functions: elevation and tilts, static or dynamic | Bars follow the raw X/Y/twist ADC values | |
+| Boot splash | Home pager | Drive: speed, drive mode |
+| <img src="docs/screenshots/SeatAdjustmentFlexScreen.png" width="200"> | <img src="docs/screenshots/GenericActionsScreen.png" width="200"> | <img src="docs/screenshots/SpecificSettingScreen.png" width="200"> |
+| Seat functions | Generic actions | Setting page (brightness, actuators) |
+| <img src="docs/screenshots/RDScreen.png" width="200"> | <img src="docs/screenshots/DiagnosticsScreen.png" width="200"> | <img src="docs/screenshots/LogScreen.png" width="200"> |
+| PIN before DEBUG ACTUATORS | Live MCB diagnostics | System logs |
+| <img src="docs/screenshots/JoystickTest.png" width="200"> | | |
+| Joystick test and calibration | | |
 
-## Simulator
+- **Drive / Seat**: only enter while the MCB link is up and its state is OK; otherwise a red banner says why.
+- **Generic actions**: one row per entry in `main/actions_spec.h` (haptic test, self test, seat up, restart).
 
-| | |
-|:--:|:--:|
-| <img src="docs/screenshots/Simulator.png" width="220"> | <img src="docs/screenshots/SimulatorBench.png" width="220"> |
-| The panel, at the Tab5's real 720x1280 | The bench: D-pad, buttons, mapping mockup |
+## Settings menu
 
-`sim/` runs those screens on a PC with no Tab5 and no MCB. It compiles
-`main/ui/` unmodified against upstream LVGL, so the layout, fonts and styling
-are the real ones at the panel's real 720x1280: useful for looking at a design
-change without a board, and for feeling the push-and-hold navigation. It needs
-CMake, Ninja and a compiler; no ESP-IDF, no SDL, no Python packages.
+| row | what it does |
+| --- | --- |
+| CHANGE THEME | switch the colour theme (saved) |
+| SCREEN BRIGHTNESS | backlight 5-100 % (saved); the side button and RTPS can set it too |
+| DIAGNOSTICS | live readings from the MCB, see below |
+| DEBUG ACTUATORS | PIN, then step each actuator with -/+ (the MCB moves it) |
+| SELF TEST | checks the HMI; results on screen and on serial |
+| SYSTEM LOGS | the last 500 serial log lines |
+| FPS COUNTER | show the render rate |
+| HAPTIC TEST | buzz the vibration motor |
+| Joystick Test → CALIBRATE | 6-step stick calibration, saved to flash |
 
-```powershell
-cd sim
-python run.py
+Saved settings live in LittleFS (`/storage`), so they survive a reboot.
+
+## RTPS
+
+- The spec is `main/rammp_rtps_spec.h`: topics, enums, tables and the message structs.
+- Its top has an example: an MCB on the same espp / ESP-IDF stack sending Diagnostics.
+- Messages are plain C++ structs serialized by espp/cdr as **XCDR1** (classic CDR), so any DDS / ROS 2 stack can talk to it.
+- Every topic is best-effort; the MCB resends its state periodically.
+- The MCB owns the chair's state; the HMI shows it and asks for changes.
+
+| topic | type | direction | carries |
+| --- | --- | --- | --- |
+| `rammp/mcb/status` | `McbStatus` | MCB → HMI, 2 Hz | drive status, state, speed, clock, label and error text |
+| `rammp/actuator/state` | `ActuatorState` | MCB → HMI, 2 Hz + on change | actuator positions, verdict on the last command |
+| `rammp/mcb/diagnostics` | `Diagnostics` | MCB → HMI, 2 Hz | readings for each `RAMMP_DIAG_TABLE` row |
+| `rammp/joystick/adc` | `AdcXYTwist` | HMI → MCB, ~30 Hz | calibrated X / Y / twist (-1..+1), buttons, drive mode |
+| `rammp/actuator/command` | `ActuatorCommand` | HMI → MCB, per press | move actuator N by ±steps |
+| `rammp/hmi/counter`, `command`, `brightness` | `std_msgs/UInt32` | bench PC | heartbeat, self-test run / ping, backlight % |
+| `rammp/selftest/report` | `SelfTestReport` | HMI → PC | one per self-test check |
+
+Example: an MCB (same espp / ESP-IDF stack) sending Diagnostics:
+
+```cpp
+#include "cdr.hpp"
+#include "rtps_participant.hpp"
+#include "rammp_rtps_spec.h"
+
+espp::RtpsParticipant rtps({.interface_address = my_ip});
+rtps.start();
+rtps.add_writer({.topic = RAMMP_TOPIC_MCB_DIAGNOSTICS, .type_name = RAMMP_TYPE_DIAGNOSTICS,
+                 .reliability = espp::RtpsParticipant::Reliability::BEST_EFFORT});
+
+rammp::Diagnostics diag{.seq = seq++, .items = {{.values = {305, 150, 450}}}}; // T1: 30.5 C, 1.50 A, 45.0 deg
+if (auto bytes = cdr::serialize<cdr::xcdr1>(diag))
+  rtps.publish(RAMMP_TOPIC_MCB_DIAGNOSTICS, rammp::as_u8(*bytes));
 ```
 
-That configures, builds and launches; CMake fetches LVGL itself on the first
-run. Windows only for now.
+Receiving works the same way: `add_reader({..., .on_sample = ...})`, then `cdr::deserialize<rammp::ActuatorCommand>(std::as_bytes(data))`.
 
-It opens two windows: the panel, which is exactly 720x1280 and contains nothing
-but what the firmware drew, and a bench underneath it holding the chair's
-control surface: a D-pad and two buttons. Hold the D-pad's up key to unlock,
-the same gesture the real stick asks for; arrows or WASD work too. The MCB
-simulation is on the keyboard, since none of it is a control the chair has.
+How the messages reach the screens:
+- **McbStatus** → the status labels on every screen, the drive speed, the error banner, and the TopBar clock.
+- No McbStatus for 2 s → "RTPS LINK LOST"; Drive and Seat are refused.
+- **ActuatorState** → the DEBUG ACTUATORS rows; a refused step flashes its row.
+- Each -/+ press sends an **ActuatorCommand**, and the row shows what the MCB answers.
+- **Diagnostics** → the DIAGNOSTICS rows; the rate label shows the arrival Hz.
+- No Diagnostics for 2 s → every row turns red and blinks.
+- **AdcXYTwist** goes out continuously once the MCB is found.
 
-Each button has a dropdown for trying out what it might do. That part is a
-labelled mockup, not firmware: the board implements one button function today.
+### Adding an actuator or a diagnostics item
 
-See [sim/README.md](sim/README.md) for the full key map and, more importantly,
-for what the sim is and is not evidence of. The navigation layer is a port of
-`main.cpp`, so the two can drift.
+One line in `main/rammp_rtps_spec.h`; the HMI screen and the Python tools pick it up.
 
-## Flashing without building
+```c
+// RAMMP_ACTUATOR_TABLE: X(id, NAME, short, label, min, max, step, decimals, unit)
+  X(4, HEADREST, "M5", "Headrest", 0, 900, 25, 1, "deg")
 
-The easiest route needs nothing installed at all — no Python, no esptool, not even this
-repo. Every CI build produces a self-contained programmer for each desktop OS, attached
-to the workflow run under **Actions → Build and Package Main → Artifacts**:
-
-```
-rammp-hmi-p4_programmer_<version>_windows.exe
-rammp-hmi-p4_programmer_<version>_macos.bin
-rammp-hmi-p4_programmer_<version>_linux.bin
+// RAMMP_DIAG_TABLE: D(id, NAME, short, label, unit1, dec1, unit2, dec2, unit3, dec3)
+  D(3, TEST_4, "T4", "Test actuator 4", "Temp [C]", 1, "Current [A]", 2, "Pos [deg]", 1)
 ```
 
-Download the one for your machine, plug in a board and run it. The firmware is baked in,
-so the version in the filename is exactly what gets flashed.
+- `id` is the next number, in table order.
+- Every row except the last ends with `\`.
+- Values are raw integers; `decimals` is display only (250 with 1 shows "25.0").
+- A diagnostics unit of `""` hides that reading.
+- The MCB must send one more value (`ActuatorState.values` / `Diagnostics.items`), in table order.
 
-Otherwise, if you already have this repo checked out: grab the images from the
-[latest release](https://github.com/rammp-org/pace-hmi-fw/releases) — CI builds and
-attaches them on every release — and extract them into a `precompiled/` folder at the
-root of the repo, then:
+## Testing
 
-```powershell
-.\flash_precompiled.ps1            # one board attached: the port is found automatically
-.\flash_precompiled.ps1 -Port COM6 # or name it
-```
-
-Double-clicking `flash_precompiled.bat` does the same thing for anyone who doesn't
-live in a terminal. The only prerequisite is **esptool v5 or newer** — the script
-uses the copy inside the ESP-IDF tools directory if it's installed, otherwise
-`pip install esptool`.
-
-`precompiled/` is **not committed** — it is build output, not source. Every `idf.py
-build` regenerates it locally (the `precompiled` target in `CMakeLists.txt`), so if you
-do have a toolchain the folder always holds the image this tree just produced, and
-`flash_precompiled.ps1` flashes exactly that. `manifest.txt` beside the binaries records
-the version, commit and SHA256 of each image; the `.elf` lands there too, for decoding a
-backtrace against the image actually on the board.
-
-## Quick testing
-
-### 3D Joystick
-Open **Joystick Test** from the home pager's settings page. The bars should correlate with the stick movement.
-
-### RTPS
-`scripts/rtps_mcb_gui.py` is the main test tool: it plays the Main Control Board from a PC, so the whole HMI ↔ MCB path can be exercised with no MCB on the bench. tkinter only, no dependencies.
-
-```
-python scripts/rtps_mcb_gui.py
-```
+| command | what it does |
+| --- | --- |
+| `python scripts/rtps_mcb_gui.py` | plays the MCB: status, error banner, actuators, diagnostics, drive view |
+| `python scripts/rtps_selftest.py` | runs the self test over RTPS (exit 0 = pass) |
+| `python scripts/rtps_mcb_sim.py` | CLI version of the GUI (`--cycle` walks every state) |
+| `python scripts/rtps_adc_plot.py` | live joystick plot (needs matplotlib) |
+| `cd sim; python run.py` | the screens on a PC, no board ([sim/README.md](sim/README.md)) |
 
 <img src="docs/screenshots/McbSimGui.png" alt="MCB simulator" width="480">
 
-It auto-connects on launch; **Detect** finds the board again if it moved, **Scan...** sweeps a subnet. Then, top to bottom:
-
-- **Drive status** / **State** — preset buttons for the enums the FW knows, a raw spinbox for values it does not, and a free-text `label` that overrides the displayed text while the colour still follows the enum.
-- **Error banner** — body and footer of the fault panel the HMI raises whenever STATE is not OK.
-- **Joystick (from the HMI)** — live X/Y/twist mV, button and drive mode arriving back off the wire; the readouts to check the stick against.
-- **Start cycle** — walks every state combination hands-free, `dwell` seconds each.
-
-**Drive view** opens a top-down car driven by the real joystick — the quickest way to feel the drive modes (pick HOLO / Normal / Auto on the Tab5; it arrives with every sample). Its speed is the speed published back to the HMI, so the number on screen and the number on the Tab5 are the same one.
-
-<img src="docs/screenshots/DriveView.png" alt="Drive view" width="480">
-
-The rest of `scripts/` is stdlib-only too (the plot also needs `pip install matplotlib`):
-
-| script | what it does |
-| --- | --- |
-| `rtps_adc_plot.py` | live X/Y dot with trail + twist bar, straight off the joystick stream |
-| `rtps_mcb_sim.py` | the CLI version of the GUI, same publisher; `--cycle` walks every combination |
-| `rtps_host.py` | raw harness — discovery dump, `std_msgs/msg/UInt32` send/receive, `--self-test` for the wire codecs |
-| `rammp_rtps.py` | not a tool: the python view of the wire spec, imported by the others |
-
-If nothing arrives, it left by the wrong adapter — RTPS uses exactly one, and on a PC with VirtualBox/Tailscale/VPN interfaces the automatic pick is usually a virtual one. Set **Via** in the GUI, or `--list-interfaces` / `--advertised-address <PC_ETHERNET_IP>` on the CLI tools.
-
-**Note: Check that on the serial monitor that the Ethernet Link is up and the TAB5 gets an IP**
-
-## RTPS spec
-`main/rammp_rtps_spec.h` is the single source of truth for everything crossing the wire between this HMI and the Main Control Board — topics, type names, enums and message layouts. The MCB firmware includes that same header, and `scripts/rammp_rtps.py` scrapes it, so neither side nor the test tools can drift.
-
-The MCB is the master and owns the vehicle state; the HMI is a slave that displays what it is told and asks for what the user wants.
-
-| topic | type | direction and payload |
-| --- | --- | --- |
-| `rammp/mcb/status` | `rammp/msg/McbStatus` | MCB → HMI: drive status, system state, speed, plus optional label and error-banner text overrides |
-| `rammp/joystick/adc` | `rammp/msg/AdcXYTwist` | HMI → MCB: raw X/Y/twist millivolts, button bits and the selected drive mode, ~30 Hz |
-
-Both are best-effort with no durability and serialize as classic little-endian CDR: a 4-byte encapsulation header followed by the fields in declaration order. `McbStatus` must be republished every 500 ms even when nothing changed — after 2 s of silence the HMI treats the link as lost and greys out the labels. Joystick values are deliberately raw millivolts (1650 centre, 3300 full scale); calibration is the consumer's job.
+- Nothing arriving? The PC picked the wrong network adapter: set **Via** in the GUI, or `--advertised-address <PC_IP>`.
+- The serial log shows the Ethernet link, the IP, and every MCB status change.

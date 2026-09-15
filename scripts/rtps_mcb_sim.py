@@ -32,7 +32,10 @@ rtps_adc_plot.py (12) by using participant id 13.
 from __future__ import annotations
 
 import argparse
+import datetime
+import math
 import os
+import random
 import socket
 import sys
 import threading
@@ -54,11 +57,6 @@ SPEED_FULL_TRAVEL_SECONDS = 3.0
 #: firmware has its own, tighter deadzone; this one only has to stop a resting
 #: stick from drifting the number.
 SPEED_DEADZONE = 0.15
-#: Samples averaged after connecting to establish where the stick actually
-#: rests. About half a second at the firmware's 30 Hz publish rate — long
-#: enough to average out ADC noise, short enough that it is over before anyone
-#: has touched the stick.
-CENTER_SAMPLE_COUNT = 15
 
 
 class McbStatusPublisher(rtps_host.RtpsHostHarness):
@@ -79,7 +77,8 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
         # this; the CLI just leaves it at zero.
         self.speed_tenths = 0
         # Latest joystick sample: (x, y, twist, buttons, drive_mode), or None.
-        self.joystick: tuple[int, int, int, int, int] | None = None
+        # Axes are -1..+1, already calibrated by the HMI.
+        self.joystick: tuple[float, float, float, int, int] | None = None
         # The chair being simulated. It is the single source of speed: what the
         # Tab5 displays is read straight off it, so the number on the screen and
         # the car in the drive view cannot disagree. Accepted from the caller so
@@ -90,14 +89,6 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
         # instead of being lost to integer rounding every step.
         self._speed = 0.0
         self._last_speed_step = time.monotonic()
-        # Measured resting position of the vertical axis. The spec's nominal
-        # centre assumes an ideal divider; a real stick sits somewhere near it
-        # (1506 mV against a nominal 1650 on the bench board). Left uncorrected
-        # that standing offset makes the deadzone lopsided — pulling back would
-        # trip far sooner than pushing forward — so take the first samples after
-        # connecting, while the stick is at rest, as the true zero.
-        self._center_y: float | None = None
-        self._center_samples = 0
         self.seq = 0
         self.announced_targets = -1
         # Stop publishing without tearing the participant down, so the HMI's
@@ -105,22 +96,228 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
         # discovery round confusing the picture.
         self.paused = False
 
+        # ---- actuators -------------------------------------------------
+        # The MCB owns every actuator position; the HMI only ever asks. These
+        # are the values it asks about, seeded to the middle of each range so a
+        # fresh bench session can step in both directions.
+        self.actuator_values = [
+            (a.min_value + a.max_value) // 2 for a in spec.ACTUATORS
+        ]
+        # Per-actuator override for the next request: None accepts it, an
+        # RAMMP_ACTUATOR_RESULT_* value refuses it with that reason. This is
+        # the whole point of the bench tool — the HMI's refusal paths are hard
+        # to reach on a real chair without driving something into a hard stop.
+        self.actuator_reject: list[int | None] = [None] * len(spec.ACTUATORS)
+        self.actuator_req_id = 0
+        self.actuator_result = spec.ACTUATOR_RESULT_OK
+        self.actuator_seq = 0
+        # Set by apply_actuator_command so the next run-loop tick publishes
+        # immediately rather than waiting out the period: a reply that took up
+        # to half a second would make every press feel broken.
+        self.actuator_dirty = True
+
+        # A second writer and a second reader, appended rather than passed
+        # through argparse: RtpsHostHarness builds one writer from
+        # --publish-topic and gives every --subscribe-topic the same type name,
+        # and these two need their own topic/type pairs. Everything downstream
+        # (SEDP announcement, target discovery) already loops over these lists.
+        self.local_writers.append(rtps_host.WriterConfig(
+            topic_name=spec.TOPIC_ACTUATOR_STATE,
+            type_name=spec.TYPE_ACTUATOR_STATE,
+            reliable=False,
+            entity_index=len(self.local_writers),
+        ))
+        self.local_readers.append(rtps_host.ReaderConfig(
+            topic_name=spec.TOPIC_ACTUATOR_COMMAND,
+            type_name=spec.TYPE_ACTUATOR_COMMAND,
+            reliable=False,
+            entity_index=len(self.local_readers),
+        ))
+
+        # Diagnostics: fake, slowly changing readings for every item in the
+        # spec's RAMMP_DIAG_TABLE, sent with each status tick. Turning them off
+        # (the GUI's checkbox) is how the HMI's stale display gets tested.
+        self.diagnostics_enabled = True
+        self.diagnostics_seq = 0
+        self.diagnostics_values: list[list[int]] = []
+        self._diagnostics_writer = rtps_host.WriterConfig(
+            topic_name=spec.TOPIC_MCB_DIAGNOSTICS,
+            type_name=spec.TYPE_DIAGNOSTICS,
+            reliable=False,
+            entity_index=len(self.local_writers),
+        )
+        self.local_writers.append(self._diagnostics_writer)
+
+        # ---- self test ---------------------------------------------------
+        # Every run of the HMI's self test needs a peer: its RTPS checks time
+        # pings against it and read McbStatus from it. Serving that here means
+        # this simulator, the GUI and rtps_selftest.py all answer a run however
+        # it was started - over RTPS, or from the HMI's own SELF TEST row.
+        self.adc_rx_count = 0
+        self.selftest_ping_rx = 0
+        self._selftest_last_ping_seq = -1
+        # Random start: the HMI ignores a command repeating the last run id it
+        # acted on, and a restarted script counting from 1 could do exactly that.
+        self.selftest_run_id = random.randint(1, 255)
+        #: run_id -> {(kind, index): spec.SelfTestResult}; run 0 = started on the HMI
+        self.selftest_reports: dict[int, dict[tuple[int, int], spec.SelfTestResult]] = {}
+        #: run_id -> time.monotonic() its FINISHED sample first arrived
+        self.selftest_finished_at: dict[int, float] = {}
+        # The run request and the pongs go out on the bench command topic, and
+        # the pings arrive on the bench counter topic - tagged, because the
+        # HMI has no RTPS readers to spare for topics of their own (see "Self
+        # test" in the spec header).
+        self._selftest_command_writer = rtps_host.WriterConfig(
+            topic_name=spec.TOPIC_HMI_COMMAND,
+            type_name=spec.TYPE_UINT32,
+            reliable=False,
+            entity_index=len(self.local_writers),
+        )
+        self.local_writers.append(self._selftest_command_writer)
+        for topic, type_name in ((spec.TOPIC_HMI_COUNTER, spec.TYPE_UINT32),
+                                 (spec.TOPIC_SELFTEST_REPORT, spec.TYPE_SELFTEST_REPORT)):
+            self.local_readers.append(rtps_host.ReaderConfig(
+                topic_name=topic,
+                type_name=type_name,
+                reliable=False,
+                entity_index=len(self.local_readers),
+            ))
+
+    def _send_on(self, writer: rtps_host.WriterConfig, cdr_payload: bytes) -> int:
+        """Publish one sample on `writer`; returns how many targets it went to."""
+        payload = self.build_data_message(writer, cdr_payload)
+        targets = self._build_user_targets(writer)
+        for destination in targets:
+            self.send_user_datagram(payload, destination)
+        return len(targets)
+
+    def send_selftest_command(self, run_id: int) -> int:
+        """(Re)send the run request for `run_id`. Safe to repeat: the HMI acts once."""
+        return self._send_on(self._selftest_command_writer, spec.pack_selftest_run(run_id))
+
+    def request_selftest(self) -> int:
+        """Ask the HMI for a new self-test run; returns its run id."""
+        self.selftest_run_id = self.selftest_run_id % 255 + 1  # 1..255, never 0
+        self.send_selftest_command(self.selftest_run_id)
+        return self.selftest_run_id
+
+    def _answer_selftest_ping(self, payload: bytes) -> None:
+        value = spec.unpack_uint32(payload)
+        seq = spec.selftest_ping_seq(value) if value is not None else None
+        if seq is None:
+            return  # the counter's own bring-up heartbeat, not a ping
+        # Count what arrives so the HMI can tell pings lost on the way here
+        # from pongs lost on the way back. seq 0 opens a probe run; a seq going
+        # backwards means that opening ping itself was lost.
+        if seq == 0 or seq <= self._selftest_last_ping_seq:
+            self.selftest_ping_rx = 0
+        self._selftest_last_ping_seq = seq
+        self.selftest_ping_rx += 1
+        self._send_on(self._selftest_command_writer,
+                      spec.pack_selftest_pong(seq, self.selftest_ping_rx))
+
+    def _note_selftest_result(self, r: spec.SelfTestResult) -> None:
+        if r.kind == spec.SELFTEST_KIND_STARTED:
+            # STARTED is sent once, and only at the start: a new run under the
+            # same id (every HMI-started run is id 0) replaces the old one
+            self.selftest_reports[r.run_id] = {}
+            self.selftest_finished_at.pop(r.run_id, None)
+            rtps_host.log(f"[selftest] run {r.run_id}: started on firmware {r.detail}, "
+                          f"{r.count} checks")
+        run = self.selftest_reports.setdefault(r.run_id, {})
+        key = (r.kind, r.index)
+        is_new = key not in run
+        run[key] = r
+        if not is_new:
+            return  # the end-of-run repeat of a sample already logged
+        if r.kind == spec.SELFTEST_KIND_RESULT:
+            rtps_host.log(f"[selftest] {spec.format_selftest_result(r)}")
+        elif r.kind == spec.SELFTEST_KIND_FINISHED:
+            self.selftest_finished_at[r.run_id] = time.monotonic()
+            verdict = "PASS" if r.lo == 0 else "FAIL"
+            rtps_host.log(f"[selftest] run {r.run_id}: {verdict} - {r.value} pass, {r.lo} fail, "
+                          f"{r.hi} skip in {r.detail}")
+
+    def apply_actuator_command(self, req_id: int, actuator_id: int, steps: int) -> int:
+        """Judge one request from the HMI and return the RESULT_* verdict.
+
+        Clamping lives here rather than on the HMI for the same reason it lives
+        on a real MCB: one board owns the position, so there is only ever one
+        opinion about whether a move is allowed.
+        """
+        self.actuator_req_id = req_id
+        self.actuator_dirty = True
+        if not 0 <= actuator_id < len(spec.ACTUATORS):
+            self.actuator_result = spec.ACTUATOR_RESULT_UNKNOWN_ID
+            return self.actuator_result
+
+        actuator = spec.ACTUATORS[actuator_id]
+        override = self.actuator_reject[actuator_id]
+        if override is not None:
+            self.actuator_result = override
+            return self.actuator_result
+
+        current = self.actuator_values[actuator_id]
+        target = current + steps * actuator.step
+        if target < actuator.min_value:
+            # Report the limit rather than moving part way. A partial move
+            # would leave the HMI showing a number the user did not ask for
+            # and no indication that anything was refused.
+            self.actuator_result = spec.ACTUATOR_RESULT_AT_MIN
+        elif target > actuator.max_value:
+            self.actuator_result = spec.ACTUATOR_RESULT_AT_MAX
+        else:
+            self.actuator_values[actuator_id] = target
+            self.actuator_result = spec.ACTUATOR_RESULT_OK
+        return self.actuator_result
+
+    def publish_actuator_state(self) -> None:
+        """Send the whole actuator state, as a reply and as the heartbeat."""
+        if not self.local_writers or len(self.local_writers) < 2:
+            return
+        writer = self.local_writers[1]
+        payload = self.build_data_message(
+            writer,
+            spec.pack_actuator_state(self.actuator_values, self.actuator_req_id,
+                                     self.actuator_result, self.actuator_seq),
+        )
+        for destination in self._build_user_targets(writer):
+            self.send_user_datagram(payload, destination)
+        self.actuator_seq = (self.actuator_seq + 1) & 0xFF
+        self.actuator_dirty = False
+
     def handle_user_packet(self, packet: bytes, sender_ip: str, sender_port: int) -> None:
-        """Capture joystick samples; everything else falls through to the base."""
+        """Capture joystick samples and actuator requests."""
         for guid_prefix, writer_id, payload, reader_id in rtps_host.parse_rtps_data_messages(
             packet
         ):
-            if self.topic_for_sample(guid_prefix, writer_id, reader_id) != spec.TOPIC_JOYSTICK_ADC:
-                continue
-            sample = spec.unpack_adc_xy_twist(payload)
-            if sample is not None:
-                self.joystick = sample
-
-    @property
-    def center_y(self) -> float:
-        """Measured resting position of the vertical axis, or the spec nominal
-        until enough samples have arrived to establish it."""
-        return self._center_y if self._center_y is not None else spec.JOYSTICK_CENTER_MV
+            topic = self.topic_for_sample(guid_prefix, writer_id, reader_id)
+            if topic == spec.TOPIC_JOYSTICK_ADC:
+                sample = spec.unpack_adc_xy_twist(payload)
+                if sample is not None:
+                    self.joystick = sample
+                    self.adc_rx_count += 1
+            elif topic == spec.TOPIC_HMI_COUNTER:
+                self._answer_selftest_ping(payload)
+            elif topic == spec.TOPIC_SELFTEST_REPORT:
+                result = spec.unpack_selftest_report(payload)
+                if result is not None:
+                    self._note_selftest_result(result)
+            elif topic == spec.TOPIC_ACTUATOR_COMMAND:
+                command = spec.unpack_actuator_command(payload)
+                if command is None:
+                    continue
+                req_id, actuator_id, steps = command
+                result = self.apply_actuator_command(req_id, actuator_id, steps)
+                name = (spec.ACTUATORS[actuator_id].short
+                        if 0 <= actuator_id < len(spec.ACTUATORS) else f"#{actuator_id}")
+                rtps_host.log(
+                    f"[actuator] req {req_id}: {name} {steps:+d} step -> "
+                    f"{spec.ACTUATOR_RESULT_NAMES.get(result, '?')}"
+                )
+                # Answer immediately. The periodic republish below is the
+                # convergence path, not the reply path.
+                self.publish_actuator_state()
 
     def step_speed(self, _dt: float = 0.0) -> None:
         """Advance the simulated chair and take its speed.
@@ -132,9 +329,6 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
         """
         if self.joystick is None:
             return
-        x_mv, y_mv, twist_mv = self.joystick[0], self.joystick[1], self.joystick[2]
-        if self.car.note_center_sample(x_mv, y_mv, twist_mv, CENTER_SAMPLE_COUNT):
-            return  # still learning where the stick rests; do not drive on it yet
         drive_mode = self.joystick[4] if len(self.joystick) > 4 else None
         self.car.update(self.joystick, drive_mode)
         self.speed_tenths = self.car.speed_tenths
@@ -150,10 +344,33 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
             + (" [PAUSED]" if self.paused else "")
         )
 
+    def publish_diagnostics(self) -> None:
+        """Fake readings for every diagnostics item: slow sine waves, offset
+        per item so the rows do not move in step."""
+        if not self.diagnostics_enabled:
+            return
+        t = time.monotonic()
+        values = []
+        for item in spec.DIAGNOSTICS:
+            readings = (30.0 + 5.0 * math.sin(t / 7.0 + item.id),       # temperature
+                        1.5 + math.sin(t / 2.0 + item.id),               # current
+                        45.0 * math.sin(t / 5.0 + 2.0 * item.id))        # position
+            values.append([round(v * 10 ** places)
+                           for v, places in zip(readings, item.decimals)])
+        self.diagnostics_values = values
+        self._send_on(self._diagnostics_writer,
+                      spec.pack_diagnostics(values, self.diagnostics_seq))
+        self.diagnostics_seq = (self.diagnostics_seq + 1) & 0xFF
+
     def publish_now(self) -> None:
         """Called by the harness run loop every --period seconds."""
         if self.paused:
             return
+        # Actuator state rides the same tick. Republished even when unchanged,
+        # so a joystick that just booted or just reconnected learns where the
+        # actuators are without the user having to press anything.
+        self.publish_actuator_state()
+        self.publish_diagnostics()
         # Advance the emulated speed on real elapsed time. Clamped so a long
         # gap (a pause, a breakpoint) cannot lurch the number across its range
         # in a single step.
@@ -165,7 +382,8 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
             writer,
             spec.pack_mcb_status(self.drive_status, self.system_state, self.flags, self.seq,
                                  self.speed_tenths, self.drive_text, self.state_text,
-                                 self.error_text, self.error_footer),
+                                 self.error_text, self.error_footer,
+                                 clock=datetime.datetime.now()),  # sets the HMI's clock
         )
         targets = self._build_user_targets(writer)
         for destination in targets:

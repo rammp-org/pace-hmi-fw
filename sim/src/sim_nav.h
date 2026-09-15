@@ -23,12 +23,22 @@ extern "C" {
  * the TopBar indicator colours are keyed off it.
  */
 typedef enum {
-    SIM_LINK_ETH_FAILED = 0, /**< W5500 bring-up failed at boot */
-    SIM_LINK_DOWN,           /**< no Ethernet link */
-    SIM_LINK_NO_IP,          /**< link up, no DHCP lease */
-    SIM_LINK_NO_PEER,        /**< have an IP, no MCB status inside the timeout */
-    SIM_LINK_CONNECTED,      /**< MCB status arriving */
+  SIM_LINK_ETH_FAILED = 0, /**< W5500 bring-up failed at boot */
+  SIM_LINK_DOWN,           /**< no Ethernet link */
+  SIM_LINK_NO_IP,          /**< link up, no DHCP lease */
+  SIM_LINK_NO_PEER,        /**< have an IP, no MCB status inside the timeout */
+  SIM_LINK_CONNECTED,      /**< MCB status arriving */
 } sim_link_state_t;
+
+/** Plain-C mirror of rammp::McbStatus (C++ in the spec), texts cut to the HMI's lengths. */
+typedef struct {
+  uint8_t drive_status, system_state, flags, seq, speed_tenths;
+  uint8_t hour, minute, second, day, month, year;
+  char drive_text[RAMMP_MCB_TEXT_LEN];
+  char state_text[RAMMP_MCB_TEXT_LEN];
+  char error_text[RAMMP_ERROR_TEXT_LEN];
+  char error_footer[RAMMP_ERROR_FOOTER_LEN];
+} rammp_mcb_status_t;
 
 /** Builds the data model and wires it to the screens ui_init() created. */
 void sim_nav_init(void);
@@ -37,7 +47,7 @@ void sim_nav_init(void);
 void sim_nav_on_stick_sample(void);
 
 /** Same entry point the firmware's RTPS receive task uses. */
-void sim_nav_on_mcb_status(const rammp_mcb_status_t * status);
+void sim_nav_on_mcb_status(const rammp_mcb_status_t *status);
 
 /** Fakes the link supervisor rather than watching a real timeout. */
 void sim_nav_set_link_state(sim_link_state_t link_state);

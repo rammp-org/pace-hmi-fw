@@ -25,13 +25,15 @@ extern lv_obj_t * ui_TwistBar;
 extern lv_obj_t * ui_Label3;
 extern lv_obj_t * ui_ButtonPanel;
 extern lv_obj_t * ui_ButtonCounter;
+extern lv_obj_t * ui_CalibrateJoystickButton;
+extern lv_obj_t * ui_CalibrateJoystickButtonLabel;
 extern void ui_event_ExitButton(lv_event_t * e);
 extern lv_obj_t * ui_ExitButton;
 extern lv_obj_t * ui_PanelButtonLabel5;
 extern lv_obj_t * ui_TopBar1;
 extern lv_obj_t * ui_StatusPanel1;
-extern lv_obj_t * ui_TextPanel4;
-extern lv_obj_t * ui_Info5;
+extern lv_obj_t * ui_JoystickTextPanel;
+extern lv_obj_t * ui_JoystickInstructionsLabel;
 // CUSTOM VARIABLES
 
 #ifdef __cplusplus

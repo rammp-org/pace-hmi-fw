@@ -37,6 +37,12 @@ void ui_init(void)
     ui_MainScreenFlex_screen_init();
     ui_DriveScreen_screen_init();
     ui_SeatAdjustmentFlexScreen_screen_init();
+    ui_RDScreen_screen_init();
+    ui_ActuatorsScreen_screen_init();
+    ui_LogScreen_screen_init();
+    ui_SpecificSettingScreen_screen_init();
+    ui_GenericActionsScreen_screen_init();
+    ui_DiagnosticsScreen_screen_init();
     ui____initial_actions0 = lv_obj_create(NULL);
     lv_disp_load_scr(ui_BootScreen);
 }
@@ -48,4 +54,10 @@ void ui_destroy(void)
     ui_MainScreenFlex_screen_destroy();
     ui_DriveScreen_screen_destroy();
     ui_SeatAdjustmentFlexScreen_screen_destroy();
+    ui_RDScreen_screen_destroy();
+    ui_ActuatorsScreen_screen_destroy();
+    ui_LogScreen_screen_destroy();
+    ui_SpecificSettingScreen_screen_destroy();
+    ui_GenericActionsScreen_screen_destroy();
+    ui_DiagnosticsScreen_screen_destroy();
 }

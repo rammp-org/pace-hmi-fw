@@ -40,7 +40,6 @@ extern lv_obj_t * ui_SeatButtonLabel5;
 extern lv_obj_t * ui_SeatButton6;
 extern lv_obj_t * ui_SeatButtonContainer6;
 extern lv_obj_t * ui_SeatButtonLabel6;
-extern lv_obj_t * ui_ExitBarPull1;
 extern lv_obj_t * ui_SeatAdjustmentPanel;
 extern lv_obj_t * ui_AngleSettingLabel;
 extern lv_obj_t * ui_AngleIndicator;
@@ -62,6 +61,7 @@ extern lv_obj_t * ui_SeatAdjustmentButton5;
 extern lv_obj_t * ui_SeatAdjustmentButtonContainer5;
 extern lv_obj_t * ui_SeatAdjustmentButtonLabel5;
 extern lv_obj_t * ui_ExitBarPushLeft;
+extern lv_obj_t * ui_ExitBarPull1;
 extern lv_obj_t * ui_ErrorWarningPanel1;
 extern lv_obj_t * ui_StatusPanel3;
 // CUSTOM VARIABLES

@@ -11,8 +11,14 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <ctime>
+#include <numeric>
 #include <optional>
 #include <stdlib.h>
+#include <sys/time.h>
 #include <vector>
 
 #include "m5stack-tab5.hpp"
@@ -22,6 +28,7 @@
 
 #include "kalman_filter.hpp"
 #include "madgwick_filter.hpp"
+#include "simple_lowpass_filter.hpp"
 
 #include "ui.h"
 // StatusPanel is a SquareLine *component*, so its children are reached by index
@@ -38,10 +45,18 @@
 #include "keypad_input.hpp"
 #include "oneshot_adc.hpp"
 
+#include "actions_spec.h"
+#include "boot_logo.h"
+#include "joystick_cal.hpp"
+#include "log_capture.hpp"
+#include "log_view.hpp"
 #include "rtps_comms.hpp"
+#include "selftest.hpp"
+#include "settings.hpp"
 
 #include "esp_heap_caps.h"
 #include "esp_lcd_mipi_dsi.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 
 using namespace std::chrono_literals;
@@ -172,6 +187,7 @@ static std::atomic<bool> select_key{false};
 // styling and, because the rows carry LV_OBJ_FLAG_SCROLL_ON_FOCUS, the
 // scroll-into-view.
 static lv_group_t *settings_group = nullptr;
+static lv_obj_t *settings_first_row = nullptr; // top visible row: where the first nudge lands
 
 // An indev can own exactly one group, so the joystick's group follows the
 // active screen: joystick_group keeps ui_FlexPanel focused for paging on
@@ -182,6 +198,7 @@ static lv_indev_t *joystick_indev = nullptr;
 static lv_group_t *joystick_group = nullptr;
 static lv_group_t *seat_group = nullptr;        // seat screen, function buttons page
 static lv_group_t *seat_adjust_group = nullptr; // seat screen, adjustment page
+static lv_group_t *rd_group = nullptr;          // RDScreen, the PIN keypad
 
 // Which FlexPanel child is currently centered in the viewport. Derived from
 // live coordinates rather than a stored index, so it stays correct no matter
@@ -242,7 +259,7 @@ static void flex_key_cb(lv_event_t *e) {
   if (key == LV_KEY_UP || key == LV_KEY_DOWN) {
     if (!focused) {
       // first nudge onto the page lands on the top row rather than wrapping
-      lv_group_focus_obj(lv_obj_get_child(ui_SettingsFlexPanel, 0));
+      lv_group_focus_obj(settings_first_row);
     } else if (key == LV_KEY_DOWN) {
       lv_group_focus_next(settings_group);
     } else {
@@ -264,6 +281,10 @@ static void flex_key_cb(lv_event_t *e) {
 // espp::I2c and BasePeripheral are both mutex-protected, so sharing the bus
 // with the IMU/touch/expander traffic from other tasks is safe.
 static espp::Drv2605 *haptic = nullptr;
+// Raw register reads from the same DRV2605, for the self test: the espp driver
+// covers playback but not the STATUS and GO registers a diagnostic is read back
+// through. Set by init_haptic, alongside `haptic`.
+static std::function<bool(uint8_t, uint8_t, uint8_t *, size_t)> drv2605_read_register;
 
 // One ALERT_1000MS effect per sequencer slot, so the buzz lasts one second per
 // slot. Keep kHapticBuzzDuration in step with kHapticBuzzSlots: it is what the
@@ -465,6 +486,57 @@ static void bind_status_panel(lv_obj_t *panel) {
 }
 
 /////////////////////////////////////////////////////////////////////////////
+// Joystick mapping
+//
+// How far each axis travels is measured per unit (joystick_cal.cpp, the
+// CALIBRATE button on the JoystickTest screen). What is done with that travel
+// is fixed here.
+/////////////////////////////////////////////////////////////////////////////
+
+// X/Y are one circular gimbal, so their per-axis deadbands are 0 and the
+// deadzone lives on the vector radius instead. The APEM HF44S10 has a square
+// gate, but the output stays CIRCULAR: a corner reads ~(0.71, 0.71) rather
+// than (1, 1), so the MCB never sees a speed above 1.
+static constexpr float kStickCenterDeadzoneRadius = 0.10f;
+static constexpr float kStickRangeDeadzone = 0.05f;
+// Twist is a separate pot on its own axis, so it carries its own deadbands.
+static constexpr float kTwistCenterDeadbandMv = 60.0f;
+static constexpr float kTwistRangeDeadbandMv = 40.0f;
+
+// AXIS WIRING: the gimbal pots are cross-wired relative to the channel names.
+// ADC1_CH1 (GPIO17) is the HORIZONTAL axis and reads higher to the right, so
+// it feeds the joystick's X with no inversion. ADC1_CH0 (GPIO16) is the
+// VERTICAL axis and reads *lower* moving up, so it feeds Y with invert_output
+// — after which +Y is up, as the rest of the code assumes. Twist reads higher
+// clockwise. Fixed here so every consumer (UI bars, the keypad pager, RTPS)
+// sees correct axes without compensating itself; joystick_cal.cpp's step
+// prompts rely on the same directions.
+static espp::FloatRangeMapper::Config stick_horizontal_config(const JoystickCal &cal) {
+  const JoystickAxisCal &a = cal[JOY_HORIZONTAL];
+  return {.center = a.center_mv, .minimum = a.min_mv, .maximum = a.max_mv};
+}
+
+static espp::FloatRangeMapper::Config stick_vertical_config(const JoystickCal &cal) {
+  const JoystickAxisCal &a = cal[JOY_VERTICAL];
+  return {.center = a.center_mv, .minimum = a.min_mv, .maximum = a.max_mv, .invert_output = true};
+}
+
+static espp::FloatRangeMapper::Config stick_twist_config(const JoystickCal &cal) {
+  const JoystickAxisCal &a = cal[JOY_TWIST];
+  return {.center = a.center_mv,
+          .center_deadband = kTwistCenterDeadbandMv,
+          .minimum = a.min_mv,
+          .maximum = a.max_mv,
+          .range_deadband = kTwistRangeDeadbandMv};
+}
+
+static void stick_apply_cal(espp::Joystick &stick, const JoystickCal &cal) {
+  stick.set_calibration(stick_horizontal_config(cal), stick_vertical_config(cal),
+                        kStickCenterDeadzoneRadius, kStickRangeDeadzone);
+  stick.set_z_calibration(stick_twist_config(cal));
+}
+
+/////////////////////////////////////////////////////////////////////////////
 // TopBar RTPS indicator
 /////////////////////////////////////////////////////////////////////////////
 
@@ -567,36 +639,48 @@ static void speed_label_observer(lv_observer_t *observer, lv_subject_t *subject)
   lv_label_set_text_fmt(lv_observer_get_target_obj(observer), "%d.%d", tenths / 10, tenths % 10);
 }
 
-// The banner is one instance on the DriveScreen, so unlike StatusPanel/TopBar
-// this is not a per-screen loop.
-static void bind_error_panel() {
-  if (ui_ErrorWarningPanel == nullptr) {
-    return;
-  }
-  // Visible whenever the state is anything other than OK. Using _if_eq against
-  // OK rather than _if_not_eq against ERROR is deliberate: a value neither
-  // board knows raises the banner instead of silently hiding it.
-  lv_obj_bind_flag_if_eq(ui_ErrorWarningPanel, &mcb_state_subject, LV_OBJ_FLAG_HIDDEN,
-                         RAMMP_STATE_OK);
-  lv_label_bind_text(
-      ui_comp_get_child(ui_ErrorWarningPanel,
-                        UI_COMP_ERRORWARNINGPANEL_ERRORMESSAGECONTAINER_ERRORMESSAGELABEL),
-      &error_text_subject, nullptr);
-  lv_label_bind_text(
-      ui_comp_get_child(ui_ErrorWarningPanel,
-                        UI_COMP_ERRORWARNINGPANEL_ERRORMESSAGECONTAINER_ERRORMESSAGEFOOTERLABEL),
-      &error_footer_subject, nullptr);
-}
-
 // Runs on the LVGL task, so the subject writes are already covered by the lock
 // lv_task_handler() is called under. Staleness has to be polled - nothing
 // happens when a sample fails to arrive - so the blink phase rides along here
 // rather than owning a second timer.
+// Defined with the other draw-side helpers below; re-run whenever the theme
+// changes, because _ui_switch_theme re-applies every registered themeable
+// property -- including the BG_OPA this cleared -- and would otherwise put all
+// the redundant fills straight back.
+static void strip_all_overdraw();
+
+// Every change of the link state goes to the serial log, and so to the
+// LogScreen: the TopBar shows where the link is now, the log keeps when it
+// changed. Warnings on the way down, info on the way up.
+static void log_link_change(RtpsLinkState state) {
+  static espp::Logger link_logger({.tag = "rtps_link", .level = espp::Logger::Verbosity::INFO});
+  static std::optional<RtpsLinkState> last;
+  if (last == state) {
+    return;
+  }
+  const std::string meaning = rtps_comms_link_state_meaning(state);
+  if (!last) {
+    link_logger.info("{} ({})", rtps_comms_link_state_name(state), meaning);
+  } else if (state > *last) {
+    link_logger.info("{} -> {} ({})", rtps_comms_link_state_name(*last),
+                     rtps_comms_link_state_name(state), meaning);
+  } else {
+    link_logger.warn("{} -> {} ({})", rtps_comms_link_state_name(*last),
+                     rtps_comms_link_state_name(state), meaning);
+  }
+  last = state;
+}
+
+static void diag_poll(); // DiagnosticsScreen, further down
+
 static void rtps_poll_cb(lv_timer_t *) {
-  lv_subject_set_int(&rtps_link_subject, static_cast<int32_t>(rtps_comms_link_state()));
+  const RtpsLinkState state = rtps_comms_link_state();
+  log_link_change(state);
+  lv_subject_set_int(&rtps_link_subject, static_cast<int32_t>(state));
   static uint32_t ticks = 0;
   // flip every other tick: a 500 ms half-period, i.e. a 1 Hz blink
   lv_subject_set_int(&rtps_blink_subject, static_cast<int32_t>((++ticks / 2) & 1u));
+  diag_poll(); // diagnostics staleness rides the same 250 ms tick
 
   // Defensive: if the RTPS label's text colour/opacity are registered as
   // themeable in the SquareLine project, ui_theme_set() re-applies the theme's
@@ -610,6 +694,132 @@ static void rtps_poll_cb(lv_timer_t *) {
   if (ui_theme_idx != last_theme) {
     last_theme = ui_theme_idx;
     lv_subject_notify(&rtps_link_subject);
+    // Same reason, different property: the theme switch restored the redundant
+    // background fills, so take them out again.
+    strip_all_overdraw();
+    // CHANGE THEME is the export's own handler (ui_events.cpp); this is where
+    // firmware first sees the result, so it is saved from here.
+    settings_set_theme(ui_theme_idx);
+  }
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// Backlight
+//
+// One brightness setting, 5..100 %, whoever changes it: the RTPS brightness
+// command, the Tab5's side button, and the SCREEN BRIGHTNESS page of the
+// SpecificSettingScreen. Saved a second after it stops changing, so a run
+// of steps is one flash write rather than one per step.
+/////////////////////////////////////////////////////////////////////////////
+
+static constexpr uint32_t kBrightnessSaveDelayMs = 1000;
+static lv_subject_t brightness_subject; // backlight %, kBrightnessMin..MaxPercent
+static lv_timer_t *brightness_save_timer = nullptr;
+
+static void brightness_save_cb(lv_timer_t *timer) {
+  lv_timer_pause(timer);
+  settings_set_brightness(lv_subject_get_int(&brightness_subject));
+}
+
+static void brightness_observer(lv_observer_t *, lv_subject_t *subject) {
+  espp::M5StackTab5::get().brightness(static_cast<float>(lv_subject_get_int(subject)));
+  if (brightness_save_timer != nullptr) { // null on the first run, at bind time
+    lv_timer_reset(brightness_save_timer);
+    lv_timer_resume(brightness_save_timer);
+  }
+}
+
+// Any task. Clamped, so nothing can turn the screen fully off.
+static void brightness_set(int percent) {
+  std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
+  lv_subject_set_int(&brightness_subject,
+                     std::clamp(percent, kBrightnessMinPercent, kBrightnessMaxPercent));
+}
+
+// The Tab5's side button: the next of 25/50/75/100 % above the current level.
+static void brightness_step() {
+  std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
+  const int32_t now = lv_subject_get_int(&brightness_subject);
+  int32_t next = 25;
+  for (int32_t level : {25, 50, 75, 100}) {
+    if (level > now) {
+      next = level;
+      break;
+    }
+  }
+  lv_subject_set_int(&brightness_subject, next);
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// TopBar clock
+//
+// The MCB sends its local time in every McbStatus. It sets the system clock
+// and the RTC, so the time keeps running through a lost link, and across a
+// reboot without the MCB. Clock1 on every TopBar shows the system clock. No
+// TZ is set, so the system clock simply holds local time and nothing converts.
+/////////////////////////////////////////////////////////////////////////////
+
+static constexpr uint32_t kClockPollMs = 1000;
+static constexpr int64_t kClockMaxDriftS = 2; // disagree by more and the MCB wins
+static std::atomic<bool> clock_valid{false};
+static lv_subject_t clock_subject;
+static char clock_buf[8];
+static char clock_prev_buf[8];
+
+// An RTC that lost power reads 2000; anything before 2025 is not a real time.
+static bool clock_plausible(const std::tm &t) { return t.tm_year >= 125; }
+
+// Any task.
+static void clock_set(const std::tm &local) {
+  std::tm copy = local;
+  const timeval tv{.tv_sec = mktime(&copy), .tv_usec = 0};
+  settimeofday(&tv, nullptr);
+  clock_valid = true;
+}
+
+// RTPS receive task.
+static void clock_note_mcb_time(const rammp::McbStatus &status) {
+  if (status.month < 1 || status.month > 12 || status.day < 1 || status.day > 31 ||
+      status.hour > 23 || status.minute > 59 || status.second > 59) {
+    return; // month 0: the MCB does not know the time
+  }
+  std::tm t{};
+  t.tm_year = 100 + status.year;
+  t.tm_mon = status.month - 1;
+  t.tm_mday = status.day;
+  t.tm_hour = status.hour;
+  t.tm_min = status.minute;
+  t.tm_sec = status.second;
+  const time_t mcb = mktime(&t); // also fills tm_wday for the RTC
+  if (clock_valid && std::llabs(static_cast<int64_t>(mcb - time(nullptr))) <= kClockMaxDriftS) {
+    return;
+  }
+  clock_set(t);
+  static espp::Logger clock_logger({.tag = "clock", .level = espp::Logger::Verbosity::INFO});
+  if (espp::M5StackTab5::get().set_rtc_time(t)) {
+    clock_logger.info("set from the MCB: {:%Y-%m-%d %H:%M:%S}", t);
+  } else {
+    clock_logger.warn("set from the MCB, but the RTC write failed");
+  }
+}
+
+// LVGL task.
+static void clock_poll_cb(lv_timer_t *) {
+  char text[sizeof(clock_buf)] = "--:--";
+  if (clock_valid) {
+    const time_t now = time(nullptr);
+    std::tm t{};
+    gmtime_r(&now, &t);
+    snprintf(text, sizeof(text), "%02d:%02d", t.tm_hour, t.tm_min);
+  }
+  if (strcmp(lv_subject_get_string(&clock_subject), text) != 0) {
+    lv_subject_copy_string(&clock_subject, text);
+  }
+}
+
+static void bind_clock_label(lv_obj_t *bar) {
+  if (bar != nullptr) {
+    lv_label_bind_text(ui_comp_get_child(bar, UI_COMP_TOPBAR_CLOCK1), &clock_subject, nullptr);
   }
 }
 
@@ -670,9 +880,14 @@ static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c);
 //   LockedPanel           joystick up      ui_UnlockArc   unlocks driving mode
 //   DrivePanel            joystick up      ui_UnlockArc1  -> DriveScreen
 //   SeatAdjustmentMenu    joystick up      ui_UnlockArc2  -> SeatAdjustmentFlexScreen
+//   GenericActionsPanel1  joystick up      ui_UnlockArc3  -> GenericActionsScreen
 //   DriveScreen           stick button     ui_ExitBarPress1    -> MainScreenFlex
 //   Seat / buttons page   joystick down    ui_ExitBarPull1     -> MainScreenFlex
 //   Seat / adjust page    joystick left    ui_ExitBarPushLeft  -> buttons page
+//   RDScreen              joystick down    ui_ExitBarPull2     -> MainScreenFlex
+//   SpecificSettingScreen joystick down    ui_ExitBarPull4     -> MainScreenFlex
+//   GenericActionsScreen  joystick down    ui_ExitBarPull5     -> MainScreenFlex
+//   DiagnosticsScreen     joystick down    ui_ExitBarPull6     -> MainScreenFlex
 //
 // "Pull" is the stick toward the user, i.e. LV_KEY_DOWN; "push left" is
 // LV_KEY_LEFT. Each exit bar lives on the page it applies to, so the gestures
@@ -915,13 +1130,208 @@ static void screen_return_to_main() {
                     &ui_MainScreenFlex_screen_init);
 }
 
-// Is the MCB currently telling us the chair is fit to drive? Requires a live
+// SpecificSettingScreen, defined with its rows further down. The actuators
+// page comes after the settings_spec.h pages.
+static constexpr int32_t kActuatorsPage = SETTINGS_PAGE_COUNT;
+static void setting_page_open(int32_t page);
+static void settings_screen_ensure();
+static void actions_screen_ensure();
+static void actions_open();
+static void diagnostics_screen_ensure();
+static void diagnostics_open();
+
+// Is the MCB currently telling us the chair is fit to drive, or to move the
+// seat? Requires a live
 // link as well as an OK state: if the status is stale we do not KNOW the state,
 // and "unknown" is not "known good" on a device that moves someone.
-static bool drive_permitted() {
+static bool mcb_ready() {
   return static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) ==
              RtpsLinkState::CONNECTED &&
          lv_subject_get_int(&mcb_state_subject) == RAMMP_STATE_OK;
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// Saying why driving is not permitted
+//
+// One cause, three ErrorWarningPanels. On MainScreenFlex: why a push into the
+// DriveScreen or the SeatAdjustmentFlexScreen was refused - both enter
+// gestures are gated in applies(), so a refused push otherwise does nothing at
+// all. On the DriveScreen and the SeatAdjustmentFlexScreen: why it was cut
+// short, by the link dropping or the MCB faulting. All word the cause from
+// rammp_rtps_spec.h.
+//
+// entry_refused_subject records only THAT a push was refused. Both panels work
+// out WHY from the link and state subjects whenever any of them changes, so
+// they always name the current cause - cable back in but no DHCP lease yet,
+// say - rather than the one at the moment it first went wrong.
+/////////////////////////////////////////////////////////////////////////////
+
+static constexpr uint32_t kDriveRefusedShowMs = 4000; // how long one refusal stays up
+// Which push was refused, so the panel can say which.
+enum : int32_t { kRefusedNone = 0, kRefusedDrive = 1, kRefusedSeat = 2 };
+static lv_subject_t entry_refused_subject; // kRefused*; panel up unless None
+// Created paused and re-armed by each refusal, like haptic_label_timer, so a
+// second push restarts the countdown rather than stacking a timer.
+static lv_timer_t *entry_refused_timer = nullptr;
+
+static_assert(sizeof(RAMMP_HMI_ETH_FAILED_TEXT) <= RAMMP_ERROR_TEXT_LEN &&
+                  sizeof(RAMMP_HMI_LINK_DOWN_TEXT) <= RAMMP_ERROR_TEXT_LEN &&
+                  sizeof(RAMMP_HMI_NO_IP_TEXT) <= RAMMP_ERROR_TEXT_LEN &&
+                  sizeof(RAMMP_HMI_NO_PEER_TEXT) <= RAMMP_ERROR_TEXT_LEN,
+              "refusal body outgrows the banner it shares with MCB faults");
+static_assert(sizeof(RAMMP_HMI_ETH_FAILED_FOOTER) <= RAMMP_ERROR_FOOTER_LEN &&
+                  sizeof(RAMMP_HMI_LINK_DOWN_FOOTER) <= RAMMP_ERROR_FOOTER_LEN &&
+                  sizeof(RAMMP_HMI_NO_IP_FOOTER) <= RAMMP_ERROR_FOOTER_LEN &&
+                  sizeof(RAMMP_HMI_NO_PEER_FOOTER) <= RAMMP_ERROR_FOOTER_LEN,
+              "refusal footer outgrows the banner it shares with MCB faults");
+
+struct RefusalText {
+  const char *body;
+  const char *footer;
+};
+
+static RefusalText link_refusal_text(RtpsLinkState link) {
+  switch (link) {
+  case RtpsLinkState::ETH_FAILED:
+    return {RAMMP_HMI_ETH_FAILED_TEXT, RAMMP_HMI_ETH_FAILED_FOOTER};
+  case RtpsLinkState::LINK_DOWN:
+    return {RAMMP_HMI_LINK_DOWN_TEXT, RAMMP_HMI_LINK_DOWN_FOOTER};
+  case RtpsLinkState::NO_IP:
+    return {RAMMP_HMI_NO_IP_TEXT, RAMMP_HMI_NO_IP_FOOTER};
+  case RtpsLinkState::NO_PEER:
+    return {RAMMP_HMI_NO_PEER_TEXT, RAMMP_HMI_NO_PEER_FOOTER};
+  case RtpsLinkState::CONNECTED:
+    break;
+  }
+  return {"", ""}; // only asked when not CONNECTED
+}
+
+// Fills an ErrorWarningPanel with why driving is not permitted right now. The
+// titles are the caller's, because the same cause reads differently as a
+// refused push and as a drive cut short; so is visibility.
+static void fill_drive_blocked_panel(lv_obj_t *panel, const char *link_title,
+                                     const char *mcb_title) {
+  lv_obj_t *title = ui_comp_get_child(panel, UI_COMP_ERRORWARNINGPANEL_ERRORTITLELABEL);
+  lv_obj_t *body =
+      ui_comp_get_child(panel, UI_COMP_ERRORWARNINGPANEL_ERRORMESSAGECONTAINER_ERRORMESSAGELABEL);
+  lv_obj_t *footer = ui_comp_get_child(
+      panel, UI_COMP_ERRORWARNINGPANEL_ERRORMESSAGECONTAINER_ERRORMESSAGEFOOTERLABEL);
+
+  // The link comes first, as in mcb_ready(): with no live link the state
+  // subject is only the last thing the MCB said, not what it is saying now.
+  const auto link = static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject));
+  if (link != RtpsLinkState::CONNECTED) {
+    const RefusalText text = link_refusal_text(link);
+    lv_label_set_text(title, link_title);
+    lv_label_set_text(body, text.body);
+    lv_label_set_text(footer, text.footer);
+  } else {
+    const auto state = static_cast<uint8_t>(lv_subject_get_int(&mcb_state_subject));
+    const char *error_text = lv_subject_get_string(&error_text_subject);
+    lv_label_set_text(title, mcb_title);
+    if (error_text[0] != '\0') {
+      lv_label_set_text(body, error_text);
+    } else {
+      lv_label_set_text_fmt(body, RAMMP_HMI_MCB_NO_TEXT_FMT, static_cast<unsigned>(state),
+                            rammp_state_name(state));
+    }
+    lv_label_set_text(footer, lv_subject_get_string(&error_footer_subject));
+  }
+}
+
+// Binds `cb` on `panel` to every subject the cause depends on, so the subject
+// argument each observer gets is ignored: whichever fired, the answer depends
+// on all of them.
+static void bind_to_drive_blocked_cause(lv_obj_t *panel, lv_observer_cb_t cb) {
+  for (lv_subject_t *subject :
+       {&rtps_link_subject, &mcb_state_subject, &error_text_subject, &error_footer_subject}) {
+    lv_subject_add_observer_obj(subject, cb, panel, nullptr);
+  }
+}
+
+// MainScreenFlex. Says which entry was refused, and hides itself the moment
+// the MCB is ready again, so it never claims a fault that has already cleared.
+static void entry_refused_panel_observer(lv_observer_t *observer, lv_subject_t *) {
+  lv_obj_t *panel = lv_observer_get_target_obj(observer);
+  const int32_t refused = lv_subject_get_int(&entry_refused_subject);
+  if (refused == kRefusedNone || mcb_ready()) {
+    lv_obj_add_flag(panel, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+  if (refused == kRefusedSeat) {
+    fill_drive_blocked_panel(panel, RAMMP_HMI_SEAT_LINK_REFUSED_TITLE,
+                             RAMMP_HMI_SEAT_MCB_REFUSED_TITLE);
+  } else {
+    fill_drive_blocked_panel(panel, RAMMP_HMI_LINK_REFUSED_TITLE, RAMMP_HMI_MCB_REFUSED_TITLE);
+  }
+  lv_obj_remove_flag(panel, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void bind_entry_refused_panel(lv_obj_t *panel) {
+  if (panel == nullptr) {
+    return;
+  }
+  lv_subject_add_observer_obj(&entry_refused_subject, entry_refused_panel_observer, panel, nullptr);
+  bind_to_drive_blocked_cause(panel, entry_refused_panel_observer);
+}
+
+// DriveScreen and SeatAdjustmentFlexScreen. No push to wait for here: entry already required a live
+// link and an OK state, so anything else means it was lost mid-drive. The banner stays up for as
+// long as that lasts rather than timing out, and clears by itself when the link and state recover.
+// A state neither board knows counts as not OK (mcb_ready compares against OK), so it raises the
+// banner rather than silently hiding it.
+static void drive_screen_warning_observer(lv_observer_t *observer, lv_subject_t *) {
+  lv_obj_t *panel = lv_observer_get_target_obj(observer);
+  if (mcb_ready()) {
+    lv_obj_add_flag(panel, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+  fill_drive_blocked_panel(panel, RAMMP_HMI_LINK_LOST_TITLE, RAMMP_HMI_MCB_FAULT_TITLE);
+  lv_obj_remove_flag(panel, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void bind_mcb_lost_panel(lv_obj_t *panel) {
+  if (panel == nullptr) {
+    return;
+  }
+  bind_to_drive_blocked_cause(panel, drive_screen_warning_observer);
+}
+
+static void entry_refused_clear() {
+  lv_timer_pause(entry_refused_timer);
+  lv_subject_set_int(&entry_refused_subject, 0);
+}
+
+static void entry_refused_timer_cb(lv_timer_t *) { entry_refused_clear(); }
+
+// Runs from hold_poll_cb, on the same input and cadence as the gesture it
+// shadows.
+static void entry_refusal_poll() {
+  // Its own edge detector rather than joy_up_armed: armed stays true for as
+  // long as the stick is released, so it cannot tell a fresh push from a held
+  // one - and a push still held from the unlock, carried across the auto-
+  // advance onto the Drive page, is not an attempt to drive.
+  static bool was_up = false;
+  const bool up = joy_up_held();
+  const bool pushed = up && !was_up;
+  was_up = up;
+
+  const int32_t page = showing_flex_page(ui_DrivePanel)           ? kRefusedDrive
+                       : showing_flex_page(ui_SeatAdjustmentMenu) ? kRefusedSeat
+                                                                  : kRefusedNone;
+  const int32_t refused = lv_subject_get_int(&entry_refused_subject);
+  if (pushed && page != kRefusedNone && !mcb_ready()) {
+    lv_subject_set_int(&entry_refused_subject, page);
+    lv_timer_reset(entry_refused_timer);
+    lv_timer_resume(entry_refused_timer);
+    // Distinct from the STRONG_CLICK a completed hold gives, so a refusal can
+    // be felt as well as read.
+    haptic_play(espp::Drv2605::Waveform::DOUBLE_CLICK, 1);
+  } else if (refused != kRefusedNone && (refused != page || mcb_ready())) {
+    // Clear rather than merely hide, so a cause that clears and then recurs
+    // inside the window does not bring the panel back without a new push.
+    entry_refused_clear();
+  }
 }
 
 static HoldGesture drive_enter_gesture{
@@ -929,8 +1339,8 @@ static HoldGesture drive_enter_gesture{
     .is_held = joy_up_held,
     // Gated in applies() rather than completed(), so a barred entry never even
     // starts filling the arc: nothing happens, instead of a progress animation
-    // that betrays you at the end. The STATUS panel's red STATE says why.
-    .applies = [] { return showing_flex_page(ui_DrivePanel) && drive_permitted(); },
+    // that betrays you at the end. entry_refusal_poll says why.
+    .applies = [] { return showing_flex_page(ui_DrivePanel) && mcb_ready(); },
     .completed =
         [] {
           _ui_screen_change(&ui_DriveScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
@@ -992,7 +1402,9 @@ static HoldGesture seat_back_gesture{
 static HoldGesture seat_enter_gesture{
     .armed = &joy_up_armed,
     .is_held = joy_up_held,
-    .applies = [] { return showing_flex_page(ui_SeatAdjustmentMenu); },
+    // Gated like drive_enter_gesture: the seat moves through the MCB, so it
+    // needs the same live link and OK state. entry_refusal_poll says why not.
+    .applies = [] { return showing_flex_page(ui_SeatAdjustmentMenu) && mcb_ready(); },
     .completed =
         [] {
           // The seat screen has a pager of its own, and unlike the MainScreenFlex
@@ -1004,13 +1416,101 @@ static HoldGesture seat_enter_gesture{
         },
 };
 
+/////////////////////////////////////////////////////////////////////////////
+// Leaving the R&D screens
+//
+// Both carry an ui_ExitBarPull, so both leave the same way the seat screen's
+// buttons page does: pull the stick back and hold. Neither has a matching
+// enter gesture — the RDScreen is reached by clicking the DEBUG ACTUATORS settings
+// row, and the SpecificSettingScreen's actuators page by getting the PIN right.
+//
+// Down does double duty on both (it steps the keypad selection on one and the
+// actuator focus on the other), so both carry the grace period for the same
+// reason the seat bars do.
+/////////////////////////////////////////////////////////////////////////////
+
+static HoldGesture rd_exit_gesture{
+    .armed = &joy_down_armed,
+    .is_held = joy_down_held,
+    .applies = [] { return lv_screen_active() == ui_RDScreen; },
+    .completed = screen_return_to_main,
+    .grace_ms = kBarGraceMs,
+};
+
+// Straight home from any page. From the actuators page that skips the PIN
+// pad: the PIN is asked again on the next visit either way (rd_pin_reset()
+// runs on every RDScreen load), so a stop at the keypad on the way out would
+// only be a screen to pull out of twice.
+static HoldGesture settings_exit_gesture{
+    .armed = &joy_down_armed,
+    .is_held = joy_down_held,
+    .applies = [] { return lv_screen_active() == ui_SpecificSettingScreen; },
+    .completed = screen_return_to_main,
+    .grace_ms = kBarGraceMs,
+};
+
+// Into the GenericActionsScreen. Not gated on the MCB: most actions are local,
+// and the ones that are not grey themselves out on the screen.
+static HoldGesture actions_enter_gesture{
+    .armed = &joy_up_armed,
+    .is_held = joy_up_held,
+    .applies = [] { return showing_flex_page(ui_GenericActionsPanel1); },
+    .completed = actions_open,
+};
+
+// Out of it, like the settings and R&D screens. Down also walks the buttons,
+// hence the grace period.
+static HoldGesture actions_exit_gesture{
+    .armed = &joy_down_armed,
+    .is_held = joy_down_held,
+    .applies = [] { return lv_screen_active() == ui_GenericActionsScreen; },
+    .completed = screen_return_to_main,
+    .grace_ms = kBarGraceMs,
+};
+
+// Out of the DiagnosticsScreen. Down also walks the rows, hence the grace.
+static HoldGesture diag_exit_gesture{
+    .armed = &joy_down_armed,
+    .is_held = joy_down_held,
+    .applies = [] { return lv_screen_active() == ui_DiagnosticsScreen; },
+    .completed = screen_return_to_main,
+    .grace_ms = kBarGraceMs,
+};
+
+// The LogScreen exits on the stick button, like the DriveScreen: up and down
+// page through the log there, so neither can double as a pull-to-exit.
+static HoldGesture log_exit_gesture{
+    .armed = &joy_button_armed,
+    .is_held = joy_button_held,
+    .applies = [] { return lv_screen_active() == ui_LogScreen; },
+    .completed = screen_return_to_main,
+    // the button is also select, so a tap would tick the bar and snap back
+    .grace_ms = kBarGraceMs,
+};
+
+static HoldGesture *const kHoldGestures[] = {
+    &unlock_gesture,    &drive_enter_gesture,   &drive_exit_gesture,   &seat_enter_gesture,
+    &seat_exit_gesture, &seat_back_gesture,     &rd_exit_gesture,      &settings_exit_gesture,
+    &log_exit_gesture,  &actions_enter_gesture, &actions_exit_gesture, &diag_exit_gesture,
+};
+
 static void hold_poll_cb(lv_timer_t *) {
-  hold_poll(&unlock_gesture);
-  hold_poll(&drive_enter_gesture);
-  hold_poll(&drive_exit_gesture);
-  hold_poll(&seat_enter_gesture);
-  hold_poll(&seat_exit_gesture);
-  hold_poll(&seat_back_gesture);
+  // The self-test overlay owns the stick while it is up (see the keypad read in
+  // app_main). Cancel anything mid-fill rather than let it complete - and
+  // navigate - behind the overlay.
+  if (selftest_ui_visible()) {
+    for (HoldGesture *g : kHoldGestures) {
+      if (g->holding) {
+        g->holding = false;
+        hold_reset(g);
+      }
+    }
+    return;
+  }
+  entry_refusal_poll();
+  for (HoldGesture *g : kHoldGestures) {
+    hold_poll(g);
+  }
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -1166,14 +1666,979 @@ static void seat_show_buttons_page() {
   lv_group_focus_obj(seat_buttons_grid.cell[seat_buttons_grid.row][seat_buttons_grid.col]);
 }
 
+/////////////////////////////////////////////////////////////////////////////
+// RDScreen: the 4-digit PIN
+//
+// ui_Keyboard1 is an lv_keyboard in NUMBER mode with no textarea attached, so
+// LVGL's own key handling is inert and the PIN is kept here instead. The four
+// checkboxes are the only readout - they are not clickable in the export, they
+// just show how many digits are in.
+//
+// The PIN is a build-time constant. It gates an R&D screen, not anything
+// safety-related, so it is a "not by accident" barrier rather than a secret:
+// anyone holding the firmware image has it either way.
+/////////////////////////////////////////////////////////////////////////////
+
+static constexpr char kRdPin[] = "1234";
+static constexpr int kRdPinLen = sizeof(kRdPin) - 1;
+static_assert(kRdPinLen == 4, "the RDScreen draws exactly four checkboxes");
+
+// The digits typed so far, NUL-terminated so a full entry is one comparison.
+// The length lives in the subject rather than here, because that is what the
+// checkboxes are bound to; this array is only ever read to judge a full entry.
+static char rd_pin_entry[kRdPinLen + 1];
+static lv_subject_t rd_pin_len_subject;
+
+// The line above the checkboxes, which doubles as the rejection notice. A
+// subject rather than an lv_label_set_text from the keypad handler, for the
+// reason in CLAUDE.md; the buffers are static because the subject stores its
+// copy in them and both have to outlive the label bound to them.
+// Arrays rather than pointers, so the static_assert below measures the string
+// and not the pointer to it.
+static constexpr char kRdPinPromptText[] = "Enter PIN to proceed";
+static constexpr char kRdPinWrongText[] = "Incorrect PIN - try again";
+static char rd_pin_message_buf[32];
+static char rd_pin_message_prev_buf[32];
+static_assert(sizeof(rd_pin_message_buf) > sizeof(kRdPinWrongText), "label buffer too small");
+static lv_subject_t rd_pin_message_subject;
+
+// Empties the entry and puts the prompt back. Runs on every RDScreen load, so
+// the PIN is asked again on every visit rather than latching once per boot.
+static void rd_pin_reset() {
+  rd_pin_entry[0] = '\0';
+  lv_subject_set_int(&rd_pin_len_subject, 0);
+  lv_subject_copy_string(&rd_pin_message_subject, kRdPinPromptText);
+}
+
+// A key on the PIN pad. Only the digits and backspace mean anything; every
+// other key the NUMBER map carries is ignored, and none of them can leave the
+// PIN inconsistent because none of them reaches this state:
+// lv_keyboard_def_event_cb (registered by the keyboard's constructor, and
+// still running ahead of this callback) returns at its `keyboard->ta == NULL`
+// check before it would act on "+/-", ".", backspace or the cursor arrows, and
+// the two it does handle without a textarea - LV_SYMBOL_OK and
+// LV_SYMBOL_KEYBOARD - only send LV_EVENT_READY / LV_EVENT_CANCEL to the
+// keyboard itself, which nothing listens for.
+static void rd_keypad_cb(lv_event_t *e) {
+  lv_obj_t *keyboard = lv_event_get_target_obj(e);
+  const uint32_t id = lv_buttonmatrix_get_selected_button(keyboard);
+  if (id == LV_BUTTONMATRIX_BUTTON_NONE) {
+    return;
+  }
+  const char *txt = lv_buttonmatrix_get_button_text(keyboard, id);
+  if (txt == nullptr) {
+    return;
+  }
+  int len = lv_subject_get_int(&rd_pin_len_subject);
+
+  if (lv_strcmp(txt, LV_SYMBOL_BACKSPACE) == 0) {
+    if (len > 0) {
+      rd_pin_entry[--len] = '\0';
+      lv_subject_set_int(&rd_pin_len_subject, len);
+    }
+    return;
+  }
+  // The only other key worth anything is a single digit. Testing the text
+  // rather than the button index keeps this independent of the map's layout.
+  if (txt[0] < '0' || txt[0] > '9' || txt[1] != '\0') {
+    return;
+  }
+
+  rd_pin_entry[len++] = txt[0];
+  rd_pin_entry[len] = '\0';
+  lv_subject_set_int(&rd_pin_len_subject, len);
+  // Typing clears a previous rejection, so the line reads as a prompt for the
+  // entry in progress rather than a verdict on the last one.
+  lv_subject_copy_string(&rd_pin_message_subject, kRdPinPromptText);
+  if (len < kRdPinLen) {
+    return;
+  }
+
+  // Judged on the fourth digit rather than on an OK key: the checkbox row makes
+  // the length obvious, so a confirm step would add nothing. Either branch
+  // empties the entry, which is what keeps `len` below kRdPinLen above.
+  const bool correct = lv_strcmp(rd_pin_entry, kRdPin) == 0;
+  rd_pin_reset();
+  if (correct) {
+    setting_page_open(kActuatorsPage);
+    return;
+  }
+  lv_subject_copy_string(&rd_pin_message_subject, kRdPinWrongText);
+}
+
+// DEBUG ACTUATORS settings row -> the PIN screen. Reached by a tap or by the
+// joystick, since flex_key_cb sends LV_EVENT_CLICKED to the focused row.
+static void rd_open_cb(lv_event_t *) {
+  _ui_screen_change(&ui_RDScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0, &ui_RDScreen_screen_init);
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// SpecificSettingScreen: pages of -/+ rows
+//
+// One screen for every setting that is a few numbers. A page is a title, a
+// line of instructions and some rows; each row is the export's
+// ActuatorComponent (Parameter1 is only the template, deleted at boot): short
+// label, label, value, and - / + buttons that grey out at the ends of the
+// range. Up/down move between rows, left/right step the focused one (holding
+// the stick repeats), and touch works on the buttons.
+//
+// Two kinds of page, which differ only in what a step does:
+//   settings   settings_spec.h. The step sets the row's subject, clamped to
+//              the range; whatever owns that subject applies and saves it.
+//   actuators  RAMMP_ACTUATOR_TABLE, reached through the PIN. The HMI owns
+//              none of these values: a step publishes a REQUEST, and a row's
+//              number changes only when the MCB's actuator-state sample says
+//              so. That keeps a limit or an interlock one decision made in one
+//              place, instead of two boards disagreeing about where the seat is.
+//
+// Memory: the screen and its rows exist only while it is up - see "Screens
+// built on demand".
+/////////////////////////////////////////////////////////////////////////////
+
+// A row's fixed description, from either table.
+struct StepperSpec {
+  const char *short_name; // "S1", "M1"
+  const char *label;      // "Brightness"
+  int32_t min_value;
+  int32_t max_value;
+  int32_t step;
+  uint8_t decimals; // display only: 126 with 1 decimal shows "12.6"
+  const char *unit; // appended to the value; nullptr = none
+};
+
+// Everything needed to drive one row, so a key callback or an observer gets it
+// all from one user_data pointer.
+struct SettingRow {
+  StepperSpec spec;
+  lv_subject_t *value; // the row's whole truth; kValueUnknown until known
+  int index;           // position on the page; on the actuators page, the actuator id
+  lv_obj_t *row;       // the ActuatorComponent root; what takes focus
+  lv_obj_t *value_label;
+  lv_obj_t *minus;
+  lv_obj_t *plus;
+};
+
+struct SettingPageText {
+  const char *title;
+  const char *instructions;
+};
+
+static constexpr SettingPageText kSettingPageText[] = {
+#define SETTINGS_PAGE_ROW(name_, title_, text_) {title_, text_},
+    SETTINGS_PAGE_TABLE(SETTINGS_PAGE_ROW)
+#undef SETTINGS_PAGE_ROW
+};
+static constexpr SettingPageText kActuatorsPageText{
+    "DEBUG ACTUATORS", "Up/down to pick, left/right or -/+ to move. Pull and hold to exit."};
+
+struct SettingParam {
+  int page; // SETTINGS_PAGE_*
+  StepperSpec spec;
+};
+
+static constexpr SettingParam kSettingParams[] = {
+#define SETTINGS_PARAM_ROW(page_, name_, short_, label_, min_, max_, step_, dec_, unit_)           \
+  {SETTINGS_PAGE_##page_, {short_, label_, min_, max_, step_, dec_, unit_}},
+    SETTINGS_PARAM_TABLE(SETTINGS_PARAM_ROW)
+#undef SETTINGS_PARAM_ROW
+};
+
+// The subject each settings parameter steps, in SETTINGS_PARAM_* order.
+static lv_subject_t *const kSettingParamValue[] = {
+    &brightness_subject, // SETTINGS_PARAM_BRIGHTNESS: its observer applies and saves it
+};
+static_assert(std::size(kSettingParamValue) == SETTINGS_PARAM_COUNT,
+              "every settings_spec.h parameter needs its subject here");
+
+static constexpr int kSettingRowsMax = std::max<int>(RAMMP_ACTUATOR_COUNT, SETTINGS_PARAM_COUNT);
+static SettingRow setting_rows[kSettingRowsMax];
+static int setting_row_count; // rows on the page that is up; 0 while the screen is not
+static int setting_cursor;    // which row the joystick is on
+static lv_group_t *setting_group = nullptr;
+// Which page is up: a SETTINGS_PAGE_* or kActuatorsPage. A subject because the
+// warning panel depends on it.
+static lv_subject_t setting_page_subject;
+
+// Raw value per actuator, in the table's units. Static: the rows' observers
+// point at them, and the MCB keeps them current with no page up.
+static lv_subject_t actuator_value[RAMMP_ACTUATOR_COUNT];
+static uint8_t actuator_count; // actuators in the table
+
+// What a value reads before it is known - only ever an actuator the MCB has
+// not reported yet. Not zero: zero is a position an actuator can genuinely be
+// in, and drawing it would be claiming knowledge we do not have. Both buttons
+// stay greyed while a row reads this, because commanding an actuator whose
+// position is unknown is exactly what the request/response arrangement avoids.
+static constexpr int32_t kValueUnknown = INT32_MIN;
+
+// The rejection flash: which actuator was refused, and why. One subject rather
+// than two, because the pair is only ever meaningful together and a single
+// lv_subject_set_int cannot tear. -1 = nothing being flashed.
+static lv_subject_t actuator_reject_subject;
+static constexpr int32_t kActuatorRejectNone = -1;
+static constexpr uint32_t kActuatorRejectFlashMs = 900;
+static int32_t actuator_reject_pack(uint8_t id, uint8_t result) {
+  return static_cast<int32_t>(id) | (static_cast<int32_t>(result) << 8);
+}
+static uint8_t actuator_reject_id(int32_t packed) { return static_cast<uint8_t>(packed & 0xFF); }
+
+// Formats a raw value the way the row draws it: 126 with decimals=1 -> "12.6",
+// then the unit. Built a digit at a time rather than with a "%.*f" style
+// format: the value is an integer and must stay one, and LVGL's own printf
+// does not promise the '*' width specifier.
+static void stepper_format(const StepperSpec &spec, int32_t raw, char *out, size_t out_size) {
+  char number[16];
+  if (spec.decimals == 0) {
+    lv_snprintf(number, sizeof(number), "%d", static_cast<int>(raw));
+  } else {
+    int32_t scale = 1;
+    for (uint8_t i = 0; i < spec.decimals; i++) {
+      scale *= 10;
+    }
+    // Split on the magnitude and put the sign back by hand, so -5 with one
+    // decimal reads "-0.5" rather than the "0.5" an integer division would give.
+    const bool negative = raw < 0;
+    const int32_t magnitude = negative ? -raw : raw;
+    char digits[12];
+    const uint8_t count =
+        spec.decimals < sizeof(digits) - 1 ? spec.decimals : (uint8_t)(sizeof(digits) - 1);
+    int32_t frac = magnitude % scale;
+    for (int i = count - 1; i >= 0; i--) {
+      digits[i] = static_cast<char>('0' + frac % 10);
+      frac /= 10;
+    }
+    digits[count] = '\0';
+    lv_snprintf(number, sizeof(number), "%s%d.%s", negative ? "-" : "",
+                static_cast<int>(magnitude / scale), digits);
+  }
+  lv_snprintf(out, out_size, "%s%s", number, spec.unit != nullptr ? spec.unit : "");
+}
+
+// The row's number. An observer rather than lv_label_bind_text because the
+// value is scaled: bind_text's format string is handed the raw integer.
+static void setting_value_observer(lv_observer_t *observer, lv_subject_t *subject) {
+  const auto *row = static_cast<const SettingRow *>(lv_observer_get_user_data(observer));
+  const int32_t raw = lv_subject_get_int(subject);
+  if (raw == kValueUnknown) {
+    lv_label_set_text(lv_observer_get_target_obj(observer), "--");
+    return;
+  }
+  char text[24];
+  stepper_format(row->spec, raw, text, sizeof(text));
+  lv_label_set_text(lv_observer_get_target_obj(observer), text);
+}
+
+// Greys each step button when its end of the range is reached, so the limit is
+// visible before the user leans on it. One observer setting both buttons
+// rather than two lv_obj_bind_state_if_* bindings: the unknown case has to
+// grey BOTH, and two bindings writing the same state would undo each other.
+static void setting_limits_observer(lv_observer_t *observer, lv_subject_t *subject) {
+  const auto *row = static_cast<const SettingRow *>(lv_observer_get_user_data(observer));
+  const int32_t raw = lv_subject_get_int(subject);
+  const bool known = raw != kValueUnknown;
+  lv_obj_set_state(row->minus, LV_STATE_DISABLED, !known || raw <= row->spec.min_value);
+  lv_obj_set_state(row->plus, LV_STATE_DISABLED, !known || raw >= row->spec.max_value);
+}
+
+// The rejection flash: a red wash behind the refused row's number. The
+// BACKGROUND, not the text colour: the label's text colour is themed for both
+// DEFAULT and FOCUSED, so a red on DEFAULT would lose to the FOCUSED style on
+// the very row the user just pressed. Nothing themes this label's background.
+static void actuator_reject_observer(lv_observer_t *observer, lv_subject_t *subject) {
+  const auto *row = static_cast<const SettingRow *>(lv_observer_get_user_data(observer));
+  lv_obj_t *label = lv_observer_get_target_obj(observer);
+  const int32_t packed = lv_subject_get_int(subject);
+  const bool rejected = packed != kActuatorRejectNone && actuator_reject_id(packed) == row->index;
+  lv_obj_set_style_bg_color(label, lv_palette_main(LV_PALETTE_RED), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(label, rejected ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_MAIN);
+}
+
+static void actuator_reject_clear_cb(lv_timer_t *timer) {
+  lv_timer_pause(timer);
+  lv_subject_set_int(&actuator_reject_subject, kActuatorRejectNone);
+}
+
+// Applies one actuator-state sample. Called on the LVGL task (see the handler
+// registered in app_main, which takes lvgl_mutex first).
+//
+// `count` is what the MCB says it has; rows beyond it keep reading "--"
+// rather than inheriting a value that was never sent for them.
+static uint8_t actuator_req_id;         // free-running; identifies our last request
+static uint8_t actuator_flashed_req_id; // the request the current flash belongs to
+
+// Which actuator each request named, indexed by its req_id. The state message
+// says which REQUEST it answers but not which actuator that request was for,
+// so the mapping is kept on this side. One byte per possible req_id is exact
+// and needs no expiry.
+static uint8_t actuator_req_target[256];
+static bool actuator_flashed_any;
+static lv_timer_t *actuator_reject_timer = nullptr;
+
+static void actuator_apply_state(const rammp::ActuatorState &state) {
+  const size_t known = std::min<size_t>(actuator_count, state.values.size());
+  for (size_t i = 0; i < known; i++) {
+    lv_subject_set_int(&actuator_value[i], state.values[i]);
+  }
+  if (state.result == RAMMP_ACTUATOR_RESULT_OK) {
+    return;
+  }
+  // This topic republishes every RAMMP_ACTUATOR_STATE_PERIOD_MS carrying the
+  // same verdict, so flash once per REQUEST rather than once per sample -
+  // otherwise a single refusal would blink twice a second until the next press.
+  if (actuator_flashed_any && state.req_id == actuator_flashed_req_id) {
+    return;
+  }
+  actuator_flashed_req_id = state.req_id;
+  actuator_flashed_any = true;
+  const uint8_t target = actuator_req_target[state.req_id];
+  if (state.result == RAMMP_ACTUATOR_RESULT_UNKNOWN_ID || target >= actuator_count) {
+    return; // no row to flash: the MCB does not have this actuator at all
+  }
+  lv_subject_set_int(&actuator_reject_subject, actuator_reject_pack(target, state.result));
+  lv_timer_reset(actuator_reject_timer);
+  lv_timer_resume(actuator_reject_timer);
+}
+
+// Puts the joystick cursor on `index`, clamped. Clamping rather than wrapping,
+// for the reason in grid_key_cb.
+static void setting_focus(int index) {
+  if (setting_row_count == 0) {
+    return;
+  }
+  setting_cursor = std::clamp(index, 0, setting_row_count - 1);
+  lv_group_focus_obj(setting_rows[setting_cursor].row);
+}
+
+// How long a joystick press shows on a step button. Comfortably shorter than
+// the 250 ms key repeat, so holding the stick reads as one blink per step.
+//
+// The pressed state has to be faked because nothing here is a real touch:
+// LVGL only sets it from an indev acting on the object itself, and the
+// joystick's indev is acting on the row. One timer and one button, rather than
+// a timer per press: a press ends the previous one early, and deleting the
+// rows only has to forget one pointer for no timer to outlive its button.
+static constexpr uint32_t kPressFlashMs = 120;
+static lv_timer_t *press_flash_timer = nullptr;
+static lv_obj_t *press_flash_button = nullptr;
+
+static void press_flash_end() {
+  if (press_flash_button != nullptr) {
+    lv_obj_remove_state(press_flash_button, LV_STATE_PRESSED);
+    press_flash_button = nullptr;
+  }
+  lv_timer_pause(press_flash_timer);
+}
+
+static void press_flash_cb(lv_timer_t *) { press_flash_end(); }
+
+static void press_flash(lv_obj_t *button) {
+  press_flash_end();
+  lv_obj_add_state(button, LV_STATE_PRESSED);
+  press_flash_button = button;
+  lv_timer_reset(press_flash_timer);
+  lv_timer_resume(press_flash_timer);
+}
+
+// Steps `row` one step in `direction`, and shows the press.
+//
+// The DISABLED check is not belt-and-braces: LVGL suppresses clicks on a
+// disabled object inside the indev, which covers touch, but the joystick path
+// reaches the button through lv_obj_send_event and never passes that check.
+static void setting_step(const SettingRow *row, int direction) {
+  lv_obj_t *button = direction < 0 ? row->minus : row->plus;
+  if (lv_obj_has_state(button, LV_STATE_DISABLED)) {
+    return;
+  }
+  press_flash(button);
+  if (lv_subject_get_int(&setting_page_subject) == kActuatorsPage) {
+    // A request: the value moves only when the MCB's state sample says so.
+    actuator_req_id++;
+    actuator_req_target[actuator_req_id] = static_cast<uint8_t>(row->index);
+    rtps_comms_publish_actuator_command(actuator_req_id, static_cast<uint8_t>(row->index),
+                                        static_cast<int8_t>(direction < 0 ? -1 : 1));
+    return;
+  }
+  const int32_t now = lv_subject_get_int(row->value);
+  lv_subject_set_int(row->value, std::clamp(now + direction * row->spec.step, row->spec.min_value,
+                                            row->spec.max_value));
+}
+
+// Up/down walk the rows, left/right step the focused one. Holding the stick
+// repeats: lv_indev raises LV_EVENT_KEY again every long_press_repeat_time.
+static void setting_key_cb(lv_event_t *e) {
+  const auto *row = static_cast<const SettingRow *>(lv_event_get_user_data(e));
+  switch (lv_event_get_key(e)) {
+  case LV_KEY_LEFT:
+    setting_step(row, -1);
+    return;
+  case LV_KEY_RIGHT:
+    setting_step(row, +1);
+    return;
+  case LV_KEY_UP:
+    setting_focus(setting_cursor - 1);
+    return;
+  case LV_KEY_DOWN:
+    setting_focus(setting_cursor + 1);
+    return;
+  default:
+    return;
+  }
+}
+
+// A tap on a step button. Moves the cursor to that row first, so touch and the
+// joystick never disagree about which row left/right would act on.
+static void setting_step_click_cb(lv_event_t *e) {
+  const auto *row = static_cast<const SettingRow *>(lv_event_get_user_data(e));
+  setting_focus(row->index);
+  setting_step(row, lv_event_get_target_obj(e) == row->minus ? -1 : +1);
+}
+
+// A tap on the row itself: focus, nothing else.
+static void setting_row_click_cb(lv_event_t *e) {
+  setting_focus(static_cast<const SettingRow *>(lv_event_get_user_data(e))->index);
+}
+
+// LVGL's click-focus (indev_click_focus in lv_indev.c) remembers the last
+// CLICK_FOCUSABLE object a pointer pressed and DEFOCUSES it when the next one
+// is pressed. Every lv_obj carries that flag by default, so the step buttons
+// took part in it despite being in no group: tapping - and then + sent
+// LV_EVENT_DEFOCUSED to -, and lv_obj_event strips LV_STATE_FOCUSED on that
+// event, so a button inside a still-focused row dropped out of the focused
+// theme. Nothing inside a row should have a focus life of its own, so the flag
+// comes off every descendant and setting_focus_cb is left as the only writer
+// of LV_STATE_FOCUSED in there. Descendants only: the row itself has to stay
+// click-focusable, because that is how a tap on it reaches its group.
+static void clear_click_focusable_recursive(lv_obj_t *obj) {
+  for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
+    lv_obj_t *child = lv_obj_get_child(obj, i);
+    lv_obj_remove_flag(child, LV_OBJ_FLAG_CLICK_FOCUSABLE);
+    clear_click_focusable_recursive(child);
+  }
+}
+
+// A focused row has to look focused all the way down. LVGL only puts
+// LV_STATE_FOCUSED on the object the group focused - the row itself - but the
+// export gives every descendant its own MAIN|FOCUSED theme style, so without
+// this the row's background would invert while the labels and the -/+ buttons
+// on it stayed in the unfocused theme and became unreadable.
+static void set_focused_recursive(lv_obj_t *obj, bool focused) {
+  if (focused) {
+    lv_obj_add_state(obj, LV_STATE_FOCUSED);
+  } else {
+    lv_obj_remove_state(obj, LV_STATE_FOCUSED);
+  }
+  for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
+    set_focused_recursive(lv_obj_get_child(obj, i), focused);
+  }
+}
+
+// Registered for LV_EVENT_FOCUSED and LV_EVENT_DEFOCUSED on each row. The step
+// buttons keep their DISABLED state through this: DISABLED and FOCUSED are
+// different bits, and only setting_limits_observer writes the one.
+static void setting_focus_cb(lv_event_t *e) {
+  set_focused_recursive(lv_event_get_target_obj(e), lv_event_get_code(e) == LV_EVENT_FOCUSED);
+}
+
+// ErrorWarningPanel6. Raised only on a page that needs the MCB - the
+// actuators - and then exactly as on the drive and seat screens: while the
+// link is down or the MCB's state is not OK.
+static void setting_warning_observer(lv_observer_t *observer, lv_subject_t *) {
+  lv_obj_t *panel = lv_observer_get_target_obj(observer);
+  if (lv_subject_get_int(&setting_page_subject) != kActuatorsPage || mcb_ready()) {
+    lv_obj_add_flag(panel, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+  fill_drive_blocked_panel(panel, RAMMP_HMI_LINK_LOST_TITLE, RAMMP_HMI_MCB_FAULT_TITLE);
+  lv_obj_remove_flag(panel, LV_OBJ_FLAG_HIDDEN);
+}
+
+// Deleting a row takes its observers and events with it (all bound to the
+// object) and drops it from setting_group; the theme manager forgets it too.
+static void setting_rows_clear() {
+  press_flash_end(); // before its button goes
+  for (int i = 0; i < setting_row_count; i++) {
+    lv_obj_delete(setting_rows[i].row);
+  }
+  setting_row_count = 0;
+  setting_cursor = 0;
+}
+
+static void setting_row_add(const StepperSpec &spec, lv_subject_t *value, bool actuator) {
+  SettingRow &entry = setting_rows[setting_row_count];
+  entry.spec = spec;
+  entry.value = value;
+  entry.index = setting_row_count++;
+  entry.row = ui_ActuatorComponent_create(ui_SpecificSettingsRows);
+  entry.value_label =
+      ui_comp_get_child(entry.row, UI_COMP_ACTUATORCOMPONENT_VALUECONTAINER1_ACTUATORSHORTLABEL1);
+  entry.minus = ui_comp_get_child(entry.row, UI_COMP_ACTUATORCOMPONENT_MINUSBUTTON1);
+  entry.plus = ui_comp_get_child(entry.row, UI_COMP_ACTUATORCOMPONENT_PLUSBUTTON1);
+
+  // Fixed for the life of the row - they come from a build-time table - so
+  // set once rather than driven through a subject.
+  lv_label_set_text(
+      ui_comp_get_child(
+          entry.row,
+          UI_COMP_ACTUATORCOMPONENT_TITLECONTAINER1_ACTUATORLABELS1_ACTUATOR1SHORTLABEL1),
+      spec.short_name);
+  lv_label_set_text(
+      ui_comp_get_child(entry.row,
+                        UI_COMP_ACTUATORCOMPONENT_TITLECONTAINER1_ACTUATORLABELS1_ACTUATOR1LABEL),
+      spec.label);
+
+  lv_subject_add_observer_obj(value, setting_value_observer, entry.value_label, &entry);
+  lv_subject_add_observer_obj(value, setting_limits_observer, entry.row, &entry);
+  if (actuator) {
+    lv_subject_add_observer_obj(&actuator_reject_subject, actuator_reject_observer,
+                                entry.value_label, &entry);
+  }
+
+  lv_group_add_obj(setting_group, entry.row);
+  lv_obj_add_event_cb(entry.row, setting_key_cb, LV_EVENT_KEY, &entry);
+  lv_obj_add_event_cb(entry.row, setting_row_click_cb, LV_EVENT_CLICKED, &entry);
+  lv_obj_add_event_cb(entry.row, setting_focus_cb, LV_EVENT_FOCUSED, nullptr);
+  lv_obj_add_event_cb(entry.row, setting_focus_cb, LV_EVENT_DEFOCUSED, nullptr);
+  lv_obj_add_event_cb(entry.minus, setting_step_click_cb, LV_EVENT_CLICKED, &entry);
+  lv_obj_add_event_cb(entry.plus, setting_step_click_cb, LV_EVENT_CLICKED, &entry);
+
+  // SquareLine exports the state each object was previewed in, and the
+  // component was drawn focused throughout - so every row would come up
+  // focused at once. Clearing it leaves setting_focus_cb as its only writer.
+  set_focused_recursive(entry.row, false);
+  clear_click_focusable_recursive(entry.row);
+}
+
+// Fills the screen for `page` and shows it. LVGL task (a click handler).
+static void setting_page_open(int32_t page) {
+  settings_screen_ensure(); // built on demand: see "Screens built on demand"
+  setting_rows_clear();
+  const SettingPageText &text =
+      page == kActuatorsPage ? kActuatorsPageText : kSettingPageText[page];
+  lv_label_set_text(ui_SettingTitleLabel, text.title);
+  lv_label_set_text(ui_BriefInstructionsLabel, text.instructions);
+  if (page == kActuatorsPage) {
+    const rammp_actuator_spec_t *specs = rammp_actuator_table(nullptr);
+    for (uint8_t i = 0; i < actuator_count; i++) {
+      setting_row_add({specs[i].short_name, specs[i].label, specs[i].min_value, specs[i].max_value,
+                       specs[i].step, specs[i].decimals, nullptr},
+                      &actuator_value[i], true);
+    }
+  } else {
+    for (int i = 0; i < SETTINGS_PARAM_COUNT; i++) {
+      if (kSettingParams[i].page == page) {
+        setting_row_add(kSettingParams[i].spec, kSettingParamValue[i], false);
+      }
+    }
+  }
+  lv_subject_set_int(&setting_page_subject, page);
+  _ui_screen_change(&ui_SpecificSettingScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
+                    &ui_SpecificSettingScreen_screen_init);
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// GenericActionsScreen: a list of one-press actions
+//
+// Entered by holding the stick up on the GENERIC ACTIONS pager page, left by
+// pulling and holding. One button per entry in actions_spec.h: the spec gives
+// each its title, subtitle and whether it needs the MCB; kActionRun below says
+// what it does. Up/down move between buttons; the stick button (or a tap) runs
+// the focused one.
+//
+// A button that needs the MCB greys out while mcb_ready() is false, so it says
+// nothing would happen before anyone presses it - and the local actions stay
+// reachable, which a full-screen banner would not allow.
+//
+// Like the SpecificSettingScreen, the screen and its buttons exist only
+// while it is up - see "Screens built on demand".
+/////////////////////////////////////////////////////////////////////////////
+
+// What each action does. LVGL task (a click).
+static void action_haptic_test() {
+  haptic_play(espp::Drv2605::Waveform::ALERT_1000MS, kHapticBuzzSlots);
+}
+
+static void action_self_test() { selftest_request(SelfTestTrigger::LOCAL, 0); }
+
+// An RTPS command: the request a "+" press on the actuators page makes. The
+// seat moves only if the MCB agrees, and a refusal flashes on that page.
+static void action_seat_up() {
+  actuator_req_id++;
+  actuator_req_target[actuator_req_id] = RAMMP_ACTUATOR_ELEVATION;
+  rtps_comms_publish_actuator_command(actuator_req_id, RAMMP_ACTUATOR_ELEVATION, +1);
+}
+
+static void action_restart_hmi() {
+  static espp::Logger action_logger({.tag = "actions", .level = espp::Logger::Verbosity::INFO});
+  action_logger.warn("restart requested from the actions screen");
+  esp_restart();
+}
+
+// In actions_spec.h order.
+static void (*const kActionRun[])() = {
+    action_haptic_test, // ACTION_HAPTIC_TEST
+    action_self_test,   // ACTION_SELF_TEST
+    action_seat_up,     // ACTION_SEAT_UP
+    action_restart_hmi, // ACTION_RESTART_HMI
+};
+static_assert(std::size(kActionRun) == ACTION_COUNT,
+              "every actions_spec.h entry needs its function here");
+
+struct ActionSpec {
+  const char *title;
+  const char *subtitle;
+  bool needs_mcb;
+};
+
+static constexpr ActionSpec kActionSpecs[] = {
+#define ACTIONS_ROW(name_, title_, subtitle_, mcb_) {title_, subtitle_, (mcb_) != 0},
+    ACTIONS_TABLE(ACTIONS_ROW)
+#undef ACTIONS_ROW
+};
+
+static lv_obj_t *action_buttons[ACTION_COUNT];
+static int action_button_count; // buttons on screen; 0 while it is not up
+static int action_cursor;       // which button the joystick is on
+static lv_group_t *actions_group = nullptr;
+
+// The component has no focused look of its own, and a cursor nobody can see
+// is no cursor: the theme's focus colour on a thicker border, as the seat
+// buttons do. A greyed button fades the whole thing, labels included.
+static constexpr lv_style_selector_t kActionFocused =
+    static_cast<lv_style_selector_t>(LV_PART_MAIN) |
+    static_cast<lv_style_selector_t>(LV_STATE_FOCUSED);
+static constexpr lv_style_selector_t kActionDisabled =
+    static_cast<lv_style_selector_t>(LV_PART_MAIN) |
+    static_cast<lv_style_selector_t>(LV_STATE_DISABLED);
+
+// Clamped rather than wrapped, for the reason in grid_key_cb.
+static void action_focus(int index) {
+  if (action_button_count == 0) {
+    return;
+  }
+  action_cursor = std::clamp(index, 0, action_button_count - 1);
+  lv_group_focus_obj(action_buttons[action_cursor]);
+}
+
+// Greys an MCB action while the MCB could not act on it. Bound to every
+// subject mcb_ready() reads, so it follows the link and the state both.
+static void action_ready_observer(lv_observer_t *observer, lv_subject_t *) {
+  lv_obj_set_state(lv_observer_get_target_obj(observer), LV_STATE_DISABLED, !mcb_ready());
+}
+
+// A tap, or the stick button on the focused one (the keypad indev turns ENTER
+// into LV_EVENT_CLICKED). The DISABLED check covers the joystick path, which
+// LVGL does not filter the way it filters a touch.
+static void action_click_cb(lv_event_t *e) {
+  lv_obj_t *button = lv_event_get_target_obj(e);
+  if (lv_obj_has_state(button, LV_STATE_DISABLED)) {
+    return;
+  }
+  const auto index = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
+  action_focus(index);
+  kActionRun[index]();
+}
+
+// Up/down walk the buttons. The keypad indev hands arrow keys to the focused
+// object rather than moving the group itself.
+static void action_key_cb(lv_event_t *e) {
+  switch (lv_event_get_key(e)) {
+  case LV_KEY_UP:
+    action_focus(action_cursor - 1);
+    return;
+  case LV_KEY_DOWN:
+    action_focus(action_cursor + 1);
+    return;
+  default:
+    return;
+  }
+}
+
+// Deleting a button takes its observers and events with it and drops it from
+// actions_group; the theme manager forgets it too.
+static void actions_clear() {
+  for (int i = 0; i < action_button_count; i++) {
+    lv_obj_delete(action_buttons[i]);
+  }
+  action_button_count = 0;
+  action_cursor = 0;
+}
+
+// Builds the buttons and shows the screen. LVGL task (a hold gesture).
+static void actions_open() {
+  actions_screen_ensure(); // built on demand: see "Screens built on demand"
+  actions_clear();
+  for (int i = 0; i < ACTION_COUNT; i++) {
+    const ActionSpec &spec = kActionSpecs[i];
+    lv_obj_t *button = ui_GenericActionsComponent1_create(ui_GenericActionsFlexPanel);
+    action_buttons[action_button_count++] = button;
+    lv_label_set_text(
+        ui_comp_get_child(
+            button,
+            UI_COMP_GENERICACTIONSCOMPONENT1_GENERICACTIONSELEMENTCONTAINER1_GENERICACTIONSELEMENTTITLE1),
+        spec.title);
+    lv_label_set_text(
+        ui_comp_get_child(
+            button,
+            UI_COMP_GENERICACTIONSCOMPONENT1_GENERICACTIONSELEMENTCONTAINER1_GENERICACTIONSELEMENTSUBTITLE1),
+        spec.subtitle);
+    ui_object_set_themeable_style_property(button, kActionFocused, LV_STYLE_BORDER_COLOR,
+                                           _ui_theme_color_focused);
+    ui_object_set_themeable_style_property(button, kActionFocused, LV_STYLE_BORDER_OPA,
+                                           _ui_theme_alpha_focused);
+    lv_obj_set_style_border_width(button, 6, kActionFocused);
+    lv_obj_set_style_opa(button, LV_OPA_40, kActionDisabled);
+    if (spec.needs_mcb) {
+      bind_to_drive_blocked_cause(button, action_ready_observer);
+    }
+    lv_group_add_obj(actions_group, button);
+    lv_obj_add_event_cb(button, action_key_cb, LV_EVENT_KEY, nullptr);
+    lv_obj_add_event_cb(button, action_click_cb, LV_EVENT_CLICKED,
+                        reinterpret_cast<void *>(static_cast<intptr_t>(i)));
+    // Only the button takes part in focus; see clear_click_focusable_recursive.
+    clear_click_focusable_recursive(button);
+  }
+  _ui_screen_change(&ui_GenericActionsScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
+                    &ui_GenericActionsScreen_screen_init);
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// DiagnosticsScreen: live readings from the MCB
+//
+// Opened from the DIAGNOSTICS settings row, left by pulling and holding. One
+// row per entry in RAMMP_DIAG_TABLE (rammp_rtps_spec.h): short label, label,
+// and up to three readings, each under its unit. The MCB publishes them all on
+// RAMMP_TOPIC_MCB_DIAGNOSTICS every RAMMP_DIAG_PERIOD_MS; they land in
+// diag_value (subjects, set under the LVGL lock by the RTPS handler in
+// app_main) and the rows observe them.
+//
+// DiagnosticsFreqLabel shows how fast they are arriving ("2.0 Hz - Live").
+// Once nothing has arrived for RAMMP_DIAG_TIMEOUT_MS - or nothing ever has -
+// every row's text and the label turn red and blink: readings the MCB stopped
+// sending must not sit there looking current.
+//
+// The red comes through LV_STATE_USER_1. The labels' text colours are themed
+// for DEFAULT and FOCUSED, and a style on a higher state outranks both without
+// touching anything the theme manager re-applies on a theme change.
+//
+// Built on demand like the settings and actions screens (see "Screens built
+// on demand").
+/////////////////////////////////////////////////////////////////////////////
+
+static_assert(RAMMP_DIAG_FIELDS == 3, "the DiagnosticComponent has exactly three readings");
+
+// Each reading's container, units label and value label in the component.
+struct DiagFieldIds {
+  int container;
+  int units;
+  int value;
+};
+static constexpr DiagFieldIds kDiagFieldIds[RAMMP_DIAG_FIELDS] = {
+    {UI_COMP_DIAGNOSTICCOMPONENT_DIAGNOSTICSVALUECONTAINER1,
+     UI_COMP_DIAGNOSTICCOMPONENT_DIAGNOSTICSVALUECONTAINER1_DIAGNOSTICSUNITS1,
+     UI_COMP_DIAGNOSTICCOMPONENT_DIAGNOSTICSVALUECONTAINER1_DIAGNOSTICSVALUE1},
+    {UI_COMP_DIAGNOSTICCOMPONENT_DIAGNOSTICSVALUECONTAINER2,
+     UI_COMP_DIAGNOSTICCOMPONENT_DIAGNOSTICSVALUECONTAINER2_DIAGNOSTICSUNITS2,
+     UI_COMP_DIAGNOSTICCOMPONENT_DIAGNOSTICSVALUECONTAINER2_DIAGNOSTICSVALUE2},
+    {UI_COMP_DIAGNOSTICCOMPONENT_DIAGNOSTICSVALUECONTAINER3,
+     UI_COMP_DIAGNOSTICCOMPONENT_DIAGNOSTICSVALUECONTAINER3_DIAGNOSTICSUNITS3,
+     UI_COMP_DIAGNOSTICCOMPONENT_DIAGNOSTICSVALUECONTAINER3_DIAGNOSTICSVALUE3},
+};
+
+// Readings, raw, [table row][reading]; kValueUnknown until the MCB sends one.
+// Static: the rows' observers point at them, and they keep updating with no
+// screen up.
+static lv_subject_t diag_value[RAMMP_DIAG_COUNT][RAMMP_DIAG_FIELDS];
+static lv_subject_t diag_stale_subject; // 1 = nothing within RAMMP_DIAG_TIMEOUT_MS, or ever
+static lv_subject_t diag_rate_subject;  // arrival rate, tenths of a Hz
+
+// Which reading a value observer shows; static so an observer can point at it.
+struct DiagField {
+  uint8_t item;
+  uint8_t field;
+};
+static DiagField diag_fields[RAMMP_DIAG_COUNT][RAMMP_DIAG_FIELDS];
+
+static lv_obj_t *diag_rows[RAMMP_DIAG_COUNT];
+static int diag_row_count; // rows on screen; 0 while it is not up
+static int diag_cursor;    // which row the joystick is on
+static lv_group_t *diag_group = nullptr;
+
+static constexpr lv_style_selector_t kDiagStale = static_cast<lv_style_selector_t>(LV_PART_MAIN) |
+                                                  static_cast<lv_style_selector_t>(LV_STATE_USER_1);
+static constexpr uint32_t kDiagStaleColour = 0xFF5050; // the self test's FAIL red
+
+// Keeps diag_stale_subject and diag_rate_subject current. LVGL task, from
+// rtps_poll_cb: staleness has to be polled - nothing happens when a sample
+// fails to arrive.
+static void diag_poll() {
+  const RtpsDiagStats stats = rtps_comms_diag_stats();
+  const bool stale =
+      stats.last_us == 0 || esp_timer_get_time() - stats.last_us > RAMMP_DIAG_TIMEOUT_MS * 1000LL;
+  lv_subject_set_int(&diag_stale_subject, stale ? 1 : 0);
+  lv_subject_set_int(&diag_rate_subject, stale ? 0 : stats.rate_tenths_hz);
+}
+
+// A reading, scaled by its decimals. stepper_format's StepperSpec carries the
+// decimals; the rest of it does not apply here.
+static void diag_value_observer(lv_observer_t *observer, lv_subject_t *subject) {
+  const auto *field = static_cast<const DiagField *>(lv_observer_get_user_data(observer));
+  lv_obj_t *label = lv_observer_get_target_obj(observer);
+  const int32_t raw = lv_subject_get_int(subject);
+  if (raw == kValueUnknown) {
+    lv_label_set_text(label, "--");
+    return;
+  }
+  const rammp_diag_spec_t &spec = rammp_diag_table(nullptr)[field->item];
+  const StepperSpec format{nullptr, nullptr, 0, 0, 0, spec.decimals[field->field], nullptr};
+  char text[24];
+  stepper_format(format, raw, text, sizeof(text));
+  lv_label_set_text(label, text);
+}
+
+static lv_opa_t diag_blink_opa() {
+  return lv_subject_get_int(&rtps_blink_subject) ? LV_OPA_COVER : LV_OPA_TRANSP;
+}
+
+// Every label under `obj` takes LV_STATE_USER_1 while stale, whose style is
+// red text at the blink's opacity.
+static void diag_mark_stale(lv_obj_t *obj, bool stale, lv_opa_t opa) {
+  for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
+    lv_obj_t *child = lv_obj_get_child(obj, i);
+    if (lv_obj_check_type(child, &lv_label_class)) {
+      lv_obj_set_style_text_color(child, lv_color_hex(kDiagStaleColour), kDiagStale);
+      lv_obj_set_style_text_opa(child, opa, kDiagStale);
+      lv_obj_set_state(child, LV_STATE_USER_1, stale);
+    }
+    diag_mark_stale(child, stale, opa);
+  }
+}
+
+// Bound to each row, on the stale and blink subjects both.
+static void diag_row_stale_observer(lv_observer_t *observer, lv_subject_t *) {
+  diag_mark_stale(lv_observer_get_target_obj(observer),
+                  lv_subject_get_int(&diag_stale_subject) != 0, diag_blink_opa());
+}
+
+// DiagnosticsFreqLabel, on the rate, stale and blink subjects.
+static void diag_freq_observer(lv_observer_t *observer, lv_subject_t *) {
+  lv_obj_t *label = lv_observer_get_target_obj(observer);
+  const bool stale = lv_subject_get_int(&diag_stale_subject) != 0;
+  if (stale) {
+    lv_label_set_text(label, "No data");
+  } else {
+    const int32_t rate = lv_subject_get_int(&diag_rate_subject);
+    lv_label_set_text_fmt(label, "%d.%d Hz - Live", static_cast<int>(rate / 10),
+                          static_cast<int>(rate % 10));
+  }
+  lv_obj_set_style_text_color(label, lv_color_hex(kDiagStaleColour), kDiagStale);
+  lv_obj_set_style_text_opa(label, diag_blink_opa(), kDiagStale);
+  lv_obj_set_state(label, LV_STATE_USER_1, stale);
+}
+
+// Clamped rather than wrapped, for the reason in grid_key_cb.
+static void diag_focus(int index) {
+  if (diag_row_count == 0) {
+    return;
+  }
+  diag_cursor = std::clamp(index, 0, diag_row_count - 1);
+  lv_group_focus_obj(diag_rows[diag_cursor]);
+}
+
+// Up/down walk the rows, which scrolls a long table into view.
+static void diag_key_cb(lv_event_t *e) {
+  switch (lv_event_get_key(e)) {
+  case LV_KEY_UP:
+    diag_focus(diag_cursor - 1);
+    return;
+  case LV_KEY_DOWN:
+    diag_focus(diag_cursor + 1);
+    return;
+  default:
+    return;
+  }
+}
+
+// Deleting a row takes its observers and events with it and drops it from
+// diag_group; the theme manager forgets it too.
+static void diag_rows_clear() {
+  for (int i = 0; i < diag_row_count; i++) {
+    lv_obj_delete(diag_rows[i]);
+  }
+  diag_row_count = 0;
+  diag_cursor = 0;
+}
+
+// Builds the rows and shows the screen. LVGL task (a click).
+static void diagnostics_open() {
+  diagnostics_screen_ensure(); // built on demand: see "Screens built on demand"
+  diag_rows_clear();
+  uint8_t count = 0;
+  const rammp_diag_spec_t *specs = rammp_diag_table(&count);
+  for (uint8_t i = 0; i < count; i++) {
+    lv_obj_t *row = ui_DiagnosticComponent_create(ui_DiagnosticsFlexRows);
+    diag_rows[diag_row_count++] = row;
+    lv_label_set_text(
+        ui_comp_get_child(
+            row, UI_COMP_DIAGNOSTICCOMPONENT_DIAGNOSTICSROW1_ACTUATORLABELS2_ACTUATOR1SHORTLABEL2),
+        specs[i].short_name);
+    lv_label_set_text(
+        ui_comp_get_child(
+            row, UI_COMP_DIAGNOSTICCOMPONENT_DIAGNOSTICSROW1_ACTUATORLABELS2_ACTUATOR1LABEL1),
+        specs[i].label);
+    for (uint8_t f = 0; f < RAMMP_DIAG_FIELDS; f++) {
+      if (specs[i].unit[f][0] == '\0') { // a reading this item does not have
+        lv_obj_add_flag(ui_comp_get_child(row, kDiagFieldIds[f].container), LV_OBJ_FLAG_HIDDEN);
+        continue;
+      }
+      lv_label_set_text(ui_comp_get_child(row, kDiagFieldIds[f].units), specs[i].unit[f]);
+      diag_fields[i][f] = {i, f};
+      lv_subject_add_observer_obj(&diag_value[i][f], diag_value_observer,
+                                  ui_comp_get_child(row, kDiagFieldIds[f].value),
+                                  &diag_fields[i][f]);
+    }
+    lv_subject_add_observer_obj(&diag_stale_subject, diag_row_stale_observer, row, nullptr);
+    lv_subject_add_observer_obj(&rtps_blink_subject, diag_row_stale_observer, row, nullptr);
+    lv_group_add_obj(diag_group, row);
+    lv_obj_add_event_cb(row, diag_key_cb, LV_EVENT_KEY, nullptr);
+    lv_obj_add_event_cb(row, setting_focus_cb, LV_EVENT_FOCUSED, nullptr);
+    lv_obj_add_event_cb(row, setting_focus_cb, LV_EVENT_DEFOCUSED, nullptr);
+    // Exported in its focused preview state, like the actuator rows; the
+    // focus callbacks are left as the only writers of LV_STATE_FOCUSED.
+    set_focused_recursive(row, false);
+    clear_click_focusable_recursive(row);
+  }
+  _ui_screen_change(&ui_DiagnosticsScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
+                    &ui_DiagnosticsScreen_screen_init);
+}
+
 // Hands the joystick to whichever group belongs to the screen being shown.
 static void screen_loaded_cb(lv_event_t *e) {
-  if (lv_event_get_target_obj(e) == ui_SeatAdjustmentFlexScreen) {
+  const lv_obj_t *screen = lv_event_get_target_obj(e);
+  if (screen == ui_SeatAdjustmentFlexScreen) {
     lv_indev_set_group(joystick_indev, seat_group);
     seat_page = 0;
     seat_buttons_grid.row = 0;
     seat_buttons_grid.col = 0;
     lv_group_focus_obj(seat_buttons_grid.cell[0][0]);
+  } else if (screen == ui_RDScreen) {
+    lv_indev_set_group(joystick_indev, rd_group);
+    rd_pin_reset();
+    // The keypad opens with nothing selected, so the first joystick nudge would
+    // be spent picking a key rather than moving between them. Index 0 is "1".
+    lv_buttonmatrix_set_selected_button(ui_Keyboard1, 0);
+    lv_group_focus_obj(ui_Keyboard1);
+  } else if (screen == ui_SpecificSettingScreen) {
+    lv_indev_set_group(joystick_indev, setting_group);
+    setting_focus(0);
+  } else if (screen == ui_GenericActionsScreen) {
+    lv_indev_set_group(joystick_indev, actions_group);
+    action_focus(0);
+  } else if (screen == ui_DiagnosticsScreen) {
+    lv_indev_set_group(joystick_indev, diag_group);
+    diag_focus(0);
+  } else if (screen == ui_LogScreen && log_view_group() != nullptr) {
+    lv_indev_set_group(joystick_indev, log_view_group());
+    log_view_on_load();
   } else {
     lv_indev_set_group(joystick_indev, joystick_group);
   }
@@ -1198,6 +2663,214 @@ static void screen_loaded_cb(lv_event_t *e) {
 // Ignoring `area` and flushing full-screen IS correct here: call_flush_cb passes
 // the buffer START (not an offset), and refr_sync_areas already copies the
 // previous frame's invalid areas forward, so both buffers stay coherent.
+// ===== TEMPORARY render benchmark + content profiler - remove before shipping =====
+// `render` is everything LVGL did between one flush finishing and the next
+// starting (the CPU cost of drawing); `present` is the vsync wait inside
+// present_frame. Measured so far, full-screen invalidate every 10 ms:
+//   MainScreenFlex  86.0 ms      empty screen  19.5 ms
+// so ~77% of a frame is content, not the frame buffer.
+static espp::Logger logger_overdraw({.tag = "overdraw", .level = espp::Logger::Verbosity::INFO});
+// Overdraw: SquareLine gives every container an opaque background, so a page
+// nested three deep repaints the same theme colour three times before anything
+// visible lands on top. Measured on MainScreenFlex with a full-screen redraw,
+// those redundant fills were ~35 ms of an 86 ms frame -- the FlexPanel, the
+// LockedPanel and the GraphicsPanel each filling the exact colour the screen
+// had already painted.
+//
+// A fill is redundant when the object is a plain opaque rectangle in exactly
+// the colour already on the screen behind it: same colour, no corner radius, no
+// gradient and no background image. Clearing bg_opa then changes nothing that
+// can be seen and removes the fill. Anything else is left alone.
+//
+// `behind` is the colour actually painted behind `obj`, threaded down the
+// recursion rather than read back off the parent -- a parent whose own fill was
+// just cleared still has its colour in its style, and reading that would stop
+// the cascade after one level.
+static bool color_eq(lv_color_t a, lv_color_t b) {
+  return a.red == b.red && a.green == b.green && a.blue == b.blue;
+}
+
+static uint32_t strip_redundant_backgrounds(lv_obj_t *obj, lv_color_t behind) {
+  uint32_t stripped = 0;
+  lv_color_t painted = behind;
+  if (lv_obj_get_style_bg_opa(obj, LV_PART_MAIN) == LV_OPA_COVER) {
+    const lv_color_t own = lv_obj_get_style_bg_color(obj, LV_PART_MAIN);
+    if (color_eq(own, behind) && lv_obj_get_style_radius(obj, LV_PART_MAIN) == 0 &&
+        lv_obj_get_style_bg_grad_dir(obj, LV_PART_MAIN) == LV_GRAD_DIR_NONE &&
+        lv_obj_get_style_bg_image_src(obj, LV_PART_MAIN) == nullptr) {
+      lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, LV_PART_MAIN);
+      stripped = 1;
+    } else {
+      painted = own;
+    }
+  }
+  for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
+    stripped += strip_redundant_backgrounds(lv_obj_get_child(obj, i), painted);
+  }
+  return stripped;
+}
+
+// The screen itself always keeps its fill: it is what the redundant children
+// were duplicating, and something has to paint the background.
+static uint32_t strip_screen_overdraw(const lv_obj_t *screen) {
+  const lv_color_t base = lv_obj_get_style_bg_color(screen, LV_PART_MAIN);
+  uint32_t stripped = 0;
+  for (uint32_t i = 0; i < lv_obj_get_child_count(screen); i++) {
+    stripped += strip_redundant_backgrounds(lv_obj_get_child(screen, i), base);
+  }
+  return stripped;
+}
+
+// Every screen ui_init built. Kept in one place so the boot pass and the
+// theme-change pass cannot drift apart. The screens built on demand are
+// nullptr while they do not exist, and skipped.
+static void strip_all_overdraw() {
+  const lv_obj_t *const screens[] = {
+      ui_MainScreenFlex, ui_DriveScreen,           ui_SeatAdjustmentFlexScreen,
+      ui_RDScreen,       ui_SpecificSettingScreen, ui_JoystickTest,
+      ui_LogScreen,      ui_GenericActionsScreen,  ui_DiagnosticsScreen};
+  const uint32_t stripped =
+      std::accumulate(std::begin(screens), std::end(screens), uint32_t{0},
+                      [](uint32_t sum, const lv_obj_t *screen) {
+                        return screen != nullptr ? sum + strip_screen_overdraw(screen) : sum;
+                      });
+  logger_overdraw.info("cleared {} redundant background fills", stripped);
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// Screens built on demand
+//
+// ui_init builds every screen at boot, and every widget lands in internal RAM
+// - the DMA-capable pool the W5500's SPI bounce buffer is later allocated from,
+// with no NULL check behind it. With the SpecificSettingScreen and the
+// GenericActionsScreen both resident that pool bottomed out at 415 B, after the
+// board had already boot-looped on it. So these two are destroyed right after
+// ui_init, built when opened, and destroyed again once left: at most one exists
+// at a time, and neither while RTPS starts.
+//
+// Everything the firmware hangs on one of them - StatusPanel and TopBar
+// bindings, exit bar, warning panel, load hooks - is redone by its *_ensure
+// function each time it is built. All of it is object-bound, so it goes with
+// the screen.
+/////////////////////////////////////////////////////////////////////////////
+
+// Deferred with lv_async_call: the SCREEN_UNLOADED event that asks for it is
+// the screen's own, and an object is not deleted from inside its own event.
+// Skipped if the screen was shown again in between.
+static void settings_screen_destroy_cb(void *) {
+  if (ui_SpecificSettingScreen != nullptr && lv_screen_active() != ui_SpecificSettingScreen) {
+    ui_SpecificSettingScreen_screen_destroy();
+  }
+}
+
+static void setting_screen_unloaded_cb(lv_event_t *) {
+  setting_rows_clear(); // rows first, so the press-flash timer forgets its button
+  lv_async_call(settings_screen_destroy_cb, nullptr);
+}
+
+static void actions_screen_destroy_cb(void *) {
+  if (ui_GenericActionsScreen != nullptr && lv_screen_active() != ui_GenericActionsScreen) {
+    ui_GenericActionsScreen_screen_destroy();
+  }
+}
+
+static void actions_screen_unloaded_cb(lv_event_t *) {
+  actions_clear();
+  lv_async_call(actions_screen_destroy_cb, nullptr);
+}
+
+static void settings_screen_ensure() {
+  if (ui_SpecificSettingScreen != nullptr) {
+    return;
+  }
+  ui_SpecificSettingScreen_screen_init();
+  // Parameter1 is only the row template: setting_page_open builds the rows.
+  // The component's own delete handler frees the child-index array it made.
+  lv_obj_delete(ui_Parameter1);
+  ui_Parameter1 = nullptr;
+  bind_status_panel(ui_StatusPanel7);
+  bind_rtps_label(ui_TopBar8);
+  bind_clock_label(ui_TopBar8);
+  lv_bar_set_range(ui_ExitBarPull4, 0, kHoldMax);
+  lv_bar_bind_value(ui_ExitBarPull4, &settings_exit_gesture.progress);
+  bind_to_drive_blocked_cause(ui_ErrorWarningPanel6, setting_warning_observer);
+  lv_subject_add_observer_obj(&setting_page_subject, setting_warning_observer,
+                              ui_ErrorWarningPanel6, nullptr);
+  lv_obj_add_event_cb(ui_SpecificSettingScreen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, nullptr);
+  lv_obj_add_event_cb(ui_SpecificSettingScreen, setting_screen_unloaded_cb,
+                      LV_EVENT_SCREEN_UNLOADED, nullptr);
+  strip_screen_overdraw(ui_SpecificSettingScreen);
+}
+
+static void actions_screen_ensure() {
+  if (ui_GenericActionsScreen != nullptr) {
+    return;
+  }
+  ui_GenericActionsScreen_screen_init();
+  // Everything in the flex panel but the title is a placeholder drawn in
+  // SquareLine: actions_open builds one button per actions_spec.h entry.
+  // Deleted without naming them, so adding or removing placeholders in
+  // SquareLine needs no change here.
+  for (int32_t i = static_cast<int32_t>(lv_obj_get_child_count(ui_GenericActionsFlexPanel)) - 1;
+       i >= 0; i--) {
+    lv_obj_t *child = lv_obj_get_child(ui_GenericActionsFlexPanel, i);
+    if (child != ui_GenericActionsTitle) {
+      lv_obj_delete(child);
+    }
+  }
+  bind_status_panel(ui_StatusPanel8);
+  bind_rtps_label(ui_TopBar9);
+  bind_clock_label(ui_TopBar9);
+  lv_bar_set_range(ui_ExitBarPull5, 0, kHoldMax);
+  lv_bar_bind_value(ui_ExitBarPull5, &actions_exit_gesture.progress);
+  // Its ErrorWarningPanel stays down: an action that needs the MCB greys out
+  // instead (action_ready_observer), which keeps the local ones reachable.
+  lv_obj_add_flag(ui_ErrorWarningPanel7, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_event_cb(ui_GenericActionsScreen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, nullptr);
+  lv_obj_add_event_cb(ui_GenericActionsScreen, actions_screen_unloaded_cb, LV_EVENT_SCREEN_UNLOADED,
+                      nullptr);
+  strip_screen_overdraw(ui_GenericActionsScreen);
+}
+
+static void diagnostics_screen_destroy_cb(void *) {
+  if (ui_DiagnosticsScreen != nullptr && lv_screen_active() != ui_DiagnosticsScreen) {
+    ui_DiagnosticsScreen_screen_destroy();
+  }
+}
+
+static void diagnostics_screen_unloaded_cb(lv_event_t *) {
+  diag_rows_clear();
+  lv_async_call(diagnostics_screen_destroy_cb, nullptr);
+}
+
+static void diagnostics_screen_ensure() {
+  if (ui_DiagnosticsScreen != nullptr) {
+    return;
+  }
+  ui_DiagnosticsScreen_screen_init();
+  // Everything in the rows panel is SquareLine's template: diagnostics_open
+  // builds one row per RAMMP_DIAG_TABLE entry instead.
+  for (int32_t i = static_cast<int32_t>(lv_obj_get_child_count(ui_DiagnosticsFlexRows)) - 1; i >= 0;
+       i--) {
+    lv_obj_delete(lv_obj_get_child(ui_DiagnosticsFlexRows, i));
+  }
+  bind_status_panel(ui_StatusPanel9);
+  bind_rtps_label(ui_TopBar10);
+  bind_clock_label(ui_TopBar10);
+  lv_bar_set_range(ui_ExitBarPull6, 0, kHoldMax);
+  lv_bar_bind_value(ui_ExitBarPull6, &diag_exit_gesture.progress);
+  // The red, blinking readings are this screen's warning: the ErrorWarningPanel
+  // would cover exactly what someone opened the screen to look at.
+  lv_obj_add_flag(ui_ErrorWarningPanel8, LV_OBJ_FLAG_HIDDEN);
+  for (lv_subject_t *subject : {&diag_rate_subject, &diag_stale_subject, &rtps_blink_subject}) {
+    lv_subject_add_observer_obj(subject, diag_freq_observer, ui_DiagnosticsFreqLabel, nullptr);
+  }
+  lv_obj_add_event_cb(ui_DiagnosticsScreen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, nullptr);
+  lv_obj_add_event_cb(ui_DiagnosticsScreen, diagnostics_screen_unloaded_cb,
+                      LV_EVENT_SCREEN_UNLOADED, nullptr);
+  strip_screen_overdraw(ui_DiagnosticsScreen);
+}
+
 static void direct_flush_cb(lv_display_t *disp, const lv_area_t * /*area*/, uint8_t *px_map) {
   if (!lv_display_flush_is_last(disp)) {
     lv_display_flush_ready(disp);
@@ -1269,7 +2942,53 @@ static void init_haptic(espp::Logger &logger, espp::I2c &i2c) {
   // Only published once the library is selected, so a half-configured driver
   // can never be reached from the button.
   haptic = &drv2605;
+  drv2605_read_register = espp::make_i2c_addressed_read_register(drv2605_i2c_device);
   logger.info("DRV2605 ready: HAPTIC TEST plays a {} ms buzz", kHapticBuzzDuration.count());
+}
+
+// DRV2605 registers the self test reads back (datasheet, register map).
+static constexpr uint8_t kDrv2605RegStatus = 0x00; // DEVICE_ID[7:5] DIAG_RESULT[3] OT[1] OC[0]
+static constexpr uint8_t kDrv2605RegGo = 0x0C;
+
+static std::optional<uint8_t> drv2605_status() {
+  uint8_t status = 0;
+  if (!drv2605_read_register ||
+      !drv2605_read_register(espp::Drv2605::DEFAULT_ADDRESS, kDrv2605RegStatus, &status, 1)) {
+    return std::nullopt;
+  }
+  return status;
+}
+
+// Plays one click and waits for the chip to report it done: GO self-clears when
+// the sequence has finished. That proves the I2C path, the sequencer and the
+// output stage run end to end - not that a motor is attached. The chip's own
+// actuator diagnostic would, but on the bench unit it reported DIAG_RESULT in
+// open- and closed-loop mode alike, so it cannot be told apart from a missing
+// motor and is not used (see hap.drv_play in selftest_spec.h).
+static std::optional<bool> drv2605_play_click(std::string &detail) {
+  if (!haptic || !drv2605_read_register) {
+    detail = "DRV2605 not initialised";
+    return std::nullopt;
+  }
+  if (!haptic_play(espp::Drv2605::Waveform::STRONG_CLICK, 1)) {
+    detail = "could not start the click";
+    return false;
+  }
+  const int64_t started = esp_timer_get_time();
+  uint8_t go = 1;
+  while ((go & 1) != 0 && esp_timer_get_time() - started < 1000 * 1000) {
+    std::this_thread::sleep_for(10ms);
+    if (!drv2605_read_register(espp::Drv2605::DEFAULT_ADDRESS, kDrv2605RegGo, &go, 1)) {
+      detail = "GO read failed";
+      return std::nullopt;
+    }
+  }
+  if ((go & 1) != 0) {
+    detail = "click never finished (GO stuck)";
+    return false;
+  }
+  detail = fmt::format("finished in ~{} ms", (esp_timer_get_time() - started) / 1000);
+  return true;
 }
 
 // DA7280 haptic driver bring-up test: read-only register probe, no driver
@@ -1497,6 +3216,9 @@ static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c) {
 }
 
 extern "C" void app_main(void) {
+  // First, so the LogScreen has everything printed from here on - including
+  // what the tasks started below print.
+  log_capture_start();
   espp::Logger logger({.tag = "M5Stack Tab5 Example", .level = espp::Logger::Verbosity::INFO});
   logger.info("Starting example!");
 
@@ -1508,7 +3230,9 @@ extern "C" void app_main(void) {
   logger.info("Probing internal I2C bus...");
   auto &i2c = tab5.internal_i2c();
   std::vector<uint8_t> found_addresses;
-  for (uint8_t address = 1; address < 128; address++) {
+  // 0x08..0x77 only: the rest are reserved, and a glitched ACK there once put
+  // 0x01 in this list, which the self test then reported as a lost device.
+  for (uint8_t address = 0x08; address <= 0x77; address++) {
     if (i2c.probe_device(address)) {
       found_addresses.push_back(address);
     }
@@ -1564,6 +3288,7 @@ extern "C" void app_main(void) {
   // as real frame buffers (tracking dirty areas across both) so a flush is a
   // vsync-gated flip (see direct_flush_cb) rather than a copy. DIRECT requires
   // rotation 0, which is what this panel runs at.
+  bool direct_render = false; // reported by the self test
   {
     void *fb0 = nullptr;
     void *fb1 = nullptr;
@@ -1579,6 +3304,7 @@ extern "C" void app_main(void) {
       lv_display_set_buffers(lv_display_get_default(), fb0, fb1, fb_bytes,
                              LV_DISPLAY_RENDER_MODE_DIRECT);
       lv_display_set_flush_cb(lv_display_get_default(), direct_flush_cb);
+      direct_render = true;
       logger.info("LVGL rendering directly into the DSI frame buffers (DIRECT mode)");
     } else {
       logger.error("Could not get DPI frame buffers ({}); leaving BSP flush in place",
@@ -1698,24 +3424,14 @@ extern "C" void app_main(void) {
     return;
   }
 
-  // only set the time if the year is before 2024
-  if (current_time.tm_year < 124) {
-    // set the RTC time to a known value (2024-01-15 14:30:45)
-    // Set time using std::tm
-    std::tm time = {};
-    time.tm_year = 124; // 2024 - 1900
-    time.tm_mon = 0;    // January (0-based)
-    time.tm_mday = 15;  // 15th
-    time.tm_hour = 14;  // 2 PM
-    time.tm_min = 30;
-    time.tm_sec = 45;
-    time.tm_wday = 1; // Monday
-    if (!tab5.set_rtc_time(time)) {
-      logger.error("Failed to set RTC time");
-      return;
-    }
+  // The RTC holds the MCB's local time (see "TopBar clock"). One that lost
+  // power reads a date long gone; the clock then shows --:-- until the MCB
+  // sends the time.
+  if (clock_plausible(current_time)) {
+    clock_set(current_time);
+    logger.info("RTC time {:%Y-%m-%d %H:%M:%S}", current_time);
   } else {
-    logger.info("RTC time is already set to a valid value {:%Y-%m-%d %H:%M:%S}", current_time);
+    logger.warn("RTC not set ({:%Y-%m-%d}); the clock waits for the MCB", current_time);
   }
 
   logger.info("Initializing battery management...");
@@ -1740,13 +3456,7 @@ extern "C" void app_main(void) {
   auto button_callback = [&](const auto &state) {
     logger.info("Button state: {}", state.active);
     if (state.active) {
-      // Cycle through brightness levels: 25%, 50%, 75%, 100%
-      static int brightness_level = 0;
-      float brightness_values[] = {0.25f, 0.5f, 0.75f, 1.0f};
-      brightness_level = (brightness_level + 1) % 4;
-      float new_brightness = brightness_values[brightness_level];
-      tab5.brightness(new_brightness);
-      logger.info("Set brightness to {:.0f}%", new_brightness * 100);
+      brightness_step();
     }
   };
   if (!tab5.initialize_button(button_callback)) {
@@ -1830,6 +3540,41 @@ extern "C" void app_main(void) {
   // the UI is 1280x720 landscape (use ROTATION_90 for the other direction).
   lv_display_set_rotation(lv_display_get_default(), LV_DISPLAY_ROTATION_0);
   ui_init();
+  // ui_init builds every screen, and this one is dead: the actuators are a
+  // page of the SpecificSettingScreen now. Its widget tree sits in internal
+  // RAM, and the W5500's SPI bounce buffer is allocated from the same
+  // DMA-capable pool when RTPS starts - with the Generic Actions screen added
+  // that pool ran dry and the board boot-looped (spi_master does not check the
+  // allocation). Delete the screen in SquareLine and this line goes too: the
+  // build fails on it, which is the reminder.
+  ui_ActuatorsScreen_screen_destroy();
+  // Built on demand instead: see "Screens built on demand".
+  ui_SpecificSettingScreen_screen_destroy();
+  ui_GenericActionsScreen_screen_destroy();
+  ui_DiagnosticsScreen_screen_destroy();
+
+  // Swap the boot logo from the export's embedded SVG to a pre-rasterised A8
+  // mask (main/boot_logo.c). Done here rather than in the SquareLine project
+  // because import_ui.ps1 mirrors main/ui/ with robocopy /MIR and would put the
+  // SVG straight back on the next import.
+  //
+  // This is what lets LV_USE_SVG, LV_USE_THORVG and LV_USE_VECTOR_GRAPHIC all
+  // stay off: this wordmark was the only vector asset in the project, and the
+  // entire ThorVG engine was compiled in to draw it once at boot.
+  //
+  // The scale is deliberately left alone. The export draws this at
+  // lv_image_set_scale(300) and LVGL scales about the image's centre pivot, so
+  // boot_logo.c is rasterised at the size the SVG DECLARED (457x196) rather
+  // than its on-screen size -- feed it a pre-scaled source and the logo lands
+  // about 40 px from where it sits today.
+  //
+  // A8 carries no colour of its own, so the wordmark's white has to come from
+  // image_recolor. That is the same convention the export already uses for the
+  // other single-ink assets (the padlock, the arrows); it just never set one
+  // here, because a vector image brought its own fill.
+  lv_image_set_src(ui_Image3, &boot_logo);
+  lv_obj_set_style_image_recolor(ui_Image3, lv_color_white(), LV_PART_MAIN);
+  lv_obj_set_style_image_recolor_opa(ui_Image3, LV_OPA_COVER, LV_PART_MAIN);
 
   // Benchmark against the real flex UI (PNG assets only) rather than the boot
   // screen, whose SVG logo otherwise dominates every measurement. Temporary,
@@ -1852,9 +3597,23 @@ extern "C" void app_main(void) {
   // sample_ui_home_init();
   // lv_screen_load(sample_ui_home_screen);
 
+  // Saved settings (settings.cpp). The theme goes on before anything is drawn
+  // (the boot overdraw pass further down runs after it, as it must: a theme
+  // switch re-adds the fills that pass removes). The backlight is applied as
+  // its observer is added.
+  settings_load();
+  if (const uint8_t theme = settings_theme();
+      theme != ui_theme_idx && (theme == UI_THEME_DEFAULT || theme == UI_THEME_DAY)) {
+    ui_theme_set(theme);
+  }
+  lv_subject_init_int(&brightness_subject, settings_brightness());
+  lv_subject_add_observer(&brightness_subject, brightness_observer, nullptr);
+  brightness_save_timer = lv_timer_create(brightness_save_cb, kBrightnessSaveDelayMs, nullptr);
+  lv_timer_pause(brightness_save_timer);
+
   // Bind the Settings-screen axis bars to the ADC subjects (observer pattern).
   // Bars show the calibrated joystick position as a percentage: -100..+100,
-  // centered at 0. Raw millivolts still go to RTPS (see the ADC task).
+  // centered at 0; RTPS carries the same values as -1..+1 (see the ADC task).
   lv_subject_init_int(&adc_x_subject, 0);
   lv_subject_init_int(&adc_y_subject, 0);
   lv_subject_init_int(&adc_twist_subject, 0);
@@ -1890,18 +3649,55 @@ extern "C" void app_main(void) {
   bind_status_panel(ui_StatusPanel1); // JoystickTest
   bind_status_panel(ui_StatusPanel2); // DriveScreen
   bind_status_panel(ui_StatusPanel3); // SeatAdjustmentFlexScreen
+  bind_status_panel(ui_StatusPanel4); // RDScreen
+  bind_status_panel(ui_StatusPanel5); // LogScreen
   bind_rtps_label(ui_TopBar1);        // JoystickTest
   bind_rtps_label(ui_TopBar2);        // DriveScreen
   bind_rtps_label(ui_TopBar3);        // MainScreenFlex
   bind_rtps_label(ui_TopBar4);        // SeatAdjustmentFlexScreen
+  bind_rtps_label(ui_TopBar5);        // RDScreen
+  bind_rtps_label(ui_TopBar6);        // LogScreen
+  lv_subject_init_string(&clock_subject, clock_buf, clock_prev_buf, sizeof(clock_buf), "--:--");
+  for (lv_obj_t *bar : {ui_TopBar1, ui_TopBar2, ui_TopBar3, ui_TopBar4, ui_TopBar5, ui_TopBar6}) {
+    bind_clock_label(bar);
+  }
+  clock_poll_cb(nullptr); // the RTC's time, when it had one, from the first frame
+  lv_timer_create(clock_poll_cb, kClockPollMs, nullptr);
   lv_subject_add_observer_obj(&speed_tenths_subject, speed_label_observer, ui_SpeedNumber, nullptr);
   lv_subject_init_int(&drive_mode_subject, RAMMP_DRIVE_MODE_NORMAL);
   bind_drive_mode_button(ui_DriveModeButton, &kModeHolo);
   bind_drive_mode_button(ui_DriveModeButton1, &kModeNormal);
   bind_drive_mode_button(ui_DriveModeButton2, &kModeAuto);
   lv_subject_add_observer(&drive_mode_subject, drive_mode_publish_observer, nullptr);
-  bind_error_panel();
+  bind_mcb_lost_panel(ui_ErrorWarningPanel);  // DriveScreen
+  bind_mcb_lost_panel(ui_ErrorWarningPanel1); // SeatAdjustmentFlexScreen
+  // Initialised before the bind: the panel's observer reads it on its first run.
+  lv_subject_init_int(&entry_refused_subject, 0);
+  entry_refused_timer = lv_timer_create(entry_refused_timer_cb, kDriveRefusedShowMs, nullptr);
+  lv_timer_pause(entry_refused_timer);
+  bind_entry_refused_panel(ui_ErrorWarningPanel4); // MainScreenFlex
+  // Diagnostics readings, and whether they are live: before the poll timer
+  // that keeps the latter current, and before any RTPS sample can land.
+  for (auto &item : diag_value) {
+    for (auto &reading : item) {
+      lv_subject_init_int(&reading, kValueUnknown);
+    }
+  }
+  lv_subject_init_int(&diag_stale_subject, 1);
+  lv_subject_init_int(&diag_rate_subject, 0);
   lv_timer_create(rtps_poll_cb, kRtpsPollMs, nullptr);
+
+  // CALIBRATE on the JoystickTest screen. Its prompts blink on the RTPS
+  // indicator's phase, so this comes after rtps_blink_subject is initialised.
+  joystick_cal_init_ui({.screen = ui_JoystickTest,
+                        .button = ui_CalibrateJoystickButton,
+                        .button_label = ui_CalibrateJoystickButtonLabel,
+                        .instructions = ui_JoystickInstructionsLabel,
+                        .blink = &rtps_blink_subject,
+                        .feedback = [] {
+                          haptic_play(espp::Drv2605::Waveform::STRONG_CLICK, 1);
+                          play_click(espp::M5StackTab5::get());
+                        }});
 
   // GPIO48 test button. The label has a built-in binding; the panel background
   // is a style property with no binding, so it gets an observer bound to the
@@ -1937,6 +3733,16 @@ extern "C" void app_main(void) {
   logger.info("Adding joystick keypad input device...");
   static espp::KeypadInput joystick_keypad(
       {.read = [](bool *up, bool *down, bool *left, bool *right, bool *enter, bool *escape) {
+        // While the self-test overlay is up it owns the stick: nothing reaches
+        // the screens behind it, and the stick button closes it once the run
+        // has finished. This read runs on the LVGL task, under its lock.
+        if (selftest_ui_visible()) {
+          *left = *right = *up = *down = *enter = *escape = false;
+          if (select_key.exchange(false)) {
+            selftest_ui_dismiss();
+          }
+          return;
+        }
         const uint32_t key = joy_key.load(); // held, so LVGL can repeat it
         *left = key == LV_KEY_LEFT;
         *right = key == LV_KEY_RIGHT;
@@ -1961,11 +3767,14 @@ extern "C" void app_main(void) {
   lv_obj_remove_flag(ui_FlexPanel, LV_OBJ_FLAG_SCROLL_WITH_ARROW);
   lv_obj_add_event_cb(ui_FlexPanel, flex_key_cb, LV_EVENT_KEY, nullptr);
 
-  // (Older exports marked the flex pages hidden, which broke paging outright:
-  // flex_scroll_step sizes its step from child 0, and a hidden child lays out
-  // at zero width. The current export no longer does, so the un-hide that used
-  // to live here is gone. If paging ever goes dead again after a re-import,
-  // check the HIDDEN flag on ui_LockedPanel first.)
+  // The lock page must always be visible, whatever the export says. SquareLine
+  // exports whatever was left hidden in the editor, and a hidden ui_LockedPanel
+  // lays out at zero width: the screen goes black under the TopBar,
+  // flex_scroll_step sizes its step from child 0, and the unlock gesture
+  // (which needs the page on screen) can never start - so nothing behind the
+  // lock can either. The other pages are bound to paging_subject below, which
+  // sets their HIDDEN flag whichever way the export left it.
+  lv_obj_remove_flag(ui_LockedPanel, LV_OBJ_FLAG_HIDDEN);
 
   // Lock/unlock for the LockedPanel page. Locked and un-paged at boot, which is
   // what the export already draws, so the initial observer run is a no-op
@@ -1989,6 +3798,8 @@ extern "C" void app_main(void) {
   lv_arc_bind_value(ui_UnlockArc, &unlock_gesture.progress);
   lv_arc_bind_value(ui_UnlockArc1, &drive_enter_gesture.progress);
   lv_arc_bind_value(ui_UnlockArc2, &seat_enter_gesture.progress);
+  lv_subject_init_int(&actions_enter_gesture.progress, 0);
+  lv_arc_bind_value(ui_UnlockArc3, &actions_enter_gesture.progress);
   lv_subject_init_int(&seat_exit_gesture.progress, 0);
   lv_subject_init_int(&seat_back_gesture.progress, 0);
   lv_bar_set_range(ui_ExitBarPress1, 0, kHoldMax);
@@ -1997,7 +3808,21 @@ extern "C" void app_main(void) {
   lv_bar_bind_value(ui_ExitBarPull1, &seat_exit_gesture.progress);
   lv_bar_set_range(ui_ExitBarPushLeft, 0, kHoldMax);
   lv_bar_bind_value(ui_ExitBarPushLeft, &seat_back_gesture.progress);
+  lv_subject_init_int(&rd_exit_gesture.progress, 0);
+  lv_subject_init_int(&settings_exit_gesture.progress, 0);
+  lv_bar_set_range(ui_ExitBarPull2, 0, kHoldMax);
+  lv_bar_bind_value(ui_ExitBarPull2, &rd_exit_gesture.progress);
+  lv_subject_init_int(&actions_exit_gesture.progress, 0);
+  lv_subject_init_int(&diag_exit_gesture.progress, 0);
+  lv_subject_init_int(&log_exit_gesture.progress, 0);
+  lv_bar_set_range(ui_ExitBarPress2, 0, kHoldMax);
+  lv_bar_bind_value(ui_ExitBarPress2, &log_exit_gesture.progress);
   lv_timer_create(hold_poll_cb, kHoldPollMs, nullptr);
+
+  // LogScreen: TextArea1 shows the serial output log_capture has kept. Its
+  // ErrorWarningPanel5 is deliberately left unbound (hidden): a link-lost
+  // banner would cover the log at exactly the moment someone wants to read it.
+  log_view_init();
 
   // SeatAdjustmentFlexScreen. Both grids are built here rather than declared
   // with initialisers because the ui_* globals only exist once ui_init has run.
@@ -2083,6 +3908,8 @@ extern "C" void app_main(void) {
   lv_obj_add_event_cb(ui_SeatAdjustmentFlexScreen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED,
                       nullptr);
   lv_obj_add_event_cb(ui_MainScreenFlex, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, nullptr);
+  lv_obj_add_event_cb(ui_RDScreen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, nullptr);
+  lv_obj_add_event_cb(ui_LogScreen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, nullptr);
 
   // Freeze the pager until the unlock hands it over. Each of these closes one
   // route into it, and they are genuinely independent — see paging_subject.
@@ -2097,6 +3924,7 @@ extern "C" void app_main(void) {
   // flex page, and the new SeatAdjustmentFlexScreen took the old name for one of
   // its own children. Binding the wrong one still compiles and fails silently.
   lv_obj_bind_flag_if_eq(ui_SeatAdjustmentMenu, &paging_subject, LV_OBJ_FLAG_HIDDEN, 0);
+  lv_obj_bind_flag_if_eq(ui_GenericActionsPanel1, &paging_subject, LV_OBJ_FLAG_HIDDEN, 0);
   lv_obj_bind_flag_if_eq(ui_SettingsMenu, &paging_subject, LV_OBJ_FLAG_HIDDEN, 0);
 
   // Focus group for the settings rows. Built by walking the children rather
@@ -2105,7 +3933,15 @@ extern "C" void app_main(void) {
   // comes from the export, so there is nothing to style in code.
   settings_group = lv_group_create();
   for (uint32_t i = 0; i < lv_obj_get_child_count(ui_SettingsFlexPanel); i++) {
-    lv_group_add_obj(settings_group, lv_obj_get_child(ui_SettingsFlexPanel, i));
+    lv_obj_t *row = lv_obj_get_child(ui_SettingsFlexPanel, i);
+    // Rows hidden in SquareLine (the ABOUT placeholders) stay out, or the
+    // joystick would land on a row nobody can see.
+    if (!lv_obj_has_flag(row, LV_OBJ_FLAG_HIDDEN)) {
+      lv_group_add_obj(settings_group, row);
+      if (settings_first_row == nullptr) {
+        settings_first_row = row;
+      }
+    }
   }
 
   // LV_USE_PERF_MONITOR makes lv_display_create() show the overlay immediately
@@ -2114,6 +3950,9 @@ extern "C" void app_main(void) {
   // which is what makes the hide safe.
   lv_sysmon_hide_performance(lv_display_get_default());
   lv_obj_add_event_cb(ui_FPSCounterButton, fps_toggle_cb, LV_EVENT_CLICKED, nullptr);
+
+  // Remove the redundant nested background fills (see strip_redundant_backgrounds).
+  strip_all_overdraw();
 
   // HAPTIC TEST settings row. CLICKED (not PRESSED) so the joystick's ENTER
   // key drives it too — the keypad indev raises the same event as a touch.
@@ -2126,6 +3965,139 @@ extern "C" void app_main(void) {
                                        static_cast<uint32_t>(kHapticBuzzDuration.count()), nullptr);
   lv_timer_pause(haptic_label_timer);
   lv_obj_add_event_cb(ui_HapticTestButton, haptic_test_cb, LV_EVENT_CLICKED, nullptr);
+
+  // DEBUG ACTUATORS settings row -> the PIN screen.
+  lv_obj_add_event_cb(ui_Button1, rd_open_cb, LV_EVENT_CLICKED, nullptr);
+
+  // SELF TEST settings row. The checks and their limits are in
+  // selftest_spec.h; selftest.cpp measures them. A PC can also start a run over
+  // RTPS (scripts/rtps_selftest.py), which is why this comes before
+  // rtps_comms_start: selftest_init registers the self-test RTPS handlers.
+  lv_obj_add_event_cb(
+      ui_Button6, [](lv_event_t *) { selftest_request(SelfTestTrigger::LOCAL, 0); },
+      LV_EVENT_CLICKED, nullptr);
+  selftest_init({
+      .lvgl_mutex = &lvgl_mutex,
+      .imu_accel_mg = []() -> std::optional<int32_t> {
+        // the cached reading the data display task keeps fresh, so no bus traffic
+        auto imu = espp::M5StackTab5::get().imu();
+        if (!imu) {
+          return std::nullopt;
+        }
+        const auto a = imu->get_accelerometer();
+        return static_cast<int32_t>(
+            std::lround(std::sqrt(a.x * a.x + a.y * a.y + a.z * a.z) * 1000.0f));
+      },
+      .rtc_seconds = []() -> std::optional<int64_t> {
+        std::tm now{};
+        if (!espp::M5StackTab5::get().get_rtc_time(now)) {
+          return std::nullopt;
+        }
+        return static_cast<int64_t>(std::mktime(&now));
+      },
+      .battery_mv = []() -> std::optional<int32_t> {
+        const auto battery = espp::M5StackTab5::get().get_battery_status();
+        // is_present only says the INA226 answered. Whether the reading is a
+        // pack at all is the self test's call (pwr.vbat in selftest_spec.h),
+        // so the raw voltage goes through and can be seen in its detail.
+        if (!battery.is_present) {
+          return std::nullopt;
+        }
+        return static_cast<int32_t>(std::lround(battery.voltage_v * 1000.0f));
+      },
+      // 0..100: app_main sets 75.0f
+      .backlight_percent = []() -> int32_t {
+        return static_cast<int32_t>(std::lround(espp::M5StackTab5::get().brightness()));
+      },
+      .i2c_probe =
+          [](uint8_t address) {
+            return espp::M5StackTab5::get().internal_i2c().probe_device(address);
+          },
+      .boot_i2c_devices = found_addresses,
+      .drv2605_status = drv2605_status,
+      .drv2605_play = drv2605_play_click,
+      .da7280_found = std::find(found_addresses.begin(), found_addresses.end(), kDa7280Address) !=
+                      found_addresses.end(),
+      .direct_render = direct_render,
+      .joystick_cal_centers_mv = []() -> std::optional<std::array<float, 3>> {
+        if (!joystick_cal_saved()) {
+          return std::nullopt;
+        }
+        const JoystickCal cal = joystick_cal_current();
+        return std::array<float, 3>{cal[JOY_HORIZONTAL].center_mv, cal[JOY_VERTICAL].center_mv,
+                                    cal[JOY_TWIST].center_mv};
+      },
+  });
+
+  // RDScreen: the PIN pad and its four checkboxes.
+  //
+  // The checkboxes need no observer of their own - each one is CHECKED exactly
+  // when the entry has reached it, which lv_obj_bind_state_if_ge says directly.
+  lv_subject_init_int(&rd_pin_len_subject, 0);
+  lv_subject_init_string(&rd_pin_message_subject, rd_pin_message_buf, rd_pin_message_prev_buf,
+                         sizeof(rd_pin_message_buf), kRdPinPromptText);
+  lv_label_bind_text(ui_SeatFunctionsLabel2, &rd_pin_message_subject, nullptr);
+  lv_obj_t *rd_checkboxes[kRdPinLen] = {ui_Checkbox1, ui_Checkbox2, ui_Checkbox3, ui_Checkbox4};
+  for (int i = 0; i < kRdPinLen; i++) {
+    lv_obj_bind_state_if_ge(rd_checkboxes[i], &rd_pin_len_subject, LV_STATE_CHECKED, i + 1);
+  }
+  lv_obj_add_event_cb(ui_Keyboard1, rd_keypad_cb, LV_EVENT_VALUE_CHANGED, nullptr);
+
+  // A button matrix does its own 2D arrow navigation and its own ENTER press
+  // (lv_buttonmatrix.c, LV_EVENT_KEY), so the keypad needs nothing but a group
+  // to be in. What it does NOT bring is a focused look: the export styles only
+  // LV_PART_ITEMS in its default state, so the key the joystick is sitting on
+  // would be indistinguishable from the rest of the pad. The matrix draws its
+  // selected button with its own FOCUSED state applied, so styling that part
+  // is all it takes.
+  rd_group = lv_group_create();
+  lv_group_add_obj(rd_group, ui_Keyboard1);
+  static constexpr lv_style_selector_t kItemsFocused =
+      static_cast<lv_style_selector_t>(LV_PART_ITEMS) |
+      static_cast<lv_style_selector_t>(LV_STATE_FOCUSED);
+  ui_object_set_themeable_style_property(ui_Keyboard1, kItemsFocused, LV_STYLE_BORDER_COLOR,
+                                         _ui_theme_color_focused);
+  ui_object_set_themeable_style_property(ui_Keyboard1, kItemsFocused, LV_STYLE_BORDER_OPA,
+                                         _ui_theme_alpha_focused);
+  lv_obj_set_style_border_width(ui_Keyboard1, 4, kItemsFocused);
+
+  // SpecificSettingScreen: what outlives the screen, which is built on demand
+  // (settings_screen_ensure).
+
+  rammp_actuator_table(&actuator_count);
+  for (uint8_t i = 0; i < actuator_count; i++) {
+    lv_subject_init_int(&actuator_value[i], kValueUnknown);
+  }
+  lv_subject_init_int(&actuator_reject_subject, kActuatorRejectNone);
+  actuator_reject_timer =
+      lv_timer_create(actuator_reject_clear_cb, kActuatorRejectFlashMs, nullptr);
+  lv_timer_pause(actuator_reject_timer);
+  press_flash_timer = lv_timer_create(press_flash_cb, kPressFlashMs, nullptr);
+  lv_timer_pause(press_flash_timer);
+  setting_group = lv_group_create();
+
+  // Initialised before the screen's warning panel ever binds to it.
+  lv_subject_init_int(&setting_page_subject, SETTINGS_PAGE_SCREEN_BRIGHTNESS);
+
+  // SCREEN BRIGHTNESS settings row. Joystick select reaches it too: the
+  // settings group holds every row on the panel.
+  lv_obj_add_event_cb(
+      ui_ScreenBrightnessButton,
+      [](lv_event_t *) { setting_page_open(SETTINGS_PAGE_SCREEN_BRIGHTNESS); }, LV_EVENT_CLICKED,
+      nullptr);
+
+  // GenericActionsScreen: what outlives the screen, which is built on demand
+  // (actions_screen_ensure).
+  actions_group = lv_group_create();
+
+  // DiagnosticsScreen: what outlives the screen, which is built on demand
+  // (diagnostics_screen_ensure). The DIAGNOSTICS row carries a SquareLine
+  // screen-change action, which would build the screen without any of that,
+  // so firmware takes the click instead.
+  diag_group = lv_group_create();
+  lv_obj_remove_event_cb(ui_DiagnosticsButton, ui_event_DiagnosticsButton);
+  lv_obj_add_event_cb(
+      ui_DiagnosticsButton, [](lv_event_t *) { diagnostics_open(); }, LV_EVENT_CLICKED, nullptr);
 
   // The overlay hardcodes LVGL's 14 px default font (lv_sysmon_create sets no
   // font at all), which is unreadable on a 1280x720 panel at arm's length.
@@ -2149,7 +4121,11 @@ extern "C" void app_main(void) {
   logger.info("Starting LVGL task...");
   espp::Task lv_task(
       {.callback = [](std::mutex &m, std::condition_variable &cv) -> bool {
-         auto start_time = std::chrono::high_resolution_clock::now();
+         // steady_clock, never high_resolution_clock: on ESP-IDF that one is the
+         // wall clock, which the MCB's time moves (see "TopBar clock"), and
+         // wait_until on a wall clock that steps back sleeps out the whole step
+         // - the screen froze for as long as the clock went back.
+         auto start_time = std::chrono::steady_clock::now();
          {
            std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
            if (kFpsStress) {
@@ -2176,14 +4152,18 @@ extern "C" void app_main(void) {
          // Always yield at least one tick: once a render cycle exceeds 8 ms
          // the deadline is already past and wait_until returns without
          // yielding, which pins core 1 at priority 20 and starves IDLE1.
-         const auto deadline =
-             std::max(start_time + 8ms, std::chrono::high_resolution_clock::now() + 1ms);
+         const auto deadline = std::max(start_time + 8ms, std::chrono::steady_clock::now() + 1ms);
          cv.wait_until(lock, deadline, []() { return false; });
          return false;
        },
        .task_config = {
            .name = "lv_task",
-           .stack_size_bytes = 32 * 1024,
+           // Measured peak ~6 KB (self test mem.stk_lvgl: 26964 B of 32 KB
+           // never used). The stack is internal DMA-capable RAM, which RTPS
+           // start-up runs dry on: at 32 KB the W5500 driver's bounce buffer
+           // failed to allocate and the board boot-looped. mem.stk_lvgl
+           // guards the headroom.
+           .stack_size_bytes = 16 * 1024,
            .priority = 20,
            .core_id = 1,
        }});
@@ -2208,8 +4188,7 @@ extern "C" void app_main(void) {
   tab5.mute(false);
   tab5.volume(60.0f);
 
-  // set the brightness to 75%
-  tab5.brightness(75.0f);
+  // (brightness is the saved setting, applied when brightness_subject is bound)
 
   // make a task to read out various data such as IMU, battery monitoring, etc.
   // and print it to screen
@@ -2385,42 +4364,21 @@ extern "C" void app_main(void) {
   adc.start();
   static espp::OneshotAdc twist_adc({.unit = ADC_UNIT_2, .channels = {twist_channel}});
 
-  // Joystick calibration. These are the numbers to tune per unit: run
-  // scripts/rtps_adc_plot.py, note the resting mV of each axis and the mV at
-  // full deflection each way, and put them here. The values below are the
-  // ideal-divider defaults (0-3300 mV, centered) and WILL be off on real
-  // hardware.
-  //
-  // X/Y are one circular gimbal, so their per-axis deadbands are 0 and the
-  // deadzone lives on the vector radius instead (center_deadzone_radius /
-  // range_deadzone below). Twist is a separate pot on its own axis, so it
-  // carries its own center/range deadbands.
-  //
-  // AXIS WIRING: the gimbal pots are cross-wired relative to the channel
-  // names. ADC1_CH1 (GPIO17) is the HORIZONTAL axis and reads higher to the
-  // right, so it feeds the joystick's X with no inversion. ADC1_CH0 (GPIO16)
-  // is the VERTICAL axis and reads *lower* moving up, so it feeds Y with
-  // invert_output — after which +Y is up, as the rest of the code assumes.
-  // Fixed here at the calibration level so every consumer (UI bars, the
-  // keypad pager, RTPS) sees correct axes without compensating itself.
-  static constexpr espp::FloatRangeMapper::Config kHorizontalCal{
-      .center = 1650.0f, .center_deadband = 0.0f, .minimum = 0.0f, .maximum = 3300.0f};
-  static constexpr espp::FloatRangeMapper::Config kVerticalCal{.center = 1650.0f,
-                                                               .center_deadband = 0.0f,
-                                                               .minimum = 0.0f,
-                                                               .maximum = 3300.0f,
-                                                               .invert_output = true};
-  static constexpr espp::FloatRangeMapper::Config kTwistCal{.center = 1650.0f,
-                                                            .center_deadband = 60.0f,
-                                                            .minimum = 0.0f,
-                                                            .maximum = 3300.0f,
-                                                            .range_deadband = 40.0f};
-  static espp::Joystick stick({.x_calibration = kHorizontalCal,
-                               .y_calibration = kVerticalCal,
-                               .z_calibration = kTwistCal,
+  // Joystick calibration: where each axis rests and the two ends of its travel,
+  // in raw mV. Measured per unit by CALIBRATE on the JoystickTest screen and
+  // kept in flash (joystick_cal.cpp); these ideal-divider values are only what
+  // a unit that was never calibrated runs on, and WILL be off on real hardware.
+  // How the travel is mapped (deadzones, axis wiring) is under "Joystick
+  // mapping" at the top of this file.
+  static constexpr JoystickAxisCal kIdealAxis{
+      .min_mv = 0.0f, .center_mv = 1650.0f, .max_mv = 3300.0f};
+  const JoystickCal joystick_cal = joystick_cal_load({kIdealAxis, kIdealAxis, kIdealAxis});
+  static espp::Joystick stick({.x_calibration = stick_horizontal_config(joystick_cal),
+                               .y_calibration = stick_vertical_config(joystick_cal),
+                               .z_calibration = stick_twist_config(joystick_cal),
                                .type = espp::Joystick::Type::CIRCULAR,
-                               .center_deadzone_radius = 0.10f,
-                               .range_deadzone = 0.05f,
+                               .center_deadzone_radius = kStickCenterDeadzoneRadius,
+                               .range_deadzone = kStickRangeDeadzone,
                                .log_level = espp::Logger::Verbosity::WARN});
 
   // customization knobs: sampling/LVGL/RTPS cadence, and how often the serial
@@ -2428,6 +4386,12 @@ extern "C" void app_main(void) {
   // console-flood pattern that starved LVGL once before.
   static constexpr auto kAdcUpdatePeriod = 33ms; // 30 Hz: ADC read, LVGL bars, RTPS publish
   static constexpr int kAdcLogDivider = 6;       // serial log every Nth cycle (~5 Hz)
+  // Twist is the noisy axis (~50 mV peak-to-peak at rest, where X/Y read ~1
+  // mV): each cycle averages this many oneshot reads of it, which costs no
+  // lag, then lowpasses the result to iron out what is left. 80 ms is short
+  // enough that the chair does not feel late to turn.
+  static constexpr int kTwistOversample = 8;
+  static espp::SimpleLowpassFilter twist_lowpass({.time_constant = 0.08f});
   auto adc_task_fn = [&adc, &channels](std::mutex &m, std::condition_variable &cv) {
     static uint32_t cycle = 0;
     const bool log_this_cycle = (cycle++ % kAdcLogDivider) == 0;
@@ -2437,14 +4401,40 @@ extern "C" void app_main(void) {
     auto vert_mv = adc.get_mv(channels[0]);  // ADC1_CH0 (GPIO16)
     auto horiz_mv = adc.get_mv(channels[1]); // ADC1_CH1 (GPIO17)
     // twist pot on ADC2 (GPIO52), sampled oneshot — see comment at the
-    // channel definitions above
-    auto twist_mv = twist_adc.read_mv(twist_channel);
+    // channel definitions above — and averaged (kTwistOversample)
+    std::optional<float> twist_mv;
+    {
+      float sum = 0.0f;
+      int reads = 0;
+      for (int i = 0; i < kTwistOversample; ++i) {
+        if (auto mv = twist_adc.read_mv(twist_channel)) {
+          sum += *mv;
+          ++reads;
+        }
+      }
+      if (reads > 0) {
+        twist_mv = sum / static_cast<float>(reads);
+      }
+    }
 
+    bool adc_published = false;
     if (vert_mv && horiz_mv && twist_mv) {
+      // A calibration run just finished: switch to it here, between two
+      // samples, on the task that owns the stick.
+      if (auto cal = joystick_cal_take_new()) {
+        stick_apply_cal(stick, *cal);
+      }
+      const float twist_smoothed = twist_lowpass(*twist_mv);
+      joystick_cal_note_raw(*horiz_mv, *vert_mv, twist_smoothed);
+      // While a calibration run owns the stick nothing downstream may act on
+      // it: the user is being told to push it to every end in turn.
+      const bool calibrating = joystick_cal_running();
+
       // raw mV -> calibrated [-1,1] per axis: circular deadzone on the X/Y
       // gimbal, twist mapped independently by its own range mapper. X is the
-      // horizontal channel, Y the vertical one (inverted by kVerticalCal).
-      stick.update(*horiz_mv, *vert_mv, *twist_mv);
+      // horizontal channel, Y the vertical one (inverted, see "Joystick
+      // mapping").
+      stick.update(*horiz_mv, *vert_mv, twist_smoothed);
 
       // Analog -> keypad level. Schmitt trigger (engage past kKeyEngage, release
       // below kKeyRelease) so the boundary can't chatter; between the two
@@ -2465,7 +4455,9 @@ extern "C" void app_main(void) {
         const float x = stick.x();
         const float y = stick.y();
         const float mag = std::max(std::abs(x), std::abs(y));
-        if (mag > kKeyEngage) {
+        if (calibrating) {
+          engaged = false; // "hold LEFT" must not page the menus or exit
+        } else if (mag > kKeyEngage) {
           engaged = true;
         } else if (mag < kKeyRelease) {
           engaged = false;
@@ -2475,7 +4467,7 @@ extern "C" void app_main(void) {
         } else if (std::abs(x) >= std::abs(y)) {
           joy_key.store(x > 0 ? LV_KEY_RIGHT : LV_KEY_LEFT);
         } else {
-          // +Y is up after kVerticalCal's inversion, and up the list is prev
+          // +Y is up after the vertical axis's inversion, and up the list is prev
           joy_key.store(y > 0 ? LV_KEY_UP : LV_KEY_DOWN);
         }
       }
@@ -2488,20 +4480,31 @@ extern "C" void app_main(void) {
         lv_subject_set_int(&adc_twist_subject, static_cast<int32_t>(stick.z() * 100.0f));
       }
 
-      // stream the RAW snapshot to the PC (rtps_adc_plot.py); this is what the
-      // calibration constants above get measured from, so it stays in mV.
-      // Ordered by logical axis (X = horizontal, Y = vertical) to match the
-      // rest of the code, but the values are untouched: the vertical trace
-      // still falls as the stick moves up, since invert_output is applied by
-      // the mapper, not here.
+      // send the MCB the same calibrated -1..+1 values the bars show (+Y
+      // forward, deadzones applied), so it needs no calibration of its own;
+      // centred while a calibration run sweeps the stick, so nothing drives
+      // on it. The bars keep moving, to show the stick is being read.
       // quiet no-op until RTPS is up and a subscriber is discovered
+<<<<<<< HEAD
       auto to_mv = [](float v) { return static_cast<uint32_t>(std::max(v, 0.0f)); };
       const uint32_t buttons = joy_button_pressed.load() ? RAMMP_BUTTON_JOYSTICK : 0u;
       const uint32_t drive_mode = drive_mode_published.load();
       rtps_comms_publish_adc(to_mv(*horiz_mv), to_mv(*vert_mv), to_mv(*twist_mv),
                              buttons, drive_mode);
       rtps_comms_publish_xy_twist(stick.x(), stick.y(), stick.z(), buttons, drive_mode);
+=======
+      adc_published = rtps_comms_publish_adc(
+          calibrating ? 0.0f : stick.x(), calibrating ? 0.0f : stick.y(),
+          calibrating ? 0.0f : stick.z(), joy_button_pressed.load() ? RAMMP_BUTTON_JOYSTICK : 0u,
+          drive_mode_published.load());
+>>>>>>> main
     }
+    // Every cycle, valid or not: the self test measures the loop's cadence and
+    // how often a read fails, as well as the values. A no-op unless a run is
+    // capturing. X is the horizontal channel, as everywhere above.
+    selftest_note_adc(vert_mv && horiz_mv && twist_mv, horiz_mv.value_or(0.0f),
+                      vert_mv.value_or(0.0f), twist_mv.value_or(0.0f), adc_published,
+                      joy_button_pressed.load());
 
     if (log_this_cycle) {
       auto fmt_mv = [](const std::optional<float> &v) {
@@ -2537,22 +4540,36 @@ extern "C" void app_main(void) {
   // remote command can't turn the screen fully off. brightness() drives the
   // backlight directly (no LVGL), so it's safe from the RTPS receive task.
   rtps_comms_on_brightness(
-      [](float percent) { espp::M5StackTab5::get().brightness(std::max(percent, 5.0f)); });
+      [](float percent) { brightness_set(static_cast<int>(std::lround(percent))); });
   // MCB status -> the two StatusPanel labels. Runs on the RTPS receive task,
   // so it only writes subjects — and takes the LVGL lock to do it, because
   // lv_subject_set_int runs the observers synchronously on this task and they
   // touch widgets.
-  rtps_comms_on_mcb_status([](const rammp_mcb_status_t &status) {
+  // RTPS handlers run on the RTPS task: subjects only, under the LVGL lock.
+  rtps_comms_on_mcb_status([](const rammp::McbStatus &status) {
+    clock_note_mcb_time(status); // no LVGL: sets the system clock and the RTC
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
     lv_subject_set_int(&drive_status_subject, status.drive_status);
     lv_subject_set_int(&mcb_state_subject, status.system_state);
-    // decode() guarantees these are NUL-terminated within RAMMP_MCB_TEXT_LEN,
-    // which is exactly the size the subjects were initialised with
-    lv_subject_copy_string(&drive_text_subject, status.drive_text);
-    lv_subject_copy_string(&state_text_subject, status.state_text);
     lv_subject_set_int(&speed_tenths_subject, status.speed_tenths);
-    lv_subject_copy_string(&error_text_subject, status.error_text);
-    lv_subject_copy_string(&error_footer_subject, status.error_footer);
+    // copy_string cuts each text to its subject's buffer (RAMMP_*_LEN)
+    lv_subject_copy_string(&drive_text_subject, status.drive_text.c_str());
+    lv_subject_copy_string(&state_text_subject, status.state_text.c_str());
+    lv_subject_copy_string(&error_text_subject, status.error_text.c_str());
+    lv_subject_copy_string(&error_footer_subject, status.error_footer.c_str());
+  });
+  rtps_comms_on_actuator_state([](const rammp::ActuatorState &state) {
+    std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
+    actuator_apply_state(state);
+  });
+  rtps_comms_on_diagnostics([](const rammp::Diagnostics &diag) {
+    std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
+    for (size_t i = 0; i < std::min<size_t>(diag.items.size(), RAMMP_DIAG_COUNT); i++) {
+      const auto &values = diag.items[i].values;
+      for (size_t f = 0; f < std::min<size_t>(values.size(), RAMMP_DIAG_FIELDS); f++) {
+        lv_subject_set_int(&diag_value[i][f], values[f]);
+      }
+    }
   });
   if (!rtps_comms_start()) {
     logger.warn("RTPS comms not started (Ethernet bring-up failed)");

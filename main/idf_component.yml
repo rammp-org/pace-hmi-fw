@@ -31,6 +31,7 @@ dependencies:
   espp/display: ">=1.3"
   espp/display_drivers: ">=1.3"
   # DRV2605 haptic motor driver (the motor on the PCB's JST connector)
+<<<<<<< HEAD
   espp/drv2605: ">=1.3"
   espp/filters: ">=1.3"
   espp/gt911: ">=1.3"
@@ -50,6 +51,36 @@ dependencies:
   espp/rtps: ">=1.3"
   espp/cdr: ">=1.3"
 
+=======
+  espp/drv2605: ==1.2.0
+  espressif/esp-dsp: ^1.8.2
+  espp/filters: ==1.2.0
+  # LittleFS on the `storage` partition: joystick calibration now, more later
+  espp/file_system: ==1.2.0
+  espp/gt911: ==1.2.0
+  espp/i2c: ==1.2.0
+  espp/ina226: ==1.2.0
+  espp/input_drivers: ==1.2.0
+  espp/interrupt: ==1.2.0
+  espp/led: ==1.2.0
+  lvgl/lvgl: ^9.5.0
+  espp/math: ==1.2.0
+  espp/rx8130ce: ==1.2.0
+  espp/pi4ioe5v: ==1.2.0
+  espp/spi: ==1.2.0
+  espp/touch: ==1.2.0
+  espp/st7123touch: ==1.2.0
+  # RTPS comms — these components first shipped in espp 1.1.6 (espp/rtps pulls
+  # in espp/socket transitively; cdr is used directly for sample serialization)
+  espp/rtps: ^1.1.6
+  espp/cdr: ==1.2.0
+  # Pinned to the 1.2.0 set the rest of espp is on. Left as ranges, any change
+  # to this manifest re-resolves them to the newest release, and 1.3.x
+  # thread_pool (via socket) needs a newer espp/task than the 1.2.0 above.
+  espp/reflect_cpp: ==1.2.0
+  espp/socket: ==1.2.0
+  espp/thread_pool: ==1.2.0
+>>>>>>> main
   # W5500 SPI Ethernet MAC driver (split out of esp_eth in IDF 6.0)
   espressif/w5500: ^2.0.0
   espressif/esp-dsp: ^1.8.2

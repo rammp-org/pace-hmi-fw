@@ -51,7 +51,19 @@ set(
 # LV_USE_STDLIB_MALLOC isn't exposed through LVGL's Kconfig and CONFIG_LV_CONF_SKIP
 # is set, so it has to come from the command line. Global (not per-component) so
 # every translation unit sees the same allocator.
-idf_build_set_property(COMPILE_DEFINITIONS "LV_USE_STDLIB_MALLOC=LV_STDLIB_CLIB" APPEND)
+#
+# CUSTOM rather than CLIB: main/lv_mem_psram.c takes every LVGL allocation from
+# PSRAM. With plain malloc the widget tree sat in internal RAM, which on the P4
+# is all DMA-capable - the pool the W5500's SPI bounce buffers come from, and
+# running it dry boot-loops the board. See that file.
+idf_build_set_property(COMPILE_DEFINITIONS "LV_USE_STDLIB_MALLOC=LV_STDLIB_CUSTOM" APPEND)
+
+# espp/rtps limits: its embedded profile with one more best-effort reader, for
+# rammp/mcb/diagnostics (see main/rtps_limits_hmi.hpp). espp/rtps's config.hpp
+# includes whatever RTPS_CONFIG_HEADER names. Global, like the define above, so
+# the library and everything that includes its headers agree on the sizes.
+idf_build_set_property(COMPILE_DEFINITIONS
+                       "RTPS_CONFIG_HEADER=\"${CMAKE_CURRENT_LIST_DIR}/main/rtps_limits_hmi.hpp\"" APPEND)
 
 project(rammp-hmi-p4)
 

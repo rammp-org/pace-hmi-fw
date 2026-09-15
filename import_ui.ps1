@@ -229,6 +229,33 @@ if (-not (Test-Path $assetTool)) {
     }
 }
 
+# --- check the export still matches what main.cpp reaches for ----------------
+# The compiler catches renames and deletions on its own (undefined symbol). What
+# it cannot catch is renumbering: SquareLine names instances by creation order
+# across the whole project, so adding one StatusPanel can renumber the ones on
+# every other screen. ui_StatusPanel4 then still compiles and still exists -- it
+# just lives on a different screen now, and the firmware binds MCB telemetry to
+# the wrong panel with nothing to show for it. ui_contract.py asserts those
+# relationships; the tables in it are what main.cpp believes.
+$contractTool = Join-Path $RepoRoot "scripts\ui_contract.py"
+if (-not (Test-Path $contractTool)) {
+    # nothing to do
+} elseif (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+    Write-Host ""
+    Write-Host "NOTE: python not on PATH - skipped the export/firmware contract check."
+} else {
+    Write-Host ""
+    $contractReport = & python $contractTool
+    if ($LASTEXITCODE -ne 0) {
+        $contractReport | ForEach-Object { Write-Host $_ -ForegroundColor Red }
+        Write-Host ""
+        Write-Host "Import finished, but the firmware would now bind to the wrong widgets." -ForegroundColor Red
+        Write-Host "Not building. Fix the above first." -ForegroundColor Red
+        exit 1
+    }
+    $contractReport | ForEach-Object { Write-Host $_ }
+}
+
 # --- optionally hand off to idf.py -------------------------------------------
 if (-not $BuildFlashMonitor) {
     Write-Host ""
