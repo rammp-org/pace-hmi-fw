@@ -15,7 +15,7 @@ CONFIG_ESP32P4_REV_MIN_100=y
 # fails the esp_clk_init assert at boot.
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_360=y
 
-# 16MB flash with a custom partition table (8M app + 4M storage)
+# 16MB flash with a custom partition table (two 6M OTA slots + storage)
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
@@ -283,7 +283,20 @@ CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=65536
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 
 # espp/rtps endpoint pools. SPDP takes 1 best-effort writer + 1 reader; the HMI
-# adds 4 writers (the default 5 fits) and 5 readers, so one more reader slot.
-CONFIG_RTPS_LIMIT_NUM_STATELESS_WRITERS=6
+# adds 6 writers (5 + OtaDeviceInfo) and 5 readers (4 + OtaCommand).
+CONFIG_RTPS_LIMIT_NUM_STATELESS_WRITERS=7
 CONFIG_RTPS_LIMIT_NUM_STATELESS_READERS=6
 CONFIG_RTPS_LIMIT_MAX_NUM_READER_CALLBACKS=6
+
+# --- Firmware update over Ethernet (main/ota_update.cpp) ---
+# A freshly updated app boots PENDING_VERIFY and is rolled back by the bootloader
+# if it resets before confirming itself. It confirms once Ethernet and RTPS are
+# up (ota_boot_confirm), and rolls itself back if that does not happen in time.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+# The DSI scanout is restarted every frame from the DMA's interrupt. Without this
+# that interrupt waits out every flash write, so an OTA (continuous writes) starved
+# the panel: measured 105 ms without a restart, seen as the screen blinking blue.
+CONFIG_LCD_DSI_ISR_CACHE_SAFE=y
+# RTPS takes ~4 sockets; the OTA session (listener + client) and the network
+# console (listener + client) add 4 more, and ping one transiently.
+CONFIG_LWIP_MAX_SOCKETS=16

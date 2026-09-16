@@ -6,6 +6,7 @@
 #include "log_capture.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
@@ -25,6 +26,7 @@ Line *ring = nullptr; // kLogCaptureLines of them, in PSRAM
 uint32_t count = 0;   // lines committed since boot; the newest is ring[(count - 1) % size]
 std::mutex ring_mutex;
 FILE *console = nullptr; // the original stdout: the serial console
+std::atomic<LogCaptureSink> sink{nullptr};
 
 // The line being assembled: a write can end mid-line, and a line can arrive in
 // several writes.
@@ -118,6 +120,9 @@ int tee_write(void *, const char *buf, int n) {
   // must never hold up the LogScreen reading the ring, nor the reverse.
   std::fwrite(buf, 1, static_cast<size_t>(n), console);
   std::fflush(console);
+  if (const LogCaptureSink forward = sink.load()) {
+    forward(buf, static_cast<size_t>(n));
+  }
   std::lock_guard<std::mutex> lock(ring_mutex);
   for (int i = 0; i < n; ++i) {
     feed(buf[i]);
@@ -151,6 +156,8 @@ void log_capture_start() {
   stdout = tee;
   stderr = tee;
 }
+
+void log_capture_set_sink(LogCaptureSink forward) { sink = forward; }
 
 bool log_capture_active() { return ring != nullptr && console != nullptr && stdout != console; }
 

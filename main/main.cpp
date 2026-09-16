@@ -50,12 +50,17 @@
 #include "joystick_cal.hpp"
 #include "log_capture.hpp"
 #include "log_view.hpp"
+#include "net_console.hpp"
+#include "ota_update.hpp"
 #include "rtps_comms.hpp"
 #include "selftest.hpp"
 #include "settings.hpp"
+#include "storage.hpp"
 
+#include "driver/ledc.h"
 #include "esp_heap_caps.h"
 #include "esp_lcd_mipi_dsi.h"
+#include "esp_rom_sys.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 
@@ -3511,12 +3516,30 @@ static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c) {
   logger.info("DA7280 functional test complete");
 }
 
+// Shutdown handler: every esp_restart (an update, a rollback, the console's reboot, the
+// actions screen) leaves the panel powered with nothing driving it until the new image
+// sets it up ~3 s later, and an undriven DSI panel shows blue. Dark instead. The LEDC
+// calls directly, not brightness(): that can wait on a fade.
+static void backlight_off_on_restart() {
+  ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, 0);
+  ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+  esp_rom_delay_us(20'000); // the new duty takes a PWM period, the panel a moment more
+  esp_rom_printf("restart: backlight off (duty %u)\n",
+                 static_cast<unsigned>(ledc_get_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0)));
+}
+
 extern "C" void app_main(void) {
   // First, so the LogScreen has everything printed from here on - including
   // what the tasks started below print.
   log_capture_start();
   espp::Logger logger({.tag = "M5Stack Tab5 Example", .level = espp::Logger::Verbosity::INFO});
   logger.info("Starting example!");
+  // Before anything reads /storage: the first boot of the two-slot layout brings the
+  // calibration and settings over from where the old partition table kept them.
+  storage_migrate_legacy();
+  // An updated image that never gets as far as RTPS rolls itself back (ota_update.cpp).
+  ota_boot_check();
+  esp_register_shutdown_handler(backlight_off_on_restart);
 
   //! [m5stack tab5 example]
   espp::M5StackTab5 &tab5 = espp::M5StackTab5::get();
@@ -4882,6 +4905,8 @@ extern "C" void app_main(void) {
   });
   if (!rtps_comms_start()) {
     logger.warn("RTPS comms not started (Ethernet bring-up failed)");
+  } else {
+    net_console_start();
   }
 
   // loop forever

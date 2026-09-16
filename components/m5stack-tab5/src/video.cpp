@@ -132,8 +132,9 @@ bool M5StackTab5::initialize_lcd() {
                                                    .duty_resolution = LEDC_TIMER_10_BIT});
   }
 
-  // default to 100% brightness to ensure users can see screen
-  brightness(100.0f);
+  // Dark until the app sets its brightness: lit before the panel is reset and fed a
+  // frame, it shows blue for the ~2.5 s bring-up takes (seen after every reboot).
+  brightness(0.0f);
 
   // Perform hardware reset sequence via IO expander
   logger_.info("Performing LCD hardware reset sequence");
@@ -455,6 +456,7 @@ bool M5StackTab5::initialize_display(size_t pixel_buffer_size) {
             .vram1 = static_cast<Pixel *>(fb1),
         },
         Logger::Verbosity::WARN);
+    brightness(0.0f); // Display's constructor sets 100%: stay dark until the app's own
   }
 
   // Register a PPA client for hardware rotation, and allocate the rotation

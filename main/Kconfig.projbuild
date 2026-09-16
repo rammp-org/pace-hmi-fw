@@ -1,0 +1,27 @@
+menu "RAMMP HMI"
+
+    config HMI_OTA_AUTH_KEY
+        string "Firmware update key"
+        default "rammp-dev-ota-key"
+        help
+            Shared secret an OtaCommand is authenticated with (HMAC-SHA256, see
+            kOtaCommand in hmi_rtps_spec.hpp). scripts/rtps_ota.py takes the same
+            key from --key or RAMMP_OTA_KEY. The default is a bench key and is
+            public: a fielded build must set its own, outside the repository.
+
+    config HMI_NET_CONSOLE
+        bool "Network console"
+        default y
+        help
+            Serial output and a few commands over TCP (rammp::kConsolePort), so
+            `idf.py monitor -p socket://<ip>:3333` works without USB. It needs no
+            authentication: turn it off in a fielded build.
+
+    config HMI_OTA_TEST_NEVER_CONFIRM
+        bool "TEST ONLY: an image that never confirms itself"
+        default n
+        help
+            Builds an image that skips the post-update confirmation, to prove
+            that the rollback brings the previous image back. Never ship it.
+
+endmenu

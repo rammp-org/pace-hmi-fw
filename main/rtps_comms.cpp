@@ -27,6 +27,7 @@
 #include "ping/ping_sock.h"
 
 #include "logger.hpp"
+#include "ota_update.hpp"
 #include "rtps_participant.hpp"
 #include "rtps_pubsub.hpp"
 #include "task.hpp"
@@ -47,7 +48,7 @@ constexpr gpio_num_t kPinInt = GPIO_NUM_4;
 constexpr int kSpiClockMhz = 20;   // W5500 max is 33; 20 tolerates jumper wires
 constexpr int kRxPollPeriodMs = 0; // 0 = RX on the INT line; N = poll every N ms (rules out INT)
 
-constexpr auto kHeartbeatPeriod = 2s; // bench counter on rammp::kHmiCounter
+constexpr int kHeartbeatEvery = 2; // bench counter on rammp::kHmiCounter, per kOtaInfoPeriod
 constexpr int64_t kMibStatusTimeoutUs =
     std::chrono::duration_cast<std::chrono::microseconds>(rammp::kMibStatusTimeout).count();
 constexpr int64_t kDiagRateWindowUs = 4'000'000;
@@ -73,6 +74,7 @@ Publisher<rammp::XYTwist> joystick_pub;
 Publisher<rammp::SeatCommand> seat_pub;
 Publisher<rammp::DriveCommand> drive_pub;
 Publisher<rammp::SelfTestReport> report_pub;
+Publisher<rammp::OtaDeviceInfo> ota_info_pub;
 
 std::function<void(float)> brightness_handler;
 std::function<void(const MIB::MibStatus &)> mib_status_handler;
@@ -184,6 +186,8 @@ void on_mib_status(const MIB::MibStatus &s) {
     mib_status_handler(s);
   }
 }
+
+void on_ota_command(const rammp::OtaCommand &c) { ota_handle_command(c); }
 
 void on_diagnostics(const rammp::Diagnostics &d) {
   static size_t last_count = SIZE_MAX; // log the first sample, then only a changed item count
@@ -355,32 +359,43 @@ bool start_participant() {
     return false;
   }
 
-  // 5 writers + 5 readers, plus SPDP's pair: the budget set in sdkconfig.defaults
+  // 6 writers + 5 readers, plus SPDP's pair: the budget set in sdkconfig.defaults
   counter_pub = make_publisher(rammp::kHmiCounter);
   joystick_pub = make_publisher(rammp::kJoystickXYTwist);
   seat_pub = make_publisher(rammp::kJoystickSeatCommand);
   drive_pub = make_publisher(rammp::kJoystickDriveCommand);
   report_pub = make_publisher(rammp::kSelfTestReport);
+  ota_info_pub = make_publisher(rammp::kOtaDeviceInfo);
   const bool ok = counter_pub && joystick_pub && seat_pub && drive_pub && report_pub &&
-                  subscribe(rammp::kHmiCommand, on_command) &&
+                  ota_info_pub && subscribe(rammp::kHmiCommand, on_command) &&
                   subscribe(rammp::kHmiBrightness, on_brightness) &&
                   subscribe(MIB::kMibStatus, on_mib_status) &&
-                  subscribe(rammp::kMcbDiagnostics, on_diagnostics);
+                  subscribe(rammp::kMcbDiagnostics, on_diagnostics) &&
+                  subscribe(rammp::kOtaCommand, on_ota_command);
   if (!ok) {
     return false;
   }
   endpoints_ready = true;
   logger.info("RTPS up on {}", ip_address);
+  // Ethernet, DHCP and every endpoint: enough for an updated image to keep itself.
+  ota_boot_confirm();
 
-  // bench heartbeat: a counter on rammp::kHmiCounter every kHeartbeatPeriod
+  // OtaDeviceInfo every kOtaInfoPeriod, for a fleet update host to find this device,
+  // and the bench heartbeat counter every kHeartbeatEvery of them.
   heartbeat_task = std::make_unique<espp::Task>(espp::Task::Config{
       .callback = [](std::mutex &m, std::condition_variable &cv) -> bool {
+        static uint32_t tick = 0;
         static uint32_t counter = 0;
-        if (publish(counter_pub, rammp::UInt32{++counter}) && counter % 10 == 1) {
+        rammp::OtaDeviceInfo info = ota_device_info();
+        info.seq = static_cast<uint8_t>(tick);
+        info.ip = ip_address;
+        publish(ota_info_pub, info);
+        if (tick++ % kHeartbeatEvery == 0 && publish(counter_pub, rammp::UInt32{++counter}) &&
+            counter % 10 == 1) {
           logger.info("Heartbeat {}", counter);
         }
         std::unique_lock<std::mutex> lock(m);
-        cv.wait_for(lock, kHeartbeatPeriod);
+        cv.wait_for(lock, rammp::kOtaInfoPeriod);
         return false; // keep running
       },
       .task_config = {.name = "rtps_pub", .stack_size_bytes = 6 * 1024, .priority = 5}});

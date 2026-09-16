@@ -220,6 +220,15 @@ MSG_DRIVE_COMMAND = [("request", "B"), ("profile", "B")]
 MSG_SEAT_COMMAND = [("axis", "B"), ("target", "f")]
 MSG_DIAGNOSTICS = [("seq", "B"), ("items", ("seq", [("values", ("seq", "i"))]))]
 MSG_UINT32 = [("data", "I")]
+MSG_OTA_DEVICE_INFO = [
+    ("seq", "B"), ("state", "B"), ("image_state", "B"), ("progress_pct", "B"),
+    ("ota_port", "H"), ("nonce", "I"), ("mac", "str"), ("ip", "str"), ("project", "str"),
+    ("version", "str"), ("hw_rev", "str"), ("slot", "str"), ("last_error", "str"),
+]
+MSG_OTA_COMMAND = [
+    ("action", "B"), ("nonce", "I"), ("image_size", "I"), ("mac", "str"), ("version", "str"),
+    ("sha256", "str"), ("auth", "str"),
+]
 MSG_SELFTEST_REPORT = [
     ("run_id", "B"), ("kind", "B"), ("index", "B"), ("count", "B"), ("result", "B"),
     ("value", "i"), ("lo", "i"), ("hi", "i"), ("name", "str"), ("unit", "str"), ("detail", "str"),
@@ -449,6 +458,74 @@ def format_selftest_result(r: SelfTestResult, detail: str | None = None) -> str:
     measured = "-" if r.result == SELFTEST_RESULT_SKIP else format_selftest_value(r)  # noqa: F821
     return (f"{SELFTEST_RESULT_NAMES.get(r.result, '?'):<4}  {r.name:<18} {measured:>14}  "
             f"{format_selftest_limits(r):<20} {r.detail if detail is None else detail}")
+
+
+# ------------------------------------------------------------ firmware update
+
+#: {0: 'IDLE', 1: 'LISTENING', ...} — rammp::OtaState
+OTA_STATE_NAMES = _group("OTA_STATE_")
+#: {0: 'CONFIRMED', 1: 'PENDING_VERIFY', 2: 'UNKNOWN'} — rammp::OtaImageState
+OTA_IMAGE_STATE_NAMES = _group("OTA_IMAGE_STATE_")
+
+
+class OtaDeviceInfo(NamedTuple):
+    """One rammp::OtaDeviceInfo: who a device is and what it runs."""
+
+    seq: int
+    state: int
+    image_state: int
+    progress_pct: int
+    ota_port: int
+    nonce: int
+    mac: str
+    ip: str
+    project: str
+    version: str
+    hw_rev: str
+    slot: str
+    last_error: str
+
+
+class OtaCommand(NamedTuple):
+    """One rammp::OtaCommand; `auth` is filled in by sign_ota_command()."""
+
+    action: int
+    nonce: int
+    image_size: int
+    mac: str
+    version: str
+    sha256: str
+    auth: str = ""
+
+
+def unpack_ota_device_info(payload: bytes) -> OtaDeviceInfo | None:
+    message = decode(MSG_OTA_DEVICE_INFO, payload)
+    return None if message is None else OtaDeviceInfo(*message)
+
+
+def pack_ota_device_info(info: OtaDeviceInfo) -> bytes:
+    """For tests of the tools: what a device publishes."""
+    return encode(MSG_OTA_DEVICE_INFO, *info)
+
+
+def ota_auth_message(c: OtaCommand) -> bytes:
+    """What `auth` signs; mirrors rammp::ota_auth_message."""
+    return f"{c.action}|{c.nonce}|{c.image_size}|{c.mac}|{c.version}|{c.sha256}".encode("ascii")
+
+
+def sign_ota_command(c: OtaCommand, key: bytes) -> OtaCommand:
+    import hashlib
+    import hmac
+    return c._replace(auth=hmac.new(key, ota_auth_message(c), hashlib.sha256).hexdigest())
+
+
+def pack_ota_command(c: OtaCommand) -> bytes:
+    return encode(MSG_OTA_COMMAND, *c)
+
+
+def unpack_ota_command(payload: bytes) -> OtaCommand | None:
+    message = decode(MSG_OTA_COMMAND, payload)
+    return None if message is None else OtaCommand(*message)
 
 
 if __name__ == "__main__":
