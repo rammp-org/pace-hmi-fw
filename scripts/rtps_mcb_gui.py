@@ -108,14 +108,17 @@ class McbPanel:
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill="both", expand=True, padx=4, pady=(4, 0))
         status_tab = ttk.Frame(self.notebook)
+        drive_tab = ttk.Frame(self.notebook)
         seat_tab = ttk.Frame(self.notebook)
         self.notebook.add(status_tab, text="Status")
+        self.notebook.add(drive_tab, text="Drive")
         self.notebook.add(seat_tab, text="Seat")
         diagnostics_tab = ttk.Frame(self.notebook)
         self.notebook.add(diagnostics_tab, text="Diagnostics")
 
         self._build_connection(status_tab)
         self._build_status_controls(status_tab)
+        self._build_drive_request(drive_tab)
         self._build_error_banner(status_tab)
         self._build_joystick(status_tab)
         self._build_cycle(status_tab)
@@ -190,34 +193,68 @@ class McbPanel:
             parent, "State", spec.FAULT_STATE_NAMES, self.state_raw_var, self.state_text_var,
             self._set_state, self._set_state_raw,
         )
-        self._build_drive_request(parent)
 
     def _build_drive_request(self, parent: tk.Widget) -> None:
-        """What the joystick last asked for, and whether to grant it.
+        """The MCB's half of DriveCommand: what was asked, and what to answer.
 
         The HMI asks before it drives and waits for SystemState to agree, so
         refusing here is the only way to see what it does when the chair will
-        not go: it should give up after MCB_STATUS_TIMEOUT_MS and say so
-        rather than sit on a drive screen.
+        not go: it should give up after MCB_STATUS_TIMEOUT_MS and say so rather
+        than sit on a drive screen that pretends the chair is moving.
         """
         frame = ttk.LabelFrame(parent, text="Drive requests (from the joystick)", padding=8)
-        frame.pack(fill="x", padx=8, pady=4)
+        frame.pack(fill="x", padx=8, pady=(8, 4))
 
         self.drive_request_label = ttk.Label(frame, text="none yet")
-        self.drive_request_label.grid(row=0, column=0, sticky="w")
+        self.drive_request_label.grid(row=0, column=0, columnspan=3, sticky="w")
 
         self.refuse_drive_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
             frame, text="Refuse ENABLE", variable=self.refuse_drive_var,
             command=self._apply_refuse_drive,
-        ).grid(row=0, column=1, padx=(16, 0))
+        ).grid(row=0, column=3, sticky="e", padx=(16, 0))
 
         ttk.Label(
             frame,
             text="Granting one sets drive status ACTIVE, which is what opens the HMI's drive "
-                 "screen; the profile it carries comes back in SystemState.",
+                 "screen. Refuse it and the HMI should give up after "
+                 f"{spec.MCB_STATUS_TIMEOUT_MS} ms and raise its refusal banner.",
             foreground="#666666", wraplength=560, justify="left",
-        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        ).grid(row=1, column=0, columnspan=4, sticky="w", pady=(6, 0))
+
+        profile = ttk.LabelFrame(parent, text="Drive profile (what SystemState reports)",
+                                 padding=8)
+        profile.pack(fill="x", padx=8, pady=4)
+
+        self.profile_raw_var = tk.StringVar(value=str(spec.DRIVE_PROFILE_NORMAL))
+        column = 0
+        # Presets from the spec's enum, so a new profile in the header turns
+        # into a button here with nothing to change in this file.
+        for value in sorted(spec.DRIVE_PROFILE_NAMES):
+            ttk.Button(
+                profile, text=spec.DRIVE_PROFILE_NAMES[value], width=10,
+                command=lambda v=value: self._set_profile(v),
+            ).grid(row=0, column=column, padx=(0, 4))
+            column += 1
+        ttk.Label(profile, text="raw").grid(row=0, column=column, padx=(12, 4))
+        ttk.Spinbox(profile, from_=0, to=255, width=5, textvariable=self.profile_raw_var).grid(
+            row=0, column=column + 1)
+        ttk.Button(profile, text="Send", command=self._set_profile_raw).grid(
+            row=0, column=column + 2, padx=4)
+
+        self.follow_profile_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            profile, text="Follow the joystick's request", variable=self.follow_profile_var,
+            command=self._apply_follow_profile,
+        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(8, 0))
+
+        ttk.Label(
+            profile,
+            text="The HMI publishes its profile on DriveCommand and waits to see it come back "
+                 "here. Untick Follow (a preset does it for you) to report something else, which "
+                 "is a profile change the chair did not grant.",
+            foreground="#666666", wraplength=560, justify="left",
+        ).grid(row=2, column=0, columnspan=column + 3, sticky="w", pady=(6, 0))
 
     def _apply_refuse_drive(self) -> None:
         if self.harness is None:
@@ -225,15 +262,47 @@ class McbPanel:
             return
         self.harness.refuse_drive = self.refuse_drive_var.get()
 
+    def _set_profile(self, value: int) -> None:
+        self.profile_raw_var.set(str(value))
+        self._set_profile_raw()
+
+    def _set_profile_raw(self) -> None:
+        """Report a profile of the bench's choosing, which means not following."""
+        if self.harness is None:
+            self._append_log("[gui] not connected")
+            return
+        # Setting one by hand and still following the joystick would put the
+        # value back on the next DriveCommand, so the button would look broken.
+        self.follow_profile_var.set(False)
+        self.harness.follow_profile = False
+        self.harness.profile = self._raw(self.profile_raw_var)
+        self._publish()
+
+    def _apply_follow_profile(self) -> None:
+        if self.harness is None:
+            self._append_log("[gui] not connected")
+            return
+        self.harness.follow_profile = self.follow_profile_var.get()
+        if self.harness.follow_profile:
+            self.harness.profile = self.harness.requested_profile
+            self._publish()
+
     def _update_drive_request(self) -> None:
         """Called from _tick: the harness's view of the last DriveCommand."""
         if self.harness is None:
             return
         request = spec.DRIVE_REQUEST_NAMES.get(self.harness.drive_request, "?")
-        profile = spec.DRIVE_PROFILE_NAMES.get(self.harness.profile, "?")
+        asked = spec.DRIVE_PROFILE_NAMES.get(self.harness.requested_profile, "?")
+        reported = spec.DRIVE_PROFILE_NAMES.get(self.harness.profile, "?")
         status = spec.DRIVE_STATUS_NAMES.get(self.harness.drive_status, "?")
+        agree = "" if self.harness.profile == self.harness.requested_profile else "  (overridden)"
         self.drive_request_label.configure(
-            text=f"last: {request}  profile {profile}  →  drive status {status}")
+            text=f"last: {request}  profile asked {asked}, reporting {reported}{agree}"
+                 f"  →  drive status {status}")
+        # The box tracks the harness while it follows, so it never shows a stale
+        # number next to a ticked Follow.
+        if self.harness.follow_profile:
+            self.profile_raw_var.set(str(self.harness.profile))
 
     def _build_one_status(self, parent, title, names, raw_var, text_var, on_preset,
                           on_raw) -> None:
@@ -396,6 +465,20 @@ class McbPanel:
             foreground="#666666", wraplength=560, justify="left",
         ).grid(row=len(spec.SEAT_AXES) + 2, column=0, columnspan=5, sticky="w", pady=(6, 0))
 
+        # What the HMI actually asked for, which is the half the values above do
+        # not show: a refused request leaves the value where it was, so without
+        # this there is no way to tell a refusal from a press that never arrived.
+        requests = ttk.LabelFrame(parent, text="Seat requests (from the joystick)", padding=8)
+        requests.pack(fill="x", padx=8, pady=4)
+        self.seat_request_label = ttk.Label(requests, text="no request yet")
+        self.seat_request_label.pack(anchor="w")
+        ttk.Label(
+            requests,
+            text="Targets are absolute: a preset button and a -/+ step are the same message, so "
+                 "this is the whole of what the HMI asks for.",
+            foreground="#666666", wraplength=560, justify="left",
+        ).pack(anchor="w", pady=(6, 0))
+
     def _set_seat_axis(self, index: int) -> None:
         """Push one typed value into the harness, clamped to the spec range."""
         if self.harness is None:
@@ -434,6 +517,7 @@ class McbPanel:
         """Called from _tick: harness -> value boxes, dropdowns -> harness."""
         if self.harness is None:
             return
+        self._update_seat_request()
         name_to_result = {name: value for value, name in spec.SEAT_RESULT_NAMES.items()}
         focused = self.root.focus_get()
         for index, axis in enumerate(spec.SEAT_AXES):
@@ -448,6 +532,20 @@ class McbPanel:
             self.harness.seat_reject[index] = (
                 None if choice == "accept" else name_to_result.get(choice)
             )
+
+    def _update_seat_request(self) -> None:
+        """The last SeatCommand and the verdict the harness gave it."""
+        command = self.harness.last_seat_command
+        if command is None:
+            self.seat_request_label.configure(text="no request yet")
+            return
+        axis_id, target = command
+        known = 0 <= axis_id < len(spec.SEAT_AXES)
+        axis = spec.SEAT_AXES[axis_id] if known else None
+        name = axis.label if known else f"axis #{axis_id}"
+        shown = f"{axis.format(target)} {axis.unit}" if known else str(target)
+        verdict = spec.SEAT_RESULT_NAMES.get(self.harness.seat_result, "?")
+        self.seat_request_label.configure(text=f"last: {name} → {shown} : {verdict}")
 
     def _build_diagnostics(self, parent: tk.Widget) -> None:
         """Fake readings for every item in the spec's RAMMP_DIAG_TABLE.
@@ -720,6 +818,7 @@ class McbPanel:
         self.harness.drive_status = spec.DRIVE_STATUS_ACTIVE
         self.drive_raw_var.set(str(spec.DRIVE_STATUS_ACTIVE))
         self._apply_refuse_drive()
+        self._apply_follow_profile()
         self._apply_overrides()
         self._apply_error_text()
         self.connect_button.configure(text="Disconnect")

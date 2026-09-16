@@ -77,8 +77,14 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
         self.drive_request = spec.DRIVE_REQUEST_DISABLE
         self.refuse_drive = False
         # The profile rides DriveCommand; the HMI waits to see it come back in
-        # SystemState before it believes the change took.
+        # SystemState before it believes the change took. Two of them, because a
+        # real MCB is allowed to disagree: `requested_profile` is what the
+        # joystick asked for and `profile` is what SystemState reports. With
+        # follow_profile cleared the bench owns the second one, which is the
+        # only way to see what the HMI does when a profile change is not granted.
         self.profile = spec.DRIVE_PROFILE_NORMAL
+        self.requested_profile = spec.DRIVE_PROFILE_NORMAL
+        self.follow_profile = True
         # label overrides; empty means "let the HMI use the enum's own name"
         self.drive_text = ""
         self.state_text = ""
@@ -123,6 +129,8 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
         self.seat_result = spec.SEAT_RESULT_OK
         self.seat_last_axis = 0
         self.seat_seq = 0
+        #: (axis_id, target) of the last SeatCommand, for the bench to show
+        self.last_seat_command: tuple[int, int] | None = None
         # Set by apply_seat_command so the next run-loop tick publishes
         # immediately rather than waiting out the period: a reply that took up
         # to half a second would make every press feel broken.
@@ -260,7 +268,9 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
         which is what a chair inhibited by a fault or a raised seat does.
         """
         self.drive_request = request
-        self.profile = profile
+        self.requested_profile = profile
+        if self.follow_profile:
+            self.profile = profile
         if request == spec.DRIVE_REQUEST_ENABLE and self.refuse_drive:
             return
         self.drive_status = (spec.DRIVE_STATUS_ACTIVE
@@ -334,6 +344,7 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
                 if command is None:
                     continue
                 axis_id, target = command
+                self.last_seat_command = (axis_id, target)
                 result = self.apply_seat_command(axis_id, target)
                 known = 0 <= axis_id < len(spec.SEAT_AXES)
                 name = spec.SEAT_AXES[axis_id].short if known else f"#{axis_id}"
