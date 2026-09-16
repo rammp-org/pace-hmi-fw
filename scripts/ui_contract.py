@@ -122,6 +122,7 @@ PARENTS: dict[str, str] = {
     # seat screen grids
     "ui_SeatButton1": "ui_SeatFunctionsButtonsPanel",
     "ui_SeatButton6": "ui_SeatFunctionsButtonsPanel",
+    "ui_SeatButton7": "ui_SeatFunctionsButtonsPanel",
     "ui_SeatAdjustmentButton1": "ui_SeatAdjustmentPanel",
     "ui_SeatAdjustmentButton5": "ui_SeatAdjustmentPanel",
 
@@ -171,9 +172,9 @@ LABELS: dict[str, str] = {
     "ui_GoToNewestButtonLabel": "Newest",   # log_view.cpp: scroll to the end
     # the four live seat functions, in the order seat_buttons_grid expects
     "ui_SeatButtonLabel1": "Elevation",
-    "ui_SeatButtonLabel2": "Real Tilt",
-    "ui_SeatButtonLabel3": "FW Tilt",
+    "ui_SeatButtonLabel2": "Backseat",
     "ui_SeatButtonLabel4": "Side Tilt",
+    "ui_SeatButtonLabel7": "Setback",
 }
 
 _CREATE_RE = re.compile(

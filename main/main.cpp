@@ -1729,8 +1729,8 @@ static void hold_poll_cb(lv_timer_t *) {
 // focus_next would give. Each page has its own group and its own cursor:
 //
 //   buttons page                    adjustment page
-//   [ Elevation ] [ Real Tilt ]     [     -     ] [     +     ]
-//   [ FW Tilt   ] [ Side Tilt ]     [ 0deg ] [ 15deg ] [ 25deg ]
+//   [ Elevation ] [ Backseat  ]     [     -     ] [     +     ]
+//   [ Side Tilt ] [ Setback   ]     [ 0deg ] [ 15deg ] [ 25deg ]
 //   [ Static    ] [ Dynamic   ]
 //
 // Note the adjustment page's rows are different lengths, which is why a grid
@@ -4153,8 +4153,8 @@ extern "C" void app_main(void) {
   seat_buttons_grid.cell[0][0] = ui_SeatButton1;
   seat_buttons_grid.cell[0][1] = ui_SeatButton2;
   seat_buttons_grid.cols[1] = 2;
-  seat_buttons_grid.cell[1][0] = ui_SeatButton3;
-  seat_buttons_grid.cell[1][1] = ui_SeatButton4;
+  seat_buttons_grid.cell[1][0] = ui_SeatButton4;
+  seat_buttons_grid.cell[1][1] = ui_SeatButton7;
   seat_buttons_grid.cols[2] = 2;
   seat_buttons_grid.cell[2][0] = ui_SeatButton5;
   seat_buttons_grid.cell[2][1] = ui_SeatButton6;
@@ -4192,7 +4192,7 @@ extern "C" void app_main(void) {
   // two inert ones. Indexed to match seat_buttons_grid.
   lv_obj_t *seat_labels[3][2] = {
       {ui_SeatButtonLabel1, ui_SeatButtonLabel2},
-      {ui_SeatButtonLabel3, ui_SeatButtonLabel4},
+      {ui_SeatButtonLabel4, ui_SeatButtonLabel7},
       {nullptr, nullptr},
   };
 
@@ -4240,8 +4240,8 @@ extern "C" void app_main(void) {
   // screen moves when SeatState says the seat did. The export's placeholders
   // ("4.0 in", "12°") are replaced the moment the first sample lands, and read
   // "--" until then.
-  lv_obj_t *seat_values[] = {ui_SeatButtonValue1, ui_SeatButtonValue2, ui_SeatButtonValue3,
-                             ui_SeatButtonValue4};
+  lv_obj_t *seat_values[] = {ui_SeatButtonValue1, ui_SeatButtonValue2, ui_SeatButtonValue4,
+                             ui_SeatButtonValue5};
   for (uint8_t i = 0; i < seat_axis_count && i < std::size(seat_values); i++) {
     lv_subject_add_observer_obj(&seat_axis_value[i], seat_button_value_observer, seat_values[i],
                                 &seat_axis_format[i]);

@@ -1019,8 +1019,8 @@ void sim_nav_init(void) {
   seat_buttons_grid.cell[0][0] = ui_SeatButton1;
   seat_buttons_grid.cell[0][1] = ui_SeatButton2;
   seat_buttons_grid.cols[1] = 2;
-  seat_buttons_grid.cell[1][0] = ui_SeatButton3;
-  seat_buttons_grid.cell[1][1] = ui_SeatButton4;
+  seat_buttons_grid.cell[1][0] = ui_SeatButton4;
+  seat_buttons_grid.cell[1][1] = ui_SeatButton7;
   seat_buttons_grid.cols[2] = 2;
   seat_buttons_grid.cell[2][0] = ui_SeatButton5;
   seat_buttons_grid.cell[2][1] = ui_SeatButton6;
@@ -1041,7 +1041,7 @@ void sim_nav_init(void) {
      * NULL for the two inert ones. Indexed to match seat_buttons_grid. */
     lv_obj_t *seat_labels[3][2] = {
         {ui_SeatButtonLabel1, ui_SeatButtonLabel2},
-        {ui_SeatButtonLabel3, ui_SeatButtonLabel4},
+        {ui_SeatButtonLabel4, ui_SeatButtonLabel7},
         {NULL, NULL},
     };
     int r, c;
