@@ -8,13 +8,13 @@ This module parses both headers at import time and mirrors its message structs,
 encoded the way espp/cdr encodes them (XCDR1).
 
     import rammp_rtps as spec
-    spec.TOPIC_MCB_SYSTEM_STATE  # 'rammp/mcb/system_state'
-    spec.DRIVE_STATUS_ACTIVE     # 1
-    spec.pack_system_state(spec.DRIVE_STATUS_ACTIVE, spec.FAULT_STATE_OK)
+    spec.TOPIC_MIB_STATUS        # 'rammp/mib/status'
+    spec.MIB_SYSTEM_STATE_IDLE   # 1
+    spec.pack_mib_status(spec.MIB_SYSTEM_STATE_IDLE)
 
-Names lose the RAMMP_ prefix or become UPPER_SNAKE: ``RAMMP_TOPIC_MCB_SYSTEM_STATE``
-gives TOPIC_MCB_SYSTEM_STATE, ``DriveStatus::ACTIVE`` gives DRIVE_STATUS_ACTIVE, and
-``milliseconds kMcbStatusPeriod{500}`` gives MCB_STATUS_PERIOD_MS.
+Names lose the RAMMP_ prefix or become UPPER_SNAKE: ``RAMMP_TOPIC_MIB_STATUS`` gives
+TOPIC_MIB_STATUS, ``MibSystemState::IDLE`` gives MIB_SYSTEM_STATE_IDLE, and
+``milliseconds kMibStatusPeriod{500}`` gives MIB_STATUS_PERIOD_MS.
 """
 
 from __future__ import annotations
@@ -29,13 +29,16 @@ HEADER_RELATIVE_PATH = os.path.join("main", "hmi_rtps_spec.hpp")
 SHARED_HEADER_RELATIVE_PATH = os.path.join(
     "external", "rammp-rtps", "components", "rammp_rtps_messages", "include", "messages",
     "joystick_message.hpp")
+MIB_HEADER_RELATIVE_PATH = os.path.join(
+    "external", "rammp-rtps", "components", "rammp_rtps_messages", "include", "messages",
+    "mib_message.hpp")
 
-# #define RAMMP_TOPIC_MCB_SYSTEM_STATE "rammp/mcb/system_state" / #define RAMMP_TYPE_... "..."
+# #define RAMMP_TOPIC_MIB_STATUS "rammp/mib/status" / #define RAMMP_TYPE_MIB_STATUS "..."
 _DEFINE_RE = re.compile(r'^\s*#define\s+RAMMP_((?:TOPIC|TYPE)_[A-Z0-9_]+)\s+"([^"]*)"', re.M)
-# enum class DriveStatus : uint8_t { INACTIVE = 0, ... };
+# enum class MibSystemState : uint8_t { INITIALIZING = 0, ... };
 _ENUM_RE = re.compile(r"enum class (\w+)\s*:\s*\w+\s*\{(.*?)\};", re.S)
 _MEMBER_RE = re.compile(r"\b([A-Z][A-Z0-9_]*)\s*=\s*(0[xX][0-9a-fA-F]+|\d+)\b")
-# inline constexpr milliseconds kMcbStatusPeriod{500};  inline constexpr size_t kMcbTextLen = 16;
+# inline constexpr milliseconds kMibStatusPeriod{500};  inline constexpr size_t kMcbTextLen = 16;
 _NUMBER_RE = re.compile(
     r"^inline constexpr ([\w:]+) k(\w+)\s*(?:=\s*|\{)(0[xX][0-9a-fA-F]+|\d+)\}?;", re.M
 )
@@ -67,6 +70,8 @@ def find_header(relative: str = HEADER_RELATIVE_PATH) -> str:
 HEADER_PATH = find_header()
 #: the shared messages, topics and tables (the rammp-rtps submodule)
 SHARED_HEADER_PATH = find_header(SHARED_HEADER_RELATIVE_PATH)
+#: the MIB's own state message, in the same submodule
+MIB_HEADER_PATH = find_header(MIB_HEADER_RELATIVE_PATH)
 
 
 def _read_spec(path: str) -> str:
@@ -74,11 +79,12 @@ def _read_spec(path: str) -> str:
         return spec_file.read().split("#if 0", 1)[0]  # the legacy codecs are #if 0'd out
 
 
-_HEADER_TEXT = _read_spec(SHARED_HEADER_PATH) + "\n" + _read_spec(HEADER_PATH)
+_HEADER_TEXT = ("\n".join(_read_spec(path) for path in
+               (SHARED_HEADER_PATH, MIB_HEADER_PATH, HEADER_PATH)))
 
 #: TOPIC_* (topic names) and TYPE_* (DDS type names)
 STRINGS: Dict[str, str] = dict(_DEFINE_RE.findall(_HEADER_TEXT))
-#: every enumerator, as ENUM_MEMBER (DRIVE_STATUS_ACTIVE)
+#: every enumerator, as ENUM_MEMBER (MIB_SYSTEM_STATE_IDLE)
 ENUMS: Dict[str, int] = {
     f"{_snake(enum)}_{member}": int(value, 0)
     for enum, body in _ENUM_RE.findall(_HEADER_TEXT)
@@ -99,22 +105,18 @@ globals().update(NUMBERS)
 
 
 def _group(prefix: str) -> Dict[int, str]:
-    """{value: SHORT_NAME} for one enum group, e.g. _group('DRIVE_STATUS_')."""
+    """{value: SHORT_NAME} for one enum group, e.g. _group('MIB_SYSTEM_STATE_')."""
     return {
         value: name[len(prefix):] for name, value in ENUMS.items() if name.startswith(prefix)
     }
 
 
-#: {0: 'INACTIVE', 1: 'ACTIVE'} — DriveStatus
-DRIVE_STATUS_NAMES = _group("DRIVE_STATUS_")
+#: {0: 'INITIALIZING', 1: 'IDLE', 2: 'ENABLED', 3: 'ERROR'} — MIB::MibSystemState
+MIB_SYSTEM_STATE_NAMES = _group("MIB_SYSTEM_STATE_")
 #: {0: 'DISABLE', 1: 'ENABLE'} — what the joystick asks for in DriveCommand
 DRIVE_REQUEST_NAMES = _group("DRIVE_REQUEST_")
-#: {0: 'OK', 1: 'ERROR'} — FaultState
-FAULT_STATE_NAMES = _group("FAULT_STATE_")
-#: {0: 'NORMAL', 1: 'HOLO', 2: 'AUTO'} — the HMI's drive-profile buttons
+#: {0: 'LOW', 1: 'NORMAL', 2: 'HIGH'} — MIB::DriveProfile, the HMI's profile buttons
 DRIVE_PROFILE_NAMES = _group("DRIVE_PROFILE_")
-#: {0: 'OK', 1: 'AT_MIN', ...} — the MCB's verdict on a seat request
-SEAT_RESULT_NAMES = _group("SEAT_RESULT_")
 
 
 class SeatAxis(NamedTuple):
@@ -203,16 +205,19 @@ CDR_LE_HEADER = b"\x00\x01\x00\x00"
 
 # The C++ structs, field for field. A type is a struct format char, "str",
 # ("seq", element type) or a nested field list (a struct).
-MSG_SYSTEM_STATE = [
-    ("drive_status", "B"), ("fault", "B"), ("profile", "B"), ("flags", "B"), ("seq", "B"),
-    ("speed_tenths", "B"), ("hour", "B"), ("minute", "B"), ("second", "B"),
+# MIB::MibStatus. seatState is a nested struct, which CDR writes inline: its four
+# floats sit here in its own declaration order, after the two enums.
+MSG_MIB_STATUS = [
+    ("systemState", "B"), ("activeProfile", "B"),
+    ("front_back_tilt", "f"), ("lateral_tilt", "f"), ("elevation", "f"), ("translation", "f"),
+    ("seq", "B"), ("speed_tenths", "B"),
+    ("hour", "B"), ("minute", "B"), ("second", "B"),
     ("day", "B"), ("month", "B"), ("year", "B"),
-    ("drive_text", "str"), ("state_text", "str"), ("error_text", "str"), ("error_footer", "str"),
+    ("status_text", "str"), ("error_message", "str"), ("error_footer", "str"),
 ]
 MSG_XY_TWIST = [("x", "f"), ("y", "f"), ("twist", "f"), ("buttons", "I")]
 MSG_DRIVE_COMMAND = [("request", "B"), ("profile", "B")]
-MSG_SEAT_COMMAND = [("axis", "B"), ("target", "i")]
-MSG_SEAT_STATE = [("result", "B"), ("last_axis", "B"), ("seq", "B"), ("values", ("seq", "i"))]
+MSG_SEAT_COMMAND = [("axis", "B"), ("target", "f")]
 MSG_DIAGNOSTICS = [("seq", "B"), ("items", ("seq", [("values", ("seq", "i"))]))]
 MSG_UINT32 = [("data", "I")]
 MSG_SELFTEST_REPORT = [
@@ -288,31 +293,35 @@ def _text(text: str, limit: int) -> str:
     return text.encode("ascii", "ignore")[: limit - 1].decode("ascii")
 
 
-def pack_system_state(drive_status: int, fault: int, profile: int = 0, flags: int = 0,
-                      seq: int = 0, speed_tenths: int = 0, drive_text: str = "",
-                      state_text: str = "", error_text: str = "", error_footer: str = "",
-                      clock: datetime.datetime | None = None) -> bytes:
-    """A rammp::SystemState. `clock` is the MCB's local time; None sends month 0, "unknown"."""
+def pack_mib_status(system_state: int, profile: int = 0, seat=(0.0, 0.0, 0.0, 0.0),
+                    seq: int = 0, speed_tenths: int = 0, status_text: str = "",
+                    error_message: str = "", error_footer: str = "",
+                    clock: datetime.datetime | None = None) -> bytes:
+    """A MIB::MibStatus. `seat` is (front_back_tilt, lateral_tilt, elevation, translation)
+    in whole units; `clock` is the MIB's local time, None sends month 0, "unknown"."""
     when = (0,) * 6 if clock is None else (
         clock.hour, clock.minute, clock.second, clock.day, clock.month,
         max(0, min(clock.year - 2000, 255)))
+    front_back, lateral, elevation, translation = seat
     return encode(
-        MSG_SYSTEM_STATE,
-        drive_status & 0xFF, fault & 0xFF, profile & 0xFF, flags & 0xFF, seq & 0xFF,
-        max(0, min(int(speed_tenths), SPEED_MAX_TENTHS)), *when,  # noqa: F821  (scraped)
-        _text(drive_text, MCB_TEXT_LEN), _text(state_text, MCB_TEXT_LEN),  # noqa: F821
-        _text(error_text, ERROR_TEXT_LEN), _text(error_footer, ERROR_FOOTER_LEN),  # noqa: F821
+        MSG_MIB_STATUS,
+        system_state & 0xFF, profile & 0xFF,
+        float(front_back), float(lateral), float(elevation), float(translation),
+        seq & 0xFF, max(0, min(int(speed_tenths), SPEED_MAX_TENTHS)), *when,  # noqa: F821
+        _text(status_text, MCB_TEXT_LEN),  # noqa: F821  (scraped)
+        _text(error_message, ERROR_TEXT_LEN), _text(error_footer, ERROR_FOOTER_LEN),  # noqa: F821
     )
 
 
-def unpack_system_state(payload: bytes):
-    """(drive_status, fault, profile, flags, seq, speed_tenths, hour, minute, second, day,
-    month, year_since_2000, drive_text, state_text, error_text, error_footer), or None."""
-    return decode(MSG_SYSTEM_STATE, payload)
+def unpack_mib_status(payload: bytes):
+    """(systemState, activeProfile, front_back_tilt, lateral_tilt, elevation, translation,
+    seq, speed_tenths, hour, minute, second, day, month, year_since_2000, status_text,
+    error_message, error_footer), or None."""
+    return decode(MSG_MIB_STATUS, payload)
 
 
 def pack_drive_command(request: int, profile: int) -> bytes:
-    """A rammp::DriveCommand (joystick -> MCB); for tests of the tools."""
+    """A rammp::DriveCommand (joystick -> MIB); for tests of the tools."""
     return encode(MSG_DRIVE_COMMAND, request & 0xFF, profile & 0xFF)
 
 
@@ -321,25 +330,14 @@ def unpack_drive_command(payload: bytes) -> tuple[int, int] | None:
     return decode(MSG_DRIVE_COMMAND, payload)
 
 
-def pack_seat_command(axis: int, target: int) -> bytes:
-    """A rammp::SeatCommand (joystick -> MCB): put `axis` at `target`, in raw units."""
-    return encode(MSG_SEAT_COMMAND, axis & 0xFF, int(target))
+def pack_seat_command(axis: int, target: float) -> bytes:
+    """A rammp::SeatCommand (joystick -> MIB): put `axis` at `target`, in whole units."""
+    return encode(MSG_SEAT_COMMAND, axis & 0xFF, float(target))
 
 
-def unpack_seat_command(payload: bytes) -> tuple[int, int] | None:
+def unpack_seat_command(payload: bytes) -> tuple[int, float] | None:
     """(axis, target), or None."""
     return decode(MSG_SEAT_COMMAND, payload)
-
-
-def pack_seat_state(values, result: int = 0, last_axis: int = 0, seq: int = 0) -> bytes:
-    """A rammp::SeatState (MCB -> joystick); `values` = raw value per seat axis."""
-    return encode(MSG_SEAT_STATE, result & 0xFF, last_axis & 0xFF, seq & 0xFF,
-                  [int(v) for v in values])
-
-
-def unpack_seat_state(payload: bytes) -> tuple[int, int, int, list[int]] | None:
-    """(result, last_axis, seq, values), or None."""
-    return decode(MSG_SEAT_STATE, payload)
 
 
 def pack_diagnostics(values, seq: int = 0) -> bytes:

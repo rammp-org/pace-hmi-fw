@@ -17,8 +17,11 @@ Two pieces:
              modes are about — sliding sideways and spinning on the spot — are
              invisible from behind.
 
-Drive mode comes from the HMI, not from here: the user picks HOLO / Normal /
-Auto on the Tab5's drive screen and it arrives with every joystick sample.
+The drive profile comes from the HMI, not from here: the user picks it on the
+Tab5's drive screen, it goes out on DriveCommand, and the MIB confirms it in
+MibStatus. It is a response strength (LOW / NORMAL / HIGH), not a kinematics
+mode, so every profile drives car-like and the profile only sets how much of
+the speed range the stick reaches.
 """
 
 from __future__ import annotations
@@ -45,6 +48,13 @@ TWIST_RATE = 2.2
 #: Radians per second of steering at full lock, at full speed. Scaled by speed
 #: so the car cannot pirouette while stopped — that is what twist is for.
 STEER_RATE = 2.0
+#: Share of the speed range each MIB::DriveProfile reaches. The profile is a
+#: response strength, so it scales the car rather than changing how it steers.
+PROFILE_SCALE = {
+    spec.DRIVE_PROFILE_LOW: 0.5,
+    spec.DRIVE_PROFILE_NORMAL: 1.0,
+    spec.DRIVE_PROFILE_HIGH: 1.5,
+}
 #: World units between road centre lines.
 ROAD_SPACING = 400.0
 #: Width of a road in world units.
@@ -100,40 +110,24 @@ class CarModel:
         # Twist is independent of drive profile: it always spins the chair in place.
         self.heading += twist * TWIST_RATE * dt
 
-        if self.drive_profile == spec.DRIVE_PROFILE_HOLO:
-            self._step_holonomic(steer, throttle, dt)
-        else:
-            # AUTO is selectable on the HMI but undefined, so it drives as
-            # NORMAL rather than silently doing nothing.
-            self._step_normal(steer, throttle, dt)
+        self._step_car(steer, throttle, dt)
 
-    def _step_normal(self, steer: float, throttle: float, dt: float) -> None:
-        """Car-like: throttle builds speed, steering curves the heading."""
+    def _step_car(self, steer: float, throttle: float, dt: float) -> None:
+        """Car-like: throttle builds speed, steering curves the heading.
+
+        Every profile drives this way - the profile only scales the ceiling.
+        """
+        ceiling = self.max_speed * PROFILE_SCALE.get(self.drive_profile, 1.0)
         if throttle != 0.0:
-            self.speed += throttle * (self.max_speed / ACCEL_SECONDS) * dt
-            self.speed = max(0.0, min(self.speed, self.max_speed))
+            self.speed += throttle * (ceiling / ACCEL_SECONDS) * dt
+            self.speed = max(0.0, min(self.speed, ceiling))
         # Steering authority follows speed, so the car turns as it drives rather
         # than spinning on the spot when parked.
         if self.speed > 0.0:
-            self.heading += steer * STEER_RATE * (self.speed / self.max_speed) * dt
+            self.heading += steer * STEER_RATE * (self.speed / ceiling) * dt
         distance = self.speed * WORLD_UNITS_PER_SPEED * dt
         self.x += math.sin(self.heading) * distance
         self.y -= math.cos(self.heading) * distance
-
-    def _step_holonomic(self, steer: float, throttle: float, dt: float) -> None:
-        """Stick deflection IS the velocity, in screen axes.
-
-        Screen frame rather than car frame: with twist spinning the chair
-        independently, a car-frame mapping means the direction of travel rotates
-        under the user's thumb, which is unpredictable to steer by.
-        """
-        magnitude = min(math.hypot(steer, throttle), 1.0)
-        self.speed = magnitude * self.max_speed
-        distance = self.speed * WORLD_UNITS_PER_SPEED * dt
-        if magnitude > 0.0:
-            self.x += (steer / magnitude) * distance
-            self.y -= (throttle / magnitude) * distance
-
 
 class DriveView:
     """Top-down window: the car stays centred, the roads move."""

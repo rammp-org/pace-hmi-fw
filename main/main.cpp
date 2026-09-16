@@ -101,12 +101,12 @@ static void fps_render_ready_cb(lv_event_t *) {
 static lv_subject_t adc_x_subject;
 static lv_subject_t adc_y_subject;
 static lv_subject_t adc_twist_subject;
-// MCB status, as reported over RTPS. The joystick is a slave here: these two
-// hold whatever the Main Control Board last said, and every StatusPanel on
-// every screen follows them. Values are the rammp::DriveStatus /
-// rammp::FaultState enums from messages/joystick_message.hpp.
-static lv_subject_t drive_status_subject;
-static lv_subject_t mcb_state_subject;
+// The MIB's state, as reported over RTPS. The joystick is a slave here: this holds
+// whatever the MIB last said, and every StatusPanel on every screen follows it. One
+// subject, because MibSystemState answers both of a panel's labels - where the message
+// it replaced needed a drive status and a fault. Values are the MIB::MibSystemState
+// enum from messages/mib_message.hpp.
+static lv_subject_t mib_state_subject;
 // Optional label overrides from the MCB. Empty means "use the enum's name",
 // which is the normal path; a non-empty string replaces the text only, never
 // the colour. String subjects need their own storage plus a previous-value
@@ -137,8 +137,8 @@ static std::atomic<bool> joy_button_pressed{false};
 // is a question about what the person wants the stick to mean - and reports it
 // to the MCB with every joystick sample. Mirrored into an atomic for the same
 // reason as the button: the ADC task must not take the LVGL lock to read it.
-static lv_subject_t drive_mode_subject;
-static std::atomic<rammp::DriveProfile> drive_profile_published{rammp::DriveProfile::NORMAL};
+static lv_subject_t drive_profile_subject;
+static std::atomic<MIB::DriveProfile> drive_profile_published{MIB::DriveProfile::NORMAL};
 // Sends the current drive request + profile; defined with the drive gestures.
 static void drive_publish();
 
@@ -433,29 +433,27 @@ static void mcb_status_label_observer(lv_observer_t *observer, lv_subject_t *) {
     return;
   }
 
-  const auto value = static_cast<uint8_t>(lv_subject_get_int(
-      kind == StatusKind::kDriveStatus ? &drive_status_subject : &mcb_state_subject));
+  const auto value = static_cast<uint8_t>(lv_subject_get_int(&mib_state_subject));
   // The override replaces the wording only; the colour below still comes from
   // the enum, so the MCB can say ACTIVE and still label it "CHARGING".
-  const char *override_text = lv_subject_get_string(
-      kind == StatusKind::kDriveStatus ? &drive_text_subject : &state_text_subject);
+  // The MIB sends one wording, and it belongs to the state label: the drive label
+  // always reads the state's own name.
+  const char *override_text =
+      kind == StatusKind::kDriveStatus ? "" : lv_subject_get_string(&state_text_subject);
   const bool overridden = override_text != nullptr && override_text[0] != '\0';
 
-  const char *text = nullptr;
+  const auto state = static_cast<MIB::MibSystemState>(value);
+  const char *text = overridden ? override_text : rammp::to_string(state);
   uint32_t color;
   if (kind == StatusKind::kDriveStatus) {
-    const auto status = static_cast<rammp::DriveStatus>(value);
-    text = overridden ? override_text : rammp::to_string(status);
-    // INACTIVE is a normal resting state, not a fault, so it reads grey —
-    // red is reserved for a value neither board knows, which is what an MCB
-    // running ahead of this firmware would send.
-    color = status == rammp::DriveStatus::ACTIVE     ? kStatusGreen
-            : status == rammp::DriveStatus::INACTIVE ? kStatusGrey
-                                                     : kStatusRed;
+    // ENABLED is the only state the chair drives in. IDLE and INITIALIZING are normal
+    // resting states, not faults, so they read grey — red is for ERROR, and for a value
+    // neither board knows, which is what a MIB running ahead of this firmware sends.
+    color = state == MIB::MibSystemState::ENABLED ? kStatusGreen
+            : state == MIB::MibSystemState::ERROR ? kStatusRed
+                                                  : kStatusGrey;
   } else {
-    const auto state = static_cast<rammp::FaultState>(value);
-    text = overridden ? override_text : rammp::to_string(state);
-    color = state == rammp::FaultState::OK ? kStatusGreen : kStatusRed;
+    color = state == MIB::MibSystemState::ERROR ? kStatusRed : kStatusGreen;
   }
   lv_label_set_text(label, text);
   lv_obj_set_style_text_color(label, lv_color_hex(color), LV_PART_MAIN);
@@ -472,9 +470,9 @@ static void bind_status_panel(lv_obj_t *panel) {
   lv_obj_t *drive_label =
       ui_comp_get_child(panel, UI_COMP_STATUSPANEL_STATUSPANELLEFT_DRIVESTATUSLABEL);
   lv_obj_t *state_label = ui_comp_get_child(panel, UI_COMP_STATUSPANEL_STATUSPANELRIGHT_STATELABEL);
-  lv_subject_add_observer_obj(&drive_status_subject, mcb_status_label_observer, drive_label,
+  lv_subject_add_observer_obj(&mib_state_subject, mcb_status_label_observer, drive_label,
                               &kDriveStatusKind);
-  lv_subject_add_observer_obj(&mcb_state_subject, mcb_status_label_observer, state_label,
+  lv_subject_add_observer_obj(&mib_state_subject, mcb_status_label_observer, state_label,
                               &kStateKind);
   // Further observers, so losing the link or receiving a new override repaints
   // them even though the enum said nothing new. All are object-bound and die
@@ -601,13 +599,13 @@ static void bind_rtps_label(lv_obj_t *bar) {
 /////////////////////////////////////////////////////////////////////////////
 
 // Paired with the button that selects it, so one callback serves all three.
-static rammp::DriveProfile kModeHolo = rammp::DriveProfile::HOLO;
-static rammp::DriveProfile kModeNormal = rammp::DriveProfile::NORMAL;
-static rammp::DriveProfile kModeAuto = rammp::DriveProfile::AUTO;
+static MIB::DriveProfile kProfileHigh = MIB::DriveProfile::HIGH;
+static MIB::DriveProfile kProfileNormal = MIB::DriveProfile::NORMAL;
+static MIB::DriveProfile kProfileLow = MIB::DriveProfile::LOW;
 
-static void drive_mode_click_cb(lv_event_t *e) {
-  const auto *mode = static_cast<const rammp::DriveProfile *>(lv_event_get_user_data(e));
-  lv_subject_set_int(&drive_mode_subject, static_cast<int32_t>(*mode));
+static void drive_profile_click_cb(lv_event_t *e) {
+  const auto *mode = static_cast<const MIB::DriveProfile *>(lv_event_get_user_data(e));
+  lv_subject_set_int(&drive_profile_subject, static_cast<int32_t>(*mode));
 }
 
 // Highlights the button whose mode is selected. Border width rather than a
@@ -615,22 +613,22 @@ static void drive_mode_click_cb(lv_event_t *e) {
 // themeable and would fight a hardcoded highlight.
 static void drive_mode_button_observer(lv_observer_t *observer, lv_subject_t *subject) {
   lv_obj_t *button = lv_observer_get_target_obj(observer);
-  const auto mine = *static_cast<const rammp::DriveProfile *>(lv_observer_get_user_data(observer));
-  const bool selected = static_cast<rammp::DriveProfile>(lv_subject_get_int(subject)) == mine;
+  const auto mine = *static_cast<const MIB::DriveProfile *>(lv_observer_get_user_data(observer));
+  const bool selected = static_cast<MIB::DriveProfile>(lv_subject_get_int(subject)) == mine;
   lv_obj_set_style_border_width(button, selected ? 8 : 2, LV_PART_MAIN);
 }
 
-static void bind_drive_mode_button(lv_obj_t *button, rammp::DriveProfile *mode) {
+static void bind_drive_profile_button(lv_obj_t *button, MIB::DriveProfile *mode) {
   if (button == nullptr) {
     return;
   }
-  lv_obj_add_event_cb(button, drive_mode_click_cb, LV_EVENT_CLICKED, mode);
-  lv_subject_add_observer_obj(&drive_mode_subject, drive_mode_button_observer, button, mode);
+  lv_obj_add_event_cb(button, drive_profile_click_cb, LV_EVENT_CLICKED, mode);
+  lv_subject_add_observer_obj(&drive_profile_subject, drive_mode_button_observer, button, mode);
 }
 
 // Mirrors the subject out to the ADC task, which cannot take the LVGL lock.
 static void drive_mode_publish_observer(lv_observer_t *, lv_subject_t *subject) {
-  drive_profile_published.store(static_cast<rammp::DriveProfile>(lv_subject_get_int(subject)));
+  drive_profile_published.store(static_cast<MIB::DriveProfile>(lv_subject_get_int(subject)));
   drive_publish(); // the MCB confirms it in SystemState.profile
 }
 
@@ -640,7 +638,7 @@ static void speed_label_observer(lv_observer_t *observer, lv_subject_t *subject)
   // int32_t is long on this target, so narrow explicitly rather than hand a
   // long to a "%d" that -Werror=format would reject
   const int tenths =
-      static_cast<int>(std::clamp<int32_t>(lv_subject_get_int(subject), 0, rammp::kSpeedMaxTenths));
+      static_cast<int>(std::clamp<int32_t>(lv_subject_get_int(subject), 0, MIB::kSpeedMaxTenths));
   lv_label_set_text_fmt(lv_observer_get_target_obj(observer), "%d.%d", tenths / 10, tenths % 10);
 }
 
@@ -785,7 +783,7 @@ static void clock_set(const std::tm &local) {
 }
 
 // RTPS receive task.
-static void clock_note_mcb_time(const rammp::SystemState &status) {
+static void clock_note_mcb_time(const MIB::MibStatus &status) {
   if (status.month < 1 || status.month > 12 || status.day < 1 || status.day > 31 ||
       status.hour > 23 || status.minute > 59 || status.second > 59) {
     return; // month 0: the MCB does not know the time
@@ -1152,10 +1150,19 @@ static void diagnostics_open();
 // link as well as an OK state: if the status is stale we do not KNOW the state,
 // and "unknown" is not "known good" on a device that moves someone.
 static bool mcb_ready() {
+  const auto state = static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject));
   return static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) ==
              RtpsLinkState::CONNECTED &&
-         static_cast<rammp::FaultState>(lv_subject_get_int(&mcb_state_subject)) ==
-             rammp::FaultState::OK;
+         (state == MIB::MibSystemState::IDLE || state == MIB::MibSystemState::ENABLED);
+}
+
+// The MIB disables manual seat control while it is driving, so the seat screen asks for
+// more than mcb_ready(): IDLE exactly. INITIALIZING and ERROR are barred by both.
+static bool seat_ready() {
+  return static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) ==
+             RtpsLinkState::CONNECTED &&
+         static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject)) ==
+             MIB::MibSystemState::IDLE;
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -1234,7 +1241,7 @@ static void fill_drive_blocked_panel(lv_obj_t *panel, const char *link_title,
     lv_label_set_text(body, text.body);
     lv_label_set_text(footer, text.footer);
   } else {
-    const auto state = static_cast<rammp::FaultState>(lv_subject_get_int(&mcb_state_subject));
+    const auto state = static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject));
     const char *error_text = lv_subject_get_string(&error_text_subject);
     lv_label_set_text(title, mcb_title);
     if (error_text[0] != '\0') {
@@ -1252,7 +1259,7 @@ static void fill_drive_blocked_panel(lv_obj_t *panel, const char *link_title,
 // on all of them.
 static void bind_to_drive_blocked_cause(lv_obj_t *panel, lv_observer_cb_t cb) {
   for (lv_subject_t *subject :
-       {&rtps_link_subject, &mcb_state_subject, &error_text_subject, &error_footer_subject}) {
+       {&rtps_link_subject, &mib_state_subject, &error_text_subject, &error_footer_subject}) {
     lv_subject_add_observer_obj(subject, cb, panel, nullptr);
   }
 }
@@ -1347,7 +1354,7 @@ static void entry_refusal_poll() {
 // goes unanswered for kDriveWaitUs raises the same banner a refused push does, so a silent
 // MCB cannot leave the user on a screen that pretends the chair is driving.
 static constexpr int64_t kDriveWaitUs =
-    std::chrono::duration_cast<std::chrono::microseconds>(rammp::kMcbStatusTimeout).count();
+    std::chrono::duration_cast<std::chrono::microseconds>(rammp::kMibStatusTimeout).count();
 static std::atomic<rammp::DriveRequest> drive_request{rammp::DriveRequest::DISABLE};
 static int64_t drive_wait_until_us; // 0 = not waiting for an answer
 
@@ -1371,8 +1378,8 @@ static void drive_wait_poll() {
   if (drive_wait_until_us == 0) {
     return;
   }
-  const auto status = static_cast<rammp::DriveStatus>(lv_subject_get_int(&drive_status_subject));
-  if (status == rammp::DriveStatus::ACTIVE) {
+  const auto state = static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject));
+  if (state == MIB::MibSystemState::ENABLED) {
     drive_wait_until_us = 0;
     _ui_screen_change(&ui_DriveScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0, &ui_DriveScreen_screen_init);
     return;
@@ -1460,7 +1467,7 @@ static HoldGesture seat_enter_gesture{
     .is_held = joy_up_held,
     // Gated like drive_enter_gesture: the seat moves through the MCB, so it
     // needs the same live link and OK state. entry_refusal_poll says why not.
-    .applies = [] { return showing_flex_page(ui_SeatAdjustmentMenu) && mcb_ready(); },
+    .applies = [] { return showing_flex_page(ui_SeatAdjustmentMenu) && seat_ready(); },
     .completed =
         [] {
           // The seat screen has a pager of its own, and unlike the MainScreenFlex
@@ -1996,9 +2003,6 @@ static constexpr int32_t kValueUnknown = INT32_MIN;
 static lv_subject_t actuator_reject_subject;
 static constexpr int32_t kActuatorRejectNone = -1;
 static constexpr uint32_t kActuatorRejectFlashMs = 900;
-static int32_t actuator_reject_pack(rammp::SeatAxis id, rammp::SeatResult result) {
-  return static_cast<int32_t>(rammp::index_of(id)) | (static_cast<int32_t>(result) << 8);
-}
 static uint8_t actuator_reject_id(int32_t packed) { return static_cast<uint8_t>(packed & 0xFF); }
 
 // Formats a raw value the way the row draws it: 126 with decimals=1 -> "12.6",
@@ -2125,42 +2129,25 @@ static void actuator_reject_clear_cb(lv_timer_t *timer) {
   lv_subject_set_int(&actuator_reject_subject, kActuatorRejectNone);
 }
 
-// Applies one actuator-state sample. Called on the LVGL task (see the handler
-// registered in app_main, which takes lvgl_mutex first).
-//
-// `count` is what the MCB says it has; rows beyond it keep reading "--"
-// rather than inheriting a value that was never sent for them.
-// A refused seat request flashes its row once: the MCB repeats the same verdict in
-// every SeatState until the next command, so the sample count cannot drive the flash.
-static uint32_t seat_requests;   // +1 per SeatCommand published
-static uint32_t seat_flashed_at; // seat_requests when the current flash was armed
 static lv_timer_t *actuator_reject_timer = nullptr;
 
-// Seat values come from the MCB and nowhere else: a press publishes a request, and the
-// number on screen moves only when SeatState says the axis moved.
-static void seat_apply_state(const rammp::SeatState &state) {
-  const size_t known = std::min<size_t>(seat_axis_count, state.values.size());
-  for (size_t i = 0; i < known; i++) {
-    lv_subject_set_int(&seat_axis_value[i], state.values[i]);
+// Seat values come from the MIB and nowhere else: a press publishes a request, and the
+// number on screen moves only when the next MibStatus says the seat moved. The wire
+// carries whole units, the screens raw integers, so each field is converted here.
+static void seat_apply_state(const MIB::seatState &seat) {
+  for (uint8_t i = 0; i < seat_axis_count; i++) {
+    const rammp::SeatAxisSpec &spec = rammp::kSeatAxes[i];
+    lv_subject_set_int(&seat_axis_value[i],
+                       rammp::seat_raw(spec, rammp::seat_field(seat, spec.id)));
   }
-  if (state.result == rammp::SeatResult::OK || seat_flashed_at == seat_requests) {
-    return;
-  }
-  seat_flashed_at = seat_requests;
-  if (rammp::index_of(state.last_axis) >= seat_axis_count) {
-    return; // no row to flash: the MCB does not have this axis at all
-  }
-  lv_subject_set_int(&actuator_reject_subject, actuator_reject_pack(state.last_axis, state.result));
-  lv_timer_reset(actuator_reject_timer);
-  lv_timer_resume(actuator_reject_timer);
 }
 
 // One seat request: an absolute target, clamped to the axis' range, so a lost or repeated
 // message cannot drift the seat.
 static void seat_request(rammp::SeatAxis axis, int32_t target) {
   const rammp::SeatAxisSpec &spec = rammp::kSeatAxes[rammp::index_of(axis)];
-  seat_requests++;
-  rtps_comms_publish_seat(axis, std::clamp(target, spec.min_value, spec.max_value));
+  rtps_comms_publish_seat(
+      axis, rammp::seat_units(spec, std::clamp(target, spec.min_value, spec.max_value)));
 }
 
 // One step up or down from where the MCB last said the axis is.
@@ -2313,7 +2300,7 @@ static void setting_focus_cb(lv_event_t *e) {
 // link is down or the MCB's state is not OK.
 static void setting_warning_observer(lv_observer_t *observer, lv_subject_t *) {
   lv_obj_t *panel = lv_observer_get_target_obj(observer);
-  if (lv_subject_get_int(&setting_page_subject) != kActuatorsPage || mcb_ready()) {
+  if (lv_subject_get_int(&setting_page_subject) != kActuatorsPage || seat_ready()) {
     lv_obj_add_flag(panel, LV_OBJ_FLAG_HIDDEN);
     return;
   }
@@ -3794,8 +3781,7 @@ extern "C" void app_main(void) {
   // the chair is not accepting drive commands, so INACTIVE/OK is the honest
   // default. The export draws a green "ACTIVE", so the initial observer run
   // repaints it grey — that is the point, not a flicker to design away.
-  lv_subject_init_int(&drive_status_subject, static_cast<int32_t>(rammp::DriveStatus::INACTIVE));
-  lv_subject_init_int(&mcb_state_subject, static_cast<int32_t>(rammp::FaultState::OK));
+  lv_subject_init_int(&mib_state_subject, static_cast<int32_t>(MIB::MibSystemState::INITIALIZING));
   // Initialised before the panels bind, because their observers read it on the
   // first run. LINK_DOWN at boot is true and self-correcting: the poll timer
   // has the real answer a quarter second later.
@@ -3830,11 +3816,11 @@ extern "C" void app_main(void) {
   clock_poll_cb(nullptr); // the RTC's time, when it had one, from the first frame
   lv_timer_create(clock_poll_cb, kClockPollMs, nullptr);
   lv_subject_add_observer_obj(&speed_tenths_subject, speed_label_observer, ui_SpeedNumber, nullptr);
-  lv_subject_init_int(&drive_mode_subject, static_cast<int32_t>(rammp::DriveProfile::NORMAL));
-  bind_drive_mode_button(ui_DriveModeButton, &kModeHolo);
-  bind_drive_mode_button(ui_DriveModeButton1, &kModeNormal);
-  bind_drive_mode_button(ui_DriveModeButton2, &kModeAuto);
-  lv_subject_add_observer(&drive_mode_subject, drive_mode_publish_observer, nullptr);
+  lv_subject_init_int(&drive_profile_subject, static_cast<int32_t>(MIB::DriveProfile::NORMAL));
+  bind_drive_profile_button(ui_DriveModeButton, &kProfileHigh);
+  bind_drive_profile_button(ui_DriveModeButton1, &kProfileNormal);
+  bind_drive_profile_button(ui_DriveModeButton2, &kProfileLow);
+  lv_subject_add_observer(&drive_profile_subject, drive_mode_publish_observer, nullptr);
   bind_mcb_lost_panel(ui_ErrorWarningPanel);  // DriveScreen
   bind_mcb_lost_panel(ui_ErrorWarningPanel1); // SeatAdjustmentFlexScreen
   // Initialised before the bind: the panel's observer reads it on its first run.
@@ -4718,21 +4704,17 @@ extern "C" void app_main(void) {
   // lv_subject_set_int runs the observers synchronously on this task and they
   // touch widgets.
   // RTPS handlers run on the RTPS task: subjects only, under the LVGL lock.
-  rtps_comms_on_system_state([](const rammp::SystemState &status) {
+  rtps_comms_on_mib_status([](const MIB::MibStatus &status) {
     clock_note_mcb_time(status); // no LVGL: sets the system clock and the RTC
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
-    lv_subject_set_int(&drive_status_subject, static_cast<int32_t>(status.drive_status));
-    lv_subject_set_int(&mcb_state_subject, static_cast<int32_t>(status.fault));
+    lv_subject_set_int(&mib_state_subject, static_cast<int32_t>(status.systemState));
     lv_subject_set_int(&speed_tenths_subject, status.speed_tenths);
-    // copy_string cuts each text to its subject's buffer (RAMMP_*_LEN)
-    lv_subject_copy_string(&drive_text_subject, status.drive_text.c_str());
-    lv_subject_copy_string(&state_text_subject, status.state_text.c_str());
-    lv_subject_copy_string(&error_text_subject, status.error_text.c_str());
+    // copy_string cuts each text to its subject's buffer (RAMMP_*_LEN). drive_text_subject
+    // stays empty: the MIB sends one wording, and the state label is where it belongs.
+    lv_subject_copy_string(&state_text_subject, status.status_text.c_str());
+    lv_subject_copy_string(&error_text_subject, status.error_message.c_str());
     lv_subject_copy_string(&error_footer_subject, status.error_footer.c_str());
-  });
-  rtps_comms_on_seat_state([](const rammp::SeatState &state) {
-    std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
-    seat_apply_state(state);
+    seat_apply_state(status.currentSeatState);
   });
   rtps_comms_on_diagnostics([](const rammp::Diagnostics &diag) {
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);

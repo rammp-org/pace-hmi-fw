@@ -53,7 +53,7 @@ Saved settings live in LittleFS (`/storage`), so they survive a reboot.
 ## RTPS
 
 - The shared spec is [rammp-rtps](https://github.com/rammp-org/rammp-rtps), the git submodule `external/rammp-rtps`.
-- `messages/joystick_message.hpp` there holds every message, topic, enum and table the MCB and the HMI share. Its top has an espp example.
+- `messages/joystick_message.hpp` there holds the joystick's commands, the shared tables and Diagnostics; `messages/mib_message.hpp` holds `MIB::MibStatus`, the chair's own state. Between them they are everything the MIB and the HMI share, and the first has an espp example at the top.
 - `main/hmi_rtps_spec.hpp` adds what only this HMI needs: timing, display limits, the bench self-test topics.
 - Messages are plain C++ structs serialized by espp/cdr as **XCDR1** (classic CDR), so any DDS / ROS 2 stack can talk to it.
 - Every topic is best-effort; the MCB resends its state periodically.
@@ -61,12 +61,11 @@ Saved settings live in LittleFS (`/storage`), so they survive a reboot.
 
 | topic | type | direction | carries |
 | --- | --- | --- | --- |
-| `rammp/mcb/system_state` | `SystemState` | MCB → HMI, 2 Hz | drive status, fault, profile, speed, clock, label and error text |
-| `rammp/mcb/seat_state` | `SeatState` | MCB → HMI, 2 Hz + on change | seat axis positions, verdict on the last command |
-| `rammp/mcb/diagnostics` | `Diagnostics` | MCB → HMI, 2 Hz | readings for each `RAMMP_DIAG_TABLE` row |
-| `rammp/joystick/xy_twist` | `XYTwist` | HMI → MCB, ~30 Hz | calibrated X / Y / twist (-1..+1), buttons |
-| `rammp/joystick/drive_command` | `DriveCommand` | HMI → MCB, per request | enable / disable driving, and the drive profile |
-| `rammp/joystick/seat_command` | `SeatCommand` | HMI → MCB, per press | put seat axis N at an absolute target |
+| `rammp/mib/status` | `MIB::MibStatus` | MIB → HMI, 2 Hz | system state, active profile, seat position, speed, clock, error text |
+| `rammp/mcb/diagnostics` | `Diagnostics` | MIB → HMI, 2 Hz | readings for each `RAMMP_DIAG_TABLE` row |
+| `rammp/joystick/xy_twist` | `XYTwist` | HMI → MIB, ~30 Hz | calibrated X / Y / twist (-1..+1), buttons |
+| `rammp/joystick/drive_command` | `DriveCommand` | HMI → MIB, per request | enable / disable driving, and the drive profile |
+| `rammp/joystick/seat_command` | `SeatCommand` | HMI → MIB, per press | put seat axis N at an absolute target |
 | `rammp/hmi/counter`, `command`, `brightness` | `std_msgs/UInt32` | bench PC | heartbeat, self-test run / ping, backlight % |
 | `rammp/selftest/report` | `SelfTestReport` | HMI → PC | one per self-test check |
 
@@ -87,16 +86,18 @@ pub.publish({.seq = seq++, .items = {{.values = {305, 150, 450}}}}); // T1: 30.5
 Receiving works the same way: `espp::Subscriber<rammp::SeatCommand>` with an `.on_message` callback.
 
 The spec is C++20 and strictly typed:
-- Every enum is scoped with a fixed wire width (`enum class DriveStatus : uint8_t`), so a raw number or the wrong enum does not compile.
-- Every topic carries its message type (`Topic<SystemState>`), so the wrong message or handler for a topic does not compile.
+- Every enum is scoped with a fixed wire width (`enum class MibSystemState : uint8_t`), so a raw number or the wrong enum does not compile.
+- Every topic carries its message type (`Topic<MibStatus>`), so the wrong message or handler for a topic does not compile.
 - Timings are `std::chrono::milliseconds`; names come from typed `to_string(...)` overloads.
 
 How the messages reach the screens:
-- **SystemState** → the status labels on every screen, the drive speed, the error banner, and the TopBar clock.
-- No SystemState for 2 s → "RTPS LINK LOST"; Drive and Seat are refused.
-- The MCB decides whether the chair drives. Holding the stick up sends a **DriveCommand** and waits: the DriveScreen opens only once `SystemState.drive_status` is `ACTIVE`, and a request unanswered for 2 s raises the same banner a refusal does. Leaving the screen sends `DISABLE`, and picking a drive profile re-sends the request carrying it.
-- **SeatState** → the numbers on the seat screen and the DEBUG ACTUATORS rows; a refused request flashes its row. The MCB owns every position: a press asks, and the number moves when `SeatState` says the seat did.
+- **MibStatus** → the status labels on every screen, the drive speed, the seat numbers, the error banner, and the TopBar clock. One message carries the lot.
+- No MibStatus for 2 s → "RTPS LINK LOST"; Drive and Seat are refused.
+- `MibSystemState` is the interlock: the chair drives only in `ENABLED`, and the MIB disables manual seat control while it is driving, so the seat screen needs `IDLE`. `INITIALIZING` and `ERROR` bar both.
+- The MIB decides whether the chair drives. Holding the stick up sends a **DriveCommand** and waits: the DriveScreen opens only once the state is `ENABLED`, and a request unanswered for 2 s raises the same banner a refusal does. Leaving the screen sends `DISABLE`, and picking a drive profile re-sends the request carrying it.
+- **MibStatus.currentSeatState** → the numbers on the seat screen and the DEBUG ACTUATORS rows. The MIB owns every position: a press asks, and the number moves when the next status says the seat did. A refusal reaches the HMI as an axis that did not move — there is no per-request verdict on the wire.
 - Each seat press sends a **SeatCommand** with an **absolute** target, so a step button and a preset are the same message, and a lost or repeated one cannot drift the seat.
+- The wire carries the seat in whole units (degrees, millimetres); the screens step and draw raw integers, converted at the wire boundary by `seat_raw()` / `seat_units()`.
 - **Diagnostics** → the DIAGNOSTICS rows; the rate label shows the arrival Hz.
 - No Diagnostics for 2 s → every row turns red and blinks.
 - **XYTwist** goes out continuously once the MCB is found.
@@ -117,14 +118,15 @@ One row in `messages/joystick_message.hpp` (rammp-rtps); the HMI screens and the
 - Every row except the last ends with `\`.
 - Values are raw integers in units of 10^-decimals `unit` (250 with 1 decimal is 25.0).
 - A diagnostics unit of `""` hides that reading.
-- The MCB must send one more value (`SeatState.values` / `Diagnostics.items`), in table order.
+- A diagnostics item is one row and nothing else: the MIB sends one more `Diagnostics.items` entry, in table order.
+- A seat axis is two edits, because the seat is named fields rather than a sequence: the table row, and the matching field in `MIB::seatState` plus its `case` in `rammp::seat_field()`. The table's rows are that struct's fields, in that order.
 - A seat axis also takes the next free button on the seat screen, in table order; past the fourth there is no button for it yet, and it appears only on the DEBUG ACTUATORS page.
 
 ## Testing
 
 | command | what it does |
 | --- | --- |
-| `python scripts/rtps_mcb_gui.py` | plays the MCB: status, drive requests, error banner, seat, diagnostics, drive view |
+| `python scripts/rtps_mcb_gui.py` | plays the MIB: system state, drive requests, error banner, seat, diagnostics, drive view |
 | `python scripts/rtps_selftest.py` | runs the self test over RTPS (exit 0 = pass) |
 | `python scripts/rtps_mcb_sim.py` | CLI version of the GUI (`--cycle` walks every state) |
 | `python scripts/rtps_adc_plot.py` | live joystick plot (needs matplotlib) |

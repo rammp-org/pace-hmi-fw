@@ -37,10 +37,10 @@ static lv_subject_t adc_x_subject;
 static lv_subject_t adc_y_subject;
 static lv_subject_t adc_twist_subject;
 
-/* MCB status, as reported by sim_nav_on_system_state(). Values are the
- * RAMMP_DRIVE_STATUS_* / RAMMP_FAULT_* enums from messages/joystick_message.hpp. */
-static lv_subject_t drive_status_subject;
-static lv_subject_t mcb_state_subject;
+/* The MIB's state, as reported by sim_nav_on_system_state(). One subject, because
+ * RAMMP_MIB_STATE_* (MIB::MibSystemState in messages/mib_message.hpp) answers both
+ * of a panel's labels. */
+static lv_subject_t mib_state_subject;
 /* Optional label overrides from the MCB. Empty means "use the enum's name". */
 static lv_subject_t drive_text_subject;
 static lv_subject_t state_text_subject;
@@ -253,24 +253,22 @@ static void mcb_status_label_observer(lv_observer_t *observer, lv_subject_t *sub
     return;
   }
 
-  value = (uint8_t)lv_subject_get_int(kind == STATUS_KIND_DRIVE ? &drive_status_subject
-                                                                : &mcb_state_subject);
-  /* The override replaces the wording only; the colour below still comes
-   * from the enum, so the MCB can say ACTIVE and still label it "CHARGING". */
-  override_text =
-      lv_subject_get_string(kind == STATUS_KIND_DRIVE ? &drive_text_subject : &state_text_subject);
+  value = (uint8_t)lv_subject_get_int(&mib_state_subject);
+  /* The MIB sends one wording, and it belongs to the state label: the drive label
+   * always reads the state's own name. The override replaces the wording only; the
+   * colour below still comes from the enum. */
+  override_text = kind == STATUS_KIND_DRIVE ? "" : lv_subject_get_string(&state_text_subject);
   overridden = override_text != NULL && override_text[0] != '\0';
 
+  text = overridden ? override_text : rammp_mib_state_name(value);
   if (kind == STATUS_KIND_DRIVE) {
-    text = overridden ? override_text : rammp_drive_status_name(value);
-    /* INACTIVE is a normal resting state, not a fault, so it reads grey --
-     * red is reserved for a value neither board knows. */
-    color = value == RAMMP_DRIVE_STATUS_ACTIVE     ? kStatusGreen
-            : value == RAMMP_DRIVE_STATUS_INACTIVE ? kStatusGrey
-                                                   : kStatusRed;
+    /* ENABLED is the only state the chair drives in. IDLE and INITIALIZING are
+     * normal resting states, not faults, so they read grey. */
+    color = value == RAMMP_MIB_STATE_ENABLED ? kStatusGreen
+            : value == RAMMP_MIB_STATE_ERROR ? kStatusRed
+                                             : kStatusGrey;
   } else {
-    text = overridden ? override_text : rammp_fault_name(value);
-    color = value == RAMMP_FAULT_OK ? kStatusGreen : kStatusRed;
+    color = value == RAMMP_MIB_STATE_ERROR ? kStatusRed : kStatusGreen;
   }
   lv_label_set_text(label, text);
   lv_obj_set_style_text_color(label, lv_color_hex(color), LV_PART_MAIN);
@@ -287,9 +285,9 @@ static void bind_status_panel(lv_obj_t *panel) {
 
   drive_label = ui_comp_get_child(panel, UI_COMP_STATUSPANEL_STATUSPANELLEFT_DRIVESTATUSLABEL);
   state_label = ui_comp_get_child(panel, UI_COMP_STATUSPANEL_STATUSPANELRIGHT_STATELABEL);
-  lv_subject_add_observer_obj(&drive_status_subject, mcb_status_label_observer, drive_label,
+  lv_subject_add_observer_obj(&mib_state_subject, mcb_status_label_observer, drive_label,
                               &kDriveStatusKind);
-  lv_subject_add_observer_obj(&mcb_state_subject, mcb_status_label_observer, state_label,
+  lv_subject_add_observer_obj(&mib_state_subject, mcb_status_label_observer, state_label,
                               &kStateKind);
   /* Further observers, so losing the link or receiving a new override
    * repaints them even though the enum said nothing new. */
@@ -297,8 +295,7 @@ static void bind_status_panel(lv_obj_t *panel) {
                               &kDriveStatusKind);
   lv_subject_add_observer_obj(&rtps_link_subject, mcb_status_label_observer, state_label,
                               &kStateKind);
-  lv_subject_add_observer_obj(&drive_text_subject, mcb_status_label_observer, drive_label,
-                              &kDriveStatusKind);
+  /* Only the state label takes a wording, so only it watches that subject. */
   lv_subject_add_observer_obj(&state_text_subject, mcb_status_label_observer, state_label,
                               &kStateKind);
 }
@@ -399,9 +396,9 @@ static void rtps_poll_cb(lv_timer_t *timer) {
  * DriveScreen: drive-mode selection
  * ======================================================================= */
 
-static uint32_t kModeHolo = RAMMP_DRIVE_PROFILE_HOLO;
-static uint32_t kModeNormal = RAMMP_DRIVE_PROFILE_NORMAL;
-static uint32_t kModeAuto = RAMMP_DRIVE_PROFILE_AUTO;
+static uint32_t kProfileHigh = RAMMP_DRIVE_PROFILE_HIGH;
+static uint32_t kProfileNormal = RAMMP_DRIVE_PROFILE_NORMAL;
+static uint32_t kProfileLow = RAMMP_DRIVE_PROFILE_LOW;
 
 static void drive_profile_click_cb(lv_event_t *e) {
   const uint32_t *mode = (const uint32_t *)lv_event_get_user_data(e);
@@ -449,8 +446,8 @@ static void bind_error_panel(void) {
     return;
   /* Visible whenever the state is anything other than OK: a value neither
    * board knows raises the banner instead of silently hiding it. */
-  lv_obj_bind_flag_if_eq(ui_ErrorWarningPanel, &mcb_state_subject, LV_OBJ_FLAG_HIDDEN,
-                         RAMMP_FAULT_OK);
+  lv_obj_bind_flag_if_not_eq(ui_ErrorWarningPanel, &mib_state_subject, LV_OBJ_FLAG_HIDDEN,
+                             RAMMP_MIB_STATE_ERROR);
   lv_label_bind_text(
       ui_comp_get_child(ui_ErrorWarningPanel,
                         UI_COMP_ERRORWARNINGPANEL_ERRORMESSAGECONTAINER_ERRORMESSAGELABEL),
@@ -670,7 +667,8 @@ static void screen_return_to_main(void) {
  * subject drives) as well as an OK state. */
 static bool drive_permitted(void) {
   return (sim_link_state_t)lv_subject_get_int(&rtps_link_subject) == SIM_LINK_CONNECTED &&
-         lv_subject_get_int(&mcb_state_subject) == RAMMP_FAULT_OK;
+         (lv_subject_get_int(&mib_state_subject) == RAMMP_MIB_STATE_IDLE ||
+          lv_subject_get_int(&mib_state_subject) == RAMMP_MIB_STATE_ENABLED);
 }
 
 static bool drive_enter_applies(void) {
@@ -932,8 +930,7 @@ void sim_nav_init(void) {
   /* ---- MCB status labels, speed, error banner, drive mode ------------ */
   /* The joystick is a slave: until the fake MCB says otherwise the chair is
    * not accepting drive commands, so INACTIVE/OK is the honest default. */
-  lv_subject_init_int(&drive_status_subject, RAMMP_DRIVE_STATUS_INACTIVE);
-  lv_subject_init_int(&mcb_state_subject, RAMMP_FAULT_OK);
+  lv_subject_init_int(&mib_state_subject, RAMMP_MIB_STATE_INITIALIZING);
   /* LINK_DOWN at boot is true and self-correcting: the poll timer has the
    * real answer a quarter second later, same as main.cpp. */
   lv_subject_init_int(&rtps_link_subject, (int32_t)SIM_LINK_DOWN);
@@ -957,9 +954,9 @@ void sim_nav_init(void) {
   bind_rtps_label(ui_TopBar4);        /* SeatAdjustmentFlexScreen */
   lv_subject_add_observer_obj(&speed_tenths_subject, speed_label_observer, ui_SpeedNumber, NULL);
   lv_subject_init_int(&drive_profile_subject, RAMMP_DRIVE_PROFILE_NORMAL);
-  bind_drive_profile_button(ui_DriveModeButton, &kModeHolo);
-  bind_drive_profile_button(ui_DriveModeButton1, &kModeNormal);
-  bind_drive_profile_button(ui_DriveModeButton2, &kModeAuto);
+  bind_drive_profile_button(ui_DriveModeButton, &kProfileHigh);
+  bind_drive_profile_button(ui_DriveModeButton1, &kProfileNormal);
+  bind_drive_profile_button(ui_DriveModeButton2, &kProfileLow);
   bind_error_panel();
   lv_timer_create(rtps_poll_cb, kRtpsPollMs, NULL);
 
@@ -1189,15 +1186,13 @@ void sim_nav_on_system_state(const rammp_system_state_t *status) {
    * LVGL task whose observers lv_subject_set_int() runs synchronously.
    * sim_mcb.c calls this from its own lv_timer, which already IS the LVGL
    * task -- there is nothing to lock. */
-  lv_subject_set_int(&drive_status_subject, status->drive_status);
-  lv_subject_set_int(&mcb_state_subject, status->fault);
+  lv_subject_set_int(&mib_state_subject, status->system_state);
   /* decode()'s NUL-termination guarantee doesn't apply here (the sim builds
    * this struct directly, not off the wire), but copy_string() itself only
    * reads up to the subject's own buffer size either way. */
-  lv_subject_copy_string(&drive_text_subject, status->drive_text);
-  lv_subject_copy_string(&state_text_subject, status->state_text);
+  lv_subject_copy_string(&state_text_subject, status->status_text);
   lv_subject_set_int(&speed_tenths_subject, status->speed_tenths);
-  lv_subject_copy_string(&error_text_subject, status->error_text);
+  lv_subject_copy_string(&error_text_subject, status->error_message);
   lv_subject_copy_string(&error_footer_subject, status->error_footer);
 }
 
@@ -1217,7 +1212,7 @@ void sim_nav_go_home(void) { screen_return_to_main(); }
 void sim_nav_next_drive_profile(void) {
   const int32_t mode = lv_subject_get_int(&drive_profile_subject);
   /* HOLO / Normal / Auto, in the order messages/joystick_message.hpp numbers them. */
-  lv_subject_set_int(&drive_profile_subject, (mode + 1) % (RAMMP_DRIVE_PROFILE_AUTO + 1));
+  lv_subject_set_int(&drive_profile_subject, (mode + 1) % (RAMMP_DRIVE_PROFILE_LOW + 1));
 }
 
 void sim_nav_reset(void) {

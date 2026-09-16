@@ -26,17 +26,17 @@ typedef enum {
   SIM_LINK_ETH_FAILED = 0, /**< W5500 bring-up failed at boot */
   SIM_LINK_DOWN,           /**< no Ethernet link */
   SIM_LINK_NO_IP,          /**< link up, no DHCP lease */
-  SIM_LINK_NO_PEER,        /**< have an IP, no SystemState inside the timeout */
-  SIM_LINK_CONNECTED,      /**< SystemState arriving */
+  SIM_LINK_NO_PEER,        /**< have an IP, no MibStatus inside the timeout */
+  SIM_LINK_CONNECTED,      /**< MibStatus arriving */
 } sim_link_state_t;
 
-/** Plain-C mirror of rammp::SystemState (C++ in the spec), texts cut to the HMI's lengths. */
+/** Plain-C mirror of MIB::MibStatus (C++ in the spec), texts cut to the HMI's lengths.
+    The seat is not mirrored: the sim has no seat screen bound to it. */
 typedef struct {
-  uint8_t drive_status, fault, flags, seq, speed_tenths;
+  uint8_t system_state, seq, speed_tenths;
   uint8_t hour, minute, second, day, month, year;
-  char drive_text[RAMMP_MCB_TEXT_LEN];
-  char state_text[RAMMP_MCB_TEXT_LEN];
-  char error_text[RAMMP_ERROR_TEXT_LEN];
+  char status_text[RAMMP_MCB_TEXT_LEN];
+  char error_message[RAMMP_ERROR_TEXT_LEN];
   char error_footer[RAMMP_ERROR_FOOTER_LEN];
 } rammp_system_state_t;
 

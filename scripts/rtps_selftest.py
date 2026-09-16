@@ -98,7 +98,7 @@ def wait_for_board(harness: rtps_mcb_sim.SystemStatePublisher, timeout: float) -
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if harness.adc_rx_count > 0:
-            time.sleep(3 * spec.MCB_STATUS_PERIOD_MS / 1000.0)  # noqa: F821  (scraped)
+            time.sleep(3 * spec.MIB_STATUS_PERIOD_MS / 1000.0)  # noqa: F821  (scraped)
             return True
         time.sleep(0.1)
     return False
@@ -240,7 +240,7 @@ def main() -> int:
                         help="Seconds to wait for the HMI to appear (default 45)")
     parser.add_argument("--verbose", action="store_true",
                         help="Show the RTPS harness log as well as the report")
-    parser.add_argument("--period", type=float, default=spec.MCB_STATUS_PERIOD_MS / 1000.0,  # noqa: F821
+    parser.add_argument("--period", type=float, default=spec.MIB_STATUS_PERIOD_MS / 1000.0,  # noqa: F821
                         help="Seconds between McbStatus republishes (default from the spec)")
     parser.add_argument("--node-name", default="selftest", help="Local participant name")
     parser.add_argument("--domain-id", type=int, default=0, help="RTPS domain id")

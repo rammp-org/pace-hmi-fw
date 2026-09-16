@@ -56,23 +56,20 @@ static void publish(void) {
 
 /* ---------------------------------------------------------- transitions --- */
 
-static void sim_mcb_set_drive_status(uint8_t drive_status) {
-  m.status.drive_status = drive_status;
-  printf("[mcb] drive=%s\n", rammp_drive_status_name(drive_status));
-}
-
-static void sim_mcb_set_state(uint8_t fault) {
-  m.status.fault = fault;
-  /* The banner text is the MCB's to word, so the fake one has to supply it;
-   * an empty error_text with fault != OK would raise a blank panel. */
-  if (fault == RAMMP_FAULT_OK) {
-    m.status.error_text[0] = '\0';
-    m.status.error_footer[0] = '\0';
-  } else {
-    snprintf(m.status.error_text, sizeof(m.status.error_text), "MOTOR FAULT");
+/* One setter where there were two: MibSystemState is both the drive status and
+   the fault. */
+static void sim_mcb_set_state(uint8_t state) {
+  m.status.system_state = state;
+  /* The banner text is the MIB's to word, so the fake one has to supply it;
+   * an empty error_message in ERROR would raise a blank panel. */
+  if (state == RAMMP_MIB_STATE_ERROR) {
+    snprintf(m.status.error_message, sizeof(m.status.error_message), "MOTOR FAULT");
     snprintf(m.status.error_footer, sizeof(m.status.error_footer), "Service required");
+  } else {
+    m.status.error_message[0] = '\0';
+    m.status.error_footer[0] = '\0';
   }
-  printf("[mcb] state=%s\n", rammp_fault_name(fault));
+  printf("[mcb] state=%s\n", rammp_mib_state_name(state));
 }
 
 static void sim_mcb_bump_speed(int delta_tenths) {
@@ -98,22 +95,18 @@ static void sim_mcb_toggle_cycle(void) {
 
 /* --------------------------------------------------------------- cycle --- */
 
-/** The four state combinations rtps_mcb_sim.py --cycle walks. */
+/** The four states rtps_mcb_sim.py --cycle walks. */
 static void cycle_step(void) {
-  static const struct {
-    uint8_t drive_status;
-    uint8_t fault;
-  } steps[] = {
-      {RAMMP_DRIVE_STATUS_INACTIVE, RAMMP_FAULT_OK},
-      {RAMMP_DRIVE_STATUS_ACTIVE, RAMMP_FAULT_OK},
-      {RAMMP_DRIVE_STATUS_ACTIVE, RAMMP_FAULT_ERROR},
-      {RAMMP_DRIVE_STATUS_INACTIVE, RAMMP_FAULT_ERROR},
+  static const uint8_t steps[] = {
+      RAMMP_MIB_STATE_INITIALIZING,
+      RAMMP_MIB_STATE_IDLE,
+      RAMMP_MIB_STATE_ENABLED,
+      RAMMP_MIB_STATE_ERROR,
   };
   const uint8_t count = (uint8_t)(sizeof(steps) / sizeof(steps[0]));
 
   m.cycle_step = (uint8_t)((m.cycle_step + 1) % count);
-  sim_mcb_set_drive_status(steps[m.cycle_step].drive_status);
-  sim_mcb_set_state(steps[m.cycle_step].fault);
+  sim_mcb_set_state(steps[m.cycle_step]);
 }
 
 static void sim_mcb_tick_cb(lv_timer_t *timer) {
@@ -122,13 +115,13 @@ static void sim_mcb_tick_cb(lv_timer_t *timer) {
   /* Keyboard only: none of this is a control the chair has, so none of it
    * is on the bench window. */
   if (sim_input_key_edge('1'))
-    sim_mcb_set_drive_status(RAMMP_DRIVE_STATUS_INACTIVE);
+    sim_mcb_set_state(RAMMP_MIB_STATE_INITIALIZING);
   if (sim_input_key_edge('2'))
-    sim_mcb_set_drive_status(RAMMP_DRIVE_STATUS_ACTIVE);
+    sim_mcb_set_state(RAMMP_MIB_STATE_IDLE);
   if (sim_input_key_edge('3'))
-    sim_mcb_set_state(RAMMP_FAULT_OK);
+    sim_mcb_set_state(RAMMP_MIB_STATE_ENABLED);
   if (sim_input_key_edge('4'))
-    sim_mcb_set_state(RAMMP_FAULT_ERROR);
+    sim_mcb_set_state(RAMMP_MIB_STATE_ERROR);
   if (sim_input_key_edge(VK_OEM_MINUS))
     sim_mcb_bump_speed(-1);
   if (sim_input_key_edge(VK_OEM_PLUS))
@@ -151,8 +144,7 @@ static void sim_mcb_tick_cb(lv_timer_t *timer) {
 
 void sim_mcb_init(void) {
   memset(&m, 0, sizeof(m));
-  m.status.drive_status = RAMMP_DRIVE_STATUS_INACTIVE;
-  m.status.fault = RAMMP_FAULT_OK;
+  m.status.system_state = RAMMP_MIB_STATE_IDLE;
   m.status.speed_tenths = 0;
   m.link = SIM_LINK_CONNECTED;
 

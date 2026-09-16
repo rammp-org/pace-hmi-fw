@@ -180,18 +180,14 @@ class McbPanel:
         ).grid(row=2, column=0, columnspan=6, sticky="w", pady=(6, 0))
 
     def _build_status_controls(self, parent: tk.Widget) -> None:
-        self.drive_text_var = tk.StringVar()
+        # One panel where there were two: MibSystemState is both the drive status and
+        # the fault, so ENABLED and ERROR are presets of the same control.
         self.state_text_var = tk.StringVar()
-        self.drive_raw_var = tk.StringVar(value=str(spec.DRIVE_STATUS_INACTIVE))
-        self.state_raw_var = tk.StringVar(value=str(spec.FAULT_STATE_OK))
+        self.state_raw_var = tk.StringVar(value=str(spec.MIB_SYSTEM_STATE_IDLE))
 
         self._build_one_status(
-            parent, "Drive status", spec.DRIVE_STATUS_NAMES, self.drive_raw_var, self.drive_text_var,
-            self._set_drive, self._set_drive_raw,
-        )
-        self._build_one_status(
-            parent, "State", spec.FAULT_STATE_NAMES, self.state_raw_var, self.state_text_var,
-            self._set_state, self._set_state_raw,
+            parent, "System state", spec.MIB_SYSTEM_STATE_NAMES, self.state_raw_var,
+            self.state_text_var, self._set_state, self._set_state_raw,
         )
 
     def _build_drive_request(self, parent: tk.Widget) -> None:
@@ -199,7 +195,7 @@ class McbPanel:
 
         The HMI asks before it drives and waits for SystemState to agree, so
         refusing here is the only way to see what it does when the chair will
-        not go: it should give up after MCB_STATUS_TIMEOUT_MS and say so rather
+        not go: it should give up after MIB_STATUS_TIMEOUT_MS and say so rather
         than sit on a drive screen that pretends the chair is moving.
         """
         frame = ttk.LabelFrame(parent, text="Drive requests (from the joystick)", padding=8)
@@ -216,9 +212,10 @@ class McbPanel:
 
         ttk.Label(
             frame,
-            text="Granting one sets drive status ACTIVE, which is what opens the HMI's drive "
-                 "screen. Refuse it and the HMI should give up after "
-                 f"{spec.MCB_STATUS_TIMEOUT_MS} ms and raise its refusal banner.",
+            text="Granting one moves the state to ENABLED, which is what opens the HMI's "
+                 "drive screen. Refuse it and the HMI should give up after "
+                 f"{spec.MIB_STATUS_TIMEOUT_MS} ms and raise its refusal banner. The MIB "
+                 "disables manual seat control while ENABLED, so the seat screen wants IDLE.",
             foreground="#666666", wraplength=560, justify="left",
         ).grid(row=1, column=0, columnspan=4, sticky="w", pady=(6, 0))
 
@@ -294,11 +291,11 @@ class McbPanel:
         request = spec.DRIVE_REQUEST_NAMES.get(self.harness.drive_request, "?")
         asked = spec.DRIVE_PROFILE_NAMES.get(self.harness.requested_profile, "?")
         reported = spec.DRIVE_PROFILE_NAMES.get(self.harness.profile, "?")
-        status = spec.DRIVE_STATUS_NAMES.get(self.harness.drive_status, "?")
+        state = spec.MIB_SYSTEM_STATE_NAMES.get(self.harness.system_state, "?")
         agree = "" if self.harness.profile == self.harness.requested_profile else "  (overridden)"
         self.drive_request_label.configure(
             text=f"last: {request}  profile asked {asked}, reporting {reported}{agree}"
-                 f"  →  drive status {status}")
+                 f"  →  state {state}")
         # The box tracks the harness while it follows, so it never shows a stale
         # number next to a ticked Follow.
         if self.harness.follow_profile:
@@ -415,9 +412,11 @@ class McbPanel:
 
         # "accept" plus every refusal the spec names, so a new RESULT_ in the
         # header turns up here without touching this file.
+        # The bench's own reasons, not the spec's: MibStatus carries no per-request
+        # verdict, so a refusal reaches the HMI only as an axis that did not move.
         reject_choices = ["accept"] + [
-            name for value, name in sorted(spec.SEAT_RESULT_NAMES.items())
-            if value != spec.SEAT_RESULT_OK
+            name for value, name in sorted(rtps_mcb_sim.SEAT_RESULTS.items())
+            if value != rtps_mcb_sim.SEAT_RESULT_OK
         ]
 
         for index, axis in enumerate(spec.SEAT_AXES):
@@ -518,7 +517,7 @@ class McbPanel:
         if self.harness is None:
             return
         self._update_seat_request()
-        name_to_result = {name: value for value, name in spec.SEAT_RESULT_NAMES.items()}
+        name_to_result = {name: value for value, name in rtps_mcb_sim.SEAT_RESULTS.items()}
         focused = self.root.focus_get()
         for index, axis in enumerate(spec.SEAT_AXES):
             if self.seat_entries[index] is not focused:
@@ -543,8 +542,8 @@ class McbPanel:
         known = 0 <= axis_id < len(spec.SEAT_AXES)
         axis = spec.SEAT_AXES[axis_id] if known else None
         name = axis.label if known else f"axis #{axis_id}"
-        shown = f"{axis.format(target)} {axis.unit}" if known else str(target)
-        verdict = spec.SEAT_RESULT_NAMES.get(self.harness.seat_result, "?")
+        shown = f"{target:g} {axis.unit}" if known else str(target)
+        verdict = rtps_mcb_sim.SEAT_RESULTS.get(self.harness.seat_result, "?")
         self.seat_request_label.configure(text=f"last: {name} → {shown} : {verdict}")
 
     def _build_diagnostics(self, parent: tk.Widget) -> None:
@@ -811,12 +810,10 @@ class McbPanel:
             return
         self.thread = threading.Thread(target=self.harness.run, daemon=True)
         self.thread.start()
-        # A fresh publisher starts INACTIVE, but the interesting state to be in
-        # on connecting is a chair that is actually driveable - otherwise the
-        # HMI bars entry to the drive screen and the first thing anyone does is
-        # click ACTIVE by hand.
-        self.harness.drive_status = spec.DRIVE_STATUS_ACTIVE
-        self.drive_raw_var.set(str(spec.DRIVE_STATUS_ACTIVE))
+        # A fresh publisher starts IDLE, which is the interesting state to be in on
+        # connecting: the HMI allows both the seat screen and a drive request from it.
+        self.harness.system_state = spec.MIB_SYSTEM_STATE_IDLE
+        self.state_raw_var.set(str(spec.MIB_SYSTEM_STATE_IDLE))
         self._apply_refuse_drive()
         self._apply_follow_profile()
         self._apply_overrides()
@@ -856,26 +853,15 @@ class McbPanel:
             return
         self.harness.publish_now()
 
-    def _set_drive(self, value: int) -> None:
-        self.drive_raw_var.set(str(value))
-        self._set_drive_raw()
-
     def _set_state(self, value: int) -> None:
         self.state_raw_var.set(str(value))
         self._set_state_raw()
-
-    def _set_drive_raw(self) -> None:
-        if self.harness is None:
-            self._append_log("[gui] not connected")
-            return
-        self.harness.drive_status = self._raw(self.drive_raw_var)
-        self._publish()
 
     def _set_state_raw(self) -> None:
         if self.harness is None:
             self._append_log("[gui] not connected")
             return
-        self.harness.fault = self._raw(self.state_raw_var)
+        self.harness.system_state = self._raw(self.state_raw_var)
         self._publish()
 
     def _raw(self, var: tk.StringVar) -> int:
@@ -889,15 +875,14 @@ class McbPanel:
         if self.harness is None:
             self._append_log("[gui] not connected")
             return
-        self.harness.error_text = self.error_text_var.get()
+        self.harness.error_message = self.error_text_var.get()
         self.harness.error_footer = self.error_footer_var.get()
         self._publish()
 
     def _apply_overrides(self) -> None:
         if self.harness is None:
             return
-        self.harness.drive_text = self.drive_text_var.get()
-        self.harness.state_text = self.state_text_var.get()
+        self.harness.status_text = self.state_text_var.get()
         self._publish()
 
     # ---------------------------------------------------------------- cycle
@@ -909,11 +894,11 @@ class McbPanel:
         exercises link loss and recovery.
         """
         return [
-            (spec.DRIVE_STATUS_INACTIVE, spec.FAULT_STATE_OK, False),
-            (spec.DRIVE_STATUS_ACTIVE, spec.FAULT_STATE_OK, False),
-            (spec.DRIVE_STATUS_ACTIVE, spec.FAULT_STATE_ERROR, False),
-            (spec.DRIVE_STATUS_INACTIVE, spec.FAULT_STATE_ERROR, False),
-            (spec.DRIVE_STATUS_INACTIVE, spec.FAULT_STATE_OK, True),
+            (spec.MIB_SYSTEM_STATE_INITIALIZING, False),
+            (spec.MIB_SYSTEM_STATE_IDLE, False),
+            (spec.MIB_SYSTEM_STATE_ENABLED, False),
+            (spec.MIB_SYSTEM_STATE_ERROR, False),
+            (spec.MIB_SYSTEM_STATE_IDLE, True),
         ]
 
     def _toggle_cycle(self) -> None:
@@ -945,18 +930,16 @@ class McbPanel:
             dwell = max(0.5, float(self.dwell_var.get()))
         except ValueError:
             dwell = 3.0
-        drive, state, paused = self._cycle_steps()[self.cycle_index]
+        state, paused = self._cycle_steps()[self.cycle_index]
         self.cycle_index = (self.cycle_index + 1) % len(self._cycle_steps())
 
         self.harness.paused = paused
         if paused:
-            delay = max(dwell, spec.MCB_STATUS_TIMEOUT_MS / 1000.0 + 1.0)
+            delay = max(dwell, spec.MIB_STATUS_TIMEOUT_MS / 1000.0 + 1.0)
             self._append_log(f"[cycle] paused {delay:.1f}s - HMI should go stale")
         else:
             delay = dwell
-            self.harness.drive_status = drive
-            self.harness.fault = state
-            self.drive_raw_var.set(str(drive))
+            self.harness.system_state = state
             self.state_raw_var.set(str(state))
             self.harness.publish_now()
         self.cycle_job = self.root.after(int(delay * 1000), self._cycle_step)
@@ -1052,7 +1035,7 @@ def main() -> int:
                         help="IPv4 interface for the multicast join/send, if it differs")
     parser.add_argument("--multicast-group", default="239.255.0.1",
                         help="RTPS metatraffic multicast group")
-    parser.add_argument("--period", type=float, default=spec.MCB_STATUS_PERIOD_MS / 1000.0,
+    parser.add_argument("--period", type=float, default=spec.MIB_STATUS_PERIOD_MS / 1000.0,
                         help="Seconds between republishes of the current status")
     parser.add_argument("--peer-participant-ids", type=rtps_host.parse_participant_id_range,
                         default="0-3", metavar="IDS",
