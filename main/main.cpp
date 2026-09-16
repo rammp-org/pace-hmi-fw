@@ -1374,19 +1374,39 @@ static void entry_refused_show(int32_t which) {
   lv_timer_resume(entry_refused_timer);
 }
 
-static void drive_wait_poll() {
-  if (drive_wait_until_us == 0) {
-    return;
-  }
+// The DriveScreen is a view of one fact: the MIB is driving. It opens whenever
+// MibStatus says ENABLED and closes as soon as it stops saying so, whoever asked --
+// this firmware's own DriveCommand is only how it asks the MIB to get there, and the
+// MIB can enter or leave driving without being asked. Anything else lets the screen
+// disagree with the chair, which is the one thing it must never do.
+//
+// Closing wants a live link as well as a state: with the link down the last state is
+// not news, so the screen stays up and drive_screen_warning_observer says the link is
+// gone. Tipping someone off the driving screen on a blip is worse than the banner.
+static void drive_screen_follow_state() {
+  const bool connected = static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) ==
+                         RtpsLinkState::CONNECTED;
   const auto state = static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject));
-  if (state == MIB::MibSystemState::ENABLED) {
-    drive_wait_until_us = 0;
-    _ui_screen_change(&ui_DriveScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0, &ui_DriveScreen_screen_init);
+  const bool driving = connected && state == MIB::MibSystemState::ENABLED;
+  const bool showing = lv_screen_active() == ui_DriveScreen;
+  if (driving == showing) {
     return;
   }
-  if (esp_timer_get_time() < drive_wait_until_us) {
-    return; // still waiting
+  if (driving) {
+    drive_wait_until_us = 0; // whatever was being waited for, it happened
+    _ui_screen_change(&ui_DriveScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0, &ui_DriveScreen_screen_init);
+  } else if (connected) {
+    screen_return_to_main();
   }
+}
+
+static void drive_wait_poll() {
+  drive_screen_follow_state();
+  if (drive_wait_until_us == 0 || esp_timer_get_time() < drive_wait_until_us) {
+    return; // not waiting on a request, or still inside its window
+  }
+  // Asked, and the MIB never said ENABLED: give up and say so, rather than leave
+  // someone holding a request that went nowhere.
   drive_wait_until_us = 0;
   drive_ask(rammp::DriveRequest::DISABLE);
   entry_refused_show(kRefusedDrive);
@@ -1399,7 +1419,8 @@ static HoldGesture drive_enter_gesture{
     // starts filling the arc: nothing happens, instead of a progress animation
     // that betrays you at the end. entry_refusal_poll says why.
     .applies = [] { return showing_flex_page(ui_DrivePanel) && mcb_ready(); },
-    // Ask, then wait: drive_wait_poll opens the screen when the MCB says it is driving.
+    // Ask, then wait: drive_screen_follow_state opens the screen when the MIB says it
+    // is driving, and the deadline is only how long to wait before giving up.
     .completed =
         [] {
           drive_ask(rammp::DriveRequest::ENABLE);
@@ -1415,11 +1436,10 @@ static HoldGesture drive_exit_gesture{
     .armed = &joy_button_armed,
     .is_held = joy_button_held,
     .applies = [] { return lv_screen_active() == ui_DriveScreen; },
-    .completed =
-        [] {
-          drive_ask(rammp::DriveRequest::DISABLE);
-          screen_return_to_main();
-        },
+    // Ask only. drive_screen_follow_state closes the screen once the MIB actually
+    // stops driving, so a MIB that does not stop cannot leave someone looking at the
+    // main screen while the chair is still moving.
+    .completed = [] { drive_ask(rammp::DriveRequest::DISABLE); },
     // The button doubles as select, so a tap would visibly tick the bar and
     // snap back without this — the same reason the pull bars carry it.
     .grace_ms = kBarGraceMs,
@@ -2067,8 +2087,11 @@ static void seat_angle_refresh() {
   char text[32];
   seat_format(spec, lv_subject_get_int(&seat_axis_value[seat_selected_axis]), text, sizeof(text));
   lv_label_set_text(ui_AngleLabel, text);
+  // "of 25°" in the export: the number alone would read as a second reading.
   seat_format(spec, spec.max_value, text, sizeof(text));
-  lv_label_set_text(ui_MaxAngleLabel, text);
+  char footer[40];
+  lv_snprintf(footer, sizeof(footer), "of %s", text);
+  lv_label_set_text(ui_MaxAngleLabel, footer);
 }
 
 // One per axis, all pointed at ui_AngleLabel: whichever axis moves, the page
@@ -4054,6 +4077,17 @@ extern "C" void app_main(void) {
                          sizeof(seat_function_buf), lv_label_get_text(ui_AngleSettingLabel));
   lv_label_bind_text(ui_AngleSettingLabel, &seat_function_subject, nullptr);
 
+  // The seat values, shared by this screen and the DEBUG ACTUATORS page. These come
+  // first because binding to an lv_subject_t means storing a pointer into it: every
+  // observer below, and the settings rows built on demand later, read these.
+  seat_axis_count = static_cast<uint8_t>(rammp::kSeatAxisCount);
+  for (uint8_t i = 0; i < seat_axis_count; i++) {
+    lv_subject_init_int(&seat_axis_value[i], kValueUnknown);
+    const rammp::SeatAxisSpec &axis = rammp::kSeatAxes[i];
+    seat_axis_format[i] = {axis.short_name, axis.label,    axis.min_value, axis.max_value,
+                           axis.step,       axis.decimals, axis.unit};
+  }
+
   // The number under each function button, and the pair on the adjustment page,
   // read the values the MCB reports and nothing else: a press asks, and the
   // screen moves when SeatState says the seat did. The export's placeholders
@@ -4226,15 +4260,9 @@ extern "C" void app_main(void) {
   lv_obj_set_style_border_width(ui_Keyboard1, 4, kItemsFocused);
 
   // SpecificSettingScreen: what outlives the screen, which is built on demand
-  // (settings_screen_ensure).
+  // (settings_screen_ensure). The seat values it steps are initialised further
+  // up, with the seat screen that shares them.
 
-  seat_axis_count = static_cast<uint8_t>(rammp::kSeatAxisCount);
-  for (uint8_t i = 0; i < seat_axis_count; i++) {
-    lv_subject_init_int(&seat_axis_value[i], kValueUnknown);
-    const rammp::SeatAxisSpec &axis = rammp::kSeatAxes[i];
-    seat_axis_format[i] = {axis.short_name, axis.label,    axis.min_value, axis.max_value,
-                           axis.step,       axis.decimals, axis.unit};
-  }
   lv_subject_init_int(&actuator_reject_subject, kActuatorRejectNone);
   actuator_reject_timer =
       lv_timer_create(actuator_reject_clear_cb, kActuatorRejectFlashMs, nullptr);
