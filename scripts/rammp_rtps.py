@@ -8,12 +8,12 @@ This module parses both headers at import time and mirrors its message structs,
 encoded the way espp/cdr encodes them (XCDR1).
 
     import rammp_rtps as spec
-    spec.TOPIC_MCB_STATUS        # 'rammp/mcb/status'
+    spec.TOPIC_MCB_SYSTEM_STATE  # 'rammp/mcb/system_state'
     spec.DRIVE_STATUS_ACTIVE     # 1
-    spec.pack_mcb_status(spec.DRIVE_STATUS_ACTIVE, spec.SYSTEM_STATE_OK)
+    spec.pack_system_state(spec.DRIVE_STATUS_ACTIVE, spec.FAULT_STATE_OK)
 
-Names lose the RAMMP_ prefix or become UPPER_SNAKE: ``RAMMP_TOPIC_MCB_STATUS`` gives
-TOPIC_MCB_STATUS, ``DriveStatus::ACTIVE`` gives DRIVE_STATUS_ACTIVE, and
+Names lose the RAMMP_ prefix or become UPPER_SNAKE: ``RAMMP_TOPIC_MCB_SYSTEM_STATE``
+gives TOPIC_MCB_SYSTEM_STATE, ``DriveStatus::ACTIVE`` gives DRIVE_STATUS_ACTIVE, and
 ``milliseconds kMcbStatusPeriod{500}`` gives MCB_STATUS_PERIOD_MS.
 """
 
@@ -30,7 +30,7 @@ SHARED_HEADER_RELATIVE_PATH = os.path.join(
     "external", "rammp-rtps", "components", "rammp_rtps_messages", "include", "messages",
     "joystick_message.hpp")
 
-# #define RAMMP_TOPIC_MCB_STATUS "rammp/mcb/status" / #define RAMMP_TYPE_MCB_STATUS "..."
+# #define RAMMP_TOPIC_MCB_SYSTEM_STATE "rammp/mcb/system_state" / #define RAMMP_TYPE_... "..."
 _DEFINE_RE = re.compile(r'^\s*#define\s+RAMMP_((?:TOPIC|TYPE)_[A-Z0-9_]+)\s+"([^"]*)"', re.M)
 # enum class DriveStatus : uint8_t { INACTIVE = 0, ... };
 _ENUM_RE = re.compile(r"enum class (\w+)\s*:\s*\w+\s*\{(.*?)\};", re.S)
@@ -42,7 +42,7 @@ _NUMBER_RE = re.compile(
 
 
 def _snake(name: str) -> str:
-    """McbStatus -> MCB_STATUS, XYTwist -> XY_TWIST, SelfTestKind -> SELFTEST_KIND."""
+    """SystemState -> SYSTEM_STATE, XYTwist -> XY_TWIST, SelfTestKind -> SELFTEST_KIND."""
     name = name.replace("SelfTest", "Selftest").replace("UInt", "Uint")
     return re.sub(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", "_", name).upper()
 
@@ -107,16 +107,18 @@ def _group(prefix: str) -> Dict[int, str]:
 
 #: {0: 'INACTIVE', 1: 'ACTIVE'} — DriveStatus
 DRIVE_STATUS_NAMES = _group("DRIVE_STATUS_")
-#: {0: 'OK', 1: 'ERROR'} — SystemState
-STATE_NAMES = _group("SYSTEM_STATE_")
-#: {0: 'NORMAL', 1: 'HOLO', 2: 'AUTO'} — the HMI's drive-mode buttons
-DRIVE_MODE_NAMES = _group("DRIVE_MODE_")
-#: {0: 'OK', 1: 'AT_MIN', ...} — the MCB's verdict on an actuator request
-ACTUATOR_RESULT_NAMES = _group("ACTUATOR_RESULT_")
+#: {0: 'DISABLE', 1: 'ENABLE'} — what the joystick asks for in DriveCommand
+DRIVE_REQUEST_NAMES = _group("DRIVE_REQUEST_")
+#: {0: 'OK', 1: 'ERROR'} — FaultState
+FAULT_STATE_NAMES = _group("FAULT_STATE_")
+#: {0: 'NORMAL', 1: 'HOLO', 2: 'AUTO'} — the HMI's drive-profile buttons
+DRIVE_PROFILE_NAMES = _group("DRIVE_PROFILE_")
+#: {0: 'OK', 1: 'AT_MIN', ...} — the MCB's verdict on a seat request
+SEAT_RESULT_NAMES = _group("SEAT_RESULT_")
 
 
-class Actuator(NamedTuple):
-    """One row of RAMMP_ACTUATOR_TABLE: raw integer values, `decimals` for display."""
+class SeatAxis(NamedTuple):
+    """One row of RAMMP_SEAT_AXIS_TABLE: raw integer values, `decimals` for display."""
 
     id: int
     name: str
@@ -139,22 +141,22 @@ class Actuator(NamedTuple):
 
 
 # X(0, ELEVATION, "M1", "Elevation", 0, 2500, 50, 1, "mm")
-_ACTUATOR_RE = re.compile(
+_SEAT_AXIS_RE = re.compile(
     r"""^\s*X\(\s*(\d+)\s*,\s*([A-Z0-9_]+)\s*,\s*"([^"]*)"\s*,\s*"([^"]*)"\s*,"""
     r"""\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(\d+)\s*,\s*"([^"]*)"\s*\)""",
     re.M,
 )
 
-#: every actuator in the shared X-macro table, in wire-id order
-ACTUATORS: List[Actuator] = [
-    Actuator(int(i), name, short, label, int(lo), int(hi), int(step), int(dec), unit)
-    for i, name, short, label, lo, hi, step, dec, unit in _ACTUATOR_RE.findall(_HEADER_TEXT)
+#: every axis in the shared X-macro table, in wire-id order
+SEAT_AXES: List[SeatAxis] = [
+    SeatAxis(int(i), name, short, label, int(lo), int(hi), int(step), int(dec), unit)
+    for i, name, short, label, lo, hi, step, dec, unit in _SEAT_AXIS_RE.findall(_HEADER_TEXT)
 ]
 
-if not ACTUATORS:
-    raise RuntimeError(f"{SHARED_HEADER_PATH}: RAMMP_ACTUATOR_TABLE parsed to nothing")
-if [a.id for a in ACTUATORS] != list(range(len(ACTUATORS))):
-    raise RuntimeError(f"{SHARED_HEADER_PATH}: actuator ids must be 0..N-1 in table order")
+if not SEAT_AXES:
+    raise RuntimeError(f"{SHARED_HEADER_PATH}: RAMMP_SEAT_AXIS_TABLE parsed to nothing")
+if [a.id for a in SEAT_AXES] != list(range(len(SEAT_AXES))):
+    raise RuntimeError(f"{SHARED_HEADER_PATH}: axis ids must be 0..N-1 in table order")
 
 
 class DiagItem(NamedTuple):
@@ -201,15 +203,16 @@ CDR_LE_HEADER = b"\x00\x01\x00\x00"
 
 # The C++ structs, field for field. A type is a struct format char, "str",
 # ("seq", element type) or a nested field list (a struct).
-MSG_MCB_STATUS = [
-    ("drive_status", "B"), ("system_state", "B"), ("flags", "B"), ("seq", "B"),
+MSG_SYSTEM_STATE = [
+    ("drive_status", "B"), ("fault", "B"), ("profile", "B"), ("flags", "B"), ("seq", "B"),
     ("speed_tenths", "B"), ("hour", "B"), ("minute", "B"), ("second", "B"),
     ("day", "B"), ("month", "B"), ("year", "B"),
     ("drive_text", "str"), ("state_text", "str"), ("error_text", "str"), ("error_footer", "str"),
 ]
-MSG_XY_TWIST = [("x", "f"), ("y", "f"), ("twist", "f"), ("buttons", "I"), ("drive_mode", "I")]
-MSG_ACTUATOR_COMMAND = [("req_id", "B"), ("actuator_id", "B"), ("steps", "b")]
-MSG_ACTUATOR_STATE = [("req_id", "B"), ("result", "B"), ("seq", "B"), ("values", ("seq", "i"))]
+MSG_XY_TWIST = [("x", "f"), ("y", "f"), ("twist", "f"), ("buttons", "I")]
+MSG_DRIVE_COMMAND = [("request", "B"), ("profile", "B")]
+MSG_SEAT_COMMAND = [("axis", "B"), ("target", "i")]
+MSG_SEAT_STATE = [("result", "B"), ("last_axis", "B"), ("seq", "B"), ("values", ("seq", "i"))]
 MSG_DIAGNOSTICS = [("seq", "B"), ("items", ("seq", [("values", ("seq", "i"))]))]
 MSG_UINT32 = [("data", "I")]
 MSG_SELFTEST_REPORT = [
@@ -285,49 +288,58 @@ def _text(text: str, limit: int) -> str:
     return text.encode("ascii", "ignore")[: limit - 1].decode("ascii")
 
 
-def pack_mcb_status(drive_status: int, system_state: int, flags: int = 0, seq: int = 0,
-                    speed_tenths: int = 0, drive_text: str = "", state_text: str = "",
-                    error_text: str = "", error_footer: str = "",
-                    clock: datetime.datetime | None = None) -> bytes:
-    """A rammp::McbStatus. `clock` is the MCB's local time; None sends month 0, "unknown"."""
+def pack_system_state(drive_status: int, fault: int, profile: int = 0, flags: int = 0,
+                      seq: int = 0, speed_tenths: int = 0, drive_text: str = "",
+                      state_text: str = "", error_text: str = "", error_footer: str = "",
+                      clock: datetime.datetime | None = None) -> bytes:
+    """A rammp::SystemState. `clock` is the MCB's local time; None sends month 0, "unknown"."""
     when = (0,) * 6 if clock is None else (
         clock.hour, clock.minute, clock.second, clock.day, clock.month,
         max(0, min(clock.year - 2000, 255)))
     return encode(
-        MSG_MCB_STATUS,
-        drive_status & 0xFF, system_state & 0xFF, flags & 0xFF, seq & 0xFF,
+        MSG_SYSTEM_STATE,
+        drive_status & 0xFF, fault & 0xFF, profile & 0xFF, flags & 0xFF, seq & 0xFF,
         max(0, min(int(speed_tenths), SPEED_MAX_TENTHS)), *when,  # noqa: F821  (scraped)
         _text(drive_text, MCB_TEXT_LEN), _text(state_text, MCB_TEXT_LEN),  # noqa: F821
         _text(error_text, ERROR_TEXT_LEN), _text(error_footer, ERROR_FOOTER_LEN),  # noqa: F821
     )
 
 
-def unpack_mcb_status(payload: bytes):
-    """(drive, state, flags, seq, speed_tenths, hour, minute, second, day, month,
-    year_since_2000, drive_text, state_text, error_text, error_footer), or None."""
-    return decode(MSG_MCB_STATUS, payload)
+def unpack_system_state(payload: bytes):
+    """(drive_status, fault, profile, flags, seq, speed_tenths, hour, minute, second, day,
+    month, year_since_2000, drive_text, state_text, error_text, error_footer), or None."""
+    return decode(MSG_SYSTEM_STATE, payload)
 
 
-def pack_actuator_command(req_id: int, actuator_id: int, steps: int) -> bytes:
-    """A rammp::ActuatorCommand (HMI -> MCB)."""
-    return encode(MSG_ACTUATOR_COMMAND, req_id & 0xFF, actuator_id & 0xFF,
-                  max(-128, min(127, int(steps))))
+def pack_drive_command(request: int, profile: int) -> bytes:
+    """A rammp::DriveCommand (joystick -> MCB); for tests of the tools."""
+    return encode(MSG_DRIVE_COMMAND, request & 0xFF, profile & 0xFF)
 
 
-def unpack_actuator_command(payload: bytes) -> tuple[int, int, int] | None:
-    """(req_id, actuator_id, steps), or None."""
-    return decode(MSG_ACTUATOR_COMMAND, payload)
+def unpack_drive_command(payload: bytes) -> tuple[int, int] | None:
+    """(request, profile), or None."""
+    return decode(MSG_DRIVE_COMMAND, payload)
 
 
-def pack_actuator_state(values, req_id: int = 0, result: int = 0, seq: int = 0) -> bytes:
-    """A rammp::ActuatorState (MCB -> HMI); `values` = raw value per table row."""
-    return encode(MSG_ACTUATOR_STATE, req_id & 0xFF, result & 0xFF, seq & 0xFF,
+def pack_seat_command(axis: int, target: int) -> bytes:
+    """A rammp::SeatCommand (joystick -> MCB): put `axis` at `target`, in raw units."""
+    return encode(MSG_SEAT_COMMAND, axis & 0xFF, int(target))
+
+
+def unpack_seat_command(payload: bytes) -> tuple[int, int] | None:
+    """(axis, target), or None."""
+    return decode(MSG_SEAT_COMMAND, payload)
+
+
+def pack_seat_state(values, result: int = 0, last_axis: int = 0, seq: int = 0) -> bytes:
+    """A rammp::SeatState (MCB -> joystick); `values` = raw value per seat axis."""
+    return encode(MSG_SEAT_STATE, result & 0xFF, last_axis & 0xFF, seq & 0xFF,
                   [int(v) for v in values])
 
 
-def unpack_actuator_state(payload: bytes) -> tuple[int, int, int, list[int]] | None:
-    """(req_id, result, seq, values), or None."""
-    return decode(MSG_ACTUATOR_STATE, payload)
+def unpack_seat_state(payload: bytes) -> tuple[int, int, int, list[int]] | None:
+    """(result, last_axis, seq, values), or None."""
+    return decode(MSG_SEAT_STATE, payload)
 
 
 def pack_diagnostics(values, seq: int = 0) -> bytes:
@@ -341,8 +353,8 @@ def unpack_diagnostics(payload: bytes) -> tuple[int, list[list[int]]] | None:
     return None if message is None else (message[0], [item[0] for item in message[1]])
 
 
-def unpack_xy_twist(payload: bytes) -> tuple[float, float, float, int, int] | None:
-    """(x, y, twist, buttons, drive_mode): axes -1..+1, calibrated by the HMI."""
+def unpack_xy_twist(payload: bytes) -> tuple[float, float, float, int] | None:
+    """(x, y, twist, buttons): axes -1..+1, calibrated by the joystick."""
     return decode(MSG_XY_TWIST, payload)
 
 
@@ -453,10 +465,10 @@ if __name__ == "__main__":
     for key in sorted(NUMBERS):
         print(f"  {key:<24} {NUMBERS[key]}")
     print("\nactuators:")
-    for actuator in ACTUATORS:
+    for axis in SEAT_AXES:
         print(
-            f"  {actuator.id}  {actuator.short:<4} {actuator.label:<16} "
-            f"{actuator.format(actuator.min_value):>7} .. "
-            f"{actuator.format(actuator.max_value):<7} "
-            f"step {actuator.format(actuator.step)} {actuator.unit}"
+            f"  {axis.id}  {axis.short:<4} {axis.label:<16} "
+            f"{axis.format(axis.min_value):>7} .. "
+            f"{axis.format(axis.max_value):<7} "
+            f"step {axis.format(axis.step)} {axis.unit}"
         )

@@ -37,8 +37,8 @@ static lv_subject_t adc_x_subject;
 static lv_subject_t adc_y_subject;
 static lv_subject_t adc_twist_subject;
 
-/* MCB status, as reported by sim_nav_on_mcb_status(). Values are the
- * RAMMP_DRIVE_STATUS_* / RAMMP_STATE_* enums from messages/joystick_message.hpp. */
+/* MCB status, as reported by sim_nav_on_system_state(). Values are the
+ * RAMMP_DRIVE_STATUS_* / RAMMP_FAULT_* enums from messages/joystick_message.hpp. */
 static lv_subject_t drive_status_subject;
 static lv_subject_t mcb_state_subject;
 /* Optional label overrides from the MCB. Empty means "use the enum's name". */
@@ -62,7 +62,7 @@ static char error_footer_prev_buf[RAMMP_ERROR_FOOTER_LEN];
  * into an atomic so the ADC task could publish it over RTPS without taking
  * the LVGL lock; the sim has no wire to publish it on, so the subject is the
  * only copy. */
-static lv_subject_t drive_mode_subject;
+static lv_subject_t drive_profile_subject;
 
 /* Link health. Drives the TopBar's RTPS indicator, and greys the status
  * labels when it is not CONNECTED. Fed from stored_link_state (see the RTPS
@@ -269,8 +269,8 @@ static void mcb_status_label_observer(lv_observer_t *observer, lv_subject_t *sub
             : value == RAMMP_DRIVE_STATUS_INACTIVE ? kStatusGrey
                                                    : kStatusRed;
   } else {
-    text = overridden ? override_text : rammp_state_name(value);
-    color = value == RAMMP_STATE_OK ? kStatusGreen : kStatusRed;
+    text = overridden ? override_text : rammp_fault_name(value);
+    color = value == RAMMP_FAULT_OK ? kStatusGreen : kStatusRed;
   }
   lv_label_set_text(label, text);
   lv_obj_set_style_text_color(label, lv_color_hex(color), LV_PART_MAIN);
@@ -399,32 +399,32 @@ static void rtps_poll_cb(lv_timer_t *timer) {
  * DriveScreen: drive-mode selection
  * ======================================================================= */
 
-static uint32_t kModeHolo = RAMMP_DRIVE_MODE_HOLO;
-static uint32_t kModeNormal = RAMMP_DRIVE_MODE_NORMAL;
-static uint32_t kModeAuto = RAMMP_DRIVE_MODE_AUTO;
+static uint32_t kModeHolo = RAMMP_DRIVE_PROFILE_HOLO;
+static uint32_t kModeNormal = RAMMP_DRIVE_PROFILE_NORMAL;
+static uint32_t kModeAuto = RAMMP_DRIVE_PROFILE_AUTO;
 
-static void drive_mode_click_cb(lv_event_t *e) {
+static void drive_profile_click_cb(lv_event_t *e) {
   const uint32_t *mode = (const uint32_t *)lv_event_get_user_data(e);
-  lv_subject_set_int(&drive_mode_subject, (int32_t)(*mode));
+  lv_subject_set_int(&drive_profile_subject, (int32_t)(*mode));
 }
 
 /* Highlights the button whose mode is selected. Border width rather than a
  * colour, so it reads the same in either theme. */
-static void drive_mode_button_observer(lv_observer_t *observer, lv_subject_t *subject) {
+static void drive_profile_button_observer(lv_observer_t *observer, lv_subject_t *subject) {
   lv_obj_t *button = lv_observer_get_target_obj(observer);
   const uint32_t mine = *(const uint32_t *)lv_observer_get_user_data(observer);
   const bool selected = (uint32_t)lv_subject_get_int(subject) == mine;
   lv_obj_set_style_border_width(button, selected ? 8 : 2, LV_PART_MAIN);
 }
 
-static void bind_drive_mode_button(lv_obj_t *button, uint32_t *mode) {
+static void bind_drive_profile_button(lv_obj_t *button, uint32_t *mode) {
   if (button == NULL)
     return;
-  lv_obj_add_event_cb(button, drive_mode_click_cb, LV_EVENT_CLICKED, mode);
-  lv_subject_add_observer_obj(&drive_mode_subject, drive_mode_button_observer, button, mode);
+  lv_obj_add_event_cb(button, drive_profile_click_cb, LV_EVENT_CLICKED, mode);
+  lv_subject_add_observer_obj(&drive_profile_subject, drive_profile_button_observer, button, mode);
 }
 
-/* Note: main.cpp also had a drive_mode_publish_observer mirroring this
+/* Note: main.cpp also had a drive_profile_publish_observer mirroring this
  * subject into an atomic the ADC task read to publish drive_mode over RTPS.
  * The sim has no RTPS wire to publish on, so that observer is dropped
  * entirely -- the subject is now the only copy of the selected mode. */
@@ -450,7 +450,7 @@ static void bind_error_panel(void) {
   /* Visible whenever the state is anything other than OK: a value neither
    * board knows raises the banner instead of silently hiding it. */
   lv_obj_bind_flag_if_eq(ui_ErrorWarningPanel, &mcb_state_subject, LV_OBJ_FLAG_HIDDEN,
-                         RAMMP_STATE_OK);
+                         RAMMP_FAULT_OK);
   lv_label_bind_text(
       ui_comp_get_child(ui_ErrorWarningPanel,
                         UI_COMP_ERRORWARNINGPANEL_ERRORMESSAGECONTAINER_ERRORMESSAGELABEL),
@@ -670,7 +670,7 @@ static void screen_return_to_main(void) {
  * subject drives) as well as an OK state. */
 static bool drive_permitted(void) {
   return (sim_link_state_t)lv_subject_get_int(&rtps_link_subject) == SIM_LINK_CONNECTED &&
-         lv_subject_get_int(&mcb_state_subject) == RAMMP_STATE_OK;
+         lv_subject_get_int(&mcb_state_subject) == RAMMP_FAULT_OK;
 }
 
 static bool drive_enter_applies(void) {
@@ -933,7 +933,7 @@ void sim_nav_init(void) {
   /* The joystick is a slave: until the fake MCB says otherwise the chair is
    * not accepting drive commands, so INACTIVE/OK is the honest default. */
   lv_subject_init_int(&drive_status_subject, RAMMP_DRIVE_STATUS_INACTIVE);
-  lv_subject_init_int(&mcb_state_subject, RAMMP_STATE_OK);
+  lv_subject_init_int(&mcb_state_subject, RAMMP_FAULT_OK);
   /* LINK_DOWN at boot is true and self-correcting: the poll timer has the
    * real answer a quarter second later, same as main.cpp. */
   lv_subject_init_int(&rtps_link_subject, (int32_t)SIM_LINK_DOWN);
@@ -956,10 +956,10 @@ void sim_nav_init(void) {
   bind_rtps_label(ui_TopBar3);        /* MainScreenFlex */
   bind_rtps_label(ui_TopBar4);        /* SeatAdjustmentFlexScreen */
   lv_subject_add_observer_obj(&speed_tenths_subject, speed_label_observer, ui_SpeedNumber, NULL);
-  lv_subject_init_int(&drive_mode_subject, RAMMP_DRIVE_MODE_NORMAL);
-  bind_drive_mode_button(ui_DriveModeButton, &kModeHolo);
-  bind_drive_mode_button(ui_DriveModeButton1, &kModeNormal);
-  bind_drive_mode_button(ui_DriveModeButton2, &kModeAuto);
+  lv_subject_init_int(&drive_profile_subject, RAMMP_DRIVE_PROFILE_NORMAL);
+  bind_drive_profile_button(ui_DriveModeButton, &kModeHolo);
+  bind_drive_profile_button(ui_DriveModeButton1, &kModeNormal);
+  bind_drive_profile_button(ui_DriveModeButton2, &kModeAuto);
   bind_error_panel();
   lv_timer_create(rtps_poll_cb, kRtpsPollMs, NULL);
 
@@ -1182,7 +1182,7 @@ void sim_nav_on_stick_sample(void) {
   }
 }
 
-void sim_nav_on_mcb_status(const rammp_mcb_status_t *status) {
+void sim_nav_on_system_state(const rammp_system_state_t *status) {
   /* Direct port of the rtps_comms_on_mcb_status lambda in main.cpp's
    * app_main(), minus the lvgl_mutex lock: that lock existed because the
    * real lambda runs on the RTPS receive task, a different thread from the
@@ -1190,7 +1190,7 @@ void sim_nav_on_mcb_status(const rammp_mcb_status_t *status) {
    * sim_mcb.c calls this from its own lv_timer, which already IS the LVGL
    * task -- there is nothing to lock. */
   lv_subject_set_int(&drive_status_subject, status->drive_status);
-  lv_subject_set_int(&mcb_state_subject, status->system_state);
+  lv_subject_set_int(&mcb_state_subject, status->fault);
   /* decode()'s NUL-termination guarantee doesn't apply here (the sim builds
    * this struct directly, not off the wire), but copy_string() itself only
    * reads up to the subject's own buffer size either way. */
@@ -1214,10 +1214,10 @@ void sim_nav_set_link_state(sim_link_state_t link_state) {
 
 void sim_nav_go_home(void) { screen_return_to_main(); }
 
-void sim_nav_next_drive_mode(void) {
-  const int32_t mode = lv_subject_get_int(&drive_mode_subject);
+void sim_nav_next_drive_profile(void) {
+  const int32_t mode = lv_subject_get_int(&drive_profile_subject);
   /* HOLO / Normal / Auto, in the order messages/joystick_message.hpp numbers them. */
-  lv_subject_set_int(&drive_mode_subject, (mode + 1) % (RAMMP_DRIVE_MODE_AUTO + 1));
+  lv_subject_set_int(&drive_profile_subject, (mode + 1) % (RAMMP_DRIVE_PROFILE_AUTO + 1));
 }
 
 void sim_nav_reset(void) {

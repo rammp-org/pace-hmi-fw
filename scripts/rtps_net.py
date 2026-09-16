@@ -265,12 +265,12 @@ def _listener_args(targets: List[str], advertised: Optional[str],
         enclave="/",
         subscribe_topic=[spec.TOPIC_JOYSTICK_XY_TWIST],
         subscribe_type_name=spec.TYPE_XY_TWIST,
-        publish_topic=spec.TOPIC_MCB_STATUS,
+        publish_topic=spec.TOPIC_MCB_SYSTEM_STATE,
         publish_value=0,
         publish_interval=0.0,  # probing only; never publish real status
         echo_received=False,
         reliable=False,
-        type_name=spec.TYPE_MCB_STATUS,
+        type_name=spec.TYPE_SYSTEM_STATE,
         announce_period=0.5,
         duration=0.0,
         trace_packets=False,
@@ -397,7 +397,7 @@ def _passive_listen(timeout: float) -> List[str]:
         multicast_group="239.255.0.1", enclave="/", subscribe_topic=[],
         subscribe_type_name=None, publish_topic=None, publish_value=0,
         publish_interval=0.0, echo_received=False, reliable=False,
-        type_name=spec.TYPE_MCB_STATUS, announce_period=0.5, duration=0.0,
+        type_name=spec.TYPE_SYSTEM_STATE, announce_period=0.5, duration=0.0,
         trace_packets=False, quiet=True, peer=None, peer_participant_ids=[],
     )
     try:

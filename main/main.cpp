@@ -104,7 +104,7 @@ static lv_subject_t adc_twist_subject;
 // MCB status, as reported over RTPS. The joystick is a slave here: these two
 // hold whatever the Main Control Board last said, and every StatusPanel on
 // every screen follows them. Values are the rammp::DriveStatus /
-// rammp::SystemState enums from messages/joystick_message.hpp.
+// rammp::FaultState enums from messages/joystick_message.hpp.
 static lv_subject_t drive_status_subject;
 static lv_subject_t mcb_state_subject;
 // Optional label overrides from the MCB. Empty means "use the enum's name",
@@ -138,7 +138,9 @@ static std::atomic<bool> joy_button_pressed{false};
 // to the MCB with every joystick sample. Mirrored into an atomic for the same
 // reason as the button: the ADC task must not take the LVGL lock to read it.
 static lv_subject_t drive_mode_subject;
-static std::atomic<rammp::DriveMode> drive_mode_published{rammp::DriveMode::NORMAL};
+static std::atomic<rammp::DriveProfile> drive_profile_published{rammp::DriveProfile::NORMAL};
+// Sends the current drive request + profile; defined with the drive gestures.
+static void drive_publish();
 
 // Link health behind those two, polled from rtps_comms (RtpsLinkState). Drives
 // the TopBar's RTPS indicator, and greys the status labels when it is not
@@ -451,9 +453,9 @@ static void mcb_status_label_observer(lv_observer_t *observer, lv_subject_t *) {
             : status == rammp::DriveStatus::INACTIVE ? kStatusGrey
                                                      : kStatusRed;
   } else {
-    const auto state = static_cast<rammp::SystemState>(value);
+    const auto state = static_cast<rammp::FaultState>(value);
     text = overridden ? override_text : rammp::to_string(state);
-    color = state == rammp::SystemState::OK ? kStatusGreen : kStatusRed;
+    color = state == rammp::FaultState::OK ? kStatusGreen : kStatusRed;
   }
   lv_label_set_text(label, text);
   lv_obj_set_style_text_color(label, lv_color_hex(color), LV_PART_MAIN);
@@ -599,12 +601,12 @@ static void bind_rtps_label(lv_obj_t *bar) {
 /////////////////////////////////////////////////////////////////////////////
 
 // Paired with the button that selects it, so one callback serves all three.
-static rammp::DriveMode kModeHolo = rammp::DriveMode::HOLO;
-static rammp::DriveMode kModeNormal = rammp::DriveMode::NORMAL;
-static rammp::DriveMode kModeAuto = rammp::DriveMode::AUTO;
+static rammp::DriveProfile kModeHolo = rammp::DriveProfile::HOLO;
+static rammp::DriveProfile kModeNormal = rammp::DriveProfile::NORMAL;
+static rammp::DriveProfile kModeAuto = rammp::DriveProfile::AUTO;
 
 static void drive_mode_click_cb(lv_event_t *e) {
-  const auto *mode = static_cast<const rammp::DriveMode *>(lv_event_get_user_data(e));
+  const auto *mode = static_cast<const rammp::DriveProfile *>(lv_event_get_user_data(e));
   lv_subject_set_int(&drive_mode_subject, static_cast<int32_t>(*mode));
 }
 
@@ -613,12 +615,12 @@ static void drive_mode_click_cb(lv_event_t *e) {
 // themeable and would fight a hardcoded highlight.
 static void drive_mode_button_observer(lv_observer_t *observer, lv_subject_t *subject) {
   lv_obj_t *button = lv_observer_get_target_obj(observer);
-  const auto mine = *static_cast<const rammp::DriveMode *>(lv_observer_get_user_data(observer));
-  const bool selected = static_cast<rammp::DriveMode>(lv_subject_get_int(subject)) == mine;
+  const auto mine = *static_cast<const rammp::DriveProfile *>(lv_observer_get_user_data(observer));
+  const bool selected = static_cast<rammp::DriveProfile>(lv_subject_get_int(subject)) == mine;
   lv_obj_set_style_border_width(button, selected ? 8 : 2, LV_PART_MAIN);
 }
 
-static void bind_drive_mode_button(lv_obj_t *button, rammp::DriveMode *mode) {
+static void bind_drive_mode_button(lv_obj_t *button, rammp::DriveProfile *mode) {
   if (button == nullptr) {
     return;
   }
@@ -628,7 +630,8 @@ static void bind_drive_mode_button(lv_obj_t *button, rammp::DriveMode *mode) {
 
 // Mirrors the subject out to the ADC task, which cannot take the LVGL lock.
 static void drive_mode_publish_observer(lv_observer_t *, lv_subject_t *subject) {
-  drive_mode_published.store(static_cast<rammp::DriveMode>(lv_subject_get_int(subject)));
+  drive_profile_published.store(static_cast<rammp::DriveProfile>(lv_subject_get_int(subject)));
+  drive_publish(); // the MCB confirms it in SystemState.profile
 }
 
 // The speed arrives as tenths; the label wants "N.N". No built-in binding
@@ -673,7 +676,8 @@ static void log_link_change(RtpsLinkState state) {
   last = state;
 }
 
-static void diag_poll(); // DiagnosticsScreen, further down
+static void diag_poll();       // DiagnosticsScreen, further down
+static void drive_wait_poll(); // DriveScreen entry, further down
 
 static void rtps_poll_cb(lv_timer_t *) {
   const RtpsLinkState state = rtps_comms_link_state();
@@ -682,7 +686,8 @@ static void rtps_poll_cb(lv_timer_t *) {
   static uint32_t ticks = 0;
   // flip every other tick: a 500 ms half-period, i.e. a 1 Hz blink
   lv_subject_set_int(&rtps_blink_subject, static_cast<int32_t>((++ticks / 2) & 1u));
-  diag_poll(); // diagnostics staleness rides the same 250 ms tick
+  diag_poll();       // diagnostics staleness rides the same 250 ms tick
+  drive_wait_poll(); // and so does the wait for the MCB to enable driving
 
   // Defensive: if the RTPS label's text colour/opacity are registered as
   // themeable in the SquareLine project, ui_theme_set() re-applies the theme's
@@ -780,7 +785,7 @@ static void clock_set(const std::tm &local) {
 }
 
 // RTPS receive task.
-static void clock_note_mcb_time(const rammp::McbStatus &status) {
+static void clock_note_mcb_time(const rammp::SystemState &status) {
   if (status.month < 1 || status.month > 12 || status.day < 1 || status.day > 31 ||
       status.hour > 23 || status.minute > 59 || status.second > 59) {
     return; // month 0: the MCB does not know the time
@@ -1149,8 +1154,8 @@ static void diagnostics_open();
 static bool mcb_ready() {
   return static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) ==
              RtpsLinkState::CONNECTED &&
-         static_cast<rammp::SystemState>(lv_subject_get_int(&mcb_state_subject)) ==
-             rammp::SystemState::OK;
+         static_cast<rammp::FaultState>(lv_subject_get_int(&mcb_state_subject)) ==
+             rammp::FaultState::OK;
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -1229,7 +1234,7 @@ static void fill_drive_blocked_panel(lv_obj_t *panel, const char *link_title,
     lv_label_set_text(body, text.body);
     lv_label_set_text(footer, text.footer);
   } else {
-    const auto state = static_cast<rammp::SystemState>(lv_subject_get_int(&mcb_state_subject));
+    const auto state = static_cast<rammp::FaultState>(lv_subject_get_int(&mcb_state_subject));
     const char *error_text = lv_subject_get_string(&error_text_subject);
     lv_label_set_text(title, mcb_title);
     if (error_text[0] != '\0') {
@@ -1337,6 +1342,49 @@ static void entry_refusal_poll() {
   }
 }
 
+// The MCB decides whether the chair drives: the joystick asks with a DriveCommand and
+// shows the DriveScreen only once SystemState says drive_status is ACTIVE. A request that
+// goes unanswered for kDriveWaitUs raises the same banner a refused push does, so a silent
+// MCB cannot leave the user on a screen that pretends the chair is driving.
+static constexpr int64_t kDriveWaitUs =
+    std::chrono::duration_cast<std::chrono::microseconds>(rammp::kMcbStatusTimeout).count();
+static std::atomic<rammp::DriveRequest> drive_request{rammp::DriveRequest::DISABLE};
+static int64_t drive_wait_until_us; // 0 = not waiting for an answer
+
+static void drive_publish() {
+  rtps_comms_publish_drive(drive_request.load(), drive_profile_published.load());
+}
+
+static void drive_ask(rammp::DriveRequest request) {
+  drive_request.store(request);
+  drive_publish();
+}
+
+// Both refusals read the same: see entry_refusal_poll.
+static void entry_refused_show(int32_t which) {
+  lv_subject_set_int(&entry_refused_subject, which);
+  lv_timer_reset(entry_refused_timer);
+  lv_timer_resume(entry_refused_timer);
+}
+
+static void drive_wait_poll() {
+  if (drive_wait_until_us == 0) {
+    return;
+  }
+  const auto status = static_cast<rammp::DriveStatus>(lv_subject_get_int(&drive_status_subject));
+  if (status == rammp::DriveStatus::ACTIVE) {
+    drive_wait_until_us = 0;
+    _ui_screen_change(&ui_DriveScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0, &ui_DriveScreen_screen_init);
+    return;
+  }
+  if (esp_timer_get_time() < drive_wait_until_us) {
+    return; // still waiting
+  }
+  drive_wait_until_us = 0;
+  drive_ask(rammp::DriveRequest::DISABLE);
+  entry_refused_show(kRefusedDrive);
+}
+
 static HoldGesture drive_enter_gesture{
     .armed = &joy_up_armed,
     .is_held = joy_up_held,
@@ -1344,10 +1392,11 @@ static HoldGesture drive_enter_gesture{
     // starts filling the arc: nothing happens, instead of a progress animation
     // that betrays you at the end. entry_refusal_poll says why.
     .applies = [] { return showing_flex_page(ui_DrivePanel) && mcb_ready(); },
+    // Ask, then wait: drive_wait_poll opens the screen when the MCB says it is driving.
     .completed =
         [] {
-          _ui_screen_change(&ui_DriveScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
-                            &ui_DriveScreen_screen_init);
+          drive_ask(rammp::DriveRequest::ENABLE);
+          drive_wait_until_us = esp_timer_get_time() + kDriveWaitUs;
         },
 };
 
@@ -1359,7 +1408,11 @@ static HoldGesture drive_exit_gesture{
     .armed = &joy_button_armed,
     .is_held = joy_button_held,
     .applies = [] { return lv_screen_active() == ui_DriveScreen; },
-    .completed = screen_return_to_main,
+    .completed =
+        [] {
+          drive_ask(rammp::DriveRequest::DISABLE);
+          screen_return_to_main();
+        },
     // The button doubles as select, so a tap would visibly tick the bar and
     // snap back without this — the same reason the pull bars carry it.
     .grace_ms = kBarGraceMs,
@@ -1564,6 +1617,23 @@ static char seat_function_prev_buf[24];
 static_assert(sizeof(seat_function_buf) > sizeof("Elevation"), "label buffer too small");
 static lv_subject_t seat_function_subject;
 
+// Which seat axis each function button adjusts. The buttons take the rows of
+// RAMMP_SEAT_AXIS_TABLE in order, so adding a row to the table is all it takes
+// to give the next button a job; -1 is a button with no row behind it, which
+// today is the Static/Dynamic pair on the third row.
+static constexpr int seat_button_axis(int row, int col) {
+  const int index = row * 2 + col;
+  return row < 2 && index < static_cast<int>(rammp::kSeatAxisCount) ? index : -1;
+}
+// The axis the adjustment page is showing; -1 until a function button is pressed.
+static int seat_selected_axis = -1;
+
+// All three defined with the settings rows further down, which own the seat
+// values and the path that asks the MCB to move one.
+static void seat_step(size_t row, int direction);
+static void seat_request(rammp::SeatAxis axis, int32_t target);
+static void seat_angle_refresh();
+
 // Arrow keys arrive here as LV_EVENT_KEY on the focused button: lv_indev only
 // consumes NEXT/PREV/ENTER/ESC itself and passes everything else through
 // lv_group_send_data. That is what lets a grid do its own 2D movement.
@@ -1612,11 +1682,53 @@ static void grid_sync_cursor(ButtonGrid *g, lv_obj_t *button) {
   lv_group_focus_obj(button);
 }
 
-// The adjustment buttons have no behaviour yet, so this is all a press does:
-// take focus. LVGL still shows the pressed state on its own.
+// A press on the adjustment page. "-" and "+" move the selected axis one step
+// from where the MCB last said it is; the three presets send the angle written
+// on their own label. Every one of them is an absolute target, so a preset and a
+// step are the same message and a lost one cannot leave the seat drifting.
+//
+// The preset reads its number off the label rather than from a table here, so
+// relabelling the button in SquareLine changes what it asks for with nothing in
+// the firmware to keep in step. The number is in the axis' display units - "15"
+// on a one-decimal axis is 15.0 degrees, raw 150.
+static int32_t seat_preset_target(size_t row, const lv_obj_t *label) {
+  const rammp::SeatAxisSpec &spec = rammp::kSeatAxes[row];
+  const char *text = lv_label_get_text(label);
+  int32_t whole = 0;
+  const bool negative = text != nullptr && *text == '-';
+  for (const char *c = negative ? text + 1 : text; c != nullptr && *c >= '0' && *c <= '9'; c++) {
+    whole = whole * 10 + (*c - '0');
+  }
+  for (uint8_t i = 0; i < spec.decimals; i++) {
+    whole *= 10;
+  }
+  return negative ? -whole : whole;
+}
+
+// Takes focus, then acts. Nothing happens before a function button has picked an
+// axis: the page can only be reached through one, but the cursor is not proof of
+// that on its own.
 static void grid_click_cb(lv_event_t *e) {
-  grid_sync_cursor(static_cast<ButtonGrid *>(lv_event_get_user_data(e)),
-                   lv_event_get_target_obj(e));
+  auto *button = lv_event_get_target_obj(e);
+  grid_sync_cursor(static_cast<ButtonGrid *>(lv_event_get_user_data(e)), button);
+  if (seat_selected_axis < 0) {
+    return;
+  }
+  const auto row = static_cast<size_t>(seat_selected_axis);
+  if (button == ui_SeatAdjustmentButton1 || button == ui_SeatAdjustmentButton2) {
+    seat_step(row, button == ui_SeatAdjustmentButton1 ? -1 : +1);
+    return;
+  }
+  // Named rather than reached with lv_obj_get_child: each button holds a
+  // container, and the label is inside that.
+  const lv_obj_t *label = button == ui_SeatAdjustmentButton3   ? ui_SeatAdjustmentButtonLabel3
+                          : button == ui_SeatAdjustmentButton4 ? ui_SeatAdjustmentButtonLabel4
+                          : button == ui_SeatAdjustmentButton5 ? ui_SeatAdjustmentButtonLabel5
+                                                               : nullptr;
+  if (label == nullptr) {
+    return; // a preset button the export no longer has
+  }
+  seat_request(rammp::kSeatAxes[row].id, seat_preset_target(row, label));
 }
 
 // Both a tap and the joystick button land here: with seat_group owning the
@@ -1630,10 +1742,14 @@ static void seat_click_cb(lv_event_t *e) {
   grid_sync_cursor(&seat_buttons_grid, button);
 
   auto *label = static_cast<lv_obj_t *>(lv_event_get_user_data(e));
-  if (!label) {
-    return; // Static and Dynamic
+  const int axis = seat_button_axis(seat_buttons_grid.row, seat_buttons_grid.col);
+  if (!label || axis < 0) {
+    return; // Static and Dynamic, and any button with no row in the table
   }
   lv_subject_copy_string(&seat_function_subject, lv_label_get_text(label));
+  // What the adjustment page's buttons and its two numbers now refer to.
+  seat_selected_axis = axis;
+  seat_angle_refresh();
 
   // The pager has SCROLLABLE cleared, so lv_obj_scroll_to_view would bail out
   // early (it checks that flag) — but lv_obj_scroll_to_x is programmatic and
@@ -1853,7 +1969,7 @@ static lv_subject_t *const kSettingParamValue[] = {
 static_assert(std::size(kSettingParamValue) == SETTINGS_PARAM_COUNT,
               "every settings_spec.h parameter needs its subject here");
 
-static constexpr int kSettingRowsMax = std::max<int>(rammp::kActuatorCount, SETTINGS_PARAM_COUNT);
+static constexpr int kSettingRowsMax = std::max<int>(rammp::kSeatAxisCount, SETTINGS_PARAM_COUNT);
 static SettingRow setting_rows[kSettingRowsMax];
 static int setting_row_count; // rows on the page that is up; 0 while the screen is not
 static int setting_cursor;    // which row the joystick is on
@@ -1864,8 +1980,8 @@ static lv_subject_t setting_page_subject;
 
 // Raw value per actuator, in the table's units. Static: the rows' observers
 // point at them, and the MCB keeps them current with no page up.
-static lv_subject_t actuator_value[rammp::kActuatorCount];
-static uint8_t actuator_count; // actuators in the table
+static lv_subject_t seat_axis_value[rammp::kSeatAxisCount];
+static uint8_t seat_axis_count; // actuators in the table
 
 // What a value reads before it is known - only ever an actuator the MCB has
 // not reported yet. Not zero: zero is a position an actuator can genuinely be
@@ -1880,7 +1996,7 @@ static constexpr int32_t kValueUnknown = INT32_MIN;
 static lv_subject_t actuator_reject_subject;
 static constexpr int32_t kActuatorRejectNone = -1;
 static constexpr uint32_t kActuatorRejectFlashMs = 900;
-static int32_t actuator_reject_pack(rammp::ActuatorId id, rammp::ActuatorResult result) {
+static int32_t actuator_reject_pack(rammp::SeatAxis id, rammp::SeatResult result) {
   return static_cast<int32_t>(rammp::index_of(id)) | (static_cast<int32_t>(result) << 8);
 }
 static uint8_t actuator_reject_id(int32_t packed) { return static_cast<uint8_t>(packed & 0xFF); }
@@ -1915,6 +2031,54 @@ static void stepper_format(const StepperSpec &spec, int32_t raw, char *out, size
                 static_cast<int>(magnitude / scale), digits);
   }
   lv_snprintf(out, out_size, "%s%s", number, spec.unit != nullptr ? spec.unit : "");
+}
+
+// How each seat axis' number is drawn, filled in at startup from the shared
+// table. Static because the observers below hold a pointer into it.
+static StepperSpec seat_axis_format[rammp::kSeatAxisCount];
+
+// A seat value with its unit, e.g. 126 on a "deg" axis -> "12.6 deg". The space
+// is why this is not stepper_format alone: that appends the unit tight against
+// the number, which suits a settings row but not a number this size.
+static void seat_format(const StepperSpec &spec, int32_t raw, char *out, size_t out_size) {
+  if (raw == kValueUnknown) {
+    lv_snprintf(out, out_size, "--");
+    return;
+  }
+  char number[16];
+  const StepperSpec bare{spec.short_name, spec.label,    spec.min_value, spec.max_value,
+                         spec.step,       spec.decimals, nullptr};
+  stepper_format(bare, raw, number, sizeof(number));
+  lv_snprintf(out, out_size, "%s %s", number, spec.unit != nullptr ? spec.unit : "");
+}
+
+// The adjustment page's two numbers: where the selected axis is, and how far it
+// goes. Written here rather than bound, because which subject they show changes
+// with the function button - see seat_angle_observer.
+static void seat_angle_refresh() {
+  if (seat_selected_axis < 0) {
+    return;
+  }
+  const StepperSpec &spec = seat_axis_format[seat_selected_axis];
+  char text[32];
+  seat_format(spec, lv_subject_get_int(&seat_axis_value[seat_selected_axis]), text, sizeof(text));
+  lv_label_set_text(ui_AngleLabel, text);
+  seat_format(spec, spec.max_value, text, sizeof(text));
+  lv_label_set_text(ui_MaxAngleLabel, text);
+}
+
+// One per axis, all pointed at ui_AngleLabel: whichever axis moves, the page
+// redraws the one it is showing. Cheaper than it looks - a sample only arrives
+// twice a second, and refreshing costs two lv_label_set_text.
+static void seat_angle_observer(lv_observer_t *, lv_subject_t *) { seat_angle_refresh(); }
+
+// The number under a function button. An observer for the same reason
+// setting_value_observer is one: the value is scaled by its decimals.
+static void seat_button_value_observer(lv_observer_t *observer, lv_subject_t *subject) {
+  const auto *spec = static_cast<const StepperSpec *>(lv_observer_get_user_data(observer));
+  char text[32];
+  seat_format(*spec, lv_subject_get_int(subject), text, sizeof(text));
+  lv_label_set_text(lv_observer_get_target_obj(observer), text);
 }
 
 // The row's number. An observer rather than lv_label_bind_text because the
@@ -1966,41 +2130,45 @@ static void actuator_reject_clear_cb(lv_timer_t *timer) {
 //
 // `count` is what the MCB says it has; rows beyond it keep reading "--"
 // rather than inheriting a value that was never sent for them.
-static uint8_t actuator_req_id;         // free-running; identifies our last request
-static uint8_t actuator_flashed_req_id; // the request the current flash belongs to
-
-// Which actuator each request named, indexed by its req_id. The state message
-// says which REQUEST it answers but not which actuator that request was for,
-// so the mapping is kept on this side. One byte per possible req_id is exact
-// and needs no expiry.
-static rammp::ActuatorId actuator_req_target[256];
-static bool actuator_flashed_any;
+// A refused seat request flashes its row once: the MCB repeats the same verdict in
+// every SeatState until the next command, so the sample count cannot drive the flash.
+static uint32_t seat_requests;   // +1 per SeatCommand published
+static uint32_t seat_flashed_at; // seat_requests when the current flash was armed
 static lv_timer_t *actuator_reject_timer = nullptr;
 
-static void actuator_apply_state(const rammp::ActuatorState &state) {
-  const size_t known = std::min<size_t>(actuator_count, state.values.size());
+// Seat values come from the MCB and nowhere else: a press publishes a request, and the
+// number on screen moves only when SeatState says the axis moved.
+static void seat_apply_state(const rammp::SeatState &state) {
+  const size_t known = std::min<size_t>(seat_axis_count, state.values.size());
   for (size_t i = 0; i < known; i++) {
-    lv_subject_set_int(&actuator_value[i], state.values[i]);
+    lv_subject_set_int(&seat_axis_value[i], state.values[i]);
   }
-  if (state.result == rammp::ActuatorResult::OK) {
+  if (state.result == rammp::SeatResult::OK || seat_flashed_at == seat_requests) {
     return;
   }
-  // This topic republishes every rammp::kActuatorStatePeriod carrying the
-  // same verdict, so flash once per REQUEST rather than once per sample -
-  // otherwise a single refusal would blink twice a second until the next press.
-  if (actuator_flashed_any && state.req_id == actuator_flashed_req_id) {
-    return;
+  seat_flashed_at = seat_requests;
+  if (rammp::index_of(state.last_axis) >= seat_axis_count) {
+    return; // no row to flash: the MCB does not have this axis at all
   }
-  actuator_flashed_req_id = state.req_id;
-  actuator_flashed_any = true;
-  const rammp::ActuatorId target = actuator_req_target[state.req_id];
-  if (state.result == rammp::ActuatorResult::UNKNOWN_ID ||
-      rammp::index_of(target) >= actuator_count) {
-    return; // no row to flash: the MCB does not have this actuator at all
-  }
-  lv_subject_set_int(&actuator_reject_subject, actuator_reject_pack(target, state.result));
+  lv_subject_set_int(&actuator_reject_subject, actuator_reject_pack(state.last_axis, state.result));
   lv_timer_reset(actuator_reject_timer);
   lv_timer_resume(actuator_reject_timer);
+}
+
+// One seat request: an absolute target, clamped to the axis' range, so a lost or repeated
+// message cannot drift the seat.
+static void seat_request(rammp::SeatAxis axis, int32_t target) {
+  const rammp::SeatAxisSpec &spec = rammp::kSeatAxes[rammp::index_of(axis)];
+  seat_requests++;
+  rtps_comms_publish_seat(axis, std::clamp(target, spec.min_value, spec.max_value));
+}
+
+// One step up or down from where the MCB last said the axis is.
+static void seat_step(size_t row, int direction) {
+  const rammp::SeatAxisSpec &spec = rammp::kSeatAxes[row];
+  const int32_t now = lv_subject_get_int(&seat_axis_value[row]);
+  const int32_t from = now == kValueUnknown ? spec.min_value : now;
+  seat_request(spec.id, from + direction * spec.step);
 }
 
 // Puts the joystick cursor on `index`, clamped. Clamping rather than wrapping,
@@ -2056,11 +2224,7 @@ static void setting_step(const SettingRow *row, int direction) {
   press_flash(button);
   if (lv_subject_get_int(&setting_page_subject) == kActuatorsPage) {
     // A request: the value moves only when the MCB's state sample says so.
-    actuator_req_id++;
-    const rammp::ActuatorId actuator = rammp::kActuators[row->index].id;
-    actuator_req_target[actuator_req_id] = actuator;
-    rtps_comms_publish_actuator_command(actuator_req_id, actuator,
-                                        static_cast<int8_t>(direction < 0 ? -1 : 1));
+    seat_step(static_cast<size_t>(row->index), direction < 0 ? -1 : 1);
     return;
   }
   const int32_t now = lv_subject_get_int(row->value);
@@ -2222,11 +2386,11 @@ static void setting_page_open(int32_t page) {
   lv_label_set_text(ui_SettingTitleLabel, text.title);
   lv_label_set_text(ui_BriefInstructionsLabel, text.instructions);
   if (page == kActuatorsPage) {
-    const auto &specs = rammp::kActuators;
-    for (uint8_t i = 0; i < actuator_count; i++) {
+    const auto &specs = rammp::kSeatAxes;
+    for (uint8_t i = 0; i < seat_axis_count; i++) {
       setting_row_add({specs[i].short_name, specs[i].label, specs[i].min_value, specs[i].max_value,
                        specs[i].step, specs[i].decimals, nullptr},
-                      &actuator_value[i], true);
+                      &seat_axis_value[i], true);
     }
   } else {
     for (int i = 0; i < SETTINGS_PARAM_COUNT; i++) {
@@ -2266,11 +2430,7 @@ static void action_self_test() { selftest_request(SelfTestTrigger::LOCAL, 0); }
 
 // An RTPS command: the request a "+" press on the actuators page makes. The
 // seat moves only if the MCB agrees, and a refusal flashes on that page.
-static void action_seat_up() {
-  actuator_req_id++;
-  actuator_req_target[actuator_req_id] = rammp::ActuatorId::ELEVATION;
-  rtps_comms_publish_actuator_command(actuator_req_id, rammp::ActuatorId::ELEVATION, +1);
-}
+static void action_seat_up() { seat_step(rammp::index_of(rammp::SeatAxis::ELEVATION), +1); }
 
 static void action_restart_hmi() {
   static espp::Logger action_logger({.tag = "actions", .level = espp::Logger::Verbosity::INFO});
@@ -3635,7 +3795,7 @@ extern "C" void app_main(void) {
   // default. The export draws a green "ACTIVE", so the initial observer run
   // repaints it grey — that is the point, not a flicker to design away.
   lv_subject_init_int(&drive_status_subject, static_cast<int32_t>(rammp::DriveStatus::INACTIVE));
-  lv_subject_init_int(&mcb_state_subject, static_cast<int32_t>(rammp::SystemState::OK));
+  lv_subject_init_int(&mcb_state_subject, static_cast<int32_t>(rammp::FaultState::OK));
   // Initialised before the panels bind, because their observers read it on the
   // first run. LINK_DOWN at boot is true and self-correcting: the poll timer
   // has the real answer a quarter second later.
@@ -3670,7 +3830,7 @@ extern "C" void app_main(void) {
   clock_poll_cb(nullptr); // the RTC's time, when it had one, from the first frame
   lv_timer_create(clock_poll_cb, kClockPollMs, nullptr);
   lv_subject_add_observer_obj(&speed_tenths_subject, speed_label_observer, ui_SpeedNumber, nullptr);
-  lv_subject_init_int(&drive_mode_subject, static_cast<int32_t>(rammp::DriveMode::NORMAL));
+  lv_subject_init_int(&drive_mode_subject, static_cast<int32_t>(rammp::DriveProfile::NORMAL));
   bind_drive_mode_button(ui_DriveModeButton, &kModeHolo);
   bind_drive_mode_button(ui_DriveModeButton1, &kModeNormal);
   bind_drive_mode_button(ui_DriveModeButton2, &kModeAuto);
@@ -3891,9 +4051,8 @@ extern "C" void app_main(void) {
     }
   }
 
-  // The adjustment buttons get navigation and focus only — grid_click_cb moves
-  // the cursor and nothing else, so pressing one does nothing beyond LVGL's own
-  // pressed state until their behaviour is written.
+  // The adjustment buttons: "-"/"+" and the three presets, all handled by
+  // grid_click_cb against whichever axis the function button picked.
   seat_adjust_group = lv_group_create();
   for (int r = 0; r < seat_adjust_grid.rows; r++) {
     for (int c = 0; c < seat_adjust_grid.cols[r]; c++) {
@@ -3908,6 +4067,19 @@ extern "C" void app_main(void) {
   lv_subject_init_string(&seat_function_subject, seat_function_buf, seat_function_prev_buf,
                          sizeof(seat_function_buf), lv_label_get_text(ui_AngleSettingLabel));
   lv_label_bind_text(ui_AngleSettingLabel, &seat_function_subject, nullptr);
+
+  // The number under each function button, and the pair on the adjustment page,
+  // read the values the MCB reports and nothing else: a press asks, and the
+  // screen moves when SeatState says the seat did. The export's placeholders
+  // ("4.0 in", "12°") are replaced the moment the first sample lands, and read
+  // "--" until then.
+  lv_obj_t *seat_values[] = {ui_SeatButtonValue1, ui_SeatButtonValue2, ui_SeatButtonValue3,
+                             ui_SeatButtonValue4};
+  for (uint8_t i = 0; i < seat_axis_count && i < std::size(seat_values); i++) {
+    lv_subject_add_observer_obj(&seat_axis_value[i], seat_button_value_observer, seat_values[i],
+                                &seat_axis_format[i]);
+    lv_subject_add_observer_obj(&seat_axis_value[i], seat_angle_observer, ui_AngleLabel, nullptr);
+  }
 
   // Hand the joystick between groups as the screen changes. Registered on both
   // screens so every route in and out is covered.
@@ -4070,9 +4242,12 @@ extern "C" void app_main(void) {
   // SpecificSettingScreen: what outlives the screen, which is built on demand
   // (settings_screen_ensure).
 
-  actuator_count = static_cast<uint8_t>(rammp::kActuatorCount);
-  for (uint8_t i = 0; i < actuator_count; i++) {
-    lv_subject_init_int(&actuator_value[i], kValueUnknown);
+  seat_axis_count = static_cast<uint8_t>(rammp::kSeatAxisCount);
+  for (uint8_t i = 0; i < seat_axis_count; i++) {
+    lv_subject_init_int(&seat_axis_value[i], kValueUnknown);
+    const rammp::SeatAxisSpec &axis = rammp::kSeatAxes[i];
+    seat_axis_format[i] = {axis.short_name, axis.label,    axis.min_value, axis.max_value,
+                           axis.step,       axis.decimals, axis.unit};
   }
   lv_subject_init_int(&actuator_reject_subject, kActuatorRejectNone);
   actuator_reject_timer =
@@ -4494,8 +4669,7 @@ extern "C" void app_main(void) {
       adc_published = rtps_comms_publish_adc(
           calibrating ? 0.0f : stick.x(), calibrating ? 0.0f : stick.y(),
           calibrating ? 0.0f : stick.z(),
-          joy_button_pressed.load() ? rammp::Buttons::JOYSTICK : rammp::Buttons::NONE,
-          drive_mode_published.load());
+          joy_button_pressed.load() ? rammp::Buttons::JOYSTICK : rammp::Buttons::NONE);
     }
     // Every cycle, valid or not: the self test measures the loop's cadence and
     // how often a read fails, as well as the values. A no-op unless a run is
@@ -4544,11 +4718,11 @@ extern "C" void app_main(void) {
   // lv_subject_set_int runs the observers synchronously on this task and they
   // touch widgets.
   // RTPS handlers run on the RTPS task: subjects only, under the LVGL lock.
-  rtps_comms_on_mcb_status([](const rammp::McbStatus &status) {
+  rtps_comms_on_system_state([](const rammp::SystemState &status) {
     clock_note_mcb_time(status); // no LVGL: sets the system clock and the RTC
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
     lv_subject_set_int(&drive_status_subject, static_cast<int32_t>(status.drive_status));
-    lv_subject_set_int(&mcb_state_subject, static_cast<int32_t>(status.system_state));
+    lv_subject_set_int(&mcb_state_subject, static_cast<int32_t>(status.fault));
     lv_subject_set_int(&speed_tenths_subject, status.speed_tenths);
     // copy_string cuts each text to its subject's buffer (RAMMP_*_LEN)
     lv_subject_copy_string(&drive_text_subject, status.drive_text.c_str());
@@ -4556,9 +4730,9 @@ extern "C" void app_main(void) {
     lv_subject_copy_string(&error_text_subject, status.error_text.c_str());
     lv_subject_copy_string(&error_footer_subject, status.error_footer.c_str());
   });
-  rtps_comms_on_actuator_state([](const rammp::ActuatorState &state) {
+  rtps_comms_on_seat_state([](const rammp::SeatState &state) {
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
-    actuator_apply_state(state);
+    seat_apply_state(state);
   });
   rtps_comms_on_diagnostics([](const rammp::Diagnostics &diag) {
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);

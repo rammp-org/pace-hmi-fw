@@ -33,9 +33,9 @@ using std::chrono::milliseconds;
 
 /* ==== Names and helpers ================================================= */
 
-// ActuatorId -> its row in kActuators and ActuatorState.values: to
-// range-check the MCB's answer and find the row a refused step flashes.
-constexpr size_t index_of(ActuatorId id) { return static_cast<size_t>(id); }
+// SeatAxis -> its row in kSeatAxes and SeatState.values: to range-check the MCB's
+// answer and find the row a refused request flashes.
+constexpr size_t index_of(SeatAxis axis) { return static_cast<size_t>(axis); }
 
 // Names for the status labels, the fault banner (when the MCB sends no text) and the
 // logs. A value this firmware does not know reads "?".
@@ -43,26 +43,26 @@ constexpr const char *to_string(DriveStatus v) {
   return v == DriveStatus::ACTIVE ? "ACTIVE" : v == DriveStatus::INACTIVE ? "INACTIVE" : "?";
 }
 
-constexpr const char *to_string(SystemState v) {
-  return v == SystemState::OK ? "OK" : v == SystemState::ERROR ? "ERROR" : "?";
+constexpr const char *to_string(FaultState v) {
+  return v == FaultState::OK ? "OK" : v == FaultState::ERROR ? "ERROR" : "?";
 }
 
-constexpr const char *to_string(ActuatorResult v) {
-  return v == ActuatorResult::OK           ? "OK"
-         : v == ActuatorResult::AT_MIN     ? "AT_MIN"
-         : v == ActuatorResult::AT_MAX     ? "AT_MAX"
-         : v == ActuatorResult::INHIBITED  ? "INHIBITED"
-         : v == ActuatorResult::UNKNOWN_ID ? "UNKNOWN_ID"
-                                           : "?";
+constexpr const char *to_string(SeatResult v) {
+  return v == SeatResult::OK             ? "OK"
+         : v == SeatResult::AT_MIN       ? "AT_MIN"
+         : v == SeatResult::AT_MAX       ? "AT_MAX"
+         : v == SeatResult::INHIBITED    ? "INHIBITED"
+         : v == SeatResult::UNKNOWN_AXIS ? "UNKNOWN_AXIS"
+                                         : "?";
 }
 
 /* ==== Timing (what this HMI expects of the MCB) ========================= */
 
-inline constexpr milliseconds kMcbStatusPeriod{500};     // MCB sends McbStatus this often
-inline constexpr milliseconds kMcbStatusTimeout{2000};   // none this long = link lost
-inline constexpr milliseconds kActuatorStatePeriod{500}; // MCB resends ActuatorState
-inline constexpr milliseconds kDiagPeriod{500};          // MCB sends Diagnostics
-inline constexpr milliseconds kDiagTimeout{2000};        // none this long = stale, red
+inline constexpr milliseconds kMcbStatusPeriod{500};   // MCB sends SystemState this often
+inline constexpr milliseconds kMcbStatusTimeout{2000}; // none this long = link lost
+inline constexpr milliseconds kSeatStatePeriod{500};   // MCB resends SeatState
+inline constexpr milliseconds kDiagPeriod{500};        // MCB sends Diagnostics
+inline constexpr milliseconds kDiagTimeout{2000};      // none this long = stale, red
 
 /* ==== Display limits ==================================================== */
 
@@ -152,13 +152,13 @@ inline constexpr char kHmiLinkDownText[] = "NO ETHERNET LINK";
 inline constexpr char kHmiLinkDownFooter[] = "Check cable/switch to MCB";
 inline constexpr char kHmiNoIpText[] = "LINK UP, NO DHCP LEASE";
 inline constexpr char kHmiNoIpFooter[] = "Check DHCP server";
-inline constexpr char kHmiNoPeerText[] = "NO McbStatus IN 2000 MS";
-inline constexpr char kHmiNoPeerFooter[] = "topic rammp/mcb/status";
+inline constexpr char kHmiNoPeerText[] = "NO SystemState IN 2000 MS";
+inline constexpr char kHmiNoPeerFooter[] = "topic rammp/mcb/system_state";
 static_assert(kMcbStatusTimeout == milliseconds{2000}, "update kHmiNoPeerText");
-static_assert(std::string_view(kHmiNoPeerFooter).ends_with(kMcbStatus.name),
+static_assert(std::string_view(kHmiNoPeerFooter).ends_with(kMcbSystemState.name),
               "update kHmiNoPeerFooter");
 
-/* state != OK with an empty error_text: printf(state number, to_string(state)) */
+/* fault != OK with an empty error_text: printf(fault number, to_string(fault)) */
 inline constexpr char kHmiMcbNoTextFmt[] = "system_state=%u (%s), error_text empty";
 
 } // namespace rammp

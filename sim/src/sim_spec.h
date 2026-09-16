@@ -9,8 +9,8 @@
 
 #include <stdint.h>
 
-#define RAMMP_MCB_STATUS_PERIOD_MS 500   /* rammp::kMcbStatusPeriod */
-#define RAMMP_MCB_STATUS_TIMEOUT_MS 2000 /* rammp::kMcbStatusTimeout */
+#define RAMMP_SYSTEM_STATE_PERIOD_MS 500   /* rammp::kMcbStatusPeriod */
+#define RAMMP_SYSTEM_STATE_TIMEOUT_MS 2000 /* rammp::kMcbStatusTimeout */
 
 #define RAMMP_SPEED_MAX_TENTHS 99  /* rammp::kSpeedMaxTenths */
 #define RAMMP_MCB_TEXT_LEN 16      /* rammp::kMcbTextLen */
@@ -22,14 +22,14 @@
 #define RAMMP_DRIVE_STATUS_INACTIVE 0
 #define RAMMP_DRIVE_STATUS_ACTIVE 1
 
-/* rammp::SystemState */
-#define RAMMP_STATE_OK 0
-#define RAMMP_STATE_ERROR 1
+/* rammp::FaultState */
+#define RAMMP_FAULT_OK 0
+#define RAMMP_FAULT_ERROR 1
 
-/* rammp::DriveMode */
-#define RAMMP_DRIVE_MODE_NORMAL 0
-#define RAMMP_DRIVE_MODE_HOLO 1
-#define RAMMP_DRIVE_MODE_AUTO 2
+/* rammp::DriveProfile */
+#define RAMMP_DRIVE_PROFILE_NORMAL 0
+#define RAMMP_DRIVE_PROFILE_HOLO 1
+#define RAMMP_DRIVE_PROFILE_AUTO 2
 
 static inline const char *rammp_drive_status_name(int v) {
   return v == RAMMP_DRIVE_STATUS_INACTIVE ? "INACTIVE"
@@ -37,8 +37,8 @@ static inline const char *rammp_drive_status_name(int v) {
                                           : "?";
 }
 
-static inline const char *rammp_state_name(int v) {
-  return v == RAMMP_STATE_OK ? "OK" : v == RAMMP_STATE_ERROR ? "ERROR" : "?";
+static inline const char *rammp_fault_name(int v) {
+  return v == RAMMP_FAULT_OK ? "OK" : v == RAMMP_FAULT_ERROR ? "ERROR" : "?";
 }
 
 #endif /* SIM_SPEC_H */

@@ -65,7 +65,7 @@ class CarModel:
         self.y = 0.0
         self.heading = 0.0  # radians, 0 = up the screen
         self.speed = 0.0  # in displayed units, 0 .. SPEED_MAX_TENTHS/10
-        self.drive_mode = spec.DRIVE_MODE_NORMAL
+        self.drive_profile = spec.DRIVE_PROFILE_NORMAL
         #: Last deflections applied, for the window to display.
         self.inputs = (0.0, 0.0, 0.0)
         self._last_update: Optional[float] = None
@@ -79,7 +79,7 @@ class CarModel:
         """The number the HMI shows, derived from the car rather than beside it."""
         return max(0, min(int(round(self.speed * 10)), spec.SPEED_MAX_TENTHS))
 
-    def update(self, sample: Optional[tuple], drive_mode: Optional[int] = None) -> None:
+    def update(self, sample: Optional[tuple], drive_profile: Optional[int] = None) -> None:
         """Advance the car to now, given the latest joystick sample."""
         now = time.monotonic()
         if self._last_update is None:
@@ -90,17 +90,17 @@ class CarModel:
         self._last_update = now
         if sample is None or dt <= 0.0:
             return
-        if drive_mode is not None:
-            self.drive_mode = drive_mode
+        if drive_profile is not None:
+            self.drive_profile = drive_profile
 
         # Already -1..+1, centred and deadzoned by the HMI: +x right, +y forward.
         steer, throttle, twist = sample[0], sample[1], sample[2]
         self.inputs = (steer, throttle, twist)
 
-        # Twist is independent of drive mode: it always spins the chair in place.
+        # Twist is independent of drive profile: it always spins the chair in place.
         self.heading += twist * TWIST_RATE * dt
 
-        if self.drive_mode == spec.DRIVE_MODE_HOLO:
+        if self.drive_profile == spec.DRIVE_PROFILE_HOLO:
             self._step_holonomic(steer, throttle, dt)
         else:
             # AUTO is selectable on the HMI but undefined, so it drives as
@@ -158,8 +158,8 @@ class DriveView:
 
         status = ttk.Frame(self.window, padding=(8, 0, 8, 8))
         status.pack(fill="x")
-        self.mode_label = ttk.Label(status, text="mode: -")
-        self.mode_label.pack(side="left")
+        self.profile_label = ttk.Label(status, text="profile: -")
+        self.profile_label.pack(side="left")
         self.readout = ttk.Label(status, text="")
         self.readout.pack(side="right")
         ttk.Button(status, text="Recentre car", command=self.recentre).pack(side="left", padx=12)
@@ -245,9 +245,9 @@ class DriveView:
         self._draw_car()
 
         steer, throttle, twist = self.car.inputs
-        mode_name = spec.DRIVE_MODE_NAMES.get(self.car.drive_mode, "?")
-        status = self.status_fn() if self.status_fn else "set the drive mode on the Tab5"
-        self.mode_label.configure(text=f"mode: {mode_name}   ({status})")
+        profile_name = spec.DRIVE_PROFILE_NAMES.get(self.car.drive_profile, "?")
+        status = self.status_fn() if self.status_fn else "set the drive profile on the Tab5"
+        self.profile_label.configure(text=f"profile: {profile_name}   ({status})")
         self.readout.configure(
             text=f"speed {self.car.speed_tenths / 10:.1f}   "
                  f"heading {math.degrees(self.car.heading) % 360:5.0f}°   "

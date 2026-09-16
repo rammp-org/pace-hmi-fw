@@ -3,8 +3,8 @@
  *
  * On the bench this job belongs to scripts/rtps_mcb_gui.py, which plays the
  * MCB over the wire. The sim has no wire, so this feeds the same
- * rammp_mcb_status_t through the same entry point the RTPS receive task uses
- * (sim_nav_on_mcb_status), at the same RAMMP_MCB_STATUS_PERIOD_MS cadence the
+ * rammp_system_state_t through the same entry point the RTPS receive task uses
+ * (sim_nav_on_system_state), at the same RAMMP_SYSTEM_STATE_PERIOD_MS cadence the
  * spec requires of a real publisher.
  *
  * It is driven entirely from the keyboard (press F1 for the map). None of it
