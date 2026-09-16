@@ -82,6 +82,9 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
         # timeout rather than sit on a screen that pretends the chair drives.
         self.drive_request = spec.DRIVE_REQUEST_DISABLE
         self.refuse_drive = False
+        # The other half: a MIB that will not stop. Leaving the drive screen is a
+        # request too, so this is how the bench makes that one fail.
+        self.refuse_stop = False
         # The profile rides DriveCommand; the HMI waits to see it come back in
         # SystemState before it believes the change took. Two of them, because a
         # real MCB is allowed to disagree: `requested_profile` is what the
@@ -273,6 +276,8 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
         if self.follow_profile:
             self.profile = profile
         if request == spec.DRIVE_REQUEST_ENABLE and self.refuse_drive:
+            return
+        if request == spec.DRIVE_REQUEST_DISABLE and self.refuse_stop:
             return
         # ERROR and INITIALIZING are not ours to leave: a drive request neither clears a
         # fault nor finishes booting.
@@ -520,6 +525,7 @@ HELP_TEXT = """commands:
   i / inactive    state -> IDLE
   z               state -> INITIALIZING
   x               toggle refusing DriveCommand ENABLE (HMI should time out)
+  s               toggle refusing DriveCommand DISABLE (HMI cannot leave driving)
   ok              state -> IDLE
   e / err         state -> ERROR
   et <text>       error banner body ('et' alone clears it)
@@ -550,6 +556,10 @@ def run_interactive(harness: SystemStatePublisher) -> None:
         elif command == "x":
             harness.refuse_drive = not harness.refuse_drive
             print(f"  refusing drive requests: {harness.refuse_drive}")
+            continue
+        elif command == "s":
+            harness.refuse_stop = not harness.refuse_stop
+            print(f"  refusing stop requests: {harness.refuse_stop}")
             continue
         elif command == "ok":
             harness.system_state = spec.MIB_SYSTEM_STATE_IDLE

@@ -605,7 +605,11 @@ static MIB::DriveProfile kProfileLow = MIB::DriveProfile::LOW;
 
 static void drive_profile_click_cb(lv_event_t *e) {
   const auto *mode = static_cast<const MIB::DriveProfile *>(lv_event_get_user_data(e));
-  lv_subject_set_int(&drive_profile_subject, static_cast<int32_t>(*mode));
+  // Ask, do not assume: drive_profile_subject is what the MIB reports, and it is fed
+  // from MibStatus.activeProfile. Setting it here would highlight a button the chair
+  // may refuse, which is the one thing these three must not do.
+  drive_profile_published.store(*mode);
+  drive_publish();
 }
 
 // Highlights the button whose mode is selected. Border width rather than a
@@ -626,10 +630,12 @@ static void bind_drive_profile_button(lv_obj_t *button, MIB::DriveProfile *mode)
   lv_subject_add_observer_obj(&drive_profile_subject, drive_mode_button_observer, button, mode);
 }
 
-// Mirrors the subject out to the ADC task, which cannot take the LVGL lock.
+// Mirrors what the MIB reports out to the ADC task, which cannot take the LVGL lock,
+// so the next DriveCommand carries the profile the chair actually took. It does not
+// publish: the subject is fed from MibStatus now, and republishing on every sample
+// would put a DriveCommand on the wire twice a second.
 static void drive_mode_publish_observer(lv_observer_t *, lv_subject_t *subject) {
   drive_profile_published.store(static_cast<MIB::DriveProfile>(lv_subject_get_int(subject)));
-  drive_publish(); // the MCB confirms it in SystemState.profile
 }
 
 // The speed arrives as tenths; the label wants "N.N". No built-in binding
@@ -1181,9 +1187,20 @@ static bool seat_ready() {
 // say - rather than the one at the moment it first went wrong.
 /////////////////////////////////////////////////////////////////////////////
 
-static constexpr uint32_t kDriveRefusedShowMs = 4000; // how long one refusal stays up
+static constexpr uint32_t kDriveRefusedShowMs = 3000; // how long one refusal stays up
+static constexpr uint32_t kExitRefusedShowMs = 2000;  // a refused exit gets its own dwell
 // Which push was refused, so the panel can say which.
-enum : int32_t { kRefusedNone = 0, kRefusedDrive = 1, kRefusedSeat = 2 };
+enum : int32_t {
+  kRefusedNone = 0,
+  kRefusedDrive = 1, // a push barred before it was sent; the cause is read live
+  kRefusedSeat = 2,
+  // These three are the MIB's own doing, so they stay up for their whole window
+  // rather than clearing the moment mcb_ready() comes back true - the chair being
+  // fine again is exactly what makes them worth reading.
+  kRefusedDriveNotGranted = 3, // asked to drive, never got ENABLED
+  kRefusedDriveStopped = 4,    // was driving, the MIB stopped it
+  kRefusedExit = 5,            // asked to stop, the MIB is still driving
+};
 static lv_subject_t entry_refused_subject; // kRefused*; panel up unless None
 // Created paused and re-armed by each refusal, like haptic_label_timer, so a
 // second push restarts the countdown rather than stacking a timer.
@@ -1254,6 +1271,25 @@ static void fill_drive_blocked_panel(lv_obj_t *panel, const char *link_title,
   }
 }
 
+// Fills a panel with a reason that is the MIB's own: its error_message when it sent
+// one, and the given fallback when it did not. Used for the refusals that happen with
+// the link up, where fill_drive_blocked_panel's "what is wrong with the link" half has
+// nothing to say.
+static void fill_mib_reason_panel(lv_obj_t *panel, const char *title, const char *fallback_body,
+                                  const char *fallback_footer) {
+  lv_obj_t *title_label = ui_comp_get_child(panel, UI_COMP_ERRORWARNINGPANEL_ERRORTITLELABEL);
+  lv_obj_t *body =
+      ui_comp_get_child(panel, UI_COMP_ERRORWARNINGPANEL_ERRORMESSAGECONTAINER_ERRORMESSAGELABEL);
+  lv_obj_t *footer = ui_comp_get_child(
+      panel, UI_COMP_ERRORWARNINGPANEL_ERRORMESSAGECONTAINER_ERRORMESSAGEFOOTERLABEL);
+  const char *error_text = lv_subject_get_string(&error_text_subject);
+  const char *error_footer = lv_subject_get_string(&error_footer_subject);
+
+  lv_label_set_text(title_label, title);
+  lv_label_set_text(body, error_text[0] != '\0' ? error_text : fallback_body);
+  lv_label_set_text(footer, error_footer[0] != '\0' ? error_footer : fallback_footer);
+}
+
 // Binds `cb` on `panel` to every subject the cause depends on, so the subject
 // argument each observer gets is ignored: whichever fired, the answer depends
 // on all of them.
@@ -1269,7 +1305,23 @@ static void bind_to_drive_blocked_cause(lv_obj_t *panel, lv_observer_cb_t cb) {
 static void entry_refused_panel_observer(lv_observer_t *observer, lv_subject_t *) {
   lv_obj_t *panel = lv_observer_get_target_obj(observer);
   const int32_t refused = lv_subject_get_int(&entry_refused_subject);
-  if (refused == kRefusedNone || mcb_ready()) {
+  if (refused == kRefusedNone || refused == kRefusedExit) {
+    // kRefusedExit belongs to the DriveScreen's own panel, not this one.
+    lv_obj_add_flag(panel, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+  // The MIB's own refusals: shown for their window whatever the state says now,
+  // because "driving stopped" is worth reading precisely when all is well again.
+  if (refused == kRefusedDriveNotGranted || refused == kRefusedDriveStopped) {
+    const bool stopped = refused == kRefusedDriveStopped;
+    fill_mib_reason_panel(
+        panel, stopped ? rammp::kHmiDriveStoppedTitle : rammp::kHmiDriveNotGrantedTitle,
+        stopped ? rammp::kHmiDriveStoppedText : rammp::kHmiDriveNotGrantedText,
+        stopped ? rammp::kHmiDriveStoppedFooter : rammp::kHmiDriveNotGrantedFooter);
+    lv_obj_remove_flag(panel, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+  if (mcb_ready()) {
     lv_obj_add_flag(panel, LV_OBJ_FLAG_HIDDEN);
     return;
   }
@@ -1297,6 +1349,14 @@ static void bind_entry_refused_panel(lv_obj_t *panel) {
 // banner rather than silently hiding it.
 static void drive_screen_warning_observer(lv_observer_t *observer, lv_subject_t *) {
   lv_obj_t *panel = lv_observer_get_target_obj(observer);
+  // A refused exit: the MIB is still driving, so the screen stays and says why.
+  if (lv_subject_get_int(&entry_refused_subject) == kRefusedExit &&
+      lv_screen_active() == ui_DriveScreen) {
+    fill_mib_reason_panel(panel, rammp::kHmiExitRefusedTitle, rammp::kHmiExitRefusedText,
+                          rammp::kHmiExitRefusedFooter);
+    lv_obj_remove_flag(panel, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
   if (mcb_ready()) {
     lv_obj_add_flag(panel, LV_OBJ_FLAG_HIDDEN);
     return;
@@ -1309,6 +1369,10 @@ static void bind_mcb_lost_panel(lv_obj_t *panel) {
   if (panel == nullptr) {
     return;
   }
+  // Also on the refusal subject: a refused exit is raised with the link and state
+  // unchanged, so nothing else would bring this panel back.
+  lv_subject_add_observer_obj(&entry_refused_subject, drive_screen_warning_observer, panel,
+                              nullptr);
   bind_to_drive_blocked_cause(panel, drive_screen_warning_observer);
 }
 
@@ -1318,6 +1382,9 @@ static void entry_refused_clear() {
 }
 
 static void entry_refused_timer_cb(lv_timer_t *) { entry_refused_clear(); }
+
+// Defined below, with the drive gestures that raise most of these.
+static void entry_refused_show(int32_t which, uint32_t show_ms);
 
 // Runs from hold_poll_cb, on the same input and cadence as the gesture it
 // shadows.
@@ -1336,27 +1403,46 @@ static void entry_refusal_poll() {
                                                                   : kRefusedNone;
   const int32_t refused = lv_subject_get_int(&entry_refused_subject);
   if (pushed && page != kRefusedNone && !mcb_ready()) {
-    lv_subject_set_int(&entry_refused_subject, page);
-    lv_timer_reset(entry_refused_timer);
-    lv_timer_resume(entry_refused_timer);
+    // Through the helper, so this always gets its own dwell back after a refusal
+    // that asked for a shorter one.
+    entry_refused_show(page, kDriveRefusedShowMs);
     // Distinct from the STRONG_CLICK a completed hold gives, so a refusal can
     // be felt as well as read.
     haptic_play(espp::Drv2605::Waveform::DOUBLE_CLICK, 1);
-  } else if (refused != kRefusedNone && (refused != page || mcb_ready())) {
+  } else if ((refused == kRefusedDrive || refused == kRefusedSeat) &&
+             (refused != page || mcb_ready())) {
     // Clear rather than merely hide, so a cause that clears and then recurs
     // inside the window does not bring the panel back without a new push.
     entry_refused_clear();
   }
 }
 
-// The MCB decides whether the chair drives: the joystick asks with a DriveCommand and
-// shows the DriveScreen only once SystemState says drive_status is ACTIVE. A request that
-// goes unanswered for kDriveWaitUs raises the same banner a refused push does, so a silent
-// MCB cannot leave the user on a screen that pretends the chair is driving.
+// The MIB decides whether the chair drives: the joystick asks with a DriveCommand and
+// shows the DriveScreen only once MibStatus says ENABLED. Two windows, because saying
+// "that was refused" and giving up on the request are different jobs:
+//
+//  - kDriveAnswerUs is when to speak. One MibStatus period plus a margin, so a sample
+//    already in flight when the request went out cannot be mistaken for a refusal.
+//    This is as early as a refusal can honestly be known, and waiting longer just
+//    reads as the HMI ignoring the user.
+//  - kDriveWaitUs is when to stop asking, so a silent MIB is not left with a live
+//    request. The warning is long since up by then.
+static constexpr int64_t kDriveAnswerUs =
+    std::chrono::duration_cast<std::chrono::microseconds>(rammp::kMibStatusPeriod +
+                                                          std::chrono::milliseconds{250})
+        .count();
 static constexpr int64_t kDriveWaitUs =
     std::chrono::duration_cast<std::chrono::microseconds>(rammp::kMibStatusTimeout).count();
 static std::atomic<rammp::DriveRequest> drive_request{rammp::DriveRequest::DISABLE};
 static int64_t drive_wait_until_us; // 0 = not waiting for an answer
+static int64_t drive_wait_warn_us;  // 0 = nothing left to say about that request
+// Leaving is a request too: the MIB decides when driving stops, so the exit gesture
+// asks and this is how long to wait before telling the user it was refused.
+static int64_t drive_exit_until_us; // 0 = not waiting for the MIB to stop
+// Latched separately from the deadline: a refused exit clears the deadline when it
+// raises its warning, and the MIB granting the stop late must still read as the user
+// leaving rather than as the chair stopping on its own.
+static bool drive_exit_requested;
 
 static void drive_publish() {
   rtps_comms_publish_drive(drive_request.load(), drive_profile_published.load());
@@ -1367,9 +1453,12 @@ static void drive_ask(rammp::DriveRequest request) {
   drive_publish();
 }
 
-// Both refusals read the same: see entry_refusal_poll.
-static void entry_refused_show(int32_t which) {
+// Both refusals read the same: see entry_refusal_poll. The dwell is the caller's,
+// because a refused exit is asked to stay up for less time than a refused entry, and
+// the timer is shared - so the period has to be set on every raise, not once.
+static void entry_refused_show(int32_t which, uint32_t show_ms) {
   lv_subject_set_int(&entry_refused_subject, which);
+  lv_timer_set_period(entry_refused_timer, show_ms);
   lv_timer_reset(entry_refused_timer);
   lv_timer_resume(entry_refused_timer);
 }
@@ -1394,22 +1483,46 @@ static void drive_screen_follow_state() {
   }
   if (driving) {
     drive_wait_until_us = 0; // whatever was being waited for, it happened
+    drive_wait_warn_us = 0;  // and there is nothing to complain about
+    drive_exit_until_us = 0; // any older request to stop is stale
+    drive_exit_requested = false;
     _ui_screen_change(&ui_DriveScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0, &ui_DriveScreen_screen_init);
   } else if (connected) {
+    // Asked for, or done to us? Leaving on request needs no explanation; the MIB
+    // stopping the chair by itself does, and the drive screen is gone by then, so it
+    // has to be said on the screen the user lands on.
+    const bool asked = drive_exit_requested;
+    drive_exit_until_us = 0;
+    drive_exit_requested = false;
     screen_return_to_main();
+    if (!asked) {
+      entry_refused_show(kRefusedDriveStopped, kDriveRefusedShowMs);
+    }
   }
 }
 
 static void drive_wait_poll() {
   drive_screen_follow_state();
-  if (drive_wait_until_us == 0 || esp_timer_get_time() < drive_wait_until_us) {
+  const int64_t now = esp_timer_get_time();
+  if (drive_exit_until_us != 0 && now >= drive_exit_until_us) {
+    // Asked to stop and the chair is still driving. Say so and stay put: the screen
+    // has to keep agreeing with the chair, however much the user wants to leave. The
+    // request stays latched, so a stop granted later is still their doing.
+    drive_exit_until_us = 0;
+    entry_refused_show(kRefusedExit, kExitRefusedShowMs);
+  }
+  if (drive_wait_warn_us != 0 && now >= drive_wait_warn_us) {
+    // A MibStatus has been and gone and the chair still is not driving. That is as
+    // much as can be known this early, and it is enough to say so.
+    drive_wait_warn_us = 0;
+    entry_refused_show(kRefusedDriveNotGranted, kDriveRefusedShowMs);
+  }
+  if (drive_wait_until_us == 0 || now < drive_wait_until_us) {
     return; // not waiting on a request, or still inside its window
   }
-  // Asked, and the MIB never said ENABLED: give up and say so, rather than leave
-  // someone holding a request that went nowhere.
+  // Long since told the user; this is only about not leaving a live request behind.
   drive_wait_until_us = 0;
   drive_ask(rammp::DriveRequest::DISABLE);
-  entry_refused_show(kRefusedDrive);
 }
 
 static HoldGesture drive_enter_gesture{
@@ -1423,8 +1536,10 @@ static HoldGesture drive_enter_gesture{
     // is driving, and the deadline is only how long to wait before giving up.
     .completed =
         [] {
+          const int64_t now = esp_timer_get_time();
           drive_ask(rammp::DriveRequest::ENABLE);
-          drive_wait_until_us = esp_timer_get_time() + kDriveWaitUs;
+          drive_wait_warn_us = now + kDriveAnswerUs;
+          drive_wait_until_us = now + kDriveWaitUs;
         },
 };
 
@@ -1439,7 +1554,12 @@ static HoldGesture drive_exit_gesture{
     // Ask only. drive_screen_follow_state closes the screen once the MIB actually
     // stops driving, so a MIB that does not stop cannot leave someone looking at the
     // main screen while the chair is still moving.
-    .completed = [] { drive_ask(rammp::DriveRequest::DISABLE); },
+    .completed =
+        [] {
+          drive_ask(rammp::DriveRequest::DISABLE);
+          drive_exit_requested = true;
+          drive_exit_until_us = esp_timer_get_time() + kDriveAnswerUs;
+        },
     // The button doubles as select, so a tap would visibly tick the bar and
     // snap back without this — the same reason the pull bars carry it.
     .grace_ms = kBarGraceMs,
@@ -3844,12 +3964,16 @@ extern "C" void app_main(void) {
   bind_drive_profile_button(ui_DriveModeButton1, &kProfileNormal);
   bind_drive_profile_button(ui_DriveModeButton2, &kProfileLow);
   lv_subject_add_observer(&drive_profile_subject, drive_mode_publish_observer, nullptr);
-  bind_mcb_lost_panel(ui_ErrorWarningPanel);  // DriveScreen
-  bind_mcb_lost_panel(ui_ErrorWarningPanel1); // SeatAdjustmentFlexScreen
-  // Initialised before the bind: the panel's observer reads it on its first run.
+  // Before the panels that observe it. lv_subject_init_int memzeroes the subject,
+  // taking any observer already on it with it, and bind_mcb_lost_panel below watches
+  // this one so the drive screen can show a refused exit.
   lv_subject_init_int(&entry_refused_subject, 0);
   entry_refused_timer = lv_timer_create(entry_refused_timer_cb, kDriveRefusedShowMs, nullptr);
   lv_timer_pause(entry_refused_timer);
+
+  bind_mcb_lost_panel(ui_ErrorWarningPanel);  // DriveScreen
+  bind_mcb_lost_panel(ui_ErrorWarningPanel1); // SeatAdjustmentFlexScreen
+  // Initialised before the bind: the panel's observer reads it on its first run.
   bind_entry_refused_panel(ui_ErrorWarningPanel4); // MainScreenFlex
   // Diagnostics readings, and whether they are live: before the poll timer
   // that keeps the latter current, and before any RTPS sample can land.
@@ -4736,6 +4860,9 @@ extern "C" void app_main(void) {
     clock_note_mcb_time(status); // no LVGL: sets the system clock and the RTC
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
     lv_subject_set_int(&mib_state_subject, static_cast<int32_t>(status.systemState));
+    // What the MIB is actually driving with: the three profile buttons highlight from
+    // this, so they follow the chair even when something else changed it.
+    lv_subject_set_int(&drive_profile_subject, static_cast<int32_t>(status.activeProfile));
     lv_subject_set_int(&speed_tenths_subject, status.speed_tenths);
     // copy_string cuts each text to its subject's buffer (RAMMP_*_LEN). drive_text_subject
     // stays empty: the MIB sends one wording, and the state label is where it belongs.

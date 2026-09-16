@@ -209,17 +209,25 @@ class McbPanel:
             frame, text="Refuse ENABLE", variable=self.refuse_drive_var,
             command=self._apply_refuse_drive,
         ).grid(row=0, column=3, sticky="e", padx=(16, 0))
+        # Leaving the drive screen is a request as well, and this is the only way to
+        # see what the HMI does when the chair will not stop.
+        self.refuse_stop_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            frame, text="Refuse DISABLE", variable=self.refuse_stop_var,
+            command=self._apply_refuse_drive,
+        ).grid(row=0, column=4, sticky="e", padx=(12, 0))
 
         ttk.Label(
             frame,
             text="Granting one moves the state to ENABLED, which is what opens the HMI's "
                  "drive screen. Refuse it and the HMI should give up after "
-                 f"{spec.MIB_STATUS_TIMEOUT_MS} ms and raise its refusal banner. The MIB "
+                 f"{spec.MIB_STATUS_TIMEOUT_MS} ms and raise its refusal banner. Refuse "
+                 "DISABLE and it cannot leave the drive screen, and says so. The MIB "
                  "disables manual seat control while ENABLED, so the seat screen wants IDLE.",
             foreground="#666666", wraplength=560, justify="left",
-        ).grid(row=1, column=0, columnspan=4, sticky="w", pady=(6, 0))
+        ).grid(row=1, column=0, columnspan=5, sticky="w", pady=(6, 0))
 
-        profile = ttk.LabelFrame(parent, text="Drive profile (what SystemState reports)",
+        profile = ttk.LabelFrame(parent, text="Drive profile (what MibStatus reports)",
                                  padding=8)
         profile.pack(fill="x", padx=8, pady=4)
 
@@ -248,8 +256,9 @@ class McbPanel:
         ttk.Label(
             profile,
             text="The HMI publishes its profile on DriveCommand and waits to see it come back "
-                 "here. Untick Follow (a preset does it for you) to report something else, which "
-                 "is a profile change the chair did not grant.",
+                 "here, and highlights the button this reports - not the one that was pressed. "
+                 "Untick Follow (a preset does it for you) to report something else, which is a "
+                 "profile change the chair did not grant.",
             foreground="#666666", wraplength=560, justify="left",
         ).grid(row=2, column=0, columnspan=column + 3, sticky="w", pady=(6, 0))
 
@@ -258,6 +267,7 @@ class McbPanel:
             self._append_log("[gui] not connected")
             return
         self.harness.refuse_drive = self.refuse_drive_var.get()
+        self.harness.refuse_stop = self.refuse_stop_var.get()
 
     def _set_profile(self, value: int) -> None:
         self.profile_raw_var.set(str(value))

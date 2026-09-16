@@ -186,6 +186,27 @@ inline constexpr char kHmiSeatMcbRefusedTitle[] = "SEAT REFUSED: MCB STATE";
 inline constexpr char kHmiLinkLostTitle[] = "RTPS LINK LOST"; // lost on drive/seat screen
 inline constexpr char kHmiMcbFaultTitle[] = "MCB STATE FAULT";
 
+/* The MIB answered, or did not: a request that went out and did not get what it
+   asked for. The body is the MIB's own error_message when it sent one, so these are
+   the fallback wording for when it did not. */
+inline constexpr char kHmiDriveNotGrantedTitle[] = "DRIVE REFUSED: NOT GRANTED";
+inline constexpr char kHmiDriveNotGrantedText[] = "MIB DID NOT ENABLE DRIVING";
+inline constexpr char kHmiDriveNotGrantedFooter[] = "Request timed out";
+inline constexpr char kHmiDriveStoppedTitle[] = "DRIVING STOPPED";
+inline constexpr char kHmiDriveStoppedText[] = "MIB DISABLED DRIVING";
+inline constexpr char kHmiDriveStoppedFooter[] = "Hold up to ask again";
+inline constexpr char kHmiExitRefusedTitle[] = "EXIT REFUSED";
+inline constexpr char kHmiExitRefusedText[] = "MIB IS STILL DRIVING";
+inline constexpr char kHmiExitRefusedFooter[] = "Hold the button again";
+static_assert(sizeof(kHmiDriveNotGrantedText) <= kErrorTextLen &&
+                  sizeof(kHmiDriveStoppedText) <= kErrorTextLen &&
+                  sizeof(kHmiExitRefusedText) <= kErrorTextLen,
+              "refusal body outgrows the banner it shares with MIB faults");
+static_assert(sizeof(kHmiDriveNotGrantedFooter) <= kErrorFooterLen &&
+                  sizeof(kHmiDriveStoppedFooter) <= kErrorFooterLen &&
+                  sizeof(kHmiExitRefusedFooter) <= kErrorFooterLen,
+              "refusal footer outgrows the banner it shares with MIB faults");
+
 /* body / footer per link state short of connected */
 inline constexpr char kHmiEthFailedText[] = "W5500 ETHERNET INIT FAILED AT BOOT";
 inline constexpr char kHmiEthFailedFooter[] = "Power-cycle HMI to retry";
