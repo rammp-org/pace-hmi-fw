@@ -10,6 +10,8 @@
  * device opens for that one update, framed by espp::OtaService.
  */
 
+#include <cstdint>
+#include <functional>
 #include <string>
 
 #include "hmi_rtps_spec.hpp"
@@ -26,6 +28,18 @@ void ota_boot_confirm();
 /// A command from the RTPS task. Ignored unless addressed to this device with
 /// its current nonce.
 void ota_handle_command(const rammp::OtaCommand &command);
+
+/// Asked before a START is accepted: why an update may not start now, or "".
+/// Runs on the RTPS task. Set once, before rtps_comms_start().
+void ota_set_start_guard(std::function<std::string()> guard);
+
+/// The update in progress, for the UpdateScreen. Cheap (no flash reads); any task.
+struct OtaProgress {
+  rammp::OtaState state = rammp::OtaState::IDLE;
+  uint8_t percent = 0;
+  std::string last_error;
+};
+OtaProgress ota_progress();
 
 /// Everything in OtaDeviceInfo but `seq` and `ip`, which the publisher owns.
 rammp::OtaDeviceInfo ota_device_info();

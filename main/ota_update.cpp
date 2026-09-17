@@ -57,6 +57,7 @@ std::string last_error;
 bool session_running = false;
 std::atomic<bool> abort_requested{false};
 
+std::function<std::string()> start_guard;
 std::string own_mac;
 bool pending_verify = false;
 std::atomic<bool> confirmed{false};
@@ -539,6 +540,10 @@ void ota_handle_command(const rammp::OtaCommand &command) {
     refuse("an update is already in progress");
     return;
   }
+  if (std::string why = start_guard ? start_guard() : ""; !why.empty()) {
+    refuse(std::move(why));
+    return;
+  }
   if (auto why = start_refusal(command); !why.empty()) {
     refuse(std::move(why));
     return;
@@ -563,6 +568,13 @@ void ota_handle_command(const rammp::OtaCommand &command) {
   esp_pthread_set_cfg(&cfg);
   std::thread(run_session, command).detach();
   esp_pthread_set_cfg(&previous);
+}
+
+void ota_set_start_guard(std::function<std::string()> guard) { start_guard = std::move(guard); }
+
+OtaProgress ota_progress() {
+  std::lock_guard<std::mutex> lock(mutex);
+  return {.state = state, .percent = progress_pct, .last_error = last_error};
 }
 
 rammp::OtaDeviceInfo ota_device_info() {
