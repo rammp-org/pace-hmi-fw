@@ -35,13 +35,32 @@ MIB_HEADER_RELATIVE_PATH = os.path.join(
 
 # #define RAMMP_TOPIC_MIB_STATUS "rammp/mib/status" / #define RAMMP_TYPE_MIB_STATUS "..."
 _DEFINE_RE = re.compile(r'^\s*#define\s+RAMMP_((?:TOPIC|TYPE)_[A-Z0-9_]+)\s+"([^"]*)"', re.M)
-# enum class MibSystemState : uint8_t { INITIALIZING = 0, ... };
+# enum class MibSystemState : uint8_t { INITIALIZING, IDLE = 1, ... };
 _ENUM_RE = re.compile(r"enum class (\w+)\s*:\s*\w+\s*\{(.*?)\};", re.S)
-_MEMBER_RE = re.compile(r"\b([A-Z][A-Z0-9_]*)\s*=\s*(0[xX][0-9a-fA-F]+|\d+)\b")
+_COMMENT_RE = re.compile(r"/\*.*?\*/|//[^\n]*", re.S)
+_MEMBER_RE = re.compile(r"^([A-Z][A-Z0-9_]*)(?:\s*=\s*(0[xX][0-9a-fA-F]+|\d+))?$")
 # inline constexpr milliseconds kMibStatusPeriod{500};  inline constexpr size_t kMcbTextLen = 16;
 _NUMBER_RE = re.compile(
     r"^inline constexpr ([\w:]+) k(\w+)\s*(?:=\s*|\{)(0[xX][0-9a-fA-F]+|\d+)\}?;", re.M
 )
+
+
+def _enumerators(body: str):
+    """(NAME, value) for one enum body, counted as C++ counts: a bare enumerator is
+    the previous one + 1, so a header that leaves the values implicit (the MIB's)
+    still gives us numbers. An enum generated from an X-macro table has none here --
+    those rows are read from the table itself."""
+    if "#" in body:  # built by an X-macro over a table
+        return
+    value = 0
+    for segment in _COMMENT_RE.sub("", body).split(","):
+        member = _MEMBER_RE.match(segment.strip())
+        if not member:
+            continue
+        if member.group(2) is not None:
+            value = int(member.group(2), 0)
+        yield member.group(1), value
+        value += 1
 
 
 def _snake(name: str) -> str:
@@ -86,9 +105,9 @@ _HEADER_TEXT = ("\n".join(_read_spec(path) for path in
 STRINGS: Dict[str, str] = dict(_DEFINE_RE.findall(_HEADER_TEXT))
 #: every enumerator, as ENUM_MEMBER (MIB_SYSTEM_STATE_IDLE)
 ENUMS: Dict[str, int] = {
-    f"{_snake(enum)}_{member}": int(value, 0)
+    f"{_snake(enum)}_{member}": value
     for enum, body in _ENUM_RE.findall(_HEADER_TEXT)
-    for member, value in _MEMBER_RE.findall(body)
+    for member, value in _enumerators(body)
 }
 #: every numeric constant (timing gets a _MS suffix)
 NUMBERS: Dict[str, int] = {
@@ -210,10 +229,11 @@ CDR_LE_HEADER = b"\x00\x01\x00\x00"
 MSG_MIB_STATUS = [
     ("systemState", "B"), ("activeProfile", "B"),
     ("front_back_tilt", "f"), ("lateral_tilt", "f"), ("elevation", "f"), ("translation", "f"),
+    ("error_message", "str"),
     ("seq", "B"), ("speed_tenths", "B"),
     ("hour", "B"), ("minute", "B"), ("second", "B"),
     ("day", "B"), ("month", "B"), ("year", "B"),
-    ("status_text", "str"), ("error_message", "str"), ("error_footer", "str"),
+    ("status_text", "str"), ("error_footer", "str"),
 ]
 MSG_XY_TWIST = [("x", "f"), ("y", "f"), ("twist", "f"), ("buttons", "I")]
 MSG_DRIVE_COMMAND = [("request", "B"), ("profile", "B")]
@@ -307,16 +327,17 @@ def pack_mib_status(system_state: int, profile: int = 0, seat=(0.0, 0.0, 0.0, 0.
         MSG_MIB_STATUS,
         system_state & 0xFF, profile & 0xFF,
         float(front_back), float(lateral), float(elevation), float(translation),
+        _text(error_message, ERROR_TEXT_LEN),  # noqa: F821  (scraped)
         seq & 0xFF, max(0, min(int(speed_tenths), SPEED_MAX_TENTHS)), *when,  # noqa: F821
-        _text(status_text, MCB_TEXT_LEN),  # noqa: F821  (scraped)
-        _text(error_message, ERROR_TEXT_LEN), _text(error_footer, ERROR_FOOTER_LEN),  # noqa: F821
+        _text(status_text, MCB_TEXT_LEN),  # noqa: F821
+        _text(error_footer, ERROR_FOOTER_LEN),  # noqa: F821
     )
 
 
 def unpack_mib_status(payload: bytes):
     """(systemState, activeProfile, front_back_tilt, lateral_tilt, elevation, translation,
-    seq, speed_tenths, hour, minute, second, day, month, year_since_2000, status_text,
-    error_message, error_footer), or None."""
+    error_message, seq, speed_tenths, hour, minute, second, day, month, year_since_2000,
+    status_text, error_footer), or None."""
     return decode(MSG_MIB_STATUS, payload)
 
 
