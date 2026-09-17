@@ -230,9 +230,7 @@ MSG_MIB_STATUS = [
     ("systemState", "B"), ("activeProfile", "B"),
     ("front_back_tilt", "f"), ("lateral_tilt", "f"), ("elevation", "f"), ("translation", "f"),
     ("error_message", "str"),
-    ("seq", "B"), ("speed_tenths", "B"),
-    ("hour", "B"), ("minute", "B"), ("second", "B"),
-    ("day", "B"), ("month", "B"), ("year", "B"),
+    ("epoch_s", "q"), ("speed", "f"), ("utc_offset_min", "h"), ("seq", "B"),
     ("status_text", "str"), ("error_footer", "str"),
 ]
 MSG_XY_TWIST = [("x", "f"), ("y", "f"), ("twist", "f"), ("buttons", "I")]
@@ -308,27 +306,40 @@ def decode(fields, payload: bytes):
         return None
 
 
+#: mph per metre per second. A unit conversion, not a spec value: MibStatus.speed is
+#: m/s, and the HMI's dial happens to say mph (rammp::kMphPerMps in hmi_rtps_spec.hpp).
+MPH_PER_MPS = 2.236936
+
+
 def _text(text: str, limit: int) -> str:
     """ASCII only (the HMI's fonts have nothing else), cut to what the HMI shows."""
     return text.encode("ascii", "ignore")[: limit - 1].decode("ascii")
 
 
 def pack_mib_status(system_state: int, profile: int = 0, seat=(0.0, 0.0, 0.0, 0.0),
-                    seq: int = 0, speed_tenths: int = 0, status_text: str = "",
+                    seq: int = 0, speed: float = 0.0, status_text: str = "",
                     error_message: str = "", error_footer: str = "",
                     clock: datetime.datetime | None = None) -> bytes:
     """A MIB::MibStatus. `seat` is (front_back_tilt, lateral_tilt, elevation, translation)
-    in whole units; `clock` is the MIB's local time, None sends month 0, "unknown"."""
-    when = (0,) * 6 if clock is None else (
-        clock.hour, clock.minute, clock.second, clock.day, clock.month,
-        max(0, min(clock.year - 2000, 255)))
+    in whole units; `speed` is metres per second; `clock` is the MIB's wall clock, None
+    sends epoch 0, "the MIB does not know the time".
+
+    A naive `clock` is taken as local time, the way the MIB means it: epoch_s goes out
+    as true UTC and utc_offset_min carries the zone, so the HMI redraws the same wall
+    clock rather than one shifted by the offset."""
+    if clock is None:
+        epoch, offset_min = 0, 0
+    else:
+        aware = clock.astimezone() if clock.tzinfo is None else clock
+        epoch = int(aware.timestamp())
+        offset_min = int(aware.utcoffset().total_seconds() // 60)
     front_back, lateral, elevation, translation = seat
     return encode(
         MSG_MIB_STATUS,
         system_state & 0xFF, profile & 0xFF,
         float(front_back), float(lateral), float(elevation), float(translation),
         _text(error_message, ERROR_TEXT_LEN),  # noqa: F821  (scraped)
-        seq & 0xFF, max(0, min(int(speed_tenths), SPEED_MAX_TENTHS)), *when,  # noqa: F821
+        epoch, float(speed), offset_min, seq & 0xFF,
         _text(status_text, MCB_TEXT_LEN),  # noqa: F821
         _text(error_footer, ERROR_FOOTER_LEN),  # noqa: F821
     )
@@ -336,8 +347,8 @@ def pack_mib_status(system_state: int, profile: int = 0, seat=(0.0, 0.0, 0.0, 0.
 
 def unpack_mib_status(payload: bytes):
     """(systemState, activeProfile, front_back_tilt, lateral_tilt, elevation, translation,
-    error_message, seq, speed_tenths, hour, minute, second, day, month, year_since_2000,
-    status_text, error_footer), or None."""
+    error_message, epoch_s, speed, utc_offset_min, seq, status_text, error_footer),
+    or None."""
     return decode(MSG_MIB_STATUS, payload)
 
 

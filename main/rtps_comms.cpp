@@ -170,14 +170,14 @@ void on_mib_status(const MIB::MibStatus &s) {
   // It repeats every kMibStatusPeriod: log only what changed. The seat is deliberately
   // not in here - it moves while a button is held, and would bury everything else.
   auto shown = [](const MIB::MibStatus &m) {
-    return std::tie(m.systemState, m.activeProfile, m.speed_tenths, m.status_text, m.error_message,
+    return std::tie(m.systemState, m.activeProfile, m.speed, m.status_text, m.error_message,
                     m.error_footer);
   };
   static std::optional<MIB::MibStatus> last;
   if (!last || shown(*last) != shown(s)) {
-    logger.info("MIB: state={} '{}' profile={} speed={}.{} error='{}' / '{}'",
+    logger.info("MIB: state={} '{}' profile={} speed={:.2f} m/s error='{}' / '{}'",
                 rammp::to_string(s.systemState), s.status_text, rammp::to_string(s.activeProfile),
-                s.speed_tenths / 10, s.speed_tenths % 10, s.error_message, s.error_footer);
+                s.speed, s.error_message, s.error_footer);
     last = s;
   }
   if (mib_status_handler) {

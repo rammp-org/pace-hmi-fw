@@ -638,13 +638,23 @@ static void drive_mode_publish_observer(lv_observer_t *, lv_subject_t *subject) 
   drive_profile_published.store(static_cast<MIB::DriveProfile>(lv_subject_get_int(subject)));
 }
 
-// The speed arrives as tenths; the label wants "N.N". No built-in binding
-// formats an integer that way, so this does the divide itself.
+// MibStatus.speed is metres per second; the label shows mph to one decimal.
+// Any task: pure arithmetic, no LVGL.
+static int32_t speed_display_tenths(float mps) {
+  if (!std::isfinite(mps) || mps <= 0.0f) {
+    return 0;
+  }
+  const auto tenths = std::lround(mps * rammp::kMphPerMps * 10.0f);
+  return static_cast<int32_t>(std::clamp<long>(tenths, 0, rammp::kSpeedMaxTenths));
+}
+
+// The speed reaches the subject as tenths; the label wants "N.N". No built-in
+// binding formats an integer that way, so this does the divide itself.
 static void speed_label_observer(lv_observer_t *observer, lv_subject_t *subject) {
   // int32_t is long on this target, so narrow explicitly rather than hand a
   // long to a "%d" that -Werror=format would reject
   const int tenths =
-      static_cast<int>(std::clamp<int32_t>(lv_subject_get_int(subject), 0, MIB::kSpeedMaxTenths));
+      static_cast<int>(std::clamp<int32_t>(lv_subject_get_int(subject), 0, rammp::kSpeedMaxTenths));
   lv_label_set_text_fmt(lv_observer_get_target_obj(observer), "%d.%d", tenths / 10, tenths % 10);
 }
 
@@ -764,10 +774,11 @@ static void brightness_step() {
 /////////////////////////////////////////////////////////////////////////////
 // TopBar clock
 //
-// The MCB sends its local time in every McbStatus. It sets the system clock
-// and the RTC, so the time keeps running through a lost link, and across a
-// reboot without the MCB. Clock1 on every TopBar shows the system clock. No
-// TZ is set, so the system clock simply holds local time and nothing converts.
+// The MIB sends Unix time plus its UTC offset in every MibStatus. It sets the
+// system clock and the RTC, so the time keeps running through a lost link, and
+// across a reboot without the MIB. Clock1 on every TopBar shows the system
+// clock. No TZ is set, so the system clock simply holds the local wall time the
+// MIB reported and nothing converts again.
 /////////////////////////////////////////////////////////////////////////////
 
 static constexpr uint32_t kClockPollMs = 1000;
@@ -790,18 +801,18 @@ static void clock_set(const std::tm &local) {
 
 // RTPS receive task.
 static void clock_note_mcb_time(const MIB::MibStatus &status) {
-  if (status.month < 1 || status.month > 12 || status.day < 1 || status.day > 31 ||
-      status.hour > 23 || status.minute > 59 || status.second > 59) {
-    return; // month 0: the MCB does not know the time
+  if (status.epoch_s <= 0) {
+    return; // 0: the MCB does not know the time
   }
+  // epoch_s is UTC; the TopBar shows the wall clock where the chair is, so the
+  // MIB's own offset comes off the wire with it. TZ is unset, which makes
+  // localtime_r and mktime the identity, so the system clock holds local time.
+  const time_t mcb =
+      static_cast<time_t>(status.epoch_s + static_cast<int64_t>(status.utc_offset_min) * 60);
   std::tm t{};
-  t.tm_year = 100 + status.year;
-  t.tm_mon = status.month - 1;
-  t.tm_mday = status.day;
-  t.tm_hour = status.hour;
-  t.tm_min = status.minute;
-  t.tm_sec = status.second;
-  const time_t mcb = mktime(&t); // also fills tm_wday for the RTC
+  if (localtime_r(&mcb, &t) == nullptr || !clock_plausible(t)) {
+    return;
+  }
   if (clock_valid && std::llabs(static_cast<int64_t>(mcb - time(nullptr))) <= kClockMaxDriftS) {
     return;
   }
@@ -4863,7 +4874,9 @@ extern "C" void app_main(void) {
     // What the MIB is actually driving with: the three profile buttons highlight from
     // this, so they follow the chair even when something else changed it.
     lv_subject_set_int(&drive_profile_subject, static_cast<int32_t>(status.activeProfile));
-    lv_subject_set_int(&speed_tenths_subject, status.speed_tenths);
+    // m/s on the wire, mph on the dial: the shared spec carries the real
+    // quantity and the unit on the label is ours to pick.
+    lv_subject_set_int(&speed_tenths_subject, speed_display_tenths(status.speed));
     // copy_string cuts each text to its subject's buffer (RAMMP_*_LEN). drive_text_subject
     // stays empty: the MIB sends one wording, and the state label is where it belongs.
     lv_subject_copy_string(&state_text_subject, status.status_text.c_str());

@@ -111,6 +111,13 @@ inline constexpr size_t kMcbTextLen = 16;     // shows up to 15 chars of status_
 inline constexpr size_t kErrorTextLen = 64;   // shows up to 63 chars of error_message
 inline constexpr size_t kErrorFooterLen = 32; // shows up to 31 chars of error_footer
 
+/* The speed readout: MibStatus.speed is metres per second, the DriveScreen's
+   UnitLabel says "mph", and SpeedNumber has room for one digit either side of the
+   point. Both live here rather than in the shared spec, which carries the real
+   quantity and leaves the unit on the dial to whoever draws it. */
+inline constexpr float kMphPerMps = 2.236936f;
+inline constexpr int32_t kSpeedMaxTenths = 99; // 9.9 mph, the widest the label fits
+
 /* ==== Bench PC <-> HMI (a production MCB can ignore these) ============== */
 
 /* std_msgs/UInt32: the counter, command and brightness topics */

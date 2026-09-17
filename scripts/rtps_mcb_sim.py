@@ -383,6 +383,12 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
         self.car.update(self.joystick, self.profile)
         self.speed_tenths = self.car.speed_tenths
 
+    @property
+    def speed_mps(self) -> float:
+        """What goes on the wire. CarModel.speed is in the HMI's displayed unit
+        (mph); MibStatus carries the real quantity and the HMI converts back."""
+        return self.speed_tenths / 10.0 / spec.MPH_PER_MPS
+
     def describe(self) -> str:
         return (
             f"state={spec.MIB_SYSTEM_STATE_NAMES.get(self.system_state, '?')} "
@@ -434,7 +440,7 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
         payload = self.build_data_message(
             writer,
             spec.pack_mib_status(self.system_state, self.profile, self.seat_units(),
-                                 self.seq, self.speed_tenths, self.status_text,
+                                 self.seq, self.speed_mps, self.status_text,
                                  self.error_message, self.error_footer,
                                  clock=datetime.datetime.now()),  # sets the HMI's clock
         )
