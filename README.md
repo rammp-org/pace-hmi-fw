@@ -27,6 +27,7 @@ python scripts/rtps_ota.py console                       # logs + commands; or i
 ```
 
 - The device announces itself on RTPS (`rammp/ota/device_info`). A START signed with the update key (`--key` / `RAMMP_OTA_KEY`; the default is a public bench key) makes it open TCP 3232 for that one image; the image goes over it with espp's OTA protocol.
+- The image goes zlib-compressed (to 32%) to any device that says it takes that: a 5 MB update is written in ~30 s instead of ~36 s. `--no-compress` sends it as is. Most of what remains is the flash itself (~16 ms per 4 KB).
 - Refused: a bad key, a replayed command, an older version (major.minor.patch), and an image whose size, version or SHA-256 is not the one the START named.
 - The new image boots pending: it confirms itself once Ethernet and RTPS are up, and goes back to the previous one if it resets first or takes longer than 120 s. The tool reports `ROLLED BACK` when that happens.
 - Signed images: build with `sdkconfig.signed` layered on (instructions in that file); a board running a signed image then refuses unsigned updates.

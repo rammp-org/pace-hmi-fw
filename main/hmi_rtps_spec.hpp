@@ -218,6 +218,16 @@ enum class OtaAction : uint8_t {
   ABORT = 2, // close it, discarding a partial image
 };
 
+/* How the DATA frames carry the image. The size and SHA-256 in the START are the
+   image's own either way, and that is what gets written and checked. */
+enum class OtaEncoding : uint8_t {
+  RAW = 0,  // the image as is
+  ZLIB = 1, // one zlib stream (RFC 1950) of the image, cut into DATA frames
+};
+
+/* OtaDeviceInfo.features bits */
+inline constexpr uint8_t kOtaFeatureZlib = 0x01; // takes OtaEncoding::ZLIB
+
 struct OtaDeviceInfo {
   uint8_t seq;
   OtaState state;
@@ -232,22 +242,32 @@ struct OtaDeviceInfo {
   std::string hw_rev;     // "esp32p4 rev 1.3"
   std::string slot;       // running partition, "ota_0"
   std::string last_error; // why the last update failed, "" when it did not
+  uint8_t features;       // kOtaFeature* bits. Last, so a host that predates it
+                          // still reads the rest (and a device without it reads 0)
 };
 
 struct OtaCommand {
   OtaAction action;
-  uint32_t nonce;      // the target's current OtaDeviceInfo.nonce
-  uint32_t image_size; // START: bytes
-  std::string mac;     // the target's OtaDeviceInfo.mac
-  std::string version; // START: the image's esp_app_desc version
-  std::string sha256;  // START: lowercase hex of the whole image
-  std::string auth;    // lowercase hex HMAC-SHA256 of ota_auth_message(...)
+  uint32_t nonce;       // the target's current OtaDeviceInfo.nonce
+  uint32_t image_size;  // START: bytes
+  std::string mac;      // the target's OtaDeviceInfo.mac
+  std::string version;  // START: the image's esp_app_desc version
+  std::string sha256;   // START: lowercase hex of the whole image
+  std::string auth;     // lowercase hex HMAC-SHA256 of ota_auth_message(...)
+  OtaEncoding encoding; // START. Last: a device without kOtaFeatureZlib gets the
+                        // command without it, and reads RAW
 };
 
-/* What `auth` signs: every field but auth itself. */
+/* What `auth` signs: every field but auth itself. A RAW command signs exactly as
+   it did before `encoding` existed, so a host works with older devices too. */
 inline std::string ota_auth_message(const OtaCommand &c) {
-  return std::to_string(static_cast<unsigned>(c.action)) + "|" + std::to_string(c.nonce) + "|" +
-         std::to_string(c.image_size) + "|" + c.mac + "|" + c.version + "|" + c.sha256;
+  std::string message = std::to_string(static_cast<unsigned>(c.action)) + "|" +
+                        std::to_string(c.nonce) + "|" + std::to_string(c.image_size) + "|" + c.mac +
+                        "|" + c.version + "|" + c.sha256;
+  if (c.encoding != OtaEncoding::RAW) {
+    message += "|" + std::to_string(static_cast<unsigned>(c.encoding));
+  }
+  return message;
 }
 
 inline constexpr uint16_t kOtaPort = 3232;

@@ -301,3 +301,8 @@ CONFIG_LCD_DSI_ISR_CACHE_SAFE=y
 # RTPS takes ~4 sockets; the OTA session (listener + client) and the network
 # console (listener + client) add 4 more, and ping one transiently.
 CONFIG_LWIP_MAX_SOCKETS=16
+# The update host sends one DATA frame at a time and waits for its reply. Sending
+# several ahead (with a larger TCP window) was measured slower: with two or more
+# frames in flight the W5500 driver reports "RX buffer corruption detected,
+# draining", and each drain costs a TCP retransmit (35.9 s at 1, 39.3 s at 2,
+# 55.3 s at 3 for a 5 MB image). Compressing the image is what helps (29.2 s).

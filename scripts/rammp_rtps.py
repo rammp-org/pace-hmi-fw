@@ -224,11 +224,15 @@ MSG_OTA_DEVICE_INFO = [
     ("seq", "B"), ("state", "B"), ("image_state", "B"), ("progress_pct", "B"),
     ("ota_port", "H"), ("nonce", "I"), ("mac", "str"), ("ip", "str"), ("project", "str"),
     ("version", "str"), ("hw_rev", "str"), ("slot", "str"), ("last_error", "str"),
+    ("features", "B"),
 ]
 MSG_OTA_COMMAND = [
     ("action", "B"), ("nonce", "I"), ("image_size", "I"), ("mac", "str"), ("version", "str"),
-    ("sha256", "str"), ("auth", "str"),
+    ("sha256", "str"), ("auth", "str"), ("encoding", "B"),
 ]
+#: what devices without OtaDeviceInfo.features send and take (the trailing field is new)
+MSG_OTA_DEVICE_INFO_V1 = MSG_OTA_DEVICE_INFO[:-1]
+MSG_OTA_COMMAND_V1 = MSG_OTA_COMMAND[:-1]
 MSG_SELFTEST_REPORT = [
     ("run_id", "B"), ("kind", "B"), ("index", "B"), ("count", "B"), ("result", "B"),
     ("value", "i"), ("lo", "i"), ("hi", "i"), ("name", "str"), ("unit", "str"), ("detail", "str"),
@@ -484,6 +488,7 @@ class OtaDeviceInfo(NamedTuple):
     hw_rev: str
     slot: str
     last_error: str
+    features: int = 0
 
 
 class OtaCommand(NamedTuple):
@@ -496,10 +501,11 @@ class OtaCommand(NamedTuple):
     version: str
     sha256: str
     auth: str = ""
+    encoding: int = 0
 
 
 def unpack_ota_device_info(payload: bytes) -> OtaDeviceInfo | None:
-    message = decode(MSG_OTA_DEVICE_INFO, payload)
+    message = decode(MSG_OTA_DEVICE_INFO, payload) or decode(MSG_OTA_DEVICE_INFO_V1, payload)
     return None if message is None else OtaDeviceInfo(*message)
 
 
@@ -510,7 +516,10 @@ def pack_ota_device_info(info: OtaDeviceInfo) -> bytes:
 
 def ota_auth_message(c: OtaCommand) -> bytes:
     """What `auth` signs; mirrors rammp::ota_auth_message."""
-    return f"{c.action}|{c.nonce}|{c.image_size}|{c.mac}|{c.version}|{c.sha256}".encode("ascii")
+    message = f"{c.action}|{c.nonce}|{c.image_size}|{c.mac}|{c.version}|{c.sha256}"
+    if c.encoding != OTA_ENCODING_RAW:  # noqa: F821  (scraped)
+        message += f"|{c.encoding}"
+    return message.encode("ascii")
 
 
 def sign_ota_command(c: OtaCommand, key: bytes) -> OtaCommand:
@@ -519,7 +528,10 @@ def sign_ota_command(c: OtaCommand, key: bytes) -> OtaCommand:
     return c._replace(auth=hmac.new(key, ota_auth_message(c), hashlib.sha256).hexdigest())
 
 
-def pack_ota_command(c: OtaCommand) -> bytes:
+def pack_ota_command(c: OtaCommand, legacy: bool = False) -> bytes:
+    """`legacy`: the layout for devices without OtaDeviceInfo.features (RAW only)."""
+    if legacy:
+        return encode(MSG_OTA_COMMAND_V1, *c[:-1])
     return encode(MSG_OTA_COMMAND, *c)
 
 

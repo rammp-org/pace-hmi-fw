@@ -16,6 +16,7 @@
 #include "esp_app_desc.h"
 #include "esp_app_format.h"
 #include "esp_chip_info.h"
+#include "esp_heap_caps.h"
 #include "esp_mac.h"
 #include "esp_ota_ops.h"
 #include "esp_pthread.h"
@@ -25,6 +26,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lwip/sockets.h"
+#include "miniz.h" // the ROM's tinfl
 #include "psa/crypto.h"
 #include "sdkconfig.h"
 
@@ -168,10 +170,10 @@ public:
       : command_(command) {}
   ~Gate() { psa_hash_abort(&hash_); }
 
-  // Why `frame` is refused, or "" to pass it on.
-  std::string check(const espp::stream_frame::Frame &frame) {
-    const std::span<const uint8_t> payload = frame.payload;
-    switch (static_cast<MessageType>(frame.type)) {
+  // Why a request of `type` is refused, or "" to pass it on. DATA is the image
+  // itself, uncompressed.
+  std::string check(MessageType type, std::span<const uint8_t> payload) {
+    switch (type) {
     case MessageType::Begin:
       if (payload.size() != 4 || espp::stream_frame::get_u32(payload) != command_.image_size) {
         return fmt::format("BEGIN is not for the authorized {}-byte image", command_.image_size);
@@ -251,6 +253,71 @@ private:
   psa_hash_operation_t hash_ = PSA_HASH_OPERATION_INIT;
   size_t received_ = 0;
   bool began_ = false;
+};
+
+// OtaEncoding::ZLIB: the DATA frames are one zlib stream, inflated here with the
+// ROM's tinfl into its 32 KB window, which is flushed to `sink` whenever it fills
+// (and at the end). ~43 KB of PSRAM, for the length of an update.
+class Inflater {
+public:
+  using Sink = std::function<std::string(std::span<const uint8_t>)>;
+
+  Inflater()
+      : state_(static_cast<tinfl_decompressor *>(
+            heap_caps_malloc(sizeof(tinfl_decompressor), MALLOC_CAP_SPIRAM)))
+      , window_(static_cast<uint8_t *>(heap_caps_malloc(TINFL_LZ_DICT_SIZE, MALLOC_CAP_SPIRAM))) {
+    if (state_ != nullptr) {
+      tinfl_init(state_);
+    }
+  }
+  ~Inflater() {
+    heap_caps_free(state_);
+    heap_caps_free(window_);
+  }
+  Inflater(const Inflater &) = delete;
+  Inflater &operator=(const Inflater &) = delete;
+
+  bool ok() const { return state_ != nullptr && window_ != nullptr; }
+  bool done() const { return done_; }
+
+  // Inflates `in`, handing whole windows to `sink`. Why it failed, or "".
+  std::string feed(std::span<const uint8_t> in, const Sink &sink) {
+    if (done_) {
+      return in.empty() ? "" : "data after the end of the compressed image";
+    }
+    while (true) {
+      size_t in_size = in.size();
+      size_t out_size = TINFL_LZ_DICT_SIZE - used_;
+      const tinfl_status status =
+          tinfl_decompress(state_, in.data(), &in_size, window_, window_ + used_, &out_size,
+                           TINFL_FLAG_PARSE_ZLIB_HEADER | TINFL_FLAG_HAS_MORE_INPUT);
+      in = in.subspan(in_size);
+      used_ += out_size;
+      if (status < TINFL_STATUS_DONE) {
+        return "the compressed image is corrupt";
+      }
+      done_ = status == TINFL_STATUS_DONE;
+      if (used_ == TINFL_LZ_DICT_SIZE || (done_ && used_ > 0)) {
+        std::string why = sink(std::span<const uint8_t>(window_, used_));
+        used_ = 0;
+        if (!why.empty()) {
+          return why;
+        }
+      }
+      if (done_) {
+        return in.empty() ? "" : "data after the end of the compressed image";
+      }
+      if (status == TINFL_STATUS_NEEDS_MORE_INPUT && in.empty()) {
+        return "";
+      }
+    }
+  }
+
+private:
+  tinfl_decompressor *state_;
+  uint8_t *window_;
+  size_t used_ = 0;
+  bool done_ = false;
 };
 
 void send_all(int sock, std::span<const uint8_t> data) {
@@ -340,6 +407,40 @@ std::string serve(int client, const rammp::OtaCommand &command) {
 
   Gate gate(command);
   std::string refusal;
+  auto refuse = [&](std::string why) {
+    logger.error("Refused: {}", why);
+    if (service.owns_session()) {
+      mute = true;
+      service.handle_frame(static_cast<uint8_t>(MessageType::Abort), {});
+      mute = false;
+    }
+    gate.reset();
+    send(espp::detail::ota_stream::make_error(static_cast<uint32_t>(EPERM), why));
+    refusal = std::move(why);
+  };
+
+  const bool compressed = command.encoding == rammp::OtaEncoding::ZLIB;
+  std::optional<Inflater> inflater;
+  if (compressed) {
+    inflater.emplace();
+    if (!inflater->ok()) {
+      return "no memory to inflate the image";
+    }
+  }
+  uint32_t compressed_received = 0;
+  bool stream_failed = false;
+  // One inflated window: through the gate, into the engine. The engine's own reply
+  // is swallowed; the host gets one reply per DATA frame it sent.
+  auto write_window = [&](std::span<const uint8_t> window) -> std::string {
+    if (std::string why = gate.check(MessageType::Data, window); !why.empty()) {
+      return why;
+    }
+    mute = true;
+    service.handle_frame(static_cast<uint8_t>(MessageType::Data), window);
+    mute = false;
+    return service.owns_session() ? "" : "writing the image failed";
+  };
+
   espp::Dispatcher dispatcher;
   dispatcher.register_module(
       service.module_id(),
@@ -347,20 +448,32 @@ std::string serve(int client, const rammp::OtaCommand &command) {
         if (frame.is_reply()) {
           return;
         }
-        std::string why = gate.check(frame);
-        if (why.empty()) {
-          service.handle(frame);
+        const auto type = static_cast<MessageType>(frame.type);
+        if (compressed && type == MessageType::Data) {
+          if (stream_failed || !service.owns_session()) {
+            send(espp::detail::ota_stream::make_error(static_cast<uint32_t>(EPERM),
+                                                      "no update session (send BEGIN first)"));
+            return;
+          }
+          compressed_received += static_cast<uint32_t>(frame.payload.size());
+          if (std::string why = inflater->feed(frame.payload, write_window); !why.empty()) {
+            stream_failed = true;
+            refuse(std::move(why));
+            return;
+          }
+          send(espp::detail::ota_stream::make_ok(compressed_received));
           return;
         }
-        logger.error("Refused: {}", why);
-        if (service.owns_session()) {
-          mute = true;
-          service.handle_frame(static_cast<uint8_t>(MessageType::Abort), {});
-          mute = false;
+        if (compressed && type == MessageType::Finish && !inflater->done() &&
+            service.owns_session()) {
+          refuse("the compressed image ended early");
+          return;
         }
-        gate.reset();
-        send(espp::detail::ota_stream::make_error(static_cast<uint32_t>(EPERM), why));
-        refusal = std::move(why);
+        if (std::string why = gate.check(type, frame.payload); !why.empty()) {
+          refuse(std::move(why));
+          return;
+        }
+        service.handle(frame);
       },
       service.module_info());
   const esp_app_desc_t *app = esp_app_get_description();
@@ -437,6 +550,9 @@ void run_session(rammp::OtaCommand command) {
 }
 
 std::string start_refusal(const rammp::OtaCommand &command) {
+  if (command.encoding != rammp::OtaEncoding::RAW && command.encoding != rammp::OtaEncoding::ZLIB) {
+    return "unknown image encoding";
+  }
   const esp_partition_t *target = esp_ota_get_next_update_partition(nullptr);
   if (target == nullptr) {
     return "no OTA partition to update";
@@ -548,7 +664,8 @@ void ota_handle_command(const rammp::OtaCommand &command) {
     refuse(std::move(why));
     return;
   }
-  logger.info("START: {} ({} bytes, sha256 {}...)", command.version, command.image_size,
+  logger.info("START: {} ({} bytes{}, sha256 {}...)", command.version, command.image_size,
+              command.encoding == rammp::OtaEncoding::ZLIB ? ", zlib" : "",
               command.sha256.substr(0, 12));
   session_running = true;
   abort_requested = false;
@@ -600,6 +717,7 @@ rammp::OtaDeviceInfo ota_device_info() {
   info.hw_rev =
       fmt::format("{} rev {}.{}", CONFIG_IDF_TARGET, chip.revision / 100, chip.revision % 100);
   info.slot = running->label;
+  info.features = rammp::kOtaFeatureZlib;
   std::lock_guard<std::mutex> lock(mutex);
   info.state = state;
   info.nonce = nonce;

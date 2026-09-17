@@ -45,7 +45,12 @@ constexpr gpio_num_t kPinMosi = GPIO_NUM_18;
 constexpr gpio_num_t kPinMiso = GPIO_NUM_19;
 constexpr gpio_num_t kPinCs = GPIO_NUM_45;
 constexpr gpio_num_t kPinInt = GPIO_NUM_4;
-constexpr int kSpiClockMhz = 20;   // W5500 max is 33; 20 tolerates jumper wires
+// The P4's SPI clock is 80 MHz / n (80, 40, 26.7, 20). 40 and 80 bring no link up
+// on this PCB (these pins go through the GPIO matrix, not SPI2's IOMUX pins), nor
+// does 40 in half-duplex with IDF's delay compensation (input_delay_ns 25 or 37);
+// this v1.3 silicon has no later sample point to offer. 26.7 works but measured no
+// faster than 20 at OTA (the flash write is the bottleneck), so 20 keeps the margin.
+constexpr int kSpiClockHz = 80'000'000 / 4;
 constexpr int kRxPollPeriodMs = 0; // 0 = RX on the INT line; N = poll every N ms (rules out INT)
 
 constexpr int kHeartbeatEvery = 2; // bench counter on rammp::kHmiCounter, per kOtaInfoPeriod
@@ -297,7 +302,7 @@ bool initialize_ethernet() {
   spi_device_interface_config_t dev_config = {};
   dev_config.command_bits = 16; // W5500 address phase
   dev_config.address_bits = 8;  // W5500 control phase
-  dev_config.clock_speed_hz = kSpiClockMhz * 1000 * 1000;
+  dev_config.clock_speed_hz = kSpiClockHz;
   dev_config.spics_io_num = kPinCs;
   dev_config.queue_size = 20;
   eth_w5500_config_t w5500_config = ETH_W5500_DEFAULT_CONFIG(kSpiHost, &dev_config);

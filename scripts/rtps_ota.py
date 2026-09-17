@@ -32,6 +32,7 @@ import struct
 import sys
 import threading
 import time
+import zlib
 from typing import Callable, Dict, List, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -124,6 +125,14 @@ class Image:
             raise SystemExit(f"{path}: not an ESP-IDF app image (no app description)")
         self.version = desc[16:48].split(b"\0", 1)[0].decode("ascii", "replace")
         self.project = desc[48:80].split(b"\0", 1)[0].decode("ascii", "replace")
+        self._zlib: Optional[bytes] = None
+
+    @property
+    def zlib(self) -> bytes:
+        """The image as one zlib stream, made once."""
+        if self._zlib is None:
+            self._zlib = zlib.compress(self.data, 9)
+        return self._zlib
 
 
 class OtaHost(rtps_host.RtpsHostHarness):
@@ -150,9 +159,9 @@ class OtaHost(rtps_host.RtpsHostHarness):
                 self.heard_at[info.mac] = time.monotonic()
                 self.changed.notify_all()
 
-    def send_command(self, command: spec.OtaCommand) -> int:
+    def send_command(self, command: spec.OtaCommand, legacy: bool = False) -> int:
         writer = self.local_writers[0]
-        payload = self.build_data_message(writer, spec.pack_ota_command(command))
+        payload = self.build_data_message(writer, spec.pack_ota_command(command, legacy))
         targets = self._build_user_targets(writer)
         for target in targets:
             self.send_user_datagram(payload, target)
@@ -197,21 +206,26 @@ def describe(info: spec.OtaDeviceInfo) -> str:
 
 
 def flash_one(host: OtaHost, mac: str, image: Image, key: bytes,
-              say: Callable[[str], None]) -> bool:
+              say: Callable[[str], None], compress: bool = True) -> bool:
     OtaClient, OtaError = _import_espp_ota()
     before = host.devices[mac]
     if before.project != image.project:
         say(f"skipped: it runs {before.project}, the image is {image.project}")
         return False
+    # A device that predates `features` takes neither zlib nor the new command layout.
+    legacy = not before.features
+    compress = compress and bool(before.features & spec.OTA_FEATURE_ZLIB)  # noqa: F821
+    encoding = spec.OTA_ENCODING_ZLIB if compress else spec.OTA_ENCODING_RAW  # noqa: F821
+    wire = image.zlib if compress else image.data
 
     # 1. START, resent until the device answers by moving its nonce on
     command = spec.sign_ota_command(spec.OtaCommand(
         action=spec.OTA_ACTION_START, nonce=before.nonce, image_size=len(image.data),  # noqa: F821
-        mac=mac, version=image.version, sha256=image.sha256), key)
+        mac=mac, version=image.version, sha256=image.sha256, encoding=encoding), key)
     deadline = time.monotonic() + COMMAND_WAIT_S
     answer = None
     while answer is None and time.monotonic() < deadline:
-        host.send_command(command)
+        host.send_command(command, legacy)
         answer = host.wait_for(mac, lambda i, _age: i is not None and i.nonce != command.nonce,
                                COMMAND_RESEND_S)
     if answer is None:
@@ -222,7 +236,9 @@ def flash_one(host: OtaHost, mac: str, image: Image, key: bytes,
         return False
 
     # 2. the image, over TCP
-    say(f"sending {image.version} ({len(image.data)} B) to {answer.ip}:{answer.ota_port}")
+    say(f"sending {image.version} ({len(image.data)} B"
+        + (f", {len(wire)} B compressed" if compress else "")
+        + f") to {answer.ip}:{answer.ota_port}")
     shown = [-1]
 
     def progress(written: int, total: int) -> None:
@@ -234,7 +250,8 @@ def flash_one(host: OtaHost, mac: str, image: Image, key: bytes,
     started = time.monotonic()
     try:
         with TcpTransport(answer.ip, answer.ota_port) as transport:
-            OtaClient(transport, progress=progress).flash(image.data)
+            # zlib or not, BEGIN announces the image's own size
+            OtaClient(transport, progress=progress).flash(wire, image_size=len(image.data))
     except (OtaError, OSError) as exc:
         say(f"transfer failed: {exc}")
         return False
@@ -283,7 +300,7 @@ def abort_one(host: OtaHost, mac: str, key: bytes, say: Callable[[str], None]) -
         version="", sha256=""), key)
     deadline = time.monotonic() + COMMAND_WAIT_S
     while time.monotonic() < deadline:
-        host.send_command(command)
+        host.send_command(command, legacy=not info.features)
         if host.wait_for(mac, lambda i, _age: i is not None and i.nonce != command.nonce,
                          COMMAND_RESEND_S):
             say("abort sent")
@@ -342,6 +359,8 @@ def main() -> int:
                         help="a device's address, for links with no multicast (repeatable)")
     parser.add_argument("--key", default=os.environ.get("RAMMP_OTA_KEY", DEFAULT_KEY),
                         help="the update key (CONFIG_HMI_OTA_AUTH_KEY); default $RAMMP_OTA_KEY")
+    parser.add_argument("--no-compress", action="store_true",
+                        help="send the image as is, even to a device that takes zlib")
     parser.add_argument("--discover", type=float, default=5.0, metavar="S",
                         help="seconds to listen for devices (default 5)")
     parser.add_argument("--advertised-address", default=None)
@@ -401,7 +420,7 @@ def main() -> int:
             say(describe(devices[mac]))
             key = cli.key.encode("utf-8")
             if cli.command == "flash":
-                results[mac] = flash_one(host, mac, image, key, say)
+                results[mac] = flash_one(host, mac, image, key, say, not cli.no_compress)
             else:
                 results[mac] = abort_one(host, mac, key, say)
 
