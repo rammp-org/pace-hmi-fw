@@ -1211,8 +1211,8 @@ void sim_nav_go_home(void) { screen_return_to_main(); }
 
 void sim_nav_next_drive_profile(void) {
   const int32_t mode = lv_subject_get_int(&drive_profile_subject);
-  /* HOLO / Normal / Auto, in the order messages/joystick_message.hpp numbers them. */
-  lv_subject_set_int(&drive_profile_subject, (mode + 1) % (RAMMP_DRIVE_PROFILE_LOW + 1));
+  /* LOW / NORMAL / HIGH, in the order messages/mib_message.hpp numbers them. */
+  lv_subject_set_int(&drive_profile_subject, (mode + 1) % (RAMMP_DRIVE_PROFILE_HIGH + 1));
 }
 
 void sim_nav_reset(void) {
