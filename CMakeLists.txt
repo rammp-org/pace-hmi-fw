@@ -83,3 +83,14 @@ add_custom_target(precompiled ALL
           --out-dir "${CMAKE_CURRENT_LIST_DIR}/precompiled"
   VERBATIM USES_TERMINAL)
 add_dependencies(precompiled app bootloader partition_table_bin)
+
+# `idf.py ota-net`: build, then update every device on the network with this image
+# (scripts/rtps_ota.py; RAMMP_OTA_KEY and RTPS_OTA_ARGS, e.g. "--device aa:bb:..",
+# are read from the environment when CMake configures). The Ethernet counterpart of
+# `idf.py flash`.
+separate_arguments(rtps_ota_args NATIVE_COMMAND "$ENV{RTPS_OTA_ARGS}")
+add_custom_target(ota-net
+  COMMAND ${python} "${CMAKE_CURRENT_LIST_DIR}/scripts/rtps_ota.py" flash
+          "${CMAKE_BINARY_DIR}/${CMAKE_PROJECT_NAME}.bin" ${rtps_ota_args}
+  VERBATIM USES_TERMINAL)
+add_dependencies(ota-net app)

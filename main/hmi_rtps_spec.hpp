@@ -181,6 +181,122 @@ constexpr uint32_t tagged(SelfTestTag tag, uint32_t payload) {
   return static_cast<uint32_t>(tag) | (payload & ~kSelfTestTagMask);
 }
 
+/* ==== Firmware update over Ethernet ===================================== */
+
+/* Any PoE device could speak these; they sit here until another device does (then
+   they belong in rammp-rtps). The update itself does not ride RTPS:
+
+     device  -> host  kOtaDeviceInfo  every kOtaInfoPeriod: who it is, what it runs
+     host    -> dev   kOtaCommand     START (authenticated, for one device, once)
+     device           opens TCP kOtaPort for kOtaConnectTimeout, one client
+     host    -> dev   TCP: espp::OtaService frames (BEGIN, DATA..., FINISH)
+     device           reboots into the image, pending verify; it confirms itself
+                      once Ethernet and RTPS are up, and rolls back if that takes
+                      longer than kOtaConfirmTimeout (or it resets first)
+
+   `auth` is hex HMAC-SHA256(key, ota_auth_message(...)), the key being
+   CONFIG_HMI_OTA_AUTH_KEY; `nonce` is the device's current OtaDeviceInfo.nonce,
+   which changes after every accepted command, so a command works once. The image
+   must be exactly `image_size` bytes with SHA-256 `sha256`, and carry `version` in
+   its app description, not older than the running one (major.minor.patch). */
+
+#define RAMMP_TOPIC_OTA_DEVICE_INFO "rammp/ota/device_info" /* device -> host */
+#define RAMMP_TYPE_OTA_DEVICE_INFO "rammp/msg/OtaDeviceInfo"
+#define RAMMP_TOPIC_OTA_COMMAND "rammp/ota/command" /* host -> device */
+#define RAMMP_TYPE_OTA_COMMAND "rammp/msg/OtaCommand"
+
+enum class OtaState : uint8_t {
+  IDLE = 0,      // no update in progress
+  LISTENING = 1, // START accepted, TCP kOtaPort open for the host
+  RECEIVING = 2, // host connected, image arriving (progress_pct)
+  REBOOTING = 3, // image written and activated
+  FAILED = 4,    // the last update did not finish: last_error says why
+};
+
+/* The running image, as the bootloader sees it */
+enum class OtaImageState : uint8_t {
+  CONFIRMED = 0,      // valid: stays
+  PENDING_VERIFY = 1, // first boot after an update: not confirmed yet
+  UNKNOWN = 2,        // no rollback data (a USB-flashed image, before any update)
+};
+
+enum class OtaAction : uint8_t {
+  START = 1, // open kOtaPort for this image
+  ABORT = 2, // close it, discarding a partial image
+};
+
+/* How the DATA frames carry the image. The size and SHA-256 in the START are the
+   image's own either way, and that is what gets written and checked. */
+enum class OtaEncoding : uint8_t {
+  RAW = 0,  // the image as is
+  ZLIB = 1, // one zlib stream (RFC 1950) of the image, cut into DATA frames
+};
+
+/* OtaDeviceInfo.features bits */
+inline constexpr uint8_t kOtaFeatureZlib = 0x01; // takes OtaEncoding::ZLIB
+
+struct OtaDeviceInfo {
+  uint8_t seq;
+  OtaState state;
+  OtaImageState image_state;
+  uint8_t progress_pct;   // of image_size, while RECEIVING
+  uint16_t ota_port;      // 0 unless LISTENING or RECEIVING
+  uint32_t nonce;         // what the next OtaCommand must carry
+  std::string mac;        // "aa:bb:cc:dd:ee:ff": addresses the device
+  std::string ip;         // "10.0.0.133"
+  std::string project;    // esp_app_desc project_name
+  std::string version;    // esp_app_desc version (git describe)
+  std::string hw_rev;     // "esp32p4 rev 1.3"
+  std::string slot;       // running partition, "ota_0"
+  std::string last_error; // why the last update failed, "" when it did not
+  uint8_t features;       // kOtaFeature* bits. Last, so a host that predates it
+                          // still reads the rest (and a device without it reads 0)
+};
+
+struct OtaCommand {
+  OtaAction action;
+  uint32_t nonce;       // the target's current OtaDeviceInfo.nonce
+  uint32_t image_size;  // START: bytes
+  std::string mac;      // the target's OtaDeviceInfo.mac
+  std::string version;  // START: the image's esp_app_desc version
+  std::string sha256;   // START: lowercase hex of the whole image
+  std::string auth;     // lowercase hex HMAC-SHA256 of ota_auth_message(...)
+  OtaEncoding encoding; // START. Last: a device without kOtaFeatureZlib gets the
+                        // command without it, and reads RAW
+};
+
+/* What `auth` signs: every field but auth itself. A RAW command signs exactly as
+   it did before `encoding` existed, so a host works with older devices too. */
+inline std::string ota_auth_message(const OtaCommand &c) {
+  std::string message = std::to_string(static_cast<unsigned>(c.action)) + "|" +
+                        std::to_string(c.nonce) + "|" + std::to_string(c.image_size) + "|" + c.mac +
+                        "|" + c.version + "|" + c.sha256;
+  if (c.encoding != OtaEncoding::RAW) {
+    message += "|" + std::to_string(static_cast<unsigned>(c.encoding));
+  }
+  return message;
+}
+
+inline constexpr uint16_t kOtaPort = 3232;
+inline constexpr uint16_t kConsolePort = 3333;            // network console: logs out, commands in
+inline constexpr milliseconds kOtaInfoPeriod{1000};       // OtaDeviceInfo
+inline constexpr milliseconds kOtaConnectTimeout{30000};  // START -> host connects
+inline constexpr milliseconds kOtaIdleTimeout{20000};     // host silent mid-update
+inline constexpr milliseconds kOtaConfirmTimeout{120000}; // boot -> RTPS up, else roll back
+
+inline constexpr Topic<OtaDeviceInfo> kOtaDeviceInfo{RAMMP_TOPIC_OTA_DEVICE_INFO,
+                                                     RAMMP_TYPE_OTA_DEVICE_INFO};
+inline constexpr Topic<OtaCommand> kOtaCommand{RAMMP_TOPIC_OTA_COMMAND, RAMMP_TYPE_OTA_COMMAND};
+
+constexpr const char *to_string(OtaState v) {
+  return v == OtaState::IDLE        ? "IDLE"
+         : v == OtaState::LISTENING ? "LISTENING"
+         : v == OtaState::RECEIVING ? "RECEIVING"
+         : v == OtaState::REBOOTING ? "REBOOTING"
+         : v == OtaState::FAILED    ? "FAILED"
+                                    : "?";
+}
+
 /* ==== HMI-raised warnings =============================================== */
 
 /* The HMI's own text about the link, shown in the same banner as an MCB fault,

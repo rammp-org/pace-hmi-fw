@@ -50,12 +50,17 @@
 #include "joystick_cal.hpp"
 #include "log_capture.hpp"
 #include "log_view.hpp"
+#include "net_console.hpp"
+#include "ota_update.hpp"
 #include "rtps_comms.hpp"
 #include "selftest.hpp"
 #include "settings.hpp"
+#include "storage.hpp"
 
+#include "driver/ledc.h"
 #include "esp_heap_caps.h"
 #include "esp_lcd_mipi_dsi.h"
+#include "esp_rom_sys.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 
@@ -148,6 +153,16 @@ static void drive_publish();
 static lv_subject_t rtps_link_subject;
 // 0/1 blink phase for the indicator, flipped by the same poll timer
 static lv_subject_t rtps_blink_subject;
+
+// UpdateScreen (an update over Ethernet, ota_update.cpp): the bar's 0..100 and
+// the text on it, set by update_screen_poll on the same tick.
+static lv_subject_t update_percent_subject;
+static char update_text_buf[48];
+static char update_text_prev_buf[48];
+static lv_subject_t update_text_subject;
+// The MIB said, over a live link, that the chair is driving. The RTPS task writes
+// it; the OTA start guard, also on the RTPS task, reads it.
+static std::atomic<bool> mib_says_driving{false};
 
 // GPIO48 test button: press count (bound to the ButtonCounter label) and
 // current pressed state (drives the ButtonPanel background via an observer)
@@ -690,8 +705,9 @@ static void log_link_change(RtpsLinkState state) {
   last = state;
 }
 
-static void diag_poll();       // DiagnosticsScreen, further down
-static void drive_wait_poll(); // DriveScreen entry, further down
+static void diag_poll();          // DiagnosticsScreen, further down
+static void drive_wait_poll();    // DriveScreen entry, further down
+static void update_screen_poll(); // UpdateScreen, further down
 
 static void rtps_poll_cb(lv_timer_t *) {
   const RtpsLinkState state = rtps_comms_link_state();
@@ -700,8 +716,9 @@ static void rtps_poll_cb(lv_timer_t *) {
   static uint32_t ticks = 0;
   // flip every other tick: a 500 ms half-period, i.e. a 1 Hz blink
   lv_subject_set_int(&rtps_blink_subject, static_cast<int32_t>((++ticks / 2) & 1u));
-  diag_poll();       // diagnostics staleness rides the same 250 ms tick
-  drive_wait_poll(); // and so does the wait for the MCB to enable driving
+  diag_poll();          // diagnostics staleness rides the same 250 ms tick
+  drive_wait_poll();    // and so does the wait for the MCB to enable driving
+  update_screen_poll(); // after it: the drive screen wins while the chair drives
 
   // Defensive: if the RTPS label's text colour/opacity are registered as
   // themeable in the SquareLine project, ui_theme_set() re-applies the theme's
@@ -1735,8 +1752,8 @@ static void hold_poll_cb(lv_timer_t *) {
 // focus_next would give. Each page has its own group and its own cursor:
 //
 //   buttons page                    adjustment page
-//   [ Elevation ] [ Real Tilt ]     [     -     ] [     +     ]
-//   [ FW Tilt   ] [ Side Tilt ]     [ 0deg ] [ 15deg ] [ 25deg ]
+//   [ Elevation ] [ Backseat  ]     [     -     ] [     +     ]
+//   [ Side Tilt ] [ Setback   ]     [ 0deg ] [ 15deg ] [ 25deg ]
 //   [ Static    ] [ Dynamic   ]
 //
 // Note the adjustment page's rows are different lengths, which is why a grid
@@ -2768,6 +2785,7 @@ static lv_obj_t *diag_rows[rammp::kDiagCount];
 static int diag_row_count; // rows on screen; 0 while it is not up
 static int diag_cursor;    // which row the joystick is on
 static lv_group_t *diag_group = nullptr;
+static lv_group_t *update_group = nullptr; // stays empty: the stick does nothing there
 
 static constexpr lv_style_selector_t kDiagStale = static_cast<lv_style_selector_t>(LV_PART_MAIN) |
                                                   static_cast<lv_style_selector_t>(LV_STATE_USER_1);
@@ -2943,6 +2961,9 @@ static void screen_loaded_cb(lv_event_t *e) {
   } else if (screen == ui_DiagnosticsScreen) {
     lv_indev_set_group(joystick_indev, diag_group);
     diag_focus(0);
+  } else if (screen == ui_UpdateScreen) {
+    lv_indev_set_group(joystick_indev, update_group); // nothing to do but watch
+    log_view_update_on_load();
   } else if (screen == ui_LogScreen && log_view_group() != nullptr) {
     lv_indev_set_group(joystick_indev, log_view_group());
     log_view_on_load();
@@ -3176,6 +3197,94 @@ static void diagnostics_screen_ensure() {
   lv_obj_add_event_cb(ui_DiagnosticsScreen, diagnostics_screen_unloaded_cb,
                       LV_EVENT_SCREEN_UNLOADED, nullptr);
   strip_screen_overdraw(ui_DiagnosticsScreen);
+}
+
+// UpdateScreen: shown for as long as an update runs, whatever was up before, and
+// built only for that. Its ErrorWarningPanel stays down (it would cover the log);
+// the StatusPanel and TopBar still say what the chair and the link are doing.
+static void update_screen_destroy_cb(void *) {
+  if (ui_UpdateScreen != nullptr && lv_screen_active() != ui_UpdateScreen) {
+    ui_UpdateScreen_screen_destroy();
+  }
+}
+
+static void update_screen_unloaded_cb(lv_event_t *) {
+  lv_async_call(update_screen_destroy_cb, nullptr);
+}
+
+static void update_screen_ensure() {
+  if (ui_UpdateScreen != nullptr) {
+    return;
+  }
+  ui_UpdateScreen_screen_init();
+  bind_status_panel(ui_StatusPanel10);
+  bind_rtps_label(ui_TopBar11);
+  bind_clock_label(ui_TopBar11);
+  lv_obj_add_flag(ui_ErrorWarningPanel9, LV_OBJ_FLAG_HIDDEN);
+  lv_bar_set_range(ui_UpdateProgressBar, 0, 100);
+  lv_bar_bind_value(ui_UpdateProgressBar, &update_percent_subject);
+  lv_label_bind_text(ui_UpdateProgressBarLabel, &update_text_subject, nullptr);
+  log_view_attach_update(ui_UpdateLog);
+  lv_obj_add_event_cb(ui_UpdateScreen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, nullptr);
+  lv_obj_add_event_cb(ui_UpdateScreen, update_screen_unloaded_cb, LV_EVENT_SCREEN_UNLOADED,
+                      nullptr);
+  strip_screen_overdraw(ui_UpdateScreen);
+}
+
+static constexpr int64_t kUpdateFailedShowUs = 5'000'000; // then back to the main screen
+static espp::Logger update_logger({.tag = "update_ui", .level = espp::Logger::Verbosity::INFO});
+
+static bool chair_driving() {
+  return static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) ==
+             RtpsLinkState::CONNECTED &&
+         static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject)) ==
+             MIB::MibSystemState::ENABLED;
+}
+
+// On the 250 ms tick: the update's progress into the subjects, and the screen up
+// while it runs. An update that ends without a reboot failed (or was aborted):
+// that is shown for a while, and the reason is in the log beneath.
+static void update_screen_poll() {
+  const OtaProgress update = ota_progress();
+  const bool running = update.state == rammp::OtaState::LISTENING ||
+                       update.state == rammp::OtaState::RECEIVING ||
+                       update.state == rammp::OtaState::REBOOTING;
+  static bool was_running = false;
+  static int64_t leave_at_us = 0;
+  const int64_t now = esp_timer_get_time();
+  char text[sizeof(update_text_buf)] = "";
+  if (running) {
+    leave_at_us = 0;
+    if (update.state == rammp::OtaState::LISTENING) {
+      snprintf(text, sizeof(text), "Update: starting");
+    } else if (update.state == rammp::OtaState::RECEIVING) {
+      snprintf(text, sizeof(text), "Update: %u%%", update.percent);
+    } else {
+      snprintf(text, sizeof(text), "Update: restarting");
+    }
+    lv_subject_set_int(&update_percent_subject,
+                       update.state == rammp::OtaState::REBOOTING ? 100 : update.percent);
+  } else if (was_running) {
+    snprintf(text, sizeof(text), "Update failed");
+    leave_at_us = now + kUpdateFailedShowUs;
+  }
+  was_running = running;
+  if (text[0] != '\0' && strcmp(text, lv_subject_get_string(&update_text_subject)) != 0) {
+    lv_subject_copy_string(&update_text_subject, text);
+  }
+  if (running && !chair_driving() && lv_screen_active() != ui_UpdateScreen) {
+    update_logger.info("Update running: showing the UpdateScreen");
+    update_screen_ensure();
+    _ui_screen_change(&ui_UpdateScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
+                      &ui_UpdateScreen_screen_init);
+  }
+  if (leave_at_us != 0 && now >= leave_at_us) {
+    leave_at_us = 0;
+    if (lv_screen_active() == ui_UpdateScreen) {
+      update_logger.info("Update over: back to the main screen");
+      screen_return_to_main();
+    }
+  }
 }
 
 static void direct_flush_cb(lv_display_t *disp, const lv_area_t * /*area*/, uint8_t *px_map) {
@@ -3522,12 +3631,30 @@ static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c) {
   logger.info("DA7280 functional test complete");
 }
 
+// Shutdown handler: every esp_restart (an update, a rollback, the console's reboot, the
+// actions screen) leaves the panel powered with nothing driving it until the new image
+// sets it up ~3 s later, and an undriven DSI panel shows blue. Dark instead. The LEDC
+// calls directly, not brightness(): that can wait on a fade.
+static void backlight_off_on_restart() {
+  ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, 0);
+  ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+  esp_rom_delay_us(20'000); // the new duty takes a PWM period, the panel a moment more
+  esp_rom_printf("restart: backlight off (duty %u)\n",
+                 static_cast<unsigned>(ledc_get_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0)));
+}
+
 extern "C" void app_main(void) {
   // First, so the LogScreen has everything printed from here on - including
   // what the tasks started below print.
   log_capture_start();
   espp::Logger logger({.tag = "M5Stack Tab5 Example", .level = espp::Logger::Verbosity::INFO});
   logger.info("Starting example!");
+  // Before anything reads /storage: the first boot of the two-slot layout brings the
+  // calibration and settings over from where the old partition table kept them.
+  storage_migrate_legacy();
+  // An updated image that never gets as far as RTPS rolls itself back (ota_update.cpp).
+  ota_boot_check();
+  esp_register_shutdown_handler(backlight_off_on_restart);
 
   //! [m5stack tab5 example]
   espp::M5StackTab5 &tab5 = espp::M5StackTab5::get();
@@ -3859,6 +3986,7 @@ extern "C" void app_main(void) {
   ui_SpecificSettingScreen_screen_destroy();
   ui_GenericActionsScreen_screen_destroy();
   ui_DiagnosticsScreen_screen_destroy();
+  ui_UpdateScreen_screen_destroy();
 
   // Swap the boot logo from the export's embedded SVG to a pre-rasterised A8
   // mask (main/boot_logo.c). Done here rather than in the SquareLine project
@@ -3941,6 +4069,9 @@ extern "C" void app_main(void) {
   // has the real answer a quarter second later.
   lv_subject_init_int(&rtps_link_subject, static_cast<int32_t>(RtpsLinkState::LINK_DOWN));
   lv_subject_init_int(&rtps_blink_subject, 1);
+  lv_subject_init_int(&update_percent_subject, 0);
+  lv_subject_init_string(&update_text_subject, update_text_buf, update_text_prev_buf,
+                         sizeof(update_text_buf), "Update: starting");
   // empty = no override, so the labels start on the enum names
   lv_subject_init_string(&drive_text_subject, drive_text_buf, drive_text_prev_buf,
                          sizeof(drive_text_buf), "");
@@ -4141,8 +4272,8 @@ extern "C" void app_main(void) {
   seat_buttons_grid.cell[0][0] = ui_SeatButton1;
   seat_buttons_grid.cell[0][1] = ui_SeatButton2;
   seat_buttons_grid.cols[1] = 2;
-  seat_buttons_grid.cell[1][0] = ui_SeatButton3;
-  seat_buttons_grid.cell[1][1] = ui_SeatButton4;
+  seat_buttons_grid.cell[1][0] = ui_SeatButton4;
+  seat_buttons_grid.cell[1][1] = ui_SeatButton7;
   seat_buttons_grid.cols[2] = 2;
   seat_buttons_grid.cell[2][0] = ui_SeatButton5;
   seat_buttons_grid.cell[2][1] = ui_SeatButton6;
@@ -4180,7 +4311,7 @@ extern "C" void app_main(void) {
   // two inert ones. Indexed to match seat_buttons_grid.
   lv_obj_t *seat_labels[3][2] = {
       {ui_SeatButtonLabel1, ui_SeatButtonLabel2},
-      {ui_SeatButtonLabel3, ui_SeatButtonLabel4},
+      {ui_SeatButtonLabel4, ui_SeatButtonLabel7},
       {nullptr, nullptr},
   };
 
@@ -4228,8 +4359,8 @@ extern "C" void app_main(void) {
   // screen moves when SeatState says the seat did. The export's placeholders
   // ("4.0 in", "12°") are replaced the moment the first sample lands, and read
   // "--" until then.
-  lv_obj_t *seat_values[] = {ui_SeatButtonValue1, ui_SeatButtonValue2, ui_SeatButtonValue3,
-                             ui_SeatButtonValue4};
+  lv_obj_t *seat_values[] = {ui_SeatButtonValue1, ui_SeatButtonValue2, ui_SeatButtonValue4,
+                             ui_SeatButtonValue5};
   for (uint8_t i = 0; i < seat_axis_count && i < std::size(seat_values); i++) {
     lv_subject_add_observer_obj(&seat_axis_value[i], seat_button_value_observer, seat_values[i],
                                 &seat_axis_format[i]);
@@ -4425,6 +4556,7 @@ extern "C" void app_main(void) {
   // screen-change action, which would build the screen without any of that,
   // so firmware takes the click instead.
   diag_group = lv_group_create();
+  update_group = lv_group_create();
   lv_obj_remove_event_cb(ui_DiagnosticsButton, ui_event_DiagnosticsButton);
   lv_obj_add_event_cb(
       ui_DiagnosticsButton, [](lv_event_t *) { diagnostics_open(); }, LV_EVENT_CLICKED, nullptr);
@@ -4869,6 +5001,7 @@ extern "C" void app_main(void) {
   // RTPS handlers run on the RTPS task: subjects only, under the LVGL lock.
   rtps_comms_on_mib_status([](const MIB::MibStatus &status) {
     clock_note_mcb_time(status); // no LVGL: sets the system clock and the RTC
+    mib_says_driving = status.systemState == MIB::MibSystemState::ENABLED;
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
     lv_subject_set_int(&mib_state_subject, static_cast<int32_t>(status.systemState));
     // What the MIB is actually driving with: the three profile buttons highlight from
@@ -4893,8 +5026,16 @@ extern "C" void app_main(void) {
       }
     }
   });
+  // No update while the chair drives: the UpdateScreen would take the display from
+  // the DriveScreen, and flash writes stall the CPU in bursts.
+  ota_set_start_guard([]() -> std::string {
+    const bool driving = mib_says_driving && rtps_comms_link_state() == RtpsLinkState::CONNECTED;
+    return driving ? "refused: the chair is driving" : "";
+  });
   if (!rtps_comms_start()) {
     logger.warn("RTPS comms not started (Ethernet bring-up failed)");
+  } else {
+    net_console_start();
   }
 
   // loop forever

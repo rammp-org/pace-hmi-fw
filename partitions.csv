@@ -1,7 +1,17 @@
-# Partition table for 16MB flash
-# Name,     Type, SubType, Offset,  Size,  Flags
-nvs,        data, nvs,     0x9000,  0x6000,
-phy_init,   data, phy,     0xf000,  0x1000,
-factory,    app,  factory, 0x10000, 8M,
-# LittleFS, mounted at /storage by espp::FileSystem (joystick calibration)
-storage,    data, littlefs, ,       4M,
+# Partition table for 16MB flash: two OTA slots (updates over Ethernet,
+# main/ota_update.cpp) and the LittleFS storage.
+#
+# The storage partition used to sit at 0x810000 (4M, after an 8M `factory`).
+# That region now lies wholly inside ota_1, and nothing a USB flash writes
+# touches it, so the first boot of this layout can still read the old files
+# and copy them over (storage_migrate_legacy in main/storage.cpp). The first
+# OTA into ota_1 then overwrites it.
+#
+# Name,     Type, SubType,  Offset,   Size,     Flags
+nvs,        data, nvs,      0x9000,   0x6000,
+phy_init,   data, phy,      0xf000,   0x1000,
+ota_0,      app,  ota_0,    0x10000,  6M,
+ota_1,      app,  ota_1,    0x610000, 6M,
+otadata,    data, ota,      0xc10000, 0x2000,
+# LittleFS, mounted at /storage by espp::FileSystem (calibration, settings)
+storage,    data, littlefs, 0xc20000, 0x3e0000,

@@ -16,6 +16,23 @@ Firmware for the RAMMP wheelchair HMI: an M5Stack Tab5 (ESP32-P4) on the [RAMMP 
 - Without a toolchain: download the programmer from **Actions → Build and Package Main → Artifacts** and run it.
 - Or put the [release](https://github.com/rammp-org/pace-hmi-fw/releases) images in `precompiled/` and run `.\flash_precompiled.ps1` (needs esptool v5+).
 
+## Update over Ethernet
+Once a board runs a firmware with OTA (flashed over USB once), USB is no longer needed:
+
+```sh
+python scripts/rtps_ota.py list                          # devices on the network: MAC, IP, version, slot
+python scripts/rtps_ota.py flash build/rammp-hmi-p4.bin  # all of them, in parallel (or --device MAC)
+idf.py ota-net                                           # build, then the same
+python scripts/rtps_ota.py console                       # logs + commands; or idf.py monitor -p socket://<ip>:3333 --no-reset
+```
+
+- The device announces itself on RTPS (`rammp/ota/device_info`). A START signed with the update key (`--key` / `RAMMP_OTA_KEY`; the default is a public bench key) makes it open TCP 3232 for that one image; the image goes over it with espp's OTA protocol.
+- The image goes zlib-compressed (to 32%) to any device that says it takes that: a 5 MB update is written in ~30 s instead of ~36 s. `--no-compress` sends it as is. Most of what remains is the flash itself (~16 ms per 4 KB).
+- Refused: a bad key, a replayed command, an older version (major.minor.patch), and an image whose size, version or SHA-256 is not the one the START named.
+- The new image boots pending: it confirms itself once Ethernet and RTPS are up, and goes back to the previous one if it resets first or takes longer than 120 s. The tool reports `ROLLED BACK` when that happens.
+- Signed images: build with `sdkconfig.signed` layered on (instructions in that file); a board running a signed image then refuses unsigned updates.
+- The partition table has two 6 MB slots. The first boot after moving to it copies the files from the old storage partition, so calibration and settings survive.
+
 ## Screens
 - Joystick only: **push up and hold** to enter, **pull and hold** (or hold the button) to leave. The bottom prompt says which.
 - The UI is designed in SquareLine Studio ([pace-hmi-gui](https://github.com/rammp-org/pace-hmi-gui)); `main/ui/` is its export (`import_ui.ps1`). Don't edit it here.

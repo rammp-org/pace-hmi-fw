@@ -43,6 +43,7 @@ void ui_init(void)
     ui_SpecificSettingScreen_screen_init();
     ui_GenericActionsScreen_screen_init();
     ui_DiagnosticsScreen_screen_init();
+    ui_UpdateScreen_screen_init();
     ui____initial_actions0 = lv_obj_create(NULL);
     lv_disp_load_scr(ui_BootScreen);
 }
@@ -60,4 +61,5 @@ void ui_destroy(void)
     ui_SpecificSettingScreen_screen_destroy();
     ui_GenericActionsScreen_screen_destroy();
     ui_DiagnosticsScreen_screen_destroy();
+    ui_UpdateScreen_screen_destroy();
 }

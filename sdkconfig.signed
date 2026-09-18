@@ -1,0 +1,22 @@
+# Signed images (plan step 5): layered on sdkconfig.defaults for a build whose
+# updates must carry a signature from the fleet key.
+#
+#   idf.py -B build_signed -D SDKCONFIG=build_signed/sdkconfig \
+#          -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.signed" build
+#
+# No eFuse is burned and the bootloader does not change: the running app trusts
+# the key its own signature block carries, and esp_ota_end() refuses an update
+# not signed with that key (unsigned ones included). So a board is enrolled by
+# USB-flashing one signed image, and a USB flash of an unsigned image undoes it.
+# Physical access still bypasses this; hardware Secure Boot v2 is the step past
+# it, and that one is permanent.
+#
+# The key is not in the repository. Make one once and keep it safe:
+#   espsecure.py generate_signing_key --version 2 --scheme rsa3072 keys/ota_signing_key.pem
+# CI signs with its own copy: build with CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=n
+# and run `espsecure.py sign_data --version 2 --keyfile <key> <app>.bin`.
+CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT=y
+CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME=y
+CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=y
+CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=y
+CONFIG_SECURE_BOOT_SIGNING_KEY="keys/ota_signing_key.pem"
