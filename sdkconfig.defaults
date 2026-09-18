@@ -1,4 +1,4 @@
-# TODO: uncomment one of these if you want to support a specifc target by default
+﻿# TODO: uncomment one of these if you want to support a specifc target by default
 # CONFIG_IDF_TARGET="esp32"
 # CONFIG_IDF_TARGET="esp32s2"
 # CONFIG_IDF_TARGET="esp32s3"
@@ -53,7 +53,7 @@ CONFIG_CACHE_L2_CACHE_LINE_128B=y
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
 
 # W5500 SPI Ethernet on the M5-Bus header (SCK=GPIO5, MOSI=GPIO18,
-# MISO=GPIO19, CS=GPIO45, INT=GPIO52) — network transport for RTPS. The W5500
+# MISO=GPIO19, CS=GPIO45, INT=GPIO52) â€” network transport for RTPS. The W5500
 # chip driver itself comes from the espressif/w5500 managed component (in IDF
 # 6.0 the SPI-Ethernet chip drivers moved out of esp_eth to the registry).
 CONFIG_ETH_USE_SPI_ETHERNET=y
@@ -77,7 +77,7 @@ CONFIG_LV_FONT_MONTSERRAT_48=y
 # widens those fields for every font, costing a little flash.
 CONFIG_LV_FONT_FMT_TXT_LARGE=y
 
-# Task stack sizes and tick rate from the m5stack-tab5 BSP example — the
+# Task stack sizes and tick rate from the m5stack-tab5 BSP example â€” the
 # default 3.5K main stack overflows during LVGL/audio/ADC setup.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=32768
 CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
@@ -284,5 +284,6 @@ CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 
 # espp/rtps endpoint pools. SPDP takes 1 best-effort writer + 1 reader; the HMI
 # adds 4 writers (the default 5 fits) and 5 readers, so one more reader slot.
+CONFIG_RTPS_LIMIT_NUM_STATELESS_WRITERS=6
 CONFIG_RTPS_LIMIT_NUM_STATELESS_READERS=6
 CONFIG_RTPS_LIMIT_MAX_NUM_READER_CALLBACKS=6

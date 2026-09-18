@@ -17,8 +17,11 @@ Two pieces:
              modes are about — sliding sideways and spinning on the spot — are
              invisible from behind.
 
-Drive mode comes from the HMI, not from here: the user picks HOLO / Normal /
-Auto on the Tab5's drive screen and it arrives with every joystick sample.
+The drive profile comes from the HMI, not from here: the user picks it on the
+Tab5's drive screen, it goes out on DriveCommand, and the MIB confirms it in
+MibStatus. It is a response strength (LOW / NORMAL / HIGH), not a kinematics
+mode, so every profile drives car-like and the profile only sets how much of
+the speed range the stick reaches.
 """
 
 from __future__ import annotations
@@ -45,6 +48,13 @@ TWIST_RATE = 2.2
 #: Radians per second of steering at full lock, at full speed. Scaled by speed
 #: so the car cannot pirouette while stopped — that is what twist is for.
 STEER_RATE = 2.0
+#: Share of the speed range each MIB::DriveProfile reaches. The profile is a
+#: response strength, so it scales the car rather than changing how it steers.
+PROFILE_SCALE = {
+    spec.DRIVE_PROFILE_LOW: 0.5,
+    spec.DRIVE_PROFILE_NORMAL: 1.0,
+    spec.DRIVE_PROFILE_HIGH: 1.5,
+}
 #: World units between road centre lines.
 ROAD_SPACING = 400.0
 #: Width of a road in world units.
@@ -65,7 +75,7 @@ class CarModel:
         self.y = 0.0
         self.heading = 0.0  # radians, 0 = up the screen
         self.speed = 0.0  # in displayed units, 0 .. SPEED_MAX_TENTHS/10
-        self.drive_mode = spec.DRIVE_MODE_NORMAL
+        self.drive_profile = spec.DRIVE_PROFILE_NORMAL
         #: Last deflections applied, for the window to display.
         self.inputs = (0.0, 0.0, 0.0)
         self._last_update: Optional[float] = None
@@ -79,7 +89,7 @@ class CarModel:
         """The number the HMI shows, derived from the car rather than beside it."""
         return max(0, min(int(round(self.speed * 10)), spec.SPEED_MAX_TENTHS))
 
-    def update(self, sample: Optional[tuple], drive_mode: Optional[int] = None) -> None:
+    def update(self, sample: Optional[tuple], drive_profile: Optional[int] = None) -> None:
         """Advance the car to now, given the latest joystick sample."""
         now = time.monotonic()
         if self._last_update is None:
@@ -90,50 +100,34 @@ class CarModel:
         self._last_update = now
         if sample is None or dt <= 0.0:
             return
-        if drive_mode is not None:
-            self.drive_mode = drive_mode
+        if drive_profile is not None:
+            self.drive_profile = drive_profile
 
         # Already -1..+1, centred and deadzoned by the HMI: +x right, +y forward.
         steer, throttle, twist = sample[0], sample[1], sample[2]
         self.inputs = (steer, throttle, twist)
 
-        # Twist is independent of drive mode: it always spins the chair in place.
+        # Twist is independent of drive profile: it always spins the chair in place.
         self.heading += twist * TWIST_RATE * dt
 
-        if self.drive_mode == spec.DRIVE_MODE_HOLO:
-            self._step_holonomic(steer, throttle, dt)
-        else:
-            # AUTO is selectable on the HMI but undefined, so it drives as
-            # NORMAL rather than silently doing nothing.
-            self._step_normal(steer, throttle, dt)
+        self._step_car(steer, throttle, dt)
 
-    def _step_normal(self, steer: float, throttle: float, dt: float) -> None:
-        """Car-like: throttle builds speed, steering curves the heading."""
+    def _step_car(self, steer: float, throttle: float, dt: float) -> None:
+        """Car-like: throttle builds speed, steering curves the heading.
+
+        Every profile drives this way - the profile only scales the ceiling.
+        """
+        ceiling = self.max_speed * PROFILE_SCALE.get(self.drive_profile, 1.0)
         if throttle != 0.0:
-            self.speed += throttle * (self.max_speed / ACCEL_SECONDS) * dt
-            self.speed = max(0.0, min(self.speed, self.max_speed))
+            self.speed += throttle * (ceiling / ACCEL_SECONDS) * dt
+            self.speed = max(0.0, min(self.speed, ceiling))
         # Steering authority follows speed, so the car turns as it drives rather
         # than spinning on the spot when parked.
         if self.speed > 0.0:
-            self.heading += steer * STEER_RATE * (self.speed / self.max_speed) * dt
+            self.heading += steer * STEER_RATE * (self.speed / ceiling) * dt
         distance = self.speed * WORLD_UNITS_PER_SPEED * dt
         self.x += math.sin(self.heading) * distance
         self.y -= math.cos(self.heading) * distance
-
-    def _step_holonomic(self, steer: float, throttle: float, dt: float) -> None:
-        """Stick deflection IS the velocity, in screen axes.
-
-        Screen frame rather than car frame: with twist spinning the chair
-        independently, a car-frame mapping means the direction of travel rotates
-        under the user's thumb, which is unpredictable to steer by.
-        """
-        magnitude = min(math.hypot(steer, throttle), 1.0)
-        self.speed = magnitude * self.max_speed
-        distance = self.speed * WORLD_UNITS_PER_SPEED * dt
-        if magnitude > 0.0:
-            self.x += (steer / magnitude) * distance
-            self.y -= (throttle / magnitude) * distance
-
 
 class DriveView:
     """Top-down window: the car stays centred, the roads move."""
@@ -158,8 +152,8 @@ class DriveView:
 
         status = ttk.Frame(self.window, padding=(8, 0, 8, 8))
         status.pack(fill="x")
-        self.mode_label = ttk.Label(status, text="mode: -")
-        self.mode_label.pack(side="left")
+        self.profile_label = ttk.Label(status, text="profile: -")
+        self.profile_label.pack(side="left")
         self.readout = ttk.Label(status, text="")
         self.readout.pack(side="right")
         ttk.Button(status, text="Recentre car", command=self.recentre).pack(side="left", padx=12)
@@ -245,9 +239,9 @@ class DriveView:
         self._draw_car()
 
         steer, throttle, twist = self.car.inputs
-        mode_name = spec.DRIVE_MODE_NAMES.get(self.car.drive_mode, "?")
-        status = self.status_fn() if self.status_fn else "set the drive mode on the Tab5"
-        self.mode_label.configure(text=f"mode: {mode_name}   ({status})")
+        profile_name = spec.DRIVE_PROFILE_NAMES.get(self.car.drive_profile, "?")
+        status = self.status_fn() if self.status_fn else "set the drive profile on the Tab5"
+        self.profile_label.configure(text=f"profile: {profile_name}   ({status})")
         self.readout.configure(
             text=f"speed {self.car.speed_tenths / 10:.1f}   "
                  f"heading {math.degrees(self.car.heading) % 360:5.0f}°   "

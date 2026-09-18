@@ -48,8 +48,8 @@ constexpr int kSpiClockMhz = 20;   // W5500 max is 33; 20 tolerates jumper wires
 constexpr int kRxPollPeriodMs = 0; // 0 = RX on the INT line; N = poll every N ms (rules out INT)
 
 constexpr auto kHeartbeatPeriod = 2s; // bench counter on rammp::kHmiCounter
-constexpr int64_t kMcbStatusTimeoutUs =
-    std::chrono::duration_cast<std::chrono::microseconds>(rammp::kMcbStatusTimeout).count();
+constexpr int64_t kMibStatusTimeoutUs =
+    std::chrono::duration_cast<std::chrono::microseconds>(rammp::kMibStatusTimeout).count();
 constexpr int64_t kDiagRateWindowUs = 4'000'000;
 
 espp::Logger logger({.tag = "rtps_comms", .level = espp::Logger::Verbosity::INFO});
@@ -60,7 +60,7 @@ std::atomic<bool> link_up{false};
 std::atomic<bool> got_ip{false};
 std::atomic<bool> peer_matched{false};    // a latch: espp only reports "matched"
 std::atomic<bool> endpoints_ready{false}; // every publisher below exists
-std::atomic<int64_t> last_status_us{0};   // last McbStatus, esp_timer time; 0 = never
+std::atomic<int64_t> last_status_us{0};   // last MibStatus, esp_timer time; 0 = never
 std::string ip_address;
 esp_netif_ip_info_t ip_info{};
 
@@ -70,12 +70,12 @@ std::unique_ptr<espp::Task> heartbeat_task;
 // HMI -> MCB / PC
 Publisher<rammp::UInt32> counter_pub;
 Publisher<rammp::XYTwist> joystick_pub;
-Publisher<rammp::ActuatorCommand> actuator_pub;
+Publisher<rammp::SeatCommand> seat_pub;
+Publisher<rammp::DriveCommand> drive_pub;
 Publisher<rammp::SelfTestReport> report_pub;
 
 std::function<void(float)> brightness_handler;
-std::function<void(const rammp::McbStatus &)> mcb_status_handler;
-std::function<void(const rammp::ActuatorState &)> actuator_state_handler;
+std::function<void(const MIB::MibStatus &)> mib_status_handler;
 std::function<void(const rammp::Diagnostics &)> diagnostics_handler;
 std::function<void(uint8_t)> selftest_run_handler;
 std::function<void(uint16_t, int)> selftest_pong_handler;
@@ -163,39 +163,25 @@ void note_mcb_status(int64_t now_us, uint8_t seq) {
   mcb_last_seq = seq;
 }
 
-void on_mcb_status(const rammp::McbStatus &s) {
+void on_mib_status(const MIB::MibStatus &s) {
   const int64_t now = esp_timer_get_time();
   last_status_us = now; // liveness, stamped before a slow handler can age it
   note_mcb_status(now, s.seq);
-  // It repeats every kMcbStatusPeriod: log only what changed.
-  auto shown = [](const rammp::McbStatus &m) {
-    return std::tie(m.drive_status, m.system_state, m.flags, m.speed_tenths, m.drive_text,
-                    m.state_text, m.error_text, m.error_footer);
+  // It repeats every kMibStatusPeriod: log only what changed. The seat is deliberately
+  // not in here - it moves while a button is held, and would bury everything else.
+  auto shown = [](const MIB::MibStatus &m) {
+    return std::tie(m.systemState, m.activeProfile, m.speed, m.status_text, m.error_message,
+                    m.error_footer);
   };
-  static std::optional<rammp::McbStatus> last;
+  static std::optional<MIB::MibStatus> last;
   if (!last || shown(*last) != shown(s)) {
-    logger.info("MCB: drive={} '{}' state={} '{}' speed={}.{} flags=0x{:02x} error='{}' / '{}'",
-                rammp::to_string(s.drive_status), s.drive_text, rammp::to_string(s.system_state),
-                s.state_text, s.speed_tenths / 10, s.speed_tenths % 10, s.flags, s.error_text,
-                s.error_footer);
+    logger.info("MIB: state={} '{}' profile={} speed={:.2f} m/s error='{}' / '{}'",
+                rammp::to_string(s.systemState), s.status_text, rammp::to_string(s.activeProfile),
+                s.speed, s.error_message, s.error_footer);
     last = s;
   }
-  if (mcb_status_handler) {
-    mcb_status_handler(s);
-  }
-}
-
-void on_actuator_state(const rammp::ActuatorState &s) {
-  static size_t last_count = SIZE_MAX; // it repeats: log the first sample and refusals only
-  if (s.values.size() != last_count) {
-    last_count = s.values.size();
-    logger.info("ActuatorState arriving: {} actuators", last_count);
-  }
-  if (s.result != rammp::ActuatorResult::OK) {
-    logger.info("Actuator request {} -> {}", s.req_id, rammp::to_string(s.result));
-  }
-  if (actuator_state_handler) {
-    actuator_state_handler(s);
+  if (mib_status_handler) {
+    mib_status_handler(s);
   }
 }
 
@@ -369,16 +355,16 @@ bool start_participant() {
     return false;
   }
 
-  // 4 writers + 5 readers, plus SPDP's pair: the budget set in sdkconfig.defaults
+  // 5 writers + 5 readers, plus SPDP's pair: the budget set in sdkconfig.defaults
   counter_pub = make_publisher(rammp::kHmiCounter);
   joystick_pub = make_publisher(rammp::kJoystickXYTwist);
-  actuator_pub = make_publisher(rammp::kJoystickActuatorCommand);
+  seat_pub = make_publisher(rammp::kJoystickSeatCommand);
+  drive_pub = make_publisher(rammp::kJoystickDriveCommand);
   report_pub = make_publisher(rammp::kSelfTestReport);
-  const bool ok = counter_pub && joystick_pub && actuator_pub && report_pub &&
+  const bool ok = counter_pub && joystick_pub && seat_pub && drive_pub && report_pub &&
                   subscribe(rammp::kHmiCommand, on_command) &&
                   subscribe(rammp::kHmiBrightness, on_brightness) &&
-                  subscribe(rammp::kMcbStatus, on_mcb_status) &&
-                  subscribe(rammp::kMcbActuatorState, on_actuator_state) &&
+                  subscribe(MIB::kMibStatus, on_mib_status) &&
                   subscribe(rammp::kMcbDiagnostics, on_diagnostics);
   if (!ok) {
     return false;
@@ -409,11 +395,8 @@ bool start_participant() {
 void rtps_comms_on_brightness(std::function<void(float)> handler) {
   brightness_handler = std::move(handler);
 }
-void rtps_comms_on_mcb_status(std::function<void(const rammp::McbStatus &)> handler) {
-  mcb_status_handler = std::move(handler);
-}
-void rtps_comms_on_actuator_state(std::function<void(const rammp::ActuatorState &)> handler) {
-  actuator_state_handler = std::move(handler);
+void rtps_comms_on_mib_status(std::function<void(const MIB::MibStatus &)> handler) {
+  mib_status_handler = std::move(handler);
 }
 void rtps_comms_on_diagnostics(std::function<void(const rammp::Diagnostics &)> handler) {
   diagnostics_handler = std::move(handler);
@@ -425,13 +408,16 @@ void rtps_comms_on_selftest_pong(std::function<void(uint16_t, int)> handler) {
   selftest_pong_handler = std::move(handler);
 }
 
-bool rtps_comms_publish_adc(float x, float y, float twist, rammp::Buttons buttons,
-                            rammp::DriveMode drive_mode) {
-  return publish(joystick_pub, rammp::XYTwist{x, y, twist, buttons, drive_mode});
+bool rtps_comms_publish_adc(float x, float y, float twist, rammp::Buttons buttons) {
+  return publish(joystick_pub, rammp::XYTwist{x, y, twist, buttons});
 }
 
-bool rtps_comms_publish_actuator_command(uint8_t req_id, rammp::ActuatorId actuator, int8_t steps) {
-  return publish(actuator_pub, rammp::ActuatorCommand{req_id, actuator, steps});
+bool rtps_comms_publish_drive(rammp::DriveRequest request, MIB::DriveProfile profile) {
+  return publish(drive_pub, rammp::DriveCommand{request, profile});
+}
+
+bool rtps_comms_publish_seat(rammp::SeatAxis axis, float target) {
+  return publish(seat_pub, rammp::SeatCommand{axis, target});
 }
 
 bool rtps_comms_publish_selftest_ping(uint16_t seq) {
@@ -488,7 +474,7 @@ RtpsLinkState rtps_comms_link_state() {
     return RtpsLinkState::NO_IP;
   }
   const int64_t last = last_status_us.load();
-  const bool fresh = last != 0 && esp_timer_get_time() - last < kMcbStatusTimeoutUs;
+  const bool fresh = last != 0 && esp_timer_get_time() - last < kMibStatusTimeoutUs;
   return fresh ? RtpsLinkState::CONNECTED : RtpsLinkState::NO_PEER;
 }
 
@@ -517,10 +503,10 @@ std::string rtps_comms_link_state_meaning(RtpsLinkState state) {
   case RtpsLinkState::NO_IP:
     return "link up, but no DHCP lease";
   case RtpsLinkState::NO_PEER:
-    return fmt::format("MCB not answering: no McbStatus in {} ms",
-                       rammp::kMcbStatusTimeout.count());
+    return fmt::format("MIB not answering: no MibStatus in {} ms",
+                       rammp::kMibStatusTimeout.count());
   case RtpsLinkState::CONNECTED:
-    return "McbStatus arriving";
+    return "MibStatus arriving";
   }
   return "?";
 }

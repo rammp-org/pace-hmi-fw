@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Stand-in for the Main Control Board: drives the joystick's status labels.
 
-The joystick HMI is a slave of the MCB — the DRIVE and STATE labels on its
-StatusPanel show whatever arrives on ``rammp/mcb/status``. This script plays the
-MCB from a laptop so that path can be exercised without the real board.
+The joystick HMI is a slave of the MCB: the DRIVE and STATE labels on its
+StatusPanel show whatever arrives on ``rammp/mib/status``, driving starts
+only once the MCB says it has, and the seat moves only when the MCB says it
+moved. This script plays the MCB from a laptop so all of that can be exercised
+without the real board — it answers DriveCommand and SeatCommand the way the
+board is meant to, and can refuse either on demand.
 
 Topics, type names, enum values and the wire layout all come from
 ``rammp_rtps.py``, which scrapes the RTPS spec headers — the same header the
@@ -49,6 +52,12 @@ import rtps_drive_game  # noqa: E402
 import rtps_net  # noqa: E402
 
 
+#: Why the bench refused a seat request. Local to this script: MibStatus has no
+#: per-request verdict, so a refusal never goes on the wire - on the HMI it shows up
+#: as an axis that simply did not move.
+SEAT_RESULT_OK = 0
+SEAT_RESULTS = {0: "OK", 1: "AT_MIN", 2: "AT_MAX", 3: "INHIBITED", 4: "UNKNOWN_AXIS"}
+
 #: Full stick deflection takes the emulated speed from 0 to max in roughly
 #: this many seconds. Deliberately unhurried so the number is readable as it
 #: moves rather than snapping to an end stop.
@@ -59,26 +68,43 @@ SPEED_FULL_TRAVEL_SECONDS = 3.0
 SPEED_DEADZONE = 0.15
 
 
-class McbStatusPublisher(rtps_host.RtpsHostHarness):
-    """Harness whose periodic publish sends a rammp_mcb_status_t."""
+class SystemStatePublisher(rtps_host.RtpsHostHarness):
+    """Plays the MCB: publishes SystemState, and answers the joystick's commands."""
 
     def __init__(self, args: argparse.Namespace,
                  car: "rtps_drive_game.CarModel | None" = None) -> None:
         super().__init__(args)
-        self.drive_status = spec.DRIVE_STATUS_INACTIVE
-        self.system_state = spec.SYSTEM_STATE_OK
-        self.flags = 0
-        # label overrides; empty means "let the HMI use the enum's own name"
-        self.drive_text = ""
-        self.state_text = ""
-        self.error_text = ""
+        # One field where there were two: MibSystemState says both whether the chair
+        # drives (ENABLED) and whether it is faulted (ERROR).
+        self.system_state = spec.MIB_SYSTEM_STATE_IDLE
+        # What the joystick last asked for, and whether this MCB plays along.
+        # Refusing is the interesting case: the HMI has to give up on its own
+        # timeout rather than sit on a screen that pretends the chair drives.
+        self.drive_request = spec.DRIVE_REQUEST_DISABLE
+        self.refuse_drive = False
+        # The other half: a MIB that will not stop. Leaving the drive screen is a
+        # request too, so this is how the bench makes that one fail.
+        self.refuse_stop = False
+        # The profile rides DriveCommand; the HMI waits to see it come back in
+        # SystemState before it believes the change took. Two of them, because a
+        # real MCB is allowed to disagree: `requested_profile` is what the
+        # joystick asked for and `profile` is what SystemState reports. With
+        # follow_profile cleared the bench owns the second one, which is the
+        # only way to see what the HMI does when a profile change is not granted.
+        self.profile = spec.DRIVE_PROFILE_NORMAL
+        self.requested_profile = spec.DRIVE_PROFILE_NORMAL
+        self.follow_profile = True
+        # label override; empty means "let the HMI use the enum's own name"
+        self.status_text = ""
+        self.error_message = ""
         self.error_footer = ""
         # Emulated chair speed in tenths. The GUI integrates the joystick into
         # this; the CLI just leaves it at zero.
         self.speed_tenths = 0
-        # Latest joystick sample: (x, y, twist, buttons, drive_mode), or None.
-        # Axes are -1..+1, already calibrated by the HMI.
-        self.joystick: tuple[float, float, float, int, int] | None = None
+        # Latest joystick sample: (x, y, twist, buttons), or None. Axes are
+        # -1..+1, already calibrated by the HMI. The profile is not in here: it
+        # arrives on DriveCommand, which is the only thing that changes it.
+        self.joystick: tuple[float, float, float, int] | None = None
         # The chair being simulated. It is the single source of speed: what the
         # Tab5 displays is read straight off it, so the number on the screen and
         # the car in the drive view cannot disagree. Accepted from the caller so
@@ -96,43 +122,43 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
         # discovery round confusing the picture.
         self.paused = False
 
-        # ---- actuators -------------------------------------------------
-        # The MCB owns every actuator position; the HMI only ever asks. These
-        # are the values it asks about, seeded to the middle of each range so a
-        # fresh bench session can step in both directions.
-        self.actuator_values = [
-            (a.min_value + a.max_value) // 2 for a in spec.ACTUATORS
+        # ---- seat -------------------------------------------------------
+        # The MCB owns every seat position; the HMI only ever asks, with an
+        # absolute target. Seeded to the middle of each range so a fresh bench
+        # session can move in both directions.
+        self.seat_values = [
+            (a.min_value + a.max_value) // 2 for a in spec.SEAT_AXES
         ]
-        # Per-actuator override for the next request: None accepts it, an
-        # RAMMP_ACTUATOR_RESULT_* value refuses it with that reason. This is
-        # the whole point of the bench tool — the HMI's refusal paths are hard
-        # to reach on a real chair without driving something into a hard stop.
-        self.actuator_reject: list[int | None] = [None] * len(spec.ACTUATORS)
-        self.actuator_req_id = 0
-        self.actuator_result = spec.ACTUATOR_RESULT_OK
-        self.actuator_seq = 0
-        # Set by apply_actuator_command so the next run-loop tick publishes
+        # Per-axis override for the next request: None judges it normally, a
+        # SEAT_RESULT_* value refuses it with that reason. This is the whole
+        # point of the bench tool — the HMI's refusal paths are hard to reach
+        # on a real chair without driving something into a hard stop.
+        self.seat_reject: list[int | None] = [None] * len(spec.SEAT_AXES)
+        self.seat_result = SEAT_RESULT_OK
+        self.seat_last_axis = 0
+        self.seat_seq = 0
+        #: (axis_id, target) of the last SeatCommand, for the bench to show
+        self.last_seat_command: tuple[int, int] | None = None
+        # Set by apply_seat_command so the next run-loop tick publishes
         # immediately rather than waiting out the period: a reply that took up
         # to half a second would make every press feel broken.
-        self.actuator_dirty = True
+        self.seat_dirty = True
 
         # A second writer and a second reader, appended rather than passed
         # through argparse: RtpsHostHarness builds one writer from
         # --publish-topic and gives every --subscribe-topic the same type name,
         # and these two need their own topic/type pairs. Everything downstream
         # (SEDP announcement, target discovery) already loops over these lists.
-        self.local_writers.append(rtps_host.WriterConfig(
-            topic_name=spec.TOPIC_MCB_ACTUATOR_STATE,
-            type_name=spec.TYPE_ACTUATOR_STATE,
-            reliable=False,
-            entity_index=len(self.local_writers),
-        ))
-        self.local_readers.append(rtps_host.ReaderConfig(
-            topic_name=spec.TOPIC_JOYSTICK_ACTUATOR_COMMAND,
-            type_name=spec.TYPE_ACTUATOR_COMMAND,
-            reliable=False,
-            entity_index=len(self.local_readers),
-        ))
+        # No seat writer any more: the seat rides MibStatus, which the harness's own
+        # periodic publish sends.
+        for topic, type_name in ((spec.TOPIC_JOYSTICK_SEAT_COMMAND, spec.TYPE_SEAT_COMMAND),
+                                 (spec.TOPIC_JOYSTICK_DRIVE_COMMAND, spec.TYPE_DRIVE_COMMAND)):
+            self.local_readers.append(rtps_host.ReaderConfig(
+                topic_name=topic,
+                type_name=type_name,
+                reliable=False,
+                entity_index=len(self.local_readers),
+            ))
 
         # Diagnostics: fake, slowly changing readings for every item in the
         # spec's RAMMP_DIAG_TABLE, sent with each status tick. Turning them off
@@ -150,7 +176,7 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
 
         # ---- self test ---------------------------------------------------
         # Every run of the HMI's self test needs a peer: its RTPS checks time
-        # pings against it and read McbStatus from it. Serving that here means
+        # pings against it and read SystemState from it. Serving that here means
         # this simulator, the GUI and rtps_selftest.py all answer a run however
         # it was started - over RTPS, or from the HMI's own SELF TEST row.
         self.adc_rx_count = 0
@@ -238,56 +264,65 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
             rtps_host.log(f"[selftest] run {r.run_id}: {verdict} - {r.value} pass, {r.lo} fail, "
                           f"{r.hi} skip in {r.detail}")
 
-    def apply_actuator_command(self, req_id: int, actuator_id: int, steps: int) -> int:
-        """Judge one request from the HMI and return the RESULT_* verdict.
+    def apply_drive_command(self, request: int, profile: int) -> None:
+        """Take one DriveCommand from the joystick.
 
-        Clamping lives here rather than on the HMI for the same reason it lives
-        on a real MCB: one board owns the position, so there is only ever one
-        opinion about whether a move is allowed.
+        The MCB is what decides whether the chair drives — the joystick asks
+        and waits. With refuse_drive set, the request is recorded and ignored,
+        which is what a chair inhibited by a fault or a raised seat does.
         """
-        self.actuator_req_id = req_id
-        self.actuator_dirty = True
-        if not 0 <= actuator_id < len(spec.ACTUATORS):
-            self.actuator_result = spec.ACTUATOR_RESULT_UNKNOWN_ID
-            return self.actuator_result
-
-        actuator = spec.ACTUATORS[actuator_id]
-        override = self.actuator_reject[actuator_id]
-        if override is not None:
-            self.actuator_result = override
-            return self.actuator_result
-
-        current = self.actuator_values[actuator_id]
-        target = current + steps * actuator.step
-        if target < actuator.min_value:
-            # Report the limit rather than moving part way. A partial move
-            # would leave the HMI showing a number the user did not ask for
-            # and no indication that anything was refused.
-            self.actuator_result = spec.ACTUATOR_RESULT_AT_MIN
-        elif target > actuator.max_value:
-            self.actuator_result = spec.ACTUATOR_RESULT_AT_MAX
-        else:
-            self.actuator_values[actuator_id] = target
-            self.actuator_result = spec.ACTUATOR_RESULT_OK
-        return self.actuator_result
-
-    def publish_actuator_state(self) -> None:
-        """Send the whole actuator state, as a reply and as the heartbeat."""
-        if not self.local_writers or len(self.local_writers) < 2:
+        self.drive_request = request
+        self.requested_profile = profile
+        if self.follow_profile:
+            self.profile = profile
+        if request == spec.DRIVE_REQUEST_ENABLE and self.refuse_drive:
             return
-        writer = self.local_writers[1]
-        payload = self.build_data_message(
-            writer,
-            spec.pack_actuator_state(self.actuator_values, self.actuator_req_id,
-                                     self.actuator_result, self.actuator_seq),
-        )
-        for destination in self._build_user_targets(writer):
-            self.send_user_datagram(payload, destination)
-        self.actuator_seq = (self.actuator_seq + 1) & 0xFF
-        self.actuator_dirty = False
+        if request == spec.DRIVE_REQUEST_DISABLE and self.refuse_stop:
+            return
+        # ERROR and INITIALIZING are not ours to leave: a drive request neither clears a
+        # fault nor finishes booting.
+        if self.system_state in (spec.MIB_SYSTEM_STATE_IDLE, spec.MIB_SYSTEM_STATE_ENABLED):
+            self.system_state = (spec.MIB_SYSTEM_STATE_ENABLED
+                                 if request == spec.DRIVE_REQUEST_ENABLE
+                                 else spec.MIB_SYSTEM_STATE_IDLE)
+
+    def apply_seat_command(self, axis_id: int, target: float) -> int:
+        """Judge one seat request from the HMI, return the SEAT_RESULT_* verdict.
+
+        Targets are absolute, which is what makes a preset button and a step
+        button the same message. Clamping lives here rather than on the HMI for
+        the same reason it lives on a real MCB: one board owns the position, so
+        there is only ever one opinion about where the seat is.
+        """
+        self.seat_last_axis = axis_id
+        self.seat_dirty = True
+        if not 0 <= axis_id < len(spec.SEAT_AXES):
+            self.seat_result = 4
+            return self.seat_result
+
+        axis = spec.SEAT_AXES[axis_id]
+        override = self.seat_reject[axis_id]
+        if override is not None:
+            self.seat_result = override
+            return self.seat_result
+
+        # The wire carries whole units; the model keeps the table's raw integers.
+        target = round(target * 10 ** axis.decimals)
+        current = self.seat_values[axis_id]
+        clamped = max(axis.min_value, min(axis.max_value, target))
+        self.seat_values[axis_id] = clamped
+        if clamped > target or (clamped == current == axis.min_value):
+            # Asked for less than the axis can do, or asked again while already
+            # at the stop: either way the answer is "that is as low as it goes".
+            self.seat_result = 1
+        elif clamped < target or (clamped == current == axis.max_value):
+            self.seat_result = 2
+        else:
+            self.seat_result = SEAT_RESULT_OK
+        return self.seat_result
 
     def handle_user_packet(self, packet: bytes, sender_ip: str, sender_port: int) -> None:
-        """Capture joystick samples and actuator requests."""
+        """Capture joystick samples, seat requests and drive requests."""
         for guid_prefix, writer_id, payload, reader_id in rtps_host.parse_rtps_data_messages(
             packet
         ):
@@ -303,21 +338,37 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
                 result = spec.unpack_selftest_report(payload)
                 if result is not None:
                     self._note_selftest_result(result)
-            elif topic == spec.TOPIC_JOYSTICK_ACTUATOR_COMMAND:
-                command = spec.unpack_actuator_command(payload)
+            elif topic == spec.TOPIC_JOYSTICK_SEAT_COMMAND:
+                command = spec.unpack_seat_command(payload)
                 if command is None:
                     continue
-                req_id, actuator_id, steps = command
-                result = self.apply_actuator_command(req_id, actuator_id, steps)
-                name = (spec.ACTUATORS[actuator_id].short
-                        if 0 <= actuator_id < len(spec.ACTUATORS) else f"#{actuator_id}")
+                axis_id, target = command
+                self.last_seat_command = (axis_id, target)
+                result = self.apply_seat_command(axis_id, target)
+                known = 0 <= axis_id < len(spec.SEAT_AXES)
+                name = spec.SEAT_AXES[axis_id].short if known else f"#{axis_id}"
+                shown = f"{target:g} {spec.SEAT_AXES[axis_id].unit}" if known else str(target)
                 rtps_host.log(
-                    f"[actuator] req {req_id}: {name} {steps:+d} step -> "
-                    f"{spec.ACTUATOR_RESULT_NAMES.get(result, '?')}"
+                    f"[seat] {name} -> {shown} : {SEAT_RESULTS.get(result, '?')}"
                 )
                 # Answer immediately. The periodic republish below is the
                 # convergence path, not the reply path.
-                self.publish_actuator_state()
+                self.publish_now()
+            elif topic == spec.TOPIC_JOYSTICK_DRIVE_COMMAND:
+                command = spec.unpack_drive_command(payload)
+                if command is None:
+                    continue
+                request, profile = command
+                self.apply_drive_command(request, profile)
+                rtps_host.log(
+                    f"[drive] {spec.DRIVE_REQUEST_NAMES.get(request, '?')} "
+                    f"profile={spec.DRIVE_PROFILE_NAMES.get(profile, '?')} -> "
+                    f"{spec.MIB_SYSTEM_STATE_NAMES.get(self.system_state, '?')}"
+                    + (" (refusing)" if request == spec.DRIVE_REQUEST_ENABLE
+                       and self.refuse_drive else "")
+                )
+                # The HMI is waiting on this to open its drive screen.
+                self.publish_now()
 
     def step_speed(self, _dt: float = 0.0) -> None:
         """Advance the simulated chair and take its speed.
@@ -329,20 +380,32 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
         """
         if self.joystick is None:
             return
-        drive_mode = self.joystick[4] if len(self.joystick) > 4 else None
-        self.car.update(self.joystick, drive_mode)
+        self.car.update(self.joystick, self.profile)
         self.speed_tenths = self.car.speed_tenths
+
+    @property
+    def speed_mps(self) -> float:
+        """What goes on the wire. CarModel.speed is in the HMI's displayed unit
+        (mph); MibStatus carries the real quantity and the HMI converts back."""
+        return self.speed_tenths / 10.0 / spec.MPH_PER_MPS
 
     def describe(self) -> str:
         return (
-            f"drive={spec.DRIVE_STATUS_NAMES.get(self.drive_status, '?')} "
-            f"state={spec.STATE_NAMES.get(self.system_state, '?')} "
-            f"flags=0x{self.flags:02x}"
-            + (f" drive_text='{self.drive_text}'" if self.drive_text else "")
-            + (f" state_text='{self.state_text}'" if self.state_text else "")
+            f"state={spec.MIB_SYSTEM_STATE_NAMES.get(self.system_state, '?')} "
+            f"profile={spec.DRIVE_PROFILE_NAMES.get(self.profile, '?')}"
+            + (f" status_text='{self.status_text}'" if self.status_text else "")
             + f" speed={self.speed_tenths / 10:.1f}"
             + (" [PAUSED]" if self.paused else "")
         )
+
+    def seat_units(self) -> tuple:
+        """The seat model in whole units, in MIB::seatState field order.
+
+        The table's rows are that struct's fields in that order, so zip is the whole
+        mapping - one row added to the table is one field more here.
+        """
+        return tuple(value / 10 ** axis.decimals
+                     for value, axis in zip(self.seat_values, spec.SEAT_AXES))
 
     def publish_diagnostics(self) -> None:
         """Fake readings for every diagnostics item: slow sine waves, offset
@@ -366,10 +429,6 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
         """Called by the harness run loop every --period seconds."""
         if self.paused:
             return
-        # Actuator state rides the same tick. Republished even when unchanged,
-        # so a joystick that just booted or just reconnected learns where the
-        # actuators are without the user having to press anything.
-        self.publish_actuator_state()
         self.publish_diagnostics()
         # Advance the emulated speed on real elapsed time. Clamped so a long
         # gap (a pause, a breakpoint) cannot lurch the number across its range
@@ -380,9 +439,9 @@ class McbStatusPublisher(rtps_host.RtpsHostHarness):
         writer = self.local_writers[0]
         payload = self.build_data_message(
             writer,
-            spec.pack_mcb_status(self.drive_status, self.system_state, self.flags, self.seq,
-                                 self.speed_tenths, self.drive_text, self.state_text,
-                                 self.error_text, self.error_footer,
+            spec.pack_mib_status(self.system_state, self.profile, self.seat_units(),
+                                 self.seq, self.speed_mps, self.status_text,
+                                 self.error_message, self.error_footer,
                                  clock=datetime.datetime.now()),  # sets the HMI's clock
         )
         targets = self._build_user_targets(writer)
@@ -453,12 +512,12 @@ def build_harness_args(cli: argparse.Namespace) -> argparse.Namespace:
         # emulated speed can follow the stick.
         subscribe_topic=[spec.TOPIC_JOYSTICK_XY_TWIST],
         subscribe_type_name=spec.TYPE_XY_TWIST,
-        publish_topic=spec.TOPIC_MCB_STATUS,
+        publish_topic=spec.TOPIC_MIB_STATUS,
         publish_value=0,  # unused: publish_now() is overridden
         publish_interval=cli.period,
         echo_received=False,
         reliable=False,
-        type_name=spec.TYPE_MCB_STATUS,
+        type_name=spec.TYPE_MIB_STATUS,
         announce_period=1.0,
         duration=0.0,
         trace_packets=cli.trace_packets,
@@ -468,23 +527,24 @@ def build_harness_args(cli: argparse.Namespace) -> argparse.Namespace:
 
 
 HELP_TEXT = """commands:
-  a / active      drive status -> ACTIVE
-  i / inactive    drive status -> INACTIVE
-  ok              state -> OK
+  a / active      state -> ENABLED (the next DriveCommand overrides it)
+  i / inactive    state -> IDLE
+  z               state -> INITIALIZING
+  x               toggle refusing DriveCommand ENABLE (HMI should time out)
+  s               toggle refusing DriveCommand DISABLE (HMI cannot leave driving)
+  ok              state -> IDLE
   e / err         state -> ERROR
-  f <hex>         reserved flags byte (e.g. 'f 01')
   et <text>       error banner body ('et' alone clears it)
   ef <text>       error banner footer ('ef' alone clears it)
-  dt <text>       override the DRIVE label text ('dt' alone clears it)
   st <text>       override the STATE label text ('st' alone clears it)
   p               pause publishing (HMI should go stale after
-                  RAMMP_MCB_STATUS_TIMEOUT_MS: blinking orange RTPS, '---')
+                  MIB_STATUS_TIMEOUT_MS: blinking orange RTPS, '---')
   r               resume publishing (HMI should go straight back to green)
   <enter>         show what is being published
   q               quit"""
 
 
-def run_interactive(harness: McbStatusPublisher) -> None:
+def run_interactive(harness: SystemStatePublisher) -> None:
     print(HELP_TEXT)
     while True:
         try:
@@ -494,33 +554,35 @@ def run_interactive(harness: McbStatusPublisher) -> None:
         if command in ("q", "quit", "exit"):
             return
         if command in ("a", "active"):
-            harness.drive_status = spec.DRIVE_STATUS_ACTIVE
+            harness.system_state = spec.MIB_SYSTEM_STATE_ENABLED
         elif command in ("i", "inactive"):
-            harness.drive_status = spec.DRIVE_STATUS_INACTIVE
+            harness.system_state = spec.MIB_SYSTEM_STATE_IDLE
+        elif command == "z":
+            harness.system_state = spec.MIB_SYSTEM_STATE_INITIALIZING
+        elif command == "x":
+            harness.refuse_drive = not harness.refuse_drive
+            print(f"  refusing drive requests: {harness.refuse_drive}")
+            continue
+        elif command == "s":
+            harness.refuse_stop = not harness.refuse_stop
+            print(f"  refusing stop requests: {harness.refuse_stop}")
+            continue
         elif command == "ok":
-            harness.system_state = spec.SYSTEM_STATE_OK
+            harness.system_state = spec.MIB_SYSTEM_STATE_IDLE
         elif command in ("e", "err", "error"):
-            harness.system_state = spec.SYSTEM_STATE_ERROR
+            harness.system_state = spec.MIB_SYSTEM_STATE_ERROR
         elif command == "et" or command.startswith("et "):
-            harness.error_text = command[3:].strip()
+            harness.error_message = command[3:].strip()
         elif command == "ef" or command.startswith("ef "):
             harness.error_footer = command[3:].strip()
-        elif command == "dt" or command.startswith("dt "):
-            harness.drive_text = command[3:].strip()
         elif command == "st" or command.startswith("st "):
-            harness.state_text = command[3:].strip()
+            harness.status_text = command[3:].strip()
         elif command in ("p", "pause"):
             harness.paused = True
             print(f"  {harness.describe()}")
             continue
         elif command in ("r", "resume"):
             harness.paused = False
-        elif command.startswith("f "):
-            try:
-                harness.flags = int(command[2:].strip(), 16) & 0xFF
-            except ValueError:
-                print("  flags must be hex, e.g. 'f 01'")
-                continue
         elif command in ("h", "help", "?"):
             print(HELP_TEXT)
             continue
@@ -533,20 +595,19 @@ def run_interactive(harness: McbStatusPublisher) -> None:
         print(f"  {harness.describe()}")
 
 
-def run_cycle(harness: McbStatusPublisher, dwell: float) -> None:
+def run_cycle(harness: SystemStatePublisher, dwell: float) -> None:
     combinations = [
-        (spec.DRIVE_STATUS_INACTIVE, spec.SYSTEM_STATE_OK),
-        (spec.DRIVE_STATUS_ACTIVE, spec.SYSTEM_STATE_OK),
-        (spec.DRIVE_STATUS_ACTIVE, spec.SYSTEM_STATE_ERROR),
-        (spec.DRIVE_STATUS_INACTIVE, spec.SYSTEM_STATE_ERROR),
+        spec.MIB_SYSTEM_STATE_INITIALIZING,
+        spec.MIB_SYSTEM_STATE_IDLE,
+        spec.MIB_SYSTEM_STATE_ENABLED,
+        spec.MIB_SYSTEM_STATE_ERROR,
     ]
-    stale_gap = max(dwell, spec.MCB_STATUS_TIMEOUT_MS / 1000.0 + 1.0)
+    stale_gap = max(dwell, spec.MIB_STATUS_TIMEOUT_MS / 1000.0 + 1.0)
     print(f"Cycling every {dwell:.1f}s; Ctrl-C to stop.")
     try:
         while True:
-            for drive_status, system_state in combinations:
-                harness.drive_status = drive_status
-                harness.system_state = system_state
+            for state in combinations:
+                harness.system_state = state
                 harness.publish_now()
                 print(f"  {harness.describe()}")
                 time.sleep(dwell)
@@ -571,10 +632,10 @@ def main() -> int:
     parser.add_argument("--dwell", type=float, default=3.0,
                         help="Seconds per combination in --cycle mode (default 3)")
     parser.add_argument(
-        "--period", type=float, default=spec.MCB_STATUS_PERIOD_MS / 1000.0,
+        "--period", type=float, default=spec.MIB_STATUS_PERIOD_MS / 1000.0,
         help="Seconds between republishes of the current status (default from the spec header's "
-             f"RAMMP_MCB_STATUS_PERIOD_MS = {spec.MCB_STATUS_PERIOD_MS} ms). Anything longer than "
-             f"RAMMP_MCB_STATUS_TIMEOUT_MS ({spec.MCB_STATUS_TIMEOUT_MS} ms) makes the HMI declare "
+             f"MIB_STATUS_PERIOD_MS = {spec.MIB_STATUS_PERIOD_MS} ms). Anything longer than "
+             f"MIB_STATUS_TIMEOUT_MS ({spec.MIB_STATUS_TIMEOUT_MS} ms) makes the HMI declare "
              "the link stale between perfectly good samples.")
     parser.add_argument("--list-interfaces", action="store_true",
                         help="Print this host's IPv4 addresses and exit")
@@ -629,13 +690,13 @@ def main() -> int:
     print(f"spec header: {spec.HEADER_PATH}")
     print(f"advertised address: {args.advertised_address} "
           "(--list-interfaces shows the alternatives)")
-    harness = McbStatusPublisher(args)
+    harness = SystemStatePublisher(args)
     network = threading.Thread(target=harness.run, daemon=True)
     network.start()
     rtps_net.save_config({"peer": peer, "advertised_address": args.advertised_address,
                           "period": cli.period})
 
-    print(f"Publishing '{spec.TOPIC_MCB_STATUS}' [{spec.TYPE_MCB_STATUS}] "
+    print(f"Publishing '{spec.TOPIC_MIB_STATUS}' [{spec.TYPE_MIB_STATUS}] "
           f"every {cli.period:.2f}s\n")
     if cli.cycle:
         run_cycle(harness, cli.dwell)

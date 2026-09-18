@@ -18,6 +18,7 @@
 #include <string_view>
 
 #include "messages/joystick_message.hpp"
+#include "messages/mib_message.hpp"
 
 /* Bench PC <-> HMI topics and types (a production MCB can ignore these) */
 #define RAMMP_TOPIC_HMI_COUNTER "rammp/hmi/counter"         /* HMI -> PC: heartbeat, ping */
@@ -33,42 +34,89 @@ using std::chrono::milliseconds;
 
 /* ==== Names and helpers ================================================= */
 
-// ActuatorId -> its row in kActuators and ActuatorState.values: to
-// range-check the MCB's answer and find the row a refused step flashes.
-constexpr size_t index_of(ActuatorId id) { return static_cast<size_t>(id); }
+// SeatAxis -> its row in kSeatAxes and SeatState.values: to range-check the MCB's
+// answer and find the row a refused request flashes.
+constexpr size_t index_of(SeatAxis axis) { return static_cast<size_t>(axis); }
 
 // Names for the status labels, the fault banner (when the MCB sends no text) and the
 // logs. A value this firmware does not know reads "?".
-constexpr const char *to_string(DriveStatus v) {
-  return v == DriveStatus::ACTIVE ? "ACTIVE" : v == DriveStatus::INACTIVE ? "INACTIVE" : "?";
+// Names for the status labels, the fault banner (when the MIB sends no text) and the
+// logs. A value this firmware does not know reads "?".
+constexpr const char *to_string(MIB::MibSystemState v) {
+  return v == MIB::MibSystemState::INITIALIZING ? "INITIALIZING"
+         : v == MIB::MibSystemState::IDLE       ? "IDLE"
+         : v == MIB::MibSystemState::ENABLED    ? "ENABLED"
+         : v == MIB::MibSystemState::ERROR      ? "ERROR"
+                                                : "?";
 }
 
-constexpr const char *to_string(SystemState v) {
-  return v == SystemState::OK ? "OK" : v == SystemState::ERROR ? "ERROR" : "?";
+constexpr const char *to_string(MIB::DriveProfile v) {
+  return v == MIB::DriveProfile::LOW      ? "LOW"
+         : v == MIB::DriveProfile::NORMAL ? "NORMAL"
+         : v == MIB::DriveProfile::HIGH   ? "HIGH"
+                                          : "?";
 }
 
-constexpr const char *to_string(ActuatorResult v) {
-  return v == ActuatorResult::OK           ? "OK"
-         : v == ActuatorResult::AT_MIN     ? "AT_MIN"
-         : v == ActuatorResult::AT_MAX     ? "AT_MAX"
-         : v == ActuatorResult::INHIBITED  ? "INHIBITED"
-         : v == ActuatorResult::UNKNOWN_ID ? "UNKNOWN_ID"
-                                           : "?";
+/* ==== Seat: the MIB's fields, and its units ============================= */
+
+// One MIB::seatState field per RAMMP_SEAT_AXIS_TABLE row, in the table's order, so the
+// table's id is the index for both. The only place the two are tied together: everything
+// else works from the table.
+constexpr float seat_field(const MIB::seatState &seat, SeatAxis axis) {
+  switch (axis) {
+  case SeatAxis::FRONT_BACK_TILT:
+    return seat.front_back_tilt;
+  case SeatAxis::LATERAL_TILT:
+    return seat.lateral_tilt;
+  case SeatAxis::ELEVATION:
+    return seat.elevation;
+  case SeatAxis::TRANSLATION:
+    return seat.translation;
+  }
+  return 0.0f;
+}
+
+// The wire carries whole units (12.5 deg); the screens step and draw raw integers (125,
+// with the row's decimals). One conversion each way, at the wire boundary and nowhere
+// else, so the UI stays integer - which is what lv_subject_t holds.
+constexpr int32_t scale_of(const SeatAxisSpec &spec) {
+  int32_t scale = 1;
+  for (uint8_t i = 0; i < spec.decimals; i++) {
+    scale *= 10;
+  }
+  return scale;
+}
+
+constexpr int32_t seat_raw(const SeatAxisSpec &spec, float value) {
+  const float scaled = value * static_cast<float>(scale_of(spec));
+  // Rounded away from zero by hand: std::lround is not constexpr, and a plain cast
+  // truncates, which would drift a value down one step every time it round-trips.
+  return static_cast<int32_t>(scaled < 0.0f ? scaled - 0.5f : scaled + 0.5f);
+}
+
+constexpr float seat_units(const SeatAxisSpec &spec, int32_t raw) {
+  return static_cast<float>(raw) / static_cast<float>(scale_of(spec));
 }
 
 /* ==== Timing (what this HMI expects of the MCB) ========================= */
 
-inline constexpr milliseconds kMcbStatusPeriod{500};     // MCB sends McbStatus this often
-inline constexpr milliseconds kMcbStatusTimeout{2000};   // none this long = link lost
-inline constexpr milliseconds kActuatorStatePeriod{500}; // MCB resends ActuatorState
-inline constexpr milliseconds kDiagPeriod{500};          // MCB sends Diagnostics
-inline constexpr milliseconds kDiagTimeout{2000};        // none this long = stale, red
+inline constexpr milliseconds kMibStatusPeriod{500};   // the MIB sends MibStatus this often
+inline constexpr milliseconds kMibStatusTimeout{2000}; // none this long = link lost
+inline constexpr milliseconds kDiagPeriod{500};        // the MIB sends Diagnostics
+inline constexpr milliseconds kDiagTimeout{2000};      // none this long = stale, red
 
 /* ==== Display limits ==================================================== */
 
-inline constexpr size_t kMcbTextLen = 16;     // shows up to 15 chars of drive/state_text
-inline constexpr size_t kErrorTextLen = 64;   // shows up to 63 chars of error_text
+inline constexpr size_t kMcbTextLen = 16;     // shows up to 15 chars of status_text
+inline constexpr size_t kErrorTextLen = 64;   // shows up to 63 chars of error_message
 inline constexpr size_t kErrorFooterLen = 32; // shows up to 31 chars of error_footer
+
+/* The speed readout: MibStatus.speed is metres per second, the DriveScreen's
+   UnitLabel says "mph", and SpeedNumber has room for one digit either side of the
+   point. Both live here rather than in the shared spec, which carries the real
+   quantity and leaves the unit on the dial to whoever draws it. */
+inline constexpr float kMphPerMps = 2.236936f;
+inline constexpr int32_t kSpeedMaxTenths = 99; // 9.9 mph, the widest the label fits
 
 /* ==== Bench PC <-> HMI (a production MCB can ignore these) ============== */
 
@@ -145,6 +193,27 @@ inline constexpr char kHmiSeatMcbRefusedTitle[] = "SEAT REFUSED: MCB STATE";
 inline constexpr char kHmiLinkLostTitle[] = "RTPS LINK LOST"; // lost on drive/seat screen
 inline constexpr char kHmiMcbFaultTitle[] = "MCB STATE FAULT";
 
+/* The MIB answered, or did not: a request that went out and did not get what it
+   asked for. The body is the MIB's own error_message when it sent one, so these are
+   the fallback wording for when it did not. */
+inline constexpr char kHmiDriveNotGrantedTitle[] = "DRIVE REFUSED: NOT GRANTED";
+inline constexpr char kHmiDriveNotGrantedText[] = "MIB DID NOT ENABLE DRIVING";
+inline constexpr char kHmiDriveNotGrantedFooter[] = "Request timed out";
+inline constexpr char kHmiDriveStoppedTitle[] = "DRIVING STOPPED";
+inline constexpr char kHmiDriveStoppedText[] = "MIB DISABLED DRIVING";
+inline constexpr char kHmiDriveStoppedFooter[] = "Hold up to ask again";
+inline constexpr char kHmiExitRefusedTitle[] = "EXIT REFUSED";
+inline constexpr char kHmiExitRefusedText[] = "MIB IS STILL DRIVING";
+inline constexpr char kHmiExitRefusedFooter[] = "Hold the button again";
+static_assert(sizeof(kHmiDriveNotGrantedText) <= kErrorTextLen &&
+                  sizeof(kHmiDriveStoppedText) <= kErrorTextLen &&
+                  sizeof(kHmiExitRefusedText) <= kErrorTextLen,
+              "refusal body outgrows the banner it shares with MIB faults");
+static_assert(sizeof(kHmiDriveNotGrantedFooter) <= kErrorFooterLen &&
+                  sizeof(kHmiDriveStoppedFooter) <= kErrorFooterLen &&
+                  sizeof(kHmiExitRefusedFooter) <= kErrorFooterLen,
+              "refusal footer outgrows the banner it shares with MIB faults");
+
 /* body / footer per link state short of connected */
 inline constexpr char kHmiEthFailedText[] = "W5500 ETHERNET INIT FAILED AT BOOT";
 inline constexpr char kHmiEthFailedFooter[] = "Power-cycle HMI to retry";
@@ -152,14 +221,14 @@ inline constexpr char kHmiLinkDownText[] = "NO ETHERNET LINK";
 inline constexpr char kHmiLinkDownFooter[] = "Check cable/switch to MCB";
 inline constexpr char kHmiNoIpText[] = "LINK UP, NO DHCP LEASE";
 inline constexpr char kHmiNoIpFooter[] = "Check DHCP server";
-inline constexpr char kHmiNoPeerText[] = "NO McbStatus IN 2000 MS";
-inline constexpr char kHmiNoPeerFooter[] = "topic rammp/mcb/status";
-static_assert(kMcbStatusTimeout == milliseconds{2000}, "update kHmiNoPeerText");
-static_assert(std::string_view(kHmiNoPeerFooter).ends_with(kMcbStatus.name),
+inline constexpr char kHmiNoPeerText[] = "NO MibStatus IN 2000 MS";
+inline constexpr char kHmiNoPeerFooter[] = "topic rammp/mib/status";
+static_assert(kMibStatusTimeout == milliseconds{2000}, "update kHmiNoPeerText");
+static_assert(std::string_view(kHmiNoPeerFooter).ends_with(MIB::kMibStatus.name),
               "update kHmiNoPeerFooter");
 
-/* state != OK with an empty error_text: printf(state number, to_string(state)) */
-inline constexpr char kHmiMcbNoTextFmt[] = "system_state=%u (%s), error_text empty";
+/* ERROR with an empty error_message: printf(state number, to_string(state)) */
+inline constexpr char kHmiMcbNoTextFmt[] = "systemState=%u (%s), error_message empty";
 
 } // namespace rammp
 

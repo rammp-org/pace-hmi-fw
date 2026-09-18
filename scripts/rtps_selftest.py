@@ -11,7 +11,7 @@ instead of by reading the code:
   python rtps_selftest.py --serve          # answer pings and print every report, for
                                            # runs started from the HMI's SELF TEST row
 
-It plays the MCB while it runs (it is an rtps_mcb_sim.McbStatusPublisher): the
+It plays the MCB while it runs (it is an rtps_mcb_sim.SystemStatePublisher): the
 HMI's RTPS checks need McbStatus arriving and their pings answered, and a run
 requested from here holds the HMI to all of them (ST_REMOTE in the spec). So
 close rtps_mcb_gui.py / rtps_mcb_sim.py first - two MCBs publishing at once
@@ -88,7 +88,7 @@ def pc_check(index: int, name: str, value: int, lo: int, hi: int, unit: str = ""
         value=value, lo=lo, hi=hi, name=name, unit=unit, detail=detail)
 
 
-def wait_for_board(harness: rtps_mcb_sim.McbStatusPublisher, timeout: float) -> bool:
+def wait_for_board(harness: rtps_mcb_sim.SystemStatePublisher, timeout: float) -> bool:
     """Until the HMI streams joystick samples to us.
 
     That is the sign it has matched our readers from our announcements, and so
@@ -98,13 +98,13 @@ def wait_for_board(harness: rtps_mcb_sim.McbStatusPublisher, timeout: float) -> 
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if harness.adc_rx_count > 0:
-            time.sleep(3 * spec.MCB_STATUS_PERIOD_MS / 1000.0)  # noqa: F821  (scraped)
+            time.sleep(3 * spec.MIB_STATUS_PERIOD_MS / 1000.0)  # noqa: F821  (scraped)
             return True
         time.sleep(0.1)
     return False
 
 
-def collect(harness: rtps_mcb_sim.McbStatusPublisher, run_id: int, timeout: float,
+def collect(harness: rtps_mcb_sim.SystemStatePublisher, run_id: int, timeout: float,
             resend: bool) -> dict:
     """Wait for run `run_id` to finish; returns what arrived and when."""
     requested = time.monotonic()
@@ -210,7 +210,7 @@ def judge(run_id: int, got: dict, rows: dict[str, SpecRow]) -> tuple[int, dict]:
     return (EXIT_PASS if not fails else EXIT_FAIL), report
 
 
-def serve(harness: rtps_mcb_sim.McbStatusPublisher, rows: dict[str, SpecRow]) -> int:
+def serve(harness: rtps_mcb_sim.SystemStatePublisher, rows: dict[str, SpecRow]) -> int:
     print("serving: pings answered, McbStatus published. Start a run from the HMI's "
           "SELF TEST row; Ctrl-C to stop.", flush=True)
     shown: set[tuple[int, float]] = set()
@@ -240,7 +240,7 @@ def main() -> int:
                         help="Seconds to wait for the HMI to appear (default 45)")
     parser.add_argument("--verbose", action="store_true",
                         help="Show the RTPS harness log as well as the report")
-    parser.add_argument("--period", type=float, default=spec.MCB_STATUS_PERIOD_MS / 1000.0,  # noqa: F821
+    parser.add_argument("--period", type=float, default=spec.MIB_STATUS_PERIOD_MS / 1000.0,  # noqa: F821
                         help="Seconds between McbStatus republishes (default from the spec)")
     parser.add_argument("--node-name", default="selftest", help="Local participant name")
     parser.add_argument("--domain-id", type=int, default=0, help="RTPS domain id")
@@ -289,7 +289,7 @@ def main() -> int:
     print(f"board {peer} via {advertised}; spec {SELFTEST_SPEC_PATH} ({len(rows)} checks)",
           flush=True)
 
-    harness = rtps_mcb_sim.McbStatusPublisher(rtps_mcb_sim.build_harness_args(cli))
+    harness = rtps_mcb_sim.SystemStatePublisher(rtps_mcb_sim.build_harness_args(cli))
     network = threading.Thread(target=harness.run, daemon=True)
     network.start()
     try:

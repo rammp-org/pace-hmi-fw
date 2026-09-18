@@ -3,9 +3,11 @@
 
 The window equivalent of ``rtps_mcb_sim.py``: preset buttons for the states the
 firmware knows, a raw spinbox for values it does not, a free-text override for
-each label, and a cycle that walks the lot hands-free. It publishes
-``rammp/mcb/status`` exactly as that script does — it imports the same publisher
-— so anything learned here applies to the CLI tool and vice versa.
+each label, and a cycle that walks the lot hands-free. It plays the MCB's half
+of the joystick's commands too: DriveCommand decides whether the HMI's drive
+screen opens, and SeatCommand moves the seat values on the Seat tab. It imports
+the same publisher ``rtps_mcb_sim.py`` uses — so anything learned here applies
+to the CLI tool and vice versa.
 
 Usage:
   python rtps_mcb_gui.py
@@ -65,7 +67,7 @@ class McbPanel:
     def __init__(self, root: tk.Tk, cli: argparse.Namespace) -> None:
         self.root = root
         self.cli = cli
-        self.harness: rtps_mcb_sim.McbStatusPublisher | None = None
+        self.harness: rtps_mcb_sim.SystemStatePublisher | None = None
         self.thread: threading.Thread | None = None
 
         # The harness runs on its own thread and tkinter is not thread-safe, so
@@ -99,25 +101,28 @@ class McbPanel:
 
         root.title("RAMMP MCB simulator")
         # The panels used to stack straight onto the root. They are on a
-        # notebook now because the actuator table is tall enough that sharing
+        # notebook now because the seat table is tall enough that sharing
         # one column with everything else pushed the log off-screen. The log
         # stays outside it: it is how you tell whether anything is working, and
         # that should not depend on which tab is showing.
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill="both", expand=True, padx=4, pady=(4, 0))
         status_tab = ttk.Frame(self.notebook)
-        actuator_tab = ttk.Frame(self.notebook)
+        drive_tab = ttk.Frame(self.notebook)
+        seat_tab = ttk.Frame(self.notebook)
         self.notebook.add(status_tab, text="Status")
-        self.notebook.add(actuator_tab, text="Actuators")
+        self.notebook.add(drive_tab, text="Drive")
+        self.notebook.add(seat_tab, text="Seat")
         diagnostics_tab = ttk.Frame(self.notebook)
         self.notebook.add(diagnostics_tab, text="Diagnostics")
 
         self._build_connection(status_tab)
         self._build_status_controls(status_tab)
+        self._build_drive_request(drive_tab)
         self._build_error_banner(status_tab)
         self._build_joystick(status_tab)
         self._build_cycle(status_tab)
-        self._build_actuators(actuator_tab)
+        self._build_seat(seat_tab)
         self._build_diagnostics(diagnostics_tab)
         self._build_log()
         root.after(TICK_MS, self._tick)
@@ -175,19 +180,136 @@ class McbPanel:
         ).grid(row=2, column=0, columnspan=6, sticky="w", pady=(6, 0))
 
     def _build_status_controls(self, parent: tk.Widget) -> None:
-        self.drive_text_var = tk.StringVar()
+        # One panel where there were two: MibSystemState is both the drive status and
+        # the fault, so ENABLED and ERROR are presets of the same control.
         self.state_text_var = tk.StringVar()
-        self.drive_raw_var = tk.StringVar(value=str(spec.DRIVE_STATUS_INACTIVE))
-        self.state_raw_var = tk.StringVar(value=str(spec.SYSTEM_STATE_OK))
+        self.state_raw_var = tk.StringVar(value=str(spec.MIB_SYSTEM_STATE_IDLE))
 
         self._build_one_status(
-            parent, "Drive status", spec.DRIVE_STATUS_NAMES, self.drive_raw_var, self.drive_text_var,
-            self._set_drive, self._set_drive_raw,
+            parent, "System state", spec.MIB_SYSTEM_STATE_NAMES, self.state_raw_var,
+            self.state_text_var, self._set_state, self._set_state_raw,
         )
-        self._build_one_status(
-            parent, "State", spec.STATE_NAMES, self.state_raw_var, self.state_text_var,
-            self._set_state, self._set_state_raw,
-        )
+
+    def _build_drive_request(self, parent: tk.Widget) -> None:
+        """The MCB's half of DriveCommand: what was asked, and what to answer.
+
+        The HMI asks before it drives and waits for SystemState to agree, so
+        refusing here is the only way to see what it does when the chair will
+        not go: it should give up after MIB_STATUS_TIMEOUT_MS and say so rather
+        than sit on a drive screen that pretends the chair is moving.
+        """
+        frame = ttk.LabelFrame(parent, text="Drive requests (from the joystick)", padding=8)
+        frame.pack(fill="x", padx=8, pady=(8, 4))
+
+        self.drive_request_label = ttk.Label(frame, text="none yet")
+        self.drive_request_label.grid(row=0, column=0, columnspan=3, sticky="w")
+
+        self.refuse_drive_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            frame, text="Refuse ENABLE", variable=self.refuse_drive_var,
+            command=self._apply_refuse_drive,
+        ).grid(row=0, column=3, sticky="e", padx=(16, 0))
+        # Leaving the drive screen is a request as well, and this is the only way to
+        # see what the HMI does when the chair will not stop.
+        self.refuse_stop_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            frame, text="Refuse DISABLE", variable=self.refuse_stop_var,
+            command=self._apply_refuse_drive,
+        ).grid(row=0, column=4, sticky="e", padx=(12, 0))
+
+        ttk.Label(
+            frame,
+            text="Granting one moves the state to ENABLED, which is what opens the HMI's "
+                 "drive screen. Refuse it and the HMI should give up after "
+                 f"{spec.MIB_STATUS_TIMEOUT_MS} ms and raise its refusal banner. Refuse "
+                 "DISABLE and it cannot leave the drive screen, and says so. The MIB "
+                 "disables manual seat control while ENABLED, so the seat screen wants IDLE.",
+            foreground="#666666", wraplength=560, justify="left",
+        ).grid(row=1, column=0, columnspan=5, sticky="w", pady=(6, 0))
+
+        profile = ttk.LabelFrame(parent, text="Drive profile (what MibStatus reports)",
+                                 padding=8)
+        profile.pack(fill="x", padx=8, pady=4)
+
+        self.profile_raw_var = tk.StringVar(value=str(spec.DRIVE_PROFILE_NORMAL))
+        column = 0
+        # Presets from the spec's enum, so a new profile in the header turns
+        # into a button here with nothing to change in this file.
+        for value in sorted(spec.DRIVE_PROFILE_NAMES):
+            ttk.Button(
+                profile, text=spec.DRIVE_PROFILE_NAMES[value], width=10,
+                command=lambda v=value: self._set_profile(v),
+            ).grid(row=0, column=column, padx=(0, 4))
+            column += 1
+        ttk.Label(profile, text="raw").grid(row=0, column=column, padx=(12, 4))
+        ttk.Spinbox(profile, from_=0, to=255, width=5, textvariable=self.profile_raw_var).grid(
+            row=0, column=column + 1)
+        ttk.Button(profile, text="Send", command=self._set_profile_raw).grid(
+            row=0, column=column + 2, padx=4)
+
+        self.follow_profile_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            profile, text="Follow the joystick's request", variable=self.follow_profile_var,
+            command=self._apply_follow_profile,
+        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(8, 0))
+
+        ttk.Label(
+            profile,
+            text="The HMI publishes its profile on DriveCommand and waits to see it come back "
+                 "here, and highlights the button this reports - not the one that was pressed. "
+                 "Untick Follow (a preset does it for you) to report something else, which is a "
+                 "profile change the chair did not grant.",
+            foreground="#666666", wraplength=560, justify="left",
+        ).grid(row=2, column=0, columnspan=column + 3, sticky="w", pady=(6, 0))
+
+    def _apply_refuse_drive(self) -> None:
+        if self.harness is None:
+            self._append_log("[gui] not connected")
+            return
+        self.harness.refuse_drive = self.refuse_drive_var.get()
+        self.harness.refuse_stop = self.refuse_stop_var.get()
+
+    def _set_profile(self, value: int) -> None:
+        self.profile_raw_var.set(str(value))
+        self._set_profile_raw()
+
+    def _set_profile_raw(self) -> None:
+        """Report a profile of the bench's choosing, which means not following."""
+        if self.harness is None:
+            self._append_log("[gui] not connected")
+            return
+        # Setting one by hand and still following the joystick would put the
+        # value back on the next DriveCommand, so the button would look broken.
+        self.follow_profile_var.set(False)
+        self.harness.follow_profile = False
+        self.harness.profile = self._raw(self.profile_raw_var)
+        self._publish()
+
+    def _apply_follow_profile(self) -> None:
+        if self.harness is None:
+            self._append_log("[gui] not connected")
+            return
+        self.harness.follow_profile = self.follow_profile_var.get()
+        if self.harness.follow_profile:
+            self.harness.profile = self.harness.requested_profile
+            self._publish()
+
+    def _update_drive_request(self) -> None:
+        """Called from _tick: the harness's view of the last DriveCommand."""
+        if self.harness is None:
+            return
+        request = spec.DRIVE_REQUEST_NAMES.get(self.harness.drive_request, "?")
+        asked = spec.DRIVE_PROFILE_NAMES.get(self.harness.requested_profile, "?")
+        reported = spec.DRIVE_PROFILE_NAMES.get(self.harness.profile, "?")
+        state = spec.MIB_SYSTEM_STATE_NAMES.get(self.harness.system_state, "?")
+        agree = "" if self.harness.profile == self.harness.requested_profile else "  (overridden)"
+        self.drive_request_label.configure(
+            text=f"last: {request}  profile asked {asked}, reporting {reported}{agree}"
+                 f"  →  state {state}")
+        # The box tracks the harness while it follows, so it never shows a stale
+        # number next to a ticked Follow.
+        if self.harness.follow_profile:
+            self.profile_raw_var.set(str(self.harness.profile))
 
     def _build_one_status(self, parent, title, names, raw_var, text_var, on_preset,
                           on_raw) -> None:
@@ -277,39 +399,41 @@ class McbPanel:
         self.speed_label = ttk.Label(frame, text="emulated speed: 0.0")
         self.speed_label.grid(row=3, column=2, sticky="w", pady=(6, 0))
 
-    def _build_actuators(self, parent: tk.Widget) -> None:
-        """One row per actuator in the shared spec table.
+    def _build_seat(self, parent: tk.Widget) -> None:
+        """One row per seat axis in the shared spec table.
 
         The MCB owns these values, so this tab IS the MCB as far as the HMI is
         concerned: what the entries hold is what the joystick will be told, and
         the reject dropdown is how a refusal the bench cannot otherwise produce
         (an interlock, a stalled motor) gets in front of the HMI.
         """
-        frame = ttk.LabelFrame(parent, text="Actuator values (the MCB owns these)", padding=8)
+        frame = ttk.LabelFrame(parent, text="Seat values (the MCB owns these)", padding=8)
         frame.pack(fill="x", padx=8, pady=4)
 
-        for column, heading in enumerate(("", "Actuator", "Value", "Range", "Next request")):
+        for column, heading in enumerate(("", "Seat axis", "Value", "Range", "Next request")):
             ttk.Label(frame, text=heading, foreground="#666666").grid(
                 row=0, column=column, sticky="w", padx=4, pady=(0, 4)
             )
 
-        #: per-actuator widgets and vars, indexed to match spec.ACTUATORS
-        self.actuator_value_vars: list[tk.StringVar] = []
-        self.actuator_entries: list[ttk.Entry] = []
-        self.actuator_reject_vars: list[tk.StringVar] = []
+        #: per-axis widgets and vars, indexed to match spec.SEAT_AXES
+        self.seat_value_vars: list[tk.StringVar] = []
+        self.seat_entries: list[ttk.Entry] = []
+        self.seat_reject_vars: list[tk.StringVar] = []
 
         # "accept" plus every refusal the spec names, so a new RESULT_ in the
         # header turns up here without touching this file.
+        # The bench's own reasons, not the spec's: MibStatus carries no per-request
+        # verdict, so a refusal reaches the HMI only as an axis that did not move.
         reject_choices = ["accept"] + [
-            name for value, name in sorted(spec.ACTUATOR_RESULT_NAMES.items())
-            if value != spec.ACTUATOR_RESULT_OK
+            name for value, name in sorted(rtps_mcb_sim.SEAT_RESULTS.items())
+            if value != rtps_mcb_sim.SEAT_RESULT_OK
         ]
 
-        for index, actuator in enumerate(spec.ACTUATORS):
+        for index, axis in enumerate(spec.SEAT_AXES):
             row = index + 1
-            ttk.Label(frame, text=actuator.short, width=4).grid(row=row, column=0, sticky="w",
+            ttk.Label(frame, text=axis.short, width=4).grid(row=row, column=0, sticky="w",
                                                                 padx=4)
-            ttk.Label(frame, text=actuator.label, width=16).grid(row=row, column=1, sticky="w",
+            ttk.Label(frame, text=axis.label, width=16).grid(row=row, column=1, sticky="w",
                                                                  padx=4)
 
             value_var = tk.StringVar(value="-")
@@ -318,95 +442,125 @@ class McbPanel:
             # Enter applies; the tick refreshes the box only while it is not
             # focused, so a value arriving from a joystick press cannot
             # overwrite what someone is halfway through typing.
-            entry.bind("<Return>", lambda _event, i=index: self._set_actuator(i))
-            self.actuator_value_vars.append(value_var)
-            self.actuator_entries.append(entry)
+            entry.bind("<Return>", lambda _event, i=index: self._set_seat_axis(i))
+            self.seat_value_vars.append(value_var)
+            self.seat_entries.append(entry)
 
             ttk.Label(
                 frame,
-                text=f"{actuator.format(actuator.min_value)} .. "
-                     f"{actuator.format(actuator.max_value)} {actuator.unit}"
-                     f"  (step {actuator.format(actuator.step)})",
+                text=f"{axis.format(axis.min_value)} .. "
+                     f"{axis.format(axis.max_value)} {axis.unit}"
+                     f"  (step {axis.format(axis.step)})",
                 foreground="#666666",
             ).grid(row=row, column=3, sticky="w", padx=4)
 
             reject_var = tk.StringVar(value="accept")
             ttk.Combobox(frame, textvariable=reject_var, values=reject_choices, width=11,
                          state="readonly").grid(row=row, column=4, padx=4)
-            self.actuator_reject_vars.append(reject_var)
+            self.seat_reject_vars.append(reject_var)
 
         buttons = ttk.Frame(frame)
-        buttons.grid(row=len(spec.ACTUATORS) + 1, column=0, columnspan=5, sticky="w", pady=(8, 0))
-        ttk.Button(buttons, text="Apply values", command=self._set_all_actuators).pack(side="left")
-        ttk.Button(buttons, text="Centre all", command=self._centre_actuators).pack(side="left",
+        buttons.grid(row=len(spec.SEAT_AXES) + 1, column=0, columnspan=5, sticky="w", pady=(8, 0))
+        ttk.Button(buttons, text="Apply values", command=self._set_all_seat_axes).pack(side="left")
+        ttk.Button(buttons, text="Centre all", command=self._centre_seat_axes).pack(side="left",
                                                                                     padx=(8, 0))
-        ttk.Button(buttons, text="Accept all", command=self._accept_all_actuators).pack(
+        ttk.Button(buttons, text="Accept all", command=self._accept_all_seat_axes).pack(
             side="left", padx=(8, 0))
         ttk.Label(
             frame,
-            text="Values update live as the HMI's - and + requests are accepted. Set one here to "
-                 "put an actuator somewhere directly \u2014 the HMI is told on the next publish.",
+            text="Values update live as the HMI's requests are accepted \u2014 it sends an "
+                 "absolute target, and this is what decides whether the seat gets there. Set one "
+                 "here to put an axis somewhere directly; the HMI is told on the next publish.",
             foreground="#666666", wraplength=560, justify="left",
-        ).grid(row=len(spec.ACTUATORS) + 2, column=0, columnspan=5, sticky="w", pady=(6, 0))
+        ).grid(row=len(spec.SEAT_AXES) + 2, column=0, columnspan=5, sticky="w", pady=(6, 0))
 
-    def _set_actuator(self, index: int) -> None:
+        # What the HMI actually asked for, which is the half the values above do
+        # not show: a refused request leaves the value where it was, so without
+        # this there is no way to tell a refusal from a press that never arrived.
+        requests = ttk.LabelFrame(parent, text="Seat requests (from the joystick)", padding=8)
+        requests.pack(fill="x", padx=8, pady=4)
+        self.seat_request_label = ttk.Label(requests, text="no request yet")
+        self.seat_request_label.pack(anchor="w")
+        ttk.Label(
+            requests,
+            text="Targets are absolute: a preset button and a -/+ step are the same message, so "
+                 "this is the whole of what the HMI asks for.",
+            foreground="#666666", wraplength=560, justify="left",
+        ).pack(anchor="w", pady=(6, 0))
+
+    def _set_seat_axis(self, index: int) -> None:
         """Push one typed value into the harness, clamped to the spec range."""
         if self.harness is None:
             return
-        actuator = spec.ACTUATORS[index]
+        axis = spec.SEAT_AXES[index]
         try:
-            raw = actuator.parse(self.actuator_value_vars[index].get())
+            raw = axis.parse(self.seat_value_vars[index].get())
         except ValueError:
             # Put the harness's value back rather than leaving the typo in
             # place looking like it took effect.
-            self.actuator_value_vars[index].set(
-                actuator.format(self.harness.actuator_values[index])
+            self.seat_value_vars[index].set(
+                axis.format(self.harness.seat_values[index])
             )
             return
-        self.harness.actuator_values[index] = raw
-        self.harness.actuator_dirty = True
+        self.harness.seat_values[index] = raw
+        self.harness.seat_dirty = True
         self.root.focus_set()  # drop focus so the tick resumes refreshing the box
 
-    def _set_all_actuators(self) -> None:
-        for index in range(len(spec.ACTUATORS)):
-            self._set_actuator(index)
+    def _set_all_seat_axes(self) -> None:
+        for index in range(len(spec.SEAT_AXES)):
+            self._set_seat_axis(index)
 
-    def _centre_actuators(self) -> None:
+    def _centre_seat_axes(self) -> None:
         if self.harness is None:
             return
-        for index, actuator in enumerate(spec.ACTUATORS):
-            self.harness.actuator_values[index] = (actuator.min_value + actuator.max_value) // 2
-        self.harness.actuator_dirty = True
+        for index, axis in enumerate(spec.SEAT_AXES):
+            self.harness.seat_values[index] = (axis.min_value + axis.max_value) // 2
+        self.harness.seat_dirty = True
         self.root.focus_set()
 
-    def _accept_all_actuators(self) -> None:
-        for var in self.actuator_reject_vars:
+    def _accept_all_seat_axes(self) -> None:
+        for var in self.seat_reject_vars:
             var.set("accept")
 
-    def _update_actuators(self) -> None:
+    def _update_seat(self) -> None:
         """Called from _tick: harness -> value boxes, dropdowns -> harness."""
         if self.harness is None:
             return
-        name_to_result = {name: value for value, name in spec.ACTUATOR_RESULT_NAMES.items()}
+        self._update_seat_request()
+        name_to_result = {name: value for value, name in rtps_mcb_sim.SEAT_RESULTS.items()}
         focused = self.root.focus_get()
-        for index, actuator in enumerate(spec.ACTUATORS):
-            if self.actuator_entries[index] is not focused:
-                text = actuator.format(self.harness.actuator_values[index])
-                if self.actuator_value_vars[index].get() != text:
-                    self.actuator_value_vars[index].set(text)
+        for index, axis in enumerate(spec.SEAT_AXES):
+            if self.seat_entries[index] is not focused:
+                text = axis.format(self.harness.seat_values[index])
+                if self.seat_value_vars[index].get() != text:
+                    self.seat_value_vars[index].set(text)
             # Pushed every tick rather than on a change event: it is one
             # assignment, and it means a dropdown set before connecting is in
             # force the moment a harness exists.
-            choice = self.actuator_reject_vars[index].get()
-            self.harness.actuator_reject[index] = (
+            choice = self.seat_reject_vars[index].get()
+            self.harness.seat_reject[index] = (
                 None if choice == "accept" else name_to_result.get(choice)
             )
+
+    def _update_seat_request(self) -> None:
+        """The last SeatCommand and the verdict the harness gave it."""
+        command = self.harness.last_seat_command
+        if command is None:
+            self.seat_request_label.configure(text="no request yet")
+            return
+        axis_id, target = command
+        known = 0 <= axis_id < len(spec.SEAT_AXES)
+        axis = spec.SEAT_AXES[axis_id] if known else None
+        name = axis.label if known else f"axis #{axis_id}"
+        shown = f"{target:g} {axis.unit}" if known else str(target)
+        verdict = rtps_mcb_sim.SEAT_RESULTS.get(self.harness.seat_result, "?")
+        self.seat_request_label.configure(text=f"last: {name} → {shown} : {verdict}")
 
     def _build_diagnostics(self, parent: tk.Widget) -> None:
         """Fake readings for every item in the spec's RAMMP_DIAG_TABLE.
 
         Sent with each status tick. Untick to stop them: the HMI's Diagnostics
-        screen should turn red and blink within RAMMP_DIAG_TIMEOUT_MS.
+        screen should turn red and blink within DIAG_TIMEOUT_MS.
         """
         frame = ttk.LabelFrame(parent, text="Diagnostics (fake readings)", padding=8)
         frame.pack(fill="x", padx=8, pady=4)
@@ -490,7 +644,7 @@ class McbPanel:
             return "not connected - press Connect on the MCB panel to drive"
         if self.harness.joystick is None:
             return "connected, waiting for joystick samples"
-        return "set the drive mode on the Tab5"
+        return "set the drive profile on the Tab5"
 
     def _drive_view_closed(self) -> None:
         self.drive_view = None
@@ -657,7 +811,7 @@ class McbPanel:
             )
         )
         try:
-            self.harness = rtps_mcb_sim.McbStatusPublisher(args, car=self.car)
+            self.harness = rtps_mcb_sim.SystemStatePublisher(args, car=self.car)
         except OSError as exc:
             # a bad address or a port already taken by another script
             self._append_log(f"[gui] connect failed: {exc}")
@@ -666,12 +820,12 @@ class McbPanel:
             return
         self.thread = threading.Thread(target=self.harness.run, daemon=True)
         self.thread.start()
-        # A fresh publisher starts INACTIVE, but the interesting state to be in
-        # on connecting is a chair that is actually driveable - otherwise the
-        # HMI bars entry to the drive screen and the first thing anyone does is
-        # click ACTIVE by hand.
-        self.harness.drive_status = spec.DRIVE_STATUS_ACTIVE
-        self.drive_raw_var.set(str(spec.DRIVE_STATUS_ACTIVE))
+        # A fresh publisher starts IDLE, which is the interesting state to be in on
+        # connecting: the HMI allows both the seat screen and a drive request from it.
+        self.harness.system_state = spec.MIB_SYSTEM_STATE_IDLE
+        self.state_raw_var.set(str(spec.MIB_SYSTEM_STATE_IDLE))
+        self._apply_refuse_drive()
+        self._apply_follow_profile()
         self._apply_overrides()
         self._apply_error_text()
         self.connect_button.configure(text="Disconnect")
@@ -709,20 +863,9 @@ class McbPanel:
             return
         self.harness.publish_now()
 
-    def _set_drive(self, value: int) -> None:
-        self.drive_raw_var.set(str(value))
-        self._set_drive_raw()
-
     def _set_state(self, value: int) -> None:
         self.state_raw_var.set(str(value))
         self._set_state_raw()
-
-    def _set_drive_raw(self) -> None:
-        if self.harness is None:
-            self._append_log("[gui] not connected")
-            return
-        self.harness.drive_status = self._raw(self.drive_raw_var)
-        self._publish()
 
     def _set_state_raw(self) -> None:
         if self.harness is None:
@@ -742,15 +885,14 @@ class McbPanel:
         if self.harness is None:
             self._append_log("[gui] not connected")
             return
-        self.harness.error_text = self.error_text_var.get()
+        self.harness.error_message = self.error_text_var.get()
         self.harness.error_footer = self.error_footer_var.get()
         self._publish()
 
     def _apply_overrides(self) -> None:
         if self.harness is None:
             return
-        self.harness.drive_text = self.drive_text_var.get()
-        self.harness.state_text = self.state_text_var.get()
+        self.harness.status_text = self.state_text_var.get()
         self._publish()
 
     # ---------------------------------------------------------------- cycle
@@ -762,11 +904,11 @@ class McbPanel:
         exercises link loss and recovery.
         """
         return [
-            (spec.DRIVE_STATUS_INACTIVE, spec.SYSTEM_STATE_OK, False),
-            (spec.DRIVE_STATUS_ACTIVE, spec.SYSTEM_STATE_OK, False),
-            (spec.DRIVE_STATUS_ACTIVE, spec.SYSTEM_STATE_ERROR, False),
-            (spec.DRIVE_STATUS_INACTIVE, spec.SYSTEM_STATE_ERROR, False),
-            (spec.DRIVE_STATUS_INACTIVE, spec.SYSTEM_STATE_OK, True),
+            (spec.MIB_SYSTEM_STATE_INITIALIZING, False),
+            (spec.MIB_SYSTEM_STATE_IDLE, False),
+            (spec.MIB_SYSTEM_STATE_ENABLED, False),
+            (spec.MIB_SYSTEM_STATE_ERROR, False),
+            (spec.MIB_SYSTEM_STATE_IDLE, True),
         ]
 
     def _toggle_cycle(self) -> None:
@@ -798,18 +940,16 @@ class McbPanel:
             dwell = max(0.5, float(self.dwell_var.get()))
         except ValueError:
             dwell = 3.0
-        drive, state, paused = self._cycle_steps()[self.cycle_index]
+        state, paused = self._cycle_steps()[self.cycle_index]
         self.cycle_index = (self.cycle_index + 1) % len(self._cycle_steps())
 
         self.harness.paused = paused
         if paused:
-            delay = max(dwell, spec.MCB_STATUS_TIMEOUT_MS / 1000.0 + 1.0)
+            delay = max(dwell, spec.MIB_STATUS_TIMEOUT_MS / 1000.0 + 1.0)
             self._append_log(f"[cycle] paused {delay:.1f}s - HMI should go stale")
         else:
             delay = dwell
-            self.harness.drive_status = drive
             self.harness.system_state = state
-            self.drive_raw_var.set(str(drive))
             self.state_raw_var.set(str(state))
             self.harness.publish_now()
         self.cycle_job = self.root.after(int(delay * 1000), self._cycle_step)
@@ -852,8 +992,9 @@ class McbPanel:
             # publisher's own tick cannot double-integrate.
             self.harness.step_speed()
             self._update_joystick()
-            self._update_actuators()
+            self._update_seat()
             self._update_diagnostics()
+            self._update_drive_request()
             targets = max(0, self.harness.announced_targets)
             paused = " PAUSED" if self.harness.paused else ""
             self.status_label.configure(
@@ -874,10 +1015,11 @@ class McbPanel:
         for axis, value in (("X", x), ("Y", y), ("Twist", twist)):
             self.axis_bars[axis]["value"] = max(0, min(100, 50 + value * 50))
             self.axis_labels[axis].configure(text=f"{value:+.2f}")
-        mode = spec.DRIVE_MODE_NAMES.get(sample[4] if len(sample) > 4 else None, "?")
+        # The profile is not in the stick sample: it arrives on DriveCommand.
+        profile = spec.DRIVE_PROFILE_NAMES.get(self.harness.profile, "?")
         pressed = bool(buttons & spec.BUTTONS_JOYSTICK)
         self.button_label.configure(
-            text=f"button: {'PRESSED' if pressed else 'released'}   mode: {mode}")
+            text=f"button: {'PRESSED' if pressed else 'released'}   profile: {profile}")
         self.speed_label.configure(
             text=f"emulated speed: {self.harness.speed_tenths / 10:.1f}")
 
@@ -903,7 +1045,7 @@ def main() -> int:
                         help="IPv4 interface for the multicast join/send, if it differs")
     parser.add_argument("--multicast-group", default="239.255.0.1",
                         help="RTPS metatraffic multicast group")
-    parser.add_argument("--period", type=float, default=spec.MCB_STATUS_PERIOD_MS / 1000.0,
+    parser.add_argument("--period", type=float, default=spec.MIB_STATUS_PERIOD_MS / 1000.0,
                         help="Seconds between republishes of the current status")
     parser.add_argument("--peer-participant-ids", type=rtps_host.parse_participant_id_range,
                         default="0-3", metavar="IDS",
