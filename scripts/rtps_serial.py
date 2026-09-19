@@ -141,7 +141,9 @@ class SerialLink(rtps_ota.OtaHost):
                     out.append(note("the device restarted"))
                 self.device_session = m.session
                 self.expected_seq = m.seq
+                # our HELLO is news to the new boot: its history is on the way
                 self.waiting_history_since = time.monotonic()
+                self.history_seen = False
             if m.seq < self.expected_seq:
                 return  # a duplicate, or too late to place
             if m.seq > self.expected_seq:
@@ -596,14 +598,16 @@ class TcpEnd(End):
         except OSError:
             pass
         finally:
-            if self.client is client:
+            last = self.client is client  # not replaced by a newer client meanwhile
+            if last:
                 self.client = None
                 self.manager = None
             try:
                 client.close()
             except OSError:
                 pass
-            self.bridge.closed(self)
+            if last:
+                self.bridge.closed(self)
 
 
 def com0com_pairs() -> List[Tuple[str, str]]:
