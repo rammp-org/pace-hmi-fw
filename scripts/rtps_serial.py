@@ -67,6 +67,9 @@ CHUNK = spec.SERIAL_CHUNK  # noqa: F821
 GONE_S = 4.0
 #: how long to hold live output back while the history it follows is on its way
 HISTORY_WAIT_S = 3.0
+#: times to ask again for a history of which nothing came (sent before the device
+#: had matched our reader - a device that has just booted - it went nowhere)
+HISTORY_RETRIES = 3
 #: esptool silent this long is done (it compresses each file before sending it:
 #: seconds, for the app)
 LOADER_IDLE_S = 20.0
@@ -107,6 +110,8 @@ class SerialLink(rtps_ota.OtaHost):
         self.expected_seq = 0
         self.waiting_history_since: Optional[float] = None
         self.held: List[bytes] = []
+        self.history_seen = False  # any of this session's history arrived
+        self.history_retries = 0
         self.lost = 0
         self.attached = False  # some port is open: the device is asked to send
         self.new_session()
@@ -146,6 +151,8 @@ class SerialLink(rtps_ota.OtaHost):
             if m.kind == spec.SERIAL_KIND_HISTORY:  # noqa: F821
                 if m.to != self.session:
                     return  # another host's
+                self.history_seen = True
+                self.history_retries = 0
                 if m.data:
                     out.append(m.data)
                 else:  # the end of it: what was held back follows
@@ -176,7 +183,7 @@ class SerialLink(rtps_ota.OtaHost):
         with self.lock:
             self.session = random.randint(1, 0xFFFFFFFF)
             self.waiting_history_since = time.monotonic()
-            self.held = []
+            self.history_seen = False
         if old and self.mac:
             self._send(spec.SERIAL_KIND_BYE, session=old)  # noqa: F821
         if self.mac and self.attached:
@@ -204,11 +211,18 @@ class SerialLink(rtps_ota.OtaHost):
         if info is not None and time.monotonic() - self.heard_at.get(self.mac, 0.0) > GONE_S:
             self.forget(info.ip)  # rebooting: discovery with it has to start over
         flush: List[bytes] = []
+        retry = False
         with self.lock:
             since = self.waiting_history_since
             if since is not None and time.monotonic() - since > HISTORY_WAIT_S:
-                flush, self.held = self.held, []
-                self.waiting_history_since = None
+                if not self.history_seen and self.history_retries < HISTORY_RETRIES:
+                    self.history_retries += 1
+                    retry = True
+                else:
+                    flush, self.held = self.held, []
+                    self.waiting_history_since = None
+        if retry and self.attached:
+            self.new_session()  # what is held stays held: new_session keeps it
         for data in flush:
             self.on_output(data)
 

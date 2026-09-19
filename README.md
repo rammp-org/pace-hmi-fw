@@ -33,6 +33,24 @@ python scripts/rtps_ota.py console                       # logs + commands; or i
 - Signed images: build with `sdkconfig.signed` layered on (instructions in that file); a board running a signed image then refuses unsigned updates.
 - The partition table has two 6 MB slots. The first boot after moving to it copies the files from the old storage partition, so calibration and settings survive.
 
+## Serial over Ethernet
+The USB serial console, carried over RTPS (`rammp/hmi/serial/tx|rx`), and served on this PC as a serial port:
+
+```sh
+python scripts/rtps_serial.py              # serves localhost:4000 (RFC 2217) and localhost:4001 (raw TCP)
+idf.py -p rfc2217://localhost:4000 monitor # the console: the lines the HMI still holds, then live; type 'help'
+idf.py -p socket://localhost:4001 flash    # the usual flash: the app goes over as an OTA update
+python scripts/rtps_serial.py --com auto   # also a COMx for any terminal (needs com0com)
+python scripts/rtps_serial.py --term       # or a terminal right here (Ctrl-] leaves)
+```
+
+- Run the scripts with the ESP-IDF Python (it has pyserial); `--device MAC` / `--peer IP` pick the HMI as `rtps_ota.py` does.
+- Flashing: the bridge plays the ESP32-P4's ROM loader and flasher stub to esptool, keeps what it writes, then sends the app with `rtps_ota.py`'s update (same key, same checks, same rollback). The bootloader, partition table and otadata are not sent. A 5 MB app goes through esptool in ~1 s over `socket://`; `rfc2217://` works too but takes ~20 s (esptool renegotiates the port around every block).
+- A real COM port needs a virtual null-modem driver ([com0com](https://sourceforge.net/projects/com0com/), signed build 2.2.2.0): the bridge holds one end of a pair and anything opens the other.
+- Opening the port does not reboot the HMI; `--allow-reset` makes an RTS pulse (idf.py monitor's reset, Ctrl-T Ctrl-R) reboot it, as USB would. `reboot` and RESET are refused while the chair drives.
+- What the HMI's network stack prints (RTPS, sockets, W5500, lwIP) stays on the UART and the LogScreen: sending the serial is what makes those print, and forwarding them would feed itself. The same goes for anything printed by the serial's own sending task.
+- `CONFIG_HMI_RTPS_SERIAL` (on by default) builds it in; it has no authentication, so turn it off in a fielded build, like the network console.
+
 ## Screens
 - Joystick only: **push up and hold** to enter, **pull and hold** (or hold the button) to leave. The bottom prompt says which.
 - The UI is designed in SquareLine Studio ([pace-hmi-gui](https://github.com/rammp-org/pace-hmi-gui)); `main/ui/` is its export (`import_ui.ps1`). Don't edit it here.
@@ -148,6 +166,7 @@ One row in `messages/joystick_message.hpp` (rammp-rtps); the HMI screens and the
 | --- | --- |
 | `python scripts/rtps_mcb_gui.py` | plays the MIB: system state, drive requests, error banner, seat, diagnostics, drive view |
 | `python scripts/rtps_selftest.py` | runs the self test over RTPS (exit 0 = pass) |
+| `python scripts/rtps_serial_test.py` | the serial bridge end to end against a stand-in HMI, flash included (exit 0 = pass; ESP-IDF Python, after a build) |
 | `python scripts/rtps_mcb_sim.py` | CLI version of the GUI (`--cycle` walks every state) |
 | `python scripts/rtps_adc_plot.py` | live joystick plot (needs matplotlib) |
 | `cd sim; python run.py` | the screens on a PC, no board ([sim/README.md](sim/README.md)) |

@@ -7,13 +7,15 @@ A FakeHmi plays the device's side of "Serial over RTPS" and of the firmware upda
 (hmi_rtps_spec.hpp), on this PC's own RTPS. The bridge runs as it would for a
 person, and this drives it as they would:
 
-  1. attach to the port: the history arrives, then the live output
+  1. attach to the port: the history arrives (asked for again when the first one
+     is lost), then the live output
   2. type a command: it is echoed and answered
   3. esptool through the RFC 2217 port (DTR/RTS resets and all): it connects,
      and the loader session ends cleanly without an update
   4. esptool write-flash of build/ (flash_args), through the raw port: the app
      must reach the FakeHmi as an OTA update, byte for byte, and the device come
-     back running it
+     back running it; a monitor left open on the RFC 2217 port sees the update
+     and then the new boot
 
 Run it with the ESP-IDF Python (it has pyserial and esptool), after `idf.py build`.
 """
@@ -82,6 +84,7 @@ class FakeHmi(rtps_host.RtpsHostHarness):
         self.last_error = ""
         self.silent_until = 0.0
         self.received_image: Optional[bytes] = None
+        self.drop_histories = 0  # histories to lose, as one sent before the match would be
         self.boot()
 
     # -- a boot: new session, fresh log
@@ -147,7 +150,9 @@ class FakeHmi(rtps_host.RtpsHostHarness):
                 new = m.session not in self.hosts
                 self.hosts[m.session] = time.monotonic()
                 lines = list(self.lines)
-            if new:
+            if new and self.drop_histories:
+                self.drop_histories -= 1
+            elif new:
                 text = "".join(line + "\n" for line in ["--- serial over RTPS: fake ---"] + lines)
                 for at in range(0, len(text), 1024):
                     self.send(spec.SERIAL_KIND_HISTORY, text[at:at + 1024].encode(), m.session)  # noqa: F821
@@ -267,6 +272,7 @@ def main() -> int:
     # The address this PC reaches itself on, as a LAN peer would see it.
     address = rtps_net.source_address_for("192.0.2.1") or rtps_host.guess_local_ipv4()
     hmi = FakeHmi(address)
+    hmi.drop_histories = 1
     threading.Thread(target=hmi.run, daemon=True).start()
 
     bridge = subprocess.Popen(
@@ -291,7 +297,7 @@ def main() -> int:
         if not t.check("bridge serving", sock is not None, "".join(bridge_log[-5:]).strip()):
             return 1
         got = bytearray()
-        t.check("history on attach", read_until(sock, b"RTPS up on", 10, got),
+        t.check("history on attach, the first one lost", read_until(sock, b"RTPS up on", 12, got),
                 got[-200:].decode(errors="replace"))
         hmi.log("[rtps_comms/I][12.3]: a live line")
         t.check("live output", read_until(sock, b"a live line", 5, got))
@@ -319,6 +325,9 @@ def main() -> int:
         if not t.check("build present", os.path.exists(flash_args) and os.path.exists(app),
                        cli.build):
             return 1
+        monitor = socket.create_connection(("127.0.0.1", cli.rfc2217), timeout=5)
+        watched = bytearray()
+        read_until(monitor, b"RTPS up on", 10, watched)  # its own history first
         before = time.monotonic()
         esptool = subprocess.run(
             [sys.executable, "-m", "esptool", "--chip", "esp32p4", "-p",
@@ -346,6 +355,11 @@ def main() -> int:
                 and time.monotonic() < deadline:
             time.sleep(0.5)
         t.check("bridge reports the update", any("update done" in line for line in bridge_log))
+        t.check("the open monitor saw the update and the new boot",
+                read_until(monitor, f"Running {image.version}".encode(), 15, watched)
+                and b"[rtps_serial] update done" in watched,
+                " | ".join(watched[-160:].decode(errors="replace").splitlines()))
+        monitor.close()
     finally:
         bridge.terminate()
         try:
