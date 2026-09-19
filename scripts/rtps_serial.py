@@ -70,6 +70,10 @@ HISTORY_WAIT_S = 3.0
 #: times to ask again for a history of which nothing came (sent before the device
 #: had matched our reader - a device that has just booted - it went nowhere)
 HISTORY_RETRIES = 3
+#: RFC 2217: the history is asked for this long after the client's purge (the last
+#: of its open()), or after REPLAY_WITHOUT_PURGE_S if it sends none
+REPLAY_AFTER_PURGE_S = 0.3
+REPLAY_WITHOUT_PURGE_S = 1.5
 #: esptool silent this long is done (it compresses each file before sending it:
 #: seconds, for the app)
 LOADER_IDLE_S = 20.0
@@ -475,8 +479,10 @@ class LoaderEmulator:
 class FakeSerial:
     """What serial.rfc2217.PortManager drives: a port with no wire behind it."""
 
-    def __init__(self, on_lines: Callable[[bool, bool], None]) -> None:
+    def __init__(self, on_lines: Callable[[bool, bool], None],
+                 on_purge: Callable[[], None]) -> None:
         self._on_lines = on_lines
+        self._on_purge = on_purge
         self._dtr = self._rts = False
         self.baudrate, self.bytesize, self.parity, self.stopbits = 115200, 8, "N", 1
         self.xonxoff = self.rtscts = self.break_condition = False
@@ -503,7 +509,7 @@ class FakeSerial:
         self._on_lines(self._dtr, self._rts)
 
     def reset_input_buffer(self) -> None:
-        pass
+        self._on_purge()  # the client threw away what it had received: see TcpEnd
 
     def reset_output_buffer(self) -> None:
         pass
@@ -529,6 +535,7 @@ class TcpEnd(End):
         self.client: Optional[socket.socket] = None
         self.manager = None
         self.send_lock = threading.Lock()
+        self.replay_timer: Optional[threading.Timer] = None
         if rfc2217:
             import serial.rfc2217  # noqa: F401  (fail at start, not at the first client)
         self.listener = socket.create_server((bind, port), reuse_port=False)
@@ -569,9 +576,17 @@ class TcpEnd(End):
                         client.sendall(data)
 
             manager = serial.rfc2217.PortManager(
-                FakeSerial(lambda dtr, rts: self.bridge.lines(self, dtr, rts)), Connection())
+                FakeSerial(lambda dtr, rts: self.bridge.lines(self, dtr, rts),
+                           lambda: self._replay_soon(REPLAY_AFTER_PURGE_S)),
+                Connection())
         self.manager = manager
-        self.bridge.opened(self)
+        # A pyserial client ends its open() by purging what it has received, which is
+        # where the history would be if asked for at once: over RFC 2217 it is asked for
+        # after the client's purge (another purge asks again), or after a while if none
+        # comes.
+        self.bridge.opened(self, replay=manager is None)
+        if manager is not None:
+            self._replay_soon(REPLAY_WITHOUT_PURGE_S)
         try:
             while True:
                 data = client.recv(65536)
@@ -584,6 +599,8 @@ class TcpEnd(End):
         except OSError:
             pass
         finally:
+            if self.replay_timer is not None:
+                self.replay_timer.cancel()
             last = self.client is client  # not replaced by a newer client meanwhile
             if last:
                 self.client = None
@@ -594,6 +611,15 @@ class TcpEnd(End):
                 pass
             if last:
                 self.bridge.closed(self)
+
+
+    def _replay_soon(self, delay: float) -> None:
+        """Ask for the history once things settle (again: the last call's delay wins)."""
+        if self.replay_timer is not None:
+            self.replay_timer.cancel()
+        self.replay_timer = threading.Timer(delay, self.bridge.replay)
+        self.replay_timer.daemon = True
+        self.replay_timer.start()
 
 
 def com0com_pairs() -> List[Tuple[str, str]]:
@@ -634,8 +660,8 @@ class ComEnd(End):
     def _pump(self) -> None:
         # Always open, as a wire is: what arrives while nothing holds the other end is
         # lost there. A program opening it mostly raises DTR or RTS; that asks the
-        # device for what it holds again (idf.py monitor lowers both, so it gets the
-        # live output only).
+        # device for what it holds again, shortly after (idf.py monitor lowers both, so
+        # it gets the live output only).
         self.bridge.opened(self)
         while True:
             data = self.port.read(65536)
@@ -643,8 +669,12 @@ class ComEnd(End):
                 self.bridge.typed(self, data)
             lines = (self.port.dsr, self.port.cts)
             if lines != self.lines_seen:
-                if not any(self.lines_seen) and self.bridge.link is not None:
-                    self.bridge.link.new_session()
+                if not any(self.lines_seen):
+                    # after the program's open() is done purging its receive buffer,
+                    # which this end cannot see happen (TcpEnd can)
+                    timer = threading.Timer(REPLAY_WITHOUT_PURGE_S, self.bridge.replay)
+                    timer.daemon = True
+                    timer.start()
                 self.lines_seen = lines
                 self.bridge.lines(self, *lines)
 
@@ -725,12 +755,18 @@ class Bridge:
                     end.write(note(text))
 
     # -- from the ends
-    def opened(self, end: End) -> None:
+    def opened(self, end: End, replay: bool = True) -> None:
+        """`replay`: ask for what the device holds now (else the end calls replay())."""
         if not isinstance(end, TerminalEnd):
             self.say(f"{end.name}: opened")
         self.open_ends.add(end)
         if self.link is not None:
             self.link.attached = True
+            if replay:
+                self.replay()
+
+    def replay(self) -> None:
+        if self.link is not None and self.link.attached:
             self.link.new_session()  # replays what the device holds, as the TCP console does
 
     def closed(self, end: End) -> None:

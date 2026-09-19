@@ -311,6 +311,20 @@ def main() -> int:
                 got[-120:].decode(errors="replace"))
         sock.close()
 
+        # 2b. a pyserial client over RFC 2217 (what idf.py monitor is): its open() purges
+        # what it has received, so the history must come after that
+        import serial
+
+        port = serial.serial_for_url(f"rfc2217://127.0.0.1:{cli.rfc2217}", timeout=0.5)
+        heard = b""
+        deadline = time.monotonic() + 8
+        while b"RTPS up on" not in heard and time.monotonic() < deadline:
+            heard += port.read(65536)
+        port.close()
+        t.check("history on a pyserial RFC 2217 open", b"RTPS up on" in heard,
+                f"{len(heard)} B")
+        time.sleep(1)
+
         # 3. esptool over RFC 2217: resets, the loader, nothing written
         mac = subprocess.run(
             [sys.executable, "-m", "esptool", "--chip", "esp32p4", "-p",
