@@ -25,6 +25,7 @@
 #include "log_capture.hpp"
 #include "logger.hpp"
 #include "ota_update.hpp"
+#include "rtps/utils/Diagnostics.hpp" // the engine's history overwrite count
 #include "rtps_comms.hpp"
 
 #if CONFIG_HMI_RTPS_SERIAL
@@ -39,8 +40,13 @@ constexpr size_t kMaxHosts = 4;
 constexpr size_t kMaxLine = 128;
 // A best-effort writer keeps RTPS_CFG_HISTORY_SIZE_STATELESS (2) samples and sends
 // them from the RTPS worker pool: a publish that outruns the pool overwrites one that
-// was never sent. Each one gets this long to go out before the next goes in.
+// was never sent. Each one gets at least kPublishGap to go out before the next goes
+// in; while the pool is backed up (a self test's reports, an update's flash writes
+// stalling the CPU) that is not enough, so the gap doubles on every overwrite seen,
+// up to kMaxPublishGap, and halves again after kCalmPublishes without one.
 constexpr auto kPublishGap = 4ms;
+constexpr auto kMaxPublishGap = 128ms;
+constexpr int kCalmPublishes = 8;
 constexpr int64_t kIdleTimeoutUs =
     std::chrono::duration_cast<std::chrono::microseconds>(rammp::kSerialIdleTimeout).count();
 
@@ -265,11 +271,23 @@ bool send(rammp::SerialKind kind, uint32_t to, std::string_view data) {
   message.kind = kind;
   message.to = to;
   message.data.assign(data.begin(), data.end());
+  // The engine counts overwrites for every writer together, but one in this writer
+  // can only happen inside this call: a change across it is (almost always) ours.
+  const uint32_t drops = rtps::Diagnostics::Writer::history_overwrite_drops;
   const bool sent = rtps_comms_publish_serial(message);
   if (sent) {
     tx_seq++; // a message nobody could be sent is not a gap
   }
-  std::this_thread::sleep_for(kPublishGap);
+  static std::chrono::milliseconds gap = kPublishGap;
+  static int calm = 0;
+  if (rtps::Diagnostics::Writer::history_overwrite_drops != drops) {
+    gap = std::min<std::chrono::milliseconds>(gap * 2, kMaxPublishGap);
+    calm = 0;
+  } else if (gap > kPublishGap && ++calm >= kCalmPublishes) {
+    gap = std::max<std::chrono::milliseconds>(gap / 2, kPublishGap);
+    calm = 0;
+  }
+  std::this_thread::sleep_for(gap);
   return sent;
 }
 
