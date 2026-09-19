@@ -16,40 +16,45 @@ Firmware for the RAMMP wheelchair HMI: an M5Stack Tab5 (ESP32-P4) on the [RAMMP 
 - Without a toolchain: download the programmer from **Actions → Build and Package Main → Artifacts** and run it.
 - Or put the [release](https://github.com/rammp-org/pace-hmi-fw/releases) images in `precompiled/` and run `.\flash_precompiled.ps1` (needs esptool v5+).
 
-## Update over Ethernet
-Once a board runs a firmware with OTA (flashed over USB once), USB is no longer needed:
+## Over Ethernet (no USB)
+Needs the board flashed over USB once with this firmware. Run from an ESP-IDF shell (its Python has pyserial).
 
+### Serial monitor
 ```sh
-python scripts/rtps_ota.py list                          # devices on the network: MAC, IP, version, slot
-python scripts/rtps_ota.py flash build/rammp-hmi-p4.bin  # all of them, in parallel (or --device MAC)
+python scripts/rtps_monitor.py    # bridge + idf monitor in one: the HMI's recent log, then live
+```
+- Type `help` for the commands (`info`, `mem`, `selftest`, `reboot`).
+- Ctrl-] quits. Ctrl-T Ctrl-F builds and flashes; Ctrl-T Ctrl-A flashes the app only (both as an OTA update).
+- `--device MAC`: pick one of several HMIs. `--peer IP`: when multicast does not reach it (e.g. over Tailscale).
+- `--allow-reset`: the monitor's reset (Ctrl-T Ctrl-R) reboots the HMI, as USB would.
+- `reboot` and resets are refused while the chair drives.
+- One bridge at a time: a second one finds the ports taken.
+
+### The bridge on its own
+```sh
+python scripts/rtps_serial.py                   # serves rfc2217://localhost:4000 and socket://localhost:4001
+idf.py -p rfc2217://localhost:4000 monitor      # any serial tool works on either port
+idf.py -p socket://localhost:4001 flash         # flash over socket:// (~1 s, rfc2217:// takes ~20 s)
+python scripts/rtps_serial.py --com auto        # a COM port for any terminal (needs com0com)
+python scripts/rtps_serial.py --term            # a terminal right here (Ctrl-] quits)
+```
+- Flashing: the bridge plays the ESP32 loader to esptool, then sends only the app as an OTA update.
+- The HMI's network-stack logs (RTPS, W5500, lwIP) stay off the link, to avoid a print loop; the UART and LogScreen have them.
+- `python scripts/rtps_serial_test.py`: the bridge end to end against a stand-in HMI (exit 0 = pass).
+- `CONFIG_HMI_RTPS_SERIAL` has no authentication: turn it off in a fielded build.
+
+### Firmware update
+```sh
+python scripts/rtps_ota.py list                          # HMIs on the network: MAC, IP, version, slot
+python scripts/rtps_ota.py flash build/rammp-hmi-p4.bin  # all of them (or --device MAC)
 idf.py ota-net                                           # build, then the same
-python scripts/rtps_ota.py console                       # logs + commands; or idf.py monitor -p socket://<ip>:3333 --no-reset
 ```
-
-- The device announces itself on RTPS (`rammp/ota/device_info`). A START signed with the update key (`--key` / `RAMMP_OTA_KEY`; the default is a public bench key) makes it open TCP 3232 for that one image; the image goes over it with espp's OTA protocol.
-- The image goes zlib-compressed (to 32%) to any device that says it takes that: a 5 MB update is written in ~30 s instead of ~36 s. `--no-compress` sends it as is. Most of what remains is the flash itself (~16 ms per 4 KB).
-- Refused: a bad key, a replayed command, an older version (major.minor.patch), and an image whose size, version or SHA-256 is not the one the START named.
-- The new image boots pending: it confirms itself once Ethernet and RTPS are up, and goes back to the previous one if it resets first or takes longer than 120 s. The tool reports `ROLLED BACK` when that happens.
-- Signed images: build with `sdkconfig.signed` layered on (instructions in that file); a board running a signed image then refuses unsigned updates.
-- The partition table has two 6 MB slots. The first boot after moving to it copies the files from the old storage partition, so calibration and settings survive.
-
-## Serial over Ethernet
-The USB serial console, carried over RTPS (`rammp/hmi/serial/tx|rx`), and served on this PC as a serial port:
-
-```sh
-python scripts/rtps_serial.py              # serves localhost:4000 (RFC 2217) and localhost:4001 (raw TCP)
-idf.py -p rfc2217://localhost:4000 monitor # the console: the lines the HMI still holds, then live; type 'help'
-idf.py -p socket://localhost:4001 flash    # the usual flash: the app goes over as an OTA update
-python scripts/rtps_serial.py --com auto   # also a COMx for any terminal (needs com0com)
-python scripts/rtps_serial.py --term       # or a terminal right here (Ctrl-] leaves)
-```
-
-- Run the scripts with the ESP-IDF Python (it has pyserial); `--device MAC` / `--peer IP` pick the HMI as `rtps_ota.py` does.
-- Flashing: the bridge plays the ESP32-P4's ROM loader and flasher stub to esptool, keeps what it writes, then sends the app with `rtps_ota.py`'s update (same key, same checks, same rollback). The bootloader, partition table and otadata are not sent. A 5 MB app goes through esptool in ~1 s over `socket://`; `rfc2217://` works too but takes ~20 s (esptool renegotiates the port around every block).
-- A real COM port needs a virtual null-modem driver ([com0com](https://sourceforge.net/projects/com0com/), signed build 2.2.2.0): the bridge holds one end of a pair and anything opens the other.
-- Opening the port does not reboot the HMI; `--allow-reset` makes an RTS pulse (idf.py monitor's reset, Ctrl-T Ctrl-R) reboot it, as USB would. `reboot` and RESET are refused while the chair drives.
-- What the HMI's network stack prints (RTPS, sockets, W5500, lwIP) stays on the UART and the LogScreen: sending the serial is what makes those print, and forwarding them would feed itself. The same goes for anything printed by the serial's own sending task.
-- `CONFIG_HMI_RTPS_SERIAL` (on by default) builds it in; it has no authentication, so turn it off in a fielded build, like the network console.
+- Key: `--key` or `RAMMP_OTA_KEY`; the default is the public bench key.
+- ~30 s for a 5 MB app (sent zlib-compressed; `--no-compress` to skip).
+- Refused: a bad key, a replayed command, an older version, a wrong size or SHA-256, the chair driving.
+- The new image confirms itself once RTPS is up; otherwise it rolls back (tool says `ROLLED BACK`) after 120 s or at a reset.
+- Signed images: layer `sdkconfig.signed` (see the file); a signed board refuses unsigned updates.
+- Two 6 MB app slots; calibration and settings survive the move to them.
 
 ## Screens
 - Joystick only: **push up and hold** to enter, **pull and hold** (or hold the button) to leave. The bottom prompt says which.
@@ -103,6 +108,8 @@ Saved settings live in LittleFS (`/storage`), so they survive a reboot.
 | `rammp/joystick/seat_command` | `SeatCommand` | HMI → MIB, per press | put seat axis N at an absolute target |
 | `rammp/hmi/counter`, `command`, `brightness` | `std_msgs/UInt32` | bench PC | heartbeat, self-test run / ping, backlight % |
 | `rammp/selftest/report` | `SelfTestReport` | HMI → PC | one per self-test check |
+| `rammp/hmi/serial/tx`, `rx` | `SerialData` | HMI ↔ PC | the serial console (`rtps_serial.py`) |
+| `rammp/ota/device_info`, `command` | `OtaDeviceInfo`, `OtaCommand` | HMI ↔ PC | firmware update (`rtps_ota.py`); the image goes over TCP |
 
 Example: an MCB (same espp / ESP-IDF stack) sending Diagnostics:
 
