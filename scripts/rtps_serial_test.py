@@ -133,7 +133,8 @@ class FakeHmi(rtps_host.RtpsHostHarness):
     def handle_user_packet(self, packet: bytes, sender_ip: str, sender_port: int) -> None:
         if time.monotonic() < self.silent_until:
             return
-        for guid_prefix, writer_id, payload, reader_id in rtps_host.parse_rtps_data_messages(packet):
+        samples = rtps_host.parse_rtps_data_messages(packet)
+        for guid_prefix, writer_id, payload, reader_id in samples:
             topic = self.topic_for_sample(guid_prefix, writer_id, reader_id)
             if topic == spec.TOPIC_SERIAL_RX:
                 m = spec.unpack_serial_data(payload)
@@ -155,12 +156,13 @@ class FakeHmi(rtps_host.RtpsHostHarness):
             elif new:
                 text = "".join(line + "\n" for line in ["--- serial over RTPS: fake ---"] + lines)
                 for at in range(0, len(text), 1024):
-                    self.send(spec.SERIAL_KIND_HISTORY, text[at:at + 1024].encode(), m.session)  # noqa: F821
+                    self.send(spec.SERIAL_KIND_HISTORY,  # noqa: F821
+                              text[at:at + 1024].encode(), m.session)
                 self.send(spec.SERIAL_KIND_HISTORY, b"", m.session)  # noqa: F821
         elif m.kind == spec.SERIAL_KIND_BYE:  # noqa: F821
             with self.lock:
                 self.hosts.pop(m.session, None)
-        elif m.kind == spec.SERIAL_KIND_DATA:  # noqa: F821
+        elif m.kind == spec.SERIAL_KIND_DATA and m.session in self.hosts:  # noqa: F821
             for ch in m.data.decode("ascii", "ignore"):
                 if ch in "\r\n":
                     self.send(spec.SERIAL_KIND_DATA, b"\r\n")  # noqa: F821
@@ -191,7 +193,8 @@ class FakeHmi(rtps_host.RtpsHostHarness):
         listener.close()
         self.state = spec.OTA_STATE_RECEIVING  # noqa: F821
         parser = F.StreamParser()
-        inflate = zlib.decompressobj() if start.encoding == spec.OTA_ENCODING_ZLIB else None  # noqa: F821
+        zlib_encoded = start.encoding == spec.OTA_ENCODING_ZLIB  # noqa: F821
+        inflate = zlib.decompressobj() if zlib_encoded else None
         image = bytearray()
         received = 0  # on the wire: what the host counts its progress in
         done = False

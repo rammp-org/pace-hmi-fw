@@ -174,15 +174,16 @@ void type(const std::vector<uint8_t> &data) {
   }
 }
 
-// A host said something: it is (still) attached. A new one gets the history.
-void note_host(uint32_t session, bool hello) {
+// A host said something: it is (still) attached. A new one gets the history. False
+// for a host that is not attached (anything but HELLO from a session never seen).
+bool note_host(uint32_t session, bool hello) {
   std::lock_guard<std::mutex> lock(hosts_mutex);
   const int64_t now = esp_timer_get_time();
   auto host = std::find_if(hosts.begin(), hosts.end(),
                            [session](const Host &h) { return h.session == session; });
   if (host == hosts.end()) {
     if (!hello) {
-      return; // typing into a session this device never saw attach: HELLO comes first
+      return false; // HELLO comes first (this device may have rebooted since)
     }
     // a free slot, else the host heard from least recently
     host = std::min_element(hosts.begin(), hosts.end(),
@@ -191,6 +192,7 @@ void note_host(uint32_t session, bool hello) {
   }
   host->seen_us = now;
   attached = true;
+  return true;
 }
 
 void forget_host(uint32_t session) {
@@ -211,15 +213,17 @@ void on_rx(const rammp::SerialData &m) {
     note_host(m.session, true);
     break;
   case rammp::SerialKind::DATA:
-    note_host(m.session, false);
-    type(m.data);
+    if (note_host(m.session, false)) {
+      type(m.data);
+    }
     break;
   case rammp::SerialKind::BYE:
     forget_host(m.session);
     break;
   case rammp::SerialKind::RESET:
-    note_host(m.session, false);
-    console_reboot(); // says why not, when it will not
+    if (note_host(m.session, false)) {
+      console_reboot(); // says why not, when it will not
+    }
     break;
   default:
     break;

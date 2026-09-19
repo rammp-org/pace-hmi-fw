@@ -118,7 +118,8 @@ class SerialLink(rtps_ota.OtaHost):
 
     # -- what arrives
     def handle_user_packet(self, packet: bytes, sender_ip: str, sender_port: int) -> None:
-        for guid_prefix, writer_id, payload, reader_id in rtps_host.parse_rtps_data_messages(packet):
+        samples = rtps_host.parse_rtps_data_messages(packet)
+        for guid_prefix, writer_id, payload, reader_id in samples:
             topic = self.topic_for_sample(guid_prefix, writer_id, reader_id)
             if topic == spec.TOPIC_OTA_DEVICE_INFO:
                 info = spec.unpack_ota_device_info(payload)
@@ -642,7 +643,7 @@ class ComEnd(End):
     def write(self, data: bytes) -> None:
         try:
             self.port.write(data)
-        except Exception:  # noqa: BLE001  (the other end may be closed: output is lost, as on a wire)
+        except Exception:  # noqa: BLE001  (the other end closed: lost, as on a wire)
             pass
 
     def _pump(self) -> None:
@@ -919,7 +920,8 @@ def main() -> int:
     parser.add_argument("--allow-reset", action="store_true",
                         help="an RTS pulse reboots the device, as on USB")
     parser.add_argument("--key", default=os.environ.get("RAMMP_OTA_KEY", rtps_ota.DEFAULT_KEY),
-                        help="the update key for flashing (default $RAMMP_OTA_KEY, or the bench key)")
+                        help="the update key for flashing (default $RAMMP_OTA_KEY, "
+                             "or the bench key)")
     parser.add_argument("--no-compress", action="store_true", help="flash: send the image as is")
     parser.add_argument("--discover", type=float, default=5.0, metavar="S")
     parser.add_argument("--advertised-address", default=None)
