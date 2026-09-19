@@ -152,8 +152,8 @@ class SerialLink(rtps_ota.OtaHost):
                 out.append(note(f"{m.seq - self.expected_seq} messages lost"))
             self.expected_seq = m.seq + 1
             if m.kind == spec.SERIAL_KIND_HISTORY:  # noqa: F821
-                if m.to != self.session:
-                    return  # another host's
+                if m.to != self.session or self.waiting_history_since is None:
+                    return  # another host's, or one we did not ask for (the device expired us)
                 self.history_seen = True
                 self.history_retries = 0
                 if m.data:
@@ -317,6 +317,8 @@ class LoaderEmulator:
                 0x0F: "CHANGE_BAUDRATE", 0x10: "FLASH_DEFL_BEGIN", 0x11: "FLASH_DEFL_DATA",
                 0x12: "FLASH_DEFL_END", 0x13: "SPI_FLASH_MD5", 0x14: "GET_SECURITY_INFO",
                 0xD3: "RUN_USER_CODE"}
+    #: nothing to do but say yes: MEM_BEGIN, MEM_DATA, SPI_SET_PARAMS, SPI_ATTACH, CHANGE_BAUDRATE
+    ACK_ONLY = {0x05, 0x07, 0x0B, 0x0D, 0x0F}
 
     def __init__(self, mac: str, send: Callable[[bytes], None]) -> None:
         self.send = send
@@ -345,6 +347,9 @@ class LoaderEmulator:
         _, op, length, _checksum = struct.unpack_from("<BBHI", frame)
         data = frame[8:8 + length]
         self.last_command = time.monotonic()
+        if op in self.ACK_ONLY:
+            self.reply(op)
+            return
         method = getattr(self, "op_" + self.OP_NAMES.get(op, "").lower(), None)
         if method is None:
             self.reply(op, status=1, error=0x05)  # esptool: UnsupportedCommandError
@@ -410,27 +415,12 @@ class LoaderEmulator:
                 self.regs[self.SPI_BASE] = 0  # done at once
         self.reply(op)
 
-    def op_mem_begin(self, op: int, data: bytes) -> None:
-        self.reply(op)
-
-    def op_mem_data(self, op: int, data: bytes) -> None:
-        self.reply(op)
-
     def op_mem_end(self, op: int, data: bytes) -> None:
         self.reply(op)
         _no_entry, entry = struct.unpack_from("<II", data)
         if entry:  # the stub, starting: it says hello
             self.stub = True
             self.send(slip(b"OHAI"))
-
-    def op_spi_attach(self, op: int, data: bytes) -> None:
-        self.reply(op)
-
-    def op_spi_set_params(self, op: int, data: bytes) -> None:
-        self.reply(op)
-
-    def op_change_baudrate(self, op: int, data: bytes) -> None:
-        self.reply(op)
 
     def op_flash_begin(self, op: int, data: bytes) -> None:
         _size, _blocks, self.block_size, self.write_at = struct.unpack_from("<IIII", data)
@@ -446,9 +436,8 @@ class LoaderEmulator:
         self.reply(op)
 
     def op_flash_defl_begin(self, op: int, data: bytes) -> None:
-        _size, _blocks, self.block_size, self.write_at = struct.unpack_from("<IIII", data)
+        self.op_flash_begin(op, data)
         self.inflate = zlib.decompressobj()
-        self.reply(op)
 
     def op_flash_defl_data(self, op: int, data: bytes) -> None:
         length = struct.unpack_from("<I", data)[0]
@@ -464,16 +453,12 @@ class LoaderEmulator:
         self.write_at += len(out)
         self.reply(op)
 
-    def _flash_end(self, op: int, data: bytes) -> None:
+    def op_flash_end(self, op: int, data: bytes) -> None:
         self.reply(op)
         if data and struct.unpack_from("<I", data)[0] == 0:  # 0 = reboot
             self.finished = True
 
-    def op_flash_end(self, op: int, data: bytes) -> None:
-        self._flash_end(op, data)
-
-    def op_flash_defl_end(self, op: int, data: bytes) -> None:
-        self._flash_end(op, data)
+    op_flash_defl_end = op_flash_end
 
     def op_spi_flash_md5(self, op: int, data: bytes) -> None:
         addr, size, _, _ = struct.unpack_from("<IIII", data)
@@ -726,6 +711,8 @@ class Bridge:
     def output(self, data: bytes) -> None:
         if self.loader is not None:
             return  # esptool is talking to us: the device's output would only confuse it
+        # the device's stream has bare LF (its UART adds the CR): CR LF, as its USB port shows
+        data = data.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
         for end in self.ends:
             end.write(data)
 

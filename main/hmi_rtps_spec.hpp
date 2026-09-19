@@ -313,6 +313,9 @@ constexpr const char *to_string(OtaState v) {
                                 HELLO detaches it
      host   -> dev   kSerialRx  RESET: reboot (refused while the chair drives)
 
+   DATA and RESET count only from a host session this boot has had a HELLO from (a
+   device that rebooted ignores them until the next HELLO).
+
    Best effort, like the other topics: `seq` counts a sender's messages from 1, so a
    gap is loss the receiver can report; `session` is random per device boot or host
    run, so either side restarting shows. A device answers only messages whose `mac`

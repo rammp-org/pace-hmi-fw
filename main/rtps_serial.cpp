@@ -12,11 +12,11 @@
 
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
-#include "esp_mac.h"
 #include "esp_pthread.h"
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "freertos/stream_buffer.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
@@ -24,8 +24,10 @@
 #include "console.hpp"
 #include "log_capture.hpp"
 #include "logger.hpp"
+#include "ota_update.hpp"
 #include "rtps_comms.hpp"
 
+#if CONFIG_HMI_RTPS_SERIAL
 namespace {
 
 using namespace std::chrono_literals;
@@ -72,6 +74,8 @@ std::array<Host, kMaxHosts> hosts;
 std::mutex input_mutex;
 std::string input_line;
 bool input_after_cr = false;
+QueueHandle_t commands = nullptr; // finished lines, for the console task (in PSRAM)
+std::atomic<TaskHandle_t> console_task{nullptr};
 
 // The pump's own.
 uint32_t own_session = 0;
@@ -148,6 +152,28 @@ void echo(std::string_view text) {
   put(text);
 }
 
+// A finished line, for the console task: commands do not run on the RTPS worker that
+// received them (6 KB of stack, and `reboot` sleeps 200 ms).
+void run_later(std::string_view line) {
+  std::array<char, kMaxLine + 1> item{};
+  line.copy(item.data(), kMaxLine);
+  if (xQueueSend(commands, item.data(), 0) != pdTRUE) {
+    echo("busy: line dropped\r\n");
+  }
+}
+
+// The console task: runs typed commands; they print their answers, which are forwarded
+// like any output (this is not the pump's task).
+void run_commands() {
+  console_task = xTaskGetCurrentTaskHandle();
+  std::array<char, kMaxLine + 1> line{};
+  while (true) {
+    if (xQueueReceive(commands, line.data(), portMAX_DELAY) == pdTRUE) {
+      console_run(line.data());
+    }
+  }
+}
+
 // Typed bytes: echoed as a terminal would, and run as a command at the end of a line.
 void type(const std::vector<uint8_t> &data) {
   std::lock_guard<std::mutex> lock(input_mutex);
@@ -160,7 +186,7 @@ void type(const std::vector<uint8_t> &data) {
         continue; // the LF of a CR LF
       }
       echo("\r\n");
-      console_run(input_line); // prints its answer: forwarded like any output
+      run_later(input_line);
       input_line.clear();
     } else if (c == '\b' || c == 0x7f) {
       if (!input_line.empty()) {
@@ -222,7 +248,7 @@ void on_rx(const rammp::SerialData &m) {
     break;
   case rammp::SerialKind::RESET:
     if (note_host(m.session, false)) {
-      console_reboot(); // says why not, when it will not
+      run_later("reboot"); // says why not, when it will not
     }
     break;
   default:
@@ -248,32 +274,48 @@ bool send(rammp::SerialKind kind, uint32_t to, std::string_view data) {
 }
 
 // Drops hosts gone quiet; returns the session of one that still wants its history (0 = none).
+// Logs only after letting go of the locks: a print takes stdout's lock, and forward()
+// takes output_mutex under it, so printing while holding output_mutex can deadlock.
 uint32_t tend_hosts() {
-  std::lock_guard<std::mutex> lock(hosts_mutex);
-  const int64_t now = esp_timer_get_time();
   uint32_t wants = 0;
-  bool any = false;
-  for (auto &host : hosts) {
-    if (host.session != 0 && now - host.seen_us > kIdleTimeoutUs) {
-      logger.info("Serial host {:08x} gone quiet", host.session);
-      host = Host{};
-    }
-    if (host.session != 0) {
-      any = true;
-      if (host.wants_history && wants == 0) {
-        wants = host.session;
-        host.wants_history = false;
+  std::array<uint32_t, kMaxHosts> quiet{};
+  bool detached = false;
+  {
+    std::lock_guard<std::mutex> lock(hosts_mutex);
+    const int64_t now = esp_timer_get_time();
+    bool any = false;
+    for (size_t i = 0; i < hosts.size(); i++) {
+      Host &host = hosts[i];
+      if (host.session != 0 && now - host.seen_us > kIdleTimeoutUs) {
+        quiet[i] = host.session;
+        host = Host{};
+      }
+      if (host.session != 0) {
+        any = true;
+        if (host.wants_history && wants == 0) {
+          wants = host.session;
+          host.wants_history = false;
+        }
       }
     }
+    if (!any && attached) {
+      attached = false;
+      std::lock_guard<std::mutex> out_lock(output_mutex);
+      xStreamBufferReset(output);
+      line_start = true;
+      detached = true;
+    }
   }
-  if (!any && attached) {
-    attached = false;
-    std::lock_guard<std::mutex> out_lock(output_mutex);
-    xStreamBufferReset(output);
-    line_start = true;
+  for (const uint32_t session : quiet) {
+    if (session != 0) {
+      logger.info("Serial host {:08x} gone quiet", session);
+    }
+  }
+  if (detached) {
     logger.info("Serial: no host attached ({} network-stack lines were kept off it; stack "
-                "never used: {} B)",
-                held_back.exchange(0), uxTaskGetStackHighWaterMark(nullptr));
+                "never used: {} B, console's {} B)",
+                held_back.exchange(0), uxTaskGetStackHighWaterMark(nullptr),
+                console_task.load() ? uxTaskGetStackHighWaterMark(console_task.load()) : 0);
   }
   return wants;
 }
@@ -344,18 +386,17 @@ void pump() {
 }
 
 } // namespace
+#endif
 
 void rtps_serial_start() {
 #if CONFIG_HMI_RTPS_SERIAL
   output = xStreamBufferCreateWithCaps(kBufferSize, 1, MALLOC_CAP_SPIRAM);
-  if (output == nullptr) {
+  commands = xQueueCreateWithCaps(4, kMaxLine + 1, MALLOC_CAP_SPIRAM);
+  if (output == nullptr || commands == nullptr) {
     logger.error("No memory for the serial over RTPS");
     return;
   }
-  uint8_t mac[6] = {};
-  esp_read_mac(mac, ESP_MAC_ETH); // the address OtaDeviceInfo.mac gives
-  own_mac = fmt::format("{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}", mac[0], mac[1], mac[2], mac[3],
-                        mac[4], mac[5]);
+  own_mac = ota_mac_string(); // the host tells devices apart by OtaDeviceInfo.mac
   do {
     own_session = esp_random();
   } while (own_session == 0);
@@ -376,6 +417,10 @@ void rtps_serial_start() {
   cfg.stack_alloc_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
   esp_pthread_set_cfg(&cfg);
   std::thread(pump).detach();
+  cfg.stack_size = 12 * 1024; // as the network console's: console_run's `info` needs it
+  cfg.thread_name = "serial_console";
+  esp_pthread_set_cfg(&cfg);
+  std::thread(run_commands).detach();
   esp_pthread_set_cfg(&previous);
   logger.info("Serial over RTPS on '{}' / '{}' as {}", rammp::kSerialTx.name, rammp::kSerialRx.name,
               own_mac);

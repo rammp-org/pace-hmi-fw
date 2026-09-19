@@ -43,3 +43,6 @@ OtaProgress ota_progress();
 
 /// Everything in OtaDeviceInfo but `seq` and `ip`, which the publisher owns.
 rammp::OtaDeviceInfo ota_device_info();
+
+/// This device's address as OtaDeviceInfo.mac gives it ("aa:bb:..", the Ethernet MAC).
+std::string ota_mac_string();

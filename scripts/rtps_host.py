@@ -978,7 +978,8 @@ class RtpsHostHarness:
 
     def _build_user_targets(self, writer: WriterConfig) -> List[Tuple[str, int]]:
         targets: List[Tuple[str, int]] = []
-        for reader in self.discovered_readers.values():
+        # snapshots: the network thread adds to these while other threads send
+        for reader in list(self.discovered_readers.values()):
             if reader.topic_name != writer.topic_name:
                 continue
             # A seeded peer is, by definition, somewhere multicast does not
@@ -996,7 +997,7 @@ class RtpsHostHarness:
                     targets.append(target)
         if targets:
             return targets
-        for participant in self.discovered_participants.values():
+        for participant in list(self.discovered_participants.values()):
             target = (participant.address, participant.ports.user_unicast)
             if participant.address and participant.ports.user_unicast > 0 and target not in targets:
                 targets.append(target)
@@ -1055,7 +1056,7 @@ class RtpsHostHarness:
             port = next(
                 (
                     p.ports.metatraffic_unicast
-                    for p in self.discovered_participants.values()
+                    for p in list(self.discovered_participants.values())
                     if p.guid_prefix == guid_prefix
                 ),
                 0,

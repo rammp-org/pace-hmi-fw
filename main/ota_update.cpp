@@ -68,13 +68,6 @@ esp_timer_handle_t confirm_timer = nullptr;
 ///////////////////////////////////////////////////////////////////////////////
 // Helpers
 
-std::string mac_string() {
-  uint8_t mac[6] = {};
-  esp_read_mac(mac, ESP_MAC_ETH);
-  return fmt::format("{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}", mac[0], mac[1], mac[2], mac[3],
-                     mac[4], mac[5]);
-}
-
 std::string to_hex(std::span<const uint8_t> bytes) {
   std::string out;
   for (uint8_t b : bytes) {
@@ -582,7 +575,7 @@ void confirm_timeout(void *) {
 // Public API
 
 void ota_boot_check() {
-  own_mac = mac_string();
+  own_mac = ota_mac_string();
   nonce = esp_random();
   const esp_partition_t *running = esp_ota_get_running_partition();
   esp_ota_img_states_t img_state{};
@@ -727,4 +720,11 @@ rammp::OtaDeviceInfo ota_device_info() {
                       : 0;
   info.last_error = last_error;
   return info;
+}
+
+std::string ota_mac_string() {
+  uint8_t mac[6] = {};
+  esp_read_mac(mac, ESP_MAC_ETH);
+  return fmt::format("{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}", mac[0], mac[1], mac[2], mac[3],
+                     mac[4], mac[5]);
 }

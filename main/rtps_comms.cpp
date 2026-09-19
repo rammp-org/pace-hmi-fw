@@ -373,7 +373,8 @@ bool start_participant() {
     return false;
   }
 
-  // 7 writers + 6 readers, plus SPDP's pair: the budget set in sdkconfig.defaults
+  // 6 writers + 5 readers (+1/+1 with CONFIG_HMI_RTPS_SERIAL), plus SPDP's pair: the
+  // budget set in sdkconfig.defaults
   counter_pub = make_publisher(rammp::kHmiCounter);
   joystick_pub = make_publisher(rammp::kJoystickXYTwist);
   seat_pub = make_publisher(rammp::kJoystickSeatCommand);
@@ -390,9 +391,11 @@ bool start_participant() {
     return false;
   }
 #if CONFIG_HMI_RTPS_SERIAL
+  // Last, and best effort: a pool too short for it (an sdkconfig older than the serial)
+  // costs the serial only, not the endpoints that drive the chair.
   serial_pub = make_publisher(rammp::kSerialTx);
   if (!serial_pub || !subscribe(rammp::kSerialRx, on_serial)) {
-    return false;
+    logger.error("Serial over RTPS unavailable; everything else carries on");
   }
 #endif
   endpoints_ready = true;
