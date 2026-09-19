@@ -995,19 +995,26 @@ class RtpsHostHarness:
                 target = (reader.unicast_address, reader.unicast_port)
                 if target not in targets:
                     targets.append(target)
-        if targets:
-            return targets
-        for participant in list(self.discovered_participants.values()):
-            target = (participant.address, participant.ports.user_unicast)
-            if participant.address and participant.ports.user_unicast > 0 and target not in targets:
-                targets.append(target)
-        if targets:
-            return targets
-        # Last resort for a seeded peer whose SEDP never came back (a one-way
-        # link, e.g. a NATing subnet router). Its user unicast port is the same
-        # pure function of domain + participant id, so publish blind: if our
-        # SEDP reached it, its reader is listening there and matched our writer.
+        if not targets:
+            for participant in list(self.discovered_participants.values()):
+                # Another tool on this PC is no stand-in for the board: we hear its
+                # SEDP (multicast loops back), so a reader of this topic there would
+                # be among the readers above already.
+                if participant.address == self.args.advertised_address:
+                    continue
+                target = (participant.address, participant.ports.user_unicast)
+                if participant.address and participant.ports.user_unicast > 0 and target not in targets:
+                    targets.append(target)
+        # A seeded peer whose SEDP never came back (a one-way link, e.g. a NATing
+        # subnet router) is reached blind, whatever else was found: its user unicast
+        # port is the same pure function of domain + participant id, so if our SEDP
+        # reached it, its reader is listening there and matched our writer. (Only
+        # blind when nothing above reached it: another tool on this PC being found
+        # used to take the board's place here, and nothing reached the board.)
+        reached = {address for address, _port in targets}
         for address in self.peer_addresses:
+            if address in reached:
+                continue
             for participant_id in self.peer_participant_ids:
                 port = compute_port_mapping(self.args.domain_id, participant_id).user_unicast
                 target = (address, port)
