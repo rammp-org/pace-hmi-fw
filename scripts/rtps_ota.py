@@ -115,9 +115,12 @@ class TcpTransport:
 class Image:
     """An app .bin and what the device will check it against."""
 
-    def __init__(self, path: str) -> None:
-        with open(path, "rb") as handle:
-            self.data = handle.read()
+    def __init__(self, path: str, data: Optional[bytes] = None) -> None:
+        """`data`: the image itself, when it is not a file (`path` then only names it)."""
+        if data is None:
+            with open(path, "rb") as handle:
+                data = handle.read()
+        self.data = data
         self.path = path
         self.sha256 = hashlib.sha256(self.data).hexdigest()
         desc = self.data[APP_DESC_OFFSET:APP_DESC_OFFSET + 256]
