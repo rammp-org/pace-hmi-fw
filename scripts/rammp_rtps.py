@@ -223,6 +223,7 @@ if [d.id for d in DIAGNOSTICS] != list(range(len(DIAGNOSTICS))):
 CDR_LE_HEADER = b"\x00\x01\x00\x00"
 
 # The C++ structs, field for field. A type is a struct format char, "str",
+# "bytes" (std::vector<uint8_t>: a sequence of octets, taken whole),
 # ("seq", element type) or a nested field list (a struct).
 # MIB::MibStatus. seatState is a nested struct, which CDR writes inline: its four
 # floats sit here in its own declaration order, after the two enums.
@@ -251,6 +252,9 @@ MSG_OTA_COMMAND = [
 #: what devices without OtaDeviceInfo.features send and take (the trailing field is new)
 MSG_OTA_DEVICE_INFO_V1 = MSG_OTA_DEVICE_INFO[:-1]
 MSG_OTA_COMMAND_V1 = MSG_OTA_COMMAND[:-1]
+MSG_SERIAL_DATA = [
+    ("session", "I"), ("seq", "I"), ("kind", "B"), ("to", "I"), ("mac", "str"), ("data", "bytes"),
+]
 MSG_SELFTEST_REPORT = [
     ("run_id", "B"), ("kind", "B"), ("index", "B"), ("count", "B"), ("result", "B"),
     ("value", "i"), ("lo", "i"), ("hi", "i"), ("name", "str"), ("unit", "str"), ("detail", "str"),
@@ -265,6 +269,9 @@ def _write(out: bytearray, kind, value) -> None:
         _write(out, "I", len(value))
         for element in value:
             _write(out, kind[1], element)
+    elif kind == "bytes":
+        _write(out, "I", len(value))
+        out.extend(value)
     elif kind == "str":
         data = value.encode("ascii", "ignore")
         _write(out, "I", len(data) + 1)
@@ -292,6 +299,11 @@ def _read(buf: bytes, pos: int, kind):
             item, pos = _read(buf, pos, kind[1])
             items.append(item)
         return items, pos
+    if kind == "bytes":
+        count, pos = _read(buf, pos, "I")
+        if pos + count > len(buf):
+            raise ValueError("sequence runs past the end")
+        return bytes(buf[pos:pos + count]), pos + count
     if kind == "str":
         length, pos = _read(buf, pos, "I")
         if pos + length > len(buf):
@@ -570,6 +582,26 @@ def pack_ota_command(c: OtaCommand, legacy: bool = False) -> bytes:
 def unpack_ota_command(payload: bytes) -> OtaCommand | None:
     message = decode(MSG_OTA_COMMAND, payload)
     return None if message is None else OtaCommand(*message)
+
+
+class SerialData(NamedTuple):
+    """One rammp::SerialData: a piece of the serial console, either way."""
+
+    session: int
+    seq: int
+    kind: int
+    to: int
+    mac: str
+    data: bytes
+
+
+def pack_serial_data(m: SerialData) -> bytes:
+    return encode(MSG_SERIAL_DATA, *m)
+
+
+def unpack_serial_data(payload: bytes) -> SerialData | None:
+    message = decode(MSG_SERIAL_DATA, payload)
+    return None if message is None else SerialData(*message)
 
 
 if __name__ == "__main__":

@@ -1,8 +1,6 @@
 #include "net_console.hpp"
 
 #include <atomic>
-#include <chrono>
-#include <cstdio>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -10,19 +8,16 @@
 
 #include "esp_heap_caps.h"
 #include "esp_pthread.h"
-#include "esp_system.h"
-#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/stream_buffer.h"
 #include "freertos/task.h"
 #include "lwip/sockets.h"
 #include "sdkconfig.h"
 
+#include "console.hpp"
+#include "hmi_rtps_spec.hpp"
 #include "log_capture.hpp"
 #include "logger.hpp"
-#include "ota_update.hpp"
-#include "rtps_comms.hpp"
-#include "selftest.hpp"
 
 namespace {
 
@@ -55,48 +50,6 @@ void send_all(int sock, std::string_view data) {
       return;
     }
     data.remove_prefix(static_cast<size_t>(sent));
-  }
-}
-
-void run_command(std::string_view line) {
-  while (!line.empty() && (line.back() == ' ' || line.back() == '\r')) {
-    line.remove_suffix(1);
-  }
-  if (line.empty()) {
-    return;
-  }
-  if (line == "help") {
-    fmt::print("commands: info, mem, selftest, reboot\n");
-  } else if (line == "info") {
-    const rammp::OtaDeviceInfo ota = ota_device_info();
-    const RtpsLinkState link = rtps_comms_link_state();
-    fmt::print("{} {} on {} ({}), image {}, update {}{}\nmac {}, link {}: {}, up {} s\n",
-               ota.project, ota.version, ota.slot, ota.hw_rev,
-               ota.image_state == rammp::OtaImageState::CONFIRMED        ? "confirmed"
-               : ota.image_state == rammp::OtaImageState::PENDING_VERIFY ? "pending verify"
-                                                                         : "not from an update",
-               rammp::to_string(ota.state),
-               ota.last_error.empty() ? "" : " (last: " + ota.last_error + ")", ota.mac,
-               rtps_comms_link_state_name(link), rtps_comms_link_state_meaning(link),
-               esp_timer_get_time() / 1'000'000);
-  } else if (line == "mem") {
-    fmt::print("internal {} B free (min {}), DMA {} B free (min {}), PSRAM {} B free\n",
-               heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-               heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
-               heap_caps_get_free_size(MALLOC_CAP_DMA),
-               heap_caps_get_minimum_free_size(MALLOC_CAP_DMA),
-               heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
-  } else if (line == "selftest") {
-    std::fputs(selftest_request(SelfTestTrigger::LOCAL, 0) ? "self test started\n"
-                                                           : "a self test is already running\n",
-               stdout);
-  } else if (line == "reboot") {
-    fmt::print("rebooting\n");
-    std::fflush(stdout);
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    esp_restart();
-  } else {
-    fmt::print("unknown command '{}' (help lists them)\n", line);
   }
 }
 
@@ -136,7 +89,7 @@ void serve(int client) {
     }
     for (ssize_t i = 0; i < got; i++) {
       if (in[i] == '\n' || in[i] == '\r') {
-        run_command(line);
+        console_run(line);
         line.clear();
       } else if (line.size() < kMaxLine) {
         line += in[i];
@@ -187,7 +140,7 @@ void net_console_start() {
     logger.error("No memory for the network console");
     return;
   }
-  log_capture_set_sink(forward);
+  log_capture_add_sink(forward);
   esp_pthread_cfg_t previous = esp_pthread_get_default_config();
   esp_pthread_get_cfg(&previous);
   auto cfg = esp_pthread_get_default_config();

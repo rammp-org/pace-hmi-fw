@@ -31,11 +31,12 @@ enum class LogLevel : uint8_t { Plain, Warning, Error };
 /// alone: the console always keeps working.
 void log_capture_start();
 
-/// Also hands every byte written to `forward` (the network console), as it
-/// passes, from whichever task printed it. It must not block and must not
-/// print. nullptr stops it.
+/// Also hands every byte written to `forward` (the network console, the RTPS
+/// serial), as it passes, from whichever task printed it. It must not block and
+/// must not print. Up to kLogCaptureSinks, for good: false when they are taken.
 using LogCaptureSink = void (*)(const char *data, size_t size);
-void log_capture_set_sink(LogCaptureSink forward);
+inline constexpr size_t kLogCaptureSinks = 2;
+bool log_capture_add_sink(LogCaptureSink forward);
 
 /// Whether stdout is currently going through the capture.
 bool log_capture_active();

@@ -47,12 +47,14 @@
 
 #include "actions_spec.h"
 #include "boot_logo.h"
+#include "console.hpp"
 #include "joystick_cal.hpp"
 #include "log_capture.hpp"
 #include "log_view.hpp"
 #include "net_console.hpp"
 #include "ota_update.hpp"
 #include "rtps_comms.hpp"
+#include "rtps_serial.hpp"
 #include "selftest.hpp"
 #include "settings.hpp"
 #include "storage.hpp"
@@ -5027,11 +5029,15 @@ extern "C" void app_main(void) {
     }
   });
   // No update while the chair drives: the UpdateScreen would take the display from
-  // the DriveScreen, and flash writes stall the CPU in bursts.
-  ota_set_start_guard([]() -> std::string {
+  // the DriveScreen, and flash writes stall the CPU in bursts. No remote reboot
+  // either (the consoles' `reboot`, the serial's RESET).
+  const auto not_while_driving = []() -> std::string {
     const bool driving = mib_says_driving && rtps_comms_link_state() == RtpsLinkState::CONNECTED;
     return driving ? "refused: the chair is driving" : "";
-  });
+  };
+  ota_set_start_guard(not_while_driving);
+  console_set_reboot_guard(not_while_driving);
+  rtps_serial_start(); // registers its RTPS handler, so before rtps_comms_start()
   if (!rtps_comms_start()) {
     logger.warn("RTPS comms not started (Ethernet bring-up failed)");
   } else {

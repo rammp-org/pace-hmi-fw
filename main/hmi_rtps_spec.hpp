@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "messages/joystick_message.hpp"
 #include "messages/mib_message.hpp"
@@ -296,6 +297,59 @@ constexpr const char *to_string(OtaState v) {
          : v == OtaState::FAILED    ? "FAILED"
                                     : "?";
 }
+
+/* ==== Serial over RTPS ================================================== */
+
+/* The serial console (everything printed, commands typed in) for a device that is
+   reachable only over Ethernet. scripts/rtps_serial.py is the host side: it makes
+   a COM port (with com0com) or an RFC 2217 server of it, so a serial monitor,
+   `idf.py monitor` and `idf.py flash` attach as they would to USB.
+
+     host   -> dev   kSerialRx  HELLO every kSerialHelloPeriod while attached
+     device -> host  kSerialTx  HISTORY: the lines it still holds, for that host (`to`),
+                                once per new host session; then DATA, live
+     host   -> dev   kSerialRx  DATA: typed bytes (echoed; a line is a console command)
+     host   -> dev   kSerialRx  BYE when it leaves; else kSerialIdleTimeout without a
+                                HELLO detaches it
+     host   -> dev   kSerialRx  RESET: reboot (refused while the chair drives)
+
+   Best effort, like the other topics: `seq` counts a sender's messages from 1, so a
+   gap is loss the receiver can report; `session` is random per device boot or host
+   run, so either side restarting shows. A device answers only messages whose `mac`
+   is its own or ""; its own carry its mac, so a host can tell devices apart.
+
+   What the device's network stack prints about itself (its log tags) never goes
+   out on kSerialTx, only to the UART and the LogScreen: sending the stream is what
+   would make it print, and each line would be more stream. */
+
+#define RAMMP_TOPIC_SERIAL_TX "rammp/hmi/serial/tx" /* device -> host */
+#define RAMMP_TOPIC_SERIAL_RX "rammp/hmi/serial/rx" /* host -> device */
+#define RAMMP_TYPE_SERIAL_DATA "rammp/msg/SerialData"
+
+enum class SerialKind : uint8_t {
+  DATA = 0,    // bytes of the stream, either way
+  HELLO = 1,   // host -> device: attach, or stay attached
+  HISTORY = 2, // device -> host: kept lines from before the attach, for `to` only
+  BYE = 3,     // host -> device: detach
+  RESET = 4,   // host -> device: reboot
+};
+
+struct SerialData {
+  uint32_t session;          // the sender's: random per device boot / host run
+  uint32_t seq;              // the sender's message count, from 1
+  SerialKind kind;           // what `data` is
+  uint32_t to;               // HISTORY: the host session that asked; else 0
+  std::string mac;           // device: its own; host: the target, "" = any
+  std::vector<uint8_t> data; // at most kSerialChunk bytes
+};
+
+inline constexpr size_t kSerialChunk = 1024;            // bytes per message, one Ethernet frame
+inline constexpr milliseconds kSerialFlushPeriod{20};   // device: gathers output this long
+inline constexpr milliseconds kSerialHelloPeriod{2000}; // host: while attached
+inline constexpr milliseconds kSerialIdleTimeout{7000}; // device: no HELLO this long = detached
+
+inline constexpr Topic<SerialData> kSerialTx{RAMMP_TOPIC_SERIAL_TX, RAMMP_TYPE_SERIAL_DATA};
+inline constexpr Topic<SerialData> kSerialRx{RAMMP_TOPIC_SERIAL_RX, RAMMP_TYPE_SERIAL_DATA};
 
 /* ==== HMI-raised warnings =============================================== */
 

@@ -11,6 +11,8 @@
 #include <cstring>
 #include <mutex>
 
+#include <stdio-bufio.h> // picolibc: the stream funopen() returns
+
 #include "esp_heap_caps.h"
 
 namespace {
@@ -26,7 +28,7 @@ Line *ring = nullptr; // kLogCaptureLines of them, in PSRAM
 uint32_t count = 0;   // lines committed since boot; the newest is ring[(count - 1) % size]
 std::mutex ring_mutex;
 FILE *console = nullptr; // the original stdout: the serial console
-std::atomic<LogCaptureSink> sink{nullptr};
+std::atomic<LogCaptureSink> sinks[kLogCaptureSinks] = {};
 
 // The line being assembled: a write can end mid-line, and a line can arrive in
 // several writes.
@@ -120,8 +122,10 @@ int tee_write(void *, const char *buf, int n) {
   // must never hold up the LogScreen reading the ring, nor the reverse.
   std::fwrite(buf, 1, static_cast<size_t>(n), console);
   std::fflush(console);
-  if (const LogCaptureSink forward = sink.load()) {
-    forward(buf, static_cast<size_t>(n));
+  for (const auto &sink : sinks) {
+    if (const LogCaptureSink forward = sink.load()) {
+      forward(buf, static_cast<size_t>(n));
+    }
   }
   std::lock_guard<std::mutex> lock(ring_mutex);
   for (int i = 0; i < n; ++i) {
@@ -146,8 +150,14 @@ void log_capture_start() {
     ring = nullptr;
     return;
   }
-  // line-buffered, like the console it stands in front of
-  setvbuf(tee, nullptr, _IOLBF, 256);
+  // Line-buffered, like the console it stands in front of. Not with setvbuf:
+  // picolibc's only sizes a buffer not yet allocated, and funopen() allocates
+  // one (128 bytes, fully buffered), so setvbuf quietly did nothing - and a
+  // finished line waited in there until 128 more bytes came along, which on a
+  // quiet device is never. _IOLBF is this one flag on a bufio stream.
+  if ((tee->flags & __SBUF) != 0) {
+    reinterpret_cast<__file_bufio *>(tee)->bflags |= __BLBF;
+  }
   std::fflush(stdout);
   console = stdout;
   // In IDF's picolibc these are plain globals shared by every task
@@ -157,7 +167,15 @@ void log_capture_start() {
   stderr = tee;
 }
 
-void log_capture_set_sink(LogCaptureSink forward) { sink = forward; }
+bool log_capture_add_sink(LogCaptureSink forward) {
+  for (auto &sink : sinks) {
+    LogCaptureSink empty = nullptr;
+    if (sink.compare_exchange_strong(empty, forward)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 bool log_capture_active() { return ring != nullptr && console != nullptr && stdout != console; }
 

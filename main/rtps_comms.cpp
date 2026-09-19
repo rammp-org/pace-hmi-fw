@@ -25,6 +25,7 @@
 #include "esp_timer.h"
 #include "lwip/ip_addr.h"
 #include "ping/ping_sock.h"
+#include "sdkconfig.h"
 
 #include "logger.hpp"
 #include "ota_update.hpp"
@@ -80,12 +81,14 @@ Publisher<rammp::SeatCommand> seat_pub;
 Publisher<rammp::DriveCommand> drive_pub;
 Publisher<rammp::SelfTestReport> report_pub;
 Publisher<rammp::OtaDeviceInfo> ota_info_pub;
+Publisher<rammp::SerialData> serial_pub; // CONFIG_HMI_RTPS_SERIAL
 
 std::function<void(float)> brightness_handler;
 std::function<void(const MIB::MibStatus &)> mib_status_handler;
 std::function<void(const rammp::Diagnostics &)> diagnostics_handler;
 std::function<void(uint8_t)> selftest_run_handler;
 std::function<void(uint16_t, int)> selftest_pong_handler;
+std::function<void(const rammp::SerialData &)> serial_handler;
 
 // Arrival statistics: written on the RTPS task, read by the LVGL and self-test tasks.
 std::mutex stats_mutex;
@@ -193,6 +196,12 @@ void on_mib_status(const MIB::MibStatus &s) {
 }
 
 void on_ota_command(const rammp::OtaCommand &c) { ota_handle_command(c); }
+
+void on_serial(const rammp::SerialData &d) {
+  if (serial_handler) {
+    serial_handler(d);
+  }
+}
 
 void on_diagnostics(const rammp::Diagnostics &d) {
   static size_t last_count = SIZE_MAX; // log the first sample, then only a changed item count
@@ -364,7 +373,7 @@ bool start_participant() {
     return false;
   }
 
-  // 6 writers + 5 readers, plus SPDP's pair: the budget set in sdkconfig.defaults
+  // 7 writers + 6 readers, plus SPDP's pair: the budget set in sdkconfig.defaults
   counter_pub = make_publisher(rammp::kHmiCounter);
   joystick_pub = make_publisher(rammp::kJoystickXYTwist);
   seat_pub = make_publisher(rammp::kJoystickSeatCommand);
@@ -380,6 +389,12 @@ bool start_participant() {
   if (!ok) {
     return false;
   }
+#if CONFIG_HMI_RTPS_SERIAL
+  serial_pub = make_publisher(rammp::kSerialTx);
+  if (!serial_pub || !subscribe(rammp::kSerialRx, on_serial)) {
+    return false;
+  }
+#endif
   endpoints_ready = true;
   logger.info("RTPS up on {}", ip_address);
   // Ethernet, DHCP and every endpoint: enough for an updated image to keep itself.
@@ -426,6 +441,14 @@ void rtps_comms_on_selftest_run(std::function<void(uint8_t)> handler) {
 }
 void rtps_comms_on_selftest_pong(std::function<void(uint16_t, int)> handler) {
   selftest_pong_handler = std::move(handler);
+}
+
+void rtps_comms_on_serial(std::function<void(const rammp::SerialData &)> handler) {
+  serial_handler = std::move(handler);
+}
+
+bool rtps_comms_publish_serial(const rammp::SerialData &data) {
+  return serial_pub && publish(serial_pub, data);
 }
 
 bool rtps_comms_publish_adc(float x, float y, float twist, rammp::Buttons buttons) {

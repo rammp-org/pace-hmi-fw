@@ -30,6 +30,8 @@ void rtps_comms_on_diagnostics(std::function<void(const rammp::Diagnostics &)> h
 void rtps_comms_on_selftest_run(std::function<void(uint8_t run_id)> handler);
 /// `peer_rx`: the peer's count of pings received; -1 when the pong was a plain echo.
 void rtps_comms_on_selftest_pong(std::function<void(uint16_t seq, int peer_rx)> handler);
+/// A host's side of the serial over RTPS (rtps_serial.hpp), every message on kSerialRx.
+void rtps_comms_on_serial(std::function<void(const rammp::SerialData &)> handler);
 
 // Publishers: any task. They return false, quietly, until the participant is up
 // and a peer has matched.
@@ -40,6 +42,8 @@ bool rtps_comms_publish_drive(rammp::DriveRequest request, MIB::DriveProfile pro
 bool rtps_comms_publish_seat(rammp::SeatAxis axis, float target);
 bool rtps_comms_publish_selftest_ping(uint16_t seq);
 bool rtps_comms_publish_selftest_report(const rammp::SelfTestReport &report);
+/// kSerialTx. False as well when CONFIG_HMI_RTPS_SERIAL is off.
+bool rtps_comms_publish_serial(const rammp::SerialData &data);
 
 /// Diagnostics arrivals, for the DiagnosticsScreen. Any task.
 struct RtpsDiagStats {

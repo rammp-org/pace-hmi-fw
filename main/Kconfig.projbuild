@@ -17,6 +17,16 @@ menu "RAMMP HMI"
             `idf.py monitor -p socket://<ip>:3333` works without USB. It needs no
             authentication: turn it off in a fielded build.
 
+    config HMI_RTPS_SERIAL
+        bool "Serial console over RTPS"
+        default y
+        help
+            The serial console (output and commands) on the kSerialTx / kSerialRx
+            topics, which scripts/rtps_serial.py turns into a COM port or an
+            RFC 2217 server. Takes one RTPS writer and one reader
+            (CONFIG_RTPS_LIMIT_*). No authentication, and it can reboot the
+            device: turn it off in a fielded build.
+
     config HMI_OTA_TEST_NEVER_CONFIRM
         bool "TEST ONLY: an image that never confirms itself"
         default n
