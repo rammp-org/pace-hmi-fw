@@ -1,6 +1,6 @@
 # Desktop simulator for the RAMMP HMI UI.
 #
-# Compiles the SquareLine export in main/ui/ verbatim -- the same sources the
+# Compiles the SquareLine export in components/ui/ verbatim -- the same sources the
 # firmware builds -- against upstream LVGL 9.5 and LVGL's native Win32 backend,
 # so the screens can be driven with a keyboard instead of a joystick and a Tab5.
 #
@@ -20,7 +20,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 set(FW_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/..)
-set(UI_DIR ${FW_ROOT}/main/ui)
+set(UI_DIR ${FW_ROOT}/components/ui)
 
 # ---------------------------------------------------------------- LVGL -----
 # Pinned to the same minor the firmware pulls in via idf_component.yml
@@ -57,7 +57,7 @@ if(MSVC)
 endif()
 
 # ------------------------------------------------------- UI (unmodified) ----
-# Every .c/.cpp under main/ui, screens, components, fonts and images. Globbed
+# Every .c/.cpp under components/ui, screens, components, fonts and images. Globbed
 # because import_ui.ps1 rewrites this tree wholesale on every SquareLine
 # export -- an explicit list would go stale the first time a screen is added.
 file(GLOB_RECURSE UI_SOURCES CONFIGURE_DEPENDS

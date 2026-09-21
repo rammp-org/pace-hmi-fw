@@ -1,8 +1,9 @@
 # Imports the SquareLine Studio UI export into this example project.
 #
-# Mirrors the export directory into main/ui/, excluding SquareLine's own
+# Mirrors the export directory into components/ui/, excluding SquareLine's own
 # CMakeLists.txt (its add_library(ui ...) conflicts with the ESP-IDF component
-# build), filelist.txt, project.info, and ui_events.cpp. Mirroring also deletes files for
+# build, and the repo keeps its own there), filelist.txt, project.info, and
+# ui_events.cpp. Excluded files are also never purged. Mirroring also deletes files for
 # screens that were renamed/removed in SquareLine, which would otherwise stay
 # behind and break the build (SRC_DIRS compiles everything in ui/).
 #
@@ -54,7 +55,7 @@ if (-not $Source) {
 }
 $Source = [System.IO.Path]::GetFullPath($Source)
 
-$Dest = Join-Path $RepoRoot "main\ui"
+$Dest = Join-Path $RepoRoot "components\ui"
 # ui_events.cpp holds hand-written Call-function bodies; SquareLine regenerates
 # it with empty stubs, so keep the repo copy and ignore the exported one.
 $Excluded = @("CMakeLists.txt", "filelist.txt", "project.info", "ui_events.cpp")
@@ -116,24 +117,23 @@ if ($rc -eq 0) {
 $srcsAfter = @(Get-ChildItem $Dest -Recurse -File -ErrorAction SilentlyContinue |
     Where-Object { $_.Extension -in ".c", ".cpp" } |
     ForEach-Object { $_.FullName } | Sort-Object)
+$UiCMake = Join-Path $Dest "CMakeLists.txt"
 if (Compare-Object $srcsBefore $srcsAfter) {
-    $mainCMake = Join-Path $RepoRoot "main\CMakeLists.txt"
-    if (Test-Path $mainCMake) {
-        (Get-Item $mainCMake).LastWriteTime = Get-Date
+    if (Test-Path $UiCMake) {
+        (Get-Item $UiCMake).LastWriteTime = Get-Date
         Write-Host ""
-        Write-Host "Source file set changed - touched main/CMakeLists.txt so CMake re-configures."
+        Write-Host "Source file set changed - touched components/ui/CMakeLists.txt so CMake re-configures."
     }
 }
 
 # --- warn about mirrored ui/ subdirs that the build does not compile ----------
-# main/CMakeLists.txt lists ui subdirectories in SRC_DIRS explicitly. When
+# components/ui/CMakeLists.txt lists its subdirectories in SRC_DIRS explicitly. When
 # SquareLine starts exporting a new folder of sources (e.g. ui/images for an
 # added image asset), the mirror brings it in but nothing compiles it, and the
 # only symptom is an "undefined reference to ui_img_*" at link time. Flag it
 # here instead.
-$MainCMake = Join-Path $RepoRoot "main\CMakeLists.txt"
-if (Test-Path $MainCMake) {
-    $cmakeText = Get-Content $MainCMake -Raw
+if (Test-Path $UiCMake) {
+    $cmakeText = Get-Content $UiCMake -Raw
     $srcDirs = @()
     if ($cmakeText -match '(?s)SRC_DIRS\s+((?:"[^"]*"\s*)+)') {
         $srcDirs = [regex]::Matches($Matches[1], '"([^"]*)"') |
@@ -142,21 +142,21 @@ if (Test-Path $MainCMake) {
 
     if (-not $srcDirs) {
         Write-Host ""
-        Write-Host "WARNING: could not parse SRC_DIRS from $MainCMake - skipping source-dir check."
+        Write-Host "WARNING: could not parse SRC_DIRS from $UiCMake - skipping source-dir check."
     } else {
         $missing = Get-ChildItem $Dest -Directory |
             Where-Object { Get-ChildItem $_.FullName -Filter *.c -File } |
-            Where-Object { $srcDirs -notcontains "ui/$($_.Name)" } |
+            Where-Object { $srcDirs -notcontains $_.Name } |
             ForEach-Object { $_.Name }
 
         if ($missing) {
             Write-Host ""
             Write-Host "WARNING: these ui/ subdirectories contain .c files but are not in"
-            Write-Host "SRC_DIRS in main/CMakeLists.txt, so they will not be compiled"
+            Write-Host "SRC_DIRS in components/ui/CMakeLists.txt, so they will not be compiled"
             Write-Host "(expect 'undefined reference' errors at link time):"
             $missing | ForEach-Object { Write-Host "  ui/$_" }
             Write-Host ""
-            Write-Host "Add them to SRC_DIRS in main/CMakeLists.txt to fix."
+            Write-Host "Add them to SRC_DIRS in components/ui/CMakeLists.txt to fix."
         }
     }
 }

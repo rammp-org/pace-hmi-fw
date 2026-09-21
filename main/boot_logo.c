@@ -13,7 +13,7 @@
 // the other single-ink assets. main.cpp sets that recolour, and swaps this in
 // over the export's SVG source.
 //
-// This file lives in main/ and NOT in main/ui/, because import_ui.ps1 mirrors
+// This file lives in main/ and NOT in components/ui/, because import_ui.ps1 mirrors
 // the SquareLine export with `robocopy /MIR` and deletes anything else there.
 //
 // Re-generate if the logo artwork changes.

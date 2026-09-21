@@ -3862,7 +3862,7 @@ extern "C" void app_main(void) {
 
   // Swap the boot logo from the export's embedded SVG to a pre-rasterised A8
   // mask (main/boot_logo.c). Done here rather than in the SquareLine project
-  // because import_ui.ps1 mirrors main/ui/ with robocopy /MIR and would put the
+  // because import_ui.ps1 mirrors components/ui/ with robocopy /MIR and would put the
   // SVG straight back on the next import.
   //
   // This is what lets LV_USE_SVG, LV_USE_THORVG and LV_USE_VECTOR_GRAPHIC all
