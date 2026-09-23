@@ -6,30 +6,29 @@
 #include "../ui.h"
 
 lv_obj_t * ui_DriveScreen = NULL;
+lv_obj_t * ui_DriveBody = NULL;
+lv_obj_t * ui_DriveContent = NULL;
+lv_obj_t * ui_SpeedEyebrow = NULL;
+lv_obj_t * ui_SpeedValue = NULL;
+lv_obj_t * ui_SpeedUnit = NULL;
+lv_obj_t * ui_DriveRule1 = NULL;
+lv_obj_t * ui_RangeEyebrow = NULL;
+lv_obj_t * ui_RangeValue = NULL;
+lv_obj_t * ui_RangeUnit = NULL;
+lv_obj_t * ui_RangeMeter = NULL;
+lv_obj_t * ui_DriveRule2 = NULL;
+lv_obj_t * ui_ModeEyebrow = NULL;
+lv_obj_t * ui_ModeManual = NULL;
+lv_obj_t * ui_ModeManualLabel = NULL;
+lv_obj_t * ui_ModeAssist = NULL;
+lv_obj_t * ui_ModeAssistLabel = NULL;
+lv_obj_t * ui_ModeAuto = NULL;
+lv_obj_t * ui_ModeAutoLabel = NULL;
 lv_obj_t * ui_TopBar2 = NULL;
-lv_obj_t * ui_SpeedPanel = NULL;
-lv_obj_t * ui_SpeedLabel = NULL;
-lv_obj_t * ui_SpeedContainer = NULL;
-lv_obj_t * ui_SpeedNumber = NULL;
-lv_obj_t * ui_UnitLabel = NULL;
-lv_obj_t * ui_ErrorWarningPanel = NULL;
-lv_obj_t * ui_RangePanel = NULL;
-lv_obj_t * ui_SpeedLabel2 = NULL;
-lv_obj_t * ui_RangeBar = NULL;
-lv_obj_t * ui_RangeContainer = NULL;
-lv_obj_t * ui_RangeNumber = NULL;
-lv_obj_t * ui_RangeUnits = NULL;
-lv_obj_t * ui_DriveModePanel = NULL;
-lv_obj_t * ui_DriveModeLabel = NULL;
-lv_obj_t * ui_DriveModeContainer = NULL;
-lv_obj_t * ui_DriveModeButton = NULL;
-lv_obj_t * ui_DriveModeButtonLabel = NULL;
-lv_obj_t * ui_DriveModeButton1 = NULL;
-lv_obj_t * ui_DriveModeButtonLabel1 = NULL;
-lv_obj_t * ui_DriveModeButton2 = NULL;
-lv_obj_t * ui_DriveModeButtonLabel2 = NULL;
-lv_obj_t * ui_StatusPanel2 = NULL;
-lv_obj_t * ui_ExitBarPress1 = NULL;
+lv_obj_t * ui_DriveBand2 = NULL;
+lv_obj_t * ui_ErrorBanner4 = NULL;
+lv_obj_t * ui_MenuKey2 = NULL;
+lv_obj_t * ui_MenuOverlay2 = NULL;
 // event funtions
 
 // build funtions
@@ -37,342 +36,408 @@ lv_obj_t * ui_ExitBarPress1 = NULL;
 void ui_DriveScreen_screen_init(void)
 {
     ui_DriveScreen = lv_obj_create(NULL);
-    lv_obj_set_scroll_snap_x(ui_DriveScreen, LV_SCROLL_SNAP_CENTER);
     ui_object_set_themeable_style_property(ui_DriveScreen, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
                                            _ui_theme_color_background);
     ui_object_set_themeable_style_property(ui_DriveScreen, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
                                            _ui_theme_alpha_background);
 
+    ui_DriveBody = lv_obj_create(ui_DriveScreen);
+    lv_obj_set_width(ui_DriveBody, 720);
+    lv_obj_set_height(ui_DriveBody, 921);
+    lv_obj_set_x(ui_DriveBody, 0);
+    lv_obj_set_y(ui_DriveBody, 195);
+    lv_obj_set_flex_flow(ui_DriveBody, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(ui_DriveBody, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_remove_flag(ui_DriveBody, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_radius(ui_DriveBody, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_DriveBody, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_DriveBody, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_DriveBody, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_DriveBody, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
+                                           _ui_theme_alpha_background);
+    lv_obj_set_style_border_width(ui_DriveBody, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_side(ui_DriveBody, LV_BORDER_SIDE_FULL, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_DriveBody, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_DriveBody, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_DriveBody, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_DriveBody, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_DriveBody, 34, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_DriveBody, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_DriveContent = lv_obj_create(ui_DriveBody);
+    lv_obj_set_width(ui_DriveContent, 720);
+    lv_obj_set_height(ui_DriveContent, 921);
+    lv_obj_remove_flag(ui_DriveContent, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_radius(ui_DriveContent, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_DriveContent, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_DriveContent, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_DriveContent, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_DriveContent, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
+                                           _ui_theme_alpha_background);
+    lv_obj_set_style_border_width(ui_DriveContent, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_side(ui_DriveContent, LV_BORDER_SIDE_FULL, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_DriveContent, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_DriveContent, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_DriveContent, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_DriveContent, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_DriveContent, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_DriveContent, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_SpeedEyebrow = lv_label_create(ui_DriveContent);
+    lv_obj_set_width(ui_SpeedEyebrow, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(ui_SpeedEyebrow, LV_SIZE_CONTENT);    /// 1
+    lv_obj_set_x(ui_SpeedEyebrow, 30);
+    lv_obj_set_y(ui_SpeedEyebrow, 26);
+    lv_label_set_text(ui_SpeedEyebrow, "SPEED");
+    ui_object_set_themeable_style_property(ui_SpeedEyebrow, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text_muted);
+    ui_object_set_themeable_style_property(ui_SpeedEyebrow, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text_muted);
+    lv_obj_set_style_text_font(ui_SpeedEyebrow, &ui_font_MontserratSemiBold24, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_SpeedEyebrow, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_SpeedEyebrow, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_SpeedEyebrow, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_SpeedEyebrow, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_SpeedEyebrow, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_SpeedEyebrow, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_SpeedValue = lv_label_create(ui_DriveContent);
+    lv_obj_set_width(ui_SpeedValue, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(ui_SpeedValue, LV_SIZE_CONTENT);    /// 1
+    lv_obj_set_x(ui_SpeedValue, 30);
+    lv_obj_set_y(ui_SpeedValue, 98);
+    lv_label_set_text(ui_SpeedValue, "3.5");
+    ui_object_set_themeable_style_property(ui_SpeedValue, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_SpeedValue, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text);
+    lv_obj_set_style_text_font(ui_SpeedValue, &ui_font_IBMPlexSansRegular264, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_SpeedValue, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_SpeedValue, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_SpeedValue, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_SpeedValue, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_SpeedValue, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_SpeedValue, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_SpeedUnit = lv_label_create(ui_DriveContent);
+    lv_obj_set_width(ui_SpeedUnit, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(ui_SpeedUnit, LV_SIZE_CONTENT);    /// 1
+    lv_obj_set_x(ui_SpeedUnit, 427);
+    lv_obj_set_y(ui_SpeedUnit, 246);
+    lv_label_set_text(ui_SpeedUnit, "mph");
+    ui_object_set_themeable_style_property(ui_SpeedUnit, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text_muted);
+    ui_object_set_themeable_style_property(ui_SpeedUnit, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text_muted);
+    lv_obj_set_style_text_font(ui_SpeedUnit, &ui_font_IBMPlexSansRegular53, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_SpeedUnit, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_SpeedUnit, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_SpeedUnit, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_SpeedUnit, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_SpeedUnit, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_SpeedUnit, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_DriveRule1 = lv_obj_create(ui_DriveContent);
+    lv_obj_set_width(ui_DriveRule1, 660);
+    lv_obj_set_height(ui_DriveRule1, 2);
+    lv_obj_set_x(ui_DriveRule1, 30);
+    lv_obj_set_y(ui_DriveRule1, 380);
+    lv_obj_remove_flag(ui_DriveRule1, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_radius(ui_DriveRule1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(ui_DriveRule1, lv_color_hex(0x767676), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(ui_DriveRule1, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_color(ui_DriveRule1, lv_color_hex(0x767676), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_opa(ui_DriveRule1, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(ui_DriveRule1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_side(ui_DriveRule1, LV_BORDER_SIDE_FULL, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_DriveRule1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_DriveRule1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_DriveRule1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_DriveRule1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_DriveRule1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_DriveRule1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_RangeEyebrow = lv_label_create(ui_DriveContent);
+    lv_obj_set_width(ui_RangeEyebrow, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(ui_RangeEyebrow, LV_SIZE_CONTENT);    /// 1
+    lv_obj_set_x(ui_RangeEyebrow, 30);
+    lv_obj_set_y(ui_RangeEyebrow, 404);
+    lv_label_set_text(ui_RangeEyebrow, "REMAINING RANGE");
+    ui_object_set_themeable_style_property(ui_RangeEyebrow, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text_muted);
+    ui_object_set_themeable_style_property(ui_RangeEyebrow, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text_muted);
+    lv_obj_set_style_text_font(ui_RangeEyebrow, &ui_font_MontserratSemiBold24, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_RangeEyebrow, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_RangeEyebrow, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_RangeEyebrow, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_RangeEyebrow, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_RangeEyebrow, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_RangeEyebrow, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_RangeValue = lv_label_create(ui_DriveContent);
+    lv_obj_set_width(ui_RangeValue, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(ui_RangeValue, LV_SIZE_CONTENT);    /// 1
+    lv_obj_set_x(ui_RangeValue, 30);
+    lv_obj_set_y(ui_RangeValue, 452);
+    lv_label_set_text(ui_RangeValue, "19");
+    ui_object_set_themeable_style_property(ui_RangeValue, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_RangeValue, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text);
+    lv_obj_set_style_text_font(ui_RangeValue, &ui_font_IBMPlexSansRegular99, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_RangeValue, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_RangeValue, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_RangeValue, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_RangeValue, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_RangeValue, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_RangeValue, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_RangeUnit = lv_label_create(ui_DriveContent);
+    lv_obj_set_width(ui_RangeUnit, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(ui_RangeUnit, LV_SIZE_CONTENT);    /// 1
+    lv_obj_set_x(ui_RangeUnit, 160);
+    lv_obj_set_y(ui_RangeUnit, 480);
+    lv_label_set_text(ui_RangeUnit, "mi");
+    ui_object_set_themeable_style_property(ui_RangeUnit, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text_muted);
+    ui_object_set_themeable_style_property(ui_RangeUnit, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text_muted);
+    lv_obj_set_style_text_font(ui_RangeUnit, &ui_font_IBMPlexSansRegular53, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_RangeUnit, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_RangeUnit, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_RangeUnit, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_RangeUnit, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_RangeUnit, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_RangeUnit, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_RangeMeter = lv_bar_create(ui_DriveContent);
+    lv_bar_set_value(ui_RangeMeter, 78, LV_ANIM_OFF);
+    lv_bar_set_start_value(ui_RangeMeter, 0, LV_ANIM_OFF);
+    lv_obj_set_width(ui_RangeMeter, 660);
+    lv_obj_set_height(ui_RangeMeter, 18);
+    lv_obj_set_x(ui_RangeMeter, 30);
+    lv_obj_set_y(ui_RangeMeter, 542);
+    lv_obj_set_style_radius(ui_RangeMeter, 9, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_RangeMeter, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_RangeMeter, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    lv_obj_set_style_border_color(ui_RangeMeter, lv_color_hex(0x767676), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_opa(ui_RangeMeter, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(ui_RangeMeter, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_RangeMeter, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_RangeMeter, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_RangeMeter, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_RangeMeter, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_RangeMeter, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_RangeMeter, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    lv_obj_set_style_radius(ui_RangeMeter, 0, LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_RangeMeter, LV_PART_INDICATOR | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_RangeMeter, LV_PART_INDICATOR | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
+
+    //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
+    if(lv_obj_get_style_pad_top(ui_RangeMeter, LV_PART_MAIN) > 0) lv_obj_set_style_pad_right(ui_RangeMeter,
+                                                                                                 lv_obj_get_style_pad_right(ui_RangeMeter, LV_PART_MAIN) + 1, LV_PART_MAIN);
+    ui_DriveRule2 = lv_obj_create(ui_DriveContent);
+    lv_obj_set_width(ui_DriveRule2, 660);
+    lv_obj_set_height(ui_DriveRule2, 2);
+    lv_obj_set_x(ui_DriveRule2, 30);
+    lv_obj_set_y(ui_DriveRule2, 597);
+    lv_obj_remove_flag(ui_DriveRule2, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_radius(ui_DriveRule2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(ui_DriveRule2, lv_color_hex(0x767676), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(ui_DriveRule2, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_color(ui_DriveRule2, lv_color_hex(0x767676), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_opa(ui_DriveRule2, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(ui_DriveRule2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_side(ui_DriveRule2, LV_BORDER_SIDE_FULL, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_DriveRule2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_DriveRule2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_DriveRule2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_DriveRule2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_DriveRule2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_DriveRule2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_ModeEyebrow = lv_label_create(ui_DriveContent);
+    lv_obj_set_width(ui_ModeEyebrow, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(ui_ModeEyebrow, LV_SIZE_CONTENT);    /// 1
+    lv_obj_set_x(ui_ModeEyebrow, 30);
+    lv_obj_set_y(ui_ModeEyebrow, 638);
+    lv_label_set_text(ui_ModeEyebrow, "DRIVE MODE");
+    ui_object_set_themeable_style_property(ui_ModeEyebrow, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text_muted);
+    ui_object_set_themeable_style_property(ui_ModeEyebrow, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text_muted);
+    lv_obj_set_style_text_font(ui_ModeEyebrow, &ui_font_MontserratSemiBold24, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_ModeEyebrow, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_ModeEyebrow, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_ModeEyebrow, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_ModeEyebrow, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_ModeEyebrow, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_ModeEyebrow, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_ModeManual = lv_button_create(ui_DriveContent);
+    lv_obj_set_width(ui_ModeManual, 207);
+    lv_obj_set_height(ui_ModeManual, 162);
+    lv_obj_set_x(ui_ModeManual, 30);
+    lv_obj_set_y(ui_ModeManual, 675);
+    lv_obj_add_flag(ui_ModeManual, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
+    lv_obj_remove_flag(ui_ModeManual, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_radius(ui_ModeManual, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_ModeManual, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_ModeManual, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    lv_obj_set_style_border_color(ui_ModeManual, lv_color_hex(0x767676), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_opa(ui_ModeManual, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(ui_ModeManual, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_ModeManual, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_ModeManual, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_ModeManual, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_ModeManual, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_ModeManual, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_ModeManual, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_ModeManualLabel = lv_label_create(ui_ModeManual);
+    lv_obj_set_width(ui_ModeManualLabel, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(ui_ModeManualLabel, LV_SIZE_CONTENT);    /// 1
+    lv_obj_set_align(ui_ModeManualLabel, LV_ALIGN_CENTER);
+    lv_label_set_text(ui_ModeManualLabel, "Manual");
+    ui_object_set_themeable_style_property(ui_ModeManualLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_ModeManualLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text);
+    lv_obj_set_style_text_font(ui_ModeManualLabel, &ui_font_MontserratSemiBold44, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_ModeManualLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_ModeManualLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_ModeManualLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_ModeManualLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_ModeManualLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_ModeManualLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_ModeAssist = lv_button_create(ui_DriveContent);
+    lv_obj_set_width(ui_ModeAssist, 207);
+    lv_obj_set_height(ui_ModeAssist, 162);
+    lv_obj_set_x(ui_ModeAssist, 257);
+    lv_obj_set_y(ui_ModeAssist, 675);
+    lv_obj_add_flag(ui_ModeAssist, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
+    lv_obj_remove_flag(ui_ModeAssist, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_radius(ui_ModeAssist, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_ModeAssist, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_ModeAssist, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
+    ui_object_set_themeable_style_property(ui_ModeAssist, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_ModeAssist, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
+                                           _ui_theme_alpha_text);
+    lv_obj_set_style_border_width(ui_ModeAssist, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_ModeAssist, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_ModeAssist, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_ModeAssist, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_ModeAssist, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_ModeAssist, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_ModeAssist, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_ModeAssistLabel = lv_label_create(ui_ModeAssist);
+    lv_obj_set_width(ui_ModeAssistLabel, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(ui_ModeAssistLabel, LV_SIZE_CONTENT);    /// 1
+    lv_obj_set_align(ui_ModeAssistLabel, LV_ALIGN_CENTER);
+    lv_label_set_text(ui_ModeAssistLabel, "Assist");
+    ui_object_set_themeable_style_property(ui_ModeAssistLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_ModeAssistLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    lv_obj_set_style_text_font(ui_ModeAssistLabel, &ui_font_MontserratSemiBold44, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_ModeAssistLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_ModeAssistLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_ModeAssistLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_ModeAssistLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_ModeAssistLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_ModeAssistLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_ModeAuto = lv_button_create(ui_DriveContent);
+    lv_obj_set_width(ui_ModeAuto, 207);
+    lv_obj_set_height(ui_ModeAuto, 162);
+    lv_obj_set_x(ui_ModeAuto, 484);
+    lv_obj_set_y(ui_ModeAuto, 675);
+    lv_obj_add_flag(ui_ModeAuto, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
+    lv_obj_remove_flag(ui_ModeAuto, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_radius(ui_ModeAuto, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_ModeAuto, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_ModeAuto, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    lv_obj_set_style_border_color(ui_ModeAuto, lv_color_hex(0x767676), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_opa(ui_ModeAuto, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(ui_ModeAuto, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_ModeAuto, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_ModeAuto, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_ModeAuto, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_ModeAuto, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_ModeAuto, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_ModeAuto, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_ModeAutoLabel = lv_label_create(ui_ModeAuto);
+    lv_obj_set_width(ui_ModeAutoLabel, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(ui_ModeAutoLabel, LV_SIZE_CONTENT);    /// 1
+    lv_obj_set_align(ui_ModeAutoLabel, LV_ALIGN_CENTER);
+    lv_label_set_text(ui_ModeAutoLabel, "Auto");
+    ui_object_set_themeable_style_property(ui_ModeAutoLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_ModeAutoLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text);
+    lv_obj_set_style_text_font(ui_ModeAutoLabel, &ui_font_MontserratSemiBold44, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_ModeAutoLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_ModeAutoLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_ModeAutoLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_ModeAutoLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_ModeAutoLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_ModeAutoLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
     ui_TopBar2 = ui_TopBar_create(ui_DriveScreen);
+    lv_obj_set_width(ui_TopBar2, 720);
+    lv_obj_set_height(ui_TopBar2, 55);
     lv_obj_set_x(ui_TopBar2, 0);
     lv_obj_set_y(ui_TopBar2, 0);
 
     //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
 
-    ui_SpeedPanel = lv_obj_create(ui_DriveScreen);
-    lv_obj_set_width(ui_SpeedPanel, 660);
-    lv_obj_set_height(ui_SpeedPanel, 400);
-    lv_obj_set_x(ui_SpeedPanel, 0);
-    lv_obj_set_y(ui_SpeedPanel, 180);
-    lv_obj_set_align(ui_SpeedPanel, LV_ALIGN_TOP_MID);
-    lv_obj_remove_flag(ui_SpeedPanel, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_radius(ui_SpeedPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_SpeedPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
-                                           _ui_theme_color_background);
-    ui_object_set_themeable_style_property(ui_SpeedPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
-                                           _ui_theme_alpha_background);
-    ui_object_set_themeable_style_property(ui_SpeedPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_SpeedPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
-                                           _ui_theme_alpha_text);
-    lv_obj_set_style_border_side(ui_SpeedPanel, LV_BORDER_SIDE_BOTTOM, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_DriveBand2 = ui_DriveBand_create(ui_DriveScreen);
+    lv_obj_set_width(ui_DriveBand2, 720);
+    lv_obj_set_height(ui_DriveBand2, 140);
+    lv_obj_set_x(ui_DriveBand2, 0);
+    lv_obj_set_y(ui_DriveBand2, 55);
 
-    ui_SpeedLabel = lv_label_create(ui_SpeedPanel);
-    lv_obj_set_width(ui_SpeedLabel, 660);
-    lv_obj_set_height(ui_SpeedLabel, 50);
-    lv_label_set_text(ui_SpeedLabel, "SPEED");
-    ui_object_set_themeable_style_property(ui_SpeedLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_SpeedLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
-                                           _ui_theme_alpha_text);
-    lv_obj_set_style_text_font(ui_SpeedLabel, &lv_font_montserrat_34, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_SpeedLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
-                                           _ui_theme_color_background);
-    ui_object_set_themeable_style_property(ui_SpeedLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
-                                           _ui_theme_alpha_background);
+    ui_ErrorBanner4 = ui_ErrorBanner_create(ui_DriveScreen);
+    lv_obj_set_width(ui_ErrorBanner4, 720);
+    lv_obj_set_height(ui_ErrorBanner4, 400);
+    lv_obj_set_x(ui_ErrorBanner4, 0);
+    lv_obj_set_y(ui_ErrorBanner4, 195);
 
-    ui_SpeedContainer = lv_obj_create(ui_SpeedPanel);
-    lv_obj_remove_style_all(ui_SpeedContainer);
-    lv_obj_set_width(ui_SpeedContainer, 600);
-    lv_obj_set_height(ui_SpeedContainer, 250);
-    lv_obj_set_align(ui_SpeedContainer, LV_ALIGN_CENTER);
-    lv_obj_set_flex_flow(ui_SpeedContainer, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(ui_SpeedContainer, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER);
-    lv_obj_remove_flag(ui_SpeedContainer,
-                       LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM |
-                       LV_OBJ_FLAG_SCROLL_CHAIN);     /// Flags
+    ui_MenuKey2 = ui_MenuKey_create(ui_DriveScreen);
+    lv_obj_set_width(ui_MenuKey2, 720);
+    lv_obj_set_height(ui_MenuKey2, 164);
+    lv_obj_set_x(ui_MenuKey2, 0);
+    lv_obj_set_y(ui_MenuKey2, 1116);
 
-    ui_SpeedNumber = lv_label_create(ui_SpeedContainer);
-    lv_obj_set_width(ui_SpeedNumber, LV_SIZE_CONTENT);   /// 700
-    lv_obj_set_height(ui_SpeedNumber, LV_SIZE_CONTENT);    /// 180
-    lv_obj_set_align(ui_SpeedNumber, LV_ALIGN_LEFT_MID);
-    lv_label_set_text(ui_SpeedNumber, "3.5");
-    ui_object_set_themeable_style_property(ui_SpeedNumber, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_SpeedNumber, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
-                                           _ui_theme_alpha_text);
-    lv_obj_set_style_text_font(ui_SpeedNumber, &ui_font_IBMPlexSansMedium264, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_SpeedNumber, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
-                                           _ui_theme_color_background);
-    ui_object_set_themeable_style_property(ui_SpeedNumber, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
-                                           _ui_theme_alpha_background);
+    ui_MenuOverlay2 = ui_MenuOverlay_create(ui_DriveScreen);
+    lv_obj_set_width(ui_MenuOverlay2, 720);
+    lv_obj_set_height(ui_MenuOverlay2, 921);
+    lv_obj_set_x(ui_MenuOverlay2, 0);
+    lv_obj_set_y(ui_MenuOverlay2, 195);
 
-    ui_UnitLabel = lv_label_create(ui_SpeedContainer);
-    lv_obj_set_width(ui_UnitLabel, LV_SIZE_CONTENT);   /// 100
-    lv_obj_set_height(ui_UnitLabel, LV_SIZE_CONTENT);    /// 40
-    lv_obj_set_x(ui_UnitLabel, 30);
-    lv_obj_set_y(ui_UnitLabel, 0);
-    lv_obj_set_align(ui_UnitLabel, LV_ALIGN_BOTTOM_MID);
-    lv_label_set_text(ui_UnitLabel, "mph");
-    ui_object_set_themeable_style_property(ui_UnitLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_UnitLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
-                                           _ui_theme_alpha_text);
-    lv_obj_set_style_text_font(ui_UnitLabel, &lv_font_montserrat_34, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_UnitLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
-                                           _ui_theme_color_background);
-    ui_object_set_themeable_style_property(ui_UnitLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
-                                           _ui_theme_alpha_background);
 
-    ui_ErrorWarningPanel = ui_ErrorWarningPanel_create(ui_DriveScreen);
-    lv_obj_set_x(ui_ErrorWarningPanel, 0);
-    lv_obj_set_y(ui_ErrorWarningPanel, 180);
-
-    ui_RangePanel = lv_obj_create(ui_DriveScreen);
-    lv_obj_set_width(ui_RangePanel, 660);
-    lv_obj_set_height(ui_RangePanel, 300);
-    lv_obj_set_x(ui_RangePanel, 0);
-    lv_obj_set_y(ui_RangePanel, 580);
-    lv_obj_set_align(ui_RangePanel, LV_ALIGN_TOP_MID);
-    lv_obj_remove_flag(ui_RangePanel, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_radius(ui_RangePanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_RangePanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
-                                           _ui_theme_color_background);
-    ui_object_set_themeable_style_property(ui_RangePanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
-                                           _ui_theme_alpha_background);
-    ui_object_set_themeable_style_property(ui_RangePanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_RangePanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
-                                           _ui_theme_alpha_text);
-    lv_obj_set_style_border_side(ui_RangePanel, LV_BORDER_SIDE_BOTTOM, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    ui_SpeedLabel2 = lv_label_create(ui_RangePanel);
-    lv_obj_set_width(ui_SpeedLabel2, 600);
-    lv_obj_set_height(ui_SpeedLabel2, 50);
-    lv_label_set_text(ui_SpeedLabel2, "REMAINING RANGE");
-    ui_object_set_themeable_style_property(ui_SpeedLabel2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_SpeedLabel2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
-                                           _ui_theme_alpha_text);
-    lv_obj_set_style_text_font(ui_SpeedLabel2, &lv_font_montserrat_34, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_SpeedLabel2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
-                                           _ui_theme_color_background);
-    ui_object_set_themeable_style_property(ui_SpeedLabel2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
-                                           _ui_theme_alpha_background);
-
-    ui_RangeBar = lv_bar_create(ui_RangePanel);
-    lv_bar_set_range(ui_RangeBar, 0, 40);
-    lv_bar_set_value(ui_RangeBar, 30, LV_ANIM_OFF);
-    lv_bar_set_start_value(ui_RangeBar, 0, LV_ANIM_OFF);
-    lv_obj_set_width(ui_RangeBar, 600);
-    lv_obj_set_height(ui_RangeBar, 30);
-    lv_obj_set_x(ui_RangeBar, 0);
-    lv_obj_set_y(ui_RangeBar, -20);
-    lv_obj_set_align(ui_RangeBar, LV_ALIGN_BOTTOM_MID);
-    ui_object_set_themeable_style_property(ui_RangeBar, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
-                                           _ui_theme_color_background);
-    ui_object_set_themeable_style_property(ui_RangeBar, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
-                                           _ui_theme_alpha_background);
-
-    ui_object_set_themeable_style_property(ui_RangeBar, LV_PART_INDICATOR | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_RangeBar, LV_PART_INDICATOR | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
-                                           _ui_theme_alpha_text);
-
-    //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
-    if(lv_obj_get_style_pad_top(ui_RangeBar, LV_PART_MAIN) > 0) lv_obj_set_style_pad_right(ui_RangeBar,
-                                                                                               lv_obj_get_style_pad_right(ui_RangeBar, LV_PART_MAIN) + 1, LV_PART_MAIN);
-    ui_RangeContainer = lv_obj_create(ui_RangePanel);
-    lv_obj_remove_style_all(ui_RangeContainer);
-    lv_obj_set_width(ui_RangeContainer, 600);
-    lv_obj_set_height(ui_RangeContainer, 250);
-    lv_obj_set_align(ui_RangeContainer, LV_ALIGN_CENTER);
-    lv_obj_set_flex_flow(ui_RangeContainer, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(ui_RangeContainer, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER);
-    lv_obj_remove_flag(ui_RangeContainer,
-                       LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM |
-                       LV_OBJ_FLAG_SCROLL_CHAIN);     /// Flags
-
-    ui_RangeNumber = lv_label_create(ui_RangeContainer);
-    lv_obj_set_width(ui_RangeNumber, LV_SIZE_CONTENT);   /// 700
-    lv_obj_set_height(ui_RangeNumber, LV_SIZE_CONTENT);    /// 180
-    lv_obj_set_align(ui_RangeNumber, LV_ALIGN_LEFT_MID);
-    lv_label_set_text(ui_RangeNumber, "19");
-    ui_object_set_themeable_style_property(ui_RangeNumber, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_RangeNumber, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
-                                           _ui_theme_alpha_text);
-    lv_obj_set_style_text_font(ui_RangeNumber, &ui_font_IBMPlexSansBold82, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_RangeNumber, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
-                                           _ui_theme_color_background);
-    ui_object_set_themeable_style_property(ui_RangeNumber, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
-                                           _ui_theme_alpha_background);
-
-    ui_RangeUnits = lv_label_create(ui_RangeContainer);
-    lv_obj_set_width(ui_RangeUnits, LV_SIZE_CONTENT);   /// 100
-    lv_obj_set_height(ui_RangeUnits, LV_SIZE_CONTENT);    /// 40
-    lv_obj_set_x(ui_RangeUnits, 30);
-    lv_obj_set_y(ui_RangeUnits, 0);
-    lv_obj_set_align(ui_RangeUnits, LV_ALIGN_BOTTOM_MID);
-    lv_label_set_text(ui_RangeUnits, "mi");
-    ui_object_set_themeable_style_property(ui_RangeUnits, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_RangeUnits, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
-                                           _ui_theme_alpha_text);
-    lv_obj_set_style_text_font(ui_RangeUnits, &lv_font_montserrat_34, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_RangeUnits, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
-                                           _ui_theme_color_background);
-    ui_object_set_themeable_style_property(ui_RangeUnits, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
-                                           _ui_theme_alpha_background);
-
-    ui_DriveModePanel = lv_obj_create(ui_DriveScreen);
-    lv_obj_set_width(ui_DriveModePanel, 660);
-    lv_obj_set_height(ui_DriveModePanel, 390);
-    lv_obj_set_x(ui_DriveModePanel, 1);
-    lv_obj_set_y(ui_DriveModePanel, 880);
-    lv_obj_set_align(ui_DriveModePanel, LV_ALIGN_TOP_MID);
-    lv_obj_remove_flag(ui_DriveModePanel, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_radius(ui_DriveModePanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_DriveModePanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
-                                           _ui_theme_color_background);
-    ui_object_set_themeable_style_property(ui_DriveModePanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
-                                           _ui_theme_alpha_background);
-    ui_object_set_themeable_style_property(ui_DriveModePanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_DriveModePanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
-                                           _ui_theme_alpha_text);
-    lv_obj_set_style_border_side(ui_DriveModePanel, LV_BORDER_SIDE_NONE, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    ui_DriveModeLabel = lv_label_create(ui_DriveModePanel);
-    lv_obj_set_width(ui_DriveModeLabel, 660);
-    lv_obj_set_height(ui_DriveModeLabel, 50);
-    lv_obj_set_align(ui_DriveModeLabel, LV_ALIGN_TOP_MID);
-    lv_label_set_text(ui_DriveModeLabel, "DRIVE MODE");
-    ui_object_set_themeable_style_property(ui_DriveModeLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_DriveModeLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
-                                           _ui_theme_alpha_text);
-    lv_obj_set_style_text_font(ui_DriveModeLabel, &lv_font_montserrat_34, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_DriveModeLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
-                                           _ui_theme_color_background);
-    ui_object_set_themeable_style_property(ui_DriveModeLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
-                                           _ui_theme_alpha_background);
-
-    ui_DriveModeContainer = lv_obj_create(ui_DriveModePanel);
-    lv_obj_remove_style_all(ui_DriveModeContainer);
-    lv_obj_set_width(ui_DriveModeContainer, 660);
-    lv_obj_set_height(ui_DriveModeContainer, 300);
-    lv_obj_set_x(ui_DriveModeContainer, 0);
-    lv_obj_set_y(ui_DriveModeContainer, 30);
-    lv_obj_set_align(ui_DriveModeContainer, LV_ALIGN_CENTER);
-    lv_obj_set_flex_flow(ui_DriveModeContainer, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(ui_DriveModeContainer, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_remove_flag(ui_DriveModeContainer, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_pad_row(ui_DriveModeContainer, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_pad_column(ui_DriveModeContainer, 20, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    ui_DriveModeButton = lv_button_create(ui_DriveModeContainer);
-    lv_obj_set_width(ui_DriveModeButton, 207);
-    lv_obj_set_height(ui_DriveModeButton, 167);
-    lv_obj_set_x(ui_DriveModeButton, 0);
-    lv_obj_set_y(ui_DriveModeButton, -70);
-    lv_obj_set_align(ui_DriveModeButton, LV_ALIGN_BOTTOM_MID);
-    lv_obj_add_flag(ui_DriveModeButton, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
-    lv_obj_remove_flag(ui_DriveModeButton, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_radius(ui_DriveModeButton, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_DriveModeButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
-                                           _ui_theme_color_background);
-    ui_object_set_themeable_style_property(ui_DriveModeButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
-                                           _ui_theme_alpha_background);
-    ui_object_set_themeable_style_property(ui_DriveModeButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_DriveModeButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
-                                           _ui_theme_alpha_text);
-    lv_obj_set_style_border_width(ui_DriveModeButton, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    ui_DriveModeButtonLabel = lv_label_create(ui_DriveModeButton);
-    lv_obj_set_width(ui_DriveModeButtonLabel, 280);
-    lv_obj_set_height(ui_DriveModeButtonLabel, 50);
-    lv_obj_set_align(ui_DriveModeButtonLabel, LV_ALIGN_CENTER);
-    lv_label_set_text(ui_DriveModeButtonLabel, "HOLO");
-    ui_object_set_themeable_style_property(ui_DriveModeButtonLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_DriveModeButtonLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
-                                           _ui_theme_alpha_text);
-    lv_obj_set_style_text_align(ui_DriveModeButtonLabel, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_DriveModeButtonLabel, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    ui_DriveModeButton1 = lv_button_create(ui_DriveModeContainer);
-    lv_obj_set_width(ui_DriveModeButton1, 207);
-    lv_obj_set_height(ui_DriveModeButton1, 167);
-    lv_obj_set_x(ui_DriveModeButton1, 0);
-    lv_obj_set_y(ui_DriveModeButton1, -70);
-    lv_obj_set_align(ui_DriveModeButton1, LV_ALIGN_BOTTOM_MID);
-    lv_obj_add_flag(ui_DriveModeButton1, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
-    lv_obj_remove_flag(ui_DriveModeButton1, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_radius(ui_DriveModeButton1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_DriveModeButton1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
-                                           _ui_theme_color_background);
-    ui_object_set_themeable_style_property(ui_DriveModeButton1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
-                                           _ui_theme_alpha_background);
-    ui_object_set_themeable_style_property(ui_DriveModeButton1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_DriveModeButton1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
-                                           _ui_theme_alpha_text);
-    lv_obj_set_style_border_width(ui_DriveModeButton1, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    ui_DriveModeButtonLabel1 = lv_label_create(ui_DriveModeButton1);
-    lv_obj_set_width(ui_DriveModeButtonLabel1, 280);
-    lv_obj_set_height(ui_DriveModeButtonLabel1, 50);
-    lv_obj_set_align(ui_DriveModeButtonLabel1, LV_ALIGN_CENTER);
-    lv_label_set_text(ui_DriveModeButtonLabel1, "Normal");
-    ui_object_set_themeable_style_property(ui_DriveModeButtonLabel1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_DriveModeButtonLabel1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
-                                           _ui_theme_alpha_text);
-    lv_obj_set_style_text_align(ui_DriveModeButtonLabel1, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_DriveModeButtonLabel1, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    ui_DriveModeButton2 = lv_button_create(ui_DriveModeContainer);
-    lv_obj_set_width(ui_DriveModeButton2, 207);
-    lv_obj_set_height(ui_DriveModeButton2, 167);
-    lv_obj_set_x(ui_DriveModeButton2, 0);
-    lv_obj_set_y(ui_DriveModeButton2, -70);
-    lv_obj_set_align(ui_DriveModeButton2, LV_ALIGN_BOTTOM_MID);
-    lv_obj_add_flag(ui_DriveModeButton2, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
-    lv_obj_remove_flag(ui_DriveModeButton2, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_radius(ui_DriveModeButton2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_DriveModeButton2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
-                                           _ui_theme_color_background);
-    ui_object_set_themeable_style_property(ui_DriveModeButton2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
-                                           _ui_theme_alpha_background);
-    ui_object_set_themeable_style_property(ui_DriveModeButton2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_DriveModeButton2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
-                                           _ui_theme_alpha_text);
-    lv_obj_set_style_border_width(ui_DriveModeButton2, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    ui_DriveModeButtonLabel2 = lv_label_create(ui_DriveModeButton2);
-    lv_obj_set_width(ui_DriveModeButtonLabel2, 280);
-    lv_obj_set_height(ui_DriveModeButtonLabel2, 50);
-    lv_obj_set_align(ui_DriveModeButtonLabel2, LV_ALIGN_CENTER);
-    lv_label_set_text(ui_DriveModeButtonLabel2, "Auto");
-    ui_object_set_themeable_style_property(ui_DriveModeButtonLabel2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_DriveModeButtonLabel2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
-                                           _ui_theme_alpha_text);
-    lv_obj_set_style_text_align(ui_DriveModeButtonLabel2, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_DriveModeButtonLabel2, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    ui_StatusPanel2 = ui_StatusPanel_create(ui_DriveScreen);
-    lv_obj_set_x(ui_StatusPanel2, 0);
-    lv_obj_set_y(ui_StatusPanel2, 50);
-
-    ui_ExitBarPress1 = ui_ExitBarPress_create(ui_DriveScreen);
-    lv_obj_set_x(ui_ExitBarPress1, 0);
-    lv_obj_set_y(ui_ExitBarPress1, -10);
-
-    //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
 
 }
 
@@ -382,29 +447,28 @@ void ui_DriveScreen_screen_destroy(void)
 
     // NULL screen variables
     ui_DriveScreen = NULL;
+    ui_DriveBody = NULL;
+    ui_DriveContent = NULL;
+    ui_SpeedEyebrow = NULL;
+    ui_SpeedValue = NULL;
+    ui_SpeedUnit = NULL;
+    ui_DriveRule1 = NULL;
+    ui_RangeEyebrow = NULL;
+    ui_RangeValue = NULL;
+    ui_RangeUnit = NULL;
+    ui_RangeMeter = NULL;
+    ui_DriveRule2 = NULL;
+    ui_ModeEyebrow = NULL;
+    ui_ModeManual = NULL;
+    ui_ModeManualLabel = NULL;
+    ui_ModeAssist = NULL;
+    ui_ModeAssistLabel = NULL;
+    ui_ModeAuto = NULL;
+    ui_ModeAutoLabel = NULL;
     ui_TopBar2 = NULL;
-    ui_SpeedPanel = NULL;
-    ui_SpeedLabel = NULL;
-    ui_SpeedContainer = NULL;
-    ui_SpeedNumber = NULL;
-    ui_UnitLabel = NULL;
-    ui_ErrorWarningPanel = NULL;
-    ui_RangePanel = NULL;
-    ui_SpeedLabel2 = NULL;
-    ui_RangeBar = NULL;
-    ui_RangeContainer = NULL;
-    ui_RangeNumber = NULL;
-    ui_RangeUnits = NULL;
-    ui_DriveModePanel = NULL;
-    ui_DriveModeLabel = NULL;
-    ui_DriveModeContainer = NULL;
-    ui_DriveModeButton = NULL;
-    ui_DriveModeButtonLabel = NULL;
-    ui_DriveModeButton1 = NULL;
-    ui_DriveModeButtonLabel1 = NULL;
-    ui_DriveModeButton2 = NULL;
-    ui_DriveModeButtonLabel2 = NULL;
-    ui_StatusPanel2 = NULL;
-    ui_ExitBarPress1 = NULL;
+    ui_DriveBand2 = NULL;
+    ui_ErrorBanner4 = NULL;
+    ui_MenuKey2 = NULL;
+    ui_MenuOverlay2 = NULL;
 
 }

@@ -50,12 +50,17 @@ bool joystick_cal_saved();
 /// The calibration in use. Any task.
 JoystickCal joystick_cal_current();
 
-/// The JoystickTest screen's widgets the run drives, plus the shared 1 Hz
-/// blink phase its prompts blink on.
+/// The JoystickScreen widgets the run drives, plus the shared 1 Hz blink phase
+/// its prompts blink on.
+///
+/// Spec V2 has no CALIBRATE button: "Calibrate Joystick" in the burger menu
+/// opens the screen and calls joystick_cal_toggle(), and leaving the screen is
+/// how a run is cancelled. `button` and `button_label` are therefore optional,
+/// and naming them brings the old on-screen start/cancel back.
 struct JoystickCalUi {
   lv_obj_t *screen = nullptr;       ///< leaving it cancels a run
-  lv_obj_t *button = nullptr;       ///< starts a run, and cancels one
-  lv_obj_t *button_label = nullptr; ///< reads CANCEL while a run is going
+  lv_obj_t *button = nullptr;       ///< optional: starts a run, and cancels one
+  lv_obj_t *button_label = nullptr; ///< optional: reads CANCEL while running
   lv_obj_t *instructions = nullptr; ///< the prompts, then the result
   lv_subject_t *blink = nullptr;    ///< 0/1, flipped by main.cpp's poll timer
   std::function<void()> feedback;   ///< a step was captured (click, buzz)
@@ -64,6 +69,11 @@ struct JoystickCalUi {
 /// Bind the run to its widgets. Same context as main.cpp's other bindings:
 /// after ui_init, before the LVGL task runs, and after `blink` is initialised.
 void joystick_cal_init_ui(const JoystickCalUi &config);
+
+/// Start a run, or cancel the one going. LVGL task; what the burger menu's
+/// "Calibrate Joystick" row calls once the screen is up. A no-op before
+/// joystick_cal_init_ui has run.
+void joystick_cal_toggle();
 
 /// ADC task, every cycle it read all three axes: the values the stick is fed.
 void joystick_cal_note_raw(float horizontal_mv, float vertical_mv, float twist_mv);

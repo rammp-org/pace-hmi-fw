@@ -13,99 +13,141 @@ lv_obj_t * ui_TopBar_create(lv_obj_t * comp_parent)
     lv_obj_t * cui_TopBar;
     cui_TopBar = lv_obj_create(comp_parent);
     lv_obj_set_width(cui_TopBar, 720);
-    lv_obj_set_height(cui_TopBar, 50);
-    lv_obj_set_align(cui_TopBar, LV_ALIGN_TOP_MID);
+    lv_obj_set_height(cui_TopBar, 55);
     lv_obj_remove_flag(cui_TopBar, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_radius(cui_TopBar, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     ui_object_set_themeable_style_property(cui_TopBar, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
                                            _ui_theme_color_background);
     ui_object_set_themeable_style_property(cui_TopBar, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
                                            _ui_theme_alpha_background);
-    lv_obj_set_style_border_side(cui_TopBar, LV_BORDER_SIDE_NONE, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    lv_obj_t * cui_RTPS;
-    cui_RTPS = lv_label_create(cui_TopBar);
-    lv_obj_set_width(cui_RTPS, LV_SIZE_CONTENT);   /// 1
-    lv_obj_set_height(cui_RTPS, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_x(cui_RTPS, -240);
-    lv_obj_set_y(cui_RTPS, 0);
-    lv_obj_set_align(cui_RTPS, LV_ALIGN_RIGHT_MID);
-    lv_label_set_text(cui_RTPS, "RTPS");
-    ui_object_set_themeable_style_property(cui_RTPS, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(cui_RTPS, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
-                                           _ui_theme_alpha_text);
-    lv_obj_set_style_text_font(cui_RTPS, &lv_font_montserrat_24, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    lv_obj_t * cui_Clock1;
-    cui_Clock1 = lv_label_create(cui_TopBar);
-    lv_obj_set_width(cui_Clock1, LV_SIZE_CONTENT);   /// 1
-    lv_obj_set_height(cui_Clock1, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_align(cui_Clock1, LV_ALIGN_LEFT_MID);
-    lv_label_set_text(cui_Clock1, "10:42");
-    ui_object_set_themeable_style_property(cui_Clock1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(cui_Clock1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
-                                           _ui_theme_alpha_text);
-    lv_obj_set_style_text_font(cui_Clock1, &lv_font_montserrat_24, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    lv_obj_t * cui_GPS1;
-    cui_GPS1 = lv_label_create(cui_TopBar);
-    lv_obj_set_width(cui_GPS1, LV_SIZE_CONTENT);   /// 1
-    lv_obj_set_height(cui_GPS1, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_x(cui_GPS1, -120);
-    lv_obj_set_y(cui_GPS1, 0);
-    lv_obj_set_align(cui_GPS1, LV_ALIGN_RIGHT_MID);
-    lv_label_set_text(cui_GPS1, "BT   GPS");
-    ui_object_set_themeable_style_property(cui_GPS1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(cui_GPS1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
-                                           _ui_theme_alpha_text);
-    lv_obj_set_style_text_font(cui_GPS1, &lv_font_montserrat_24, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    lv_obj_t * cui_Battery1;
-    cui_Battery1 = lv_bar_create(cui_TopBar);
-    lv_bar_set_value(cui_Battery1, 80, LV_ANIM_OFF);
-    lv_bar_set_start_value(cui_Battery1, 0, LV_ANIM_OFF);
-    lv_obj_set_width(cui_Battery1, 100);
-    lv_obj_set_height(cui_Battery1, 20);
-    lv_obj_set_align(cui_Battery1, LV_ALIGN_RIGHT_MID);
-    ui_object_set_themeable_style_property(cui_Battery1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+    ui_object_set_themeable_style_property(cui_TopBar, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
                                            _ui_theme_color_background);
-    ui_object_set_themeable_style_property(cui_Battery1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+    ui_object_set_themeable_style_property(cui_TopBar, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
                                            _ui_theme_alpha_background);
-    ui_object_set_themeable_style_property(cui_Battery1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(cui_Battery1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
-                                           _ui_theme_alpha_text);
-    lv_obj_set_style_border_width(cui_Battery1, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(cui_TopBar, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_side(cui_TopBar, LV_BORDER_SIDE_NONE, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(cui_TopBar, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(cui_TopBar, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(cui_TopBar, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(cui_TopBar, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(cui_TopBar, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(cui_TopBar, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    lv_obj_set_style_radius(cui_Battery1, 0, LV_PART_INDICATOR | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(cui_Battery1, LV_PART_INDICATOR | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+    lv_obj_t * cui_BatteryPct;
+    cui_BatteryPct = lv_label_create(cui_TopBar);
+    lv_obj_set_width(cui_BatteryPct, 200);
+    lv_obj_set_height(cui_BatteryPct, 34);
+    lv_obj_set_x(cui_BatteryPct, 490);
+    lv_obj_set_y(cui_BatteryPct, 15);
+    lv_label_set_text(cui_BatteryPct, "78%");
+    ui_object_set_themeable_style_property(cui_BatteryPct, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_text);
-    ui_object_set_themeable_style_property(cui_Battery1, LV_PART_INDICATOR | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+    ui_object_set_themeable_style_property(cui_BatteryPct, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text);
+    lv_obj_set_style_text_align(cui_BatteryPct, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(cui_BatteryPct, &ui_font_IBMPlexSansRegular28, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(cui_BatteryPct, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(cui_BatteryPct, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(cui_BatteryPct, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(cui_BatteryPct, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(cui_BatteryPct, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(cui_BatteryPct, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    lv_obj_t * cui_Clock;
+    cui_Clock = lv_label_create(cui_TopBar);
+    lv_obj_set_width(cui_Clock, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(cui_Clock, LV_SIZE_CONTENT);    /// 1
+    lv_obj_set_x(cui_Clock, 30);
+    lv_obj_set_y(cui_Clock, 16);
+    lv_label_set_text(cui_Clock, "10:42");
+    ui_object_set_themeable_style_property(cui_Clock, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text_muted);
+    ui_object_set_themeable_style_property(cui_Clock, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text_muted);
+    lv_obj_set_style_text_font(cui_Clock, &ui_font_IBMPlexSansRegular24, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(cui_Clock, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(cui_Clock, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(cui_Clock, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(cui_Clock, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(cui_Clock, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(cui_Clock, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    lv_obj_t * cui_Link;
+    cui_Link = lv_label_create(cui_TopBar);
+    lv_obj_set_width(cui_Link, 280);
+    lv_obj_set_height(cui_Link, 34);
+    lv_obj_set_x(cui_Link, 266);
+    lv_obj_set_y(cui_Link, 16);
+    lv_label_set_text(cui_Link, "BT · WI-FI");
+    ui_object_set_themeable_style_property(cui_Link, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text_muted);
+    ui_object_set_themeable_style_property(cui_Link, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text_muted);
+    lv_obj_set_style_text_align(cui_Link, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(cui_Link, &ui_font_IBMPlexSansRegular24, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(cui_Link, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(cui_Link, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(cui_Link, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(cui_Link, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(cui_Link, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(cui_Link, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    lv_obj_t * cui_Battery;
+    cui_Battery = lv_bar_create(cui_TopBar);
+    lv_bar_set_value(cui_Battery, 78, LV_ANIM_OFF);
+    lv_bar_set_start_value(cui_Battery, 0, LV_ANIM_OFF);
+    lv_obj_set_width(cui_Battery, 50);
+    lv_obj_set_height(cui_Battery, 28);
+    lv_obj_set_x(cui_Battery, 560);
+    lv_obj_set_y(cui_Battery, 13);
+    lv_obj_set_style_radius(cui_Battery, 4, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_Battery, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_Battery, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(cui_Battery, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(cui_Battery, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
+                                           _ui_theme_alpha_text);
+    lv_obj_set_style_border_width(cui_Battery, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(cui_Battery, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(cui_Battery, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(cui_Battery, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(cui_Battery, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(cui_Battery, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(cui_Battery, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    lv_obj_set_style_radius(cui_Battery, 0, LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_Battery, LV_PART_INDICATOR | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(cui_Battery, LV_PART_INDICATOR | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
                                            _ui_theme_alpha_text);
 
     //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
-    if(lv_obj_get_style_pad_top(cui_Battery1, LV_PART_MAIN) > 0) lv_obj_set_style_pad_right(cui_Battery1,
-                                                                                                lv_obj_get_style_pad_right(cui_Battery1, LV_PART_MAIN) + 1, LV_PART_MAIN);
-    lv_obj_t * cui_Label4;
-    cui_Label4 = lv_label_create(cui_Battery1);
-    lv_obj_set_width(cui_Label4, LV_SIZE_CONTENT);   /// 1
-    lv_obj_set_height(cui_Label4, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_align(cui_Label4, LV_ALIGN_CENTER);
-    lv_label_set_text(cui_Label4, "30 mi");
-    ui_object_set_themeable_style_property(cui_Label4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
-                                           _ui_theme_color_background);
-    ui_object_set_themeable_style_property(cui_Label4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
-                                           _ui_theme_alpha_background);
+    if(lv_obj_get_style_pad_top(cui_Battery, LV_PART_MAIN) > 0) lv_obj_set_style_pad_right(cui_Battery,
+                                                                                               lv_obj_get_style_pad_right(cui_Battery, LV_PART_MAIN) + 1, LV_PART_MAIN);
+    lv_obj_t * cui_BatteryNub;
+    cui_BatteryNub = lv_label_create(cui_Battery);
+    lv_obj_set_width(cui_BatteryNub, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(cui_BatteryNub, LV_SIZE_CONTENT);    /// 1
+    lv_obj_set_align(cui_BatteryNub, LV_ALIGN_CENTER);
+    lv_label_set_text(cui_BatteryNub, ".");
+    lv_obj_set_style_text_color(cui_BatteryNub, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_opa(cui_BatteryNub, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(cui_BatteryNub, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(cui_BatteryNub, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(cui_BatteryNub, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(cui_BatteryNub, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(cui_BatteryNub, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(cui_BatteryNub, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     lv_obj_t ** children = lv_malloc(sizeof(lv_obj_t *) * _UI_COMP_TOPBAR_NUM);
     children[UI_COMP_TOPBAR_TOPBAR] = cui_TopBar;
-    children[UI_COMP_TOPBAR_RTPS] = cui_RTPS;
-    children[UI_COMP_TOPBAR_CLOCK1] = cui_Clock1;
-    children[UI_COMP_TOPBAR_GPS1] = cui_GPS1;
-    children[UI_COMP_TOPBAR_BATTERY1] = cui_Battery1;
-    children[UI_COMP_TOPBAR_BATTERY1_LABEL4] = cui_Label4;
+    children[UI_COMP_TOPBAR_BATTERYPCT] = cui_BatteryPct;
+    children[UI_COMP_TOPBAR_CLOCK] = cui_Clock;
+    children[UI_COMP_TOPBAR_LINK] = cui_Link;
+    children[UI_COMP_TOPBAR_BATTERY] = cui_Battery;
+    children[UI_COMP_TOPBAR_BATTERY_BATTERYNUB] = cui_BatteryNub;
     lv_obj_add_event_cb(cui_TopBar, get_component_child_event_cb, LV_EVENT_GET_COMP_CHILD, children);
     lv_obj_add_event_cb(cui_TopBar, del_component_child_event_cb, LV_EVENT_DELETE, children);
     ui_comp_TopBar_create_hook(cui_TopBar);

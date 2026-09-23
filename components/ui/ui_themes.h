@@ -13,6 +13,9 @@ extern "C" {
 #define UI_THEME_COLOR_BACKGROUND 0
 #define UI_THEME_COLOR_TEXT 1
 #define UI_THEME_COLOR_FOCUSED 2
+#define UI_THEME_COLOR_TEXT_MUTED 3
+#define UI_THEME_COLOR_OK 4
+#define UI_THEME_COLOR_ALERT 5
 
 #define UI_THEME_DEFAULT 0
 
@@ -26,6 +29,15 @@ extern const ui_theme_variable_t _ui_theme_alpha_text[2];
 
 extern const ui_theme_variable_t _ui_theme_color_focused[2];
 extern const ui_theme_variable_t _ui_theme_alpha_focused[2];
+
+extern const ui_theme_variable_t _ui_theme_color_text_muted[2];
+extern const ui_theme_variable_t _ui_theme_alpha_text_muted[2];
+
+extern const ui_theme_variable_t _ui_theme_color_ok[2];
+extern const ui_theme_variable_t _ui_theme_alpha_ok[2];
+
+extern const ui_theme_variable_t _ui_theme_color_alert[2];
+extern const ui_theme_variable_t _ui_theme_alpha_alert[2];
 
 extern const uint32_t * ui_theme_colors[2];
 extern const uint8_t * ui_theme_alphas[2];

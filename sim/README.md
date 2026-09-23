@@ -1,5 +1,21 @@
 # Desktop simulator
 
+> **Out of service during the burger-menu rework.**
+>
+> `sim_nav.c` is a port of `main/main.cpp`'s navigation layer, and that layer
+> was built for the joystick flex pager that spec V2 replaced. Every screen and
+> most widgets it names are gone from the export, so this does not build.
+>
+> Until it is brought back:
+>
+> - `tools/shot` in the `ui_squareline` repo renders any screen through real
+>   LVGL, which covers "does the export draw correctly".
+> - `scripts/hmi_ui.py` drives the board itself -- screenshots and injected
+>   touch, keys and button -- which covers behaviour.
+>
+> Nothing here is part of the ESP-IDF build, so `idf.py build` is unaffected.
+
+
 Runs the HMI's screens on a PC, driven from a keyboard and an on-screen D-pad,
 with no Tab5 and no MCB on the bench.
 

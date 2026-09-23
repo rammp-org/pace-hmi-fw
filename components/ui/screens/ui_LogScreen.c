@@ -7,17 +7,20 @@
 
 lv_obj_t * ui_LogScreen = NULL;
 lv_obj_t * ui_TopBar6 = NULL;
+lv_obj_t * ui_ErrorBanner5 = NULL;
+lv_obj_t * ui_DriveBand5 = NULL;
+lv_obj_t * ui_MenuKey6 = NULL;
+lv_obj_t * ui_MenuOverlay6 = NULL;
+lv_obj_t * ui_LogBody = NULL;
+lv_obj_t * ui_LogTitle = NULL;
+lv_obj_t * ui_LogContent = NULL;
 lv_obj_t * ui_LogScreenPanel = NULL;
 lv_obj_t * ui_LogScreenPanelInner = NULL;
-lv_obj_t * ui_LogsLabel = NULL;
 lv_obj_t * ui_TextArea1 = NULL;
 lv_obj_t * ui_GoToOldestButton = NULL;
 lv_obj_t * ui_GoToOldestButtonLabel = NULL;
 lv_obj_t * ui_GoToNewestButton = NULL;
 lv_obj_t * ui_GoToNewestButtonLabel = NULL;
-lv_obj_t * ui_ErrorWarningPanel5 = NULL;
-lv_obj_t * ui_StatusPanel5 = NULL;
-lv_obj_t * ui_ExitBarPress2 = NULL;
 // event funtions
 
 // build funtions
@@ -32,16 +35,109 @@ void ui_LogScreen_screen_init(void)
                                            _ui_theme_alpha_background);
 
     ui_TopBar6 = ui_TopBar_create(ui_LogScreen);
+    lv_obj_set_width(ui_TopBar6, 720);
+    lv_obj_set_height(ui_TopBar6, 55);
     lv_obj_set_x(ui_TopBar6, 0);
     lv_obj_set_y(ui_TopBar6, 0);
 
     //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
 
-    ui_LogScreenPanel = lv_obj_create(ui_LogScreen);
-    lv_obj_set_height(ui_LogScreenPanel, 1000);
-    lv_obj_set_width(ui_LogScreenPanel, lv_pct(100));
-    lv_obj_set_x(ui_LogScreenPanel, 0);
-    lv_obj_set_y(ui_LogScreenPanel, 195);
+    ui_ErrorBanner5 = ui_ErrorBanner_create(ui_LogScreen);
+    lv_obj_set_width(ui_ErrorBanner5, 720);
+    lv_obj_set_height(ui_ErrorBanner5, 400);
+    lv_obj_set_x(ui_ErrorBanner5, 0);
+    lv_obj_set_y(ui_ErrorBanner5, 195);
+
+    ui_DriveBand5 = ui_DriveBand_create(ui_LogScreen);
+    lv_obj_set_width(ui_DriveBand5, 720);
+    lv_obj_set_height(ui_DriveBand5, 140);
+    lv_obj_set_x(ui_DriveBand5, 0);
+    lv_obj_set_y(ui_DriveBand5, 55);
+
+    ui_MenuKey6 = ui_MenuKey_create(ui_LogScreen);
+    lv_obj_set_width(ui_MenuKey6, 720);
+    lv_obj_set_height(ui_MenuKey6, 164);
+    lv_obj_set_x(ui_MenuKey6, 0);
+    lv_obj_set_y(ui_MenuKey6, 1116);
+
+    ui_MenuOverlay6 = ui_MenuOverlay_create(ui_LogScreen);
+    lv_obj_set_width(ui_MenuOverlay6, 720);
+    lv_obj_set_height(ui_MenuOverlay6, 921);
+    lv_obj_set_x(ui_MenuOverlay6, 0);
+    lv_obj_set_y(ui_MenuOverlay6, 195);
+
+
+
+    ui_LogBody = lv_obj_create(ui_LogScreen);
+    lv_obj_set_width(ui_LogBody, 720);
+    lv_obj_set_height(ui_LogBody, 921);
+    lv_obj_set_x(ui_LogBody, 0);
+    lv_obj_set_y(ui_LogBody, 195);
+    lv_obj_set_flex_flow(ui_LogBody, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(ui_LogBody, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_remove_flag(ui_LogBody, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_radius(ui_LogBody, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_LogBody, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_LogBody, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_LogBody, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_LogBody, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
+                                           _ui_theme_alpha_background);
+    lv_obj_set_style_border_width(ui_LogBody, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_side(ui_LogBody, LV_BORDER_SIDE_FULL, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_LogBody, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_LogBody, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_LogBody, 52, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_LogBody, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_LogBody, 34, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_LogBody, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_LogTitle = lv_label_create(ui_LogBody);
+    lv_obj_set_width(ui_LogTitle, 720);
+    lv_obj_set_height(ui_LogTitle, 47);
+    lv_obj_set_x(ui_LogTitle, 0);
+    lv_obj_set_y(ui_LogTitle, -7);
+    lv_label_set_text(ui_LogTitle, "Log");
+    ui_object_set_themeable_style_property(ui_LogTitle, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_LogTitle, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text);
+    lv_obj_set_style_text_align(ui_LogTitle, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_LogTitle, &ui_font_MontserratSemiBold44, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_LogTitle, 30, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_LogTitle, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_LogTitle, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_LogTitle, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_LogTitle, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_LogTitle, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_LogContent = lv_obj_create(ui_LogBody);
+    lv_obj_set_width(ui_LogContent, 720);
+    lv_obj_set_height(ui_LogContent, 788);
+    lv_obj_remove_flag(ui_LogContent, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_radius(ui_LogContent, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_LogContent, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_LogContent, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_LogContent, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_LogContent, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
+                                           _ui_theme_alpha_background);
+    lv_obj_set_style_border_width(ui_LogContent, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_side(ui_LogContent, LV_BORDER_SIDE_FULL, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_LogContent, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_LogContent, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_LogContent, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_LogContent, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_LogContent, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_LogContent, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_LogScreenPanel = lv_obj_create(ui_LogContent);
+    lv_obj_set_width(ui_LogScreenPanel, 720);
+    lv_obj_set_height(ui_LogScreenPanel, 788);
     lv_obj_set_align(ui_LogScreenPanel, LV_ALIGN_TOP_MID);
     lv_obj_remove_flag(ui_LogScreenPanel,
                        LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM |
@@ -72,21 +168,6 @@ void ui_LogScreen_screen_init(void)
                                            _ui_theme_alpha_background);
     lv_obj_set_style_pad_row(ui_LogScreenPanelInner, 20, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_LogScreenPanelInner, 20, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    ui_LogsLabel = lv_label_create(ui_LogScreenPanelInner);
-    lv_obj_set_width(ui_LogsLabel, 660);
-    lv_obj_set_height(ui_LogsLabel, 50);
-    lv_obj_set_align(ui_LogsLabel, LV_ALIGN_TOP_MID);
-    lv_label_set_text(ui_LogsLabel, "Logs");
-    ui_object_set_themeable_style_property(ui_LogsLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_LogsLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
-                                           _ui_theme_alpha_text);
-    lv_obj_set_style_text_font(ui_LogsLabel, &ui_font_IBMPlexSansMedium53, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_LogsLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
-                                           _ui_theme_color_background);
-    ui_object_set_themeable_style_property(ui_LogsLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
-                                           _ui_theme_alpha_background);
 
     ui_TextArea1 = lv_textarea_create(ui_LogScreenPanelInner);
     lv_obj_set_height(ui_TextArea1, 685);
@@ -172,20 +253,6 @@ void ui_LogScreen_screen_init(void)
     lv_obj_set_style_text_align(ui_GoToNewestButtonLabel, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(ui_GoToNewestButtonLabel, &lv_font_montserrat_32, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_ErrorWarningPanel5 = ui_ErrorWarningPanel_create(ui_LogScreen);
-    lv_obj_set_x(ui_ErrorWarningPanel5, 0);
-    lv_obj_set_y(ui_ErrorWarningPanel5, 180);
-
-    ui_StatusPanel5 = ui_StatusPanel_create(ui_LogScreen);
-    lv_obj_set_x(ui_StatusPanel5, 0);
-    lv_obj_set_y(ui_StatusPanel5, 50);
-
-    ui_ExitBarPress2 = ui_ExitBarPress_create(ui_LogScreen);
-    lv_obj_set_x(ui_ExitBarPress2, 0);
-    lv_obj_set_y(ui_ExitBarPress2, -10);
-
-    //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
-
 }
 
 void ui_LogScreen_screen_destroy(void)
@@ -195,16 +262,19 @@ void ui_LogScreen_screen_destroy(void)
     // NULL screen variables
     ui_LogScreen = NULL;
     ui_TopBar6 = NULL;
+    ui_ErrorBanner5 = NULL;
+    ui_DriveBand5 = NULL;
+    ui_MenuKey6 = NULL;
+    ui_MenuOverlay6 = NULL;
+    ui_LogBody = NULL;
+    ui_LogTitle = NULL;
+    ui_LogContent = NULL;
     ui_LogScreenPanel = NULL;
     ui_LogScreenPanelInner = NULL;
-    ui_LogsLabel = NULL;
     ui_TextArea1 = NULL;
     ui_GoToOldestButton = NULL;
     ui_GoToOldestButtonLabel = NULL;
     ui_GoToNewestButton = NULL;
     ui_GoToNewestButtonLabel = NULL;
-    ui_ErrorWarningPanel5 = NULL;
-    ui_StatusPanel5 = NULL;
-    ui_ExitBarPress2 = NULL;
 
 }
