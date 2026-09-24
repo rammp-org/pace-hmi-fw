@@ -25,6 +25,11 @@ void settings_load();
 uint8_t settings_theme();
 void settings_set_theme(uint8_t value);
 
+/// Whether the burger menu slides in (the spec's 280 ms) or appears at once.
+/// Default false: instant.
+bool settings_menu_slide();
+void settings_set_menu_slide(bool on);
+
 /// Backlight %, kBrightnessMinPercent..kBrightnessMaxPercent. Default 75.
 int settings_brightness();
 void settings_set_brightness(int percent);

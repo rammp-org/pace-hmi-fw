@@ -18,7 +18,6 @@
   X(SELF_TEST, "Self test", "Check the HMI, results on screen", 0)                                 \
   X(SEAT_UP, "Seat up", "Ask the MCB to raise M1 one step", 1)                                     \
   X(FPS_COUNTER, "FPS counter", "Show or hide the render overlay", 0)                              \
-  X(CHANGE_THEME, "Change theme", "Day or night palette", 0)                                       \
   X(RESTART_HMI, "Restart HMI", "Reboot this display", 0)
 
 /* ACTION_HAPTIC_TEST, ..., ACTION_COUNT */

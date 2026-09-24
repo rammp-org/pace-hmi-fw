@@ -206,6 +206,12 @@ static lv_group_t *seat_group = nullptr;        // seat screen, function buttons
 static lv_group_t *seat_adjust_group = nullptr; // seat screen, adjustment page
 static lv_group_t *rd_group = nullptr;          // the bench gate's PIN keypad
 
+// Two of the UI Settings rows; the third is brightness_subject. Up here because
+// rtps_poll_cb keeps the theme row in step and the menu reads the slide. Each
+// observer (app_main) applies and saves its value.
+static lv_subject_t theme_subject;      // 0 = dark (UI_THEME_DEFAULT), 1 = day
+static lv_subject_t menu_slide_subject; // 0 = the menu appears at once, 1 = it slides
+
 // The burger menu's overlay while it is up, else null. Up here because the
 // hold gestures ask whether it is open before they apply.
 static lv_obj_t *nav_menu_open = nullptr;
@@ -658,10 +664,12 @@ static void rtps_poll_cb(lv_timer_t *) {
     // Same reason, different property: the theme switch restored the redundant
     // background fills, so take them out again.
     strip_all_overdraw();
-    // The switch itself is the "Change theme" Skunk Works slot (or a CALL
-    // FUNCTION event reaching ui_events.cpp's theme_toggle); this is where
-    // firmware first sees the result, so it is saved from here.
+    // The switch itself is the UI Settings Theme row (or a CALL FUNCTION
+    // event reaching ui_events.cpp's theme_toggle, or the remote UI); this is
+    // where firmware first sees the result, so it is saved from here, and the
+    // row is brought into step with a switch it did not make.
     settings_set_theme(ui_theme_idx);
+    lv_subject_set_int(&theme_subject, ui_theme_idx == UI_THEME_DAY ? 1 : 0);
   }
 }
 
@@ -2099,6 +2107,9 @@ struct StepperSpec {
   int32_t step;
   uint8_t decimals; // display only: 126 with 1 decimal shows "12.6"
   const char *unit; // appended to the value; nullptr = none
+  // What each value reads, min_value first, for a row that picks between
+  // named options rather than a number; nullptr = a number.
+  const char *const *names = nullptr;
 };
 
 // Everything needed to drive one row, so a key callback or an observer gets it
@@ -2138,10 +2149,24 @@ static constexpr SettingParam kSettingParams[] = {
 #undef SETTINGS_PARAM_ROW
 };
 
-// The subject each settings parameter steps, in SETTINGS_PARAM_* order.
+// The subject each settings parameter steps, in SETTINGS_PARAM_* order. Each
+// one's observer applies and saves it.
 static lv_subject_t *const kSettingParamValue[] = {
-    &brightness_subject, // SETTINGS_PARAM_BRIGHTNESS: its observer applies and saves it
+    &brightness_subject, // SETTINGS_PARAM_BRIGHTNESS
+    &theme_subject,      // SETTINGS_PARAM_THEME
+    &menu_slide_subject, // SETTINGS_PARAM_MENU_SLIDE
 };
+
+// What the named rows read, in SETTINGS_PARAM_* order; nullptr = a number.
+static constexpr const char *kThemeNames[] = {"Dark", "Day"};
+static constexpr const char *kOnOffNames[] = {"Off", "On"};
+static const char *const *const kSettingParamNames[] = {
+    nullptr,     // SETTINGS_PARAM_BRIGHTNESS
+    kThemeNames, // SETTINGS_PARAM_THEME
+    kOnOffNames, // SETTINGS_PARAM_MENU_SLIDE
+};
+static_assert(std::size(kSettingParamNames) == SETTINGS_PARAM_COUNT,
+              "every settings_spec.h parameter needs its names (or nullptr) here");
 static_assert(std::size(kSettingParamValue) == SETTINGS_PARAM_COUNT,
               "every settings_spec.h parameter needs its subject here");
 
@@ -2179,6 +2204,10 @@ static uint8_t actuator_reject_id(int32_t packed) { return static_cast<uint8_t>(
 // format: the value is an integer and must stay one, and LVGL's own printf
 // does not promise the '*' width specifier.
 static void stepper_format(const StepperSpec &spec, int32_t raw, char *out, size_t out_size) {
+  if (spec.names != nullptr && raw >= spec.min_value && raw <= spec.max_value) {
+    lv_snprintf(out, out_size, "%s", spec.names[raw - spec.min_value]);
+    return;
+  }
   char number[16];
   if (spec.decimals == 0) {
     lv_snprintf(number, sizeof(number), "%d", static_cast<int>(raw));
@@ -2553,7 +2582,9 @@ static void setting_page_open(int32_t page) {
   } else {
     for (int i = 0; i < SETTINGS_PARAM_COUNT; i++) {
       if (kSettingParams[i].page == page) {
-        setting_row_add(kSettingParams[i].spec, kSettingParamValue[i], false);
+        StepperSpec spec = kSettingParams[i].spec;
+        spec.names = kSettingParamNames[i];
+        setting_row_add(spec, kSettingParamValue[i], false);
       }
     }
   }
@@ -2586,13 +2617,6 @@ static void action_haptic_test() {
 
 static void action_self_test() { selftest_request(SelfTestTrigger::LOCAL, 0); }
 
-// The day/night switch. rtps_poll_cb notices ui_theme_idx moved and saves it,
-// which is also what re-runs the passes a theme switch undoes, so this does
-// nothing but flip it.
-static void action_change_theme() {
-  ui_theme_set(ui_theme_idx == UI_THEME_DAY ? UI_THEME_DEFAULT : UI_THEME_DAY);
-}
-
 // An RTPS command: the request a "+" press on the actuators page makes. The
 // seat moves only if the MCB agrees, and a refusal flashes on that page.
 static void action_seat_up() { seat_step(rammp::index_of(rammp::SeatAxis::ELEVATION), +1); }
@@ -2605,12 +2629,11 @@ static void action_restart_hmi() {
 
 // In actions_spec.h order.
 static void (*const kActionRun[])() = {
-    action_haptic_test,  // ACTION_HAPTIC_TEST
-    action_self_test,    // ACTION_SELF_TEST
-    action_seat_up,      // ACTION_SEAT_UP
-    fps_toggle,          // ACTION_FPS_COUNTER
-    action_change_theme, // ACTION_CHANGE_THEME
-    action_restart_hmi,  // ACTION_RESTART_HMI
+    action_haptic_test, // ACTION_HAPTIC_TEST
+    action_self_test,   // ACTION_SELF_TEST
+    action_seat_up,     // ACTION_SEAT_UP
+    fps_toggle,         // ACTION_FPS_COUNTER
+    action_restart_hmi, // ACTION_RESTART_HMI
 };
 static_assert(std::size(kActionRun) == ACTION_COUNT,
               "every actions_spec.h entry needs its function here");
@@ -3204,6 +3227,18 @@ static void nav_menu_hide_cb(lv_anim_t *a) {
 
 static void nav_menu_slide(lv_obj_t *overlay, int32_t from, int32_t to, bool hide_after) {
   lv_anim_delete(overlay, nav_menu_anim_cb);
+  // Instant unless UI Settings turns the slide on: straight to where the
+  // slide would have ended, hidden if that is where it was going.
+  if (lv_subject_get_int(&menu_slide_subject) == 0) {
+    lv_obj_set_y(overlay, to);
+    if (hide_after) {
+      lv_anim_t done;
+      lv_anim_init(&done);
+      lv_anim_set_var(&done, overlay);
+      nav_menu_hide_cb(&done);
+    }
+    return;
+  }
   lv_obj_set_y(overlay, from);
   lv_anim_t a;
   lv_anim_init(&a);
@@ -3347,11 +3382,12 @@ static void nav_row_cb(lv_event_t *e) {
   }
   // Seat Functions needs the MCB, as the old seat page did: refused on the
   // spot rather than opening a screen whose every button would be refused in
-  // turn. The menu closes so the banner underneath can say why.
+  // turn.
   const auto dest = static_cast<NavDest>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
   if (dest == NAV_SEAT && !mcb_ready()) {
+    // Refused where it was picked: the menu stays up, the row stays greyed,
+    // and the reason is waiting on the banner underneath once it closes.
     haptic_play(espp::Drv2605::Waveform::DOUBLE_CLICK, 1);
-    nav_close_menu();
     entry_refused_show(kRefusedSeat, kDriveRefusedShowMs);
     return;
   }
@@ -4565,6 +4601,26 @@ extern "C" void app_main(void) {
   }
   lv_subject_init_int(&brightness_subject, settings_brightness());
   lv_subject_add_observer(&brightness_subject, brightness_observer, nullptr);
+  // Theme: the row switches the UI's palette; rtps_poll_cb notices the switch
+  // (however it was made) and saves it, and keeps this subject in step.
+  lv_subject_init_int(&theme_subject, ui_theme_idx == UI_THEME_DAY ? 1 : 0);
+  lv_subject_add_observer(
+      &theme_subject,
+      [](lv_observer_t *, lv_subject_t *subject) {
+        const uint8_t want = lv_subject_get_int(subject) != 0 ? UI_THEME_DAY : UI_THEME_DEFAULT;
+        if (ui_theme_idx != want) {
+          ui_theme_set(want);
+        }
+      },
+      nullptr);
+  // Menu slide: off by default, so the menu appears at once; saved on change.
+  lv_subject_init_int(&menu_slide_subject, settings_menu_slide() ? 1 : 0);
+  lv_subject_add_observer(
+      &menu_slide_subject,
+      [](lv_observer_t *, lv_subject_t *subject) {
+        settings_set_menu_slide(lv_subject_get_int(subject) != 0);
+      },
+      nullptr);
   brightness_save_timer = lv_timer_create(brightness_save_cb, kBrightnessSaveDelayMs, nullptr);
   lv_timer_pause(brightness_save_timer);
 
@@ -5085,7 +5141,7 @@ extern "C" void app_main(void) {
   setting_group = lv_group_create();
 
   // Initialised before the screen's warning panel ever binds to it.
-  lv_subject_init_int(&setting_page_subject, SETTINGS_PAGE_SCREEN_BRIGHTNESS);
+  lv_subject_init_int(&setting_page_subject, SETTINGS_PAGE_UI);
 
   // SCREEN BRIGHTNESS no longer needs a button of its own: "UI Settings" in
   // the burger menu opens page 0, which is that page (setting_page_open(0) in

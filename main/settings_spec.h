@@ -12,11 +12,15 @@
 
 /* P(NAME, title, instructions) */
 #define SETTINGS_PAGE_TABLE(P)                                                                     \
-  P(SCREEN_BRIGHTNESS, "SCREEN BRIGHTNESS", "Left/right or -/+ to change. Saved automatically.")
+  P(UI, "UI Settings", "Left/right or -/+ to change. Saved automatically.")
 
-/* X(PAGE, NAME, short, label, min, max, step, decimals, unit) */
+/* X(PAGE, NAME, short, label, min, max, step, decimals, unit)
+   A row whose values are names rather than numbers (Theme, Menu slide) is
+   0..n-1 here; main.cpp's kSettingParamNames says what each value reads. */
 #define SETTINGS_PARAM_TABLE(X)                                                                    \
-  X(SCREEN_BRIGHTNESS, BRIGHTNESS, "S1", "Brightness", 5, 100, 5, 0, "%")
+  X(UI, BRIGHTNESS, "S1", "Brightness", 5, 100, 5, 0, "%")                                         \
+  X(UI, THEME, "S2", "Theme", 0, 1, 1, 0, "")                                                      \
+  X(UI, MENU_SLIDE, "S3", "Menu slide", 0, 1, 1, 0, "")
 
 /* SETTINGS_PAGE_SCREEN_BRIGHTNESS, ..., SETTINGS_PAGE_COUNT */
 enum {

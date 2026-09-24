@@ -13,8 +13,8 @@
 #include "ui.h"
 
 // Still here for a CALL FUNCTION event in SquareLine to reach. Nothing in the
-// current export wires one, so the theme is switched from the Skunk Works slot
-// instead; main.cpp's rtps_poll_cb notices either way and saves the result.
+// current export wires one: the theme is the UI Settings Theme row. main.cpp's
+// rtps_poll_cb notices a switch either way and saves it.
 void theme_toggle(lv_event_t * e)
 {
     LV_UNUSED(e);
