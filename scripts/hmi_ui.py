@@ -49,12 +49,12 @@ ROW_HEIGHT = 921 // 8  # eight rows divide the 921 px body
 MENU_ROWS = [
     "Drive",
     "Seat Functions",
-    "Skunk Works",
-    "Log",
-    "Diagnostics",
     "Bench",
-    "UI Settings",
+    "Diagnostics",
     "Joystick",
+    "Log",
+    "Skunk Works",
+    "UI Settings",
 ]
 
 

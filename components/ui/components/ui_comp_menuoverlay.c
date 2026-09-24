@@ -334,7 +334,7 @@ lv_obj_t * ui_MenuOverlay_create(lv_obj_t * comp_parent)
     lv_obj_set_height(cui_RowLabel3, LV_SIZE_CONTENT);    /// 1
     lv_obj_set_x(cui_RowLabel3, 30);
     lv_obj_set_y(cui_RowLabel3, 28);
-    lv_label_set_text(cui_RowLabel3, "Skunk Works");
+    lv_label_set_text(cui_RowLabel3, "Bench");
     ui_object_set_themeable_style_property(cui_RowLabel3, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_text);
     ui_object_set_themeable_style_property(cui_RowLabel3, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
@@ -453,7 +453,7 @@ lv_obj_t * ui_MenuOverlay_create(lv_obj_t * comp_parent)
     lv_obj_set_height(cui_RowLabel4, LV_SIZE_CONTENT);    /// 1
     lv_obj_set_x(cui_RowLabel4, 30);
     lv_obj_set_y(cui_RowLabel4, 28);
-    lv_label_set_text(cui_RowLabel4, "Log");
+    lv_label_set_text(cui_RowLabel4, "Diagnostics");
     ui_object_set_themeable_style_property(cui_RowLabel4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_text);
     ui_object_set_themeable_style_property(cui_RowLabel4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
@@ -572,7 +572,7 @@ lv_obj_t * ui_MenuOverlay_create(lv_obj_t * comp_parent)
     lv_obj_set_height(cui_RowLabel5, LV_SIZE_CONTENT);    /// 1
     lv_obj_set_x(cui_RowLabel5, 30);
     lv_obj_set_y(cui_RowLabel5, 28);
-    lv_label_set_text(cui_RowLabel5, "Diagnostics");
+    lv_label_set_text(cui_RowLabel5, "Joystick");
     ui_object_set_themeable_style_property(cui_RowLabel5, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_text);
     ui_object_set_themeable_style_property(cui_RowLabel5, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
@@ -691,7 +691,7 @@ lv_obj_t * ui_MenuOverlay_create(lv_obj_t * comp_parent)
     lv_obj_set_height(cui_RowLabel6, LV_SIZE_CONTENT);    /// 1
     lv_obj_set_x(cui_RowLabel6, 30);
     lv_obj_set_y(cui_RowLabel6, 28);
-    lv_label_set_text(cui_RowLabel6, "Bench");
+    lv_label_set_text(cui_RowLabel6, "Log");
     ui_object_set_themeable_style_property(cui_RowLabel6, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_text);
     ui_object_set_themeable_style_property(cui_RowLabel6, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
@@ -810,7 +810,7 @@ lv_obj_t * ui_MenuOverlay_create(lv_obj_t * comp_parent)
     lv_obj_set_height(cui_RowLabel7, LV_SIZE_CONTENT);    /// 1
     lv_obj_set_x(cui_RowLabel7, 30);
     lv_obj_set_y(cui_RowLabel7, 28);
-    lv_label_set_text(cui_RowLabel7, "UI Settings");
+    lv_label_set_text(cui_RowLabel7, "Skunk Works");
     ui_object_set_themeable_style_property(cui_RowLabel7, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_text);
     ui_object_set_themeable_style_property(cui_RowLabel7, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
@@ -929,7 +929,7 @@ lv_obj_t * ui_MenuOverlay_create(lv_obj_t * comp_parent)
     lv_obj_set_height(cui_RowLabel8, LV_SIZE_CONTENT);    /// 1
     lv_obj_set_x(cui_RowLabel8, 30);
     lv_obj_set_y(cui_RowLabel8, 28);
-    lv_label_set_text(cui_RowLabel8, "Joystick");
+    lv_label_set_text(cui_RowLabel8, "UI Settings");
     ui_object_set_themeable_style_property(cui_RowLabel8, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_text);
     ui_object_set_themeable_style_property(cui_RowLabel8, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,

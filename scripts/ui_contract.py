@@ -166,12 +166,12 @@ LABELS: dict[str, str] = {
     # the wrong screen, silently -- nav_row_cb carries only the row index.
     "cui_RowLabel1": "Drive",
     "cui_RowLabel2": "Seat Functions",
-    "cui_RowLabel3": "Skunk Works",
-    "cui_RowLabel4": "Log",
-    "cui_RowLabel5": "Diagnostics",
-    "cui_RowLabel6": "Bench",
-    "cui_RowLabel7": "UI Settings",
-    "cui_RowLabel8": "Joystick",
+    "cui_RowLabel3": "Bench",
+    "cui_RowLabel4": "Diagnostics",
+    "cui_RowLabel5": "Joystick",
+    "cui_RowLabel6": "Log",
+    "cui_RowLabel7": "Skunk Works",
+    "cui_RowLabel8": "UI Settings",
 }
 
 _CREATE_RE = re.compile(

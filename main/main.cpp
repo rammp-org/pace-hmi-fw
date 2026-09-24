@@ -3165,14 +3165,15 @@ static constexpr uint32_t kHomeFadeMs = 120;
 // of each row. Adding a row in SquareLine means a line in each of these two and
 // a case in nav_go -- the row order is the menu order, nothing else encodes it.
 enum NavDest {
-  NAV_DRIVE,    // "Drive": the Drive screen, or Locked (where it is asked for)
-  NAV_SEAT,     // "Seat Functions"
-  NAV_SKUNK,    // "Skunk Works"
-  NAV_LOG,      // "Log"
-  NAV_DIAG,     // "Diagnostics"
+  NAV_DRIVE, // "Drive": the Drive screen, or Locked (where it is asked for)
+  NAV_SEAT,  // "Seat Functions"
+  // The rest alphabetically.
   NAV_BENCH,    // "Bench", behind the PIN gate
-  NAV_SETTINGS, // "UI Settings"
+  NAV_DIAG,     // "Diagnostics"
   NAV_JOYSTICK, // "Joystick", the test screen with CALIBRATE on it
+  NAV_LOG,      // "Log"
+  NAV_SKUNK,    // "Skunk Works"
+  NAV_SETTINGS, // "UI Settings"
   NAV_DEST_COUNT,
 };
 
@@ -3499,16 +3500,17 @@ static void nav_go(NavDest dest) {
   // a load of the screen already up, so SCREEN_LOADED never comes, and the
   // stick would be left on the menu's group -- emptied above -- with nothing
   // to focus until another screen loaded. Arrive by hand instead.
-  lv_obj_t *const dest_screens[NAV_DEST_COUNT] = {
-      lv_subject_get_int(&locked_subject) != 0 ? ui_LockedScreen : ui_DriveScreen,
-      ui_SeatScreen,
-      ui_SkunkWorksScreen,
-      ui_LogScreen,
-      ui_DiagnosticsScreen,
-      ui_BenchGateScreen,
-      ui_SettingsScreen,
-      ui_JoystickScreen,
-  };
+  // Filled by name, not by position, so reordering the menu cannot shift it.
+  lv_obj_t *dest_screens[NAV_DEST_COUNT] = {};
+  dest_screens[NAV_DRIVE] =
+      lv_subject_get_int(&locked_subject) != 0 ? ui_LockedScreen : ui_DriveScreen;
+  dest_screens[NAV_SEAT] = ui_SeatScreen;
+  dest_screens[NAV_BENCH] = ui_BenchGateScreen;
+  dest_screens[NAV_DIAG] = ui_DiagnosticsScreen;
+  dest_screens[NAV_JOYSTICK] = ui_JoystickScreen;
+  dest_screens[NAV_LOG] = ui_LogScreen;
+  dest_screens[NAV_SKUNK] = ui_SkunkWorksScreen;
+  dest_screens[NAV_SETTINGS] = ui_SettingsScreen;
   if (dest < NAV_DEST_COUNT && dest_screens[dest] == before && lv_screen_active() == before) {
     nav_arrive(before);
   }
