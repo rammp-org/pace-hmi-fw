@@ -239,6 +239,7 @@ static std::atomic<bool> stick_drives{false};
 // Defined with the burger menu (see "The burger menu, and moving around with
 // the joystick"); declared here for the screens and gestures above it.
 static void nav_use_group(lv_group_t *g, const lv_obj_t *screen);
+static void nav_arrive(lv_obj_t *screen);
 static void nav_to_key();
 static void nav_home();
 static void nav_focus_ring(lv_obj_t *obj);
@@ -3394,6 +3395,7 @@ static void nav_home() {
 // (nav_drop_row, in screen_loaded_cb), which is the spec's "the screen
 // underneath swaps to the destination, then the panel drops".
 static void nav_go(NavDest dest) {
+  lv_obj_t *const before = lv_screen_active();
   if (nav_menu_open != nullptr) {
     lv_obj_add_flag(nav_menu_open, LV_OBJ_FLAG_HIDDEN);
     for (uint32_t id : kNavRowIds) {
@@ -3431,6 +3433,17 @@ static void nav_go(NavDest dest) {
     break;
   case NAV_DEST_COUNT:
     break;
+  }
+  // A row picked on its own screen (UI Settings from UI Settings): LVGL skips
+  // a load of the screen already up, so SCREEN_LOADED never comes, and the
+  // stick would be left on the menu's group -- emptied above -- with nothing
+  // to focus until another screen loaded. Arrive by hand instead.
+  lv_obj_t *const dest_screens[NAV_DEST_COUNT] = {
+      ui_SeatScreen,      ui_SkunkWorksScreen, ui_LogScreen,      ui_DiagnosticsScreen,
+      ui_BenchGateScreen, ui_SettingsScreen,   ui_JoystickScreen,
+  };
+  if (dest < NAV_DEST_COUNT && dest_screens[dest] == before && lv_screen_active() == before) {
+    nav_arrive(before);
   }
   nav_update_stick_gate();
 }
@@ -3686,8 +3699,11 @@ static const char *active_screen_name() {
   return "?";
 }
 
-static void screen_loaded_cb(lv_event_t *e) {
-  lv_obj_t *screen = lv_event_get_target_obj(e);
+static void screen_loaded_cb(lv_event_t *e) { nav_arrive(lv_event_get_target_obj(e)); }
+
+// Everything that happens when a screen comes up: on SCREEN_LOADED, or by
+// hand from nav_go when the destination was already the screen up.
+static void nav_arrive(lv_obj_t *screen) {
   // The overlay that was up belonged to the screen being left. It was closed on
   // the way out, but a screen reached any other way (the unlock timer, a
   // completed hold) has to leave the menu behind too.
@@ -3982,6 +3998,7 @@ static uint8_t *flip_frame = nullptr; // LVGL's upright frame while flipped (PSR
 static ppa_client_handle_t flip_ppa = nullptr;
 static int flip_back = 0; // which panel_fb the next rotated frame goes into
 static std::atomic<bool> display_flipped{false};
+static espp::Logger logger_nav({.tag = "nav", .level = espp::Logger::Verbosity::INFO});
 static espp::Logger logger_flip({.tag = "flip", .level = espp::Logger::Verbosity::INFO});
 
 static void flip_flush_cb(lv_display_t *disp, const lv_area_t *, uint8_t *px_map) {
@@ -5049,6 +5066,32 @@ extern "C" void app_main(void) {
   // every screen carries its own instance of all seven.
   menu_group = lv_group_create();
   lv_indev_set_group(joystick_indev, joystick_group);
+  // A backstop for the stick losing its cursor: if its group ever has nothing
+  // focused while the screen has settled, hand it back to the screen that is
+  // up, as a fresh arrival would. Logged, because it means some path left the
+  // group behind and that path wants fixing too.
+  lv_timer_create(
+      [](lv_timer_t *) {
+        lv_group_t *g = lv_indev_get_group(joystick_indev);
+        static int lost = 0;
+        if (g != nullptr && lv_group_get_focused(g) != nullptr) {
+          lost = 0;
+          return;
+        }
+        // Only screens with the burger key, which always has something to
+        // focus (Boot and Update have none), and only when it stays lost for
+        // two checks in a row: a screen change or a row press in flight
+        // passes through an empty group on its way to SCREEN_LOADED.
+        if (nav_chrome_of(lv_screen_active()) == nullptr || nav_press_timer != nullptr ||
+            ++lost < 2) {
+          return;
+        }
+        lost = 0;
+        logger_nav.warn("the stick had nothing focused on {}; re-entering it",
+                        active_screen_name());
+        nav_arrive(lv_screen_active());
+      },
+      500, nullptr);
   // hold-to-repeat feel. LVGL's defaults (400 ms then every 100 ms) are tuned
   // for a keyboard and run the settings list far too fast for a joystick you
   // steer with; these are the two knobs if it feels wrong on the bench.
