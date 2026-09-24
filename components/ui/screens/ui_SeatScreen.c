@@ -34,25 +34,22 @@ lv_obj_t * ui_SeatButton6 = NULL;
 lv_obj_t * ui_SeatButtonContainer6 = NULL;
 lv_obj_t * ui_SeatButtonLabel6 = NULL;
 lv_obj_t * ui_SeatAdjustmentPanel = NULL;
+lv_obj_t * ui_SeatBackButton = NULL;
+lv_obj_t * ui_SeatBackLabel = NULL;
 lv_obj_t * ui_AngleSettingLabel = NULL;
-lv_obj_t * ui_AngleIndicator = NULL;
 lv_obj_t * ui_AngleLabel = NULL;
 lv_obj_t * ui_MaxAngleLabel = NULL;
 lv_obj_t * ui_SeatAdjustmentButton1 = NULL;
-lv_obj_t * ui_SeatAdjustmentButtonContainer1 = NULL;
 lv_obj_t * ui_SeatAdjustmentButtonLabel1 = NULL;
 lv_obj_t * ui_SeatAdjustmentButton2 = NULL;
-lv_obj_t * ui_SeatAdjustmentButtonContainer2 = NULL;
 lv_obj_t * ui_SeatAdjustmentButtonLabel2 = NULL;
 lv_obj_t * ui_SeatAdjustmentButton3 = NULL;
-lv_obj_t * ui_SeatAdjustmentButtonContainer3 = NULL;
 lv_obj_t * ui_SeatAdjustmentButtonLabel3 = NULL;
 lv_obj_t * ui_SeatAdjustmentButton4 = NULL;
-lv_obj_t * ui_SeatAdjustmentButtonContainer4 = NULL;
 lv_obj_t * ui_SeatAdjustmentButtonLabel4 = NULL;
 lv_obj_t * ui_SeatAdjustmentButton5 = NULL;
-lv_obj_t * ui_SeatAdjustmentButtonContainer5 = NULL;
 lv_obj_t * ui_SeatAdjustmentButtonLabel5 = NULL;
+lv_obj_t * ui_SeatAxisHint = NULL;
 lv_obj_t * ui_TopBar4 = NULL;
 lv_obj_t * ui_ErrorBanner1 = NULL;
 lv_obj_t * ui_DriveBand3 = NULL;
@@ -497,13 +494,15 @@ void ui_SeatScreen_screen_init(void)
     lv_obj_set_style_text_align(ui_SeatButtonLabel6, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(ui_SeatButtonLabel6, &ui_font_MontserratSemiBold44, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_SeatAdjustmentPanel = lv_obj_create(ui_SeatRows);
+    ui_SeatAdjustmentPanel = lv_obj_create(ui_SeatScreen);
     lv_obj_set_width(ui_SeatAdjustmentPanel, 720);
-    lv_obj_set_height(ui_SeatAdjustmentPanel, 790);
-    lv_obj_set_align(ui_SeatAdjustmentPanel, LV_ALIGN_TOP_MID);
-    lv_obj_set_flex_flow(ui_SeatAdjustmentPanel, LV_FLEX_FLOW_ROW_WRAP);
-    lv_obj_set_flex_align(ui_SeatAdjustmentPanel, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_height(ui_SeatAdjustmentPanel, 921);
+    lv_obj_set_x(ui_SeatAdjustmentPanel, 0);
+    lv_obj_set_y(ui_SeatAdjustmentPanel, 195);
+    lv_obj_add_flag(ui_SeatAdjustmentPanel, LV_OBJ_FLAG_HIDDEN);     /// Flags
     lv_obj_remove_flag(ui_SeatAdjustmentPanel, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_scroll_dir(ui_SeatAdjustmentPanel, LV_DIR_VER);
+    lv_obj_set_style_radius(ui_SeatAdjustmentPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     ui_object_set_themeable_style_property(ui_SeatAdjustmentPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
                                            _ui_theme_color_background);
     ui_object_set_themeable_style_property(ui_SeatAdjustmentPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
@@ -512,259 +511,420 @@ void ui_SeatScreen_screen_init(void)
                                            _ui_theme_color_background);
     ui_object_set_themeable_style_property(ui_SeatAdjustmentPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
                                            _ui_theme_alpha_background);
-    lv_obj_set_style_pad_row(ui_SeatAdjustmentPanel, 21, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_pad_column(ui_SeatAdjustmentPanel, 21, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(ui_SeatAdjustmentPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_side(ui_SeatAdjustmentPanel, LV_BORDER_SIDE_FULL, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_SeatAdjustmentPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_SeatAdjustmentPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_SeatAdjustmentPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_SeatAdjustmentPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_SeatAdjustmentPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_SeatAdjustmentPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_SeatBackButton = lv_button_create(ui_SeatAdjustmentPanel);
+    lv_obj_set_width(ui_SeatBackButton, 116);
+    lv_obj_set_height(ui_SeatBackButton, 116);
+    lv_obj_set_x(ui_SeatBackButton, 30);
+    lv_obj_set_y(ui_SeatBackButton, 50);
+    lv_obj_add_flag(ui_SeatBackButton, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
+    lv_obj_remove_flag(ui_SeatBackButton, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_radius(ui_SeatBackButton, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_SeatBackButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_SeatBackButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    lv_obj_set_style_border_color(ui_SeatBackButton, lv_color_hex(0x767676), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_opa(ui_SeatBackButton, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(ui_SeatBackButton, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_SeatBackButton, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_SeatBackButton, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_SeatBackButton, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_SeatBackButton, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_SeatBackButton, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_SeatBackButton, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_SeatBackButton, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_SeatBackButton, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
+    ui_object_set_themeable_style_property(ui_SeatBackButton, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_SeatBackButton, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
+
+    ui_SeatBackLabel = lv_label_create(ui_SeatBackButton);
+    lv_obj_set_width(ui_SeatBackLabel, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(ui_SeatBackLabel, LV_SIZE_CONTENT);    /// 1
+    lv_obj_set_align(ui_SeatBackLabel, LV_ALIGN_CENTER);
+    lv_label_set_text(ui_SeatBackLabel, "");
+    ui_object_set_themeable_style_property(ui_SeatBackLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_SeatBackLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text);
+    lv_obj_set_style_text_font(ui_SeatBackLabel, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_SeatBackLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_SeatBackLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_SeatBackLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_SeatBackLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_SeatBackLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_SeatBackLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_SeatBackLabel, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_SeatBackLabel, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_SeatBackLabel, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_SeatBackLabel, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
 
     ui_AngleSettingLabel = lv_label_create(ui_SeatAdjustmentPanel);
-    lv_obj_set_width(ui_AngleSettingLabel, 660);
-    lv_obj_set_height(ui_AngleSettingLabel, 50);
-    lv_obj_set_align(ui_AngleSettingLabel, LV_ALIGN_TOP_MID);
-    lv_label_set_text(ui_AngleSettingLabel, "Real Tilt");
+    lv_obj_set_width(ui_AngleSettingLabel, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(ui_AngleSettingLabel, LV_SIZE_CONTENT);    /// 1
+    lv_obj_set_x(ui_AngleSettingLabel, 176);
+    lv_obj_set_y(ui_AngleSettingLabel, 85);
+    lv_label_set_text(ui_AngleSettingLabel, "Rear Tilt");
     ui_object_set_themeable_style_property(ui_AngleSettingLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_text);
     ui_object_set_themeable_style_property(ui_AngleSettingLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
                                            _ui_theme_alpha_text);
-    lv_obj_set_style_text_font(ui_AngleSettingLabel, &ui_font_IBMPlexSansMedium53, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_AngleSettingLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
-                                           _ui_theme_color_background);
-    ui_object_set_themeable_style_property(ui_AngleSettingLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
-                                           _ui_theme_alpha_background);
+    lv_obj_set_style_text_font(ui_AngleSettingLabel, &ui_font_MontserratSemiBold44, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_AngleSettingLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_AngleSettingLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_AngleSettingLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_AngleSettingLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_AngleSettingLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_AngleSettingLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_AngleIndicator = lv_obj_create(ui_SeatAdjustmentPanel);
-    lv_obj_remove_style_all(ui_AngleIndicator);
-    lv_obj_set_width(ui_AngleIndicator, 600);
-    lv_obj_set_height(ui_AngleIndicator, LV_SIZE_CONTENT);    /// 250
-    lv_obj_set_align(ui_AngleIndicator, LV_ALIGN_CENTER);
-    lv_obj_set_flex_flow(ui_AngleIndicator, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(ui_AngleIndicator, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER);
-    lv_obj_remove_flag(ui_AngleIndicator,
-                       LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM |
-                       LV_OBJ_FLAG_SCROLL_CHAIN);     /// Flags
-
-    ui_AngleLabel = lv_label_create(ui_AngleIndicator);
-    lv_obj_set_height(ui_AngleLabel, 220);
-    lv_obj_set_width(ui_AngleLabel, LV_SIZE_CONTENT);   /// 700
-    lv_obj_set_align(ui_AngleLabel, LV_ALIGN_CENTER);
+    ui_AngleLabel = lv_label_create(ui_SeatAdjustmentPanel);
+    lv_obj_set_width(ui_AngleLabel, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(ui_AngleLabel, LV_SIZE_CONTENT);    /// 1
+    lv_obj_set_x(ui_AngleLabel, 30);
+    lv_obj_set_y(ui_AngleLabel, 191);
     lv_label_set_text(ui_AngleLabel, "12°");
     ui_object_set_themeable_style_property(ui_AngleLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_text);
     ui_object_set_themeable_style_property(ui_AngleLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
                                            _ui_theme_alpha_text);
     lv_obj_set_style_text_font(ui_AngleLabel, &ui_font_IBMPlexSansMedium264, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_AngleLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
-                                           _ui_theme_color_background);
-    ui_object_set_themeable_style_property(ui_AngleLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
-                                           _ui_theme_alpha_background);
+    lv_obj_set_style_pad_left(ui_AngleLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_AngleLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_AngleLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_AngleLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_AngleLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_AngleLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_MaxAngleLabel = lv_label_create(ui_AngleIndicator);
-    lv_obj_set_width(ui_MaxAngleLabel, LV_SIZE_CONTENT);   /// 100
-    lv_obj_set_height(ui_MaxAngleLabel, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_x(ui_MaxAngleLabel, 30);
-    lv_obj_set_y(ui_MaxAngleLabel, 0);
-    lv_obj_set_align(ui_MaxAngleLabel, LV_ALIGN_BOTTOM_MID);
+    ui_MaxAngleLabel = lv_label_create(ui_SeatAdjustmentPanel);
+    lv_obj_set_width(ui_MaxAngleLabel, 300);
+    lv_obj_set_height(ui_MaxAngleLabel, 70);
+    lv_obj_set_x(ui_MaxAngleLabel, 390);
+    lv_obj_set_y(ui_MaxAngleLabel, 358);
     lv_label_set_text(ui_MaxAngleLabel, "of 25°");
     ui_object_set_themeable_style_property(ui_MaxAngleLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
-                                           _ui_theme_color_text);
+                                           _ui_theme_color_text_muted);
     ui_object_set_themeable_style_property(ui_MaxAngleLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
-                                           _ui_theme_alpha_text);
-    lv_obj_set_style_text_font(ui_MaxAngleLabel, &lv_font_montserrat_34, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_MaxAngleLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
-                                           _ui_theme_color_background);
-    ui_object_set_themeable_style_property(ui_MaxAngleLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
-                                           _ui_theme_alpha_background);
+                                           _ui_theme_alpha_text_muted);
+    lv_obj_set_style_text_align(ui_MaxAngleLabel, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_MaxAngleLabel, &ui_font_IBMPlexSansRegular53, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_MaxAngleLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_MaxAngleLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_MaxAngleLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_MaxAngleLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_MaxAngleLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_MaxAngleLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_SeatAdjustmentButton1 = lv_button_create(ui_SeatAdjustmentPanel);
     lv_obj_set_width(ui_SeatAdjustmentButton1, 320);
     lv_obj_set_height(ui_SeatAdjustmentButton1, 162);
-    lv_obj_set_x(ui_SeatAdjustmentButton1, 0);
-    lv_obj_set_y(ui_SeatAdjustmentButton1, -70);
-    lv_obj_set_align(ui_SeatAdjustmentButton1, LV_ALIGN_BOTTOM_MID);
+    lv_obj_set_x(ui_SeatAdjustmentButton1, 30);
+    lv_obj_set_y(ui_SeatAdjustmentButton1, 472);
     lv_obj_add_flag(ui_SeatAdjustmentButton1, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
     lv_obj_remove_flag(ui_SeatAdjustmentButton1, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_radius(ui_SeatAdjustmentButton1, 10, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_radius(ui_SeatAdjustmentButton1, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
     ui_object_set_themeable_style_property(ui_SeatAdjustmentButton1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
                                            _ui_theme_color_background);
     ui_object_set_themeable_style_property(ui_SeatAdjustmentButton1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
                                            _ui_theme_alpha_background);
-    ui_object_set_themeable_style_property(ui_SeatAdjustmentButton1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_SeatAdjustmentButton1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
-                                           _ui_theme_alpha_text);
+    lv_obj_set_style_border_color(ui_SeatAdjustmentButton1, lv_color_hex(0x767676), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_opa(ui_SeatAdjustmentButton1, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_border_width(ui_SeatAdjustmentButton1, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_SeatAdjustmentButton1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_SeatAdjustmentButton1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_SeatAdjustmentButton1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_SeatAdjustmentButton1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_SeatAdjustmentButton1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_SeatAdjustmentButton1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButton1, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButton1, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButton1, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButton1, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
 
-    ui_SeatAdjustmentButtonContainer1 = lv_obj_create(ui_SeatAdjustmentButton1);
-    lv_obj_remove_style_all(ui_SeatAdjustmentButtonContainer1);
-    lv_obj_set_width(ui_SeatAdjustmentButtonContainer1, 320);
-    lv_obj_set_height(ui_SeatAdjustmentButtonContainer1, 110);
-    lv_obj_set_align(ui_SeatAdjustmentButtonContainer1, LV_ALIGN_CENTER);
-    lv_obj_remove_flag(ui_SeatAdjustmentButtonContainer1, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-
-    ui_SeatAdjustmentButtonLabel1 = lv_label_create(ui_SeatAdjustmentButtonContainer1);
-    lv_obj_set_width(ui_SeatAdjustmentButtonLabel1, 240);
-    lv_obj_set_height(ui_SeatAdjustmentButtonLabel1, LV_SIZE_CONTENT);    /// 50
+    ui_SeatAdjustmentButtonLabel1 = lv_label_create(ui_SeatAdjustmentButton1);
+    lv_obj_set_width(ui_SeatAdjustmentButtonLabel1, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(ui_SeatAdjustmentButtonLabel1, LV_SIZE_CONTENT);    /// 1
     lv_obj_set_align(ui_SeatAdjustmentButtonLabel1, LV_ALIGN_CENTER);
-    lv_label_set_text(ui_SeatAdjustmentButtonLabel1, "-");
+    lv_label_set_text(ui_SeatAdjustmentButtonLabel1, "");
     ui_object_set_themeable_style_property(ui_SeatAdjustmentButtonLabel1, LV_PART_MAIN | LV_STATE_DEFAULT,
                                            LV_STYLE_TEXT_COLOR, _ui_theme_color_text);
     ui_object_set_themeable_style_property(ui_SeatAdjustmentButtonLabel1, LV_PART_MAIN | LV_STATE_DEFAULT,
                                            LV_STYLE_TEXT_OPA, _ui_theme_alpha_text);
-    lv_obj_set_style_text_align(ui_SeatAdjustmentButtonLabel1, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_SeatAdjustmentButtonLabel1, &ui_font_IBMPlexSansBold82, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_SeatAdjustmentButtonLabel1, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_SeatAdjustmentButtonLabel1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_SeatAdjustmentButtonLabel1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_SeatAdjustmentButtonLabel1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_SeatAdjustmentButtonLabel1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_SeatAdjustmentButtonLabel1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_SeatAdjustmentButtonLabel1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButtonLabel1, LV_PART_MAIN | LV_STATE_CHECKED,
+                                           LV_STYLE_TEXT_COLOR, _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButtonLabel1, LV_PART_MAIN | LV_STATE_CHECKED,
+                                           LV_STYLE_TEXT_OPA, _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButtonLabel1, LV_PART_MAIN | LV_STATE_PRESSED,
+                                           LV_STYLE_TEXT_COLOR, _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButtonLabel1, LV_PART_MAIN | LV_STATE_PRESSED,
+                                           LV_STYLE_TEXT_OPA, _ui_theme_alpha_background);
 
     ui_SeatAdjustmentButton2 = lv_button_create(ui_SeatAdjustmentPanel);
     lv_obj_set_width(ui_SeatAdjustmentButton2, 320);
     lv_obj_set_height(ui_SeatAdjustmentButton2, 162);
-    lv_obj_set_x(ui_SeatAdjustmentButton2, 0);
-    lv_obj_set_y(ui_SeatAdjustmentButton2, -70);
-    lv_obj_set_align(ui_SeatAdjustmentButton2, LV_ALIGN_BOTTOM_MID);
+    lv_obj_set_x(ui_SeatAdjustmentButton2, 370);
+    lv_obj_set_y(ui_SeatAdjustmentButton2, 472);
     lv_obj_add_flag(ui_SeatAdjustmentButton2, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
     lv_obj_remove_flag(ui_SeatAdjustmentButton2, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_radius(ui_SeatAdjustmentButton2, 10, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_radius(ui_SeatAdjustmentButton2, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
     ui_object_set_themeable_style_property(ui_SeatAdjustmentButton2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
                                            _ui_theme_color_background);
     ui_object_set_themeable_style_property(ui_SeatAdjustmentButton2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
                                            _ui_theme_alpha_background);
-    ui_object_set_themeable_style_property(ui_SeatAdjustmentButton2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_SeatAdjustmentButton2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
-                                           _ui_theme_alpha_text);
+    lv_obj_set_style_border_color(ui_SeatAdjustmentButton2, lv_color_hex(0x767676), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_opa(ui_SeatAdjustmentButton2, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_border_width(ui_SeatAdjustmentButton2, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_SeatAdjustmentButton2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_SeatAdjustmentButton2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_SeatAdjustmentButton2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_SeatAdjustmentButton2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_SeatAdjustmentButton2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_SeatAdjustmentButton2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButton2, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButton2, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButton2, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButton2, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
 
-    ui_SeatAdjustmentButtonContainer2 = lv_obj_create(ui_SeatAdjustmentButton2);
-    lv_obj_remove_style_all(ui_SeatAdjustmentButtonContainer2);
-    lv_obj_set_width(ui_SeatAdjustmentButtonContainer2, 320);
-    lv_obj_set_height(ui_SeatAdjustmentButtonContainer2, 110);
-    lv_obj_set_align(ui_SeatAdjustmentButtonContainer2, LV_ALIGN_CENTER);
-    lv_obj_remove_flag(ui_SeatAdjustmentButtonContainer2, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-
-    ui_SeatAdjustmentButtonLabel2 = lv_label_create(ui_SeatAdjustmentButtonContainer2);
-    lv_obj_set_width(ui_SeatAdjustmentButtonLabel2, 240);
-    lv_obj_set_height(ui_SeatAdjustmentButtonLabel2, LV_SIZE_CONTENT);    /// 50
+    ui_SeatAdjustmentButtonLabel2 = lv_label_create(ui_SeatAdjustmentButton2);
+    lv_obj_set_width(ui_SeatAdjustmentButtonLabel2, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(ui_SeatAdjustmentButtonLabel2, LV_SIZE_CONTENT);    /// 1
     lv_obj_set_align(ui_SeatAdjustmentButtonLabel2, LV_ALIGN_CENTER);
-    lv_label_set_text(ui_SeatAdjustmentButtonLabel2, "+");
+    lv_label_set_text(ui_SeatAdjustmentButtonLabel2, "");
     ui_object_set_themeable_style_property(ui_SeatAdjustmentButtonLabel2, LV_PART_MAIN | LV_STATE_DEFAULT,
                                            LV_STYLE_TEXT_COLOR, _ui_theme_color_text);
     ui_object_set_themeable_style_property(ui_SeatAdjustmentButtonLabel2, LV_PART_MAIN | LV_STATE_DEFAULT,
                                            LV_STYLE_TEXT_OPA, _ui_theme_alpha_text);
-    lv_obj_set_style_text_align(ui_SeatAdjustmentButtonLabel2, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_SeatAdjustmentButtonLabel2, &ui_font_IBMPlexSansBold82, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_SeatAdjustmentButtonLabel2, &lv_font_montserrat_48, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_SeatAdjustmentButtonLabel2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_SeatAdjustmentButtonLabel2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_SeatAdjustmentButtonLabel2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_SeatAdjustmentButtonLabel2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_SeatAdjustmentButtonLabel2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_SeatAdjustmentButtonLabel2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButtonLabel2, LV_PART_MAIN | LV_STATE_CHECKED,
+                                           LV_STYLE_TEXT_COLOR, _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButtonLabel2, LV_PART_MAIN | LV_STATE_CHECKED,
+                                           LV_STYLE_TEXT_OPA, _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButtonLabel2, LV_PART_MAIN | LV_STATE_PRESSED,
+                                           LV_STYLE_TEXT_COLOR, _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButtonLabel2, LV_PART_MAIN | LV_STATE_PRESSED,
+                                           LV_STYLE_TEXT_OPA, _ui_theme_alpha_background);
 
     ui_SeatAdjustmentButton3 = lv_button_create(ui_SeatAdjustmentPanel);
-    lv_obj_set_width(ui_SeatAdjustmentButton3, 205);
+    lv_obj_set_width(ui_SeatAdjustmentButton3, 207);
     lv_obj_set_height(ui_SeatAdjustmentButton3, 162);
-    lv_obj_set_x(ui_SeatAdjustmentButton3, 0);
-    lv_obj_set_y(ui_SeatAdjustmentButton3, -70);
-    lv_obj_set_align(ui_SeatAdjustmentButton3, LV_ALIGN_BOTTOM_MID);
+    lv_obj_set_x(ui_SeatAdjustmentButton3, 30);
+    lv_obj_set_y(ui_SeatAdjustmentButton3, 655);
     lv_obj_add_flag(ui_SeatAdjustmentButton3, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
     lv_obj_remove_flag(ui_SeatAdjustmentButton3, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_radius(ui_SeatAdjustmentButton3, 10, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_radius(ui_SeatAdjustmentButton3, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
     ui_object_set_themeable_style_property(ui_SeatAdjustmentButton3, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
                                            _ui_theme_color_background);
     ui_object_set_themeable_style_property(ui_SeatAdjustmentButton3, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
                                            _ui_theme_alpha_background);
-    ui_object_set_themeable_style_property(ui_SeatAdjustmentButton3, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_SeatAdjustmentButton3, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
-                                           _ui_theme_alpha_text);
+    lv_obj_set_style_border_color(ui_SeatAdjustmentButton3, lv_color_hex(0x767676), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_opa(ui_SeatAdjustmentButton3, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_border_width(ui_SeatAdjustmentButton3, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_SeatAdjustmentButton3, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_SeatAdjustmentButton3, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_SeatAdjustmentButton3, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_SeatAdjustmentButton3, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_SeatAdjustmentButton3, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_SeatAdjustmentButton3, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButton3, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButton3, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButton3, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButton3, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
 
-    ui_SeatAdjustmentButtonContainer3 = lv_obj_create(ui_SeatAdjustmentButton3);
-    lv_obj_remove_style_all(ui_SeatAdjustmentButtonContainer3);
-    lv_obj_set_width(ui_SeatAdjustmentButtonContainer3, 320);
-    lv_obj_set_height(ui_SeatAdjustmentButtonContainer3, 110);
-    lv_obj_set_align(ui_SeatAdjustmentButtonContainer3, LV_ALIGN_CENTER);
-    lv_obj_remove_flag(ui_SeatAdjustmentButtonContainer3, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-
-    ui_SeatAdjustmentButtonLabel3 = lv_label_create(ui_SeatAdjustmentButtonContainer3);
-    lv_obj_set_width(ui_SeatAdjustmentButtonLabel3, 240);
-    lv_obj_set_height(ui_SeatAdjustmentButtonLabel3, LV_SIZE_CONTENT);    /// 50
+    ui_SeatAdjustmentButtonLabel3 = lv_label_create(ui_SeatAdjustmentButton3);
+    lv_obj_set_width(ui_SeatAdjustmentButtonLabel3, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(ui_SeatAdjustmentButtonLabel3, LV_SIZE_CONTENT);    /// 1
     lv_obj_set_align(ui_SeatAdjustmentButtonLabel3, LV_ALIGN_CENTER);
     lv_label_set_text(ui_SeatAdjustmentButtonLabel3, "0°");
     ui_object_set_themeable_style_property(ui_SeatAdjustmentButtonLabel3, LV_PART_MAIN | LV_STATE_DEFAULT,
                                            LV_STYLE_TEXT_COLOR, _ui_theme_color_text);
     ui_object_set_themeable_style_property(ui_SeatAdjustmentButtonLabel3, LV_PART_MAIN | LV_STATE_DEFAULT,
                                            LV_STYLE_TEXT_OPA, _ui_theme_alpha_text);
-    lv_obj_set_style_text_align(ui_SeatAdjustmentButtonLabel3, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_SeatAdjustmentButtonLabel3, &ui_font_IBMPlexSansMedium53,
+    lv_obj_set_style_text_font(ui_SeatAdjustmentButtonLabel3, &ui_font_MontserratSemiBold44,
                                LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_SeatAdjustmentButtonLabel3, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_SeatAdjustmentButtonLabel3, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_SeatAdjustmentButtonLabel3, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_SeatAdjustmentButtonLabel3, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_SeatAdjustmentButtonLabel3, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_SeatAdjustmentButtonLabel3, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButtonLabel3, LV_PART_MAIN | LV_STATE_CHECKED,
+                                           LV_STYLE_TEXT_COLOR, _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButtonLabel3, LV_PART_MAIN | LV_STATE_CHECKED,
+                                           LV_STYLE_TEXT_OPA, _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButtonLabel3, LV_PART_MAIN | LV_STATE_PRESSED,
+                                           LV_STYLE_TEXT_COLOR, _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButtonLabel3, LV_PART_MAIN | LV_STATE_PRESSED,
+                                           LV_STYLE_TEXT_OPA, _ui_theme_alpha_background);
 
     ui_SeatAdjustmentButton4 = lv_button_create(ui_SeatAdjustmentPanel);
-    lv_obj_set_width(ui_SeatAdjustmentButton4, 205);
+    lv_obj_set_width(ui_SeatAdjustmentButton4, 207);
     lv_obj_set_height(ui_SeatAdjustmentButton4, 162);
-    lv_obj_set_x(ui_SeatAdjustmentButton4, 0);
-    lv_obj_set_y(ui_SeatAdjustmentButton4, -70);
-    lv_obj_set_align(ui_SeatAdjustmentButton4, LV_ALIGN_BOTTOM_MID);
+    lv_obj_set_x(ui_SeatAdjustmentButton4, 257);
+    lv_obj_set_y(ui_SeatAdjustmentButton4, 655);
     lv_obj_add_flag(ui_SeatAdjustmentButton4, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
     lv_obj_remove_flag(ui_SeatAdjustmentButton4, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_radius(ui_SeatAdjustmentButton4, 10, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_radius(ui_SeatAdjustmentButton4, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
     ui_object_set_themeable_style_property(ui_SeatAdjustmentButton4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
                                            _ui_theme_color_background);
     ui_object_set_themeable_style_property(ui_SeatAdjustmentButton4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
                                            _ui_theme_alpha_background);
-    ui_object_set_themeable_style_property(ui_SeatAdjustmentButton4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_SeatAdjustmentButton4, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
-                                           _ui_theme_alpha_text);
+    lv_obj_set_style_border_color(ui_SeatAdjustmentButton4, lv_color_hex(0x767676), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_opa(ui_SeatAdjustmentButton4, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_border_width(ui_SeatAdjustmentButton4, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_SeatAdjustmentButton4, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_SeatAdjustmentButton4, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_SeatAdjustmentButton4, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_SeatAdjustmentButton4, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_SeatAdjustmentButton4, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_SeatAdjustmentButton4, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButton4, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButton4, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButton4, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButton4, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
 
-    ui_SeatAdjustmentButtonContainer4 = lv_obj_create(ui_SeatAdjustmentButton4);
-    lv_obj_remove_style_all(ui_SeatAdjustmentButtonContainer4);
-    lv_obj_set_width(ui_SeatAdjustmentButtonContainer4, 320);
-    lv_obj_set_height(ui_SeatAdjustmentButtonContainer4, 110);
-    lv_obj_set_align(ui_SeatAdjustmentButtonContainer4, LV_ALIGN_CENTER);
-    lv_obj_remove_flag(ui_SeatAdjustmentButtonContainer4, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-
-    ui_SeatAdjustmentButtonLabel4 = lv_label_create(ui_SeatAdjustmentButtonContainer4);
-    lv_obj_set_width(ui_SeatAdjustmentButtonLabel4, 240);
-    lv_obj_set_height(ui_SeatAdjustmentButtonLabel4, LV_SIZE_CONTENT);    /// 50
+    ui_SeatAdjustmentButtonLabel4 = lv_label_create(ui_SeatAdjustmentButton4);
+    lv_obj_set_width(ui_SeatAdjustmentButtonLabel4, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(ui_SeatAdjustmentButtonLabel4, LV_SIZE_CONTENT);    /// 1
     lv_obj_set_align(ui_SeatAdjustmentButtonLabel4, LV_ALIGN_CENTER);
     lv_label_set_text(ui_SeatAdjustmentButtonLabel4, "15°");
     ui_object_set_themeable_style_property(ui_SeatAdjustmentButtonLabel4, LV_PART_MAIN | LV_STATE_DEFAULT,
                                            LV_STYLE_TEXT_COLOR, _ui_theme_color_text);
     ui_object_set_themeable_style_property(ui_SeatAdjustmentButtonLabel4, LV_PART_MAIN | LV_STATE_DEFAULT,
                                            LV_STYLE_TEXT_OPA, _ui_theme_alpha_text);
-    lv_obj_set_style_text_align(ui_SeatAdjustmentButtonLabel4, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_SeatAdjustmentButtonLabel4, &ui_font_IBMPlexSansMedium53,
+    lv_obj_set_style_text_font(ui_SeatAdjustmentButtonLabel4, &ui_font_MontserratSemiBold44,
                                LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_SeatAdjustmentButtonLabel4, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_SeatAdjustmentButtonLabel4, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_SeatAdjustmentButtonLabel4, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_SeatAdjustmentButtonLabel4, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_SeatAdjustmentButtonLabel4, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_SeatAdjustmentButtonLabel4, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButtonLabel4, LV_PART_MAIN | LV_STATE_CHECKED,
+                                           LV_STYLE_TEXT_COLOR, _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButtonLabel4, LV_PART_MAIN | LV_STATE_CHECKED,
+                                           LV_STYLE_TEXT_OPA, _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButtonLabel4, LV_PART_MAIN | LV_STATE_PRESSED,
+                                           LV_STYLE_TEXT_COLOR, _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButtonLabel4, LV_PART_MAIN | LV_STATE_PRESSED,
+                                           LV_STYLE_TEXT_OPA, _ui_theme_alpha_background);
 
     ui_SeatAdjustmentButton5 = lv_button_create(ui_SeatAdjustmentPanel);
-    lv_obj_set_width(ui_SeatAdjustmentButton5, 205);
+    lv_obj_set_width(ui_SeatAdjustmentButton5, 207);
     lv_obj_set_height(ui_SeatAdjustmentButton5, 162);
-    lv_obj_set_x(ui_SeatAdjustmentButton5, 0);
-    lv_obj_set_y(ui_SeatAdjustmentButton5, -70);
-    lv_obj_set_align(ui_SeatAdjustmentButton5, LV_ALIGN_BOTTOM_MID);
+    lv_obj_set_x(ui_SeatAdjustmentButton5, 484);
+    lv_obj_set_y(ui_SeatAdjustmentButton5, 655);
     lv_obj_add_flag(ui_SeatAdjustmentButton5, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
     lv_obj_remove_flag(ui_SeatAdjustmentButton5, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_radius(ui_SeatAdjustmentButton5, 10, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_radius(ui_SeatAdjustmentButton5, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
     ui_object_set_themeable_style_property(ui_SeatAdjustmentButton5, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
                                            _ui_theme_color_background);
     ui_object_set_themeable_style_property(ui_SeatAdjustmentButton5, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
                                            _ui_theme_alpha_background);
-    ui_object_set_themeable_style_property(ui_SeatAdjustmentButton5, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_SeatAdjustmentButton5, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
-                                           _ui_theme_alpha_text);
+    lv_obj_set_style_border_color(ui_SeatAdjustmentButton5, lv_color_hex(0x767676), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_opa(ui_SeatAdjustmentButton5, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_border_width(ui_SeatAdjustmentButton5, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_SeatAdjustmentButton5, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_SeatAdjustmentButton5, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_SeatAdjustmentButton5, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_SeatAdjustmentButton5, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_SeatAdjustmentButton5, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_SeatAdjustmentButton5, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButton5, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButton5, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButton5, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButton5, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
 
-    ui_SeatAdjustmentButtonContainer5 = lv_obj_create(ui_SeatAdjustmentButton5);
-    lv_obj_remove_style_all(ui_SeatAdjustmentButtonContainer5);
-    lv_obj_set_width(ui_SeatAdjustmentButtonContainer5, 320);
-    lv_obj_set_height(ui_SeatAdjustmentButtonContainer5, 110);
-    lv_obj_set_align(ui_SeatAdjustmentButtonContainer5, LV_ALIGN_CENTER);
-    lv_obj_remove_flag(ui_SeatAdjustmentButtonContainer5, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-
-    ui_SeatAdjustmentButtonLabel5 = lv_label_create(ui_SeatAdjustmentButtonContainer5);
-    lv_obj_set_width(ui_SeatAdjustmentButtonLabel5, 240);
-    lv_obj_set_height(ui_SeatAdjustmentButtonLabel5, LV_SIZE_CONTENT);    /// 50
+    ui_SeatAdjustmentButtonLabel5 = lv_label_create(ui_SeatAdjustmentButton5);
+    lv_obj_set_width(ui_SeatAdjustmentButtonLabel5, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(ui_SeatAdjustmentButtonLabel5, LV_SIZE_CONTENT);    /// 1
     lv_obj_set_align(ui_SeatAdjustmentButtonLabel5, LV_ALIGN_CENTER);
     lv_label_set_text(ui_SeatAdjustmentButtonLabel5, "25°");
     ui_object_set_themeable_style_property(ui_SeatAdjustmentButtonLabel5, LV_PART_MAIN | LV_STATE_DEFAULT,
                                            LV_STYLE_TEXT_COLOR, _ui_theme_color_text);
     ui_object_set_themeable_style_property(ui_SeatAdjustmentButtonLabel5, LV_PART_MAIN | LV_STATE_DEFAULT,
                                            LV_STYLE_TEXT_OPA, _ui_theme_alpha_text);
-    lv_obj_set_style_text_align(ui_SeatAdjustmentButtonLabel5, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_SeatAdjustmentButtonLabel5, &ui_font_IBMPlexSansMedium53,
+    lv_obj_set_style_text_font(ui_SeatAdjustmentButtonLabel5, &ui_font_MontserratSemiBold44,
                                LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_SeatAdjustmentButtonLabel5, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_SeatAdjustmentButtonLabel5, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_SeatAdjustmentButtonLabel5, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_SeatAdjustmentButtonLabel5, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_SeatAdjustmentButtonLabel5, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_SeatAdjustmentButtonLabel5, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButtonLabel5, LV_PART_MAIN | LV_STATE_CHECKED,
+                                           LV_STYLE_TEXT_COLOR, _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButtonLabel5, LV_PART_MAIN | LV_STATE_CHECKED,
+                                           LV_STYLE_TEXT_OPA, _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButtonLabel5, LV_PART_MAIN | LV_STATE_PRESSED,
+                                           LV_STYLE_TEXT_COLOR, _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_SeatAdjustmentButtonLabel5, LV_PART_MAIN | LV_STATE_PRESSED,
+                                           LV_STYLE_TEXT_OPA, _ui_theme_alpha_background);
+
+    ui_SeatAxisHint = lv_label_create(ui_SeatAdjustmentPanel);
+    lv_obj_set_width(ui_SeatAxisHint, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(ui_SeatAxisHint, LV_SIZE_CONTENT);    /// 1
+    lv_obj_set_x(ui_SeatAxisHint, 30);
+    lv_obj_set_y(ui_SeatAxisHint, 834);
+    lv_label_set_text(ui_SeatAxisHint, "Hold to move. Release to stop.");
+    ui_object_set_themeable_style_property(ui_SeatAxisHint, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text_muted);
+    ui_object_set_themeable_style_property(ui_SeatAxisHint, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text_muted);
+    lv_obj_set_style_text_font(ui_SeatAxisHint, &ui_font_MontserratRegular28, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_SeatAxisHint, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_SeatAxisHint, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_SeatAxisHint, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_SeatAxisHint, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_SeatAxisHint, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_SeatAxisHint, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_TopBar4 = ui_TopBar_create(ui_SeatScreen);
     lv_obj_set_width(ui_TopBar4, 720);
@@ -837,25 +997,22 @@ void ui_SeatScreen_screen_destroy(void)
     ui_SeatButtonContainer6 = NULL;
     ui_SeatButtonLabel6 = NULL;
     ui_SeatAdjustmentPanel = NULL;
+    ui_SeatBackButton = NULL;
+    ui_SeatBackLabel = NULL;
     ui_AngleSettingLabel = NULL;
-    ui_AngleIndicator = NULL;
     ui_AngleLabel = NULL;
     ui_MaxAngleLabel = NULL;
     ui_SeatAdjustmentButton1 = NULL;
-    ui_SeatAdjustmentButtonContainer1 = NULL;
     ui_SeatAdjustmentButtonLabel1 = NULL;
     ui_SeatAdjustmentButton2 = NULL;
-    ui_SeatAdjustmentButtonContainer2 = NULL;
     ui_SeatAdjustmentButtonLabel2 = NULL;
     ui_SeatAdjustmentButton3 = NULL;
-    ui_SeatAdjustmentButtonContainer3 = NULL;
     ui_SeatAdjustmentButtonLabel3 = NULL;
     ui_SeatAdjustmentButton4 = NULL;
-    ui_SeatAdjustmentButtonContainer4 = NULL;
     ui_SeatAdjustmentButtonLabel4 = NULL;
     ui_SeatAdjustmentButton5 = NULL;
-    ui_SeatAdjustmentButtonContainer5 = NULL;
     ui_SeatAdjustmentButtonLabel5 = NULL;
+    ui_SeatAxisHint = NULL;
     ui_TopBar4 = NULL;
     ui_ErrorBanner1 = NULL;
     ui_DriveBand3 = NULL;

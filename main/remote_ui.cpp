@@ -39,6 +39,9 @@ RemoteUiConfig cfg;
 std::atomic<int32_t> touch_x{0};
 std::atomic<int32_t> touch_y{0};
 std::atomic<bool> touch_down{false};
+// Bumped on every read, so a tap can wait until LVGL has actually seen its
+// press and then its release.
+std::atomic<uint32_t> pointer_reads{0};
 
 lv_indev_t *pointer = nullptr;
 
@@ -47,6 +50,17 @@ void pointer_read(lv_indev_t *, lv_indev_data_t *data) {
   data->point.y = touch_y.load(std::memory_order_relaxed);
   data->state =
       touch_down.load(std::memory_order_relaxed) ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+  pointer_reads.fetch_add(1);
+}
+
+// Holds the pointer as it is until LVGL has read it twice more (so once whole
+// after the change), or a second has gone: a fixed 80 ms was shorter than a
+// full redraw, and a press the LVGL task never polled was a tap that vanished.
+void hold_until_read() {
+  const uint32_t from = pointer_reads.load();
+  for (int waited = 0; waited < 1000 && pointer_reads.load() - from < 2; waited += 5) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
 }
 
 bool send_all(int sock, const void *data, size_t len) {
@@ -222,8 +236,10 @@ bool handle(int sock, const std::string &line) {
   if (verb == "TAP") {
     touch_to(arg(words, 1), arg(words, 2), true);
     std::this_thread::sleep_for(std::chrono::milliseconds(kTapMs));
+    hold_until_read();
     touch_down.store(false, std::memory_order_relaxed);
     std::this_thread::sleep_for(std::chrono::milliseconds(kTapMs));
+    hold_until_read();
     return send_line(sock, "OK");
   }
   if (verb == "PRESS") {

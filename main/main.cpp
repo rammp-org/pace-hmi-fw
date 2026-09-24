@@ -218,6 +218,7 @@ static lv_subject_t stick_sensitivity_subject; // 1..10, see stick_key_threshold
 static lv_subject_t stick_invert_x_subject;    // 1 = left and right swap over
 static lv_subject_t stick_invert_y_subject;    // 1 = forward and back swap over
 static lv_subject_t stick_swap_subject;        // 1 = the stick's X and Y trade places
+static lv_subject_t sounds_subject;            // 0 = the clicks and refusals are silent
 
 // What the ADC task needs of those, as plain atomics it can read without the
 // LVGL lock. Written by setting_store_observer.
@@ -225,6 +226,8 @@ static std::atomic<int> stick_sensitivity{SETTINGS_STICK_SENSITIVITY_MAX - 1};
 static std::atomic<bool> stick_invert_x{false};
 static std::atomic<bool> stick_invert_y{false};
 static std::atomic<bool> stick_swap{false};
+// UI Settings "Sounds". Read by play_click from the touch task as well as LVGL's.
+static std::atomic<bool> sounds_on{true};
 
 // The burger menu's overlay while it is up, else null. Up here because the
 // hold gestures ask whether it is open before they apply.
@@ -864,8 +867,8 @@ static void gpio48_button_callback(const espp::Interrupt::Event &event) {
 static bool load_audio(size_t &out_size, size_t &out_sample_rate);
 static void play_click(espp::M5StackTab5 &tab5);
 // "Can't do that", heard (play_refusal) or heard and felt (refusal_feedback);
-// defined with play_click.
-static void play_refusal();
+// defined with play_click. A warning or error sounds even with Sounds off.
+static void play_refusal(bool warning = false);
 static void refusal_feedback();
 
 // DRV2605 haptic driver: brings the motor on the PCB's JST connector up and
@@ -1329,7 +1332,7 @@ static void banner_show(lv_obj_t *panel, bool up) {
   const bool was_up = !lv_obj_has_flag(panel, LV_OBJ_FLAG_HIDDEN);
   lv_obj_set_flag(panel, LV_OBJ_FLAG_HIDDEN, !up);
   if (up && !was_up && lv_obj_get_screen(panel) == lv_screen_active()) {
-    play_refusal();
+    play_refusal(true);
   }
 }
 
@@ -1999,32 +2002,23 @@ static void seat_click_cb(lv_event_t *e) {
   seat_selected_axis = axis;
   seat_angle_refresh();
 
-  // The pager has SCROLLABLE cleared, so lv_obj_scroll_to_view would bail out
-  // early (it checks that flag) — but lv_obj_scroll_to_x is programmatic and
-  // still moves it. Step math mirrors flex_scroll_step's.
-  lv_obj_update_layout(ui_SeatRows);
-  const int32_t step = lv_obj_get_width(ui_SeatFunctionsButtonsPanel) +
-                       lv_obj_get_style_pad_column(ui_SeatRows, LV_PART_MAIN);
-  lv_obj_scroll_to_x(ui_SeatRows, step, LV_ANIM_ON);
-
-  // Scrolling the buttons out of sight does not stop the keypad reaching them:
-  // the group still holds a focused button, so the joystick would go on moving
-  // and clicking widgets nobody can see. Touch is already safe (LVGL only
-  // descends into children the touch point actually lands on, and these are now
-  // outside the viewport), so it is only the group that needs detaching.
-  //
-  // The adjustment page has its own group, so the joystick moves across with the
-  // pager rather than staying on buttons nobody can see any more.
+  // Spec 04b: the motion's own page, over the function buttons. The joystick
+  // moves across with it -- its own group -- onto "-" rather than the back
+  // button above, since adjusting is what the page is for.
+  lv_obj_remove_flag(ui_SeatAdjustmentPanel, LV_OBJ_FLAG_HIDDEN);
   nav_use_group(seat_adjust_group, ui_SeatScreen);
-  seat_adjust_grid.row = 0;
+  seat_adjust_grid.row = 1;
   seat_adjust_grid.col = 0;
-  lv_group_focus_obj(seat_adjust_grid.cell[0][0]);
+  lv_group_focus_obj(seat_adjust_grid.cell[1][0]);
   seat_page = 1;
 }
 
-// Declared up with the seat grids, which are what call it.
+// Declared up with the seat grids, which are what call it. Also the back
+// button's, and the screen's arrival: the page left up on the last visit must
+// not greet the next one, or the stick's cursor sits on the function buttons
+// hidden underneath it.
 static void seat_show_buttons_page() {
-  lv_obj_scroll_to_x(ui_SeatRows, 0, LV_ANIM_ON);
+  lv_obj_add_flag(ui_SeatAdjustmentPanel, LV_OBJ_FLAG_HIDDEN);
   seat_page = 0;
   nav_use_group(seat_group, ui_SeatScreen);
   // Back to the button the user selected rather than the top-left one: the
@@ -2225,6 +2219,7 @@ static lv_subject_t *const kSettingParamValue[] = {
     &stick_invert_x_subject,    // SETTINGS_PARAM_STICK_INVERT_X
     &stick_invert_y_subject,    // SETTINGS_PARAM_STICK_INVERT_Y
     &stick_swap_subject,        // SETTINGS_PARAM_STICK_SWAP
+    &sounds_subject,            // SETTINGS_PARAM_SOUNDS
 };
 
 // What the named rows read, in SETTINGS_PARAM_* order; nullptr = a number.
@@ -2241,6 +2236,7 @@ static const char *const *const kSettingParamNames[] = {
     kMirrorNames, // SETTINGS_PARAM_STICK_INVERT_X
     kMirrorNames, // SETTINGS_PARAM_STICK_INVERT_Y
     kSwapNames,   // SETTINGS_PARAM_STICK_SWAP
+    kOnOffNames,  // SETTINGS_PARAM_SOUNDS
 };
 static_assert(std::size(kSettingParamNames) == SETTINGS_PARAM_COUNT,
               "every settings_spec.h parameter needs its names (or nullptr) here");
@@ -2337,6 +2333,9 @@ static void setting_store_observer(lv_observer_t *observer, lv_subject_t *subjec
   case SETTINGS_PARAM_STICK_SWAP:
     stick_swap.store(value != 0);
     break;
+  case SETTINGS_PARAM_SOUNDS:
+    sounds_on.store(value != 0);
+    break;
   default:
     break; // MENU_SLIDE: read where it is used, nothing to apply
   }
@@ -2364,19 +2363,63 @@ static void seat_format(const StepperSpec &spec, int32_t raw, char *out, size_t 
 // The adjustment page's two numbers: where the selected axis is, and how far it
 // goes. Written here rather than bound, because which subject they show changes
 // with the function button - see seat_angle_observer.
+//
+// Spec 04b: the big one is the number, with "°" on an angle -- the word "deg"
+// at 264 px was most of the screen -- and the small one says "of 25°", or
+// "of 50.0 mm" on a length, where the unit has no symbol to shrink to.
 static void seat_angle_refresh() {
   if (seat_selected_axis < 0) {
     return;
   }
   const StepperSpec &spec = seat_axis_format[seat_selected_axis];
+  const bool degrees = spec.unit != nullptr && strcmp(spec.unit, "deg") == 0;
+  const int32_t raw = lv_subject_get_int(&seat_axis_value[seat_selected_axis]);
+  const StepperSpec bare{spec.short_name, spec.label,    spec.min_value, spec.max_value,
+                         spec.step,       spec.decimals, nullptr};
+  char number[16];
   char text[32];
-  seat_format(spec, lv_subject_get_int(&seat_axis_value[seat_selected_axis]), text, sizeof(text));
+  if (raw == kValueUnknown) {
+    lv_snprintf(text, sizeof(text), "--");
+  } else {
+    stepper_format(bare, raw, number, sizeof(number));
+    lv_snprintf(text, sizeof(text), "%s%s", number, degrees ? "°" : "");
+  }
   lv_label_set_text(ui_AngleLabel, text);
-  // "of 25°" in the export: the number alone would read as a second reading.
-  seat_format(spec, spec.max_value, text, sizeof(text));
+
+  stepper_format(bare, spec.max_value, number, sizeof(number));
   char footer[40];
-  lv_snprintf(footer, sizeof(footer), "of %s", text);
+  lv_snprintf(footer, sizeof(footer), degrees ? "of %s°" : "of %s %s", number,
+              spec.unit != nullptr ? spec.unit : "");
   lv_label_set_text(ui_MaxAngleLabel, footer);
+
+  // A long reading ("-42.5°") at 264 px runs into the "of": shrink it, about
+  // its bottom-left corner, to fit what the "of" leaves.
+  const lv_font_t *font = lv_obj_get_style_text_font(ui_AngleLabel, LV_PART_MAIN);
+  const lv_font_t *small = lv_obj_get_style_text_font(ui_MaxAngleLabel, LV_PART_MAIN);
+  auto width_of = [](const char *s, const lv_font_t *f) {
+    lv_point_t size;
+    lv_text_get_size(&size, s, f, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    return size.x;
+  };
+  const int32_t wide = width_of(text, font);
+  const int32_t room = 660 - width_of(footer, small) - 24;
+  const int32_t scale =
+      wide > room && wide > 0 ? LV_SCALE_NONE * std::max<int32_t>(room, 1) / wide : LV_SCALE_NONE;
+  lv_obj_set_style_transform_pivot_x(ui_AngleLabel, 0, LV_PART_MAIN);
+  lv_obj_set_style_transform_pivot_y(ui_AngleLabel, lv_pct(100), LV_PART_MAIN);
+  lv_obj_set_style_transform_scale(ui_AngleLabel, scale, LV_PART_MAIN);
+
+  // The preset the motion sits at is the selected one: the negative (spec
+  // 04b, "15°" filled).
+  for (lv_obj_t *preset :
+       {ui_SeatAdjustmentButton3, ui_SeatAdjustmentButton4, ui_SeatAdjustmentButton5}) {
+    const lv_obj_t *label = preset == ui_SeatAdjustmentButton3   ? ui_SeatAdjustmentButtonLabel3
+                            : preset == ui_SeatAdjustmentButton4 ? ui_SeatAdjustmentButtonLabel4
+                                                                 : ui_SeatAdjustmentButtonLabel5;
+    lv_obj_set_state(preset, LV_STATE_CHECKED,
+                     raw != kValueUnknown &&
+                         seat_preset_target(static_cast<size_t>(seat_selected_axis), label) == raw);
+  }
 }
 
 // One per axis, all pointed at ui_AngleLabel: whichever axis moves, the page
@@ -3710,11 +3753,9 @@ static void nav_attach_chrome(lv_obj_t *key, lv_obj_t *overlay, lv_obj_t *band) 
 // Called on load; closing the menu restores the group without this reset.
 static void nav_enter_screen(lv_obj_t *screen) {
   if (screen == ui_SeatScreen) {
-    nav_use_group(seat_group, screen);
-    seat_page = 0;
     seat_buttons_grid.row = 0;
     seat_buttons_grid.col = 0;
-    lv_group_focus_obj(seat_buttons_grid.cell[0][0]);
+    seat_show_buttons_page();
   } else if (screen == ui_BenchGateScreen) {
     nav_use_group(rd_group, screen);
     rd_focus(0);
@@ -4975,6 +5016,7 @@ extern "C" void app_main(void) {
            {&stick_invert_x_subject, SETTINGS_PARAM_STICK_INVERT_X},
            {&stick_invert_y_subject, SETTINGS_PARAM_STICK_INVERT_Y},
            {&stick_swap_subject, SETTINGS_PARAM_STICK_SWAP},
+           {&sounds_subject, SETTINGS_PARAM_SOUNDS},
        }) {
     lv_subject_init_int(subject, settings_get(param));
     lv_subject_add_observer(subject, setting_store_observer,
@@ -5168,6 +5210,11 @@ extern "C" void app_main(void) {
         *down = key == LV_KEY_DOWN;
         *enter = select_key.exchange(false); // one-shot
         *escape = false;
+        if (*enter) {
+          // The stick button's select, heard like a finger landing on the
+          // screen (the touch callback clicks on the press).
+          play_click(espp::M5StackTab5::get());
+        }
       }});
   joystick_indev = joystick_keypad.get_input_device();
   // The fallback group, for the screens whose content nothing focuses: Drive,
@@ -5262,16 +5309,17 @@ extern "C" void app_main(void) {
   seat_buttons_grid.cell[2][0] = ui_SeatButton5; // Static
   seat_buttons_grid.cell[2][1] = ui_SeatButton6; // Dynamic
 
-  // 2 then 3: the wrap layout fits "-" and "+" on one row and the three presets
-  // on the next.
-  seat_adjust_grid.rows = 2;
-  seat_adjust_grid.cols[0] = 2;
-  seat_adjust_grid.cell[0][0] = ui_SeatAdjustmentButton1;
-  seat_adjust_grid.cell[0][1] = ui_SeatAdjustmentButton2;
-  seat_adjust_grid.cols[1] = 3;
-  seat_adjust_grid.cell[1][0] = ui_SeatAdjustmentButton3;
-  seat_adjust_grid.cell[1][1] = ui_SeatAdjustmentButton4;
-  seat_adjust_grid.cell[1][2] = ui_SeatAdjustmentButton5;
+  // Spec 04b, top to bottom: the back button, "-" and "+", the three presets.
+  seat_adjust_grid.rows = 3;
+  seat_adjust_grid.cols[0] = 1;
+  seat_adjust_grid.cell[0][0] = ui_SeatBackButton;
+  seat_adjust_grid.cols[1] = 2;
+  seat_adjust_grid.cell[1][0] = ui_SeatAdjustmentButton1;
+  seat_adjust_grid.cell[1][1] = ui_SeatAdjustmentButton2;
+  seat_adjust_grid.cols[2] = 3;
+  seat_adjust_grid.cell[2][0] = ui_SeatAdjustmentButton3;
+  seat_adjust_grid.cell[2][1] = ui_SeatAdjustmentButton4;
+  seat_adjust_grid.cell[2][2] = ui_SeatAdjustmentButton5;
 
   // Neither page's buttons carry a FOCUSED style in the export, so joystick
   // focus would be invisible. Recolour the 2 px border they already have, the
@@ -5310,18 +5358,28 @@ extern "C" void app_main(void) {
     }
   }
 
-  // The adjustment buttons: "-"/"+" and the three presets, all handled by
-  // grid_click_cb against whichever axis the function button picked.
+  // The adjustment page: "-"/"+" and the three presets, handled by
+  // grid_click_cb against whichever axis the function button picked, and the
+  // back button, which closes the page. The design draws them in the negative
+  // when pressed or checked; the ring is the cursor, as everywhere else.
   seat_adjust_group = lv_group_create();
   for (int r = 0; r < seat_adjust_grid.rows; r++) {
     for (int c = 0; c < seat_adjust_grid.cols[r]; c++) {
       lv_obj_t *button = seat_adjust_grid.cell[r][c];
       lv_group_add_obj(seat_adjust_group, button);
       lv_obj_add_event_cb(button, grid_key_cb, LV_EVENT_KEY, &seat_adjust_grid);
-      lv_obj_add_event_cb(button, grid_click_cb, LV_EVENT_CLICKED, &seat_adjust_grid);
-      style_focus(button);
+      if (button == ui_SeatBackButton) {
+        lv_obj_add_event_cb(
+            button, [](lv_event_t *) { seat_show_buttons_page(); }, LV_EVENT_CLICKED, nullptr);
+      } else {
+        lv_obj_add_event_cb(button, grid_click_cb, LV_EVENT_CLICKED, &seat_adjust_grid);
+      }
+      nav_focus_ring(button);
+      nav_mirror_states(button);
     }
   }
+  // It covers the function buttons: its fill is what hides them.
+  keep_overlay_fill(ui_SeatAdjustmentPanel);
 
   lv_subject_init_string(&seat_function_subject, seat_function_buf, seat_function_prev_buf,
                          sizeof(seat_function_buf), lv_label_get_text(ui_AngleSettingLabel));
@@ -6094,9 +6152,17 @@ static bool load_audio(size_t &out_size, size_t &out_sample_rate) {
   return true;
 }
 
-static void play_click(espp::M5StackTab5 &tab5) {
+static void click_now(espp::M5StackTab5 &tab5) {
   if (audio_bytes.size() > 0) {
     tab5.play_audio(audio_bytes);
+  }
+}
+
+// The click: a touch landing, the stick button selecting, a hold completing.
+// Silent with UI Settings "Sounds" off.
+static void play_click(espp::M5StackTab5 &tab5) {
+  if (sounds_on.load()) {
+    click_now(tab5);
   }
 }
 
@@ -6111,7 +6177,13 @@ static void play_click(espp::M5StackTab5 &tab5) {
 static constexpr uint32_t kRefusalGapMs = 110;
 static constexpr uint32_t kRefusalQuietMs = 400;
 
-static void play_refusal() {
+//
+// `warning` is a banner coming up. Sounds off silences the rest -- a greyed
+// press is still felt -- but never a warning or an error.
+static void play_refusal(bool warning) {
+  if (!warning && !sounds_on.load()) {
+    return;
+  }
   static bool played = false;
   static uint32_t last_ms = 0;
   if (played && lv_tick_elaps(last_ms) < kRefusalQuietMs) {
@@ -6119,8 +6191,8 @@ static void play_refusal() {
   }
   played = true;
   last_ms = lv_tick_get();
-  play_click(espp::M5StackTab5::get());
-  lv_timer_t *second = lv_timer_create([](lv_timer_t *) { play_click(espp::M5StackTab5::get()); },
+  click_now(espp::M5StackTab5::get());
+  lv_timer_t *second = lv_timer_create([](lv_timer_t *) { click_now(espp::M5StackTab5::get()); },
                                        kRefusalGapMs, nullptr);
   lv_timer_set_repeat_count(second, 1);
 }

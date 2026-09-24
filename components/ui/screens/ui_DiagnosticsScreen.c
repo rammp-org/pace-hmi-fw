@@ -11,7 +11,6 @@ lv_obj_t * ui_DiagnosticsTitle = NULL;
 lv_obj_t * ui_DiagnosticsContent = NULL;
 lv_obj_t * ui_DiagRows = NULL;
 lv_obj_t * ui_SpecificSettingsInnerPanel1 = NULL;
-lv_obj_t * ui_DiagnosticsTitleContainer = NULL;
 lv_obj_t * ui_DiagnosticsFlexRows = NULL;
 lv_obj_t * ui_DiagRow = NULL;
 lv_obj_t * ui_TopBar10 = NULL;
@@ -140,16 +139,9 @@ void ui_DiagnosticsScreen_screen_init(void)
     lv_obj_set_style_pad_row(ui_SpecificSettingsInnerPanel1, 20, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_SpecificSettingsInnerPanel1, 20, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_DiagnosticsTitleContainer = lv_obj_create(ui_SpecificSettingsInnerPanel1);
-    lv_obj_remove_style_all(ui_DiagnosticsTitleContainer);
-    lv_obj_set_width(ui_DiagnosticsTitleContainer, 660);
-    lv_obj_set_height(ui_DiagnosticsTitleContainer, 50);
-    lv_obj_set_align(ui_DiagnosticsTitleContainer, LV_ALIGN_CENTER);
-    lv_obj_remove_flag(ui_DiagnosticsTitleContainer, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-
     ui_DiagnosticsFlexRows = lv_obj_create(ui_SpecificSettingsInnerPanel1);
     lv_obj_set_width(ui_DiagnosticsFlexRows, 720);
-    lv_obj_set_height(ui_DiagnosticsFlexRows, 718);
+    lv_obj_set_height(ui_DiagnosticsFlexRows, 788);
     lv_obj_set_align(ui_DiagnosticsFlexRows, LV_ALIGN_TOP_MID);
     lv_obj_set_flex_flow(ui_DiagnosticsFlexRows, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(ui_DiagnosticsFlexRows, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER);
@@ -243,7 +235,6 @@ void ui_DiagnosticsScreen_screen_destroy(void)
     ui_DiagnosticsContent = NULL;
     ui_DiagRows = NULL;
     ui_SpecificSettingsInnerPanel1 = NULL;
-    ui_DiagnosticsTitleContainer = NULL;
     ui_DiagnosticsFlexRows = NULL;
     ui_DiagRow = NULL;
     ui_TopBar10 = NULL;

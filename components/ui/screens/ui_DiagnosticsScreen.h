@@ -19,7 +19,6 @@ extern lv_obj_t * ui_DiagnosticsTitle;
 extern lv_obj_t * ui_DiagnosticsContent;
 extern lv_obj_t * ui_DiagRows;
 extern lv_obj_t * ui_SpecificSettingsInnerPanel1;
-extern lv_obj_t * ui_DiagnosticsTitleContainer;
 extern lv_obj_t * ui_DiagnosticsFlexRows;
 extern lv_obj_t * ui_DiagRow;
 extern lv_obj_t * ui_TopBar10;

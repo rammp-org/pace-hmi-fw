@@ -125,7 +125,8 @@ PARENTS: dict[str, str] = {
     "ui_SeatButton6": "ui_SeatFunctionsButtonsPanel",
     "ui_SeatAdjustmentButton1": "ui_SeatAdjustmentPanel",
     "ui_SeatAdjustmentButton5": "ui_SeatAdjustmentPanel",
-    "ui_AngleLabel": "ui_AngleIndicator",
+    "ui_SeatBackButton": "ui_SeatAdjustmentPanel",
+    "ui_AngleLabel": "ui_SeatAdjustmentPanel",
 }
 
 for _screen, (_bar, _band, _banner, _key, _overlay) in CHROME.items():

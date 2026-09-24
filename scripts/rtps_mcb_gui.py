@@ -35,6 +35,25 @@ from tkinter import simpledialog, ttk
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import rammp_rtps as spec  # noqa: E402  (path setup must run first)
+
+# The drive-mode buttons on the Tab5's Drive screen, left to right, and the
+# profile each one asks for (main.cpp, bind_drive_profile_button). The bench
+# shows the same names in the same order, so a button here is the button
+# there; the wire name follows in brackets.
+HMI_DRIVE_MODES = [
+    ("Manual", spec.DRIVE_PROFILE_HIGH),
+    ("Assist", spec.DRIVE_PROFILE_NORMAL),
+    ("Auto", spec.DRIVE_PROFILE_LOW),
+]
+
+
+def profile_label(value: int) -> str:
+    """'Manual (HIGH)' for a profile the HMI has a button for, else the wire name."""
+    wire = spec.DRIVE_PROFILE_NAMES.get(value, "?")
+    for name, profile in HMI_DRIVE_MODES:
+        if profile == value:
+            return f"{name} ({wire})"
+    return wire
 import rtps_host  # noqa: E402
 import rtps_drive_game  # noqa: E402
 import rtps_mcb_sim  # noqa: E402
@@ -233,11 +252,13 @@ class McbPanel:
 
         self.profile_raw_var = tk.StringVar(value=str(spec.DRIVE_PROFILE_NORMAL))
         column = 0
-        # Presets from the spec's enum, so a new profile in the header turns
-        # into a button here with nothing to change in this file.
-        for value in sorted(spec.DRIVE_PROFILE_NAMES):
+        # The HMI's own buttons first, in its order and with its names, then
+        # any profile the spec's enum has that the HMI has no button for.
+        shown = [profile for _, profile in HMI_DRIVE_MODES]
+        extra = [v for v in sorted(spec.DRIVE_PROFILE_NAMES) if v not in shown]
+        for value in shown + extra:
             ttk.Button(
-                profile, text=spec.DRIVE_PROFILE_NAMES[value], width=10,
+                profile, text=profile_label(value), width=15,
                 command=lambda v=value: self._set_profile(v),
             ).grid(row=0, column=column, padx=(0, 4))
             column += 1
@@ -299,8 +320,8 @@ class McbPanel:
         if self.harness is None:
             return
         request = spec.DRIVE_REQUEST_NAMES.get(self.harness.drive_request, "?")
-        asked = spec.DRIVE_PROFILE_NAMES.get(self.harness.requested_profile, "?")
-        reported = spec.DRIVE_PROFILE_NAMES.get(self.harness.profile, "?")
+        asked = profile_label(self.harness.requested_profile)
+        reported = profile_label(self.harness.profile)
         state = spec.MIB_SYSTEM_STATE_NAMES.get(self.harness.system_state, "?")
         agree = "" if self.harness.profile == self.harness.requested_profile else "  (overridden)"
         self.drive_request_label.configure(
@@ -1016,7 +1037,7 @@ class McbPanel:
             self.axis_bars[axis]["value"] = max(0, min(100, 50 + value * 50))
             self.axis_labels[axis].configure(text=f"{value:+.2f}")
         # The profile is not in the stick sample: it arrives on DriveCommand.
-        profile = spec.DRIVE_PROFILE_NAMES.get(self.harness.profile, "?")
+        profile = profile_label(self.harness.profile)
         pressed = bool(buttons & spec.BUTTONS_JOYSTICK)
         self.button_label.configure(
             text=f"button: {'PRESSED' if pressed else 'released'}   profile: {profile}")

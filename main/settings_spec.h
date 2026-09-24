@@ -27,7 +27,8 @@
   X(UI, STICK_SENSITIVITY, "S5", "Stick sensitivity", 1, 10, 1, 0, "", 9)                          \
   X(UI, STICK_INVERT_X, "S6", "Stick left/right", 0, 1, 1, 0, "", 0)                               \
   X(UI, STICK_INVERT_Y, "S7", "Stick fwd/back", 0, 1, 1, 0, "", 0)                                 \
-  X(UI, STICK_SWAP, "S8", "Stick axes", 0, 1, 1, 0, "", 0)
+  X(UI, STICK_SWAP, "S8", "Stick axes", 0, 1, 1, 0, "", 0)                                         \
+  X(UI, SOUNDS, "S9", "Sounds", 0, 1, 1, 0, "", 1)
 
 /* SETTINGS_PAGE_SCREEN_BRIGHTNESS, ..., SETTINGS_PAGE_COUNT */
 enum {
