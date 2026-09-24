@@ -14,17 +14,17 @@ extern "C" {
 extern void ui_SkunkWorksScreen_screen_init(void);
 extern void ui_SkunkWorksScreen_screen_destroy(void);
 extern lv_obj_t * ui_SkunkWorksScreen;
-extern lv_obj_t * ui_TopBar9;
-extern lv_obj_t * ui_ErrorBanner7;
-extern lv_obj_t * ui_DriveBand8;
-extern lv_obj_t * ui_MenuKey8;
-extern lv_obj_t * ui_MenuOverlay8;
 extern lv_obj_t * ui_SkunkWorksBody;
 extern lv_obj_t * ui_SkunkWorksTitle;
 extern lv_obj_t * ui_SkunkWorksContent;
 extern lv_obj_t * ui_SlotRows;
 extern lv_obj_t * ui_GenericActionsFlexPanel;
 extern lv_obj_t * ui_SlotTile;
+extern lv_obj_t * ui_TopBar9;
+extern lv_obj_t * ui_ErrorBanner7;
+extern lv_obj_t * ui_DriveBand8;
+extern lv_obj_t * ui_MenuKey8;
+extern lv_obj_t * ui_MenuOverlay8;
 // CUSTOM VARIABLES
 
 #ifdef __cplusplus

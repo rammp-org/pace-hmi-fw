@@ -1,0 +1,22 @@
+menu "RAMMP HMI"
+
+    config HMI_REMOTE_UI
+        bool "Remote UI debug channel (screenshots + input injection)"
+        default n
+        help
+            Opens a TCP server on port 3333 that hands out the current frame as
+            raw RGB565 and injects touch, joystick and button input, so the whole
+            UI can be walked and captured from scripts/hmi_ui.py instead of by
+            someone looking at the panel.
+
+            THIS CAN MOVE THE CHAIR. It is a debug back door with no
+            authentication: anything on the same network can drive the HMI. It
+            refuses input while the MCB reports the chair enabled, and reading
+            the screen is always allowed, but that is a guard rail, not
+            security.
+
+            Off by default for that reason. Turn it on in your local sdkconfig
+            (which is not in git) while working on the UI, not in
+            sdkconfig.defaults -- that one ships.
+
+endmenu

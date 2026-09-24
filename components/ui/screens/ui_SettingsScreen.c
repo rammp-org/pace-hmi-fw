@@ -6,11 +6,6 @@
 #include "../ui.h"
 
 lv_obj_t * ui_SettingsScreen = NULL;
-lv_obj_t * ui_TopBar8 = NULL;
-lv_obj_t * ui_ErrorBanner6 = NULL;
-lv_obj_t * ui_DriveBand7 = NULL;
-lv_obj_t * ui_MenuKey7 = NULL;
-lv_obj_t * ui_MenuOverlay7 = NULL;
 lv_obj_t * ui_SettingsBody = NULL;
 lv_obj_t * ui_SettingsTitle = NULL;
 lv_obj_t * ui_SettingsContent = NULL;
@@ -18,6 +13,11 @@ lv_obj_t * ui_SettingsRows = NULL;
 lv_obj_t * ui_SpecificSettingsInnerPanel = NULL;
 lv_obj_t * ui_SpecificSettingsRows = NULL;
 lv_obj_t * ui_Parameter1 = NULL;
+lv_obj_t * ui_TopBar8 = NULL;
+lv_obj_t * ui_ErrorBanner6 = NULL;
+lv_obj_t * ui_DriveBand7 = NULL;
+lv_obj_t * ui_MenuKey7 = NULL;
+lv_obj_t * ui_MenuOverlay7 = NULL;
 // event funtions
 
 // build funtions
@@ -30,40 +30,6 @@ void ui_SettingsScreen_screen_init(void)
                                            _ui_theme_color_background);
     ui_object_set_themeable_style_property(ui_SettingsScreen, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
                                            _ui_theme_alpha_background);
-
-    ui_TopBar8 = ui_TopBar_create(ui_SettingsScreen);
-    lv_obj_set_width(ui_TopBar8, 720);
-    lv_obj_set_height(ui_TopBar8, 55);
-    lv_obj_set_x(ui_TopBar8, 0);
-    lv_obj_set_y(ui_TopBar8, 0);
-
-    //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
-
-    ui_ErrorBanner6 = ui_ErrorBanner_create(ui_SettingsScreen);
-    lv_obj_set_width(ui_ErrorBanner6, 720);
-    lv_obj_set_height(ui_ErrorBanner6, 400);
-    lv_obj_set_x(ui_ErrorBanner6, 0);
-    lv_obj_set_y(ui_ErrorBanner6, 195);
-
-    ui_DriveBand7 = ui_DriveBand_create(ui_SettingsScreen);
-    lv_obj_set_width(ui_DriveBand7, 720);
-    lv_obj_set_height(ui_DriveBand7, 140);
-    lv_obj_set_x(ui_DriveBand7, 0);
-    lv_obj_set_y(ui_DriveBand7, 55);
-
-    ui_MenuKey7 = ui_MenuKey_create(ui_SettingsScreen);
-    lv_obj_set_width(ui_MenuKey7, 720);
-    lv_obj_set_height(ui_MenuKey7, 164);
-    lv_obj_set_x(ui_MenuKey7, 0);
-    lv_obj_set_y(ui_MenuKey7, 1116);
-
-    ui_MenuOverlay7 = ui_MenuOverlay_create(ui_SettingsScreen);
-    lv_obj_set_width(ui_MenuOverlay7, 720);
-    lv_obj_set_height(ui_MenuOverlay7, 921);
-    lv_obj_set_x(ui_MenuOverlay7, 0);
-    lv_obj_set_y(ui_MenuOverlay7, 195);
-
-
 
     ui_SettingsBody = lv_obj_create(ui_SettingsScreen);
     lv_obj_set_width(ui_SettingsBody, 720);
@@ -200,6 +166,40 @@ void ui_SettingsScreen_screen_init(void)
     lv_obj_set_x(ui_Parameter1, 0);
     lv_obj_set_y(ui_Parameter1, 100);
 
+    ui_TopBar8 = ui_TopBar_create(ui_SettingsScreen);
+    lv_obj_set_width(ui_TopBar8, 720);
+    lv_obj_set_height(ui_TopBar8, 55);
+    lv_obj_set_x(ui_TopBar8, 0);
+    lv_obj_set_y(ui_TopBar8, 0);
+
+    //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
+
+    ui_ErrorBanner6 = ui_ErrorBanner_create(ui_SettingsScreen);
+    lv_obj_set_width(ui_ErrorBanner6, 720);
+    lv_obj_set_height(ui_ErrorBanner6, 400);
+    lv_obj_set_x(ui_ErrorBanner6, 0);
+    lv_obj_set_y(ui_ErrorBanner6, 195);
+
+    ui_DriveBand7 = ui_DriveBand_create(ui_SettingsScreen);
+    lv_obj_set_width(ui_DriveBand7, 720);
+    lv_obj_set_height(ui_DriveBand7, 140);
+    lv_obj_set_x(ui_DriveBand7, 0);
+    lv_obj_set_y(ui_DriveBand7, 55);
+
+    ui_MenuKey7 = ui_MenuKey_create(ui_SettingsScreen);
+    lv_obj_set_width(ui_MenuKey7, 720);
+    lv_obj_set_height(ui_MenuKey7, 164);
+    lv_obj_set_x(ui_MenuKey7, 0);
+    lv_obj_set_y(ui_MenuKey7, 1116);
+
+    ui_MenuOverlay7 = ui_MenuOverlay_create(ui_SettingsScreen);
+    lv_obj_set_width(ui_MenuOverlay7, 720);
+    lv_obj_set_height(ui_MenuOverlay7, 921);
+    lv_obj_set_x(ui_MenuOverlay7, 0);
+    lv_obj_set_y(ui_MenuOverlay7, 195);
+
+
+
 }
 
 void ui_SettingsScreen_screen_destroy(void)
@@ -208,11 +208,6 @@ void ui_SettingsScreen_screen_destroy(void)
 
     // NULL screen variables
     ui_SettingsScreen = NULL;
-    ui_TopBar8 = NULL;
-    ui_ErrorBanner6 = NULL;
-    ui_DriveBand7 = NULL;
-    ui_MenuKey7 = NULL;
-    ui_MenuOverlay7 = NULL;
     ui_SettingsBody = NULL;
     ui_SettingsTitle = NULL;
     ui_SettingsContent = NULL;
@@ -220,5 +215,10 @@ void ui_SettingsScreen_screen_destroy(void)
     ui_SpecificSettingsInnerPanel = NULL;
     ui_SpecificSettingsRows = NULL;
     ui_Parameter1 = NULL;
+    ui_TopBar8 = NULL;
+    ui_ErrorBanner6 = NULL;
+    ui_DriveBand7 = NULL;
+    ui_MenuKey7 = NULL;
+    ui_MenuOverlay7 = NULL;
 
 }

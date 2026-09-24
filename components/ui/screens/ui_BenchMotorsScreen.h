@@ -14,11 +14,6 @@ extern "C" {
 extern void ui_BenchMotorsScreen_screen_init(void);
 extern void ui_BenchMotorsScreen_screen_destroy(void);
 extern lv_obj_t * ui_BenchMotorsScreen;
-extern lv_obj_t * ui_TopBar7;
-extern lv_obj_t * ui_ErrorBanner3;
-extern lv_obj_t * ui_DriveBand6;
-extern lv_obj_t * ui_MenuKey5;
-extern lv_obj_t * ui_MenuOverlay5;
 extern lv_obj_t * ui_BenchMotorsBody;
 extern lv_obj_t * ui_MotorsTitle;
 extern lv_obj_t * ui_BenchMotorsContent;
@@ -26,6 +21,11 @@ extern lv_obj_t * ui_MotorRows;
 extern lv_obj_t * ui_RDScreenFlexPanelInner;
 extern lv_obj_t * ui_ActuatorsFlexPanel;
 extern lv_obj_t * ui_SettingRow;
+extern lv_obj_t * ui_TopBar7;
+extern lv_obj_t * ui_ErrorBanner3;
+extern lv_obj_t * ui_DriveBand6;
+extern lv_obj_t * ui_MenuKey5;
+extern lv_obj_t * ui_MenuOverlay5;
 // CUSTOM VARIABLES
 
 #ifdef __cplusplus

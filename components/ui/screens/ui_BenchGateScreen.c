@@ -148,9 +148,9 @@ void ui_BenchGateScreen_screen_init(void)
     lv_obj_remove_flag(ui_BenchPinDot1, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_obj_set_style_radius(ui_BenchPinDot1, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
     ui_object_set_themeable_style_property(ui_BenchPinDot1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
-                                           _ui_theme_color_text);
+                                           _ui_theme_color_background);
     ui_object_set_themeable_style_property(ui_BenchPinDot1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
-                                           _ui_theme_alpha_text);
+                                           _ui_theme_alpha_background);
     lv_obj_set_style_border_color(ui_BenchPinDot1, lv_color_hex(0x767676), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_border_opa(ui_BenchPinDot1, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_border_width(ui_BenchPinDot1, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -170,9 +170,9 @@ void ui_BenchGateScreen_screen_init(void)
     lv_obj_remove_flag(ui_BenchPinDot2, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_obj_set_style_radius(ui_BenchPinDot2, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
     ui_object_set_themeable_style_property(ui_BenchPinDot2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
-                                           _ui_theme_color_text);
+                                           _ui_theme_color_background);
     ui_object_set_themeable_style_property(ui_BenchPinDot2, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
-                                           _ui_theme_alpha_text);
+                                           _ui_theme_alpha_background);
     lv_obj_set_style_border_color(ui_BenchPinDot2, lv_color_hex(0x767676), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_border_opa(ui_BenchPinDot2, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_border_width(ui_BenchPinDot2, 2, LV_PART_MAIN | LV_STATE_DEFAULT);

@@ -6,12 +6,6 @@
 #include "../ui.h"
 
 lv_obj_t * ui_DiagnosticsScreen = NULL;
-lv_obj_t * ui_TopBar10 = NULL;
-lv_obj_t * ui_ErrorBanner8 = NULL;
-lv_obj_t * ui_DriveBand9 = NULL;
-lv_obj_t * ui_MenuKey9 = NULL;
-lv_obj_t * ui_MenuOverlay9 = NULL;
-lv_obj_t * ui_DiagnosticsFreqLabel = NULL;
 lv_obj_t * ui_DiagnosticsBody = NULL;
 lv_obj_t * ui_DiagnosticsTitle = NULL;
 lv_obj_t * ui_DiagnosticsContent = NULL;
@@ -20,6 +14,12 @@ lv_obj_t * ui_SpecificSettingsInnerPanel1 = NULL;
 lv_obj_t * ui_DiagnosticsTitleContainer = NULL;
 lv_obj_t * ui_DiagnosticsFlexRows = NULL;
 lv_obj_t * ui_DiagRow = NULL;
+lv_obj_t * ui_TopBar10 = NULL;
+lv_obj_t * ui_ErrorBanner8 = NULL;
+lv_obj_t * ui_DriveBand9 = NULL;
+lv_obj_t * ui_MenuKey9 = NULL;
+lv_obj_t * ui_MenuOverlay9 = NULL;
+lv_obj_t * ui_DiagnosticsFreqLabel = NULL;
 // event funtions
 
 // build funtions
@@ -32,59 +32,6 @@ void ui_DiagnosticsScreen_screen_init(void)
                                            _ui_theme_color_background);
     ui_object_set_themeable_style_property(ui_DiagnosticsScreen, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
                                            _ui_theme_alpha_background);
-
-    ui_TopBar10 = ui_TopBar_create(ui_DiagnosticsScreen);
-    lv_obj_set_width(ui_TopBar10, 720);
-    lv_obj_set_height(ui_TopBar10, 55);
-    lv_obj_set_x(ui_TopBar10, 0);
-    lv_obj_set_y(ui_TopBar10, 0);
-
-    //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
-
-    ui_ErrorBanner8 = ui_ErrorBanner_create(ui_DiagnosticsScreen);
-    lv_obj_set_width(ui_ErrorBanner8, 720);
-    lv_obj_set_height(ui_ErrorBanner8, 400);
-    lv_obj_set_x(ui_ErrorBanner8, 0);
-    lv_obj_set_y(ui_ErrorBanner8, 195);
-
-    ui_DriveBand9 = ui_DriveBand_create(ui_DiagnosticsScreen);
-    lv_obj_set_width(ui_DriveBand9, 720);
-    lv_obj_set_height(ui_DriveBand9, 140);
-    lv_obj_set_x(ui_DriveBand9, 0);
-    lv_obj_set_y(ui_DriveBand9, 55);
-
-    ui_MenuKey9 = ui_MenuKey_create(ui_DiagnosticsScreen);
-    lv_obj_set_width(ui_MenuKey9, 720);
-    lv_obj_set_height(ui_MenuKey9, 164);
-    lv_obj_set_x(ui_MenuKey9, 0);
-    lv_obj_set_y(ui_MenuKey9, 1116);
-
-    ui_MenuOverlay9 = ui_MenuOverlay_create(ui_DiagnosticsScreen);
-    lv_obj_set_width(ui_MenuOverlay9, 720);
-    lv_obj_set_height(ui_MenuOverlay9, 921);
-    lv_obj_set_x(ui_MenuOverlay9, 0);
-    lv_obj_set_y(ui_MenuOverlay9, 195);
-
-
-
-    ui_DiagnosticsFreqLabel = lv_label_create(ui_DiagnosticsScreen);
-    lv_obj_set_width(ui_DiagnosticsFreqLabel, 300);
-    lv_obj_set_height(ui_DiagnosticsFreqLabel, 40);
-    lv_obj_set_x(ui_DiagnosticsFreqLabel, 390);
-    lv_obj_set_y(ui_DiagnosticsFreqLabel, 259);
-    lv_label_set_text(ui_DiagnosticsFreqLabel, "2 Hz · live");
-    ui_object_set_themeable_style_property(ui_DiagnosticsFreqLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
-                                           _ui_theme_color_text_muted);
-    ui_object_set_themeable_style_property(ui_DiagnosticsFreqLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
-                                           _ui_theme_alpha_text_muted);
-    lv_obj_set_style_text_align(ui_DiagnosticsFreqLabel, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_DiagnosticsFreqLabel, &ui_font_IBMPlexSansRegular28, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_pad_left(ui_DiagnosticsFreqLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_pad_right(ui_DiagnosticsFreqLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_pad_top(ui_DiagnosticsFreqLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_pad_bottom(ui_DiagnosticsFreqLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_pad_row(ui_DiagnosticsFreqLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_pad_column(ui_DiagnosticsFreqLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_DiagnosticsBody = lv_obj_create(ui_DiagnosticsScreen);
     lv_obj_set_width(ui_DiagnosticsBody, 720);
@@ -228,6 +175,58 @@ void ui_DiagnosticsScreen_screen_init(void)
     lv_obj_set_x(ui_DiagRow, 0);
     lv_obj_set_y(ui_DiagRow, 102);
 
+    ui_TopBar10 = ui_TopBar_create(ui_DiagnosticsScreen);
+    lv_obj_set_width(ui_TopBar10, 720);
+    lv_obj_set_height(ui_TopBar10, 55);
+    lv_obj_set_x(ui_TopBar10, 0);
+    lv_obj_set_y(ui_TopBar10, 0);
+
+    //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
+
+    ui_ErrorBanner8 = ui_ErrorBanner_create(ui_DiagnosticsScreen);
+    lv_obj_set_width(ui_ErrorBanner8, 720);
+    lv_obj_set_height(ui_ErrorBanner8, 400);
+    lv_obj_set_x(ui_ErrorBanner8, 0);
+    lv_obj_set_y(ui_ErrorBanner8, 195);
+
+    ui_DriveBand9 = ui_DriveBand_create(ui_DiagnosticsScreen);
+    lv_obj_set_width(ui_DriveBand9, 720);
+    lv_obj_set_height(ui_DriveBand9, 140);
+    lv_obj_set_x(ui_DriveBand9, 0);
+    lv_obj_set_y(ui_DriveBand9, 55);
+
+    ui_MenuKey9 = ui_MenuKey_create(ui_DiagnosticsScreen);
+    lv_obj_set_width(ui_MenuKey9, 720);
+    lv_obj_set_height(ui_MenuKey9, 164);
+    lv_obj_set_x(ui_MenuKey9, 0);
+    lv_obj_set_y(ui_MenuKey9, 1116);
+
+    ui_MenuOverlay9 = ui_MenuOverlay_create(ui_DiagnosticsScreen);
+    lv_obj_set_width(ui_MenuOverlay9, 720);
+    lv_obj_set_height(ui_MenuOverlay9, 921);
+    lv_obj_set_x(ui_MenuOverlay9, 0);
+    lv_obj_set_y(ui_MenuOverlay9, 195);
+
+
+
+    ui_DiagnosticsFreqLabel = lv_label_create(ui_DiagnosticsScreen);
+    lv_obj_set_width(ui_DiagnosticsFreqLabel, 300);
+    lv_obj_set_height(ui_DiagnosticsFreqLabel, 40);
+    lv_obj_set_x(ui_DiagnosticsFreqLabel, 390);
+    lv_obj_set_y(ui_DiagnosticsFreqLabel, 259);
+    lv_label_set_text(ui_DiagnosticsFreqLabel, "2 Hz · live");
+    ui_object_set_themeable_style_property(ui_DiagnosticsFreqLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text_muted);
+    ui_object_set_themeable_style_property(ui_DiagnosticsFreqLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text_muted);
+    lv_obj_set_style_text_align(ui_DiagnosticsFreqLabel, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_DiagnosticsFreqLabel, &ui_font_IBMPlexSansRegular28, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_DiagnosticsFreqLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_DiagnosticsFreqLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_DiagnosticsFreqLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_DiagnosticsFreqLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_DiagnosticsFreqLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_DiagnosticsFreqLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
 }
 
@@ -237,12 +236,6 @@ void ui_DiagnosticsScreen_screen_destroy(void)
 
     // NULL screen variables
     ui_DiagnosticsScreen = NULL;
-    ui_TopBar10 = NULL;
-    ui_ErrorBanner8 = NULL;
-    ui_DriveBand9 = NULL;
-    ui_MenuKey9 = NULL;
-    ui_MenuOverlay9 = NULL;
-    ui_DiagnosticsFreqLabel = NULL;
     ui_DiagnosticsBody = NULL;
     ui_DiagnosticsTitle = NULL;
     ui_DiagnosticsContent = NULL;
@@ -251,5 +244,11 @@ void ui_DiagnosticsScreen_screen_destroy(void)
     ui_DiagnosticsTitleContainer = NULL;
     ui_DiagnosticsFlexRows = NULL;
     ui_DiagRow = NULL;
+    ui_TopBar10 = NULL;
+    ui_ErrorBanner8 = NULL;
+    ui_DriveBand9 = NULL;
+    ui_MenuKey9 = NULL;
+    ui_MenuOverlay9 = NULL;
+    ui_DiagnosticsFreqLabel = NULL;
 
 }

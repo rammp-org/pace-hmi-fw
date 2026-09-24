@@ -14,11 +14,6 @@ extern "C" {
 extern void ui_SettingsScreen_screen_init(void);
 extern void ui_SettingsScreen_screen_destroy(void);
 extern lv_obj_t * ui_SettingsScreen;
-extern lv_obj_t * ui_TopBar8;
-extern lv_obj_t * ui_ErrorBanner6;
-extern lv_obj_t * ui_DriveBand7;
-extern lv_obj_t * ui_MenuKey7;
-extern lv_obj_t * ui_MenuOverlay7;
 extern lv_obj_t * ui_SettingsBody;
 extern lv_obj_t * ui_SettingsTitle;
 extern lv_obj_t * ui_SettingsContent;
@@ -26,6 +21,11 @@ extern lv_obj_t * ui_SettingsRows;
 extern lv_obj_t * ui_SpecificSettingsInnerPanel;
 extern lv_obj_t * ui_SpecificSettingsRows;
 extern lv_obj_t * ui_Parameter1;
+extern lv_obj_t * ui_TopBar8;
+extern lv_obj_t * ui_ErrorBanner6;
+extern lv_obj_t * ui_DriveBand7;
+extern lv_obj_t * ui_MenuKey7;
+extern lv_obj_t * ui_MenuOverlay7;
 // CUSTOM VARIABLES
 
 #ifdef __cplusplus

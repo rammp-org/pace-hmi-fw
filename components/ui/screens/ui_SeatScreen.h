@@ -14,11 +14,6 @@ extern "C" {
 extern void ui_SeatScreen_screen_init(void);
 extern void ui_SeatScreen_screen_destroy(void);
 extern lv_obj_t * ui_SeatScreen;
-extern lv_obj_t * ui_TopBar4;
-extern lv_obj_t * ui_ErrorBanner1;
-extern lv_obj_t * ui_DriveBand3;
-extern lv_obj_t * ui_MenuKey4;
-extern lv_obj_t * ui_MenuOverlay4;
 extern lv_obj_t * ui_SeatBody;
 extern lv_obj_t * ui_SeatTitle;
 extern lv_obj_t * ui_SeatContent;
@@ -66,6 +61,11 @@ extern lv_obj_t * ui_SeatAdjustmentButtonLabel4;
 extern lv_obj_t * ui_SeatAdjustmentButton5;
 extern lv_obj_t * ui_SeatAdjustmentButtonContainer5;
 extern lv_obj_t * ui_SeatAdjustmentButtonLabel5;
+extern lv_obj_t * ui_TopBar4;
+extern lv_obj_t * ui_ErrorBanner1;
+extern lv_obj_t * ui_DriveBand3;
+extern lv_obj_t * ui_MenuKey4;
+extern lv_obj_t * ui_MenuOverlay4;
 // CUSTOM VARIABLES
 
 #ifdef __cplusplus

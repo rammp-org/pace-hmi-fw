@@ -14,11 +14,6 @@ extern "C" {
 extern void ui_LogScreen_screen_init(void);
 extern void ui_LogScreen_screen_destroy(void);
 extern lv_obj_t * ui_LogScreen;
-extern lv_obj_t * ui_TopBar6;
-extern lv_obj_t * ui_ErrorBanner5;
-extern lv_obj_t * ui_DriveBand5;
-extern lv_obj_t * ui_MenuKey6;
-extern lv_obj_t * ui_MenuOverlay6;
 extern lv_obj_t * ui_LogBody;
 extern lv_obj_t * ui_LogTitle;
 extern lv_obj_t * ui_LogContent;
@@ -29,6 +24,11 @@ extern lv_obj_t * ui_GoToOldestButton;
 extern lv_obj_t * ui_GoToOldestButtonLabel;
 extern lv_obj_t * ui_GoToNewestButton;
 extern lv_obj_t * ui_GoToNewestButtonLabel;
+extern lv_obj_t * ui_TopBar6;
+extern lv_obj_t * ui_ErrorBanner5;
+extern lv_obj_t * ui_DriveBand5;
+extern lv_obj_t * ui_MenuKey6;
+extern lv_obj_t * ui_MenuOverlay6;
 // CUSTOM VARIABLES
 
 #ifdef __cplusplus

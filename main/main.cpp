@@ -50,6 +50,7 @@
 #include "joystick_cal.hpp"
 #include "log_capture.hpp"
 #include "log_view.hpp"
+#include "remote_ui.hpp"
 #include "rtps_comms.hpp"
 #include "selftest.hpp"
 #include "settings.hpp"
@@ -178,6 +179,16 @@ static std::atomic<bool> select_key{false};
 // An indev can own exactly one group, so the joystick's group follows the
 // active screen. The swap happens on LV_EVENT_SCREEN_LOADED, so it covers
 // every route between the screens.
+// "This object covers what is behind it" -- see strip_redundant_backgrounds.
+// LVGL leaves the USER flags for exactly this; nothing in the export uses them.
+static constexpr lv_obj_flag_t kOverlayFlag = LV_OBJ_FLAG_USER_1;
+
+// Kept out of the overdraw pass, and kept opaque whatever the theme says.
+static void keep_overlay_fill(lv_obj_t *obj) {
+  lv_obj_add_flag(obj, kOverlayFlag);
+  lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, LV_PART_MAIN);
+}
+
 static lv_indev_t *joystick_indev = nullptr;
 static lv_group_t *joystick_group = nullptr;
 static lv_group_t *menu_group = nullptr;        // the menu overlay's rows
@@ -310,7 +321,10 @@ static void mcb_status_label_observer(lv_observer_t *observer, lv_subject_t *) {
   // than only LockedScreen, which is where the export writes it by hand.
   if (kind == StatusKind::kDriveStatus && lv_subject_get_int(&locked_subject) != 0) {
     lv_label_set_text(label, "LOCKED");
-    lv_obj_set_style_text_color(label, lv_color_hex(kStatusGrey), LV_PART_MAIN);
+    // Red, per spec 01. Not a fault: it is the one state the user has to act on
+    // before anything else happens, and the spec gives it the alert colour for
+    // that reason.
+    lv_obj_set_style_text_color(label, lv_color_hex(kStatusRed), LV_PART_MAIN);
     return;
   }
 
@@ -1150,6 +1164,7 @@ static void fill_mib_reason_panel(lv_obj_t *panel, const char *title, const char
 // argument each observer gets is ignored: whichever fired, the answer depends
 // on all of them.
 static void bind_to_drive_blocked_cause(lv_obj_t *panel, lv_observer_cb_t cb) {
+  keep_overlay_fill(panel);
   for (lv_subject_t *subject :
        {&rtps_link_subject, &mib_state_subject, &error_text_subject, &error_footer_subject}) {
     lv_subject_add_observer_obj(subject, cb, panel, nullptr);
@@ -1191,6 +1206,7 @@ static void entry_refused_panel_observer(lv_observer_t *observer, lv_subject_t *
 }
 
 static void bind_entry_refused_panel(lv_obj_t *panel) {
+  keep_overlay_fill(panel);
   if (panel == nullptr) {
     return;
   }
@@ -1222,6 +1238,7 @@ static void drive_screen_warning_observer(lv_observer_t *observer, lv_subject_t 
 }
 
 static void bind_mcb_lost_panel(lv_obj_t *panel) {
+  keep_overlay_fill(panel);
   if (panel == nullptr) {
     return;
   }
@@ -2831,16 +2848,29 @@ static void nav_band_cb(lv_event_t *) { nav_home(); }
 
 // Only the outermost object of a composite stays clickable, so the whole of it
 // is the hit target rather than whichever child happens to be under the finger.
+//
+// All the way down, not one level: LVGL hit-tests the DEEPEST clickable object
+// under the point, and lv_obj_create() makes every container clickable. The
+// burger key is a Ground holding three Bars, and the three bars are what a
+// finger actually lands on -- clearing only Ground left the key dead in the
+// middle, which is the whole of it anyone aims at.
+static void nav_clear_clickable(lv_obj_t *obj) {
+  for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
+    lv_obj_t *child = lv_obj_get_child(obj, i);
+    lv_obj_remove_flag(child, LV_OBJ_FLAG_CLICKABLE);
+    nav_clear_clickable(child);
+  }
+}
+
 static void nav_claim_clicks(lv_obj_t *obj) {
   clear_click_focusable_recursive(obj);
-  for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
-    lv_obj_remove_flag(lv_obj_get_child(obj, i), LV_OBJ_FLAG_CLICKABLE);
-  }
+  nav_clear_clickable(obj);
   lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE);
 }
 
 // One screen's chrome. `band` is null on a screen whose band is not a way home.
 static void nav_attach_chrome(lv_obj_t *key, lv_obj_t *overlay, lv_obj_t *band) {
+  keep_overlay_fill(overlay);
   nav_claim_clicks(key);
   lv_obj_add_event_cb(key, nav_key_cb, LV_EVENT_CLICKED, overlay);
 
@@ -2893,6 +2923,36 @@ static void nav_focus_screen(lv_obj_t *screen) {
   }
 }
 
+// The active screen, by name. Only the remote UI asks, but the table is worth
+// having in one place: a screen missing from it reports "?" rather than lying.
+static const char *active_screen_name() {
+  const lv_obj_t *screen = lv_screen_active();
+  struct Named {
+    lv_obj_t *const *obj;
+    const char *name;
+  };
+  static const Named kScreens[] = {
+      {&ui_BootScreen, "BootScreen"},
+      {&ui_LockedScreen, "LockedScreen"},
+      {&ui_DriveScreen, "DriveScreen"},
+      {&ui_SeatScreen, "SeatScreen"},
+      {&ui_JoystickScreen, "JoystickScreen"},
+      {&ui_BenchGateScreen, "BenchGateScreen"},
+      {&ui_BenchMotorsScreen, "BenchMotorsScreen"},
+      {&ui_LogScreen, "LogScreen"},
+      {&ui_UpdateScreen, "UpdateScreen"},
+      {&ui_SettingsScreen, "SettingsScreen"},
+      {&ui_SkunkWorksScreen, "SkunkWorksScreen"},
+      {&ui_DiagnosticsScreen, "DiagnosticsScreen"},
+  };
+  for (const Named &entry : kScreens) {
+    if (*entry.obj == screen) {
+      return entry.name;
+    }
+  }
+  return "?";
+}
+
 static void screen_loaded_cb(lv_event_t *e) {
   lv_obj_t *screen = lv_event_get_target_obj(e);
   // The overlay that was up belonged to the screen being left. It was closed on
@@ -2932,6 +2992,7 @@ static void screen_loaded_cb(lv_event_t *e) {
 //   MainScreenFlex  86.0 ms      empty screen  19.5 ms
 // so ~77% of a frame is content, not the frame buffer.
 static espp::Logger logger_overdraw({.tag = "overdraw", .level = espp::Logger::Verbosity::INFO});
+
 // Overdraw: SquareLine gives every container an opaque background, so a page
 // nested three deep repaints the same theme colour three times before anything
 // visible lands on top. Measured on MainScreenFlex with a full-screen redraw,
@@ -2955,6 +3016,16 @@ static bool color_eq(lv_color_t a, lv_color_t b) {
 static uint32_t strip_redundant_backgrounds(lv_obj_t *obj, lv_color_t behind) {
   uint32_t stripped = 0;
   lv_color_t painted = behind;
+  // An overlay keeps its fill, subtree and all. The test below asks whether an
+  // object paints what its ANCESTORS already painted, which is true of a
+  // nested container and false of anything that covers a SIBLING: spec V2's
+  // fault banner and burger menu are exactly the theme background, so their
+  // fill reads as redundant -- and taking it away leaves them drawn on top of
+  // the content they exist to hide, with the speed digits showing through the
+  // fault text. Marked by kOverlayFlag where they are wired.
+  if (lv_obj_has_flag(obj, kOverlayFlag)) {
+    return 0;
+  }
   if (lv_obj_get_style_bg_opa(obj, LV_PART_MAIN) == LV_OPA_COVER) {
     const lv_color_t own = lv_obj_get_style_bg_color(obj, LV_PART_MAIN);
     if (color_eq(own, behind) && lv_obj_get_style_radius(obj, LV_PART_MAIN) == 0 &&
@@ -3053,6 +3124,7 @@ static void settings_screen_ensure() {
   bind_status_panel(ui_DriveBand7);
   bind_rtps_label(ui_TopBar8);
   bind_clock_label(ui_TopBar8);
+  nav_attach_chrome(ui_MenuKey7, ui_MenuOverlay7, ui_DriveBand7);
   bind_to_drive_blocked_cause(ui_ErrorBanner6, setting_warning_observer);
   lv_subject_add_observer_obj(&setting_page_subject, setting_warning_observer, ui_ErrorBanner6,
                               nullptr);
@@ -3081,6 +3153,7 @@ static void actions_screen_ensure() {
   bind_status_panel(ui_DriveBand8);
   bind_rtps_label(ui_TopBar9);
   bind_clock_label(ui_TopBar9);
+  nav_attach_chrome(ui_MenuKey8, ui_MenuOverlay8, ui_DriveBand8);
   // Its ErrorWarningPanel stays down: an action that needs the MCB greys out
   // instead (action_ready_observer), which keeps the local ones reachable.
   lv_obj_add_flag(ui_ErrorBanner7, LV_OBJ_FLAG_HIDDEN);
@@ -3115,6 +3188,7 @@ static void diagnostics_screen_ensure() {
   bind_status_panel(ui_DriveBand9);
   bind_rtps_label(ui_TopBar10);
   bind_clock_label(ui_TopBar10);
+  nav_attach_chrome(ui_MenuKey9, ui_MenuOverlay9, ui_DriveBand9);
   // The red, blinking readings are this screen's warning: the ErrorWarningPanel
   // would cover exactly what someone opened the screen to look at.
   lv_obj_add_flag(ui_ErrorBanner8, LV_OBJ_FLAG_HIDDEN);
@@ -3917,9 +3991,11 @@ extern "C" void app_main(void) {
       // LockedScreen's band reads LOCKED, and DRIVE on it must not be a way in:
       // ACTIVATE DRIVE and the unlock hold are.
       {ui_TopBar1, ui_DriveBand1, ui_MenuKey1, ui_MenuOverlay1, false},
-      {ui_TopBar2, ui_DriveBand2, ui_MenuKey2, ui_MenuOverlay2, false}, // DriveScreen, already home
-      {ui_TopBar3, ui_DriveBand4, ui_MenuKey3, ui_MenuOverlay3, true},  // JoystickScreen
-      {ui_TopBar4, ui_DriveBand3, ui_MenuKey4, ui_MenuOverlay4, true},  // SeatScreen
+      // DriveScreen too: DRIVE is how you back out of the menu without
+      // picking a row, and it has to do that on the screen it goes back to.
+      {ui_TopBar2, ui_DriveBand2, ui_MenuKey2, ui_MenuOverlay2, true},
+      {ui_TopBar3, ui_DriveBand4, ui_MenuKey3, ui_MenuOverlay3, true},     // JoystickScreen
+      {ui_TopBar4, ui_DriveBand3, ui_MenuKey4, ui_MenuOverlay4, true},     // SeatScreen
       {ui_TopBar5, ui_DriveBand11, ui_MenuKey11, ui_MenuOverlay11, true},  // BenchGateScreen
       {ui_TopBar6, ui_DriveBand5, ui_MenuKey6, ui_MenuOverlay6, true},     // LogScreen
       {ui_TopBar11, ui_DriveBand10, ui_MenuKey10, ui_MenuOverlay10, true}, // UpdateScreen
@@ -4034,6 +4110,9 @@ extern "C" void app_main(void) {
   // Update and Boot. It holds nothing, so the stick's LVGL half is idle there
   // while hold_poll still reads the same latch for the exit hold.
   joystick_group = lv_group_create();
+  // The burger menu's rows. Filled per overlay when the menu opens, because
+  // every screen carries its own instance of all seven.
+  menu_group = lv_group_create();
   lv_indev_set_group(joystick_indev, joystick_group);
   // hold-to-repeat feel. LVGL's defaults (400 ms then every 100 ms) are tuned
   // for a keyboard and run the settings list far too fast for a joystick you
@@ -4185,6 +4264,23 @@ extern "C" void app_main(void) {
 
   // Remove the redundant nested background fills (see strip_redundant_backgrounds).
   strip_all_overdraw();
+
+  // Leave the boot logo. Spec V1 did this with a screen-change event set in
+  // SquareLine; firmware owns it now, because the honest moment to leave is
+  // when everything behind the first screen is wired -- which is here, not a
+  // fixed delay the designer picked. kBootHoldMs is only so the wordmark is
+  // readable rather than a flash.
+  //
+  // LockedScreen and not DriveScreen: locked_subject starts at 1 and the chair
+  // does not drive until someone unlocks it.
+  static constexpr uint32_t kBootHoldMs = 1200;
+  lv_timer_t *boot_done = lv_timer_create(
+      [](lv_timer_t *) {
+        _ui_screen_change(&ui_LockedScreen, LV_SCREEN_LOAD_ANIM_FADE_ON, 280, 0,
+                          &ui_LockedScreen_screen_init);
+      },
+      kBootHoldMs, nullptr);
+  lv_timer_set_repeat_count(boot_done, 1);
 
   // The self test's checks and their limits are in selftest_spec.h;
   // selftest.cpp measures them. Started from the "Self test" Skunk Works slot,
@@ -4811,6 +4907,38 @@ extern "C" void app_main(void) {
   if (!rtps_comms_start()) {
     logger.warn("RTPS comms not started (Ethernet bring-up failed)");
   }
+
+  // The remote UI debug channel (CONFIG_HMI_REMOTE_UI, off by default). Last,
+  // because it drives everything above it: input goes into the same latches the
+  // ADC task and the GPIO48 callback write, so what a script exercises is the
+  // real handling and not a parallel path.
+  remote_ui_start({
+      .lvgl_mutex = &lvgl_mutex,
+      .set_key = [](uint32_t key) { joy_key.store(key); },
+      .press_select = [] { select_key.store(true); },
+      .set_button =
+          [](bool down) {
+            joy_button_pressed.store(down);
+            if (down) {
+              select_key.store(true);
+              std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
+              lv_subject_set_int(&button_count_subject,
+                                 lv_subject_get_int(&button_count_subject) + 1);
+              lv_subject_set_int(&button_pressed_subject, 1);
+            } else {
+              std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
+              lv_subject_set_int(&button_pressed_subject, 0);
+            }
+          },
+      // Reading the screen is always allowed; injecting anything while the MCB
+      // has the chair enabled is not.
+      .input_allowed =
+          [] {
+            return static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject)) !=
+                   MIB::MibSystemState::ENABLED;
+          },
+      .screen_name = [] { return active_screen_name(); },
+  });
 
   // loop forever
   while (true) {

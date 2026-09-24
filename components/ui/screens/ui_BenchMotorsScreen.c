@@ -6,11 +6,6 @@
 #include "../ui.h"
 
 lv_obj_t * ui_BenchMotorsScreen = NULL;
-lv_obj_t * ui_TopBar7 = NULL;
-lv_obj_t * ui_ErrorBanner3 = NULL;
-lv_obj_t * ui_DriveBand6 = NULL;
-lv_obj_t * ui_MenuKey5 = NULL;
-lv_obj_t * ui_MenuOverlay5 = NULL;
 lv_obj_t * ui_BenchMotorsBody = NULL;
 lv_obj_t * ui_MotorsTitle = NULL;
 lv_obj_t * ui_BenchMotorsContent = NULL;
@@ -18,6 +13,11 @@ lv_obj_t * ui_MotorRows = NULL;
 lv_obj_t * ui_RDScreenFlexPanelInner = NULL;
 lv_obj_t * ui_ActuatorsFlexPanel = NULL;
 lv_obj_t * ui_SettingRow = NULL;
+lv_obj_t * ui_TopBar7 = NULL;
+lv_obj_t * ui_ErrorBanner3 = NULL;
+lv_obj_t * ui_DriveBand6 = NULL;
+lv_obj_t * ui_MenuKey5 = NULL;
+lv_obj_t * ui_MenuOverlay5 = NULL;
 // event funtions
 
 // build funtions
@@ -30,40 +30,6 @@ void ui_BenchMotorsScreen_screen_init(void)
                                            _ui_theme_color_background);
     ui_object_set_themeable_style_property(ui_BenchMotorsScreen, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
                                            _ui_theme_alpha_background);
-
-    ui_TopBar7 = ui_TopBar_create(ui_BenchMotorsScreen);
-    lv_obj_set_width(ui_TopBar7, 720);
-    lv_obj_set_height(ui_TopBar7, 55);
-    lv_obj_set_x(ui_TopBar7, 0);
-    lv_obj_set_y(ui_TopBar7, 0);
-
-    //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
-
-    ui_ErrorBanner3 = ui_ErrorBanner_create(ui_BenchMotorsScreen);
-    lv_obj_set_width(ui_ErrorBanner3, 720);
-    lv_obj_set_height(ui_ErrorBanner3, 400);
-    lv_obj_set_x(ui_ErrorBanner3, 0);
-    lv_obj_set_y(ui_ErrorBanner3, 195);
-
-    ui_DriveBand6 = ui_DriveBand_create(ui_BenchMotorsScreen);
-    lv_obj_set_width(ui_DriveBand6, 720);
-    lv_obj_set_height(ui_DriveBand6, 140);
-    lv_obj_set_x(ui_DriveBand6, 0);
-    lv_obj_set_y(ui_DriveBand6, 55);
-
-    ui_MenuKey5 = ui_MenuKey_create(ui_BenchMotorsScreen);
-    lv_obj_set_width(ui_MenuKey5, 720);
-    lv_obj_set_height(ui_MenuKey5, 164);
-    lv_obj_set_x(ui_MenuKey5, 0);
-    lv_obj_set_y(ui_MenuKey5, 1116);
-
-    ui_MenuOverlay5 = ui_MenuOverlay_create(ui_BenchMotorsScreen);
-    lv_obj_set_width(ui_MenuOverlay5, 720);
-    lv_obj_set_height(ui_MenuOverlay5, 921);
-    lv_obj_set_x(ui_MenuOverlay5, 0);
-    lv_obj_set_y(ui_MenuOverlay5, 195);
-
-
 
     ui_BenchMotorsBody = lv_obj_create(ui_BenchMotorsScreen);
     lv_obj_set_width(ui_BenchMotorsBody, 720);
@@ -200,6 +166,40 @@ void ui_BenchMotorsScreen_screen_init(void)
     lv_obj_set_x(ui_SettingRow, 0);
     lv_obj_set_y(ui_SettingRow, 100);
 
+    ui_TopBar7 = ui_TopBar_create(ui_BenchMotorsScreen);
+    lv_obj_set_width(ui_TopBar7, 720);
+    lv_obj_set_height(ui_TopBar7, 55);
+    lv_obj_set_x(ui_TopBar7, 0);
+    lv_obj_set_y(ui_TopBar7, 0);
+
+    //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
+
+    ui_ErrorBanner3 = ui_ErrorBanner_create(ui_BenchMotorsScreen);
+    lv_obj_set_width(ui_ErrorBanner3, 720);
+    lv_obj_set_height(ui_ErrorBanner3, 400);
+    lv_obj_set_x(ui_ErrorBanner3, 0);
+    lv_obj_set_y(ui_ErrorBanner3, 195);
+
+    ui_DriveBand6 = ui_DriveBand_create(ui_BenchMotorsScreen);
+    lv_obj_set_width(ui_DriveBand6, 720);
+    lv_obj_set_height(ui_DriveBand6, 140);
+    lv_obj_set_x(ui_DriveBand6, 0);
+    lv_obj_set_y(ui_DriveBand6, 55);
+
+    ui_MenuKey5 = ui_MenuKey_create(ui_BenchMotorsScreen);
+    lv_obj_set_width(ui_MenuKey5, 720);
+    lv_obj_set_height(ui_MenuKey5, 164);
+    lv_obj_set_x(ui_MenuKey5, 0);
+    lv_obj_set_y(ui_MenuKey5, 1116);
+
+    ui_MenuOverlay5 = ui_MenuOverlay_create(ui_BenchMotorsScreen);
+    lv_obj_set_width(ui_MenuOverlay5, 720);
+    lv_obj_set_height(ui_MenuOverlay5, 921);
+    lv_obj_set_x(ui_MenuOverlay5, 0);
+    lv_obj_set_y(ui_MenuOverlay5, 195);
+
+
+
 }
 
 void ui_BenchMotorsScreen_screen_destroy(void)
@@ -208,11 +208,6 @@ void ui_BenchMotorsScreen_screen_destroy(void)
 
     // NULL screen variables
     ui_BenchMotorsScreen = NULL;
-    ui_TopBar7 = NULL;
-    ui_ErrorBanner3 = NULL;
-    ui_DriveBand6 = NULL;
-    ui_MenuKey5 = NULL;
-    ui_MenuOverlay5 = NULL;
     ui_BenchMotorsBody = NULL;
     ui_MotorsTitle = NULL;
     ui_BenchMotorsContent = NULL;
@@ -220,5 +215,10 @@ void ui_BenchMotorsScreen_screen_destroy(void)
     ui_RDScreenFlexPanelInner = NULL;
     ui_ActuatorsFlexPanel = NULL;
     ui_SettingRow = NULL;
+    ui_TopBar7 = NULL;
+    ui_ErrorBanner3 = NULL;
+    ui_DriveBand6 = NULL;
+    ui_MenuKey5 = NULL;
+    ui_MenuOverlay5 = NULL;
 
 }

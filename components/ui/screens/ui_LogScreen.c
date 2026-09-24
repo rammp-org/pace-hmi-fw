@@ -6,11 +6,6 @@
 #include "../ui.h"
 
 lv_obj_t * ui_LogScreen = NULL;
-lv_obj_t * ui_TopBar6 = NULL;
-lv_obj_t * ui_ErrorBanner5 = NULL;
-lv_obj_t * ui_DriveBand5 = NULL;
-lv_obj_t * ui_MenuKey6 = NULL;
-lv_obj_t * ui_MenuOverlay6 = NULL;
 lv_obj_t * ui_LogBody = NULL;
 lv_obj_t * ui_LogTitle = NULL;
 lv_obj_t * ui_LogContent = NULL;
@@ -21,6 +16,11 @@ lv_obj_t * ui_GoToOldestButton = NULL;
 lv_obj_t * ui_GoToOldestButtonLabel = NULL;
 lv_obj_t * ui_GoToNewestButton = NULL;
 lv_obj_t * ui_GoToNewestButtonLabel = NULL;
+lv_obj_t * ui_TopBar6 = NULL;
+lv_obj_t * ui_ErrorBanner5 = NULL;
+lv_obj_t * ui_DriveBand5 = NULL;
+lv_obj_t * ui_MenuKey6 = NULL;
+lv_obj_t * ui_MenuOverlay6 = NULL;
 // event funtions
 
 // build funtions
@@ -33,40 +33,6 @@ void ui_LogScreen_screen_init(void)
                                            _ui_theme_color_background);
     ui_object_set_themeable_style_property(ui_LogScreen, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
                                            _ui_theme_alpha_background);
-
-    ui_TopBar6 = ui_TopBar_create(ui_LogScreen);
-    lv_obj_set_width(ui_TopBar6, 720);
-    lv_obj_set_height(ui_TopBar6, 55);
-    lv_obj_set_x(ui_TopBar6, 0);
-    lv_obj_set_y(ui_TopBar6, 0);
-
-    //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
-
-    ui_ErrorBanner5 = ui_ErrorBanner_create(ui_LogScreen);
-    lv_obj_set_width(ui_ErrorBanner5, 720);
-    lv_obj_set_height(ui_ErrorBanner5, 400);
-    lv_obj_set_x(ui_ErrorBanner5, 0);
-    lv_obj_set_y(ui_ErrorBanner5, 195);
-
-    ui_DriveBand5 = ui_DriveBand_create(ui_LogScreen);
-    lv_obj_set_width(ui_DriveBand5, 720);
-    lv_obj_set_height(ui_DriveBand5, 140);
-    lv_obj_set_x(ui_DriveBand5, 0);
-    lv_obj_set_y(ui_DriveBand5, 55);
-
-    ui_MenuKey6 = ui_MenuKey_create(ui_LogScreen);
-    lv_obj_set_width(ui_MenuKey6, 720);
-    lv_obj_set_height(ui_MenuKey6, 164);
-    lv_obj_set_x(ui_MenuKey6, 0);
-    lv_obj_set_y(ui_MenuKey6, 1116);
-
-    ui_MenuOverlay6 = ui_MenuOverlay_create(ui_LogScreen);
-    lv_obj_set_width(ui_MenuOverlay6, 720);
-    lv_obj_set_height(ui_MenuOverlay6, 921);
-    lv_obj_set_x(ui_MenuOverlay6, 0);
-    lv_obj_set_y(ui_MenuOverlay6, 195);
-
-
 
     ui_LogBody = lv_obj_create(ui_LogScreen);
     lv_obj_set_width(ui_LogBody, 720);
@@ -253,6 +219,40 @@ void ui_LogScreen_screen_init(void)
     lv_obj_set_style_text_align(ui_GoToNewestButtonLabel, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(ui_GoToNewestButtonLabel, &lv_font_montserrat_32, LV_PART_MAIN | LV_STATE_DEFAULT);
 
+    ui_TopBar6 = ui_TopBar_create(ui_LogScreen);
+    lv_obj_set_width(ui_TopBar6, 720);
+    lv_obj_set_height(ui_TopBar6, 55);
+    lv_obj_set_x(ui_TopBar6, 0);
+    lv_obj_set_y(ui_TopBar6, 0);
+
+    //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
+
+    ui_ErrorBanner5 = ui_ErrorBanner_create(ui_LogScreen);
+    lv_obj_set_width(ui_ErrorBanner5, 720);
+    lv_obj_set_height(ui_ErrorBanner5, 400);
+    lv_obj_set_x(ui_ErrorBanner5, 0);
+    lv_obj_set_y(ui_ErrorBanner5, 195);
+
+    ui_DriveBand5 = ui_DriveBand_create(ui_LogScreen);
+    lv_obj_set_width(ui_DriveBand5, 720);
+    lv_obj_set_height(ui_DriveBand5, 140);
+    lv_obj_set_x(ui_DriveBand5, 0);
+    lv_obj_set_y(ui_DriveBand5, 55);
+
+    ui_MenuKey6 = ui_MenuKey_create(ui_LogScreen);
+    lv_obj_set_width(ui_MenuKey6, 720);
+    lv_obj_set_height(ui_MenuKey6, 164);
+    lv_obj_set_x(ui_MenuKey6, 0);
+    lv_obj_set_y(ui_MenuKey6, 1116);
+
+    ui_MenuOverlay6 = ui_MenuOverlay_create(ui_LogScreen);
+    lv_obj_set_width(ui_MenuOverlay6, 720);
+    lv_obj_set_height(ui_MenuOverlay6, 921);
+    lv_obj_set_x(ui_MenuOverlay6, 0);
+    lv_obj_set_y(ui_MenuOverlay6, 195);
+
+
+
 }
 
 void ui_LogScreen_screen_destroy(void)
@@ -261,11 +261,6 @@ void ui_LogScreen_screen_destroy(void)
 
     // NULL screen variables
     ui_LogScreen = NULL;
-    ui_TopBar6 = NULL;
-    ui_ErrorBanner5 = NULL;
-    ui_DriveBand5 = NULL;
-    ui_MenuKey6 = NULL;
-    ui_MenuOverlay6 = NULL;
     ui_LogBody = NULL;
     ui_LogTitle = NULL;
     ui_LogContent = NULL;
@@ -276,5 +271,10 @@ void ui_LogScreen_screen_destroy(void)
     ui_GoToOldestButtonLabel = NULL;
     ui_GoToNewestButton = NULL;
     ui_GoToNewestButtonLabel = NULL;
+    ui_TopBar6 = NULL;
+    ui_ErrorBanner5 = NULL;
+    ui_DriveBand5 = NULL;
+    ui_MenuKey6 = NULL;
+    ui_MenuOverlay6 = NULL;
 
 }

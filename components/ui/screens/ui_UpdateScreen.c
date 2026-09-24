@@ -6,11 +6,6 @@
 #include "../ui.h"
 
 lv_obj_t * ui_UpdateScreen = NULL;
-lv_obj_t * ui_TopBar11 = NULL;
-lv_obj_t * ui_ErrorBanner9 = NULL;
-lv_obj_t * ui_DriveBand10 = NULL;
-lv_obj_t * ui_MenuKey10 = NULL;
-lv_obj_t * ui_MenuOverlay10 = NULL;
 lv_obj_t * ui_UpdateBody = NULL;
 lv_obj_t * ui_UpdateTitle = NULL;
 lv_obj_t * ui_UpdateContent = NULL;
@@ -19,6 +14,11 @@ lv_obj_t * ui_UpdatePanelInner = NULL;
 lv_obj_t * ui_UpdateLog = NULL;
 lv_obj_t * ui_UpdateProgressBar = NULL;
 lv_obj_t * ui_UpdateProgressBarLabel = NULL;
+lv_obj_t * ui_TopBar11 = NULL;
+lv_obj_t * ui_ErrorBanner9 = NULL;
+lv_obj_t * ui_DriveBand10 = NULL;
+lv_obj_t * ui_MenuKey10 = NULL;
+lv_obj_t * ui_MenuOverlay10 = NULL;
 // event funtions
 
 // build funtions
@@ -31,40 +31,6 @@ void ui_UpdateScreen_screen_init(void)
                                            _ui_theme_color_background);
     ui_object_set_themeable_style_property(ui_UpdateScreen, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
                                            _ui_theme_alpha_background);
-
-    ui_TopBar11 = ui_TopBar_create(ui_UpdateScreen);
-    lv_obj_set_width(ui_TopBar11, 720);
-    lv_obj_set_height(ui_TopBar11, 55);
-    lv_obj_set_x(ui_TopBar11, 0);
-    lv_obj_set_y(ui_TopBar11, 0);
-
-    //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
-
-    ui_ErrorBanner9 = ui_ErrorBanner_create(ui_UpdateScreen);
-    lv_obj_set_width(ui_ErrorBanner9, 720);
-    lv_obj_set_height(ui_ErrorBanner9, 400);
-    lv_obj_set_x(ui_ErrorBanner9, 0);
-    lv_obj_set_y(ui_ErrorBanner9, 195);
-
-    ui_DriveBand10 = ui_DriveBand_create(ui_UpdateScreen);
-    lv_obj_set_width(ui_DriveBand10, 720);
-    lv_obj_set_height(ui_DriveBand10, 140);
-    lv_obj_set_x(ui_DriveBand10, 0);
-    lv_obj_set_y(ui_DriveBand10, 55);
-
-    ui_MenuKey10 = ui_MenuKey_create(ui_UpdateScreen);
-    lv_obj_set_width(ui_MenuKey10, 720);
-    lv_obj_set_height(ui_MenuKey10, 164);
-    lv_obj_set_x(ui_MenuKey10, 0);
-    lv_obj_set_y(ui_MenuKey10, 1116);
-
-    ui_MenuOverlay10 = ui_MenuOverlay_create(ui_UpdateScreen);
-    lv_obj_set_width(ui_MenuOverlay10, 720);
-    lv_obj_set_height(ui_MenuOverlay10, 921);
-    lv_obj_set_x(ui_MenuOverlay10, 0);
-    lv_obj_set_y(ui_MenuOverlay10, 195);
-
-
 
     ui_UpdateBody = lv_obj_create(ui_UpdateScreen);
     lv_obj_set_width(ui_UpdateBody, 720);
@@ -221,6 +187,40 @@ void ui_UpdateScreen_screen_init(void)
     lv_obj_set_style_text_align(ui_UpdateProgressBarLabel, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(ui_UpdateProgressBarLabel, &lv_font_montserrat_40, LV_PART_MAIN | LV_STATE_DEFAULT);
 
+    ui_TopBar11 = ui_TopBar_create(ui_UpdateScreen);
+    lv_obj_set_width(ui_TopBar11, 720);
+    lv_obj_set_height(ui_TopBar11, 55);
+    lv_obj_set_x(ui_TopBar11, 0);
+    lv_obj_set_y(ui_TopBar11, 0);
+
+    //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
+
+    ui_ErrorBanner9 = ui_ErrorBanner_create(ui_UpdateScreen);
+    lv_obj_set_width(ui_ErrorBanner9, 720);
+    lv_obj_set_height(ui_ErrorBanner9, 400);
+    lv_obj_set_x(ui_ErrorBanner9, 0);
+    lv_obj_set_y(ui_ErrorBanner9, 195);
+
+    ui_DriveBand10 = ui_DriveBand_create(ui_UpdateScreen);
+    lv_obj_set_width(ui_DriveBand10, 720);
+    lv_obj_set_height(ui_DriveBand10, 140);
+    lv_obj_set_x(ui_DriveBand10, 0);
+    lv_obj_set_y(ui_DriveBand10, 55);
+
+    ui_MenuKey10 = ui_MenuKey_create(ui_UpdateScreen);
+    lv_obj_set_width(ui_MenuKey10, 720);
+    lv_obj_set_height(ui_MenuKey10, 164);
+    lv_obj_set_x(ui_MenuKey10, 0);
+    lv_obj_set_y(ui_MenuKey10, 1116);
+
+    ui_MenuOverlay10 = ui_MenuOverlay_create(ui_UpdateScreen);
+    lv_obj_set_width(ui_MenuOverlay10, 720);
+    lv_obj_set_height(ui_MenuOverlay10, 921);
+    lv_obj_set_x(ui_MenuOverlay10, 0);
+    lv_obj_set_y(ui_MenuOverlay10, 195);
+
+
+
 }
 
 void ui_UpdateScreen_screen_destroy(void)
@@ -229,11 +229,6 @@ void ui_UpdateScreen_screen_destroy(void)
 
     // NULL screen variables
     ui_UpdateScreen = NULL;
-    ui_TopBar11 = NULL;
-    ui_ErrorBanner9 = NULL;
-    ui_DriveBand10 = NULL;
-    ui_MenuKey10 = NULL;
-    ui_MenuOverlay10 = NULL;
     ui_UpdateBody = NULL;
     ui_UpdateTitle = NULL;
     ui_UpdateContent = NULL;
@@ -242,5 +237,10 @@ void ui_UpdateScreen_screen_destroy(void)
     ui_UpdateLog = NULL;
     ui_UpdateProgressBar = NULL;
     ui_UpdateProgressBarLabel = NULL;
+    ui_TopBar11 = NULL;
+    ui_ErrorBanner9 = NULL;
+    ui_DriveBand10 = NULL;
+    ui_MenuKey10 = NULL;
+    ui_MenuOverlay10 = NULL;
 
 }

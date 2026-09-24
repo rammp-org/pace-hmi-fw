@@ -6,11 +6,6 @@
 #include "../ui.h"
 
 lv_obj_t * ui_SeatScreen = NULL;
-lv_obj_t * ui_TopBar4 = NULL;
-lv_obj_t * ui_ErrorBanner1 = NULL;
-lv_obj_t * ui_DriveBand3 = NULL;
-lv_obj_t * ui_MenuKey4 = NULL;
-lv_obj_t * ui_MenuOverlay4 = NULL;
 lv_obj_t * ui_SeatBody = NULL;
 lv_obj_t * ui_SeatTitle = NULL;
 lv_obj_t * ui_SeatContent = NULL;
@@ -58,6 +53,11 @@ lv_obj_t * ui_SeatAdjustmentButtonLabel4 = NULL;
 lv_obj_t * ui_SeatAdjustmentButton5 = NULL;
 lv_obj_t * ui_SeatAdjustmentButtonContainer5 = NULL;
 lv_obj_t * ui_SeatAdjustmentButtonLabel5 = NULL;
+lv_obj_t * ui_TopBar4 = NULL;
+lv_obj_t * ui_ErrorBanner1 = NULL;
+lv_obj_t * ui_DriveBand3 = NULL;
+lv_obj_t * ui_MenuKey4 = NULL;
+lv_obj_t * ui_MenuOverlay4 = NULL;
 // event funtions
 
 // build funtions
@@ -70,40 +70,6 @@ void ui_SeatScreen_screen_init(void)
                                            _ui_theme_color_background);
     ui_object_set_themeable_style_property(ui_SeatScreen, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
                                            _ui_theme_alpha_background);
-
-    ui_TopBar4 = ui_TopBar_create(ui_SeatScreen);
-    lv_obj_set_width(ui_TopBar4, 720);
-    lv_obj_set_height(ui_TopBar4, 55);
-    lv_obj_set_x(ui_TopBar4, 0);
-    lv_obj_set_y(ui_TopBar4, 0);
-
-    //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
-
-    ui_ErrorBanner1 = ui_ErrorBanner_create(ui_SeatScreen);
-    lv_obj_set_width(ui_ErrorBanner1, 720);
-    lv_obj_set_height(ui_ErrorBanner1, 400);
-    lv_obj_set_x(ui_ErrorBanner1, 0);
-    lv_obj_set_y(ui_ErrorBanner1, 195);
-
-    ui_DriveBand3 = ui_DriveBand_create(ui_SeatScreen);
-    lv_obj_set_width(ui_DriveBand3, 720);
-    lv_obj_set_height(ui_DriveBand3, 140);
-    lv_obj_set_x(ui_DriveBand3, 0);
-    lv_obj_set_y(ui_DriveBand3, 55);
-
-    ui_MenuKey4 = ui_MenuKey_create(ui_SeatScreen);
-    lv_obj_set_width(ui_MenuKey4, 720);
-    lv_obj_set_height(ui_MenuKey4, 164);
-    lv_obj_set_x(ui_MenuKey4, 0);
-    lv_obj_set_y(ui_MenuKey4, 1116);
-
-    ui_MenuOverlay4 = ui_MenuOverlay_create(ui_SeatScreen);
-    lv_obj_set_width(ui_MenuOverlay4, 720);
-    lv_obj_set_height(ui_MenuOverlay4, 921);
-    lv_obj_set_x(ui_MenuOverlay4, 0);
-    lv_obj_set_y(ui_MenuOverlay4, 195);
-
-
 
     ui_SeatBody = lv_obj_create(ui_SeatScreen);
     lv_obj_set_width(ui_SeatBody, 720);
@@ -756,6 +722,40 @@ void ui_SeatScreen_screen_init(void)
     lv_obj_set_style_text_font(ui_SeatAdjustmentButtonLabel5, &ui_font_IBMPlexSansMedium53,
                                LV_PART_MAIN | LV_STATE_DEFAULT);
 
+    ui_TopBar4 = ui_TopBar_create(ui_SeatScreen);
+    lv_obj_set_width(ui_TopBar4, 720);
+    lv_obj_set_height(ui_TopBar4, 55);
+    lv_obj_set_x(ui_TopBar4, 0);
+    lv_obj_set_y(ui_TopBar4, 0);
+
+    //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
+
+    ui_ErrorBanner1 = ui_ErrorBanner_create(ui_SeatScreen);
+    lv_obj_set_width(ui_ErrorBanner1, 720);
+    lv_obj_set_height(ui_ErrorBanner1, 400);
+    lv_obj_set_x(ui_ErrorBanner1, 0);
+    lv_obj_set_y(ui_ErrorBanner1, 195);
+
+    ui_DriveBand3 = ui_DriveBand_create(ui_SeatScreen);
+    lv_obj_set_width(ui_DriveBand3, 720);
+    lv_obj_set_height(ui_DriveBand3, 140);
+    lv_obj_set_x(ui_DriveBand3, 0);
+    lv_obj_set_y(ui_DriveBand3, 55);
+
+    ui_MenuKey4 = ui_MenuKey_create(ui_SeatScreen);
+    lv_obj_set_width(ui_MenuKey4, 720);
+    lv_obj_set_height(ui_MenuKey4, 164);
+    lv_obj_set_x(ui_MenuKey4, 0);
+    lv_obj_set_y(ui_MenuKey4, 1116);
+
+    ui_MenuOverlay4 = ui_MenuOverlay_create(ui_SeatScreen);
+    lv_obj_set_width(ui_MenuOverlay4, 720);
+    lv_obj_set_height(ui_MenuOverlay4, 921);
+    lv_obj_set_x(ui_MenuOverlay4, 0);
+    lv_obj_set_y(ui_MenuOverlay4, 195);
+
+
+
 }
 
 void ui_SeatScreen_screen_destroy(void)
@@ -764,11 +764,6 @@ void ui_SeatScreen_screen_destroy(void)
 
     // NULL screen variables
     ui_SeatScreen = NULL;
-    ui_TopBar4 = NULL;
-    ui_ErrorBanner1 = NULL;
-    ui_DriveBand3 = NULL;
-    ui_MenuKey4 = NULL;
-    ui_MenuOverlay4 = NULL;
     ui_SeatBody = NULL;
     ui_SeatTitle = NULL;
     ui_SeatContent = NULL;
@@ -816,5 +811,10 @@ void ui_SeatScreen_screen_destroy(void)
     ui_SeatAdjustmentButton5 = NULL;
     ui_SeatAdjustmentButtonContainer5 = NULL;
     ui_SeatAdjustmentButtonLabel5 = NULL;
+    ui_TopBar4 = NULL;
+    ui_ErrorBanner1 = NULL;
+    ui_DriveBand3 = NULL;
+    ui_MenuKey4 = NULL;
+    ui_MenuOverlay4 = NULL;
 
 }

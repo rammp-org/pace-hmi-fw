@@ -6,17 +6,17 @@
 #include "../ui.h"
 
 lv_obj_t * ui_SkunkWorksScreen = NULL;
-lv_obj_t * ui_TopBar9 = NULL;
-lv_obj_t * ui_ErrorBanner7 = NULL;
-lv_obj_t * ui_DriveBand8 = NULL;
-lv_obj_t * ui_MenuKey8 = NULL;
-lv_obj_t * ui_MenuOverlay8 = NULL;
 lv_obj_t * ui_SkunkWorksBody = NULL;
 lv_obj_t * ui_SkunkWorksTitle = NULL;
 lv_obj_t * ui_SkunkWorksContent = NULL;
 lv_obj_t * ui_SlotRows = NULL;
 lv_obj_t * ui_GenericActionsFlexPanel = NULL;
 lv_obj_t * ui_SlotTile = NULL;
+lv_obj_t * ui_TopBar9 = NULL;
+lv_obj_t * ui_ErrorBanner7 = NULL;
+lv_obj_t * ui_DriveBand8 = NULL;
+lv_obj_t * ui_MenuKey8 = NULL;
+lv_obj_t * ui_MenuOverlay8 = NULL;
 // event funtions
 
 // build funtions
@@ -29,40 +29,6 @@ void ui_SkunkWorksScreen_screen_init(void)
                                            _ui_theme_color_background);
     ui_object_set_themeable_style_property(ui_SkunkWorksScreen, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
                                            _ui_theme_alpha_background);
-
-    ui_TopBar9 = ui_TopBar_create(ui_SkunkWorksScreen);
-    lv_obj_set_width(ui_TopBar9, 720);
-    lv_obj_set_height(ui_TopBar9, 55);
-    lv_obj_set_x(ui_TopBar9, 0);
-    lv_obj_set_y(ui_TopBar9, 0);
-
-    //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
-
-    ui_ErrorBanner7 = ui_ErrorBanner_create(ui_SkunkWorksScreen);
-    lv_obj_set_width(ui_ErrorBanner7, 720);
-    lv_obj_set_height(ui_ErrorBanner7, 400);
-    lv_obj_set_x(ui_ErrorBanner7, 0);
-    lv_obj_set_y(ui_ErrorBanner7, 195);
-
-    ui_DriveBand8 = ui_DriveBand_create(ui_SkunkWorksScreen);
-    lv_obj_set_width(ui_DriveBand8, 720);
-    lv_obj_set_height(ui_DriveBand8, 140);
-    lv_obj_set_x(ui_DriveBand8, 0);
-    lv_obj_set_y(ui_DriveBand8, 55);
-
-    ui_MenuKey8 = ui_MenuKey_create(ui_SkunkWorksScreen);
-    lv_obj_set_width(ui_MenuKey8, 720);
-    lv_obj_set_height(ui_MenuKey8, 164);
-    lv_obj_set_x(ui_MenuKey8, 0);
-    lv_obj_set_y(ui_MenuKey8, 1116);
-
-    ui_MenuOverlay8 = ui_MenuOverlay_create(ui_SkunkWorksScreen);
-    lv_obj_set_width(ui_MenuOverlay8, 720);
-    lv_obj_set_height(ui_MenuOverlay8, 921);
-    lv_obj_set_x(ui_MenuOverlay8, 0);
-    lv_obj_set_y(ui_MenuOverlay8, 195);
-
-
 
     ui_SkunkWorksBody = lv_obj_create(ui_SkunkWorksScreen);
     lv_obj_set_width(ui_SkunkWorksBody, 720);
@@ -176,6 +142,40 @@ void ui_SkunkWorksScreen_screen_init(void)
     lv_obj_set_x(ui_SlotTile, 0);
     lv_obj_set_y(ui_SlotTile, -70);
 
+    ui_TopBar9 = ui_TopBar_create(ui_SkunkWorksScreen);
+    lv_obj_set_width(ui_TopBar9, 720);
+    lv_obj_set_height(ui_TopBar9, 55);
+    lv_obj_set_x(ui_TopBar9, 0);
+    lv_obj_set_y(ui_TopBar9, 0);
+
+    //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
+
+    ui_ErrorBanner7 = ui_ErrorBanner_create(ui_SkunkWorksScreen);
+    lv_obj_set_width(ui_ErrorBanner7, 720);
+    lv_obj_set_height(ui_ErrorBanner7, 400);
+    lv_obj_set_x(ui_ErrorBanner7, 0);
+    lv_obj_set_y(ui_ErrorBanner7, 195);
+
+    ui_DriveBand8 = ui_DriveBand_create(ui_SkunkWorksScreen);
+    lv_obj_set_width(ui_DriveBand8, 720);
+    lv_obj_set_height(ui_DriveBand8, 140);
+    lv_obj_set_x(ui_DriveBand8, 0);
+    lv_obj_set_y(ui_DriveBand8, 55);
+
+    ui_MenuKey8 = ui_MenuKey_create(ui_SkunkWorksScreen);
+    lv_obj_set_width(ui_MenuKey8, 720);
+    lv_obj_set_height(ui_MenuKey8, 164);
+    lv_obj_set_x(ui_MenuKey8, 0);
+    lv_obj_set_y(ui_MenuKey8, 1116);
+
+    ui_MenuOverlay8 = ui_MenuOverlay_create(ui_SkunkWorksScreen);
+    lv_obj_set_width(ui_MenuOverlay8, 720);
+    lv_obj_set_height(ui_MenuOverlay8, 921);
+    lv_obj_set_x(ui_MenuOverlay8, 0);
+    lv_obj_set_y(ui_MenuOverlay8, 195);
+
+
+
 }
 
 void ui_SkunkWorksScreen_screen_destroy(void)
@@ -184,16 +184,16 @@ void ui_SkunkWorksScreen_screen_destroy(void)
 
     // NULL screen variables
     ui_SkunkWorksScreen = NULL;
-    ui_TopBar9 = NULL;
-    ui_ErrorBanner7 = NULL;
-    ui_DriveBand8 = NULL;
-    ui_MenuKey8 = NULL;
-    ui_MenuOverlay8 = NULL;
     ui_SkunkWorksBody = NULL;
     ui_SkunkWorksTitle = NULL;
     ui_SkunkWorksContent = NULL;
     ui_SlotRows = NULL;
     ui_GenericActionsFlexPanel = NULL;
     ui_SlotTile = NULL;
+    ui_TopBar9 = NULL;
+    ui_ErrorBanner7 = NULL;
+    ui_DriveBand8 = NULL;
+    ui_MenuKey8 = NULL;
+    ui_MenuOverlay8 = NULL;
 
 }
