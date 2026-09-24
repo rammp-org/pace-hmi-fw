@@ -113,8 +113,8 @@ void ui_SkunkWorksScreen_screen_init(void)
     lv_obj_set_style_border_side(ui_SlotRows, LV_BORDER_SIDE_NONE, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_left(ui_SlotRows, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_right(ui_SlotRows, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_pad_top(ui_SlotRows, 20, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_pad_bottom(ui_SlotRows, 20, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_SlotRows, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_SlotRows, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_GenericActionsFlexPanel = lv_obj_create(ui_SlotRows);
     lv_obj_set_width(ui_GenericActionsFlexPanel, 720);
