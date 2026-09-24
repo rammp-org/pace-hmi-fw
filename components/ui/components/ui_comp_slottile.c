@@ -13,13 +13,10 @@ lv_obj_t * ui_SlotTile_create(lv_obj_t * comp_parent)
     lv_obj_t * cui_SlotTile;
     cui_SlotTile = lv_button_create(comp_parent);
     lv_obj_set_width(cui_SlotTile, 320);
-    lv_obj_set_height(cui_SlotTile, 264);
-    lv_obj_set_x(cui_SlotTile, 0);
-    lv_obj_set_y(cui_SlotTile, -70);
-    lv_obj_set_align(cui_SlotTile, LV_ALIGN_BOTTOM_MID);
+    lv_obj_set_height(cui_SlotTile, 240);
     lv_obj_add_flag(cui_SlotTile, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
     lv_obj_remove_flag(cui_SlotTile, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_radius(cui_SlotTile, 10, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_radius(cui_SlotTile, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
     ui_object_set_themeable_style_property(cui_SlotTile, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
                                            _ui_theme_color_background);
     ui_object_set_themeable_style_property(cui_SlotTile, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
@@ -29,41 +26,53 @@ lv_obj_t * ui_SlotTile_create(lv_obj_t * comp_parent)
     ui_object_set_themeable_style_property(cui_SlotTile, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
                                            _ui_theme_alpha_text);
     lv_obj_set_style_border_width(cui_SlotTile, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(cui_SlotTile, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(cui_SlotTile, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(cui_SlotTile, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(cui_SlotTile, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(cui_SlotTile, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(cui_SlotTile, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     lv_obj_t * cui_SlotBox;
     cui_SlotBox = lv_obj_create(cui_SlotTile);
     lv_obj_remove_style_all(cui_SlotBox);
     lv_obj_set_width(cui_SlotBox, 320);
-    lv_obj_set_height(cui_SlotBox, 110);
-    lv_obj_set_align(cui_SlotBox, LV_ALIGN_CENTER);
+    lv_obj_set_height(cui_SlotBox, 240);
+    lv_obj_set_flex_flow(cui_SlotBox, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(cui_SlotBox, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_remove_flag(cui_SlotBox, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_pad_left(cui_SlotBox, 20, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(cui_SlotBox, 20, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(cui_SlotBox, 22, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(cui_SlotBox, 16, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(cui_SlotBox, 6, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(cui_SlotBox, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     lv_obj_t * cui_SlotTitle;
     cui_SlotTitle = lv_label_create(cui_SlotBox);
-    lv_obj_set_height(cui_SlotTitle, 80);
-    lv_obj_set_width(cui_SlotTitle, lv_pct(80));
+    lv_obj_set_width(cui_SlotTitle, 280);
+    lv_obj_set_height(cui_SlotTitle, LV_SIZE_CONTENT);    /// 0
     lv_obj_set_align(cui_SlotTitle, LV_ALIGN_TOP_MID);
-    lv_label_set_long_mode(cui_SlotTitle, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
     lv_label_set_text(cui_SlotTitle, "Title 1");
     ui_object_set_themeable_style_property(cui_SlotTitle, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_text);
     ui_object_set_themeable_style_property(cui_SlotTitle, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
                                            _ui_theme_alpha_text);
     lv_obj_set_style_text_align(cui_SlotTitle, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(cui_SlotTitle, &ui_font_IBMPlexSansMedium53, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(cui_SlotTitle, &ui_font_MontserratSemiBold44, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     lv_obj_t * cui_SlotSubtitle;
     cui_SlotSubtitle = lv_label_create(cui_SlotBox);
-    lv_obj_set_height(cui_SlotSubtitle, 50);
-    lv_obj_set_width(cui_SlotSubtitle, lv_pct(80));
+    lv_obj_set_width(cui_SlotSubtitle, 280);
+    lv_obj_set_height(cui_SlotSubtitle, LV_SIZE_CONTENT);    /// 0
     lv_obj_set_align(cui_SlotSubtitle, LV_ALIGN_BOTTOM_MID);
     lv_label_set_text(cui_SlotSubtitle, "Subtitle 1");
     ui_object_set_themeable_style_property(cui_SlotSubtitle, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
-                                           _ui_theme_color_text);
+                                           _ui_theme_color_text_muted);
     ui_object_set_themeable_style_property(cui_SlotSubtitle, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
-                                           _ui_theme_alpha_text);
+                                           _ui_theme_alpha_text_muted);
     lv_obj_set_style_text_align(cui_SlotSubtitle, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(cui_SlotSubtitle, &lv_font_montserrat_34, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(cui_SlotSubtitle, &ui_font_MontserratRegular28, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     lv_obj_t ** children = lv_malloc(sizeof(lv_obj_t *) * _UI_COMP_SLOTTILE_NUM);
     children[UI_COMP_SLOTTILE_SLOTTILE] = cui_SlotTile;

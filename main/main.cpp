@@ -220,6 +220,7 @@ static std::atomic<bool> stick_drives{false};
 // the joystick"); declared here for the screens and gestures above it.
 static void nav_use_group(lv_group_t *g, const lv_obj_t *screen);
 static void nav_to_key();
+static void nav_home();
 static void nav_focus_ring(lv_obj_t *obj);
 static void nav_update_stick_gate();
 
@@ -516,7 +517,9 @@ static void bind_rtps_label(lv_obj_t *bar) {
   if (bar == nullptr) {
     return;
   }
-  lv_obj_t *label = ui_comp_get_child(bar, UI_COMP_TOPBAR_BATTERYPCT);
+  // The bar's own RTPS label. The spec's battery percentage took the old
+  // label's place, and this used to colour and blink that instead.
+  lv_obj_t *label = ui_comp_get_child(bar, UI_COMP_TOPBAR_RTPS);
   lv_subject_add_observer_obj(&rtps_link_subject, rtps_label_observer, label, nullptr);
   lv_subject_add_observer_obj(&rtps_blink_subject, rtps_label_observer, label, nullptr);
 }
@@ -1183,6 +1186,7 @@ enum : int32_t {
   kRefusedDriveNotGranted = 3, // asked to drive, never got ENABLED
   kRefusedDriveStopped = 4,    // was driving, the MIB stopped it
   kRefusedExit = 5,            // asked to stop, the MIB is still driving
+  kRefusedDriveLost = 6,       // was driving, then the link went; cause read live
 };
 static lv_subject_t entry_refused_subject; // kRefused*; panel up unless None
 // Created paused and re-armed by each refusal, like haptic_label_timer, so a
@@ -1320,6 +1324,8 @@ static void entry_refused_panel_observer(lv_observer_t *observer, lv_subject_t *
   if (refused == kRefusedSeat) {
     fill_drive_blocked_panel(panel, rammp::kHmiSeatLinkRefusedTitle,
                              rammp::kHmiSeatMcbRefusedTitle);
+  } else if (refused == kRefusedDriveLost) {
+    fill_drive_blocked_panel(panel, rammp::kHmiDriveLostLinkTitle, rammp::kHmiDriveLostMcbTitle);
   } else {
     fill_drive_blocked_panel(panel, rammp::kHmiLinkRefusedTitle, rammp::kHmiMcbRefusedTitle);
   }
@@ -1406,8 +1412,11 @@ static void entry_refusal_poll() {
     // Distinct from the STRONG_CLICK a completed hold gives, so a refusal can
     // be felt as well as read.
     haptic_play(espp::Drv2605::Waveform::DOUBLE_CLICK, 1);
-  } else if ((refused == kRefusedDrive || refused == kRefusedSeat) &&
-             (refused != page || mcb_ready())) {
+  } else if ((refused == kRefusedDrive && (refused != page || mcb_ready())) ||
+             ((refused == kRefusedSeat || refused == kRefusedDriveLost) && mcb_ready())) {
+    // A refused drive is tied to the push on the Locked screen, so it goes
+    // with it. A refused seat comes from the menu -- no push to hold it up --
+    // so it stays its window (entry_refused_timer) unless the cause clears.
     // Clear rather than merely hide, so a cause that clears and then recurs
     // inside the window does not bring the panel back without a new push.
     entry_refused_clear();
@@ -1497,8 +1506,18 @@ static void drive_screen_follow_state() {
     drive_exit_requested = false;
     set_locked(true);
     if (!asked) {
-      entry_refused_show(kRefusedDriveStopped, kDriveRefusedShowMs);
+      // The link going is not the MIB deciding anything: say which it was.
+      // kRefusedDriveLost reads the cause live ("RTPS LINK") and clears when
+      // the MCB is back; kRefusedDriveStopped is the MIB's own decision.
+      entry_refused_show(connected ? kRefusedDriveStopped : kRefusedDriveLost, kDriveRefusedShowMs);
     }
+    return;
+  }
+  // The seat screen needs the MCB as much as driving does. Losing it there is
+  // a way out, not a screen left looking live: home, with the reason.
+  if (lv_screen_active() == ui_SeatScreen && !mcb_ready()) {
+    nav_home();
+    entry_refused_show(kRefusedSeat, kDriveRefusedShowMs);
     return;
   }
   // Asked, and the answer window has passed without ENABLED: the refusal is on
@@ -3326,6 +3345,16 @@ static void nav_row_cb(lv_event_t *e) {
   if (nav_press_timer != nullptr) {
     return; // one pick at a time
   }
+  // Seat Functions needs the MCB, as the old seat page did: refused on the
+  // spot rather than opening a screen whose every button would be refused in
+  // turn. The menu closes so the banner underneath can say why.
+  const auto dest = static_cast<NavDest>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
+  if (dest == NAV_SEAT && !mcb_ready()) {
+    haptic_play(espp::Drv2605::Waveform::DOUBLE_CLICK, 1);
+    nav_close_menu();
+    entry_refused_show(kRefusedSeat, kDriveRefusedShowMs);
+    return;
+  }
   lv_obj_add_state(lv_event_get_target_obj(e), LV_STATE_CHECKED);
   nav_press_timer = lv_timer_create(nav_press_done_cb, kRowPressMs, lv_event_get_user_data(e));
   lv_timer_set_repeat_count(nav_press_timer, 1);
@@ -3457,6 +3486,14 @@ static void nav_attach_chrome(lv_obj_t *key, lv_obj_t *overlay, lv_obj_t *band) 
     lv_obj_add_event_cb(row, nav_row_cb, LV_EVENT_CLICKED,
                         reinterpret_cast<void *>(static_cast<intptr_t>(i)));
     lv_obj_add_event_cb(row, nav_row_key_cb, LV_EVENT_KEY, nullptr);
+  }
+  // Seat Functions greys while the MCB could not act on it, the same test and
+  // the same look as the MCB tiles on Skunk Works -- still walkable, so the
+  // cursor never sticks on it, and refused by nav_row_cb if picked.
+  lv_obj_t *seat_row = ui_comp_get_child(overlay, kNavRowIds[NAV_SEAT]);
+  lv_obj_set_style_opa(seat_row, LV_OPA_40, kActionUnavailableStyle);
+  for (lv_subject_t *subject : {&rtps_link_subject, &mib_state_subject}) {
+    lv_subject_add_observer_obj(subject, action_ready_observer, seat_row, nullptr);
   }
 
   if (band != nullptr) {
@@ -4627,6 +4664,14 @@ extern "C" void app_main(void) {
   // run. LockedScreen's banner, because a refused unlock is what it reports now
   // (entry_refusal_poll), and the pager page it used to live on is gone.
   bind_entry_refused_panel(ui_ErrorBanner2); // LockedScreen
+  // A refusal from the menu (Seat Functions, no MCB) can happen on any screen,
+  // so the screens whose banner has no other job say it too. Diagnostics and
+  // Skunk Works keep theirs down on purpose; Drive, Seat and Settings have
+  // their own causes to show.
+  bind_entry_refused_panel(ui_ErrorBanner5);  // LogScreen
+  bind_entry_refused_panel(ui_ErrorBanner10); // JoystickScreen
+  bind_entry_refused_panel(ui_ErrorBanner11); // BenchGateScreen
+  bind_entry_refused_panel(ui_ErrorBanner9);  // UpdateScreen
   // Diagnostics readings, and whether they are live: before the poll timer
   // that keeps the latter current, and before any RTPS sample can land.
   for (auto &item : diag_value) {

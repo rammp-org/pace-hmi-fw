@@ -144,8 +144,10 @@ void ui_SkunkWorksScreen_screen_init(void)
                                            LV_STYLE_BG_OPA, _ui_theme_alpha_text);
 
     ui_SlotTile = ui_SlotTile_create(ui_GenericActionsFlexPanel);
+    lv_obj_set_width(ui_SlotTile, 320);
+    lv_obj_set_height(ui_SlotTile, 240);
     lv_obj_set_x(ui_SlotTile, 0);
-    lv_obj_set_y(ui_SlotTile, -70);
+    lv_obj_set_y(ui_SlotTile, 0);
 
     ui_TopBar9 = ui_TopBar_create(ui_SkunkWorksScreen);
     lv_obj_set_width(ui_TopBar9, 720);

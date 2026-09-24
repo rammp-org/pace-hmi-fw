@@ -141,6 +141,25 @@ lv_obj_t * ui_TopBar_create(lv_obj_t * comp_parent)
     lv_obj_set_style_pad_row(cui_BatteryNub, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(cui_BatteryNub, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
+    lv_obj_t * cui_Rtps;
+    cui_Rtps = lv_label_create(cui_TopBar);
+    lv_obj_set_width(cui_Rtps, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(cui_Rtps, LV_SIZE_CONTENT);    /// 1
+    lv_obj_set_x(cui_Rtps, 120);
+    lv_obj_set_y(cui_Rtps, 16);
+    lv_label_set_text(cui_Rtps, "RTPS");
+    ui_object_set_themeable_style_property(cui_Rtps, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text_muted);
+    ui_object_set_themeable_style_property(cui_Rtps, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text_muted);
+    lv_obj_set_style_text_font(cui_Rtps, &ui_font_IBMPlexSansRegular24, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(cui_Rtps, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(cui_Rtps, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(cui_Rtps, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(cui_Rtps, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(cui_Rtps, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(cui_Rtps, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
     lv_obj_t ** children = lv_malloc(sizeof(lv_obj_t *) * _UI_COMP_TOPBAR_NUM);
     children[UI_COMP_TOPBAR_TOPBAR] = cui_TopBar;
     children[UI_COMP_TOPBAR_BATTERYPCT] = cui_BatteryPct;
@@ -148,6 +167,7 @@ lv_obj_t * ui_TopBar_create(lv_obj_t * comp_parent)
     children[UI_COMP_TOPBAR_LINK] = cui_Link;
     children[UI_COMP_TOPBAR_BATTERY] = cui_Battery;
     children[UI_COMP_TOPBAR_BATTERY_BATTERYNUB] = cui_BatteryNub;
+    children[UI_COMP_TOPBAR_RTPS] = cui_Rtps;
     lv_obj_add_event_cb(cui_TopBar, get_component_child_event_cb, LV_EVENT_GET_COMP_CHILD, children);
     lv_obj_add_event_cb(cui_TopBar, del_component_child_event_cb, LV_EVENT_DELETE, children);
     ui_comp_TopBar_create_hook(cui_TopBar);
