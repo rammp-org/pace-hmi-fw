@@ -64,8 +64,11 @@ PARENTS: dict[str, str] = {
     # boot logo: main.cpp swaps the pre-rasterised A8 mask onto this image
     "ui_Image3": "ui_BootScreen",
 
-    # LockedScreen: the only ways out are the hold on the stick and this button
+    # LockedScreen: ACTIVATE DRIVE, the ring the unlock fills, and the shackle
+    # that rises when it lands
     "ui_ActivateDrive": "ui_LockedContent",
+    "ui_LockRing": "ui_LockedContent",
+    "ui_Shackle": "ui_LockedContent",
 
     # DriveScreen: the readouts and the three drive-profile buttons
     "ui_SpeedValue": "ui_DriveContent",
@@ -81,6 +84,7 @@ PARENTS: dict[str, str] = {
     "ui_TwistBar": "ui_JoystickContent",
     "ui_ButtonCounter": "ui_JoystickContent",
     "ui_JoystickHint": "ui_JoystickContent",
+    "ui_CalibrateButton": "ui_JoystickContent",
 
     # BenchGateScreen: four dots and eleven keys on the one content panel.
     # main.cpp hands each key its digit by name, so a key that moved would type
@@ -141,6 +145,9 @@ for _screen, (_bar, _band, _banner, _key, _overlay) in CHROME.items():
 LABELS: dict[str, str] = {
     "ui_GoToOldestButtonLabel": "Oldest",   # log_view.cpp: scroll to the top
     "ui_GoToNewestButtonLabel": "Newest",   # log_view.cpp: scroll to the end
+    # joystick_cal.cpp reads this as the button's resting text, and writes
+    # CANCEL over it during a run
+    "ui_CalibrateButtonLabel": "Calibrate",
 
     # The four live seat functions, in the order seat_buttons_grid walks them
     # (row-major, two per row) against the rows of RAMMP_SEAT_AXIS_TABLE. Read
@@ -165,7 +172,7 @@ LABELS: dict[str, str] = {
     "cui_RowLabel4": "Diagnostics",
     "cui_RowLabel5": "Bench",
     "cui_RowLabel6": "UI Settings",
-    "cui_RowLabel7": "Calibrate Joystick",
+    "cui_RowLabel7": "Joystick",
 }
 
 _CREATE_RE = re.compile(

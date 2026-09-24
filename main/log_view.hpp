@@ -23,3 +23,8 @@ lv_group_t *log_view_group();
 /// For LV_EVENT_SCREEN_LOADED on ui_LogScreen: brings the text up to date and
 /// jumps to the newest line.
 void log_view_on_load();
+
+/// Called when the stick pushes DOWN with the log already at its last line:
+/// there is nothing further to page to, so the caller moves the joystick's
+/// focus on to the next thing on the screen (the burger key). Null = ignore.
+void log_view_set_escape(void (*down_past_end)());

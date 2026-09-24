@@ -12,8 +12,7 @@
 
 /* P(NAME, title, instructions) */
 #define SETTINGS_PAGE_TABLE(P)                                                                     \
-  P(SCREEN_BRIGHTNESS, "SCREEN BRIGHTNESS",                                                        \
-    "Left/right or -/+ to change. Saved automatically. Pull and hold to exit.")
+  P(SCREEN_BRIGHTNESS, "SCREEN BRIGHTNESS", "Left/right or -/+ to change. Saved automatically.")
 
 /* X(PAGE, NAME, short, label, min, max, step, decimals, unit) */
 #define SETTINGS_PARAM_TABLE(X)                                                                    \

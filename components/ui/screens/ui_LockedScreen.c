@@ -8,6 +8,7 @@
 lv_obj_t * ui_LockedScreen = NULL;
 lv_obj_t * ui_LockedBody = NULL;
 lv_obj_t * ui_LockedContent = NULL;
+lv_obj_t * ui_LockRing = NULL;
 lv_obj_t * ui_Shackle = NULL;
 lv_obj_t * ui_LockBody = NULL;
 lv_obj_t * ui_LockKeyhole = NULL;
@@ -77,6 +78,36 @@ void ui_LockedScreen_screen_init(void)
     lv_obj_set_style_pad_bottom(ui_LockedContent, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_LockedContent, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_LockedContent, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_LockRing = lv_arc_create(ui_LockedContent);
+    lv_obj_set_width(ui_LockRing, 424);
+    lv_obj_set_height(ui_LockRing, 424);
+    lv_obj_set_x(ui_LockRing, 148);
+    lv_obj_set_y(ui_LockRing, 130);
+    lv_obj_remove_flag(ui_LockRing, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_PRESS_LOCK | LV_OBJ_FLAG_CLICK_FOCUSABLE |
+                       LV_OBJ_FLAG_GESTURE_BUBBLE | LV_OBJ_FLAG_SNAPPABLE);     /// Flags
+    lv_arc_set_value(ui_LockRing, 0);
+    lv_arc_set_bg_angles(ui_LockRing, 0, 360);
+    lv_arc_set_rotation(ui_LockRing, 270);
+    lv_obj_set_style_pad_left(ui_LockRing, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_LockRing, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_LockRing, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_LockRing, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_LockRing, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_LockRing, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_arc_color(ui_LockRing, lv_color_hex(0x767676), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_arc_opa(ui_LockRing, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_arc_width(ui_LockRing, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_object_set_themeable_style_property(ui_LockRing, LV_PART_INDICATOR | LV_STATE_DEFAULT, LV_STYLE_ARC_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_LockRing, LV_PART_INDICATOR | LV_STATE_DEFAULT, LV_STYLE_ARC_OPA,
+                                           _ui_theme_alpha_text);
+    lv_obj_set_style_arc_width(ui_LockRing, 8, LV_PART_INDICATOR | LV_STATE_DEFAULT);
+
+    lv_obj_set_style_radius(ui_LockRing, 0, LV_PART_KNOB | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(ui_LockRing, lv_color_hex(0x000000), LV_PART_KNOB | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(ui_LockRing, 0, LV_PART_KNOB | LV_STATE_DEFAULT);
 
     ui_Shackle = lv_obj_create(ui_LockedContent);
     lv_obj_set_width(ui_Shackle, 138);
@@ -154,7 +185,7 @@ void ui_LockedScreen_screen_init(void)
     lv_obj_set_width(ui_ActivateDrive, 574);
     lv_obj_set_height(ui_ActivateDrive, 162);
     lv_obj_set_x(ui_ActivateDrive, 73);
-    lv_obj_set_y(ui_ActivateDrive, 538);
+    lv_obj_set_y(ui_ActivateDrive, 595);
     lv_obj_add_flag(ui_ActivateDrive, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
     lv_obj_remove_flag(ui_ActivateDrive, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_obj_set_style_radius(ui_ActivateDrive, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -173,6 +204,14 @@ void ui_LockedScreen_screen_init(void)
     lv_obj_set_style_pad_bottom(ui_ActivateDrive, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_ActivateDrive, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_ActivateDrive, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_ActivateDrive, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_ActivateDrive, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
+    ui_object_set_themeable_style_property(ui_ActivateDrive, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_ActivateDrive, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
 
     ui_ActivateDriveLabel = lv_label_create(ui_ActivateDrive);
     lv_obj_set_width(ui_ActivateDriveLabel, LV_SIZE_CONTENT);   /// 1
@@ -190,6 +229,14 @@ void ui_LockedScreen_screen_init(void)
     lv_obj_set_style_pad_bottom(ui_ActivateDriveLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_ActivateDriveLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_ActivateDriveLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_ActivateDriveLabel, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_ActivateDriveLabel, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_ActivateDriveLabel, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_ActivateDriveLabel, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
 
     ui_TopBar1 = ui_TopBar_create(ui_LockedScreen);
     lv_obj_set_width(ui_TopBar1, 720);
@@ -237,6 +284,7 @@ void ui_LockedScreen_screen_destroy(void)
     ui_LockedScreen = NULL;
     ui_LockedBody = NULL;
     ui_LockedContent = NULL;
+    ui_LockRing = NULL;
     ui_Shackle = NULL;
     ui_LockBody = NULL;
     ui_LockKeyhole = NULL;

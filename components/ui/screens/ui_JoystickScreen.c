@@ -18,6 +18,8 @@ lv_obj_t * ui_TwistEyebrow = NULL;
 lv_obj_t * ui_TwistBar = NULL;
 lv_obj_t * ui_ButtonCounterEyebrow = NULL;
 lv_obj_t * ui_ButtonCounter = NULL;
+lv_obj_t * ui_CalibrateButton = NULL;
+lv_obj_t * ui_CalibrateButtonLabel = NULL;
 lv_obj_t * ui_TopBar3 = NULL;
 lv_obj_t * ui_DriveBand4 = NULL;
 lv_obj_t * ui_ErrorBanner10 = NULL;
@@ -107,7 +109,7 @@ void ui_JoystickScreen_screen_init(void)
     lv_obj_set_height(ui_JoystickHint, 80);
     lv_obj_set_x(ui_JoystickHint, 30);
     lv_obj_set_y(ui_JoystickHint, 8);
-    lv_label_set_text(ui_JoystickHint, "Move the joystick. The bars should follow.\nCalibrate from the menu.");
+    lv_label_set_text(ui_JoystickHint, "Move the joystick. The bars should follow.\nHold the stick button to calibrate.");
     ui_object_set_themeable_style_property(ui_JoystickHint, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_text_muted);
     ui_object_set_themeable_style_property(ui_JoystickHint, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
@@ -304,6 +306,63 @@ void ui_JoystickScreen_screen_init(void)
     lv_obj_set_style_pad_row(ui_ButtonCounter, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_ButtonCounter, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
+    ui_CalibrateButton = lv_button_create(ui_JoystickContent);
+    lv_obj_set_width(ui_CalibrateButton, 360);
+    lv_obj_set_height(ui_CalibrateButton, 162);
+    lv_obj_set_x(ui_CalibrateButton, 330);
+    lv_obj_set_y(ui_CalibrateButton, 572);
+    lv_obj_add_flag(ui_CalibrateButton, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
+    lv_obj_remove_flag(ui_CalibrateButton, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_set_style_radius(ui_CalibrateButton, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_CalibrateButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_CalibrateButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_CalibrateButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_CalibrateButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
+                                           _ui_theme_alpha_text);
+    lv_obj_set_style_border_width(ui_CalibrateButton, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_CalibrateButton, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_CalibrateButton, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_CalibrateButton, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_CalibrateButton, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_CalibrateButton, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_CalibrateButton, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_CalibrateButton, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_CalibrateButton, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
+    ui_object_set_themeable_style_property(ui_CalibrateButton, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_CalibrateButton, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
+
+    ui_CalibrateButtonLabel = lv_label_create(ui_CalibrateButton);
+    lv_obj_set_width(ui_CalibrateButtonLabel, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(ui_CalibrateButtonLabel, LV_SIZE_CONTENT);    /// 1
+    lv_obj_set_align(ui_CalibrateButtonLabel, LV_ALIGN_CENTER);
+    lv_label_set_text(ui_CalibrateButtonLabel, "Calibrate");
+    ui_object_set_themeable_style_property(ui_CalibrateButtonLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_CalibrateButtonLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_text);
+    lv_obj_set_style_text_font(ui_CalibrateButtonLabel, &ui_font_MontserratSemiBold44, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_CalibrateButtonLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_CalibrateButtonLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_CalibrateButtonLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_CalibrateButtonLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_CalibrateButtonLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_CalibrateButtonLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_CalibrateButtonLabel, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_CalibrateButtonLabel, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_CalibrateButtonLabel, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_CalibrateButtonLabel, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+
     ui_TopBar3 = ui_TopBar_create(ui_JoystickScreen);
     lv_obj_set_width(ui_TopBar3, 720);
     lv_obj_set_height(ui_TopBar3, 55);
@@ -358,6 +417,8 @@ void ui_JoystickScreen_screen_destroy(void)
     ui_TwistBar = NULL;
     ui_ButtonCounterEyebrow = NULL;
     ui_ButtonCounter = NULL;
+    ui_CalibrateButton = NULL;
+    ui_CalibrateButtonLabel = NULL;
     ui_TopBar3 = NULL;
     ui_DriveBand4 = NULL;
     ui_ErrorBanner10 = NULL;

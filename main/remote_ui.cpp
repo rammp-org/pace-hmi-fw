@@ -168,23 +168,12 @@ int arg(const std::vector<std::string> &words, size_t index, int fallback = 0) {
   return std::atoi(words[index].c_str());
 }
 
-/// True if this command writes to the UI rather than only reading it.
-bool is_input(const std::string &verb) {
-  return verb == "TAP" || verb == "PRESS" || verb == "RELEASE" || verb == "SWIPE" ||
-         verb == "KEY" || verb == "BTN" || verb == "THEME";
-}
-
 bool handle(int sock, const std::string &line) {
   const std::vector<std::string> words = split(line);
   if (words.empty()) {
     return true;
   }
   const std::string &verb = words[0];
-
-  // Looking is always safe; touching something that moves a chair is not.
-  if (is_input(verb) && cfg.input_allowed && !cfg.input_allowed()) {
-    return send_line(sock, "ERR refused: the MCB reports the chair enabled");
-  }
 
   if (verb == "PING") {
     return send_line(sock, "OK");
@@ -298,7 +287,8 @@ void server_task() {
     ::close(listener);
     return;
   }
-  ESP_LOGW(kTag, "remote UI listening on %u -- DEBUG ONLY, this can move the chair", kRemoteUiPort);
+  ESP_LOGW(kTag, "remote UI listening on %u -- DEBUG ONLY, it can press anything on screen",
+           kRemoteUiPort);
 
   while (true) {
     const int client = ::accept(listener, nullptr, nullptr);

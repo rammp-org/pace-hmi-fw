@@ -22,8 +22,9 @@ falls back to HMI_HOST from the environment.
 Stdlib only, like its neighbours: zlib and a short struct header are enough to
 write a PNG, so nothing here needs Pillow.
 
-THIS CAN MOVE A CHAIR. The firmware refuses input while the MCB reports the
-chair enabled; that is a guard rail, not a reason to point it at one.
+It cannot drive the chair -- injected stick directions only move the UI's
+focus, never the stick values the MCB receives -- but it can press anything on
+screen, the seat and actuator jogs included. Bench use only.
 """
 
 from __future__ import annotations
@@ -52,7 +53,7 @@ MENU_ROWS = [
     "Diagnostics",
     "Bench",
     "UI Settings",
-    "Calibrate Joystick",
+    "Joystick",
 ]
 
 
@@ -120,6 +121,25 @@ class Hmi:
 
     def theme(self, index: int) -> str:
         return self.command(f"THEME {index}")
+
+    # --- the joystick, as a person would use it -------------------------------
+
+    def nudge(self, direction: str, ms: int = 120) -> str:
+        """One flick of the stick: held long enough for one keypad read, then
+        let go. LVGL repeats a held key after 500 ms, so this stays well short."""
+        self.key(direction.upper())
+        time.sleep(ms / 1000)
+        return self.key("NONE")
+
+    def press(self, ms: int = 120) -> str:
+        """A short press of the stick button: a select, on release."""
+        self.command("BTN 1")
+        time.sleep(ms / 1000)
+        return self.command("BTN 0")
+
+    def hold(self, ms: int = 2000) -> str:
+        """A long press of the stick button: a hold, never a select."""
+        return self.press(ms)
 
     # --- the burger menu, which is how everything is reached ----------------
 
@@ -270,6 +290,14 @@ def main() -> int:
     sub.add_parser("home", help="DRIVE in the band: back to the drive screen")
     sub.add_parser("menu", help="open (or close) the burger menu")
 
+    nudge = sub.add_parser("nudge", help="one flick of the stick (UP/DOWN/LEFT/RIGHT)")
+    nudge.add_argument("direction")
+    nudge.add_argument("--times", type=int, default=1)
+
+    sub.add_parser("press", help="a short press of the stick button (select)")
+    hold = sub.add_parser("hold", help="hold the stick button")
+    hold.add_argument("ms", type=int, nargs="?", default=2000)
+
     theme = sub.add_parser("theme", help="0 = night, 1 = day")
     theme.add_argument("index", type=int)
 
@@ -301,6 +329,14 @@ def main() -> int:
             print(hmi.home(), hmi.screen())
         elif args.command == "menu":
             print(hmi.open_menu())
+        elif args.command == "nudge":
+            for _ in range(args.times):
+                print(hmi.nudge(args.direction))
+                time.sleep(0.15)
+        elif args.command == "press":
+            print(hmi.press())
+        elif args.command == "hold":
+            print(hmi.hold(args.ms))
         elif args.command == "theme":
             print(hmi.theme(args.index))
         elif args.command == "walk":

@@ -133,8 +133,16 @@ void poll_cb(lv_timer_t *) {
 // the next. Up the stick is up the log: a positive dy moves the content down,
 // revealing earlier lines. Left and right page sideways through long lines.
 // LVGL's key repeat turns a held stick into paging.
+void (*escape_down)() = nullptr;
+
 void key_cb(lv_event_t *e) {
   const uint32_t key = lv_event_get_key(e);
+  // Already showing the newest line: a further push down leaves the log for
+  // whatever follows it, rather than doing nothing forever.
+  if (key == LV_KEY_DOWN && escape_down != nullptr && lv_obj_get_scroll_bottom(view) <= 0) {
+    escape_down();
+    return;
+  }
   if (key == LV_KEY_UP || key == LV_KEY_DOWN) {
     const int32_t line = line_height();
     const int32_t page = std::max<int32_t>(line, lv_obj_get_content_height(view) - line);
@@ -223,6 +231,8 @@ void log_view_init() {
 }
 
 lv_group_t *log_view_group() { return group; }
+
+void log_view_set_escape(void (*down_past_end)()) { escape_down = down_past_end; }
 
 void log_view_on_load() {
   if (text == nullptr) {

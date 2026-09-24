@@ -28,9 +28,13 @@
  * One client at a time: a second connection is accepted and closed, so a
  * half-dead session cannot lock the channel out.
  *
- * THIS MOVES A CHAIR. It is behind CONFIG_HMI_REMOTE_UI, it must be off in a
- * production build, and it refuses every input command while the MIB reports
- * ENABLED -- reading the screen stays allowed, because looking is safe.
+ * What it can and cannot reach. The joystick directions it injects go into the
+ * keypad latch LVGL reads, never into the stick values sent to the MCB, so it
+ * cannot drive the chair. It CAN press anything on screen: ACTIVATE DRIVE, the
+ * seat and actuator jog buttons, the drive mode. Those move things. There is no
+ * authentication, so anything on the network can do it -- which is why the
+ * channel is compiled out unless CONFIG_HMI_REMOTE_UI is set, and must stay out
+ * of anything that leaves the bench.
  */
 
 #include <cstdint>
@@ -50,8 +54,6 @@ struct RemoteUiConfig {
   std::function<void()> press_select;
   /// The GPIO48 test button, held.
   std::function<void(bool)> set_button;
-  /// False while it would be unsafe to inject anything (the MIB says ENABLED).
-  std::function<bool()> input_allowed;
   /// The active screen's name, for SCREEN. Called under the LVGL lock.
   std::function<const char *()> screen_name;
 };

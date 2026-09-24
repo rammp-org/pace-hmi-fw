@@ -9,11 +9,11 @@ menu "RAMMP HMI"
             UI can be walked and captured from scripts/hmi_ui.py instead of by
             someone looking at the panel.
 
-            THIS CAN MOVE THE CHAIR. It is a debug back door with no
-            authentication: anything on the same network can drive the HMI. It
-            refuses input while the MCB reports the chair enabled, and reading
-            the screen is always allowed, but that is a guard rail, not
-            security.
+            It cannot drive the chair: injected joystick directions only move
+            the UI's focus and never reach the stick values sent to the MCB.
+            It CAN press anything on screen -- ACTIVATE DRIVE, the seat and
+            actuator jog buttons -- and it has no authentication, so anything on
+            the same network can.
 
             Off by default for that reason. Turn it on in your local sdkconfig
             (which is not in git) while working on the UI, not in

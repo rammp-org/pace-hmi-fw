@@ -16,6 +16,7 @@ extern void ui_LockedScreen_screen_destroy(void);
 extern lv_obj_t * ui_LockedScreen;
 extern lv_obj_t * ui_LockedBody;
 extern lv_obj_t * ui_LockedContent;
+extern lv_obj_t * ui_LockRing;
 extern lv_obj_t * ui_Shackle;
 extern lv_obj_t * ui_LockBody;
 extern lv_obj_t * ui_LockKeyhole;

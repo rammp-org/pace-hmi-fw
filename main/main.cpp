@@ -175,6 +175,11 @@ static std::atomic<uint32_t> joy_key{0};
 // would re-click the focused row every repeat period, which for the theme-toggle
 // row means it strobes. Consumed by the indev read.
 static std::atomic<bool> select_key{false};
+// A direction held by the remote UI channel (remote_ui.cpp); 0 = none. The ADC
+// task recomputes joy_key from the real stick every cycle, so a direction
+// written straight into joy_key lasted at most 33 ms and a keypad read could
+// miss it. This one outlasts that until the channel lets go.
+static std::atomic<uint32_t> remote_key{0};
 
 // An indev can own exactly one group, so the joystick's group follows the
 // active screen. The swap happens on LV_EVENT_SCREEN_LOADED, so it covers
@@ -195,6 +200,22 @@ static lv_group_t *menu_group = nullptr;        // the menu overlay's rows
 static lv_group_t *seat_group = nullptr;        // seat screen, function buttons page
 static lv_group_t *seat_adjust_group = nullptr; // seat screen, adjustment page
 static lv_group_t *rd_group = nullptr;          // the bench gate's PIN keypad
+
+// The burger menu's overlay while it is up, else null. Up here because the
+// hold gestures ask whether it is open before they apply.
+static lv_obj_t *nav_menu_open = nullptr;
+
+// Whether the stick may drive the chair right now: the Drive screen is up, the
+// menu is shut and drive is active. Written on the LVGL task by
+// nav_update_stick_gate, read by the ADC task, which sends the MCB a centred
+// stick whenever it is false.
+static std::atomic<bool> stick_drives{false};
+
+// Defined with the burger menu (see "The burger menu, and moving around with
+// the joystick"); declared here for the screens and gestures above it.
+static void nav_use_group(lv_group_t *g, const lv_obj_t *screen);
+static void nav_to_key();
+static void nav_update_stick_gate();
 
 // HAPTIC TEST settings row -> kHapticBuzzDuration of vibration.
 //
@@ -299,9 +320,6 @@ enum class StatusKind { kDriveStatus, kState };
 static StatusKind kDriveStatusKind = StatusKind::kDriveStatus;
 static StatusKind kStateKind = StatusKind::kState;
 
-static constexpr uint32_t kStatusGreen = 0x01FF00; // the export's ACTIVE/OK green
-static constexpr uint32_t kStatusGrey = 0xAAAAAA;  // nothing wrong, just not driving
-static constexpr uint32_t kStatusRed = 0xFF0000;
 static constexpr uint32_t kStatusOrange = 0xFF8C00; // network up, nothing peering
 // Shown instead of a stale drive-status/state: the MCB has gone quiet, so the
 // last value it sent is no longer something the HMI can stand behind.
@@ -314,52 +332,58 @@ static constexpr const char *kStatusUnknownText = "---";
 static void mcb_status_label_observer(lv_observer_t *observer, lv_subject_t *) {
   lv_obj_t *label = lv_observer_get_target_obj(observer);
   const auto kind = *static_cast<const StatusKind *>(lv_observer_get_user_data(observer));
+  // Theme colours, not literals: the day theme's green and red are darker, so
+  // they still read on white. Re-run on a theme switch (rtps_poll_cb notifies).
+  const lv_color_t ok = lv_color_hex(ui_get_theme_value(_ui_theme_color_ok));
+  const lv_color_t alert = lv_color_hex(ui_get_theme_value(_ui_theme_color_alert));
+  const lv_color_t muted = lv_color_hex(ui_get_theme_value(_ui_theme_color_text_muted));
+  auto show = [label](const char *text, lv_color_t colour) {
+    lv_label_set_text(label, text);
+    lv_obj_set_style_text_color(label, colour, LV_PART_MAIN);
+  };
 
-  // Locked is the HMI's own answer and it outranks the MCB's: the chair will
-  // not drive until someone unlocks it here, whatever the MCB reports. The band
-  // is chrome on every screen, so this is what makes all of them agree rather
-  // than only LockedScreen, which is where the export writes it by hand.
-  if (kind == StatusKind::kDriveStatus && lv_subject_get_int(&locked_subject) != 0) {
-    lv_label_set_text(label, "LOCKED");
-    // Red, per spec 01. Not a fault: it is the one state the user has to act on
-    // before anything else happens, and the spec gives it the alert colour for
-    // that reason.
-    lv_obj_set_style_text_color(label, lv_color_hex(kStatusRed), LV_PART_MAIN);
-    return;
-  }
+  const bool connected = static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) ==
+                         RtpsLinkState::CONNECTED;
+  const auto state = static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject));
 
-  // No live link means no current answer, whatever arrived last.
-  if (static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) !=
-      RtpsLinkState::CONNECTED) {
-    lv_label_set_text(label, kStatusUnknownText);
-    lv_obj_set_style_text_color(label, lv_color_hex(kStatusGrey), LV_PART_MAIN);
-    return;
-  }
-
-  const auto value = static_cast<uint8_t>(lv_subject_get_int(&mib_state_subject));
-  // The override replaces the wording only; the colour below still comes from
-  // the enum, so the MCB can say ACTIVE and still label it "CHARGING".
-  // The MIB sends one wording, and it belongs to the state label: the drive label
-  // always reads the state's own name.
-  const char *override_text =
-      kind == StatusKind::kDriveStatus ? "" : lv_subject_get_string(&state_text_subject);
-  const bool overridden = override_text != nullptr && override_text[0] != '\0';
-
-  const auto state = static_cast<MIB::MibSystemState>(value);
-  const char *text = overridden ? override_text : rammp::to_string(state);
-  uint32_t color;
+  // DRIVE is two words, per spec: ACTIVE in green while the chair is driving,
+  // LOCKED in red whenever it is not -- locked here, a fault, the link down, or
+  // the MIB simply not enabled. It is the one thing the user has to act on
+  // before anything moves, and the spec gives it the alert colour for that.
+  // Locked outranks everything: the chair does not drive until ACTIVATE DRIVE,
+  // whatever the MIB says.
   if (kind == StatusKind::kDriveStatus) {
-    // ENABLED is the only state the chair drives in. IDLE and INITIALIZING are normal
-    // resting states, not faults, so they read grey — red is for ERROR, and for a value
-    // neither board knows, which is what a MIB running ahead of this firmware sends.
-    color = state == MIB::MibSystemState::ENABLED ? kStatusGreen
-            : state == MIB::MibSystemState::ERROR ? kStatusRed
-                                                  : kStatusGrey;
-  } else {
-    color = state == MIB::MibSystemState::ERROR ? kStatusRed : kStatusGreen;
+    const bool active = lv_subject_get_int(&locked_subject) == 0 && connected &&
+                        state == MIB::MibSystemState::ENABLED;
+    show(active ? "ACTIVE" : "LOCKED", active ? ok : alert);
+    return;
   }
-  lv_label_set_text(label, text);
-  lv_obj_set_style_text_color(label, lv_color_hex(color), LV_PART_MAIN);
+
+  // STATE: no live link means no current answer, whatever arrived last.
+  if (!connected) {
+    show(kStatusUnknownText, muted);
+    return;
+  }
+  // The MIB's own wording wins when it sends one ("M2 ERROR"); the colour still
+  // comes from the state, so it can say anything and still read as a fault.
+  const char *override_text = lv_subject_get_string(&state_text_subject);
+  const bool overridden = override_text != nullptr && override_text[0] != '\0';
+  switch (state) {
+  case MIB::MibSystemState::IDLE:
+  case MIB::MibSystemState::ENABLED:
+    show(overridden ? override_text : "OK", ok);
+    return;
+  case MIB::MibSystemState::INITIALIZING:
+    // Not a fault and not yet OK. "STARTING" rather than the enum's name, which
+    // does not fit the cell.
+    show(overridden ? override_text : "STARTING", muted);
+    return;
+  default:
+    // ERROR, and any value this firmware does not know -- what a MIB running
+    // ahead of it sends.
+    show(overridden ? override_text : "ERROR", alert);
+    return;
+  }
 }
 
 // Binds one StatusPanel instance's two labels to the two subjects. Called once
@@ -455,12 +479,12 @@ static void rtps_label_observer(lv_observer_t *observer, lv_subject_t *) {
   lv_obj_t *label = lv_observer_get_target_obj(observer);
   const auto state = static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject));
 
-  uint32_t color = kStatusRed;
+  uint32_t color = ui_get_theme_value(_ui_theme_color_alert);
   bool blink = false;
   switch (state) {
   case RtpsLinkState::ETH_FAILED: // no hardware and no link are both "there is
   case RtpsLinkState::LINK_DOWN:  // no network", and neither is worth blinking
-    color = kStatusRed;
+    color = ui_get_theme_value(_ui_theme_color_alert);
     break;
   case RtpsLinkState::NO_IP:
     color = kStatusOrange;
@@ -470,7 +494,9 @@ static void rtps_label_observer(lv_observer_t *observer, lv_subject_t *) {
     blink = true;
     break;
   case RtpsLinkState::CONNECTED:
-    color = kStatusGreen;
+    // The theme's green, not a literal: the day theme's is darker, so it
+    // still reads against white.
+    color = ui_get_theme_value(_ui_theme_color_ok);
     break;
   }
   lv_obj_set_style_text_color(label, lv_color_hex(color), LV_PART_MAIN);
@@ -751,34 +777,50 @@ static void bind_clock_label(lv_obj_t *bar) {
   }
 }
 
-// Runs on the Button's interrupt task (not in ISR context). Only touches
-// subjects, never widgets directly.
-static void gpio48_button_callback(const espp::Interrupt::Event &event) {
+// One edge of the stick button, from the GPIO or from the remote UI channel --
+// one path, so what a script presses is the real handling. Touches subjects,
+// never widgets directly. Any task.
+//
+// "Select" -- the keypad's ENTER, which clicks whatever the joystick has
+// focused -- fires on RELEASE, and only for a press shorter than
+// kSelectMaxUs. The same button is held to stop driving and to start a
+// calibration, and a select on the press edge would have clicked the focused
+// control (on the Drive screen: opened the menu) at the start of every hold.
+// kSelectMaxUs is a hold's grace period, so a press short enough to select
+// never starts a hold filling, and one long enough to fill never selects.
+static constexpr int64_t kSelectMaxUs = 500 * 1000; // == kBarGraceMs
+static void stick_button_edge(bool active) {
   // lv_subject_set_int runs the observers synchronously on this task, and they
   // touch widgets, so this needs the LVGL lock
   std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
 
   // the panel follows every edge, so contact bounce can't strand it blue: the
   // last edge always wins
-  lv_subject_set_int(&button_pressed_subject, event.active);
+  lv_subject_set_int(&button_pressed_subject, active);
   // undebounced on purpose: the MCB wants the raw line state, and this is the
   // same every-edge signal the panel follows
-  joy_button_pressed.store(event.active);
+  joy_button_pressed.store(active);
 
-  // doubles as the "select" gesture for the settings list — the joystick has no
-  // natural press of its own
-  if (event.active) {
+  const int64_t now = esp_timer_get_time();
+  static int64_t pressed_at_us = 0;
+  if (active) {
+    pressed_at_us = now;
+  } else if (now - pressed_at_us < kSelectMaxUs) {
     select_key.store(true);
   }
 
   // only the counter is debounced. espp's GPIO glitch filters are ns-scale and
   // do nothing against millisecond-scale mechanical bounce.
   static int64_t last_press_us = 0;
-  const int64_t now = esp_timer_get_time();
-  if (event.active && (now - last_press_us) > 30000) {
+  if (active && (now - last_press_us) > 30000) {
     last_press_us = now;
     lv_subject_set_int(&button_count_subject, lv_subject_get_int(&button_count_subject) + 1);
   }
+}
+
+// Runs on the Button's interrupt task (not in ISR context).
+static void gpio48_button_callback(const espp::Interrupt::Event &event) {
+  stick_button_edge(event.active);
 }
 
 static bool load_audio(size_t &out_size, size_t &out_sample_rate);
@@ -853,8 +895,6 @@ static constexpr uint32_t kHoldPollMs = 33;
 // still where it was. Without this, unlocking would roll on into the Drive
 // screen with no second hold, because joystick-up triggers both.
 static bool joy_up_armed = true;
-static bool joy_down_armed = true;
-static bool joy_left_armed = true;
 static bool joy_button_armed = true;
 
 // progress and holding carry default member initializers rather than being
@@ -935,10 +975,8 @@ static void hold_poll(HoldGesture *g) {
 
 // The inputs. joy_key is the same Schmitt-triggered latch the flex pager uses,
 // so the engage/release thresholds stay in one place, and it resolves a diagonal
-// to a single direction — which is what keeps these three mutually exclusive.
+// to a single direction.
 static bool joy_up_held() { return joy_key.load() == LV_KEY_UP; }
-static bool joy_down_held() { return joy_key.load() == LV_KEY_DOWN; }
-static bool joy_left_held() { return joy_key.load() == LV_KEY_LEFT; }
 // The stick's own button. Reads the level the button callback mirrors out, not
 // the edge-latched select_key: a hold gesture needs to know the button is still
 // down, and select_key is consumed by the first indev read after the press.
@@ -948,23 +986,77 @@ static bool joy_button_held() { return joy_button_pressed.load(); }
 // Lock / unlock, and the LockedScreen gesture
 /////////////////////////////////////////////////////////////////////////////
 
-// The two labels that used to swap on locked_subject went with the pager page
-// they were on. LockedScreen is a padlock and one button now, and the drive
-// band reads LOCKED on every screen (mcb_status_label_observer).
+// Locked means "not driving", and the Locked screen is where that changes.
+// ACTIVATE DRIVE -- a tap, the stick button with the cursor on it, or holding
+// the stick up -- asks the MIB to start driving, and nothing unlocks until the
+// MIB says it has (activate_drive, lock_open). The ring round the padlock shows
+// where that stands: it fills while the stick is held up, a quarter of it goes
+// round while the MIB is asked, and it closes when the MIB answers. Then the
+// spec's 01b frame -- the shackle rises, the button fills white, the band flips
+// to ACTIVE -- held one second, and Drive dissolves in (Motion timing,
+// "ACTIVATE DRIVE").
+//
+// Locking again is the MIB's call too: the chair stops, asked (the drive-exit
+// hold) or not (a fault, the link), and drive_screen_follow_state brings the
+// Locked screen back with the reason on its banner.
+
+static constexpr int32_t kShackleRisePx = 30; // spec 01b: 103 px -> 133 px, bottom fixed
+static constexpr uint32_t kRingSpinMs = 900;  // one turn of the waiting arc
+static constexpr int32_t kRingWaitArc = 25;   // how much of the ring goes round
+static constexpr uint32_t kUnlockDissolveMs = 280;
 
 // One-shot, armed by the unlock and cancelled by a re-lock that beats it. Held
 // so set_locked(true) can delete it: a re-lock inside the kUnlockAdvanceMs
 // window would otherwise be immediately undone by the advance it left running.
 static lv_timer_t *unlock_advance_timer = nullptr;
 
-// Opens the Drive screen a beat after the unlock lands. The spec's ACTIVATE
-// DRIVE sequence (Motion timing) is 120 ms press, then a hard cut to the band
-// reading ACTIVE, then 1 s, then a 280 ms dissolve into Drive. This timer is
-// that second; the dissolve is the screen change's own fade.
+// Asked the MIB to drive, no answer yet: the ring is going round.
+static bool lock_waiting = false;
+// The shackle's resting geometry, read from the export at wiring time.
+static int32_t shackle_rest_y = 0;
+static int32_t shackle_rest_h = 0;
+
+// The Drive screen, dissolving in one second after the unlock landed.
 static void unlock_advance_cb(lv_timer_t *) {
   unlock_advance_timer = nullptr; // repeat_count 1: LVGL deletes it after this
-  _ui_screen_change(&ui_DriveScreen, LV_SCREEN_LOAD_ANIM_FADE_ON, 280, 0,
+  _ui_screen_change(&ui_DriveScreen, LV_SCREEN_LOAD_ANIM_FADE_ON, kUnlockDissolveMs, 0,
                     &ui_DriveScreen_screen_init);
+}
+
+static void ring_spin_cb(void *ring, int32_t angle) {
+  lv_arc_set_rotation(static_cast<lv_obj_t *>(ring), angle);
+}
+
+// The ring and the padlock back at rest: empty, shackle down, button unfilled.
+static void lock_visual_rest() {
+  lock_waiting = false;
+  lv_anim_delete(ui_LockRing, ring_spin_cb);
+  lv_arc_set_rotation(ui_LockRing, 270);
+  lv_arc_set_value(ui_LockRing, 0);
+  lv_obj_set_y(ui_Shackle, shackle_rest_y);
+  lv_obj_set_height(ui_Shackle, shackle_rest_h);
+  lv_obj_remove_state(ui_ActivateDrive, LV_STATE_CHECKED);
+}
+
+// Asked the MIB and waiting: a quarter of the ring goes round until it answers.
+static void lock_visual_wait() {
+  lock_waiting = true;
+  lv_arc_set_value(ui_LockRing, kRingWaitArc);
+  lv_anim_t a;
+  lv_anim_init(&a);
+  lv_anim_set_var(&a, ui_LockRing);
+  lv_anim_set_exec_cb(&a, ring_spin_cb);
+  lv_anim_set_values(&a, 270, 270 + 360);
+  lv_anim_set_duration(&a, kRingSpinMs);
+  lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+  lv_anim_start(&a);
+}
+
+// While nothing else is showing, the ring follows the stick-up hold.
+static void lock_ring_hold_observer(lv_observer_t *, lv_subject_t *subject) {
+  if (!lock_waiting && lv_subject_get_int(&locked_subject) != 0) {
+    lv_arc_set_value(ui_LockRing, lv_subject_get_int(subject));
+  }
 }
 
 // Locks or unlocks the HMI. Callers must hold lvgl_mutex: writing a subject runs
@@ -973,14 +1065,16 @@ static void unlock_advance_cb(lv_timer_t *) {
 // lock lv_task_handler() is called under.
 //
 // Unlocking arms unlock_advance_cb, which opens Drive. Locking goes straight
-// back to the Locked screen from wherever you were, so a re-lock can never
-// strand you on a screen that assumes the chair may move.
+// back to the Locked screen from wherever you were -- a hard cut, per the
+// spec's rule that the move between LOCKED and ACTIVE is instant -- so a
+// re-lock can never strand you on a screen that assumes the chair may move.
 static void set_locked(bool locked) {
   if (unlock_advance_timer) {
     lv_timer_delete(unlock_advance_timer);
     unlock_advance_timer = nullptr;
   }
   if (locked) {
+    lock_visual_rest();
     _ui_screen_change(&ui_LockedScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
                       &ui_LockedScreen_screen_init);
   } else {
@@ -988,13 +1082,27 @@ static void set_locked(bool locked) {
     lv_timer_set_repeat_count(unlock_advance_timer, 1);
   }
   lv_subject_set_int(&locked_subject, locked ? 1 : 0);
+  nav_update_stick_gate();
 }
 
+// Defined with the drive request it makes, further down.
+static bool mcb_ready();
+static void activate_drive();
+static void lock_open();
+
+// Holding the stick up on the Locked screen: the same as pressing ACTIVATE
+// DRIVE. Only while there is something to ask -- a MIB that is not ready gets
+// the refusal on the first push instead (entry_refusal_poll), rather than a
+// ring that fills for a second and then says no.
 static HoldGesture unlock_gesture{
     .armed = &joy_up_armed,
     .is_held = joy_up_held,
-    .applies = [] { return lv_subject_get_int(&locked_subject) != 0; },
-    .completed = [] { set_locked(false); },
+    .applies =
+        [] {
+          return lv_subject_get_int(&locked_subject) != 0 && !lock_waiting &&
+                 lv_screen_active() == ui_LockedScreen && nav_menu_open == nullptr && mcb_ready();
+        },
+    .completed = [] { activate_drive(); },
 };
 
 /////////////////////////////////////////////////////////////////////////////
@@ -1009,11 +1117,6 @@ static HoldGesture unlock_gesture{
 // take the same path as the boot screen's own transition and re-create the
 // target if it was ever destroyed.
 /////////////////////////////////////////////////////////////////////////////
-
-static void screen_return_to_main() {
-  _ui_screen_change(&ui_DriveScreen, LV_SCREEN_LOAD_ANIM_FADE_ON, 120, 0,
-                    &ui_DriveScreen_screen_init);
-}
 
 // SettingsScreen, defined with its rows further down. The actuators
 // page comes after the settings_spec.h pages.
@@ -1175,10 +1278,22 @@ static void bind_to_drive_blocked_cause(lv_obj_t *panel, lv_observer_cb_t cb) {
 // the MCB is ready again, so it never claims a fault that has already cleared.
 static void entry_refused_panel_observer(lv_observer_t *observer, lv_subject_t *) {
   lv_obj_t *panel = lv_observer_get_target_obj(observer);
+  // Every show and hide goes through here. On the Locked screen the banner
+  // takes the top of the body, which is where the padlock is, and half a
+  // padlock under a fault reads as a drawing glitch -- so the padlock and its
+  // ring step aside while the banner is up.
+  auto shown = [panel](bool up) {
+    lv_obj_set_flag(panel, LV_OBJ_FLAG_HIDDEN, !up);
+    if (panel == ui_ErrorBanner2) {
+      for (lv_obj_t *art : {ui_LockRing, ui_Shackle, ui_LockBody, ui_LockKeyhole}) {
+        lv_obj_set_flag(art, LV_OBJ_FLAG_HIDDEN, up);
+      }
+    }
+  };
   const int32_t refused = lv_subject_get_int(&entry_refused_subject);
   if (refused == kRefusedNone || refused == kRefusedExit) {
     // kRefusedExit belongs to the DriveScreen's own panel, not this one.
-    lv_obj_add_flag(panel, LV_OBJ_FLAG_HIDDEN);
+    shown(false);
     return;
   }
   // The MIB's own refusals: shown for their window whatever the state says now,
@@ -1189,11 +1304,11 @@ static void entry_refused_panel_observer(lv_observer_t *observer, lv_subject_t *
         panel, stopped ? rammp::kHmiDriveStoppedTitle : rammp::kHmiDriveNotGrantedTitle,
         stopped ? rammp::kHmiDriveStoppedText : rammp::kHmiDriveNotGrantedText,
         stopped ? rammp::kHmiDriveStoppedFooter : rammp::kHmiDriveNotGrantedFooter);
-    lv_obj_remove_flag(panel, LV_OBJ_FLAG_HIDDEN);
+    shown(true);
     return;
   }
   if (mcb_ready()) {
-    lv_obj_add_flag(panel, LV_OBJ_FLAG_HIDDEN);
+    shown(false);
     return;
   }
   if (refused == kRefusedSeat) {
@@ -1202,7 +1317,7 @@ static void entry_refused_panel_observer(lv_observer_t *observer, lv_subject_t *
   } else {
     fill_drive_blocked_panel(panel, rammp::kHmiLinkRefusedTitle, rammp::kHmiMcbRefusedTitle);
   }
-  lv_obj_remove_flag(panel, LV_OBJ_FLAG_HIDDEN);
+  shown(true);
 }
 
 static void bind_entry_refused_panel(lv_obj_t *panel) {
@@ -1271,13 +1386,12 @@ static void entry_refusal_poll() {
   const bool pushed = up && !was_up;
   was_up = up;
 
-  // The screen the push would be trying to leave. Pushing up on LockedScreen
-  // is the unlock gesture, so a push there with the MCB not ready is a refused
-  // attempt to drive; the seat screen is the same story for its own hold.
-  const lv_obj_t *active = lv_screen_active();
-  const int32_t page = active == ui_LockedScreen ? kRefusedDrive
-                       : active == ui_SeatScreen ? kRefusedSeat
-                                                 : kRefusedNone;
+  // Pushing up on the Locked screen is the unlock gesture, so a push there with
+  // the MCB not ready is a refused attempt to drive. Everywhere else a push is
+  // the joystick walking the UI, and means nothing to the chair.
+  const bool attempt = lv_screen_active() == ui_LockedScreen && nav_menu_open == nullptr &&
+                       lv_subject_get_int(&locked_subject) != 0;
+  const int32_t page = attempt ? kRefusedDrive : kRefusedNone;
   const int32_t refused = lv_subject_get_int(&entry_refused_subject);
   if (pushed && page != kRefusedNone && !mcb_ready()) {
     // Through the helper, so this always gets its own dwell back after a refusal
@@ -1354,27 +1468,37 @@ static void drive_screen_follow_state() {
                          RtpsLinkState::CONNECTED;
   const auto state = static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject));
   const bool driving = connected && state == MIB::MibSystemState::ENABLED;
-  const bool showing = lv_screen_active() == ui_DriveScreen;
-  if (driving == showing) {
-    return;
-  }
-  if (driving) {
+  const bool locked = lv_subject_get_int(&locked_subject) != 0;
+
+  if (driving && locked) {
+    // The chair drives: the HMI has to say so, asked or not. The screen stays
+    // where it is -- spec V2 keeps drive ACTIVE across the menu and the other
+    // screens, and the stick only drives from Drive (stick_drives) -- but
+    // coming from Locked, the unlock plays and Drive follows.
     drive_wait_until_us = 0; // whatever was being waited for, it happened
     drive_wait_warn_us = 0;  // and there is nothing to complain about
     drive_exit_until_us = 0; // any older request to stop is stale
     drive_exit_requested = false;
-    _ui_screen_change(&ui_DriveScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0, &ui_DriveScreen_screen_init);
-  } else if (connected) {
-    // Asked for, or done to us? Leaving on request needs no explanation; the MIB
-    // stopping the chair by itself does, and the drive screen is gone by then, so it
-    // has to be said on the screen the user lands on.
+    lock_open();
+    return;
+  }
+  if (!driving && !locked) {
+    // Stopped. Asked for, or done to us? Leaving on request needs no
+    // explanation; the MIB stopping the chair by itself does, and it has to be
+    // said on the screen the user lands on.
     const bool asked = drive_exit_requested;
     drive_exit_until_us = 0;
     drive_exit_requested = false;
-    screen_return_to_main();
+    set_locked(true);
     if (!asked) {
       entry_refused_show(kRefusedDriveStopped, kDriveRefusedShowMs);
     }
+    return;
+  }
+  // Asked, and the answer window has passed without ENABLED: the refusal is on
+  // the banner (drive_wait_poll), so the ring stops going round.
+  if (locked && lock_waiting && drive_wait_warn_us == 0) {
+    lock_visual_rest();
   }
 }
 
@@ -1419,6 +1543,40 @@ static void drive_request_enter() {
   drive_wait_until_us = now + kDriveWaitUs;
 }
 
+// ACTIVATE DRIVE, however it was pressed. Refused on the spot when the MIB
+// could not act on it; otherwise asked, with the ring going round until the MIB
+// answers (drive_screen_follow_state opens the lock on ENABLED, and stops the
+// ring if the answer window passes without one).
+static void activate_drive() {
+  if (lv_subject_get_int(&locked_subject) == 0 || lock_waiting) {
+    return; // already driving, or already asked
+  }
+  if (!mcb_ready()) {
+    lock_visual_rest();
+    entry_refused_show(kRefusedDrive, kDriveRefusedShowMs);
+    haptic_play(espp::Drv2605::Waveform::DOUBLE_CLICK, 1);
+    return;
+  }
+  lock_visual_wait();
+  drive_request_enter();
+}
+
+// The MIB said ENABLED: spec 01b, a hard cut. The ring closes, the shackle rises
+// kShackleRisePx with its bottom edge where it was, the button fills white, and
+// set_locked(false) flips the band to ACTIVE and starts the one-second hold
+// before Drive dissolves in.
+static void lock_open() {
+  lock_waiting = false;
+  lv_anim_delete(ui_LockRing, ring_spin_cb);
+  lv_arc_set_rotation(ui_LockRing, 270);
+  lv_arc_set_value(ui_LockRing, kHoldMax);
+  lv_obj_set_y(ui_Shackle, shackle_rest_y - kShackleRisePx);
+  lv_obj_set_height(ui_Shackle, shackle_rest_h + kShackleRisePx);
+  lv_obj_add_state(ui_ActivateDrive, LV_STATE_CHECKED);
+  haptic_play(espp::Drv2605::Waveform::STRONG_CLICK, 1);
+  set_locked(false);
+}
+
 // Exits on the stick BUTTON, not on pulling the stick back: pulling back is how
 // you drive in reverse, so a pull-to-exit gesture fired every time the user
 // reversed. The button is the only input on this screen that means nothing to
@@ -1429,7 +1587,7 @@ static void drive_request_enter() {
 static HoldGesture drive_exit_gesture{
     .armed = &joy_button_armed,
     .is_held = joy_button_held,
-    .applies = [] { return lv_screen_active() == ui_DriveScreen; },
+    .applies = [] { return lv_screen_active() == ui_DriveScreen && nav_menu_open == nullptr; },
     // Ask only. drive_screen_follow_state closes the screen once the MIB actually
     // stops driving, so a MIB that does not stop cannot leave someone looking at the
     // main screen while the chair is still moving.
@@ -1454,13 +1612,26 @@ static int seat_page = 0;
 // grid it restores focus into is declared.
 static void seat_show_buttons_page();
 
-// Two gestures left. Everything else that used to be one -- enter the drive,
-// seat and actions screens, leave the seat, bench, settings, actions,
-// diagnostics and log screens -- is a menu row or the DRIVE cell now, and the
-// exit bars that showed the fill are gone with them.
+// Holding the stick button on the joystick screen starts a calibration run
+// (and, holding it again, cancels one) -- the same as pressing Calibrate, for
+// someone who cannot reach the screen. The button turns negative while the
+// hold fills, bound in app_main.
+static HoldGesture calibrate_gesture{
+    .armed = &joy_button_armed,
+    .is_held = joy_button_held,
+    .applies = [] { return lv_screen_active() == ui_JoystickScreen && nav_menu_open == nullptr; },
+    .completed = [] { joystick_cal_toggle(); },
+    // The button doubles as select, so a tap must not tick the fill.
+    .grace_ms = kBarGraceMs,
+};
+
+// Three gestures. Everything else that used to be one -- enter the drive, seat
+// and actions screens, leave the seat, bench, settings, actions, diagnostics
+// and log screens -- is a menu row or the DRIVE cell now.
 static HoldGesture *const kHoldGestures[] = {
     &unlock_gesture,
     &drive_exit_gesture,
+    &calibrate_gesture,
 };
 
 static void hold_poll_cb(lv_timer_t *) {
@@ -1560,14 +1731,36 @@ static void seat_angle_refresh();
 // cursor.
 static void grid_key_cb(lv_event_t *e) {
   auto *g = static_cast<ButtonGrid *>(lv_event_get_user_data(e));
+  // The cursor is whichever cell holds focus, not wherever it was last left:
+  // coming back up from the burger key, the group put focus on a cell without
+  // telling the grid.
+  const lv_obj_t *here = lv_event_get_target_obj(e);
+  for (int r = 0; r < g->rows; r++) {
+    for (int c = 0; c < g->cols[r]; c++) {
+      if (g->cell[r][c] == here) {
+        g->row = r;
+        g->col = c;
+      }
+    }
+  }
   switch (lv_event_get_key(e)) {
   case LV_KEY_UP:
     g->row--;
     break;
   case LV_KEY_DOWN:
+    if (g->row + 1 >= g->rows) {
+      nav_to_key(); // below the bottom row is the burger key
+      return;
+    }
     g->row++;
     break;
   case LV_KEY_LEFT:
+    // Left off the adjustment page's left edge is "back": the seat pager's
+    // second page has no other way to its first now the hold gestures are gone.
+    if (g == &seat_adjust_grid && g->col == 0) {
+      seat_show_buttons_page();
+      return;
+    }
     g->col--;
     break;
   case LV_KEY_RIGHT:
@@ -1693,7 +1886,7 @@ static void seat_click_cb(lv_event_t *e) {
   //
   // The adjustment page has its own group, so the joystick moves across with the
   // pager rather than staying on buttons nobody can see any more.
-  lv_indev_set_group(joystick_indev, seat_adjust_group);
+  nav_use_group(seat_adjust_group, ui_SeatScreen);
   seat_adjust_grid.row = 0;
   seat_adjust_grid.col = 0;
   lv_group_focus_obj(seat_adjust_grid.cell[0][0]);
@@ -1704,7 +1897,7 @@ static void seat_click_cb(lv_event_t *e) {
 static void seat_show_buttons_page() {
   lv_obj_scroll_to_x(ui_SeatRows, 0, LV_ANIM_ON);
   seat_page = 0;
-  lv_indev_set_group(joystick_indev, seat_group);
+  nav_use_group(seat_group, ui_SeatScreen);
   // Back to the button the user selected rather than the top-left one: the
   // grid's cursor still holds it, and returning to where you were is less
   // jarring than being bounced to the corner.
@@ -1872,8 +2065,8 @@ static constexpr SettingPageText kSettingPageText[] = {
     SETTINGS_PAGE_TABLE(SETTINGS_PAGE_ROW)
 #undef SETTINGS_PAGE_ROW
 };
-static constexpr SettingPageText kActuatorsPageText{
-    "DEBUG ACTUATORS", "Up/down to pick, left/right or -/+ to move. Pull and hold to exit."};
+static constexpr SettingPageText kActuatorsPageText{"DEBUG ACTUATORS",
+                                                    "Up/down to pick, left/right or -/+ to move."};
 
 struct SettingParam {
   int page; // SETTINGS_PAGE_*
@@ -2155,6 +2348,10 @@ static void setting_key_cb(lv_event_t *e) {
     setting_focus(setting_cursor - 1);
     return;
   case LV_KEY_DOWN:
+    if (setting_cursor + 1 >= setting_row_count) {
+      nav_to_key(); // below the last row is the burger key
+      return;
+    }
     setting_focus(setting_cursor + 1);
     return;
   default:
@@ -2423,6 +2620,10 @@ static void action_key_cb(lv_event_t *e) {
     action_focus(action_cursor - 1);
     return;
   case LV_KEY_DOWN:
+    if (action_cursor + 1 >= action_button_count) {
+      nav_to_key(); // below the last tile is the burger key
+      return;
+    }
     action_focus(action_cursor + 1);
     return;
   default:
@@ -2617,6 +2818,10 @@ static void diag_key_cb(lv_event_t *e) {
     diag_focus(diag_cursor - 1);
     return;
   case LV_KEY_DOWN:
+    if (diag_cursor + 1 >= diag_row_count) {
+      nav_to_key(); // below the last row is the burger key
+      return;
+    }
     diag_focus(diag_cursor + 1);
     return;
   default:
@@ -2673,7 +2878,7 @@ static void diagnostics_open() {
 }
 
 /////////////////////////////////////////////////////////////////////////////
-// The burger menu
+// The burger menu, and moving around with the joystick
 //
 // Spec V2 gives every screen but BootScreen the same chrome: a TopBar across
 // the top, a DriveBand under it, a MenuKey in the bottom 162 px, and a
@@ -2682,14 +2887,32 @@ static void diagnostics_open() {
 // band and the key itself do not move, which is what the spec means by
 // "sticky".
 //
-// Every screen carries its own instance of all four, so nav_attach_chrome is
-// called once per screen -- from app_main for the screens ui_init builds, and
-// from the *_screen_ensure() functions for the ones built on demand.
+// The joystick reaches all of it. Every screen's focus group ends with that
+// screen's burger key: push down past the last row (or key, or log line) and
+// the key is focused; push up from it and you are back where you were. The
+// stick button presses whatever is focused -- a row, a button, the key. In the
+// open menu, up and down walk the rows, and left (or the key) closes it.
 //
-// This lives in main.cpp rather than the ui_nav.cpp the plan named: every
-// destination is a file-static here (the *_open functions, the focus groups,
-// the PIN gate), and a header exporting all of them to one caller would be more
-// coupling than the split removes.
+// The Drive screen is the exception, because there the stick drives: nothing
+// on it takes focus but its key, which has no focus ring, so a short press of
+// the stick button opens the menu and a hold still stops the chair
+// (drive_exit_gesture). The button selects on RELEASE, and only for a press
+// shorter than a hold's grace, so a hold never also clicks.
+//
+// What the cursor looks like: rows (menu, settings, diagnostics) go negative,
+// the spec's own "selected"; buttons get a ring in the theme's focus colour,
+// because on a button the negative already means pressed -- ACTIVATE DRIVE
+// filled white is the unlocked frame, and the key filled white is "menu open".
+//
+// Every screen carries its own instance of all four pieces of chrome, so
+// nav_attach_chrome is called once per screen -- from app_main for the screens
+// ui_init builds, and from the *_screen_ensure() functions for the ones built
+// on demand.
+//
+// This lives in main.cpp rather than a ui_nav.cpp: every destination is a
+// file-static here (the *_open functions, the focus groups, the PIN gate), and
+// a header exporting all of them to one caller would be more coupling than the
+// split removes.
 /////////////////////////////////////////////////////////////////////////////
 
 // The overlay sits over the body; sliding it clear of the screen bottom is the
@@ -2697,6 +2920,10 @@ static void diagnostics_open() {
 static constexpr int32_t kMenuShownY = 195;
 static constexpr int32_t kMenuHiddenY = 195 + 921;
 static constexpr uint32_t kMenuSlideMs = 280;
+// p21 "ROW PRESS": the row holds negative this long before anything moves.
+static constexpr uint32_t kRowPressMs = 300;
+// p21 "HOME BUTTON": a dissolve from any screen back to Drive.
+static constexpr uint32_t kHomeFadeMs = 120;
 
 // The seven destinations, in the order MenuOverlay draws them, and the child id
 // of each row. Adding a row in SquareLine means a line in each of these two and
@@ -2708,7 +2935,7 @@ enum NavDest {
   NAV_DIAG,     // "Diagnostics"
   NAV_BENCH,    // "Bench", behind the PIN gate
   NAV_SETTINGS, // "UI Settings"
-  NAV_JOYSTICK, // "Calibrate Joystick"
+  NAV_JOYSTICK, // "Joystick", the test screen with CALIBRATE on it
   NAV_DEST_COUNT,
 };
 
@@ -2718,21 +2945,154 @@ static const uint32_t kNavRowIds[NAV_DEST_COUNT] = {
     UI_COMP_MENUOVERLAY_ROW7,
 };
 
-// The overlay currently up, or null. At most one can be: only one screen is
-// loaded at a time, and a screen change closes it.
-static lv_obj_t *nav_menu_open = nullptr;
+// Each screen's key and overlay, filled in as nav_attach_chrome wires them, so
+// "the burger key on the screen that is up" is one lookup. The screens built on
+// demand come and go, so an entry is emptied when its key is deleted.
+struct NavChrome {
+  lv_obj_t *screen;
+  lv_obj_t *key;
+  lv_obj_t *overlay;
+};
+static NavChrome nav_chrome[16];
 
-static void nav_focus_screen(lv_obj_t *screen);
+static NavChrome *nav_chrome_of(const lv_obj_t *screen) {
+  for (NavChrome &c : nav_chrome) {
+    if (c.screen != nullptr && c.screen == screen) {
+      return &c;
+    }
+  }
+  return nullptr;
+}
+
+static void nav_chrome_forget_cb(lv_event_t *e) {
+  const lv_obj_t *key = lv_event_get_target_obj(e);
+  for (NavChrome &c : nav_chrome) {
+    if (c.key == key) {
+      c = {};
+    }
+  }
+}
+
+// The group the screen underneath uses, so closing the menu can hand it back.
+static lv_group_t *nav_screen_group = nullptr;
+
+// A row picked and holding negative, waiting out kRowPressMs; and the row whose
+// press the destination's own overlay replays on arrival, sliding away.
+static lv_timer_t *nav_press_timer = nullptr;
+static int nav_drop_row = -1;
+
+// --- the look ------------------------------------------------------------------
+
+// LVGL keeps a state on the object it was set on. The spec's negative (the
+// styles negative() writes in the SquareLine build) is defined on every layer
+// of a control -- ground, label, bars -- so the state has to reach all of them
+// or the ground inverts under a label that does not, and the label vanishes.
+static constexpr lv_state_t kMirroredStates = static_cast<lv_state_t>(
+    static_cast<uint32_t>(LV_STATE_PRESSED) | static_cast<uint32_t>(LV_STATE_CHECKED) |
+    static_cast<uint32_t>(LV_STATE_FOCUSED));
+
+static void nav_mirror_to(lv_obj_t *obj, lv_state_t on) {
+  for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
+    lv_obj_t *child = lv_obj_get_child(obj, i);
+    lv_obj_remove_state(child, static_cast<lv_state_t>(kMirroredStates & ~on));
+    lv_obj_add_state(child, on);
+    nav_mirror_to(child, on);
+  }
+}
+
+static void nav_mirror_cb(lv_event_t *e) {
+  lv_obj_t *obj = lv_event_get_current_target_obj(e);
+  nav_mirror_to(obj, static_cast<lv_state_t>(lv_obj_get_state(obj) & kMirroredStates));
+}
+
+static void nav_mirror_states(lv_obj_t *obj) {
+  lv_obj_add_event_cb(obj, nav_mirror_cb, LV_EVENT_STATE_CHANGED, nullptr);
+  nav_mirror_to(obj, static_cast<lv_state_t>(lv_obj_get_state(obj) & kMirroredStates));
+}
+
+// The joystick's cursor on a button: a second outline in the theme's text
+// colour, a gap outside the button's own stroke. Not the theme's blue "focused"
+// colour, which all but vanishes on black -- and the spec's rule is that no
+// control uses colour to say it is chosen. Themeable, so it follows a day/night
+// switch.
+//
+// Set for FOCUS_KEY as well as FOCUSED: a focus the keypad caused carries both,
+// and LVGL ranks FOCUS_KEY above FOCUSED, so the default theme's own FOCUS_KEY
+// outline -- two dim blue pixels -- would otherwise win over this one.
+static void nav_ring_style(lv_obj_t *obj, int32_t width, int32_t pad) {
+  for (lv_state_t state : {LV_STATE_FOCUSED, LV_STATE_FOCUS_KEY}) {
+    const lv_style_selector_t sel =
+        static_cast<lv_style_selector_t>(LV_PART_MAIN) | static_cast<lv_style_selector_t>(state);
+    if (width > 0) {
+      ui_object_set_themeable_style_property(obj, sel, LV_STYLE_OUTLINE_COLOR,
+                                             _ui_theme_color_text);
+      ui_object_set_themeable_style_property(obj, sel, LV_STYLE_OUTLINE_OPA, _ui_theme_alpha_text);
+    }
+    lv_obj_set_style_outline_width(obj, width, sel);
+    lv_obj_set_style_outline_pad(obj, pad, sel);
+  }
+}
+
+static void nav_focus_ring(lv_obj_t *obj) { nav_ring_style(obj, 4, 6); }
+
+// The burger key spans the screen edge to edge, so an outside ring would be
+// off-screen and an inside one on the key itself would be painted over by its
+// Ground. The ring goes on the Ground, inset -- the Ground sees the key's
+// focus through nav_mirror_states -- and the key's own outline is switched off.
+static void nav_key_focus_ring(lv_obj_t *key) {
+  nav_ring_style(key, 0, 0);
+  nav_ring_style(ui_comp_get_child(key, UI_COMP_MENUKEY_GROUND), 4, -14);
+}
+
+// --- groups --------------------------------------------------------------------
+
+// Makes `g` the joystick's group, with `screen`'s burger key appended as its
+// last member. Removed and re-added every time rather than once, because the
+// list screens rebuild their rows on every visit and the key has to stay after
+// them for "down past the last row" to reach it.
+static void nav_use_group(lv_group_t *g, const lv_obj_t *screen) {
+  lv_group_set_wrap(g, false);
+  if (NavChrome *c = nav_chrome_of(screen)) {
+    lv_group_add_obj(g, c->key); // removes it from wherever it was first
+  }
+  nav_screen_group = g;
+  lv_indev_set_group(joystick_indev, g);
+}
+
+// Down past the end of a list, grid or log: on to the burger key.
+static void nav_to_key() {
+  if (NavChrome *c = nav_chrome_of(lv_screen_active())) {
+    lv_group_focus_obj(c->key);
+  }
+}
+
+// Only the stick may drive, and only on the Drive screen with the menu shut:
+// everywhere else the same stick is walking focus around, and a push meant for
+// the next row must not also move the chair. The ADC task reads this and sends
+// the MCB a centred stick whenever it is false.
+static void nav_update_stick_gate() {
+  stick_drives.store(lv_subject_get_int(&locked_subject) == 0 &&
+                     lv_screen_active() == ui_DriveScreen && nav_menu_open == nullptr);
+}
+
+// --- the menu ------------------------------------------------------------------
 
 static void nav_menu_anim_cb(void *obj, int32_t y) {
   lv_obj_set_y(static_cast<lv_obj_t *>(obj), y);
 }
 
 static void nav_menu_hide_cb(lv_anim_t *a) {
-  lv_obj_add_flag(static_cast<lv_obj_t *>(a->var), LV_OBJ_FLAG_HIDDEN);
+  auto *overlay = static_cast<lv_obj_t *>(a->var);
+  lv_obj_add_flag(overlay, LV_OBJ_FLAG_HIDDEN);
+  // A row replayed on arrival (nav_drop_row) goes back to resting once it is
+  // out of sight, ready for the next time this overlay opens.
+  for (uint32_t id : kNavRowIds) {
+    lv_obj_remove_state(ui_comp_get_child(overlay, id), LV_STATE_CHECKED);
+  }
 }
 
 static void nav_menu_slide(lv_obj_t *overlay, int32_t from, int32_t to, bool hide_after) {
+  lv_anim_delete(overlay, nav_menu_anim_cb);
   lv_obj_set_y(overlay, from);
   lv_anim_t a;
   lv_anim_init(&a);
@@ -2747,15 +3107,32 @@ static void nav_menu_slide(lv_obj_t *overlay, int32_t from, int32_t to, bool hid
   lv_anim_start(&a);
 }
 
+static void nav_key_open_look(const lv_obj_t *screen, bool open) {
+  if (NavChrome *c = nav_chrome_of(screen)) {
+    lv_obj_set_state(c->key, LV_STATE_CHECKED, open);
+  }
+}
+
+// Closes the menu over the screen that is up and gives the stick back to it,
+// on the key the menu was opened from.
 static void nav_close_menu() {
   if (nav_menu_open == nullptr) {
     return;
   }
   lv_obj_t *overlay = nav_menu_open;
   nav_menu_open = nullptr;
+  if (nav_press_timer != nullptr) {
+    lv_timer_delete(nav_press_timer);
+    nav_press_timer = nullptr;
+  }
+  nav_key_open_look(lv_screen_active(), false);
   nav_menu_slide(overlay, lv_obj_get_y(overlay), kMenuHiddenY, true);
   lv_group_remove_all_objs(menu_group);
-  nav_focus_screen(lv_screen_active());
+  if (nav_screen_group != nullptr) {
+    nav_use_group(nav_screen_group, lv_screen_active());
+    nav_to_key();
+  }
+  nav_update_stick_gate();
 }
 
 static void nav_open_menu(lv_obj_t *overlay) {
@@ -2765,29 +3142,53 @@ static void nav_open_menu(lv_obj_t *overlay) {
   nav_menu_open = overlay;
   lv_obj_remove_flag(overlay, LV_OBJ_FLAG_HIDDEN);
   nav_menu_slide(overlay, kMenuHiddenY, kMenuShownY, false);
+  nav_key_open_look(lv_screen_active(), true);
 
   // The rows belong to whichever overlay is up, so the group is rebuilt rather
-  // than filled once: every screen has its own instance of all seven.
+  // than filled once: every screen has its own instance of all seven. The key
+  // goes last, so down from the bottom row reaches it and a press closes.
   lv_group_remove_all_objs(menu_group);
+  lv_group_set_wrap(menu_group, false);
   for (uint32_t id : kNavRowIds) {
     lv_group_add_obj(menu_group, ui_comp_get_child(overlay, id));
   }
+  if (NavChrome *c = nav_chrome_of(lv_screen_active())) {
+    lv_group_add_obj(menu_group, c->key);
+  }
   lv_indev_set_group(joystick_indev, menu_group);
   lv_group_focus_obj(ui_comp_get_child(overlay, kNavRowIds[0]));
+  nav_update_stick_gate();
 }
 
-// DRIVE in the band, and what a completed drive-exit hold comes back to.
-// Reached from every screen, menu open or not.
+// Where DRIVE in the band goes: the Drive screen while the chair is driving,
+// the Locked screen -- with ACTIVATE DRIVE on it -- while it is not. Either way
+// it is where the chair's state is, which is what "home" has to mean.
 static void nav_home() {
   nav_close_menu();
-  screen_return_to_main();
+  if (lv_subject_get_int(&locked_subject) != 0) {
+    _ui_screen_change(&ui_LockedScreen, LV_SCREEN_LOAD_ANIM_FADE_ON, kHomeFadeMs, 0,
+                      &ui_LockedScreen_screen_init);
+  } else {
+    _ui_screen_change(&ui_DriveScreen, LV_SCREEN_LOAD_ANIM_FADE_ON, kHomeFadeMs, 0,
+                      &ui_DriveScreen_screen_init);
+  }
 }
 
+// Swaps the screen underneath. The overlay that was up belonged to the screen
+// being left and goes with it; the destination's own overlay replays the drop
+// (nav_drop_row, in screen_loaded_cb), which is the spec's "the screen
+// underneath swaps to the destination, then the panel drops".
 static void nav_go(NavDest dest) {
-  // Closed before the swap, not after: the overlay belongs to the screen being
-  // left, and a screen the user is walking away from should not still be
-  // animating when it is unloaded.
-  nav_close_menu();
+  if (nav_menu_open != nullptr) {
+    lv_obj_add_flag(nav_menu_open, LV_OBJ_FLAG_HIDDEN);
+    for (uint32_t id : kNavRowIds) {
+      lv_obj_remove_state(ui_comp_get_child(nav_menu_open, id), LV_STATE_CHECKED);
+    }
+    nav_key_open_look(lv_screen_active(), false);
+    lv_group_remove_all_objs(menu_group);
+    nav_menu_open = nullptr;
+    nav_drop_row = dest;
+  }
   switch (dest) {
   case NAV_SEAT:
     _ui_screen_change(&ui_SeatScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0, &ui_SeatScreen_screen_init);
@@ -2810,19 +3211,29 @@ static void nav_go(NavDest dest) {
     setting_page_open(0);
     break;
   case NAV_JOYSTICK:
-    // The row is both the way to the screen and the start of a run: spec V2
-    // has no CALIBRATE button on it. Leaving the screen cancels.
     _ui_screen_change(&ui_JoystickScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
                       &ui_JoystickScreen_screen_init);
-    joystick_cal_toggle();
     break;
   case NAV_DEST_COUNT:
     break;
   }
+  nav_update_stick_gate();
 }
 
+static void nav_press_done_cb(lv_timer_t *t) {
+  nav_press_timer = nullptr; // repeat count 1: LVGL deletes it after this
+  nav_go(static_cast<NavDest>(reinterpret_cast<intptr_t>(lv_timer_get_user_data(t))));
+}
+
+// A row picked, by touch or by the stick button: it turns negative and holds
+// kRowPressMs, then the screen underneath changes.
 static void nav_row_cb(lv_event_t *e) {
-  nav_go(static_cast<NavDest>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e))));
+  if (nav_press_timer != nullptr) {
+    return; // one pick at a time
+  }
+  lv_obj_add_state(lv_event_get_target_obj(e), LV_STATE_CHECKED);
+  nav_press_timer = lv_timer_create(nav_press_done_cb, kRowPressMs, lv_event_get_user_data(e));
+  lv_timer_set_repeat_count(nav_press_timer, 1);
 }
 
 // The key toggles; user_data is the overlay on the same screen.
@@ -2835,13 +3246,57 @@ static void nav_key_cb(lv_event_t *e) {
   }
 }
 
-// A row's own key handler: the stick moves between rows by itself (they are a
-// plain group), and pulling left closes the menu the way the key would.
+// The stick on a menu row. The keypad indev hands arrows to the focused object
+// rather than moving the group, so the walk is done here. Right is "go", like
+// the chevron says; left closes, like the key.
 static void nav_row_key_cb(lv_event_t *e) {
-  const uint32_t key = lv_event_get_key(e);
-  if (key == LV_KEY_LEFT || key == LV_KEY_ESC) {
+  lv_obj_t *row = lv_event_get_target_obj(e);
+  switch (lv_event_get_key(e)) {
+  case LV_KEY_UP:
+    lv_group_focus_prev(lv_obj_get_group(row));
+    return;
+  case LV_KEY_DOWN:
+    lv_group_focus_next(lv_obj_get_group(row));
+    return;
+  case LV_KEY_RIGHT:
+    lv_obj_send_event(row, LV_EVENT_CLICKED, nullptr);
+    return;
+  case LV_KEY_LEFT:
+  case LV_KEY_ESC:
     nav_close_menu();
+    return;
+  default:
+    return;
   }
+}
+
+// The stick on the burger key. It is always last in its group, so there is
+// nothing below it; up goes back to whatever is above.
+static void nav_key_key_cb(lv_event_t *e) {
+  const uint32_t key = lv_event_get_key(e);
+  if (key == LV_KEY_UP || key == LV_KEY_LEFT) {
+    lv_group_focus_prev(lv_obj_get_group(lv_event_get_target_obj(e)));
+  }
+}
+
+// A plain button in a screen's group (ACTIVATE DRIVE, Calibrate): down to the
+// next member -- in practice, the key.
+static void nav_button_key_cb(lv_event_t *e) {
+  const uint32_t key = lv_event_get_key(e);
+  lv_group_t *g = lv_obj_get_group(lv_event_get_target_obj(e));
+  if (key == LV_KEY_DOWN || key == LV_KEY_RIGHT) {
+    lv_group_focus_next(g);
+  } else if (key == LV_KEY_UP || key == LV_KEY_LEFT) {
+    lv_group_focus_prev(g);
+  }
+}
+
+// A button that sits in a screen's focus group: ringed when the cursor is on
+// it, inverted when pressed, and walkable with the stick.
+static void nav_focusable_button(lv_obj_t *button) {
+  nav_focus_ring(button);
+  nav_mirror_states(button);
+  lv_obj_add_event_cb(button, nav_button_key_cb, LV_EVENT_KEY, nullptr);
 }
 
 static void nav_band_cb(lv_event_t *) { nav_home(); }
@@ -2868,23 +3323,41 @@ static void nav_claim_clicks(lv_obj_t *obj) {
   lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE);
 }
 
-// One screen's chrome. `band` is null on a screen whose band is not a way home.
+// One screen's chrome. `band` is the DriveBand whose DRIVE cell goes home.
 static void nav_attach_chrome(lv_obj_t *key, lv_obj_t *overlay, lv_obj_t *band) {
+  lv_obj_t *screen = lv_obj_get_screen(key);
+  for (NavChrome &c : nav_chrome) {
+    if (c.screen == nullptr || c.screen == screen) {
+      c = {screen, key, overlay};
+      break;
+    }
+  }
+  lv_obj_add_event_cb(key, nav_chrome_forget_cb, LV_EVENT_DELETE, nullptr);
+
   keep_overlay_fill(overlay);
   nav_claim_clicks(key);
+  nav_mirror_states(key);
+  // Not on the Drive screen: there the key is the only thing that ever holds
+  // focus, and a ring round it for as long as someone drives is noise.
+  if (screen != ui_DriveScreen) {
+    nav_key_focus_ring(key);
+  } else {
+    nav_ring_style(key, 0, 0); // not even the theme's
+  }
   lv_obj_add_event_cb(key, nav_key_cb, LV_EVENT_CLICKED, overlay);
+  lv_obj_add_event_cb(key, nav_key_key_cb, LV_EVENT_KEY, nullptr);
 
   for (int i = 0; i < NAV_DEST_COUNT; i++) {
     lv_obj_t *row = ui_comp_get_child(overlay, kNavRowIds[i]);
     nav_claim_clicks(row);
+    // Exported in its focused preview state; the group is left as the only
+    // writer of LV_STATE_FOCUSED, and the mirror carries it to the labels.
+    set_focused_recursive(row, false);
+    nav_mirror_states(row);
+    nav_ring_style(row, 0, 0); // the row's negative is its cursor; no outline
     lv_obj_add_event_cb(row, nav_row_cb, LV_EVENT_CLICKED,
                         reinterpret_cast<void *>(static_cast<intptr_t>(i)));
     lv_obj_add_event_cb(row, nav_row_key_cb, LV_EVENT_KEY, nullptr);
-    lv_obj_add_event_cb(row, setting_focus_cb, LV_EVENT_FOCUSED, nullptr);
-    lv_obj_add_event_cb(row, setting_focus_cb, LV_EVENT_DEFOCUSED, nullptr);
-    // Exported in its focused preview state, like the settings rows; the focus
-    // callbacks are left as the only writers of LV_STATE_FOCUSED.
-    set_focused_recursive(row, false);
   }
 
   if (band != nullptr) {
@@ -2894,33 +3367,55 @@ static void nav_attach_chrome(lv_obj_t *key, lv_obj_t *overlay, lv_obj_t *band) 
   }
 }
 
-// Hands the joystick to whichever group belongs to the screen being shown.
-// Called on load, and again when the menu closes and gives the stick back.
-static void nav_focus_screen(lv_obj_t *screen) {
+// Hands the joystick to the screen being shown and puts the cursor at its top.
+// Called on load; closing the menu restores the group without this reset.
+static void nav_enter_screen(lv_obj_t *screen) {
   if (screen == ui_SeatScreen) {
-    lv_indev_set_group(joystick_indev, seat_group);
+    nav_use_group(seat_group, screen);
     seat_page = 0;
     seat_buttons_grid.row = 0;
     seat_buttons_grid.col = 0;
     lv_group_focus_obj(seat_buttons_grid.cell[0][0]);
   } else if (screen == ui_BenchGateScreen) {
-    lv_indev_set_group(joystick_indev, rd_group);
+    nav_use_group(rd_group, screen);
     rd_focus(0);
   } else if (screen == ui_SettingsScreen) {
-    lv_indev_set_group(joystick_indev, setting_group);
+    nav_use_group(setting_group, screen);
     setting_focus(0);
   } else if (screen == ui_SkunkWorksScreen) {
-    lv_indev_set_group(joystick_indev, actions_group);
+    nav_use_group(actions_group, screen);
     action_focus(0);
   } else if (screen == ui_DiagnosticsScreen) {
-    lv_indev_set_group(joystick_indev, diag_group);
+    nav_use_group(diag_group, screen);
     diag_focus(0);
   } else if (screen == ui_LogScreen && log_view_group() != nullptr) {
-    lv_indev_set_group(joystick_indev, log_view_group());
+    nav_use_group(log_view_group(), screen);
     log_view_on_load();
   } else {
-    lv_indev_set_group(joystick_indev, joystick_group);
+    // The screens with at most a button or two of their own share one group,
+    // refilled for whichever is up.
+    lv_group_remove_all_objs(joystick_group);
+    if (screen == ui_LockedScreen) {
+      lv_group_add_obj(joystick_group, ui_ActivateDrive);
+    } else if (screen == ui_JoystickScreen) {
+      lv_group_add_obj(joystick_group, ui_CalibrateButton);
+    }
+    nav_use_group(joystick_group, screen);
   }
+}
+
+// Replays the row press on the destination's own overlay: shown where the old
+// one was, the picked row negative, then slid away over the new screen.
+static void nav_drop_menu(lv_obj_t *screen) {
+  const int row = nav_drop_row;
+  nav_drop_row = -1;
+  NavChrome *c = nav_chrome_of(screen);
+  if (row < 0 || c == nullptr) {
+    return;
+  }
+  lv_obj_remove_flag(c->overlay, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_state(ui_comp_get_child(c->overlay, kNavRowIds[row]), LV_STATE_CHECKED);
+  nav_menu_slide(c->overlay, kMenuShownY, kMenuHiddenY, true);
 }
 
 // The active screen, by name. Only the remote UI asks, but the table is worth
@@ -2959,7 +3454,9 @@ static void screen_loaded_cb(lv_event_t *e) {
   // the way out, but a screen reached any other way (the unlock timer, a
   // completed hold) has to leave the menu behind too.
   nav_menu_open = nullptr;
-  nav_focus_screen(screen);
+  nav_enter_screen(screen);
+  nav_drop_menu(screen);
+  nav_update_stick_gate();
   // The PIN is asked again on every visit rather than latching once per boot.
   if (screen == ui_BenchGateScreen) {
     rd_pin_reset();
@@ -3988,9 +4485,9 @@ extern "C" void app_main(void) {
     bool band_goes_home;
   };
   const ScreenChrome kChrome[] = {
-      // LockedScreen's band reads LOCKED, and DRIVE on it must not be a way in:
-      // ACTIVATE DRIVE and the unlock hold are.
-      {ui_TopBar1, ui_DriveBand1, ui_MenuKey1, ui_MenuOverlay1, false},
+      // DRIVE goes "home", which while locked IS this screen; on it, the cell
+      // only closes the menu. ACTIVATE DRIVE and the unlock hold are the way in.
+      {ui_TopBar1, ui_DriveBand1, ui_MenuKey1, ui_MenuOverlay1, true},
       // DriveScreen too: DRIVE is how you back out of the menu without
       // picking a row, and it has to do that on the screen it goes back to.
       {ui_TopBar2, ui_DriveBand2, ui_MenuKey2, ui_MenuOverlay2, true},
@@ -4006,10 +4503,10 @@ extern "C" void app_main(void) {
     bind_clock_label(c.bar);
     nav_attach_chrome(c.key, c.overlay, c.band_goes_home ? c.band : nullptr);
   }
-  // Locked means locked: the menu key is the only other way off this screen, so
-  // it stays down until the chair is unlocked. Bound rather than hidden once,
-  // so it comes back if the screen is ever reached unlocked.
-  lv_obj_bind_flag_if_eq(ui_MenuKey1, &locked_subject, LV_OBJ_FLAG_HIDDEN, 1);
+  // The menu stays reachable while locked: Log, Diagnostics, UI Settings and
+  // the bench tools are all useful with the chair not driving -- and without an
+  // MCB at all. Locked still means nothing moves: the band reads LOCKED on every
+  // screen and the stick only drives from Drive (stick_drives).
   clock_poll_cb(nullptr); // the RTC's time, when it had one, from the first frame
   lv_timer_create(clock_poll_cb, kClockPollMs, nullptr);
   lv_subject_add_observer_obj(&speed_tenths_subject, speed_label_observer, ui_SpeedValue, nullptr);
@@ -4042,10 +4539,14 @@ extern "C" void app_main(void) {
   lv_subject_init_int(&diag_rate_subject, 0);
   lv_timer_create(rtps_poll_cb, kRtpsPollMs, nullptr);
 
-  // Calibration on the JoystickScreen. Started from the burger menu now, so no
-  // button is named. Its prompts blink on the RTPS indicator's phase, so this
-  // comes after rtps_blink_subject is initialised.
+  // Calibration on the JoystickScreen: its Calibrate button starts a run (and
+  // reads CANCEL during one), and so does holding the stick button
+  // (calibrate_gesture). Its prompts blink on the RTPS indicator's phase, so
+  // this comes after rtps_blink_subject is initialised.
+  nav_focusable_button(ui_CalibrateButton);
   joystick_cal_init_ui({.screen = ui_JoystickScreen,
+                        .button = ui_CalibrateButton,
+                        .button_label = ui_CalibrateButtonLabel,
                         .instructions = ui_JoystickHint,
                         .blink = &rtps_blink_subject,
                         .feedback = [] {
@@ -4120,10 +4621,18 @@ extern "C" void app_main(void) {
   lv_indev_set_long_press_time(joystick_keypad.get_input_device(), 500);
   lv_indev_set_long_press_repeat_time(joystick_keypad.get_input_device(), 250);
 
-  // ACTIVATE DRIVE. The hold on the stick is the other way in and both end at
-  // set_locked(false), so the button is not a second path through the lock.
+  // ACTIVATE DRIVE: a tap, or the stick button with the cursor on it. The hold
+  // on the stick is the third way in, and all three end at activate_drive, so
+  // none of them is a second path through the lock.
   lv_obj_add_event_cb(
-      ui_ActivateDrive, [](lv_event_t *) { set_locked(false); }, LV_EVENT_CLICKED, nullptr);
+      ui_ActivateDrive, [](lv_event_t *) { activate_drive(); }, LV_EVENT_CLICKED, nullptr);
+  nav_focusable_button(ui_ActivateDrive);
+  // Where the shackle sits at rest, so the 01b rise can be undone exactly.
+  lv_obj_update_layout(ui_Shackle);
+  shackle_rest_y = lv_obj_get_y(ui_Shackle);
+  shackle_rest_h = lv_obj_get_height(ui_Shackle);
+  lv_arc_set_range(ui_LockRing, 0, kHoldMax);
+  lv_obj_remove_flag(ui_LockRing, LV_OBJ_FLAG_CLICKABLE);
 
   // The two push-and-hold gestures left, polled by one shared timer — only the
   // gesture whose applies() is true on the current screen can be filling at any
@@ -4132,12 +4641,21 @@ extern "C" void app_main(void) {
   // fill so hold_poll can tell a hold from a tap.
   lv_subject_init_int(&unlock_gesture.progress, 0);
   lv_subject_init_int(&drive_exit_gesture.progress, 0);
+  lv_subject_init_int(&calibrate_gesture.progress, 0);
+  // The ring round the padlock fills with the stick-up hold.
+  lv_subject_add_observer_obj(&unlock_gesture.progress, lock_ring_hold_observer, ui_LockRing,
+                              nullptr);
+  // Calibrate turns negative as soon as a hold of the stick button starts to
+  // fill, so the hold is visibly doing something before it completes.
+  lv_obj_bind_state_if_ge(ui_CalibrateButton, &calibrate_gesture.progress, LV_STATE_PRESSED, 1);
   lv_timer_create(hold_poll_cb, kHoldPollMs, nullptr);
 
   // LogScreen: TextArea1 shows the serial output log_capture has kept. Its
   // ErrorWarningPanel5 is deliberately left unbound (hidden): a link-lost
   // banner would cover the log at exactly the moment someone wants to read it.
   log_view_init();
+  // Down at the newest line leaves the log for the burger key.
+  log_view_set_escape(nav_to_key);
 
   // SeatScreen. Both grids are built here rather than declared with
   // initialisers because the ui_* globals only exist once ui_init has run.
@@ -4383,9 +4901,6 @@ extern "C" void app_main(void) {
       {0, 0, kRdBack},
   };
   rd_group = lv_group_create();
-  static constexpr lv_style_selector_t kMainFocused =
-      static_cast<lv_style_selector_t>(LV_PART_MAIN) |
-      static_cast<lv_style_selector_t>(LV_STATE_FOCUSED);
   for (int r = 0; r < rd_grid.rows; r++) {
     rd_grid.cols[r] = kGridMaxCols;
     for (int c = 0; c < kGridMaxCols; c++) {
@@ -4398,14 +4913,10 @@ extern "C" void app_main(void) {
       lv_obj_add_event_cb(key, rd_keypad_cb, LV_EVENT_CLICKED,
                           reinterpret_cast<void *>(static_cast<intptr_t>(rd_digits[r][c])));
       lv_obj_add_event_cb(key, grid_key_cb, LV_EVENT_KEY, &rd_grid);
-      // The keys carry no FOCUSED style in the export, so the key the joystick
-      // sits on would be indistinguishable. Recolour the 2 px border they
-      // already have, the same way the seat and settings rows do.
-      ui_object_set_themeable_style_property(key, kMainFocused, LV_STYLE_BORDER_COLOR,
-                                             _ui_theme_color_focused);
-      ui_object_set_themeable_style_property(key, kMainFocused, LV_STYLE_BORDER_OPA,
-                                             _ui_theme_alpha_focused);
-      lv_obj_set_style_border_width(key, 4, kMainFocused);
+      // The cursor is the same focus ring as every other button; a press is
+      // the key's negative (the export's PRESSED style), carried to its label.
+      nav_focus_ring(key);
+      nav_mirror_states(key);
       clear_click_focusable_recursive(key);
     }
   }
@@ -4803,7 +5314,9 @@ extern "C" void app_main(void) {
         } else if (mag < kKeyRelease) {
           engaged = false;
         }
-        if (!engaged) {
+        if (remote_key.load() != 0) {
+          joy_key.store(remote_key.load());
+        } else if (!engaged) {
           joy_key.store(0);
         } else if (std::abs(x) >= std::abs(y)) {
           joy_key.store(x > 0 ? LV_KEY_RIGHT : LV_KEY_LEFT);
@@ -4822,13 +5335,18 @@ extern "C" void app_main(void) {
       }
 
       // send the MCB the same calibrated -1..+1 values the bars show (+Y
-      // forward, deadzones applied), so it needs no calibration of its own;
-      // centred while a calibration run sweeps the stick, so nothing drives
-      // on it. The bars keep moving, to show the stick is being read.
-      // quiet no-op until RTPS is up and a subscriber is discovered
+      // forward, deadzones applied), so it needs no calibration of its own.
+      // Centred whenever the stick is doing something else: while a
+      // calibration run sweeps it, and whenever it is walking the UI rather
+      // than driving -- any screen but Drive, or Drive with the menu open
+      // (stick_drives). Drive stays ACTIVE across the menu and the other
+      // screens, as the spec draws it, so this is what keeps a push meant for
+      // the next row from moving the chair. The bars keep moving, to show the
+      // stick is being read. Quiet no-op until RTPS is up and a subscriber is
+      // discovered.
+      const bool neutral = calibrating || !stick_drives.load();
       adc_published = rtps_comms_publish_adc(
-          calibrating ? 0.0f : stick.x(), calibrating ? 0.0f : stick.y(),
-          calibrating ? 0.0f : stick.z(),
+          neutral ? 0.0f : stick.x(), neutral ? 0.0f : stick.y(), neutral ? 0.0f : stick.z(),
           joy_button_pressed.load() ? rammp::Buttons::JOYSTICK : rammp::Buttons::NONE);
     }
     // Every cycle, valid or not: the self test measures the loop's cadence and
@@ -4914,29 +5432,13 @@ extern "C" void app_main(void) {
   // real handling and not a parallel path.
   remote_ui_start({
       .lvgl_mutex = &lvgl_mutex,
-      .set_key = [](uint32_t key) { joy_key.store(key); },
+      .set_key =
+          [](uint32_t key) {
+            remote_key.store(key);
+            joy_key.store(key);
+          },
       .press_select = [] { select_key.store(true); },
-      .set_button =
-          [](bool down) {
-            joy_button_pressed.store(down);
-            if (down) {
-              select_key.store(true);
-              std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
-              lv_subject_set_int(&button_count_subject,
-                                 lv_subject_get_int(&button_count_subject) + 1);
-              lv_subject_set_int(&button_pressed_subject, 1);
-            } else {
-              std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
-              lv_subject_set_int(&button_pressed_subject, 0);
-            }
-          },
-      // Reading the screen is always allowed; injecting anything while the MCB
-      // has the chair enabled is not.
-      .input_allowed =
-          [] {
-            return static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject)) !=
-                   MIB::MibSystemState::ENABLED;
-          },
+      .set_button = [](bool down) { stick_button_edge(down); },
       .screen_name = [] { return active_screen_name(); },
   });
 

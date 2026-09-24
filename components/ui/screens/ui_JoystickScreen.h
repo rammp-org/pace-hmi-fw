@@ -26,6 +26,8 @@ extern lv_obj_t * ui_TwistEyebrow;
 extern lv_obj_t * ui_TwistBar;
 extern lv_obj_t * ui_ButtonCounterEyebrow;
 extern lv_obj_t * ui_ButtonCounter;
+extern lv_obj_t * ui_CalibrateButton;
+extern lv_obj_t * ui_CalibrateButtonLabel;
 extern lv_obj_t * ui_TopBar3;
 extern lv_obj_t * ui_DriveBand4;
 extern lv_obj_t * ui_ErrorBanner10;

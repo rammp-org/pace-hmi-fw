@@ -77,6 +77,18 @@ lv_obj_t * ui_MenuOverlay_create(lv_obj_t * comp_parent)
     lv_obj_set_style_pad_bottom(cui_RowGround1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(cui_RowGround1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(cui_RowGround1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_RowGround1, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(cui_RowGround1, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
+    ui_object_set_themeable_style_property(cui_RowGround1, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(cui_RowGround1, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
+    ui_object_set_themeable_style_property(cui_RowGround1, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(cui_RowGround1, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
 
     lv_obj_t * cui_RowLabel1;
     cui_RowLabel1 = lv_label_create(cui_RowGround1);
@@ -96,6 +108,18 @@ lv_obj_t * ui_MenuOverlay_create(lv_obj_t * comp_parent)
     lv_obj_set_style_pad_bottom(cui_RowLabel1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(cui_RowLabel1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(cui_RowLabel1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_RowLabel1, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowLabel1, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(cui_RowLabel1, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowLabel1, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(cui_RowLabel1, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowLabel1, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
 
     lv_obj_t * cui_RowChevron1;
     cui_RowChevron1 = lv_label_create(cui_RowGround1);
@@ -116,6 +140,18 @@ lv_obj_t * ui_MenuOverlay_create(lv_obj_t * comp_parent)
     lv_obj_set_style_pad_bottom(cui_RowChevron1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(cui_RowChevron1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(cui_RowChevron1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_RowChevron1, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowChevron1, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(cui_RowChevron1, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowChevron1, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(cui_RowChevron1, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowChevron1, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
 
     lv_obj_t * cui_Row2;
     cui_Row2 = lv_obj_create(cui_MenuOverlay);
@@ -160,6 +196,18 @@ lv_obj_t * ui_MenuOverlay_create(lv_obj_t * comp_parent)
     lv_obj_set_style_pad_bottom(cui_RowGround2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(cui_RowGround2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(cui_RowGround2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_RowGround2, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(cui_RowGround2, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
+    ui_object_set_themeable_style_property(cui_RowGround2, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(cui_RowGround2, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
+    ui_object_set_themeable_style_property(cui_RowGround2, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(cui_RowGround2, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
 
     lv_obj_t * cui_RowLabel2;
     cui_RowLabel2 = lv_label_create(cui_RowGround2);
@@ -179,6 +227,18 @@ lv_obj_t * ui_MenuOverlay_create(lv_obj_t * comp_parent)
     lv_obj_set_style_pad_bottom(cui_RowLabel2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(cui_RowLabel2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(cui_RowLabel2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_RowLabel2, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowLabel2, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(cui_RowLabel2, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowLabel2, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(cui_RowLabel2, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowLabel2, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
 
     lv_obj_t * cui_RowChevron2;
     cui_RowChevron2 = lv_label_create(cui_RowGround2);
@@ -199,6 +259,18 @@ lv_obj_t * ui_MenuOverlay_create(lv_obj_t * comp_parent)
     lv_obj_set_style_pad_bottom(cui_RowChevron2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(cui_RowChevron2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(cui_RowChevron2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_RowChevron2, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowChevron2, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(cui_RowChevron2, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowChevron2, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(cui_RowChevron2, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowChevron2, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
 
     lv_obj_t * cui_Row3;
     cui_Row3 = lv_obj_create(cui_MenuOverlay);
@@ -243,6 +315,18 @@ lv_obj_t * ui_MenuOverlay_create(lv_obj_t * comp_parent)
     lv_obj_set_style_pad_bottom(cui_RowGround3, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(cui_RowGround3, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(cui_RowGround3, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_RowGround3, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(cui_RowGround3, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
+    ui_object_set_themeable_style_property(cui_RowGround3, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(cui_RowGround3, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
+    ui_object_set_themeable_style_property(cui_RowGround3, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(cui_RowGround3, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
 
     lv_obj_t * cui_RowLabel3;
     cui_RowLabel3 = lv_label_create(cui_RowGround3);
@@ -262,6 +346,18 @@ lv_obj_t * ui_MenuOverlay_create(lv_obj_t * comp_parent)
     lv_obj_set_style_pad_bottom(cui_RowLabel3, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(cui_RowLabel3, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(cui_RowLabel3, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_RowLabel3, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowLabel3, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(cui_RowLabel3, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowLabel3, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(cui_RowLabel3, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowLabel3, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
 
     lv_obj_t * cui_RowChevron3;
     cui_RowChevron3 = lv_label_create(cui_RowGround3);
@@ -282,6 +378,18 @@ lv_obj_t * ui_MenuOverlay_create(lv_obj_t * comp_parent)
     lv_obj_set_style_pad_bottom(cui_RowChevron3, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(cui_RowChevron3, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(cui_RowChevron3, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_RowChevron3, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowChevron3, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(cui_RowChevron3, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowChevron3, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(cui_RowChevron3, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowChevron3, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
 
     lv_obj_t * cui_Row4;
     cui_Row4 = lv_obj_create(cui_MenuOverlay);
@@ -326,6 +434,18 @@ lv_obj_t * ui_MenuOverlay_create(lv_obj_t * comp_parent)
     lv_obj_set_style_pad_bottom(cui_RowGround4, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(cui_RowGround4, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(cui_RowGround4, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_RowGround4, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(cui_RowGround4, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
+    ui_object_set_themeable_style_property(cui_RowGround4, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(cui_RowGround4, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
+    ui_object_set_themeable_style_property(cui_RowGround4, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(cui_RowGround4, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
 
     lv_obj_t * cui_RowLabel4;
     cui_RowLabel4 = lv_label_create(cui_RowGround4);
@@ -345,6 +465,18 @@ lv_obj_t * ui_MenuOverlay_create(lv_obj_t * comp_parent)
     lv_obj_set_style_pad_bottom(cui_RowLabel4, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(cui_RowLabel4, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(cui_RowLabel4, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_RowLabel4, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowLabel4, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(cui_RowLabel4, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowLabel4, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(cui_RowLabel4, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowLabel4, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
 
     lv_obj_t * cui_RowChevron4;
     cui_RowChevron4 = lv_label_create(cui_RowGround4);
@@ -365,6 +497,18 @@ lv_obj_t * ui_MenuOverlay_create(lv_obj_t * comp_parent)
     lv_obj_set_style_pad_bottom(cui_RowChevron4, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(cui_RowChevron4, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(cui_RowChevron4, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_RowChevron4, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowChevron4, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(cui_RowChevron4, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowChevron4, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(cui_RowChevron4, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowChevron4, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
 
     lv_obj_t * cui_Row5;
     cui_Row5 = lv_obj_create(cui_MenuOverlay);
@@ -409,6 +553,18 @@ lv_obj_t * ui_MenuOverlay_create(lv_obj_t * comp_parent)
     lv_obj_set_style_pad_bottom(cui_RowGround5, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(cui_RowGround5, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(cui_RowGround5, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_RowGround5, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(cui_RowGround5, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
+    ui_object_set_themeable_style_property(cui_RowGround5, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(cui_RowGround5, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
+    ui_object_set_themeable_style_property(cui_RowGround5, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(cui_RowGround5, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
 
     lv_obj_t * cui_RowLabel5;
     cui_RowLabel5 = lv_label_create(cui_RowGround5);
@@ -428,6 +584,18 @@ lv_obj_t * ui_MenuOverlay_create(lv_obj_t * comp_parent)
     lv_obj_set_style_pad_bottom(cui_RowLabel5, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(cui_RowLabel5, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(cui_RowLabel5, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_RowLabel5, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowLabel5, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(cui_RowLabel5, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowLabel5, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(cui_RowLabel5, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowLabel5, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
 
     lv_obj_t * cui_RowChevron5;
     cui_RowChevron5 = lv_label_create(cui_RowGround5);
@@ -448,6 +616,18 @@ lv_obj_t * ui_MenuOverlay_create(lv_obj_t * comp_parent)
     lv_obj_set_style_pad_bottom(cui_RowChevron5, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(cui_RowChevron5, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(cui_RowChevron5, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_RowChevron5, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowChevron5, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(cui_RowChevron5, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowChevron5, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(cui_RowChevron5, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowChevron5, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
 
     lv_obj_t * cui_Row6;
     cui_Row6 = lv_obj_create(cui_MenuOverlay);
@@ -492,6 +672,18 @@ lv_obj_t * ui_MenuOverlay_create(lv_obj_t * comp_parent)
     lv_obj_set_style_pad_bottom(cui_RowGround6, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(cui_RowGround6, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(cui_RowGround6, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_RowGround6, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(cui_RowGround6, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
+    ui_object_set_themeable_style_property(cui_RowGround6, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(cui_RowGround6, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
+    ui_object_set_themeable_style_property(cui_RowGround6, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(cui_RowGround6, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
 
     lv_obj_t * cui_RowLabel6;
     cui_RowLabel6 = lv_label_create(cui_RowGround6);
@@ -511,6 +703,18 @@ lv_obj_t * ui_MenuOverlay_create(lv_obj_t * comp_parent)
     lv_obj_set_style_pad_bottom(cui_RowLabel6, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(cui_RowLabel6, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(cui_RowLabel6, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_RowLabel6, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowLabel6, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(cui_RowLabel6, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowLabel6, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(cui_RowLabel6, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowLabel6, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
 
     lv_obj_t * cui_RowChevron6;
     cui_RowChevron6 = lv_label_create(cui_RowGround6);
@@ -531,6 +735,18 @@ lv_obj_t * ui_MenuOverlay_create(lv_obj_t * comp_parent)
     lv_obj_set_style_pad_bottom(cui_RowChevron6, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(cui_RowChevron6, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(cui_RowChevron6, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_RowChevron6, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowChevron6, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(cui_RowChevron6, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowChevron6, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(cui_RowChevron6, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowChevron6, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
 
     lv_obj_t * cui_Row7;
     cui_Row7 = lv_obj_create(cui_MenuOverlay);
@@ -575,6 +791,18 @@ lv_obj_t * ui_MenuOverlay_create(lv_obj_t * comp_parent)
     lv_obj_set_style_pad_bottom(cui_RowGround7, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(cui_RowGround7, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(cui_RowGround7, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_RowGround7, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(cui_RowGround7, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
+    ui_object_set_themeable_style_property(cui_RowGround7, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(cui_RowGround7, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
+    ui_object_set_themeable_style_property(cui_RowGround7, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(cui_RowGround7, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
 
     lv_obj_t * cui_RowLabel7;
     cui_RowLabel7 = lv_label_create(cui_RowGround7);
@@ -582,7 +810,7 @@ lv_obj_t * ui_MenuOverlay_create(lv_obj_t * comp_parent)
     lv_obj_set_height(cui_RowLabel7, LV_SIZE_CONTENT);    /// 1
     lv_obj_set_x(cui_RowLabel7, 30);
     lv_obj_set_y(cui_RowLabel7, 36);
-    lv_label_set_text(cui_RowLabel7, "Calibrate Joystick");
+    lv_label_set_text(cui_RowLabel7, "Joystick");
     ui_object_set_themeable_style_property(cui_RowLabel7, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_text);
     ui_object_set_themeable_style_property(cui_RowLabel7, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
@@ -594,6 +822,18 @@ lv_obj_t * ui_MenuOverlay_create(lv_obj_t * comp_parent)
     lv_obj_set_style_pad_bottom(cui_RowLabel7, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(cui_RowLabel7, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(cui_RowLabel7, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_RowLabel7, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowLabel7, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(cui_RowLabel7, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowLabel7, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(cui_RowLabel7, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowLabel7, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
 
     lv_obj_t * cui_RowChevron7;
     cui_RowChevron7 = lv_label_create(cui_RowGround7);
@@ -614,6 +854,18 @@ lv_obj_t * ui_MenuOverlay_create(lv_obj_t * comp_parent)
     lv_obj_set_style_pad_bottom(cui_RowChevron7, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(cui_RowChevron7, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(cui_RowChevron7, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(cui_RowChevron7, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowChevron7, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(cui_RowChevron7, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowChevron7, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(cui_RowChevron7, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(cui_RowChevron7, LV_PART_MAIN | LV_STATE_FOCUSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
 
     lv_obj_t ** children = lv_malloc(sizeof(lv_obj_t *) * _UI_COMP_MENUOVERLAY_NUM);
     children[UI_COMP_MENUOVERLAY_MENUOVERLAY] = cui_MenuOverlay;

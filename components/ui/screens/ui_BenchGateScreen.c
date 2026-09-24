@@ -249,6 +249,10 @@ void ui_BenchGateScreen_screen_init(void)
     lv_obj_set_style_pad_bottom(ui_BenchKey1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_BenchKey1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_BenchKey1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_BenchKey1, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_BenchKey1, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
 
     ui_BenchKey1Label = lv_label_create(ui_BenchKey1);
     lv_obj_set_width(ui_BenchKey1Label, LV_SIZE_CONTENT);   /// 1
@@ -266,6 +270,10 @@ void ui_BenchGateScreen_screen_init(void)
     lv_obj_set_style_pad_bottom(ui_BenchKey1Label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_BenchKey1Label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_BenchKey1Label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_BenchKey1Label, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_BenchKey1Label, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
 
     ui_BenchKey2 = lv_button_create(ui_BenchContent);
     lv_obj_set_width(ui_BenchKey2, 207);
@@ -288,6 +296,10 @@ void ui_BenchGateScreen_screen_init(void)
     lv_obj_set_style_pad_bottom(ui_BenchKey2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_BenchKey2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_BenchKey2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_BenchKey2, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_BenchKey2, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
 
     ui_BenchKey2Label = lv_label_create(ui_BenchKey2);
     lv_obj_set_width(ui_BenchKey2Label, LV_SIZE_CONTENT);   /// 1
@@ -305,6 +317,10 @@ void ui_BenchGateScreen_screen_init(void)
     lv_obj_set_style_pad_bottom(ui_BenchKey2Label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_BenchKey2Label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_BenchKey2Label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_BenchKey2Label, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_BenchKey2Label, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
 
     ui_BenchKey3 = lv_button_create(ui_BenchContent);
     lv_obj_set_width(ui_BenchKey3, 207);
@@ -327,6 +343,10 @@ void ui_BenchGateScreen_screen_init(void)
     lv_obj_set_style_pad_bottom(ui_BenchKey3, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_BenchKey3, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_BenchKey3, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_BenchKey3, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_BenchKey3, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
 
     ui_BenchKey3Label = lv_label_create(ui_BenchKey3);
     lv_obj_set_width(ui_BenchKey3Label, LV_SIZE_CONTENT);   /// 1
@@ -344,6 +364,10 @@ void ui_BenchGateScreen_screen_init(void)
     lv_obj_set_style_pad_bottom(ui_BenchKey3Label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_BenchKey3Label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_BenchKey3Label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_BenchKey3Label, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_BenchKey3Label, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
 
     ui_BenchKey4 = lv_button_create(ui_BenchContent);
     lv_obj_set_width(ui_BenchKey4, 207);
@@ -366,6 +390,10 @@ void ui_BenchGateScreen_screen_init(void)
     lv_obj_set_style_pad_bottom(ui_BenchKey4, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_BenchKey4, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_BenchKey4, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_BenchKey4, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_BenchKey4, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
 
     ui_BenchKey4Label = lv_label_create(ui_BenchKey4);
     lv_obj_set_width(ui_BenchKey4Label, LV_SIZE_CONTENT);   /// 1
@@ -383,6 +411,10 @@ void ui_BenchGateScreen_screen_init(void)
     lv_obj_set_style_pad_bottom(ui_BenchKey4Label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_BenchKey4Label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_BenchKey4Label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_BenchKey4Label, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_BenchKey4Label, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
 
     ui_BenchKey5 = lv_button_create(ui_BenchContent);
     lv_obj_set_width(ui_BenchKey5, 207);
@@ -405,6 +437,10 @@ void ui_BenchGateScreen_screen_init(void)
     lv_obj_set_style_pad_bottom(ui_BenchKey5, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_BenchKey5, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_BenchKey5, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_BenchKey5, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_BenchKey5, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
 
     ui_BenchKey5Label = lv_label_create(ui_BenchKey5);
     lv_obj_set_width(ui_BenchKey5Label, LV_SIZE_CONTENT);   /// 1
@@ -422,6 +458,10 @@ void ui_BenchGateScreen_screen_init(void)
     lv_obj_set_style_pad_bottom(ui_BenchKey5Label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_BenchKey5Label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_BenchKey5Label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_BenchKey5Label, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_BenchKey5Label, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
 
     ui_BenchKey6 = lv_button_create(ui_BenchContent);
     lv_obj_set_width(ui_BenchKey6, 207);
@@ -444,6 +484,10 @@ void ui_BenchGateScreen_screen_init(void)
     lv_obj_set_style_pad_bottom(ui_BenchKey6, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_BenchKey6, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_BenchKey6, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_BenchKey6, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_BenchKey6, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
 
     ui_BenchKey6Label = lv_label_create(ui_BenchKey6);
     lv_obj_set_width(ui_BenchKey6Label, LV_SIZE_CONTENT);   /// 1
@@ -461,6 +505,10 @@ void ui_BenchGateScreen_screen_init(void)
     lv_obj_set_style_pad_bottom(ui_BenchKey6Label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_BenchKey6Label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_BenchKey6Label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_BenchKey6Label, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_BenchKey6Label, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
 
     ui_BenchKey7 = lv_button_create(ui_BenchContent);
     lv_obj_set_width(ui_BenchKey7, 207);
@@ -483,6 +531,10 @@ void ui_BenchGateScreen_screen_init(void)
     lv_obj_set_style_pad_bottom(ui_BenchKey7, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_BenchKey7, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_BenchKey7, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_BenchKey7, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_BenchKey7, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
 
     ui_BenchKey7Label = lv_label_create(ui_BenchKey7);
     lv_obj_set_width(ui_BenchKey7Label, LV_SIZE_CONTENT);   /// 1
@@ -500,6 +552,10 @@ void ui_BenchGateScreen_screen_init(void)
     lv_obj_set_style_pad_bottom(ui_BenchKey7Label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_BenchKey7Label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_BenchKey7Label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_BenchKey7Label, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_BenchKey7Label, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
 
     ui_BenchKey8 = lv_button_create(ui_BenchContent);
     lv_obj_set_width(ui_BenchKey8, 207);
@@ -522,6 +578,10 @@ void ui_BenchGateScreen_screen_init(void)
     lv_obj_set_style_pad_bottom(ui_BenchKey8, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_BenchKey8, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_BenchKey8, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_BenchKey8, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_BenchKey8, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
 
     ui_BenchKey8Label = lv_label_create(ui_BenchKey8);
     lv_obj_set_width(ui_BenchKey8Label, LV_SIZE_CONTENT);   /// 1
@@ -539,6 +599,10 @@ void ui_BenchGateScreen_screen_init(void)
     lv_obj_set_style_pad_bottom(ui_BenchKey8Label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_BenchKey8Label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_BenchKey8Label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_BenchKey8Label, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_BenchKey8Label, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
 
     ui_BenchKey9 = lv_button_create(ui_BenchContent);
     lv_obj_set_width(ui_BenchKey9, 207);
@@ -561,6 +625,10 @@ void ui_BenchGateScreen_screen_init(void)
     lv_obj_set_style_pad_bottom(ui_BenchKey9, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_BenchKey9, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_BenchKey9, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_BenchKey9, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_BenchKey9, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
 
     ui_BenchKey9Label = lv_label_create(ui_BenchKey9);
     lv_obj_set_width(ui_BenchKey9Label, LV_SIZE_CONTENT);   /// 1
@@ -578,6 +646,10 @@ void ui_BenchGateScreen_screen_init(void)
     lv_obj_set_style_pad_bottom(ui_BenchKey9Label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_BenchKey9Label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_BenchKey9Label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_BenchKey9Label, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_BenchKey9Label, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
 
     ui_BenchKey0 = lv_button_create(ui_BenchContent);
     lv_obj_set_width(ui_BenchKey0, 207);
@@ -600,6 +672,10 @@ void ui_BenchGateScreen_screen_init(void)
     lv_obj_set_style_pad_bottom(ui_BenchKey0, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_BenchKey0, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_BenchKey0, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_BenchKey0, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_BenchKey0, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
 
     ui_BenchKey0Label = lv_label_create(ui_BenchKey0);
     lv_obj_set_width(ui_BenchKey0Label, LV_SIZE_CONTENT);   /// 1
@@ -617,6 +693,10 @@ void ui_BenchGateScreen_screen_init(void)
     lv_obj_set_style_pad_bottom(ui_BenchKey0Label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_BenchKey0Label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_BenchKey0Label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_BenchKey0Label, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_BenchKey0Label, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
 
     ui_BenchKeyBack = lv_button_create(ui_BenchContent);
     lv_obj_set_width(ui_BenchKeyBack, 207);
@@ -639,6 +719,10 @@ void ui_BenchGateScreen_screen_init(void)
     lv_obj_set_style_pad_bottom(ui_BenchKeyBack, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_BenchKeyBack, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_BenchKeyBack, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_BenchKeyBack, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_BenchKeyBack, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
 
     ui_BenchKeyBackLabel = lv_label_create(ui_BenchKeyBack);
     lv_obj_set_width(ui_BenchKeyBackLabel, LV_SIZE_CONTENT);   /// 1
@@ -656,6 +740,10 @@ void ui_BenchGateScreen_screen_init(void)
     lv_obj_set_style_pad_bottom(ui_BenchKeyBackLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_BenchKeyBackLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_BenchKeyBackLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_BenchKeyBackLabel, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_BenchKeyBackLabel, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
 
     ui_TopBar5 = ui_TopBar_create(ui_BenchGateScreen);
     lv_obj_set_width(ui_TopBar5, 720);
