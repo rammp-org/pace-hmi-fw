@@ -180,6 +180,11 @@ static std::atomic<bool> select_key{false};
 // written straight into joy_key lasted at most 33 ms and a keypad read could
 // miss it. This one outlasts that until the channel lets go.
 static std::atomic<uint32_t> remote_key{0};
+// The last direction the stick engaged, kept until the keypad has read it. A
+// quick flick can engage and release inside one ADC period plus one keypad read,
+// and the read would then only ever see joy_key at rest -- a flick the stick
+// felt and the UI never did.
+static std::atomic<uint32_t> joy_flick{0};
 
 // An indev can own exactly one group, so the joystick's group follows the
 // active screen. The swap happens on LV_EVENT_SCREEN_LOADED, so it covers
@@ -215,6 +220,7 @@ static std::atomic<bool> stick_drives{false};
 // the joystick"); declared here for the screens and gestures above it.
 static void nav_use_group(lv_group_t *g, const lv_obj_t *screen);
 static void nav_to_key();
+static void nav_focus_ring(lv_obj_t *obj);
 static void nav_update_stick_gate();
 
 // HAPTIC TEST settings row -> kHapticBuzzDuration of vibration.
@@ -1612,13 +1618,46 @@ static int seat_page = 0;
 // grid it restores focus into is declared.
 static void seat_show_buttons_page();
 
-// Holding the stick button on the joystick screen starts a calibration run
-// (and, holding it again, cancels one) -- the same as pressing Calibrate, for
-// someone who cannot reach the screen. The button turns negative while the
-// hold fills, bound in app_main.
+// Calibrate is press-and-HOLD, never a tap: a run takes the stick over for the
+// best part of a minute, so it should not start from a brush of the screen or
+// a stray click of the stick button. Holding the Calibrate button, or the stick
+// button anywhere on the joystick screen, fills the meter along the bottom of
+// the button (bound in app_main) and starts a run when it is full; the same
+// hold during a run cancels it.
+//
+// The touch half is polled -- "is a pointer down, and on Calibrate?" at the
+// gesture's own cadence -- rather than tracked from the button's press events,
+// so there is no event to miss and nothing to keep in step. Both inputs feed
+// the one gesture and share its grace and fill time.
+static bool calibrate_touch_held() {
+  if (ui_CalibrateButton == nullptr || lv_screen_active() != ui_JoystickScreen) {
+    return false;
+  }
+  for (lv_indev_t *indev = lv_indev_get_next(nullptr); indev != nullptr;
+       indev = lv_indev_get_next(indev)) {
+    if (lv_indev_get_type(indev) != LV_INDEV_TYPE_POINTER ||
+        lv_indev_get_state(indev) != LV_INDEV_STATE_PRESSED) {
+      continue;
+    }
+    lv_point_t point;
+    lv_indev_get_point(indev, &point);
+    if (lv_indev_search_obj(lv_screen_active(), &point) == ui_CalibrateButton) {
+      return true;
+    }
+  }
+  return false;
+}
+static bool calibrate_held() { return joy_button_held() || calibrate_touch_held(); }
+
+// Its own "let go first" flag, not joy_button_armed: that one is shared with
+// drive_exit_gesture, whose poll sees the stick button up while a FINGER holds
+// Calibrate and re-arms it every 33 ms -- so a completed touch hold was armed
+// again at once, and one long press started a run and then cancelled it.
+static bool calibrate_armed = true;
+
 static HoldGesture calibrate_gesture{
-    .armed = &joy_button_armed,
-    .is_held = joy_button_held,
+    .armed = &calibrate_armed,
+    .is_held = calibrate_held,
     .applies = [] { return lv_screen_active() == ui_JoystickScreen && nav_menu_open == nullptr; },
     .completed = [] { joystick_cal_toggle(); },
     // The button doubles as select, so a tap must not tick the fill.
@@ -2572,17 +2611,18 @@ static constexpr ActionSpec kActionSpecs[] = {
 static lv_obj_t *action_buttons[ACTION_COUNT];
 static int action_button_count; // buttons on screen; 0 while it is not up
 static int action_cursor;       // which button the joystick is on
+static int action_cols = 1;     // tiles per row, measured once they are laid out
 static lv_group_t *actions_group = nullptr;
 
-// The component has no focused look of its own, and a cursor nobody can see
-// is no cursor: the theme's focus colour on a thicker border, as the seat
-// buttons do. A greyed button fades the whole thing, labels included.
-static constexpr lv_style_selector_t kActionFocused =
+// A tile the MCB could not act on right now. Not LV_STATE_DISABLED: LVGL drops
+// every input event aimed at a disabled object, LV_EVENT_KEY included, so the
+// joystick's cursor landing on a greyed tile could never leave it again. A
+// user state greys it the same way and leaves it walkable; action_click_cb is
+// what refuses to run it.
+static constexpr lv_state_t kActionUnavailable = LV_STATE_USER_2;
+static constexpr lv_style_selector_t kActionUnavailableStyle =
     static_cast<lv_style_selector_t>(LV_PART_MAIN) |
-    static_cast<lv_style_selector_t>(LV_STATE_FOCUSED);
-static constexpr lv_style_selector_t kActionDisabled =
-    static_cast<lv_style_selector_t>(LV_PART_MAIN) |
-    static_cast<lv_style_selector_t>(LV_STATE_DISABLED);
+    static_cast<lv_style_selector_t>(kActionUnavailable);
 
 // Clamped rather than wrapped, for the reason in grid_key_cb.
 static void action_focus(int index) {
@@ -2596,15 +2636,15 @@ static void action_focus(int index) {
 // Greys an MCB action while the MCB could not act on it. Bound to every
 // subject mcb_ready() reads, so it follows the link and the state both.
 static void action_ready_observer(lv_observer_t *observer, lv_subject_t *) {
-  lv_obj_set_state(lv_observer_get_target_obj(observer), LV_STATE_DISABLED, !mcb_ready());
+  lv_obj_set_state(lv_observer_get_target_obj(observer), kActionUnavailable, !mcb_ready());
 }
 
 // A tap, or the stick button on the focused one (the keypad indev turns ENTER
-// into LV_EVENT_CLICKED). The DISABLED check covers the joystick path, which
-// LVGL does not filter the way it filters a touch.
+// into LV_EVENT_CLICKED). A greyed tile takes the press and does nothing.
 static void action_click_cb(lv_event_t *e) {
   lv_obj_t *button = lv_event_get_target_obj(e);
-  if (lv_obj_has_state(button, LV_STATE_DISABLED)) {
+  if (lv_obj_has_state(button, kActionUnavailable)) {
+    haptic_play(espp::Drv2605::Waveform::DOUBLE_CLICK, 1); // felt, like a refusal
     return;
   }
   const auto index = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
@@ -2612,19 +2652,48 @@ static void action_click_cb(lv_event_t *e) {
   kActionRun[index]();
 }
 
-// Up/down walk the buttons. The keypad indev hands arrow keys to the focused
-// object rather than moving the group itself.
+// The tiles are a grid (the flex panel wraps them action_cols to a row), so
+// the stick walks them as one: up and down a row, left and right along it.
+// The keypad indev hands arrow keys to the focused object rather than moving
+// the group itself.
 static void action_key_cb(lv_event_t *e) {
+  // The cursor is the tile that holds focus: coming back up from the burger
+  // key, the group moved focus without telling action_cursor.
+  const lv_obj_t *here = lv_event_get_target_obj(e);
+  for (int i = 0; i < action_button_count; i++) {
+    if (action_buttons[i] == here) {
+      action_cursor = i;
+    }
+  }
+  const int col = action_cursor % action_cols;
   switch (lv_event_get_key(e)) {
   case LV_KEY_UP:
-    action_focus(action_cursor - 1);
+    if (action_cursor >= action_cols) {
+      action_focus(action_cursor - action_cols);
+    }
     return;
   case LV_KEY_DOWN:
-    if (action_cursor + 1 >= action_button_count) {
-      nav_to_key(); // below the last tile is the burger key
+    if (action_cursor + action_cols >= action_button_count) {
+      // No tile below. On the last row that means the burger key; on a
+      // short last row seen from above, the last tile.
+      if (action_cursor / action_cols == (action_button_count - 1) / action_cols) {
+        nav_to_key();
+      } else {
+        action_focus(action_button_count - 1);
+      }
       return;
     }
-    action_focus(action_cursor + 1);
+    action_focus(action_cursor + action_cols);
+    return;
+  case LV_KEY_LEFT:
+    if (col > 0) {
+      action_focus(action_cursor - 1);
+    }
+    return;
+  case LV_KEY_RIGHT:
+    if (col + 1 < action_cols && action_cursor + 1 < action_button_count) {
+      action_focus(action_cursor + 1);
+    }
     return;
   default:
     return;
@@ -2652,12 +2721,9 @@ static void actions_open() {
     lv_label_set_text(ui_comp_get_child(button, UI_COMP_SLOTTILE_SLOTBOX_SLOTTITLE), spec.title);
     lv_label_set_text(ui_comp_get_child(button, UI_COMP_SLOTTILE_SLOTBOX_SLOTSUBTITLE),
                       spec.subtitle);
-    ui_object_set_themeable_style_property(button, kActionFocused, LV_STYLE_BORDER_COLOR,
-                                           _ui_theme_color_focused);
-    ui_object_set_themeable_style_property(button, kActionFocused, LV_STYLE_BORDER_OPA,
-                                           _ui_theme_alpha_focused);
-    lv_obj_set_style_border_width(button, 6, kActionFocused);
-    lv_obj_set_style_opa(button, LV_OPA_40, kActionDisabled);
+    // The same cursor as every other button; greyed fades the whole tile.
+    nav_focus_ring(button);
+    lv_obj_set_style_opa(button, LV_OPA_40, kActionUnavailableStyle);
     if (spec.needs_mcb) {
       bind_to_drive_blocked_cause(button, action_ready_observer);
     }
@@ -2667,6 +2733,18 @@ static void actions_open() {
                         reinterpret_cast<void *>(static_cast<intptr_t>(i)));
     // Only the button takes part in focus; see clear_click_focusable_recursive.
     clear_click_focusable_recursive(button);
+  }
+  // Tiles per row: however many share the first tile's row once the flex
+  // panel has wrapped them. Measured rather than assumed, so a SquareLine
+  // change to the tile or the panel width needs nothing here.
+  action_cols = 1;
+  if (action_button_count > 0) {
+    lv_obj_update_layout(ui_GenericActionsFlexPanel);
+    const int32_t first_y = lv_obj_get_y(action_buttons[0]);
+    action_cols = 0;
+    for (int i = 0; i < action_button_count && lv_obj_get_y(action_buttons[i]) == first_y; i++) {
+      action_cols++;
+    }
   }
   _ui_screen_change(&ui_SkunkWorksScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
                     &ui_SkunkWorksScreen_screen_init);
@@ -3041,7 +3119,21 @@ static void nav_focus_ring(lv_obj_t *obj) { nav_ring_style(obj, 4, 6); }
 // focus through nav_mirror_states -- and the key's own outline is switched off.
 static void nav_key_focus_ring(lv_obj_t *key) {
   nav_ring_style(key, 0, 0);
-  nav_ring_style(ui_comp_get_child(key, UI_COMP_MENUKEY_GROUND), 4, -14);
+  lv_obj_t *ground = ui_comp_get_child(key, UI_COMP_MENUKEY_GROUND);
+  nav_ring_style(ground, 4, -14);
+  // With the menu open the key is CHECKED, which fills its ground with the text
+  // colour -- and a ring in the text colour on that is invisible. Focused AND
+  // checked, the ring takes the background colour instead. LVGL ranks a style
+  // by its state bits, and FOCUSED|CHECKED outranks FOCUSED alone.
+  const lv_style_selector_t open_and_focused = static_cast<lv_style_selector_t>(LV_PART_MAIN) |
+                                               static_cast<lv_style_selector_t>(LV_STATE_FOCUSED) |
+                                               static_cast<lv_style_selector_t>(LV_STATE_CHECKED);
+  ui_object_set_themeable_style_property(ground, open_and_focused, LV_STYLE_OUTLINE_COLOR,
+                                         _ui_theme_color_background);
+  ui_object_set_themeable_style_property(ground, open_and_focused, LV_STYLE_OUTLINE_OPA,
+                                         _ui_theme_alpha_background);
+  lv_obj_set_style_outline_width(ground, 4, open_and_focused);
+  lv_obj_set_style_outline_pad(ground, -14, open_and_focused);
 }
 
 // --- groups --------------------------------------------------------------------
@@ -3148,7 +3240,10 @@ static void nav_open_menu(lv_obj_t *overlay) {
   // than filled once: every screen has its own instance of all seven. The key
   // goes last, so down from the bottom row reaches it and a press closes.
   lv_group_remove_all_objs(menu_group);
-  lv_group_set_wrap(menu_group, false);
+  // The menu wraps: down from the burger key is the top row again, up from
+  // the top row is the key. It is the one list short enough that going round
+  // is quicker than going back.
+  lv_group_set_wrap(menu_group, true);
   for (uint32_t id : kNavRowIds) {
     lv_group_add_obj(menu_group, ui_comp_get_child(overlay, id));
   }
@@ -3270,12 +3365,16 @@ static void nav_row_key_cb(lv_event_t *e) {
   }
 }
 
-// The stick on the burger key. It is always last in its group, so there is
-// nothing below it; up goes back to whatever is above.
+// The stick on the burger key. It is always last in its group: up goes back
+// to whatever is above; down goes on only in the open menu, which wraps round
+// to its top row (a screen's own group does not wrap, so there it stays put).
 static void nav_key_key_cb(lv_event_t *e) {
   const uint32_t key = lv_event_get_key(e);
+  lv_group_t *g = lv_obj_get_group(lv_event_get_target_obj(e));
   if (key == LV_KEY_UP || key == LV_KEY_LEFT) {
-    lv_group_focus_prev(lv_obj_get_group(lv_event_get_target_obj(e)));
+    lv_group_focus_prev(g);
+  } else if (key == LV_KEY_DOWN || key == LV_KEY_RIGHT) {
+    lv_group_focus_next(g);
   }
 }
 
@@ -4539,13 +4638,13 @@ extern "C" void app_main(void) {
   lv_subject_init_int(&diag_rate_subject, 0);
   lv_timer_create(rtps_poll_cb, kRtpsPollMs, nullptr);
 
-  // Calibration on the JoystickScreen: its Calibrate button starts a run (and
-  // reads CANCEL during one), and so does holding the stick button
-  // (calibrate_gesture). Its prompts blink on the RTPS indicator's phase, so
-  // this comes after rtps_blink_subject is initialised.
+  // Calibration on the JoystickScreen: holding Calibrate or the stick button
+  // starts a run (calibrate_gesture), so the button is not handed to
+  // joystick_cal as a tap-to-start -- only its label, which reads CANCEL during
+  // a run. Its prompts blink on the RTPS indicator's phase, so this comes after
+  // rtps_blink_subject is initialised.
   nav_focusable_button(ui_CalibrateButton);
   joystick_cal_init_ui({.screen = ui_JoystickScreen,
-                        .button = ui_CalibrateButton,
                         .button_label = ui_CalibrateButtonLabel,
                         .instructions = ui_JoystickHint,
                         .blink = &rtps_blink_subject,
@@ -4598,7 +4697,11 @@ extern "C" void app_main(void) {
           }
           return;
         }
-        const uint32_t key = joy_key.load(); // held, so LVGL can repeat it
+        uint32_t key = joy_key.load(); // held, so LVGL can repeat it
+        const uint32_t flick = joy_flick.exchange(0);
+        if (key == 0) {
+          key = flick; // pressed for this one read, released on the next
+        }
         *left = key == LV_KEY_LEFT;
         *right = key == LV_KEY_RIGHT;
         *up = key == LV_KEY_UP;
@@ -4645,9 +4748,12 @@ extern "C" void app_main(void) {
   // The ring round the padlock fills with the stick-up hold.
   lv_subject_add_observer_obj(&unlock_gesture.progress, lock_ring_hold_observer, ui_LockRing,
                               nullptr);
-  // Calibrate turns negative as soon as a hold of the stick button starts to
-  // fill, so the hold is visibly doing something before it completes.
-  lv_obj_bind_state_if_ge(ui_CalibrateButton, &calibrate_gesture.progress, LV_STATE_PRESSED, 1);
+  // Calibrate's meter shows the hold filling, and is out of sight while it is
+  // empty. Held by touch or by the stick button, it is the same fill.
+  lv_bar_set_range(ui_CalibrateFill, 0, kHoldMax);
+  lv_bar_bind_value(ui_CalibrateFill, &calibrate_gesture.progress);
+  lv_obj_bind_flag_if_eq(ui_CalibrateFill, &calibrate_gesture.progress, LV_OBJ_FLAG_HIDDEN, 0);
+  lv_obj_remove_flag(ui_CalibrateFill, LV_OBJ_FLAG_CLICKABLE);
   lv_timer_create(hold_poll_cb, kHoldPollMs, nullptr);
 
   // LogScreen: TextArea1 shows the serial output log_capture has kept. Its
@@ -5296,12 +5402,14 @@ extern "C" void app_main(void) {
       // diagonal resolves to one direction rather than two.
       //
       // A light touch on purpose: menus should answer well before the stick is
-      // anywhere near its travel limit. The release threshold sits exactly on
-      // the joystick's own center_deadzone_radius, so a direction lets go the
-      // moment the stick is back inside the dead zone, and the deadzone already
-      // suppresses any noise below it.
-      static constexpr float kKeyEngage = 0.20f;
-      static constexpr float kKeyRelease = 0.10f;
+      // anywhere near its travel limit. stick.x()/y() are rescaled past the
+      // circular dead zone -- 0 at its edge, 1 at the gate -- so these are
+      // fractions of the travel OUTSIDE it: engaging at 0.06 is about 15% of
+      // the full throw (it was 0.20, about 27%, and read as unresponsive), and
+      // releasing at 0.02 lets go just before the stick is back in the dead
+      // zone. The dead zone itself is what keeps rest noise from engaging.
+      static constexpr float kKeyEngage = 0.06f;
+      static constexpr float kKeyRelease = 0.02f;
       {
         static bool engaged = false;
         const float x = stick.x();
@@ -5314,6 +5422,7 @@ extern "C" void app_main(void) {
         } else if (mag < kKeyRelease) {
           engaged = false;
         }
+        const uint32_t was = joy_key.load();
         if (remote_key.load() != 0) {
           joy_key.store(remote_key.load());
         } else if (!engaged) {
@@ -5323,6 +5432,10 @@ extern "C" void app_main(void) {
         } else {
           // +Y is up after the vertical axis's inversion, and up the list is prev
           joy_key.store(y > 0 ? LV_KEY_UP : LV_KEY_DOWN);
+        }
+        // A fresh engage (or a re-aim) is latched for the keypad; see joy_flick.
+        if (const uint32_t now = joy_key.load(); now != 0 && now != was) {
+          joy_flick.store(now);
         }
       }
       {

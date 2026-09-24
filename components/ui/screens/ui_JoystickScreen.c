@@ -20,6 +20,7 @@ lv_obj_t * ui_ButtonCounterEyebrow = NULL;
 lv_obj_t * ui_ButtonCounter = NULL;
 lv_obj_t * ui_CalibrateButton = NULL;
 lv_obj_t * ui_CalibrateButtonLabel = NULL;
+lv_obj_t * ui_CalibrateFill = NULL;
 lv_obj_t * ui_TopBar3 = NULL;
 lv_obj_t * ui_DriveBand4 = NULL;
 lv_obj_t * ui_ErrorBanner10 = NULL;
@@ -109,7 +110,8 @@ void ui_JoystickScreen_screen_init(void)
     lv_obj_set_height(ui_JoystickHint, 80);
     lv_obj_set_x(ui_JoystickHint, 30);
     lv_obj_set_y(ui_JoystickHint, 8);
-    lv_label_set_text(ui_JoystickHint, "Move the joystick. The bars should follow.\nHold the stick button to calibrate.");
+    lv_label_set_text(ui_JoystickHint,
+                      "Move the joystick. The bars should follow.\nPress and hold Calibrate (or the stick button).");
     ui_object_set_themeable_style_property(ui_JoystickHint, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_text_muted);
     ui_object_set_themeable_style_property(ui_JoystickHint, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
@@ -363,6 +365,43 @@ void ui_JoystickScreen_screen_init(void)
     ui_object_set_themeable_style_property(ui_CalibrateButtonLabel, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
                                            _ui_theme_alpha_background);
 
+    ui_CalibrateFill = lv_bar_create(ui_CalibrateButton);
+    lv_obj_set_width(ui_CalibrateFill, 328);
+    lv_obj_set_height(ui_CalibrateFill, 12);
+    lv_obj_set_x(ui_CalibrateFill, 16);
+    lv_obj_set_y(ui_CalibrateFill, 134);
+    lv_obj_set_style_radius(ui_CalibrateFill, 6, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_CalibrateFill, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_CalibrateFill, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+    lv_obj_set_style_border_color(ui_CalibrateFill, lv_color_hex(0x767676), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_opa(ui_CalibrateFill, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(ui_CalibrateFill, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_CalibrateFill, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_CalibrateFill, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_CalibrateFill, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_CalibrateFill, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_CalibrateFill, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_CalibrateFill, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_CalibrateFill, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_CalibrateFill, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
+
+    lv_obj_set_style_radius(ui_CalibrateFill, 0, LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_CalibrateFill, LV_PART_INDICATOR | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_CalibrateFill, LV_PART_INDICATOR | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
+    ui_object_set_themeable_style_property(ui_CalibrateFill, LV_PART_INDICATOR | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_CalibrateFill, LV_PART_INDICATOR | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_background);
+
+    //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
+    if(lv_obj_get_style_pad_top(ui_CalibrateFill, LV_PART_MAIN) > 0) lv_obj_set_style_pad_right(ui_CalibrateFill,
+                                                                                                    lv_obj_get_style_pad_right(ui_CalibrateFill, LV_PART_MAIN) + 1, LV_PART_MAIN);
     ui_TopBar3 = ui_TopBar_create(ui_JoystickScreen);
     lv_obj_set_width(ui_TopBar3, 720);
     lv_obj_set_height(ui_TopBar3, 55);
@@ -419,6 +458,7 @@ void ui_JoystickScreen_screen_destroy(void)
     ui_ButtonCounter = NULL;
     ui_CalibrateButton = NULL;
     ui_CalibrateButtonLabel = NULL;
+    ui_CalibrateFill = NULL;
     ui_TopBar3 = NULL;
     ui_DriveBand4 = NULL;
     ui_ErrorBanner10 = NULL;

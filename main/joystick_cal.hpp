@@ -53,10 +53,10 @@ JoystickCal joystick_cal_current();
 /// The JoystickScreen widgets the run drives, plus the shared 1 Hz blink phase
 /// its prompts blink on.
 ///
-/// Spec V2 has no CALIBRATE button: "Calibrate Joystick" in the burger menu
-/// opens the screen and calls joystick_cal_toggle(), and leaving the screen is
-/// how a run is cancelled. `button` and `button_label` are therefore optional,
-/// and naming them brings the old on-screen start/cancel back.
+/// main.cpp starts and cancels runs itself -- a press-and-hold on the Calibrate
+/// button or the stick button, which calls joystick_cal_toggle() -- so it
+/// passes only `button_label`, to read CANCEL during a run. `button` is still
+/// there for a caller that wants a plain tap to start one.
 struct JoystickCalUi {
   lv_obj_t *screen = nullptr;       ///< leaving it cancels a run
   lv_obj_t *button = nullptr;       ///< optional: starts a run, and cancels one

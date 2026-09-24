@@ -85,6 +85,8 @@ PARENTS: dict[str, str] = {
     "ui_ButtonCounter": "ui_JoystickContent",
     "ui_JoystickHint": "ui_JoystickContent",
     "ui_CalibrateButton": "ui_JoystickContent",
+    # the meter main.cpp binds to the press-and-hold that starts a run
+    "ui_CalibrateFill": "ui_CalibrateButton",
 
     # BenchGateScreen: four dots and eleven keys on the one content panel.
     # main.cpp hands each key its digit by name, so a key that moved would type
