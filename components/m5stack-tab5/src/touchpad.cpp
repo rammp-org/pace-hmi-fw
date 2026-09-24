@@ -147,19 +147,6 @@ void M5StackTab5::touchpad_read(uint8_t *num_touch_points, uint16_t *x, uint16_t
   *x = touchpad_data_.x;
   *y = touchpad_data_.y;
   *btn_state = touchpad_data_.btn_state;
-  // The panel turned 180 degrees under an upright UI (set_flipped): what the
-  // finger touches is at the opposite corner of the frame LVGL drew.
-  if (flipped_.load() && *num_touch_points > 0) {
-    *x = static_cast<uint16_t>(display_width_ - 1 - *x);
-    *y = static_cast<uint16_t>(display_height_ - 1 - *y);
-  }
-}
-
-void M5StackTab5::set_flipped(bool flipped) {
-  flipped_.store(flipped);
-  if (display_driver_) {
-    display_driver_->set_rotation(flipped ? espp::DisplayRotation::LANDSCAPE_INVERTED : rotation);
-  }
 }
 
 M5StackTab5::TouchpadData

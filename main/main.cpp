@@ -55,6 +55,8 @@
 #include "selftest.hpp"
 #include "settings.hpp"
 
+#include "driver/ppa.h"
+#include "esp_cache.h"
 #include "esp_heap_caps.h"
 #include "esp_lcd_mipi_dsi.h"
 #include "esp_system.h"
@@ -2261,6 +2263,8 @@ static void stepper_format(const StepperSpec &spec, int32_t raw, char *out, size
   lv_snprintf(out, out_size, "%s%s", number, spec.unit != nullptr ? spec.unit : "");
 }
 
+static void set_display_flipped(bool on); // screen flip, beside direct_flush_cb
+
 // Applies and saves one of the UI Settings rows that has no observer of its
 // own (brightness and theme do). user_data is its SETTINGS_PARAM_*.
 static void setting_store_observer(lv_observer_t *observer, lv_subject_t *subject) {
@@ -2270,7 +2274,7 @@ static void setting_store_observer(lv_observer_t *observer, lv_subject_t *subjec
   settings_set(param, value);
   switch (param) {
   case SETTINGS_PARAM_FLIP:
-    espp::M5StackTab5::get().set_flipped(value != 0);
+    set_display_flipped(value != 0);
     break;
   case SETTINGS_PARAM_STICK_SENSITIVITY:
     stick_sensitivity.store(value);
@@ -3943,6 +3947,158 @@ static void direct_flush_cb(lv_display_t *disp, const lv_area_t * /*area*/, uint
   tab5.present_frame(px_map);
 }
 
+/////////////////////////////////////////////////////////////////////////////
+// Screen flip (UI Settings "Flip screen")
+//
+// Turns the picture 180 degrees for a unit mounted upside down. LVGL keeps
+// drawing upright; the P4's pixel-processing accelerator (PPA) turns the
+// finished frame over on its way to the panel.
+//
+// Normally LVGL renders straight into the DSI panel's two frame buffers and a
+// flush is just a swap (direct_flush_cb). Flipped, LVGL renders -- still in
+// DIRECT mode, so it keeps redrawing only what changed -- into one PSRAM frame
+// of its own, and each flush has the PPA rotate the whole frame into the panel
+// buffer that is not on screen, then swaps to it at vsync exactly as the
+// normal path does. So it stays tear-free, the frame buffer LVGL owns stays
+// upright (screenshots, the remote UI), and flip off is the same zero-copy
+// pipeline as before.
+//
+// Everything here is public API -- LVGL's buffer and read-callback calls,
+// ESP-IDF's PPA driver and DPI frame buffers, the board's present_frame() --
+// so neither LVGL nor the vendored board support is changed. The PPA driver
+// writes the source back from the CPU cache and invalidates the target itself.
+// Not the panel's own scan direction (MADCTL): on this DSI video-mode panel
+// that garbles the picture.
+//
+// Touch turns with the picture: the touch input's read callback is wrapped to
+// mirror the point while flipped.
+/////////////////////////////////////////////////////////////////////////////
+
+static uint8_t *panel_fb[2] = {nullptr, nullptr}; // the DSI panel's frame buffers
+static size_t panel_fb_bytes = 0;
+static int32_t panel_w = 0;
+static int32_t panel_h = 0;
+static uint8_t *flip_frame = nullptr; // LVGL's upright frame while flipped (PSRAM)
+static ppa_client_handle_t flip_ppa = nullptr;
+static int flip_back = 0; // which panel_fb the next rotated frame goes into
+static std::atomic<bool> display_flipped{false};
+static espp::Logger logger_flip({.tag = "flip", .level = espp::Logger::Verbosity::INFO});
+
+static void flip_flush_cb(lv_display_t *disp, const lv_area_t *, uint8_t *px_map) {
+  if (!lv_display_flush_is_last(disp)) {
+    lv_display_flush_ready(disp);
+    return;
+  }
+  uint8_t *target = panel_fb[flip_back];
+  bool rotated = false;
+  if (flip_ppa != nullptr) {
+    ppa_srm_oper_config_t srm = {};
+    srm.in.buffer = px_map;
+    srm.in.pic_w = panel_w;
+    srm.in.pic_h = panel_h;
+    srm.in.block_w = panel_w;
+    srm.in.block_h = panel_h;
+    srm.in.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
+    srm.out.buffer = target;
+    srm.out.buffer_size = panel_fb_bytes;
+    srm.out.pic_w = panel_w;
+    srm.out.pic_h = panel_h;
+    srm.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
+    srm.rotation_angle = PPA_SRM_ROTATION_ANGLE_180;
+    srm.scale_x = 1.0f;
+    srm.scale_y = 1.0f;
+    srm.mode = PPA_TRANS_MODE_BLOCKING;
+    rotated = ppa_do_scale_rotate_mirror(flip_ppa, &srm) == ESP_OK;
+  }
+  if (!rotated) {
+    // No PPA (or it refused): the same turn on the CPU, then out of the cache
+    // so the DSI DMA reads what was written.
+    const uint32_t stride = lv_draw_buf_width_to_stride(panel_w, LV_COLOR_FORMAT_RGB565);
+    lv_draw_sw_rotate(px_map, target, panel_w, panel_h, stride, stride, LV_DISPLAY_ROTATION_180,
+                      LV_COLOR_FORMAT_RGB565);
+    esp_cache_msync(target, panel_fb_bytes, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+  }
+  // The same vsync-gated swap as direct_flush_cb; flush_ready arrives through
+  // the panel's on_color_trans_done.
+  espp::M5StackTab5::get().present_frame(target);
+  flip_back ^= 1;
+}
+
+// Turns the picture over, or back. LVGL task, between frames (a settings step
+// or the boot-time apply), so no flush is in flight.
+static void set_display_flipped(bool on) {
+  if (on == display_flipped.load() || panel_fb[0] == nullptr) {
+    return; // nothing to change, or DIRECT mode never came up
+  }
+  lv_display_t *disp = lv_display_get_default();
+  // In DIRECT double buffering LVGL's active buffer is the one it draws into
+  // next -- the one NOT on screen. That is where the first frame of the new
+  // mode has to go.
+  const lv_draw_buf_t *active = lv_display_get_buf_active(disp);
+  const int back = active != nullptr && active->data == panel_fb[1] ? 1 : 0;
+  if (on) {
+    if (flip_frame == nullptr) {
+      flip_frame =
+          static_cast<uint8_t *>(heap_caps_aligned_alloc(128, panel_fb_bytes, MALLOC_CAP_SPIRAM));
+      if (flip_frame == nullptr) {
+        logger_flip.error("no PSRAM for the flipped frame; staying upright");
+        return;
+      }
+    }
+    if (flip_ppa == nullptr) {
+      ppa_client_config_t cfg = {};
+      cfg.oper_type = PPA_OPERATION_SRM;
+      if (ppa_register_client(&cfg, &flip_ppa) != ESP_OK) {
+        flip_ppa = nullptr; // flip_flush_cb falls back to the CPU
+        logger_flip.warn("no PPA client; the flip will rotate on the CPU");
+      }
+    }
+    flip_back = back;
+    lv_display_set_buffers(disp, flip_frame, nullptr, panel_fb_bytes,
+                           LV_DISPLAY_RENDER_MODE_DIRECT);
+    lv_display_set_flush_cb(disp, flip_flush_cb);
+  } else {
+    // Back to rendering straight into the panel: the one not on screen first.
+    // flip_back is the next free one, so the other is showing.
+    lv_display_set_buffers(disp, panel_fb[flip_back], panel_fb[flip_back ^ 1], panel_fb_bytes,
+                           LV_DISPLAY_RENDER_MODE_DIRECT);
+    lv_display_set_flush_cb(disp, direct_flush_cb);
+  }
+  display_flipped.store(on);
+  // Everything, into the new buffers. Twice when turning back: DIRECT mode
+  // copies the last frame's changed areas forward from the other panel buffer,
+  // which still holds a rotated picture until LVGL has drawn into both once.
+  lv_obj_invalidate(lv_screen_active());
+  if (!on) {
+    lv_timer_t *again =
+        lv_timer_create([](lv_timer_t *) { lv_obj_invalidate(lv_screen_active()); }, 100, nullptr);
+    lv_timer_set_repeat_count(again, 1);
+  }
+  logger_flip.info("screen {}", on ? "flipped 180 degrees" : "upright");
+}
+
+// The touch input's own read, kept so the wrapper can call it.
+static lv_indev_read_cb_t touch_read_upright = nullptr;
+
+static void touch_read_flip_aware(lv_indev_t *indev, lv_indev_data_t *data) {
+  touch_read_upright(indev, data);
+  if (display_flipped.load()) {
+    data->point.x = panel_w - 1 - data->point.x;
+    data->point.y = panel_h - 1 - data->point.y;
+  }
+}
+
+// Once the touch input exists: route its reads through the flip.
+static void flip_wrap_touch(lv_indev_t *touch) {
+  if (touch == nullptr || touch_read_upright != nullptr) {
+    return;
+  }
+  touch_read_upright = lv_indev_get_read_cb(touch);
+  if (touch_read_upright != nullptr) {
+    lv_indev_set_read_cb(touch, touch_read_flip_aware);
+  }
+}
+
 // DRV2605 haptic motor driver (the motor on the PCB's JST connector).
 //
 // The waveform is armed once here rather than per press: slots 0 and 1 each
@@ -4365,6 +4521,11 @@ extern "C" void app_main(void) {
       lv_display_set_buffers(lv_display_get_default(), fb0, fb1, fb_bytes,
                              LV_DISPLAY_RENDER_MODE_DIRECT);
       lv_display_set_flush_cb(lv_display_get_default(), direct_flush_cb);
+      panel_fb[0] = static_cast<uint8_t *>(fb0);
+      panel_fb[1] = static_cast<uint8_t *>(fb1);
+      panel_fb_bytes = fb_bytes;
+      panel_w = tab5.display_width();
+      panel_h = tab5.display_height();
       direct_render = true;
       logger.info("LVGL rendering directly into the DSI frame buffers (DIRECT mode)");
     } else {
@@ -5241,6 +5402,10 @@ extern "C" void app_main(void) {
   if (!tab5.initialize_touch(touch_callback)) {
     logger.error("Failed to initialize touch!");
     return;
+  }
+  if (auto touchpad = tab5.touchpad_input()) {
+    std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
+    flip_wrap_touch(touchpad->get_touchpad_input_device());
   }
 
   // start a simple thread to do the lv_task_handler every 8ms — the refresh
