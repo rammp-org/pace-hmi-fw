@@ -182,6 +182,38 @@ bool handle(int sock, const std::string &line) {
     const int step = arg(words, 1, 1) == 2 ? 2 : 1;
     return send_shot(sock, step);
   }
+  if (verb == "FOCUS") {
+    // Where input stands: the object the keypad (joystick) has focused, and
+    // each pointer's state. For chasing "the cursor vanished" without a
+    // debugger: x y w h are screen coordinates, state is LVGL's bit set.
+    std::lock_guard<std::recursive_mutex> lock(*cfg.lvgl_mutex);
+    std::string out = "OK";
+    for (lv_indev_t *indev = lv_indev_get_next(nullptr); indev != nullptr;
+         indev = lv_indev_get_next(indev)) {
+      if (lv_indev_get_type(indev) == LV_INDEV_TYPE_KEYPAD) {
+        lv_group_t *g = lv_indev_get_group(indev);
+        lv_obj_t *f = g != nullptr ? lv_group_get_focused(g) : nullptr;
+        if (f == nullptr) {
+          out += " keypad:none";
+        } else {
+          lv_area_t a;
+          lv_obj_get_coords(f, &a);
+          out += " keypad:" + std::to_string(a.x1) + "," + std::to_string(a.y1) + "," +
+                 std::to_string(lv_area_get_width(&a)) + "x" +
+                 std::to_string(lv_area_get_height(&a)) +
+                 ",state=" + std::to_string(lv_obj_get_state(f)) +
+                 ",groupsize=" + std::to_string(lv_group_get_obj_count(g));
+        }
+      } else if (lv_indev_get_type(indev) == LV_INDEV_TYPE_POINTER) {
+        lv_point_t pt;
+        lv_indev_get_point(indev, &pt);
+        out += std::string(" pointer:") +
+               (lv_indev_get_state(indev) == LV_INDEV_STATE_PRESSED ? "down" : "up") + "@" +
+               std::to_string(pt.x) + "," + std::to_string(pt.y);
+      }
+    }
+    return send_line(sock, out);
+  }
   if (verb == "SCREEN") {
     std::lock_guard<std::recursive_mutex> lock(*cfg.lvgl_mutex);
     const char *name = cfg.screen_name ? cfg.screen_name() : "?";

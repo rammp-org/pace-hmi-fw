@@ -4,9 +4,12 @@
  * @file settings.hpp
  * @brief User settings that survive a reboot, in /storage/settings.txt.
  *
- * One "key value" line each. A missing file or key keeps the default; unknown
- * keys are ignored, so a file from an older or newer firmware still loads.
- * Any task; each setter writes the file only when the value changed.
+ * One "key value" line each, a key per settings_spec.h parameter (lowercase:
+ * "brightness", "theme", "stick_sensitivity"...). A missing file or key keeps
+ * the table's default; unknown keys are ignored, so a file from an older or
+ * newer firmware still loads. It sits beside joystick_cal.txt on the same
+ * LittleFS partition. Any task; a setter writes the file only when the value
+ * changed.
  */
 
 #include <cstdint>
@@ -21,15 +24,17 @@ static_assert(kBrightnessMinPercent > 0, "the backlight must not be able to go f
 /// Read the file. Call once from app_main, before the getters.
 void settings_load();
 
-/// UI theme index (ui_themes.h). Default 0, UI_THEME_DEFAULT.
-uint8_t settings_theme();
-void settings_set_theme(uint8_t value);
+/// A SETTINGS_PARAM_* value, within its table range.
+int settings_get(int param);
+/// Clamped to the table range; saved if it changed.
+void settings_set(int param, int value);
 
-/// Whether the burger menu slides in (the spec's 280 ms) or appears at once.
-/// Default false: instant.
-bool settings_menu_slide();
-void settings_set_menu_slide(bool on);
+/// UI theme index (ui_themes.h): the THEME row, 0 = UI_THEME_DEFAULT.
+inline uint8_t settings_theme() { return static_cast<uint8_t>(settings_get(SETTINGS_PARAM_THEME)); }
+inline void settings_set_theme(uint8_t value) { settings_set(SETTINGS_PARAM_THEME, value); }
 
-/// Backlight %, kBrightnessMinPercent..kBrightnessMaxPercent. Default 75.
-int settings_brightness();
-void settings_set_brightness(int percent);
+/// Backlight %, kBrightnessMinPercent..kBrightnessMaxPercent.
+inline int settings_brightness() { return settings_get(SETTINGS_PARAM_BRIGHTNESS); }
+inline void settings_set_brightness(int percent) {
+  settings_set(SETTINGS_PARAM_BRIGHTNESS, percent);
+}

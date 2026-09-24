@@ -23,6 +23,8 @@
  *   BTN 0|1                   the GPIO48 button, held
  *   THEME 0|1                 night / day
  *   SCREEN                    the active screen's name
+ *   FOCUS                     where input stands: the joystick's focused object
+ *                             (x,y,size,state) and each pointer's state
  *   PING                      OK, for a liveness check
  *
  * One client at a time: a second connection is accepted and closed, so a

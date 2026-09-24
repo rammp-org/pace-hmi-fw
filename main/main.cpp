@@ -209,8 +209,20 @@ static lv_group_t *rd_group = nullptr;          // the bench gate's PIN keypad
 // Two of the UI Settings rows; the third is brightness_subject. Up here because
 // rtps_poll_cb keeps the theme row in step and the menu reads the slide. Each
 // observer (app_main) applies and saves its value.
-static lv_subject_t theme_subject;      // 0 = dark (UI_THEME_DEFAULT), 1 = day
-static lv_subject_t menu_slide_subject; // 0 = the menu appears at once, 1 = it slides
+static lv_subject_t theme_subject;             // 0 = dark (UI_THEME_DEFAULT), 1 = day
+static lv_subject_t menu_slide_subject;        // 0 = the menu appears at once, 1 = it slides
+static lv_subject_t flip_subject;              // 1 = the panel is turned 180 degrees
+static lv_subject_t stick_sensitivity_subject; // 1..10, see stick_key_thresholds
+static lv_subject_t stick_invert_x_subject;    // 1 = left and right swap over
+static lv_subject_t stick_invert_y_subject;    // 1 = forward and back swap over
+static lv_subject_t stick_swap_subject;        // 1 = the stick's X and Y trade places
+
+// What the ADC task needs of those, as plain atomics it can read without the
+// LVGL lock. Written by setting_store_observer.
+static std::atomic<int> stick_sensitivity{SETTINGS_STICK_SENSITIVITY_MAX - 1};
+static std::atomic<bool> stick_invert_x{false};
+static std::atomic<bool> stick_invert_y{false};
+static std::atomic<bool> stick_swap{false};
 
 // The burger menu's overlay while it is up, else null. Up here because the
 // hold gestures ask whether it is open before they apply.
@@ -2110,6 +2122,8 @@ struct StepperSpec {
   // What each value reads, min_value first, for a row that picks between
   // named options rather than a number; nullptr = a number.
   const char *const *names = nullptr;
+  // Refused while the chair is driving (see setting_step).
+  bool locked_only = false;
 };
 
 // Everything needed to drive one row, so a key callback or an observer gets it
@@ -2143,7 +2157,7 @@ struct SettingParam {
 };
 
 static constexpr SettingParam kSettingParams[] = {
-#define SETTINGS_PARAM_ROW(page_, name_, short_, label_, min_, max_, step_, dec_, unit_)           \
+#define SETTINGS_PARAM_ROW(page_, name_, short_, label_, min_, max_, step_, dec_, unit_, dflt_)    \
   {SETTINGS_PAGE_##page_, {short_, label_, min_, max_, step_, dec_, unit_}},
     SETTINGS_PARAM_TABLE(SETTINGS_PARAM_ROW)
 #undef SETTINGS_PARAM_ROW
@@ -2152,18 +2166,30 @@ static constexpr SettingParam kSettingParams[] = {
 // The subject each settings parameter steps, in SETTINGS_PARAM_* order. Each
 // one's observer applies and saves it.
 static lv_subject_t *const kSettingParamValue[] = {
-    &brightness_subject, // SETTINGS_PARAM_BRIGHTNESS
-    &theme_subject,      // SETTINGS_PARAM_THEME
-    &menu_slide_subject, // SETTINGS_PARAM_MENU_SLIDE
+    &brightness_subject,        // SETTINGS_PARAM_BRIGHTNESS
+    &theme_subject,             // SETTINGS_PARAM_THEME
+    &menu_slide_subject,        // SETTINGS_PARAM_MENU_SLIDE
+    &flip_subject,              // SETTINGS_PARAM_FLIP
+    &stick_sensitivity_subject, // SETTINGS_PARAM_STICK_SENSITIVITY
+    &stick_invert_x_subject,    // SETTINGS_PARAM_STICK_INVERT_X
+    &stick_invert_y_subject,    // SETTINGS_PARAM_STICK_INVERT_Y
+    &stick_swap_subject,        // SETTINGS_PARAM_STICK_SWAP
 };
 
 // What the named rows read, in SETTINGS_PARAM_* order; nullptr = a number.
 static constexpr const char *kThemeNames[] = {"Dark", "Day"};
 static constexpr const char *kOnOffNames[] = {"Off", "On"};
+static constexpr const char *kMirrorNames[] = {"Normal", "Mirror"};
+static constexpr const char *kSwapNames[] = {"Normal", "Swap"};
 static const char *const *const kSettingParamNames[] = {
-    nullptr,     // SETTINGS_PARAM_BRIGHTNESS
-    kThemeNames, // SETTINGS_PARAM_THEME
-    kOnOffNames, // SETTINGS_PARAM_MENU_SLIDE
+    nullptr,      // SETTINGS_PARAM_BRIGHTNESS
+    kThemeNames,  // SETTINGS_PARAM_THEME
+    kOnOffNames,  // SETTINGS_PARAM_MENU_SLIDE
+    kOnOffNames,  // SETTINGS_PARAM_FLIP
+    nullptr,      // SETTINGS_PARAM_STICK_SENSITIVITY
+    kMirrorNames, // SETTINGS_PARAM_STICK_INVERT_X
+    kMirrorNames, // SETTINGS_PARAM_STICK_INVERT_Y
+    kSwapNames,   // SETTINGS_PARAM_STICK_SWAP
 };
 static_assert(std::size(kSettingParamNames) == SETTINGS_PARAM_COUNT,
               "every settings_spec.h parameter needs its names (or nullptr) here");
@@ -2233,6 +2259,34 @@ static void stepper_format(const StepperSpec &spec, int32_t raw, char *out, size
                 static_cast<int>(magnitude / scale), digits);
   }
   lv_snprintf(out, out_size, "%s%s", number, spec.unit != nullptr ? spec.unit : "");
+}
+
+// Applies and saves one of the UI Settings rows that has no observer of its
+// own (brightness and theme do). user_data is its SETTINGS_PARAM_*.
+static void setting_store_observer(lv_observer_t *observer, lv_subject_t *subject) {
+  const int param =
+      static_cast<int>(reinterpret_cast<intptr_t>(lv_observer_get_user_data(observer)));
+  const int value = lv_subject_get_int(subject);
+  settings_set(param, value);
+  switch (param) {
+  case SETTINGS_PARAM_FLIP:
+    espp::M5StackTab5::get().set_flipped(value != 0);
+    break;
+  case SETTINGS_PARAM_STICK_SENSITIVITY:
+    stick_sensitivity.store(value);
+    break;
+  case SETTINGS_PARAM_STICK_INVERT_X:
+    stick_invert_x.store(value != 0);
+    break;
+  case SETTINGS_PARAM_STICK_INVERT_Y:
+    stick_invert_y.store(value != 0);
+    break;
+  case SETTINGS_PARAM_STICK_SWAP:
+    stick_swap.store(value != 0);
+    break;
+  default:
+    break; // MENU_SLIDE: read where it is used, nothing to apply
+  }
 }
 
 // How each seat axis' number is drawn, filled in at startup from the shared
@@ -2407,6 +2461,10 @@ static void press_flash(lv_obj_t *button) {
 static void setting_step(const SettingRow *row, int direction) {
   lv_obj_t *button = direction < 0 ? row->minus : row->plus;
   if (lv_obj_has_state(button, LV_STATE_DISABLED)) {
+    return;
+  }
+  if (row->spec.locked_only && lv_subject_get_int(&locked_subject) == 0) {
+    haptic_play(espp::Drv2605::Waveform::DOUBLE_CLICK, 1); // not while driving
     return;
   }
   press_flash(button);
@@ -2584,6 +2642,10 @@ static void setting_page_open(int32_t page) {
       if (kSettingParams[i].page == page) {
         StepperSpec spec = kSettingParams[i].spec;
         spec.names = kSettingParamNames[i];
+        // Remapping the stick changes which way a push drives the chair, so
+        // it is not done mid-drive.
+        spec.locked_only = i == SETTINGS_PARAM_STICK_INVERT_X ||
+                           i == SETTINGS_PARAM_STICK_INVERT_Y || i == SETTINGS_PARAM_STICK_SWAP;
         setting_row_add(spec, kSettingParamValue[i], false);
       }
     }
@@ -4613,14 +4675,21 @@ extern "C" void app_main(void) {
         }
       },
       nullptr);
-  // Menu slide: off by default, so the menu appears at once; saved on change.
-  lv_subject_init_int(&menu_slide_subject, settings_menu_slide() ? 1 : 0);
-  lv_subject_add_observer(
-      &menu_slide_subject,
-      [](lv_observer_t *, lv_subject_t *subject) {
-        settings_set_menu_slide(lv_subject_get_int(subject) != 0);
-      },
-      nullptr);
+  // The rest of UI Settings: each row's subject starts at its saved value, and
+  // setting_store_observer applies it (on this first run too, which is what
+  // puts a saved flip or stick mapping back at boot) and saves any change.
+  for (const auto &[subject, param] : std::initializer_list<std::pair<lv_subject_t *, int>>{
+           {&menu_slide_subject, SETTINGS_PARAM_MENU_SLIDE},
+           {&flip_subject, SETTINGS_PARAM_FLIP},
+           {&stick_sensitivity_subject, SETTINGS_PARAM_STICK_SENSITIVITY},
+           {&stick_invert_x_subject, SETTINGS_PARAM_STICK_INVERT_X},
+           {&stick_invert_y_subject, SETTINGS_PARAM_STICK_INVERT_Y},
+           {&stick_swap_subject, SETTINGS_PARAM_STICK_SWAP},
+       }) {
+    lv_subject_init_int(subject, settings_get(param));
+    lv_subject_add_observer(subject, setting_store_observer,
+                            reinterpret_cast<void *>(static_cast<intptr_t>(param)));
+  }
   brightness_save_timer = lv_timer_create(brightness_save_cb, kBrightnessSaveDelayMs, nullptr);
   lv_timer_pause(brightness_save_timer);
 
@@ -5494,6 +5563,21 @@ extern "C" void app_main(void) {
       // horizontal channel, Y the vertical one (inverted, see "Joystick
       // mapping").
       stick.update(*horiz_mv, *vert_mv, twist_smoothed);
+      // The stick as mounted: UI Settings can swap its axes and mirror either
+      // one. Applied here, once, so the bars, the UI keys and the MCB all get
+      // the same stick. Swap first, then mirror, so "mirror left/right" always
+      // means the direction the user pushes, whatever the swap did.
+      float stick_x = stick.x();
+      float stick_y = stick.y();
+      if (stick_swap.load()) {
+        std::swap(stick_x, stick_y);
+      }
+      if (stick_invert_x.load()) {
+        stick_x = -stick_x;
+      }
+      if (stick_invert_y.load()) {
+        stick_y = -stick_y;
+      }
 
       // Analog -> keypad level. Schmitt trigger (engage past kKeyEngage, release
       // below kKeyRelease) so the boundary can't chatter; between the two
@@ -5502,19 +5586,24 @@ extern "C" void app_main(void) {
       // without needing to pass through center. The larger component wins, so a
       // diagonal resolves to one direction rather than two.
       //
-      // A light touch on purpose: menus should answer well before the stick is
-      // anywhere near its travel limit. stick.x()/y() are rescaled past the
-      // circular dead zone -- 0 at its edge, 1 at the gate -- so these are
-      // fractions of the travel OUTSIDE it: engaging at 0.06 is about 15% of
-      // the full throw (it was 0.20, about 27%, and read as unresponsive), and
-      // releasing at 0.02 lets go just before the stick is back in the dead
-      // zone. The dead zone itself is what keeps rest noise from engaging.
-      static constexpr float kKeyEngage = 0.06f;
-      static constexpr float kKeyRelease = 0.02f;
+      // How far the stick must go to count as a key is the UI Settings stick
+      // sensitivity, 1..10. stick.x()/y() are rescaled past the circular dead
+      // zone -- 0 at its edge, 1 at the gate -- so the thresholds are fractions
+      // of the travel OUTSIDE it: level 1 engages at 0.30 (about 36% of the
+      // full throw), level 10 at 0.01, the moment the stick leaves the dead
+      // zone, and the default 9 at ~0.04 (about 14%; it was 0.06, and 0.20
+      // before that). Release is half the engage, so the key lets go on the
+      // way back rather than chattering at the boundary. The dead zone itself
+      // (kStickCenterDeadzoneRadius, shared with driving) is what keeps rest
+      // noise from engaging at any level.
+      const int level = std::clamp<int>(stick_sensitivity.load(), SETTINGS_STICK_SENSITIVITY_MIN,
+                                        SETTINGS_STICK_SENSITIVITY_MAX);
+      const float kKeyEngage = 0.30f - (level - 1) * (0.29f / 9.0f);
+      const float kKeyRelease = kKeyEngage * 0.5f;
       {
         static bool engaged = false;
-        const float x = stick.x();
-        const float y = stick.y();
+        const float x = stick_x;
+        const float y = stick_y;
         const float mag = std::max(std::abs(x), std::abs(y));
         if (calibrating) {
           engaged = false; // "hold LEFT" must not page the menus or exit
@@ -5543,8 +5632,8 @@ extern "C" void app_main(void) {
         // lv_subject_set_int runs the bar's observer callback synchronously,
         // which touches the widget, so it needs the LVGL lock
         std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
-        lv_subject_set_int(&adc_x_subject, static_cast<int32_t>(stick.x() * 100.0f));
-        lv_subject_set_int(&adc_y_subject, static_cast<int32_t>(stick.y() * 100.0f));
+        lv_subject_set_int(&adc_x_subject, static_cast<int32_t>(stick_x * 100.0f));
+        lv_subject_set_int(&adc_y_subject, static_cast<int32_t>(stick_y * 100.0f));
         lv_subject_set_int(&adc_twist_subject, static_cast<int32_t>(stick.z() * 100.0f));
       }
 
@@ -5560,7 +5649,7 @@ extern "C" void app_main(void) {
       // discovered.
       const bool neutral = calibrating || !stick_drives.load();
       adc_published = rtps_comms_publish_adc(
-          neutral ? 0.0f : stick.x(), neutral ? 0.0f : stick.y(), neutral ? 0.0f : stick.z(),
+          neutral ? 0.0f : stick_x, neutral ? 0.0f : stick_y, neutral ? 0.0f : stick.z(),
           joy_button_pressed.load() ? rammp::Buttons::JOYSTICK : rammp::Buttons::NONE);
     }
     // Every cycle, valid or not: the self test measures the loop's cadence and

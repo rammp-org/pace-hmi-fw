@@ -276,6 +276,20 @@ public:
   /// \return A shared pointer to the display driver
   const std::shared_ptr<DisplayDriver> &display_driver() const { return display_driver_; }
 
+  /// Turn the picture 180 degrees in the panel, and touch with it.
+  ///
+  /// Done by the display controller -- it reverses its gate and source scan
+  /// (MADCTL), the only rotation that costs nothing -- rather than by LVGL,
+  /// whose software rotation cannot run with LVGL drawing straight into the
+  /// panel's frame buffers. LVGL keeps drawing upright, so the frame buffer,
+  /// and anything that reads it, never knows. Touch points are mirrored to
+  /// match in touchpad_read(). Call after initialize_display().
+  /// \param flipped true for upside down, false for the normal way up
+  void set_flipped(bool flipped);
+
+  /// Whether set_flipped(true) is in force
+  bool flipped() const { return flipped_.load(); }
+
   /// Write lines to the LCD
   /// \param xs The x start coordinate
   /// \param ys The y start coordinate
@@ -945,6 +959,7 @@ protected:
   // flush (which runs on the GUI thread and already reads it) so the camera
   // task can read the rotation without calling LVGL from its own thread.
   std::atomic<uint8_t> camera_display_rotation_{0};
+  std::atomic<bool> flipped_{false};
   void apply_camera_controls();
   bool allocate_camera_preview_buffer(CameraScale scale);
 
