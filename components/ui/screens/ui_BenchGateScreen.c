@@ -779,6 +779,7 @@ void ui_BenchGateScreen_screen_init(void)
 
 
 
+
 }
 
 void ui_BenchGateScreen_screen_destroy(void)

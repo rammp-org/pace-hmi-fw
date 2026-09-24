@@ -64,9 +64,9 @@ PARENTS: dict[str, str] = {
     # boot logo: main.cpp swaps the pre-rasterised A8 mask onto this image
     "ui_Image3": "ui_BootScreen",
 
-    # LockedScreen: ACTIVATE DRIVE, the ring the unlock fills, and the shackle
-    # that rises when it lands
-    "ui_ActivateDrive": "ui_LockedContent",
+    # LockedScreen: the ring the unlock fills, the shackle that rises when it
+    # lands, and the legend that says how (the stick, not a button)
+    "ui_DriveHint": "ui_LockedContent",
     "ui_LockRing": "ui_LockedContent",
     "ui_Shackle": "ui_LockedContent",
 
@@ -164,13 +164,14 @@ LABELS: dict[str, str] = {
 
     # The burger menu, in the order nav_go switches on. A row that moves opens
     # the wrong screen, silently -- nav_row_cb carries only the row index.
-    "cui_RowLabel1": "Seat Functions",
-    "cui_RowLabel2": "Skunk Works",
-    "cui_RowLabel3": "Log",
-    "cui_RowLabel4": "Diagnostics",
-    "cui_RowLabel5": "Bench",
-    "cui_RowLabel6": "UI Settings",
-    "cui_RowLabel7": "Joystick",
+    "cui_RowLabel1": "Drive",
+    "cui_RowLabel2": "Seat Functions",
+    "cui_RowLabel3": "Skunk Works",
+    "cui_RowLabel4": "Log",
+    "cui_RowLabel5": "Diagnostics",
+    "cui_RowLabel6": "Bench",
+    "cui_RowLabel7": "UI Settings",
+    "cui_RowLabel8": "Joystick",
 }
 
 _CREATE_RE = re.compile(

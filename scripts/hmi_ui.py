@@ -45,8 +45,9 @@ TIMEOUT_S = 20.0
 # seven menu rows: 131 px each, starting at the top of the 921 px body.
 MENU_KEY = (360, 1198)
 BODY_TOP = 195
-ROW_HEIGHT = 131
+ROW_HEIGHT = 921 // 8  # eight rows divide the 921 px body
 MENU_ROWS = [
+    "Drive",
     "Seat Functions",
     "Skunk Works",
     "Log",

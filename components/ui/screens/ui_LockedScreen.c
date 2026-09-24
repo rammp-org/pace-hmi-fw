@@ -12,8 +12,7 @@ lv_obj_t * ui_LockRing = NULL;
 lv_obj_t * ui_Shackle = NULL;
 lv_obj_t * ui_LockBody = NULL;
 lv_obj_t * ui_LockKeyhole = NULL;
-lv_obj_t * ui_ActivateDrive = NULL;
-lv_obj_t * ui_ActivateDriveLabel = NULL;
+lv_obj_t * ui_DriveHint = NULL;
 lv_obj_t * ui_TopBar1 = NULL;
 lv_obj_t * ui_DriveBand1 = NULL;
 lv_obj_t * ui_ErrorBanner2 = NULL;
@@ -181,62 +180,24 @@ void ui_LockedScreen_screen_init(void)
     lv_obj_set_style_pad_row(ui_LockKeyhole, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_LockKeyhole, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_ActivateDrive = lv_button_create(ui_LockedContent);
-    lv_obj_set_width(ui_ActivateDrive, 574);
-    lv_obj_set_height(ui_ActivateDrive, 162);
-    lv_obj_set_x(ui_ActivateDrive, 73);
-    lv_obj_set_y(ui_ActivateDrive, 595);
-    lv_obj_add_flag(ui_ActivateDrive, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
-    lv_obj_remove_flag(ui_ActivateDrive, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_radius(ui_ActivateDrive, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_ActivateDrive, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
-                                           _ui_theme_color_background);
-    ui_object_set_themeable_style_property(ui_ActivateDrive, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
-                                           _ui_theme_alpha_background);
-    ui_object_set_themeable_style_property(ui_ActivateDrive, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
+    ui_DriveHint = lv_label_create(ui_LockedContent);
+    lv_obj_set_width(ui_DriveHint, 500);
+    lv_obj_set_height(ui_DriveHint, 120);
+    lv_obj_set_x(ui_DriveHint, 110);
+    lv_obj_set_y(ui_DriveHint, 608);
+    lv_label_set_text(ui_DriveHint, "Hold the joystick forward to drive");
+    ui_object_set_themeable_style_property(ui_DriveHint, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_ActivateDrive, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
+    ui_object_set_themeable_style_property(ui_DriveHint, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
                                            _ui_theme_alpha_text);
-    lv_obj_set_style_border_width(ui_ActivateDrive, 4, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_pad_left(ui_ActivateDrive, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_pad_right(ui_ActivateDrive, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_pad_top(ui_ActivateDrive, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_pad_bottom(ui_ActivateDrive, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_pad_row(ui_ActivateDrive, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_pad_column(ui_ActivateDrive, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_ActivateDrive, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_ActivateDrive, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_OPA,
-                                           _ui_theme_alpha_text);
-    ui_object_set_themeable_style_property(ui_ActivateDrive, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_ActivateDrive, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
-                                           _ui_theme_alpha_text);
-
-    ui_ActivateDriveLabel = lv_label_create(ui_ActivateDrive);
-    lv_obj_set_width(ui_ActivateDriveLabel, LV_SIZE_CONTENT);   /// 1
-    lv_obj_set_height(ui_ActivateDriveLabel, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_align(ui_ActivateDriveLabel, LV_ALIGN_CENTER);
-    lv_label_set_text(ui_ActivateDriveLabel, "ACTIVATE DRIVE");
-    ui_object_set_themeable_style_property(ui_ActivateDriveLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_ActivateDriveLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
-                                           _ui_theme_alpha_text);
-    lv_obj_set_style_text_font(ui_ActivateDriveLabel, &ui_font_MontserratSemiBold53, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_pad_left(ui_ActivateDriveLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_pad_right(ui_ActivateDriveLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_pad_top(ui_ActivateDriveLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_pad_bottom(ui_ActivateDriveLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_pad_row(ui_ActivateDriveLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_pad_column(ui_ActivateDriveLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_ActivateDriveLabel, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_COLOR,
-                                           _ui_theme_color_background);
-    ui_object_set_themeable_style_property(ui_ActivateDriveLabel, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_OPA,
-                                           _ui_theme_alpha_background);
-    ui_object_set_themeable_style_property(ui_ActivateDriveLabel, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
-                                           _ui_theme_color_background);
-    ui_object_set_themeable_style_property(ui_ActivateDriveLabel, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
-                                           _ui_theme_alpha_background);
+    lv_obj_set_style_text_align(ui_DriveHint, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_DriveHint, &ui_font_MontserratSemiBold44, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_DriveHint, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_DriveHint, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_DriveHint, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_DriveHint, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(ui_DriveHint, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_column(ui_DriveHint, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_TopBar1 = ui_TopBar_create(ui_LockedScreen);
     lv_obj_set_width(ui_TopBar1, 720);
@@ -274,6 +235,7 @@ void ui_LockedScreen_screen_init(void)
 
 
 
+
 }
 
 void ui_LockedScreen_screen_destroy(void)
@@ -288,8 +250,7 @@ void ui_LockedScreen_screen_destroy(void)
     ui_Shackle = NULL;
     ui_LockBody = NULL;
     ui_LockKeyhole = NULL;
-    ui_ActivateDrive = NULL;
-    ui_ActivateDriveLabel = NULL;
+    ui_DriveHint = NULL;
     ui_TopBar1 = NULL;
     ui_DriveBand1 = NULL;
     ui_ErrorBanner2 = NULL;

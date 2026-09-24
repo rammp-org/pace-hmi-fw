@@ -307,6 +307,14 @@ void ui_DriveScreen_screen_init(void)
     lv_obj_set_style_pad_bottom(ui_ModeManual, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_ModeManual, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_ModeManual, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_ModeManual, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_ModeManual, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
+    ui_object_set_themeable_style_property(ui_ModeManual, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_ModeManual, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
 
     ui_ModeManualLabel = lv_label_create(ui_ModeManual);
     lv_obj_set_width(ui_ModeManualLabel, LV_SIZE_CONTENT);   /// 1
@@ -324,6 +332,14 @@ void ui_DriveScreen_screen_init(void)
     lv_obj_set_style_pad_bottom(ui_ModeManualLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_ModeManualLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_ModeManualLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_ModeManualLabel, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_ModeManualLabel, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_ModeManualLabel, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_ModeManualLabel, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
 
     ui_ModeAssist = lv_button_create(ui_DriveContent);
     lv_obj_set_width(ui_ModeAssist, 207);
@@ -334,13 +350,11 @@ void ui_DriveScreen_screen_init(void)
     lv_obj_remove_flag(ui_ModeAssist, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_obj_set_style_radius(ui_ModeAssist, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
     ui_object_set_themeable_style_property(ui_ModeAssist, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
-                                           _ui_theme_color_text);
+                                           _ui_theme_color_background);
     ui_object_set_themeable_style_property(ui_ModeAssist, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
-                                           _ui_theme_alpha_text);
-    ui_object_set_themeable_style_property(ui_ModeAssist, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_ModeAssist, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
-                                           _ui_theme_alpha_text);
+                                           _ui_theme_alpha_background);
+    lv_obj_set_style_border_color(ui_ModeAssist, lv_color_hex(0x767676), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_opa(ui_ModeAssist, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_border_width(ui_ModeAssist, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_left(ui_ModeAssist, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_right(ui_ModeAssist, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -348,6 +362,14 @@ void ui_DriveScreen_screen_init(void)
     lv_obj_set_style_pad_bottom(ui_ModeAssist, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_ModeAssist, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_ModeAssist, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_ModeAssist, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_ModeAssist, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
+    ui_object_set_themeable_style_property(ui_ModeAssist, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_ModeAssist, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
 
     ui_ModeAssistLabel = lv_label_create(ui_ModeAssist);
     lv_obj_set_width(ui_ModeAssistLabel, LV_SIZE_CONTENT);   /// 1
@@ -355,9 +377,9 @@ void ui_DriveScreen_screen_init(void)
     lv_obj_set_align(ui_ModeAssistLabel, LV_ALIGN_CENTER);
     lv_label_set_text(ui_ModeAssistLabel, "Assist");
     ui_object_set_themeable_style_property(ui_ModeAssistLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
-                                           _ui_theme_color_background);
+                                           _ui_theme_color_text);
     ui_object_set_themeable_style_property(ui_ModeAssistLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
-                                           _ui_theme_alpha_background);
+                                           _ui_theme_alpha_text);
     lv_obj_set_style_text_font(ui_ModeAssistLabel, &ui_font_MontserratSemiBold44, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_left(ui_ModeAssistLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_right(ui_ModeAssistLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -365,6 +387,14 @@ void ui_DriveScreen_screen_init(void)
     lv_obj_set_style_pad_bottom(ui_ModeAssistLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_ModeAssistLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_ModeAssistLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_ModeAssistLabel, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_ModeAssistLabel, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_ModeAssistLabel, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_ModeAssistLabel, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
 
     ui_ModeAuto = lv_button_create(ui_DriveContent);
     lv_obj_set_width(ui_ModeAuto, 207);
@@ -387,6 +417,14 @@ void ui_DriveScreen_screen_init(void)
     lv_obj_set_style_pad_bottom(ui_ModeAuto, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_ModeAuto, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_ModeAuto, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_ModeAuto, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_ModeAuto, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
+    ui_object_set_themeable_style_property(ui_ModeAuto, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_COLOR,
+                                           _ui_theme_color_text);
+    ui_object_set_themeable_style_property(ui_ModeAuto, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_BG_OPA,
+                                           _ui_theme_alpha_text);
 
     ui_ModeAutoLabel = lv_label_create(ui_ModeAuto);
     lv_obj_set_width(ui_ModeAutoLabel, LV_SIZE_CONTENT);   /// 1
@@ -404,6 +442,14 @@ void ui_DriveScreen_screen_init(void)
     lv_obj_set_style_pad_bottom(ui_ModeAutoLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_ModeAutoLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_ModeAutoLabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_object_set_themeable_style_property(ui_ModeAutoLabel, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_ModeAutoLabel, LV_PART_MAIN | LV_STATE_CHECKED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
+    ui_object_set_themeable_style_property(ui_ModeAutoLabel, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_COLOR,
+                                           _ui_theme_color_background);
+    ui_object_set_themeable_style_property(ui_ModeAutoLabel, LV_PART_MAIN | LV_STATE_PRESSED, LV_STYLE_TEXT_OPA,
+                                           _ui_theme_alpha_background);
 
     ui_TopBar2 = ui_TopBar_create(ui_DriveScreen);
     lv_obj_set_width(ui_TopBar2, 720);
@@ -436,6 +482,7 @@ void ui_DriveScreen_screen_init(void)
     lv_obj_set_height(ui_MenuOverlay2, 921);
     lv_obj_set_x(ui_MenuOverlay2, 0);
     lv_obj_set_y(ui_MenuOverlay2, 195);
+
 
 
 

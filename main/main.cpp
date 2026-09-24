@@ -240,6 +240,10 @@ static std::atomic<bool> stick_drives{false};
 // the joystick"); declared here for the screens and gestures above it.
 static void nav_use_group(lv_group_t *g, const lv_obj_t *screen);
 static void nav_arrive(lv_obj_t *screen);
+static void nav_mirror_states(lv_obj_t *obj);
+// Open the menu on the next screen to load: the burger key on Drive asks the
+// MIB to stop first, and the menu follows once it has, over the Locked screen.
+static bool nav_menu_on_arrival = false;
 static void nav_to_key();
 static void nav_home();
 static void nav_focus_ring(lv_obj_t *obj);
@@ -378,7 +382,7 @@ static void mcb_status_label_observer(lv_observer_t *observer, lv_subject_t *) {
   // LOCKED in red whenever it is not -- locked here, a fault, the link down, or
   // the MIB simply not enabled. It is the one thing the user has to act on
   // before anything moves, and the spec gives it the alert colour for that.
-  // Locked outranks everything: the chair does not drive until ACTIVATE DRIVE,
+  // Locked outranks everything: the chair does not drive until it is asked to,
   // whatever the MIB says.
   if (kind == StatusKind::kDriveStatus) {
     const bool active = lv_subject_get_int(&locked_subject) == 0 && connected &&
@@ -573,14 +577,14 @@ static void drive_profile_click_cb(lv_event_t *e) {
   drive_publish();
 }
 
-// Highlights the button whose mode is selected. Border width rather than a
-// colour, so it reads the same in either theme - the buttons' colours are
-// themeable and would fight a hardcoded highlight.
+// Highlights the button whose mode the MIB reports: CHECKED, which the design
+// draws as the negative of the resting button (spec: Button states), themed
+// both ways. All three are drawn at rest, so nothing is lit until the MIB says.
 static void drive_mode_button_observer(lv_observer_t *observer, lv_subject_t *subject) {
   lv_obj_t *button = lv_observer_get_target_obj(observer);
   const auto mine = *static_cast<const MIB::DriveProfile *>(lv_observer_get_user_data(observer));
   const bool selected = static_cast<MIB::DriveProfile>(lv_subject_get_int(subject)) == mine;
-  lv_obj_set_style_border_width(button, selected ? 8 : 2, LV_PART_MAIN);
+  lv_obj_set_state(button, LV_STATE_CHECKED, selected);
 }
 
 static void bind_drive_profile_button(lv_obj_t *button, MIB::DriveProfile *mode) {
@@ -588,6 +592,8 @@ static void bind_drive_profile_button(lv_obj_t *button, MIB::DriveProfile *mode)
     return;
   }
   lv_obj_add_event_cb(button, drive_profile_click_cb, LV_EVENT_CLICKED, mode);
+  // The label takes the inverted colour with the button (pressed and checked).
+  nav_mirror_states(button);
   lv_subject_add_observer_obj(&drive_profile_subject, drive_mode_button_observer, button, mode);
 }
 
@@ -857,6 +863,10 @@ static void gpio48_button_callback(const espp::Interrupt::Event &event) {
 
 static bool load_audio(size_t &out_size, size_t &out_sample_rate);
 static void play_click(espp::M5StackTab5 &tab5);
+// "Can't do that", heard (play_refusal) or heard and felt (refusal_feedback);
+// defined with play_click.
+static void play_refusal();
+static void refusal_feedback();
 
 // DRV2605 haptic driver: brings the motor on the PCB's JST connector up and
 // selects its effect library. The waveform slots are armed per play, by
@@ -1019,13 +1029,13 @@ static bool joy_button_held() { return joy_button_pressed.load(); }
 /////////////////////////////////////////////////////////////////////////////
 
 // Locked means "not driving", and the Locked screen is where that changes.
-// ACTIVATE DRIVE -- a tap, the stick button with the cursor on it, or holding
-// the stick up -- asks the MIB to start driving, and nothing unlocks until the
-// MIB says it has (activate_drive, lock_open). The ring round the padlock shows
-// where that stands: it fills while the stick is held up, a quarter of it goes
-// round while the MIB is asked, and it closes when the MIB answers. Then the
-// spec's 01b frame -- the shackle rises, the button fills white, the band flips
-// to ACTIVE -- held one second, and Drive dissolves in (Motion timing,
+// Holding the stick up -- the legend under the padlock says so; the spec's
+// ACTIVATE DRIVE button is gone -- asks the MIB to start driving, and nothing
+// unlocks until the MIB says it has (activate_drive, lock_open). The ring round
+// the padlock shows where that stands: it fills while the stick is held up, a
+// quarter of it goes round while the MIB is asked, and it closes when the MIB
+// answers. Then the spec's 01b frame -- the shackle rises, the band flips to
+// ACTIVE -- held one second, and Drive dissolves in (Motion timing,
 // "ACTIVATE DRIVE").
 //
 // Locking again is the MIB's call too: the chair stops, asked (the drive-exit
@@ -1059,7 +1069,7 @@ static void ring_spin_cb(void *ring, int32_t angle) {
   lv_arc_set_rotation(static_cast<lv_obj_t *>(ring), angle);
 }
 
-// The ring and the padlock back at rest: empty, shackle down, button unfilled.
+// The ring and the padlock back at rest: empty, shackle down.
 static void lock_visual_rest() {
   lock_waiting = false;
   lv_anim_delete(ui_LockRing, ring_spin_cb);
@@ -1067,7 +1077,6 @@ static void lock_visual_rest() {
   lv_arc_set_value(ui_LockRing, 0);
   lv_obj_set_y(ui_Shackle, shackle_rest_y);
   lv_obj_set_height(ui_Shackle, shackle_rest_h);
-  lv_obj_remove_state(ui_ActivateDrive, LV_STATE_CHECKED);
 }
 
 // Asked the MIB and waiting: a quarter of the ring goes round until it answers.
@@ -1122,8 +1131,8 @@ static bool mcb_ready();
 static void activate_drive();
 static void lock_open();
 
-// Holding the stick up on the Locked screen: the same as pressing ACTIVATE
-// DRIVE. Only while there is something to ask -- a MIB that is not ready gets
+// Holding the stick up on the Locked screen: how driving is asked for. Only
+// while there is something to ask -- a MIB that is not ready gets
 // the refusal on the first push instead (entry_refusal_poll), rather than a
 // ring that fills for a second and then says no.
 static HoldGesture unlock_gesture{
@@ -1210,6 +1219,9 @@ enum : int32_t {
   kRefusedDriveStopped = 4,    // was driving, the MIB stopped it
   kRefusedExit = 5,            // asked to stop, the MIB is still driving
   kRefusedDriveLost = 6,       // was driving, then the link went; cause read live
+  // Drive picked from the menu while the MCB could not drive. Like kRefusedSeat:
+  // no push holds it up, so it stays its window unless the cause clears.
+  kRefusedDriveMenu = 7,
 };
 static lv_subject_t entry_refused_subject; // kRefused*; panel up unless None
 // Created paused and re-armed by each refusal, like haptic_label_timer, so a
@@ -1307,6 +1319,17 @@ static void bind_to_drive_blocked_cause(lv_obj_t *panel, lv_observer_cb_t cb) {
   }
 }
 
+// Shows or hides a banner, sounding the refusal when one comes up on the
+// screen in front: a warning or an error arriving is heard as well as read.
+// Only on the rise, because every cause subject re-runs the observers.
+static void banner_show(lv_obj_t *panel, bool up) {
+  const bool was_up = !lv_obj_has_flag(panel, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_flag(panel, LV_OBJ_FLAG_HIDDEN, !up);
+  if (up && !was_up && lv_obj_get_screen(panel) == lv_screen_active()) {
+    play_refusal();
+  }
+}
+
 // MainScreenFlex. Says which entry was refused, and hides itself the moment
 // the MCB is ready again, so it never claims a fault that has already cleared.
 static void entry_refused_panel_observer(lv_observer_t *observer, lv_subject_t *) {
@@ -1316,7 +1339,7 @@ static void entry_refused_panel_observer(lv_observer_t *observer, lv_subject_t *
   // padlock under a fault reads as a drawing glitch -- so the padlock and its
   // ring step aside while the banner is up.
   auto shown = [panel](bool up) {
-    lv_obj_set_flag(panel, LV_OBJ_FLAG_HIDDEN, !up);
+    banner_show(panel, up);
     if (panel == ui_ErrorBanner2) {
       for (lv_obj_t *art : {ui_LockRing, ui_Shackle, ui_LockBody, ui_LockKeyhole}) {
         lv_obj_set_flag(art, LV_OBJ_FLAG_HIDDEN, up);
@@ -1376,15 +1399,15 @@ static void drive_screen_warning_observer(lv_observer_t *observer, lv_subject_t 
       lv_screen_active() == ui_DriveScreen) {
     fill_mib_reason_panel(panel, rammp::kHmiExitRefusedTitle, rammp::kHmiExitRefusedText,
                           rammp::kHmiExitRefusedFooter);
-    lv_obj_remove_flag(panel, LV_OBJ_FLAG_HIDDEN);
+    banner_show(panel, true);
     return;
   }
   if (mcb_ready()) {
-    lv_obj_add_flag(panel, LV_OBJ_FLAG_HIDDEN);
+    banner_show(panel, false);
     return;
   }
   fill_drive_blocked_panel(panel, rammp::kHmiLinkLostTitle, rammp::kHmiMcbFaultTitle);
-  lv_obj_remove_flag(panel, LV_OBJ_FLAG_HIDDEN);
+  banner_show(panel, true);
 }
 
 static void bind_mcb_lost_panel(lv_obj_t *panel) {
@@ -1434,9 +1457,11 @@ static void entry_refusal_poll() {
     entry_refused_show(page, kDriveRefusedShowMs);
     // Distinct from the STRONG_CLICK a completed hold gives, so a refusal can
     // be felt as well as read.
-    haptic_play(espp::Drv2605::Waveform::DOUBLE_CLICK, 1);
+    refusal_feedback();
   } else if ((refused == kRefusedDrive && (refused != page || mcb_ready())) ||
-             ((refused == kRefusedSeat || refused == kRefusedDriveLost) && mcb_ready())) {
+             ((refused == kRefusedSeat || refused == kRefusedDriveLost ||
+               refused == kRefusedDriveMenu) &&
+              mcb_ready())) {
     // A refused drive is tied to the push on the Locked screen, so it goes
     // with it. A refused seat comes from the menu -- no push to hold it up --
     // so it stays its window (entry_refused_timer) unless the cause clears.
@@ -1472,6 +1497,9 @@ static int64_t drive_exit_until_us; // 0 = not waiting for the MIB to stop
 // raises its warning, and the MIB granting the stop late must still read as the user
 // leaving rather than as the chair stopping on its own.
 static bool drive_exit_requested;
+// The stop was asked by the burger key, not the exit hold: once the MIB grants
+// it, the menu opens over the Locked screen, which is what the key was for.
+static bool drive_exit_then_menu;
 
 static void drive_publish() {
   rtps_comms_publish_drive(drive_request.load(), drive_profile_published.load());
@@ -1517,6 +1545,7 @@ static void drive_screen_follow_state() {
     drive_wait_warn_us = 0;  // and there is nothing to complain about
     drive_exit_until_us = 0; // any older request to stop is stale
     drive_exit_requested = false;
+    drive_exit_then_menu = false;
     lock_open();
     return;
   }
@@ -1525,8 +1554,13 @@ static void drive_screen_follow_state() {
     // explanation; the MIB stopping the chair by itself does, and it has to be
     // said on the screen the user lands on.
     const bool asked = drive_exit_requested;
+    const bool then_menu = asked && drive_exit_then_menu;
     drive_exit_until_us = 0;
     drive_exit_requested = false;
+    drive_exit_then_menu = false;
+    // Before set_locked: an instant screen change loads the Locked screen, and
+    // runs nav_arrive, inside it.
+    nav_menu_on_arrival = then_menu;
     set_locked(true);
     if (!asked) {
       // The link going is not the MIB deciding anything: say which it was.
@@ -1558,6 +1592,7 @@ static void drive_wait_poll() {
     // has to keep agreeing with the chair, however much the user wants to leave. The
     // request stays latched, so a stop granted later is still their doing.
     drive_exit_until_us = 0;
+    drive_exit_then_menu = false; // refused: no menu, even if it stops later
     entry_refused_show(kRefusedExit, kExitRefusedShowMs);
   }
   if (drive_wait_warn_us != 0 && now >= drive_wait_warn_us) {
@@ -1574,9 +1609,8 @@ static void drive_wait_poll() {
   drive_ask(rammp::DriveRequest::DISABLE);
 }
 
-// Asking the MIB to start driving. Was a hold-up gesture on the pager's drive
-// page; spec V2 has ACTIVATE DRIVE on the Locked screen instead, and the
-// joystick hold on that screen does the same thing. Both land here.
+// Asking the MIB to start driving: the stick held up on the Locked screen
+// (unlock_gesture, through activate_drive).
 //
 // Ask, then wait: drive_screen_follow_state opens the screen when the MIB says
 // it is driving, and the deadline is only how long to wait before giving up.
@@ -1591,7 +1625,7 @@ static void drive_request_enter() {
   drive_wait_until_us = now + kDriveWaitUs;
 }
 
-// ACTIVATE DRIVE, however it was pressed. Refused on the spot when the MIB
+// The unlock hold completed. Refused on the spot when the MIB
 // could not act on it; otherwise asked, with the ring going round until the MIB
 // answers (drive_screen_follow_state opens the lock on ENABLED, and stops the
 // ring if the answer window passes without one).
@@ -1602,7 +1636,7 @@ static void activate_drive() {
   if (!mcb_ready()) {
     lock_visual_rest();
     entry_refused_show(kRefusedDrive, kDriveRefusedShowMs);
-    haptic_play(espp::Drv2605::Waveform::DOUBLE_CLICK, 1);
+    refusal_feedback();
     return;
   }
   lock_visual_wait();
@@ -1610,7 +1644,7 @@ static void activate_drive() {
 }
 
 // The MIB said ENABLED: spec 01b, a hard cut. The ring closes, the shackle rises
-// kShackleRisePx with its bottom edge where it was, the button fills white, and
+// kShackleRisePx with its bottom edge where it was, and
 // set_locked(false) flips the band to ACTIVE and starts the one-second hold
 // before Drive dissolves in.
 static void lock_open() {
@@ -1620,9 +1654,19 @@ static void lock_open() {
   lv_arc_set_value(ui_LockRing, kHoldMax);
   lv_obj_set_y(ui_Shackle, shackle_rest_y - kShackleRisePx);
   lv_obj_set_height(ui_Shackle, shackle_rest_h + kShackleRisePx);
-  lv_obj_add_state(ui_ActivateDrive, LV_STATE_CHECKED);
   haptic_play(espp::Drv2605::Waveform::STRONG_CLICK, 1);
   set_locked(false);
+}
+
+// Asks the MIB to stop driving: the exit hold below, or the burger key on the
+// Drive screen (then_menu), which may open the menu only once driving has
+// stopped. drive_screen_follow_state leaves the screen when the MIB does stop;
+// drive_wait_poll says so if it does not.
+static void drive_exit_ask(bool then_menu) {
+  drive_ask(rammp::DriveRequest::DISABLE);
+  drive_exit_requested = true;
+  drive_exit_then_menu = then_menu;
+  drive_exit_until_us = esp_timer_get_time() + kDriveAnswerUs;
 }
 
 // Exits on the stick BUTTON, not on pulling the stick back: pulling back is how
@@ -1639,12 +1683,7 @@ static HoldGesture drive_exit_gesture{
     // Ask only. drive_screen_follow_state closes the screen once the MIB actually
     // stops driving, so a MIB that does not stop cannot leave someone looking at the
     // main screen while the chair is still moving.
-    .completed =
-        [] {
-          drive_ask(rammp::DriveRequest::DISABLE);
-          drive_exit_requested = true;
-          drive_exit_until_us = esp_timer_get_time() + kDriveAnswerUs;
-        },
+    .completed = [] { drive_exit_ask(false); },
     // The button doubles as select, so a tap would visibly tick the bar and
     // snap back without this.
     .grace_ms = kBarGraceMs,
@@ -2466,10 +2505,11 @@ static void press_flash(lv_obj_t *button) {
 static void setting_step(const SettingRow *row, int direction) {
   lv_obj_t *button = direction < 0 ? row->minus : row->plus;
   if (lv_obj_has_state(button, LV_STATE_DISABLED)) {
+    refusal_feedback(); // at its limit
     return;
   }
   if (row->spec.locked_only && lv_subject_get_int(&locked_subject) == 0) {
-    haptic_play(espp::Drv2605::Waveform::DOUBLE_CLICK, 1); // not while driving
+    refusal_feedback(); // not while driving
     return;
   }
   press_flash(button);
@@ -2569,11 +2609,11 @@ static void setting_focus_cb(lv_event_t *e) {
 static void setting_warning_observer(lv_observer_t *observer, lv_subject_t *) {
   lv_obj_t *panel = lv_observer_get_target_obj(observer);
   if (lv_subject_get_int(&setting_page_subject) != kActuatorsPage || seat_ready()) {
-    lv_obj_add_flag(panel, LV_OBJ_FLAG_HIDDEN);
+    banner_show(panel, false);
     return;
   }
   fill_drive_blocked_panel(panel, rammp::kHmiLinkLostTitle, rammp::kHmiMcbFaultTitle);
-  lv_obj_remove_flag(panel, LV_OBJ_FLAG_HIDDEN);
+  banner_show(panel, true);
 }
 
 // Deleting a row takes its observers and events with it (all bound to the
@@ -2753,7 +2793,7 @@ static void action_ready_observer(lv_observer_t *observer, lv_subject_t *) {
 static void action_click_cb(lv_event_t *e) {
   lv_obj_t *button = lv_event_get_target_obj(e);
   if (lv_obj_has_state(button, kActionUnavailable)) {
-    haptic_play(espp::Drv2605::Waveform::DOUBLE_CLICK, 1); // felt, like a refusal
+    refusal_feedback(); // felt, like a refusal
     return;
   }
   const auto index = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
@@ -3088,8 +3128,8 @@ static void diagnostics_open() {
 //
 // What the cursor looks like: rows (menu, settings, diagnostics) go negative,
 // the spec's own "selected"; buttons get a ring in the theme's focus colour,
-// because on a button the negative already means pressed -- ACTIVATE DRIVE
-// filled white is the unlocked frame, and the key filled white is "menu open".
+// because on a button the negative already means pressed -- a drive mode
+// filled is the one selected, and the key filled white is "menu open".
 //
 // Every screen carries its own instance of all four pieces of chrome, so
 // nav_attach_chrome is called once per screen -- from app_main for the screens
@@ -3112,10 +3152,11 @@ static constexpr uint32_t kRowPressMs = 300;
 // p21 "HOME BUTTON": a dissolve from any screen back to Drive.
 static constexpr uint32_t kHomeFadeMs = 120;
 
-// The seven destinations, in the order MenuOverlay draws them, and the child id
+// The eight destinations, in the order MenuOverlay draws them, and the child id
 // of each row. Adding a row in SquareLine means a line in each of these two and
 // a case in nav_go -- the row order is the menu order, nothing else encodes it.
 enum NavDest {
+  NAV_DRIVE,    // "Drive": the Drive screen, or Locked (where it is asked for)
   NAV_SEAT,     // "Seat Functions"
   NAV_SKUNK,    // "Skunk Works"
   NAV_LOG,      // "Log"
@@ -3129,7 +3170,7 @@ enum NavDest {
 static const uint32_t kNavRowIds[NAV_DEST_COUNT] = {
     UI_COMP_MENUOVERLAY_ROW1, UI_COMP_MENUOVERLAY_ROW2, UI_COMP_MENUOVERLAY_ROW3,
     UI_COMP_MENUOVERLAY_ROW4, UI_COMP_MENUOVERLAY_ROW5, UI_COMP_MENUOVERLAY_ROW6,
-    UI_COMP_MENUOVERLAY_ROW7,
+    UI_COMP_MENUOVERLAY_ROW7, UI_COMP_MENUOVERLAY_ROW8,
 };
 
 // Each screen's key and overlay, filled in as nav_attach_chrome wires them, so
@@ -3377,7 +3418,7 @@ static void nav_open_menu(lv_obj_t *overlay) {
 }
 
 // Where DRIVE in the band goes: the Drive screen while the chair is driving,
-// the Locked screen -- with ACTIVATE DRIVE on it -- while it is not. Either way
+// the Locked screen -- where holding the stick up asks for it -- while it is not. Either way
 // it is where the chair's state is, which is what "home" has to mean.
 static void nav_home() {
   nav_close_menu();
@@ -3407,6 +3448,17 @@ static void nav_go(NavDest dest) {
     nav_drop_row = dest;
   }
   switch (dest) {
+  case NAV_DRIVE:
+    // Where driving is: Drive while the chair drives, the Locked screen -- with
+    // the hold that asks for it -- while it does not.
+    if (lv_subject_get_int(&locked_subject) != 0) {
+      _ui_screen_change(&ui_LockedScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
+                        &ui_LockedScreen_screen_init);
+    } else {
+      _ui_screen_change(&ui_DriveScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
+                        &ui_DriveScreen_screen_init);
+    }
+    break;
   case NAV_SEAT:
     _ui_screen_change(&ui_SeatScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0, &ui_SeatScreen_screen_init);
     break;
@@ -3439,8 +3491,14 @@ static void nav_go(NavDest dest) {
   // stick would be left on the menu's group -- emptied above -- with nothing
   // to focus until another screen loaded. Arrive by hand instead.
   lv_obj_t *const dest_screens[NAV_DEST_COUNT] = {
-      ui_SeatScreen,      ui_SkunkWorksScreen, ui_LogScreen,      ui_DiagnosticsScreen,
-      ui_BenchGateScreen, ui_SettingsScreen,   ui_JoystickScreen,
+      lv_subject_get_int(&locked_subject) != 0 ? ui_LockedScreen : ui_DriveScreen,
+      ui_SeatScreen,
+      ui_SkunkWorksScreen,
+      ui_LogScreen,
+      ui_DiagnosticsScreen,
+      ui_BenchGateScreen,
+      ui_SettingsScreen,
+      ui_JoystickScreen,
   };
   if (dest < NAV_DEST_COUNT && dest_screens[dest] == before && lv_screen_active() == before) {
     nav_arrive(before);
@@ -3466,8 +3524,15 @@ static void nav_row_cb(lv_event_t *e) {
   if (dest == NAV_SEAT && !mcb_ready()) {
     // Refused where it was picked: the menu stays up, the row stays greyed,
     // and the reason is waiting on the banner underneath once it closes.
-    haptic_play(espp::Drv2605::Waveform::DOUBLE_CLICK, 1);
+    refusal_feedback();
     entry_refused_show(kRefusedSeat, kDriveRefusedShowMs);
+    return;
+  }
+  // Drive the same way, while there is a drive to ask for: driving already,
+  // the row only goes back to the Drive screen.
+  if (dest == NAV_DRIVE && lv_subject_get_int(&locked_subject) != 0 && !mcb_ready()) {
+    refusal_feedback();
+    entry_refused_show(kRefusedDriveMenu, kDriveRefusedShowMs);
     return;
   }
   lv_obj_add_state(lv_event_get_target_obj(e), LV_STATE_CHECKED);
@@ -3480,9 +3545,19 @@ static void nav_key_cb(lv_event_t *e) {
   auto *overlay = static_cast<lv_obj_t *>(lv_event_get_user_data(e));
   if (nav_menu_open == overlay) {
     nav_close_menu();
-  } else {
-    nav_open_menu(overlay);
+    return;
   }
+  // While driving, the menu is the way off the Drive screen, and whether
+  // driving stops is the MIB's call. So the key asks it to stop, and the menu
+  // opens over the Locked screen once it has (drive_screen_follow_state). If
+  // the MIB keeps driving, the Drive screen stays and its banner says so.
+  if (lv_screen_active() == ui_DriveScreen && lv_subject_get_int(&locked_subject) == 0) {
+    if (drive_exit_until_us == 0) {
+      drive_exit_ask(true);
+    }
+    return;
+  }
+  nav_open_menu(overlay);
 }
 
 // The stick on a menu row. The keypad indev hands arrows to the focused object
@@ -3522,7 +3597,7 @@ static void nav_key_key_cb(lv_event_t *e) {
   }
 }
 
-// A plain button in a screen's group (ACTIVATE DRIVE, Calibrate): down to the
+// A plain button in a screen's group (Calibrate): down to the
 // next member -- in practice, the key.
 static void nav_button_key_cb(lv_event_t *e) {
   const uint32_t key = lv_event_get_key(e);
@@ -3602,13 +3677,15 @@ static void nav_attach_chrome(lv_obj_t *key, lv_obj_t *overlay, lv_obj_t *band) 
                         reinterpret_cast<void *>(static_cast<intptr_t>(i)));
     lv_obj_add_event_cb(row, nav_row_key_cb, LV_EVENT_KEY, nullptr);
   }
-  // Seat Functions greys while the MCB could not act on it, the same test and
-  // the same look as the MCB tiles on Skunk Works -- still walkable, so the
-  // cursor never sticks on it, and refused by nav_row_cb if picked.
-  lv_obj_t *seat_row = ui_comp_get_child(overlay, kNavRowIds[NAV_SEAT]);
-  lv_obj_set_style_opa(seat_row, LV_OPA_40, kActionUnavailableStyle);
-  for (lv_subject_t *subject : {&rtps_link_subject, &mib_state_subject}) {
-    lv_subject_add_observer_obj(subject, action_ready_observer, seat_row, nullptr);
+  // Drive and Seat Functions grey while the MCB could not act on them, the same
+  // test and the same look as the MCB tiles on Skunk Works -- still walkable,
+  // so the cursor never sticks on one, and refused by nav_row_cb if picked.
+  for (NavDest gated : {NAV_DRIVE, NAV_SEAT}) {
+    lv_obj_t *row = ui_comp_get_child(overlay, kNavRowIds[gated]);
+    lv_obj_set_style_opa(row, LV_OPA_40, kActionUnavailableStyle);
+    for (lv_subject_t *subject : {&rtps_link_subject, &mib_state_subject}) {
+      lv_subject_add_observer_obj(subject, action_ready_observer, row, nullptr);
+    }
   }
 
   if (band != nullptr) {
@@ -3646,9 +3723,7 @@ static void nav_enter_screen(lv_obj_t *screen) {
     // The screens with at most a button or two of their own share one group,
     // refilled for whichever is up.
     lv_group_remove_all_objs(joystick_group);
-    if (screen == ui_LockedScreen) {
-      lv_group_add_obj(joystick_group, ui_ActivateDrive);
-    } else if (screen == ui_JoystickScreen) {
+    if (screen == ui_JoystickScreen) {
       lv_group_add_obj(joystick_group, ui_CalibrateButton);
     }
     nav_use_group(joystick_group, screen);
@@ -3710,6 +3785,14 @@ static void nav_arrive(lv_obj_t *screen) {
   nav_menu_open = nullptr;
   nav_enter_screen(screen);
   nav_drop_menu(screen);
+  // The burger key on Drive asked the MIB to stop, and it has: the menu the
+  // key was pressed for, over the Locked screen that came up.
+  if (nav_menu_on_arrival) {
+    nav_menu_on_arrival = false;
+    if (NavChrome *c = nav_chrome_of(screen)) {
+      nav_open_menu(c->overlay);
+    }
+  }
   nav_update_stick_gate();
   // The PIN is asked again on every visit rather than latching once per boot.
   if (screen == ui_BenchGateScreen) {
@@ -4097,12 +4180,30 @@ static void set_display_flipped(bool on) {
 // The touch input's own read, kept so the wrapper can call it.
 static lv_indev_read_cb_t touch_read_upright = nullptr;
 
+// A finger landing on a greyed control (a stepper at its limit). LVGL finds
+// the widget under the point but sends a DISABLED one no events at all, so
+// this is the only place that hears the press -- and answers it with the
+// refusal, like every other greyed control.
+static void touch_refuse_disabled(const lv_indev_data_t *data) {
+  static bool was_down = false;
+  const bool down = data->state == LV_INDEV_STATE_PRESSED;
+  if (down && !was_down) {
+    lv_point_t point = data->point;
+    lv_obj_t *hit = lv_indev_search_obj(lv_screen_active(), &point);
+    if (hit != nullptr && lv_obj_has_state(hit, LV_STATE_DISABLED)) {
+      refusal_feedback();
+    }
+  }
+  was_down = down;
+}
+
 static void touch_read_flip_aware(lv_indev_t *indev, lv_indev_data_t *data) {
   touch_read_upright(indev, data);
   if (display_flipped.load()) {
     data->point.x = panel_w - 1 - data->point.x;
     data->point.y = panel_h - 1 - data->point.y;
   }
+  touch_refuse_disabled(data);
 }
 
 // Once the touch input exists: route its reads through the flip.
@@ -4925,7 +5026,7 @@ extern "C" void app_main(void) {
   };
   const ScreenChrome kChrome[] = {
       // DRIVE goes "home", which while locked IS this screen; on it, the cell
-      // only closes the menu. ACTIVATE DRIVE and the unlock hold are the way in.
+      // only closes the menu. The unlock hold, or the menu's Drive row, is the way in.
       {ui_TopBar1, ui_DriveBand1, ui_MenuKey1, ui_MenuOverlay1, true},
       // DriveScreen too: DRIVE is how you back out of the menu without
       // picking a row, and it has to do that on the screen it goes back to.
@@ -5098,12 +5199,6 @@ extern "C" void app_main(void) {
   lv_indev_set_long_press_time(joystick_keypad.get_input_device(), 500);
   lv_indev_set_long_press_repeat_time(joystick_keypad.get_input_device(), 250);
 
-  // ACTIVATE DRIVE: a tap, or the stick button with the cursor on it. The hold
-  // on the stick is the third way in, and all three end at activate_drive, so
-  // none of them is a second path through the lock.
-  lv_obj_add_event_cb(
-      ui_ActivateDrive, [](lv_event_t *) { activate_drive(); }, LV_EVENT_CLICKED, nullptr);
-  nav_focusable_button(ui_ActivateDrive);
   // Where the shackle sits at rest, so the 01b rise can be undone exactly.
   lv_obj_update_layout(ui_Shackle);
   shackle_rest_y = lv_obj_get_y(ui_Shackle);
@@ -5992,4 +6087,35 @@ static void play_click(espp::M5StackTab5 &tab5) {
   if (audio_bytes.size() > 0) {
     tab5.play_audio(audio_bytes);
   }
+}
+
+// "Can't do that": the click twice, kRefusalGapMs apart. One click is a touch
+// landing, so two in quick succession reads as a no. Played when a greyed
+// control is pressed and when a warning or error banner comes up. A greyed
+// press that also raises a banner is one refusal, not two, so a second within
+// kRefusalQuietMs is dropped.
+//
+// The audio queue holds about one click's worth, so the second is queued by a
+// one-shot timer rather than appended now. LVGL task, or under lvgl_mutex.
+static constexpr uint32_t kRefusalGapMs = 110;
+static constexpr uint32_t kRefusalQuietMs = 400;
+
+static void play_refusal() {
+  static bool played = false;
+  static uint32_t last_ms = 0;
+  if (played && lv_tick_elaps(last_ms) < kRefusalQuietMs) {
+    return;
+  }
+  played = true;
+  last_ms = lv_tick_get();
+  play_click(espp::M5StackTab5::get());
+  lv_timer_t *second = lv_timer_create([](lv_timer_t *) { play_click(espp::M5StackTab5::get()); },
+                                       kRefusalGapMs, nullptr);
+  lv_timer_set_repeat_count(second, 1);
+}
+
+// A refused press: the DRV2605's double click, which says the same by touch.
+static void refusal_feedback() {
+  haptic_play(espp::Drv2605::Waveform::DOUBLE_CLICK, 1);
+  play_refusal();
 }
