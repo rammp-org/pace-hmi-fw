@@ -888,8 +888,12 @@ static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c);
 // Two places in the HMI ask the user to hold an input for kHoldMs before
 // something happens:
 //
-//   LockedScreen   joystick up     unlocks driving mode -> DriveScreen
+//   LockedScreen   stick button    enters driving mode  -> DriveScreen
 //   DriveScreen    stick button    leaves driving mode  -> LockedScreen
+//
+// Both on the button, never the stick (issue #11): an enable held on the stick
+// left the user holding it forward the moment the chair would take it, and
+// the chair drove off at full speed.
 //
 // Everything else that used to be a hold -- enter seat, enter actions, and the
 // "pull the stick back to leave" exits on seat, bench, settings, actions,
@@ -934,9 +938,8 @@ static constexpr uint32_t kHoldPollMs = 33;
 // This is the "let go first" rule, and it is per *input* rather than per
 // gesture on purpose: completing one gesture usually navigates straight to a
 // screen where another gesture watches the same input, and the user's thumb is
-// still where it was. Without this, unlocking would roll on into the Drive
-// screen with no second hold, because joystick-up triggers both.
-static bool joy_up_armed = true;
+// still where it was. Without this, the button hold that enters driving would
+// roll on into the Drive screen's exit hold, which watches the same button.
 static bool joy_button_armed = true;
 
 // progress and holding carry default member initializers rather than being
@@ -1015,10 +1018,6 @@ static void hold_poll(HoldGesture *g) {
   lv_anim_start(&a);
 }
 
-// The inputs. joy_key is the same Schmitt-triggered latch the flex pager uses,
-// so the engage/release thresholds stay in one place, and it resolves a diagonal
-// to a single direction.
-static bool joy_up_held() { return joy_key.load() == LV_KEY_UP; }
 // The stick's own button. Reads the level the button callback mirrors out, not
 // the edge-latched select_key: a hold gesture needs to know the button is still
 // down, and select_key is consumed by the first indev read after the press.
@@ -1029,10 +1028,10 @@ static bool joy_button_held() { return joy_button_pressed.load(); }
 /////////////////////////////////////////////////////////////////////////////
 
 // Locked means "not driving", and the Locked screen is where that changes.
-// Holding the stick up -- the legend under the padlock says so; the spec's
+// Holding the stick button -- the legend under the padlock says so; the spec's
 // ACTIVATE DRIVE button is gone -- asks the MIB to start driving, and nothing
 // unlocks until the MIB says it has (activate_drive, lock_open). The ring round
-// the padlock shows where that stands: it fills while the stick is held up, a
+// the padlock shows where that stands: it fills while the button is held, a
 // quarter of it goes round while the MIB is asked, and it closes when the MIB
 // answers. Then the spec's 01b frame -- the shackle rises, the band flips to
 // ACTIVE -- held one second, and Drive dissolves in (Motion timing,
@@ -1093,7 +1092,7 @@ static void lock_visual_wait() {
   lv_anim_start(&a);
 }
 
-// While nothing else is showing, the ring follows the stick-up hold.
+// While nothing else is showing, the ring follows the button hold.
 static void lock_ring_hold_observer(lv_observer_t *, lv_subject_t *subject) {
   if (!lock_waiting && lv_subject_get_int(&locked_subject) != 0) {
     lv_arc_set_value(ui_LockRing, lv_subject_get_int(subject));
@@ -1131,19 +1130,23 @@ static bool mcb_ready();
 static void activate_drive();
 static void lock_open();
 
-// Holding the stick up on the Locked screen: how driving is asked for. Only
-// while there is something to ask -- a MIB that is not ready gets
-// the refusal on the first push instead (entry_refusal_poll), rather than a
-// ring that fills for a second and then says no.
+// Holding the stick button on the Locked screen: how driving is asked for, the
+// same hold that leaves it on Drive (and so the same "let go first" flag). Only
+// while there is something to ask -- a MIB that is not ready gets the refusal
+// once the press is a hold instead (entry_refusal_poll), rather than a ring
+// that fills for a second and then says no.
 static HoldGesture unlock_gesture{
-    .armed = &joy_up_armed,
-    .is_held = joy_up_held,
+    .armed = &joy_button_armed,
+    .is_held = joy_button_held,
     .applies =
         [] {
           return lv_subject_get_int(&locked_subject) != 0 && !lock_waiting &&
                  lv_screen_active() == ui_LockedScreen && nav_menu_open == nullptr && mcb_ready();
         },
     .completed = [] { activate_drive(); },
+    // The button doubles as select (a tap opens the menu from the key), so a
+    // tap must not tick the ring.
+    .grace_ms = kBarGraceMs,
 };
 
 /////////////////////////////////////////////////////////////////////////////
@@ -1435,18 +1438,23 @@ static void entry_refused_show(int32_t which, uint32_t show_ms);
 // Runs from hold_poll_cb, on the same input and cadence as the gesture it
 // shadows.
 static void entry_refusal_poll() {
-  // Its own edge detector rather than joy_up_armed: armed stays true for as
-  // long as the stick is released, so it cannot tell a fresh push from a held
-  // one - and a push still held from the unlock, carried across the auto-
-  // advance onto the Drive page, is not an attempt to drive.
-  static bool was_up = false;
-  const bool up = joy_up_held();
-  const bool pushed = up && !was_up;
-  was_up = up;
+  // Holding the stick button on the Locked screen is the unlock gesture, so a
+  // hold there with the MCB not ready is a refused attempt to drive. A hold, not
+  // a press: under kBarGraceMs the button is a tap, which only selects. Once
+  // per press, timed here rather than read off joy_button_armed, which the
+  // gestures own and which cannot tell a fresh press from a held one.
+  static int64_t pressed_at_us = 0;
+  static bool refused_this_press = false;
+  const int64_t now = esp_timer_get_time();
+  if (!joy_button_held()) {
+    pressed_at_us = 0;
+    refused_this_press = false;
+  } else if (pressed_at_us == 0) {
+    pressed_at_us = now;
+  }
+  const bool pushed = pressed_at_us != 0 && !refused_this_press &&
+                      now - pressed_at_us >= static_cast<int64_t>(kBarGraceMs) * 1000;
 
-  // Pushing up on the Locked screen is the unlock gesture, so a push there with
-  // the MCB not ready is a refused attempt to drive. Everywhere else a push is
-  // the joystick walking the UI, and means nothing to the chair.
   const bool attempt = lv_screen_active() == ui_LockedScreen && nav_menu_open == nullptr &&
                        lv_subject_get_int(&locked_subject) != 0;
   const int32_t page = attempt ? kRefusedDrive : kRefusedNone;
@@ -1454,6 +1462,7 @@ static void entry_refusal_poll() {
   if (pushed && page != kRefusedNone && !mcb_ready()) {
     // Through the helper, so this always gets its own dwell back after a refusal
     // that asked for a shorter one.
+    refused_this_press = true;
     entry_refused_show(page, kDriveRefusedShowMs);
     // Distinct from the STRONG_CLICK a completed hold gives, so a refusal can
     // be felt as well as read.
@@ -1609,7 +1618,7 @@ static void drive_wait_poll() {
   drive_ask(rammp::DriveRequest::DISABLE);
 }
 
-// Asking the MIB to start driving: the stick held up on the Locked screen
+// Asking the MIB to start driving: the stick button held on the Locked screen
 // (unlock_gesture, through activate_drive).
 //
 // Ask, then wait: drive_screen_follow_state opens the screen when the MIB says
@@ -3418,7 +3427,7 @@ static void nav_open_menu(lv_obj_t *overlay) {
 }
 
 // Where DRIVE in the band goes: the Drive screen while the chair is driving,
-// the Locked screen -- where holding the stick up asks for it -- while it is not. Either way
+// the Locked screen -- where holding the stick button asks for it -- while it is not. Either way
 // it is where the chair's state is, which is what "home" has to mean.
 static void nav_home() {
   nav_close_menu();
@@ -5214,7 +5223,7 @@ extern "C" void app_main(void) {
   lv_subject_init_int(&unlock_gesture.progress, 0);
   lv_subject_init_int(&drive_exit_gesture.progress, 0);
   lv_subject_init_int(&calibrate_gesture.progress, 0);
-  // The ring round the padlock fills with the stick-up hold.
+  // The ring round the padlock fills with the button hold.
   lv_subject_add_observer_obj(&unlock_gesture.progress, lock_ring_hold_observer, ui_LockRing,
                               nullptr);
   // Calibrate's meter shows the hold filling, and is out of sight while it is

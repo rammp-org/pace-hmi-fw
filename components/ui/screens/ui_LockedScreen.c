@@ -185,7 +185,7 @@ void ui_LockedScreen_screen_init(void)
     lv_obj_set_height(ui_DriveHint, 120);
     lv_obj_set_x(ui_DriveHint, 110);
     lv_obj_set_y(ui_DriveHint, 608);
-    lv_label_set_text(ui_DriveHint, "Hold the joystick forward to drive");
+    lv_label_set_text(ui_DriveHint, "Hold the joystick button to drive");
     ui_object_set_themeable_style_property(ui_DriveHint, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_text);
     ui_object_set_themeable_style_property(ui_DriveHint, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
