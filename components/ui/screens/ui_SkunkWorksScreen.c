@@ -118,10 +118,11 @@ void ui_SkunkWorksScreen_screen_init(void)
 
     ui_GenericActionsFlexPanel = lv_obj_create(ui_SlotRows);
     lv_obj_set_width(ui_GenericActionsFlexPanel, 720);
-    lv_obj_set_height(ui_GenericActionsFlexPanel, 900);
+    lv_obj_set_height(ui_GenericActionsFlexPanel, 788);
     lv_obj_set_align(ui_GenericActionsFlexPanel, LV_ALIGN_TOP_MID);
     lv_obj_set_flex_flow(ui_GenericActionsFlexPanel, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(ui_GenericActionsFlexPanel, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_scroll_dir(ui_GenericActionsFlexPanel, LV_DIR_VER);
     ui_object_set_themeable_style_property(ui_GenericActionsFlexPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
                                            _ui_theme_color_background);
     ui_object_set_themeable_style_property(ui_GenericActionsFlexPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
@@ -130,6 +131,10 @@ void ui_SkunkWorksScreen_screen_init(void)
                                            LV_STYLE_BORDER_COLOR, _ui_theme_color_background);
     ui_object_set_themeable_style_property(ui_GenericActionsFlexPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
                                            _ui_theme_alpha_background);
+    lv_obj_set_style_pad_left(ui_GenericActionsFlexPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_GenericActionsFlexPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_GenericActionsFlexPanel, 12, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_GenericActionsFlexPanel, 12, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_GenericActionsFlexPanel, 20, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_GenericActionsFlexPanel, 20, LV_PART_MAIN | LV_STATE_DEFAULT);
 

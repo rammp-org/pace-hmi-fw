@@ -154,13 +154,6 @@ void key_cb(lv_event_t *e) {
   }
 }
 
-void oldest_cb(lv_event_t *) { lv_obj_scroll_to(view, 0, 0, LV_ANIM_OFF); }
-
-void newest_cb(lv_event_t *) {
-  lv_obj_scroll_to_x(view, 0, LV_ANIM_OFF);
-  scroll_to_newest();
-}
-
 } // namespace
 
 void log_view_init() {
@@ -212,13 +205,6 @@ void log_view_init() {
   lv_subject_init_int(&log_version_subject, 0);
   lv_subject_add_observer_obj(&log_version_subject, log_text_observer, view, nullptr);
   lv_timer_create(poll_cb, kPollMs, nullptr);
-
-  if (ui_GoToOldestButton != nullptr) {
-    lv_obj_add_event_cb(ui_GoToOldestButton, oldest_cb, LV_EVENT_CLICKED, nullptr);
-  }
-  if (ui_GoToNewestButton != nullptr) {
-    lv_obj_add_event_cb(ui_GoToNewestButton, newest_cb, LV_EVENT_CLICKED, nullptr);
-  }
 
   // The joystick gets a zero-size target to hold focus and take its keys, so
   // nothing on the screen shows a focus ring.

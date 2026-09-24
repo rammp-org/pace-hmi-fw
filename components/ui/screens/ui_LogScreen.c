@@ -12,10 +12,6 @@ lv_obj_t * ui_LogContent = NULL;
 lv_obj_t * ui_LogScreenPanel = NULL;
 lv_obj_t * ui_LogScreenPanelInner = NULL;
 lv_obj_t * ui_TextArea1 = NULL;
-lv_obj_t * ui_GoToOldestButton = NULL;
-lv_obj_t * ui_GoToOldestButtonLabel = NULL;
-lv_obj_t * ui_GoToNewestButton = NULL;
-lv_obj_t * ui_GoToNewestButtonLabel = NULL;
 lv_obj_t * ui_TopBar6 = NULL;
 lv_obj_t * ui_ErrorBanner5 = NULL;
 lv_obj_t * ui_DriveBand5 = NULL;
@@ -116,10 +112,14 @@ void ui_LogScreen_screen_init(void)
     ui_object_set_themeable_style_property(ui_LogScreenPanel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
                                            _ui_theme_alpha_background);
     lv_obj_set_style_border_side(ui_LogScreenPanel, LV_BORDER_SIDE_NONE, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(ui_LogScreenPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_LogScreenPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_LogScreenPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_LogScreenPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_LogScreenPanelInner = lv_obj_create(ui_LogScreenPanel);
-    lv_obj_set_height(ui_LogScreenPanelInner, 800);
-    lv_obj_set_width(ui_LogScreenPanelInner, lv_pct(100));
+    lv_obj_set_width(ui_LogScreenPanelInner, 720);
+    lv_obj_set_height(ui_LogScreenPanelInner, 788);
     lv_obj_set_align(ui_LogScreenPanelInner, LV_ALIGN_TOP_MID);
     lv_obj_set_flex_flow(ui_LogScreenPanelInner, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(ui_LogScreenPanelInner, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
@@ -132,12 +132,16 @@ void ui_LogScreen_screen_init(void)
                                            _ui_theme_color_background);
     ui_object_set_themeable_style_property(ui_LogScreenPanelInner, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
                                            _ui_theme_alpha_background);
+    lv_obj_set_style_pad_left(ui_LogScreenPanelInner, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_LogScreenPanelInner, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_LogScreenPanelInner, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_LogScreenPanelInner, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_LogScreenPanelInner, 20, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_LogScreenPanelInner, 20, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_TextArea1 = lv_textarea_create(ui_LogScreenPanelInner);
-    lv_obj_set_height(ui_TextArea1, 685);
-    lv_obj_set_width(ui_TextArea1, lv_pct(100));
+    lv_obj_set_width(ui_TextArea1, 660);
+    lv_obj_set_height(ui_TextArea1, 764);
     lv_obj_set_align(ui_TextArea1, LV_ALIGN_TOP_MID);
     lv_textarea_set_text(ui_TextArea1,
                          "1AAAAAAAAAAAAA\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n40\n41\n42");
@@ -156,68 +160,6 @@ void ui_LogScreen_screen_init(void)
                                            _ui_theme_color_text);
     ui_object_set_themeable_style_property(ui_TextArea1, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
                                            _ui_theme_alpha_text);
-
-    ui_GoToOldestButton = lv_button_create(ui_LogScreenPanel);
-    lv_obj_set_width(ui_GoToOldestButton, 200);
-    lv_obj_set_height(ui_GoToOldestButton, 120);
-    lv_obj_set_x(ui_GoToOldestButton, -200);
-    lv_obj_set_y(ui_GoToOldestButton, 0);
-    lv_obj_set_align(ui_GoToOldestButton, LV_ALIGN_BOTTOM_MID);
-    lv_obj_add_flag(ui_GoToOldestButton, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
-    lv_obj_remove_flag(ui_GoToOldestButton, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_radius(ui_GoToOldestButton, 5, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_GoToOldestButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
-                                           _ui_theme_color_background);
-    ui_object_set_themeable_style_property(ui_GoToOldestButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
-                                           _ui_theme_alpha_background);
-    ui_object_set_themeable_style_property(ui_GoToOldestButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_GoToOldestButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
-                                           _ui_theme_alpha_text);
-    lv_obj_set_style_border_width(ui_GoToOldestButton, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    ui_GoToOldestButtonLabel = lv_label_create(ui_GoToOldestButton);
-    lv_obj_set_width(ui_GoToOldestButtonLabel, 200);
-    lv_obj_set_height(ui_GoToOldestButtonLabel, LV_SIZE_CONTENT);    /// 100
-    lv_obj_set_align(ui_GoToOldestButtonLabel, LV_ALIGN_CENTER);
-    lv_label_set_text(ui_GoToOldestButtonLabel, "Oldest");
-    ui_object_set_themeable_style_property(ui_GoToOldestButtonLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_GoToOldestButtonLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
-                                           _ui_theme_alpha_text);
-    lv_obj_set_style_text_align(ui_GoToOldestButtonLabel, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_GoToOldestButtonLabel, &lv_font_montserrat_32, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    ui_GoToNewestButton = lv_button_create(ui_LogScreenPanel);
-    lv_obj_set_width(ui_GoToNewestButton, 200);
-    lv_obj_set_height(ui_GoToNewestButton, 120);
-    lv_obj_set_x(ui_GoToNewestButton, 200);
-    lv_obj_set_y(ui_GoToNewestButton, 0);
-    lv_obj_set_align(ui_GoToNewestButton, LV_ALIGN_BOTTOM_MID);
-    lv_obj_add_flag(ui_GoToNewestButton, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
-    lv_obj_remove_flag(ui_GoToNewestButton, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_radius(ui_GoToNewestButton, 5, LV_PART_MAIN | LV_STATE_DEFAULT);
-    ui_object_set_themeable_style_property(ui_GoToNewestButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_COLOR,
-                                           _ui_theme_color_background);
-    ui_object_set_themeable_style_property(ui_GoToNewestButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BG_OPA,
-                                           _ui_theme_alpha_background);
-    ui_object_set_themeable_style_property(ui_GoToNewestButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_GoToNewestButton, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_BORDER_OPA,
-                                           _ui_theme_alpha_text);
-    lv_obj_set_style_border_width(ui_GoToNewestButton, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    ui_GoToNewestButtonLabel = lv_label_create(ui_GoToNewestButton);
-    lv_obj_set_width(ui_GoToNewestButtonLabel, 200);
-    lv_obj_set_height(ui_GoToNewestButtonLabel, LV_SIZE_CONTENT);    /// 50
-    lv_obj_set_align(ui_GoToNewestButtonLabel, LV_ALIGN_CENTER);
-    lv_label_set_text(ui_GoToNewestButtonLabel, "Newest");
-    ui_object_set_themeable_style_property(ui_GoToNewestButtonLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(ui_GoToNewestButtonLabel, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
-                                           _ui_theme_alpha_text);
-    lv_obj_set_style_text_align(ui_GoToNewestButtonLabel, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_GoToNewestButtonLabel, &lv_font_montserrat_32, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_TopBar6 = ui_TopBar_create(ui_LogScreen);
     lv_obj_set_width(ui_TopBar6, 720);
@@ -267,10 +209,6 @@ void ui_LogScreen_screen_destroy(void)
     ui_LogScreenPanel = NULL;
     ui_LogScreenPanelInner = NULL;
     ui_TextArea1 = NULL;
-    ui_GoToOldestButton = NULL;
-    ui_GoToOldestButtonLabel = NULL;
-    ui_GoToNewestButton = NULL;
-    ui_GoToNewestButtonLabel = NULL;
     ui_TopBar6 = NULL;
     ui_ErrorBanner5 = NULL;
     ui_DriveBand5 = NULL;

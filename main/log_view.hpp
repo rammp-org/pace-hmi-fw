@@ -4,7 +4,8 @@
  * @file log_view.hpp
  * @brief The LogScreen: TextArea1 shows what log_capture keeps of the serial
  *        output, one line per log line, newest at the bottom, errors red and
- *        warnings amber. The Oldest/Newest buttons jump to either end.
+ *        warnings amber. It opens at the newest line; the joystick pages
+ *        through it, and a finger drags it.
  *
  * Everything here runs on the LVGL task. Lines reach the widget the way all
  * firmware state does (CLAUDE.md): a poll timer bumps a subject and an observer

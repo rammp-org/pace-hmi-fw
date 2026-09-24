@@ -118,7 +118,7 @@ void ui_SettingsScreen_screen_init(void)
 
     ui_SpecificSettingsInnerPanel = lv_obj_create(ui_SettingsRows);
     lv_obj_set_width(ui_SpecificSettingsInnerPanel, 720);
-    lv_obj_set_height(ui_SpecificSettingsInnerPanel, 790);
+    lv_obj_set_height(ui_SpecificSettingsInnerPanel, 788);
     lv_obj_set_align(ui_SpecificSettingsInnerPanel, LV_ALIGN_TOP_MID);
     lv_obj_set_flex_flow(ui_SpecificSettingsInnerPanel, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(ui_SpecificSettingsInnerPanel, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
@@ -131,14 +131,16 @@ void ui_SettingsScreen_screen_init(void)
                                            LV_STYLE_BORDER_COLOR, _ui_theme_color_background);
     ui_object_set_themeable_style_property(ui_SpecificSettingsInnerPanel, LV_PART_MAIN | LV_STATE_DEFAULT,
                                            LV_STYLE_BORDER_OPA, _ui_theme_alpha_background);
+    lv_obj_set_style_pad_left(ui_SpecificSettingsInnerPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(ui_SpecificSettingsInnerPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_SpecificSettingsInnerPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_SpecificSettingsInnerPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_SpecificSettingsInnerPanel, 20, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_SpecificSettingsInnerPanel, 20, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_SpecificSettingsRows = lv_obj_create(ui_SpecificSettingsInnerPanel);
     lv_obj_set_width(ui_SpecificSettingsRows, 720);
-    lv_obj_set_height(ui_SpecificSettingsRows, 900);
-    lv_obj_set_x(ui_SpecificSettingsRows, 0);
-    lv_obj_set_y(ui_SpecificSettingsRows, -37);
+    lv_obj_set_height(ui_SpecificSettingsRows, 788);
     lv_obj_set_align(ui_SpecificSettingsRows, LV_ALIGN_TOP_MID);
     lv_obj_set_flex_flow(ui_SpecificSettingsRows, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(ui_SpecificSettingsRows, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER);
@@ -152,8 +154,8 @@ void ui_SettingsScreen_screen_init(void)
     lv_obj_set_style_border_side(ui_SpecificSettingsRows, LV_BORDER_SIDE_NONE, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_left(ui_SpecificSettingsRows, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_right(ui_SpecificSettingsRows, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_pad_top(ui_SpecificSettingsRows, 30, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_pad_bottom(ui_SpecificSettingsRows, 3, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(ui_SpecificSettingsRows, 12, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(ui_SpecificSettingsRows, 12, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(ui_SpecificSettingsRows, 42, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_column(ui_SpecificSettingsRows, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 

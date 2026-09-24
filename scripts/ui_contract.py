@@ -101,8 +101,6 @@ PARENTS: dict[str, str] = {
 
     # LogScreen: log_view.cpp points this text area at the captured serial log
     "ui_TextArea1": "ui_LogScreenPanelInner",
-    "ui_GoToOldestButton": "ui_LogScreenPanel",
-    "ui_GoToNewestButton": "ui_LogScreenPanel",
 
     # SettingsScreen: main.cpp fills in the title per page, deletes the
     # Parameter1 template, and builds each page's rows into SpecificSettingsRows
@@ -145,8 +143,6 @@ for _screen, (_bar, _band, _banner, _key, _overlay) in CHROME.items():
 # cui_* names are component-internal locals (ui_comp_menuoverlay.c), which is
 # where the burger menu's rows live: they carry no screen global to name.
 LABELS: dict[str, str] = {
-    "ui_GoToOldestButtonLabel": "Oldest",   # log_view.cpp: scroll to the top
-    "ui_GoToNewestButtonLabel": "Newest",   # log_view.cpp: scroll to the end
     # joystick_cal.cpp reads this as the button's resting text, and writes
     # CANCEL over it during a run
     "ui_CalibrateButtonLabel": "Calibrate",
