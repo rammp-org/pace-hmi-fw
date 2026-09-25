@@ -17,6 +17,11 @@ So this asserts the things main.cpp believes that the compiler cannot: which
 parent each named object hangs off, and the label text that identifies a row by
 its role rather than its number.
 
+It also checks one thing the LOCAL build cannot catch: every built-in
+lv_font_montserrat_<N> the export uses must be enabled in sdkconfig.defaults.
+A local sdkconfig that already has the size builds fine, and CI -- which builds
+from sdkconfig.defaults alone -- fails on an undeclared font.
+
 Run from import_ui.ps1 straight after the mirror, before anything is built.
 
   python ui_contract.py            # report; exit 1 on any mismatch
@@ -210,10 +215,27 @@ def scan(root: pathlib.Path) -> tuple[dict[str, str], dict[str, str]]:
     return parents, labels
 
 
+_MONTSERRAT_RE = re.compile(r"\blv_font_montserrat_(\d+)\b")
+_MONTSERRAT_ON_RE = re.compile(r"^CONFIG_LV_FONT_MONTSERRAT_(\d+)=y", re.M)
+
+
+def missing_fonts(root: pathlib.Path) -> list[str]:
+    """Built-in Montserrat sizes the export uses but sdkconfig.defaults leaves off."""
+    used: set[int] = set()
+    for path in (root / "components" / "ui").rglob("*.c"):
+        used.update(int(n) for n in _MONTSERRAT_RE.findall(
+            path.read_text(encoding="utf-8", errors="replace")))
+    defaults = (root / "sdkconfig.defaults").read_text(encoding="utf-8", errors="replace")
+    enabled = {int(n) for n in _MONTSERRAT_ON_RE.findall(defaults)}
+    return [f"lv_font_montserrat_{n}: used by the export, but CONFIG_LV_FONT_MONTSERRAT_{n}=y "
+            "is not in sdkconfig.defaults (CI builds from the defaults alone)"
+            for n in sorted(used - enabled)]
+
+
 def main() -> int:
     root = repo_root()
     parents, labels = scan(root)
-    problems: list[str] = []
+    problems: list[str] = missing_fonts(root)
 
     for symbol, expected in PARENTS.items():
         actual = parents.get(symbol)
