@@ -133,8 +133,16 @@ void poll_cb(lv_timer_t *) {
 // the next. Up the stick is up the log: a positive dy moves the content down,
 // revealing earlier lines. Left and right page sideways through long lines.
 // LVGL's key repeat turns a held stick into paging.
+void (*escape_down)() = nullptr;
+
 void key_cb(lv_event_t *e) {
   const uint32_t key = lv_event_get_key(e);
+  // Already showing the newest line: a further push down leaves the log for
+  // whatever follows it, rather than doing nothing forever.
+  if (key == LV_KEY_DOWN && escape_down != nullptr && lv_obj_get_scroll_bottom(view) <= 0) {
+    escape_down();
+    return;
+  }
   if (key == LV_KEY_UP || key == LV_KEY_DOWN) {
     const int32_t line = line_height();
     const int32_t page = std::max<int32_t>(line, lv_obj_get_content_height(view) - line);
@@ -144,13 +152,6 @@ void key_cb(lv_event_t *e) {
                                            lv_obj_get_content_width(view) - kHorizontalOverlapPx);
     lv_obj_scroll_by_bounded(view, key == LV_KEY_LEFT ? page : -page, 0, LV_ANIM_ON);
   }
-}
-
-void oldest_cb(lv_event_t *) { lv_obj_scroll_to(view, 0, 0, LV_ANIM_OFF); }
-
-void newest_cb(lv_event_t *) {
-  lv_obj_scroll_to_x(view, 0, LV_ANIM_OFF);
-  scroll_to_newest();
 }
 
 } // namespace
@@ -205,13 +206,6 @@ void log_view_init() {
   lv_subject_add_observer_obj(&log_version_subject, log_text_observer, view, nullptr);
   lv_timer_create(poll_cb, kPollMs, nullptr);
 
-  if (ui_GoToOldestButton != nullptr) {
-    lv_obj_add_event_cb(ui_GoToOldestButton, oldest_cb, LV_EVENT_CLICKED, nullptr);
-  }
-  if (ui_GoToNewestButton != nullptr) {
-    lv_obj_add_event_cb(ui_GoToNewestButton, newest_cb, LV_EVENT_CLICKED, nullptr);
-  }
-
   // The joystick gets a zero-size target to hold focus and take its keys, so
   // nothing on the screen shows a focus ring.
   lv_obj_t *keys = lv_obj_create(ui_LogScreen);
@@ -223,6 +217,8 @@ void log_view_init() {
 }
 
 lv_group_t *log_view_group() { return group; }
+
+void log_view_set_escape(void (*down_past_end)()) { escape_down = down_past_end; }
 
 void log_view_on_load() {
   if (text == nullptr) {

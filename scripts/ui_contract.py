@@ -1,21 +1,26 @@
 #!/usr/bin/env python3
 """Fail the import when the SquareLine export stops matching what main.cpp assumes.
 
-main.cpp reaches into the export by symbol name -- ui_StatusPanel4, ui_Button1,
+main.cpp reaches into the export by symbol name -- ui_DriveBand4, ui_BenchKey7,
 ui_Image3 and ~90 others. Most drift is caught by the compiler: rename or delete
 an object and the build fails on an undefined symbol, loudly, which needs no
 help from this script.
 
 What the compiler CANNOT catch is renumbering. SquareLine names instances by
-creation order across the whole project, so adding a StatusPanel to one screen
-can renumber the StatusPanels on every other screen. The name still exists and
+creation order across the whole project, so adding a screen can renumber the
+TopBar, DriveBand, MenuKey and MenuOverlay on every other screen. The name still exists and
 still compiles -- it just refers to a different object now, quite possibly on a
-different screen. The firmware then binds MCB telemetry to the wrong panel, or
-opens the R&D screen from the wrong settings row, silently.
+different screen. The firmware then binds MCB telemetry to the wrong band, or
+opens the wrong screen from a burger-menu row, silently.
 
 So this asserts the things main.cpp believes that the compiler cannot: which
 parent each named object hangs off, and the label text that identifies a row by
 its role rather than its number.
+
+It also checks one thing the LOCAL build cannot catch: every built-in
+lv_font_montserrat_<N> the export uses must be enabled in sdkconfig.defaults.
+A local sdkconfig that already has the size builds fine, and CI -- which builds
+from sdkconfig.defaults alone -- fails on an undeclared font.
 
 Run from import_ui.ps1 straight after the mirror, before anything is built.
 
@@ -37,148 +42,150 @@ import sys
 # Each entry is a symbol the firmware names and the parent it must hang off.
 # Keep this in step with main.cpp: if you point the firmware at a new export
 # object, add it here too, or the next renumbering will go unnoticed.
+#
+# Spec V2 gives every screen but BootScreen the same four-piece chrome, and each
+# piece is an instance numbered across the whole project -- which is exactly the
+# renumbering this script exists to catch. So the chrome table is the bulk of
+# it, and is expanded rather than written out: eleven screens times five
+# instances is too many lines to keep honest by hand.
+
+# screen -> the TopBar, DriveBand, ErrorBanner, MenuKey and MenuOverlay instance
+# numbers, exactly as main.cpp names them.
+CHROME: dict[str, tuple[str, str, str, str, str]] = {
+    "ui_LockedScreen":       ("1",  "1",  "2",  "1",  "1"),
+    "ui_DriveScreen":        ("2",  "2",  "4",  "2",  "2"),
+    "ui_JoystickScreen":     ("3",  "4",  "10", "3",  "3"),
+    "ui_SeatScreen":         ("4",  "3",  "1",  "4",  "4"),
+    "ui_BenchGateScreen":    ("5",  "11", "11", "11", "11"),
+    "ui_LogScreen":          ("6",  "5",  "5",  "6",  "6"),
+    "ui_BenchMotorsScreen":  ("7",  "6",  "3",  "5",  "5"),
+    "ui_SettingsScreen":     ("8",  "7",  "6",  "7",  "7"),
+    "ui_SkunkWorksScreen":   ("9",  "8",  "7",  "8",  "8"),
+    "ui_DiagnosticsScreen":  ("10", "9",  "8",  "9",  "9"),
+    "ui_UpdateScreen":       ("11", "10", "9",  "10", "10"),
+}
+
 PARENTS: dict[str, str] = {
     # boot logo: main.cpp swaps the pre-rasterised A8 mask onto this image
     "ui_Image3": "ui_BootScreen",
 
-    # MainScreenFlex pager. The lock gating hides these three by binding
-    # paging_subject to their HIDDEN flag, so they have to be pager pages.
-    "ui_FlexPanel": "ui_MainScreenFlex",
-    "ui_LockedPanel": "ui_FlexPanel",
-    "ui_DrivePanel": "ui_FlexPanel",
-    "ui_SeatAdjustmentMenu": "ui_FlexPanel",
-    "ui_SettingsMenu": "ui_FlexPanel",
+    # LockedScreen: the ring the unlock fills, the shackle that rises when it
+    # lands, and the legend that says how (the stick, not a button)
+    "ui_DriveHint": "ui_LockedContent",
+    "ui_LockRing": "ui_LockedContent",
+    "ui_Shackle": "ui_LockedContent",
 
-    # the push-and-hold arcs, one per pager page
-    "ui_GraphicsPanel": "ui_LockedPanel",
-    "ui_GraphicsPanel1": "ui_DrivePanel",
-    "ui_GraphicsPanel2": "ui_SeatAdjustmentMenu",
-    "ui_UnlockArc": "ui_GraphicsPanel",
-    "ui_UnlockArc1": "ui_GraphicsPanel1",
-    "ui_UnlockArc2": "ui_GraphicsPanel2",
+    # DriveScreen: the readouts and the three drive-profile buttons
+    "ui_SpeedValue": "ui_DriveContent",
+    "ui_RangeMeter": "ui_DriveContent",
+    "ui_ModeManual": "ui_DriveContent",
+    "ui_ModeAssist": "ui_DriveContent",
+    "ui_ModeAuto": "ui_DriveContent",
 
-    # settings rows the firmware wires handlers onto
-    "ui_SettingsFlexPanel": "ui_SettingsMenu",
-    "ui_Button1": "ui_SettingsFlexPanel",           # DEBUG ACTUATORS -> RDScreen
-    "ui_Button6": "ui_SettingsFlexPanel",           # SELF TEST -> selftest_request
-    "ui_FPSCounterButton": "ui_SettingsFlexPanel",
-    "ui_HapticTestButton": "ui_SettingsFlexPanel",
-    "ui_ScreenBrightnessButton": "ui_SettingsFlexPanel",  # -> SpecificSettingScreen
-    "ui_DiagnosticsButton": "ui_SettingsFlexPanel",  # -> DiagnosticsScreen
+    # JoystickScreen: the three axis bars, the button counter, and the label
+    # joystick_cal.cpp prompts in
+    "ui_XAxisBar": "ui_JoystickContent",
+    "ui_YAxisBar": "ui_JoystickContent",
+    "ui_TwistBar": "ui_JoystickContent",
+    "ui_ButtonCounter": "ui_JoystickContent",
+    "ui_JoystickHint": "ui_JoystickContent",
+    "ui_CalibrateButton": "ui_JoystickContent",
+    # the meter main.cpp binds to the press-and-hold that starts a run
+    "ui_CalibrateFill": "ui_CalibrateButton",
 
-    # exit gestures: each bar has to be on the screen its gesture applies to,
-    # or it fills a bar the user cannot see
-    "ui_ExitBarPress1": "ui_DriveScreen",
-    "ui_ExitBarPull1": "ui_SeatAdjustmentFlexScreen",
-    "ui_ExitBarPushLeft": "ui_SeatAdjustmentPanel",
-    "ui_ExitBarPull2": "ui_RDScreen",
-    "ui_ExitBarPull4": "ui_SpecificSettingScreen",
-    "ui_ExitBarPress2": "ui_LogScreen",
+    # BenchGateScreen: four dots and eleven keys on the one content panel.
+    # main.cpp hands each key its digit by name, so a key that moved would type
+    # a different PIN without failing to compile.
+    "ui_BenchIntro": "ui_BenchContent",
+    "ui_BenchPinDot1": "ui_BenchContent",
+    "ui_BenchPinDot4": "ui_BenchContent",
+    "ui_BenchKey1": "ui_BenchContent",
+    "ui_BenchKey9": "ui_BenchContent",
+    "ui_BenchKey0": "ui_BenchContent",
+    "ui_BenchKeyBack": "ui_BenchContent",
 
     # LogScreen: log_view.cpp points this text area at the captured serial log
     "ui_TextArea1": "ui_LogScreenPanelInner",
-    "ui_GoToOldestButton": "ui_LogScreenPanel",
-    "ui_GoToNewestButton": "ui_LogScreenPanel",
 
-    # RDScreen PIN entry
-    "ui_SeatFunctionsButtonsPanel1": "ui_SeatAdjustmentScreenFlexPanel1",
-    "ui_CheckboxContainer": "ui_SeatFunctionsButtonsPanel1",
-    "ui_Checkbox1": "ui_CheckboxContainer",
-    "ui_Checkbox2": "ui_CheckboxContainer",
-    "ui_Checkbox3": "ui_CheckboxContainer",
-    "ui_Checkbox4": "ui_CheckboxContainer",
-    "ui_Keyboard1": "ui_SeatFunctionsButtonsPanel1",
-    "ui_SeatFunctionsLabel2": "ui_SeatFunctionsButtonsPanel1",
-
-    # SpecificSettingScreen: main.cpp fills in the title and instructions per
-    # page, deletes the Parameter1 template, and builds each page's rows into
-    # SpecificSettingsRows
-    "ui_SettingTitleLabel": "ui_SpecificSettingsInnerPanel",
-    "ui_BriefInstructionsLabel": "ui_SpecificSettingsInnerPanel",
+    # SettingsScreen: main.cpp fills in the title per page, deletes the
+    # Parameter1 template, and builds each page's rows into SpecificSettingsRows
+    "ui_SettingsTitle": "ui_SettingsBody",
     "ui_Parameter1": "ui_SpecificSettingsRows",
-    "ui_ErrorWarningPanel6": "ui_SpecificSettingScreen",
 
-    # GenericActionsScreen: entered by holding up on this pager page (its arc
-    # shows the hold); main.cpp deletes the component instances and builds one
+    # SkunkWorksScreen: main.cpp deletes the placeholder tiles and builds one
     # per entry in actions_spec.h into the flex panel
-    "ui_GenericActionsPanel1": "ui_FlexPanel",
-    "ui_UnlockArc3": "ui_GraphicsPanel3",
-    "ui_GenericActionsFlexPanel": "ui_GenericActionsPanel",
-    "ui_GenericActionsTitle": "ui_GenericActionsFlexPanel",
-    "ui_ExitBarPull5": "ui_GenericActionsScreen",
-    "ui_ErrorWarningPanel7": "ui_GenericActionsScreen",
-    "ui_StatusPanel8": "ui_GenericActionsScreen",
-    "ui_TopBar9": "ui_GenericActionsScreen",
+    "ui_SkunkWorksTitle": "ui_SkunkWorksBody",
+    "ui_GenericActionsFlexPanel": "ui_SlotRows",
 
     # DiagnosticsScreen: main.cpp drives the rate label, deletes the template
     # component and builds one per entry in RAMMP_DIAG_TABLE into the rows panel
-    "ui_DiagnosticsFreqLabel": "ui_DiagnosticsTitleContainer",
+    "ui_DiagnosticsFreqLabel": "ui_DiagnosticsScreen",
     "ui_DiagnosticsFlexRows": "ui_SpecificSettingsInnerPanel1",
-    "ui_ExitBarPull6": "ui_DiagnosticsScreen",
-    "ui_ErrorWarningPanel8": "ui_DiagnosticsScreen",
-    "ui_StatusPanel9": "ui_DiagnosticsScreen",
-    "ui_TopBar10": "ui_DiagnosticsScreen",
 
-    # seat screen grids
+    # SeatScreen grids. The numbers skip 3 and jump to 7 -- SquareLine
+    # renumbered these when the screen was renamed -- so the LABELS table below
+    # is what actually pins each button to the axis it drives.
     "ui_SeatButton1": "ui_SeatFunctionsButtonsPanel",
+    "ui_SeatButton7": "ui_SeatFunctionsButtonsPanel",
     "ui_SeatButton6": "ui_SeatFunctionsButtonsPanel",
     "ui_SeatAdjustmentButton1": "ui_SeatAdjustmentPanel",
     "ui_SeatAdjustmentButton5": "ui_SeatAdjustmentPanel",
-
-    # ErrorWarningPanels main.cpp raises: entry refused (drive or seat page),
-    # and link/MCB lost on the drive and seat screens
-    "ui_ErrorWarningPanel4": "ui_MainScreenFlex",
-    "ui_ErrorWarningPanel": "ui_DriveScreen",
-    "ui_ErrorWarningPanel1": "ui_SeatAdjustmentFlexScreen",
-
-    # JoystickTest: joystick_cal.cpp runs its calibration from this button
-    # and prompts in this label
-    "ui_CalibrateJoystickButton": "ui_LockedPanel2",
-    "ui_CalibrateJoystickButtonLabel": "ui_CalibrateJoystickButton",
-    "ui_JoystickInstructionsLabel": "ui_JoystickTextPanel",
-
-    # one StatusPanel and one TopBar per screen, each bound to MCB telemetry by
-    # number -- the single most renumbering-prone thing in the project
-    "ui_StatusPanel": "ui_MainScreenFlex",
-    "ui_StatusPanel1": "ui_JoystickTest",
-    "ui_StatusPanel2": "ui_DriveScreen",
-    "ui_StatusPanel3": "ui_SeatAdjustmentFlexScreen",
-    "ui_StatusPanel4": "ui_RDScreen",
-    "ui_StatusPanel5": "ui_LogScreen",
-    "ui_StatusPanel7": "ui_SpecificSettingScreen",
-    "ui_TopBar1": "ui_JoystickTest",
-    "ui_TopBar2": "ui_DriveScreen",
-    "ui_TopBar3": "ui_MainScreenFlex",
-    "ui_TopBar4": "ui_SeatAdjustmentFlexScreen",
-    "ui_TopBar5": "ui_RDScreen",
-    "ui_TopBar6": "ui_LogScreen",
-    "ui_TopBar8": "ui_SpecificSettingScreen",
+    "ui_SeatBackButton": "ui_SeatAdjustmentPanel",
+    "ui_AngleLabel": "ui_SeatAdjustmentPanel",
 }
 
-# Labels that identify a widget by its ROLE. A settings row is only "the R&D
-# DEBUG row" because of what it says; if the numbering shifts, the parent check
-# above still passes (it is still some row on the settings panel) and only the
-# text gives it away.
+for _screen, (_bar, _band, _banner, _key, _overlay) in CHROME.items():
+    PARENTS["ui_TopBar" + _bar] = _screen
+    PARENTS["ui_DriveBand" + _band] = _screen
+    PARENTS["ui_ErrorBanner" + _banner] = _screen
+    PARENTS["ui_MenuKey" + _key] = _screen
+    PARENTS["ui_MenuOverlay" + _overlay] = _screen
+
+# Labels that identify a widget by its ROLE. A seat button is only "the one that
+# drives FB Tilt" because of what it says; if the numbering shifts, the parent
+# check above still passes -- it is still some button on the functions panel --
+# and only the text gives it away.
+#
+# cui_* names are component-internal locals (ui_comp_menuoverlay.c), which is
+# where the burger menu's rows live: they carry no screen global to name.
 LABELS: dict[str, str] = {
-    "ui_ButtonLabel1": "DEBUG ACTUATORS",  # the row that opens ui_RDScreen
-    "ui_ButtonLabel6": "SELF TEST",        # the row that starts the self test
-    "ui_FPSCounterLabel": "FPS COUNTER",
-    "ui_HapticTestLabel": "HAPTIC TEST",
-    "ui_ButtonLabel7": "SCREEN BRIGHTNESS",  # opens the brightness settings page
-    "ui_ButtonLabel8": "DIAGNOSTICS",  # opens the DiagnosticsScreen
-    "ui_CalibrateJoystickButtonLabel": "CALIBRATE",  # joystick_cal.cpp's button
-    "ui_GoToOldestButtonLabel": "Oldest",   # log_view.cpp: scroll to the top
-    "ui_GoToNewestButtonLabel": "Newest",   # log_view.cpp: scroll to the end
-    # the four live seat functions, in the order seat_buttons_grid expects
-    "ui_SeatButtonLabel1": "Elevation",
-    "ui_SeatButtonLabel2": "Real Tilt",
-    "ui_SeatButtonLabel3": "FW Tilt",
-    "ui_SeatButtonLabel4": "Side Tilt",
+    # joystick_cal.cpp reads this as the button's resting text, and writes
+    # CANCEL over it during a run
+    "ui_CalibrateButtonLabel": "Calibrate",
+
+    # The four live seat functions, in the order seat_buttons_grid walks them
+    # (row-major, two per row) against the rows of RAMMP_SEAT_AXIS_TABLE. Read
+    # this beside main.cpp's seat_button_axis(): a mismatch is a press that
+    # moves the wrong actuator with the right label on it.
+    "ui_SeatButtonLabel1": "FB Tilt",
+    "ui_SeatButtonLabel2": "Side Tilt",
+    "ui_SeatButtonLabel4": "Elevation",
+    "ui_SeatButtonLabel7": "Translation",
+
+    # The PIN pad, spot-checked at both ends and either side of the hole.
+    "ui_BenchKey1Label": "1",
+    "ui_BenchKey5Label": "5",
+    "ui_BenchKey9Label": "9",
+    "ui_BenchKey0Label": "0",
+
+    # The burger menu, in the order nav_go switches on. A row that moves opens
+    # the wrong screen, silently -- nav_row_cb carries only the row index.
+    "cui_RowLabel1": "Drive",
+    "cui_RowLabel2": "Seat Functions",
+    "cui_RowLabel3": "Bench",
+    "cui_RowLabel4": "Diagnostics",
+    "cui_RowLabel5": "Joystick",
+    "cui_RowLabel6": "Log",
+    "cui_RowLabel7": "Skunk Works",
+    "cui_RowLabel8": "UI Settings",
 }
 
 _CREATE_RE = re.compile(
     r"^\s*(ui_[A-Za-z0-9_]+)\s*=\s*[A-Za-z0-9_]+_create\(\s*(ui_[A-Za-z0-9_]+|NULL)\s*\)", re.M)
-_LABEL_RE = re.compile(r'lv_label_set_text\(\s*(ui_[A-Za-z0-9_]+)\s*,\s*"((?:[^"\\]|\\.)*)"', re.M)
+# c?ui_: the burger menu's rows are locals inside ui_comp_menuoverlay.c, so the
+# only name they have is the component-internal one.
+_LABEL_RE = re.compile(
+    r'lv_label_set_text\(\s*(c?ui_[A-Za-z0-9_]+)\s*,\s*"((?:[^"\\]|\\.)*)"', re.M)
 
 
 def repo_root() -> pathlib.Path:
@@ -208,10 +215,27 @@ def scan(root: pathlib.Path) -> tuple[dict[str, str], dict[str, str]]:
     return parents, labels
 
 
+_MONTSERRAT_RE = re.compile(r"\blv_font_montserrat_(\d+)\b")
+_MONTSERRAT_ON_RE = re.compile(r"^CONFIG_LV_FONT_MONTSERRAT_(\d+)=y", re.M)
+
+
+def missing_fonts(root: pathlib.Path) -> list[str]:
+    """Built-in Montserrat sizes the export uses but sdkconfig.defaults leaves off."""
+    used: set[int] = set()
+    for path in (root / "components" / "ui").rglob("*.c"):
+        used.update(int(n) for n in _MONTSERRAT_RE.findall(
+            path.read_text(encoding="utf-8", errors="replace")))
+    defaults = (root / "sdkconfig.defaults").read_text(encoding="utf-8", errors="replace")
+    enabled = {int(n) for n in _MONTSERRAT_ON_RE.findall(defaults)}
+    return [f"lv_font_montserrat_{n}: used by the export, but CONFIG_LV_FONT_MONTSERRAT_{n}=y "
+            "is not in sdkconfig.defaults (CI builds from the defaults alone)"
+            for n in sorted(used - enabled)]
+
+
 def main() -> int:
     root = repo_root()
     parents, labels = scan(root)
-    problems: list[str] = []
+    problems: list[str] = missing_fonts(root)
 
     for symbol, expected in PARENTS.items():
         actual = parents.get(symbol)

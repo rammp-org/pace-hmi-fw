@@ -5,45 +5,16 @@
 //
 // Excluded from import_ui.ps1's mirror - edited by hand, SquareLine's
 // regenerated stubs for this file are ignored.
+//
+// flex_scroll_next / flex_scroll_previous went with the spec-V1 pager: there is
+// no ui_FlexPanel to scroll and nothing in the export calls them. Spec V2
+// navigates with the burger menu (main.cpp's nav_* section).
 
 #include "ui.h"
 
-static void flex_scroll_step(int dir)
-{
-    if(ui_FlexPanel == NULL) return;
-
-    lv_obj_t * first = lv_obj_get_child(ui_FlexPanel, 0);
-    if(first == NULL) return;
-
-    lv_obj_update_layout(ui_FlexPanel);
-
-    int32_t step = lv_obj_get_width(first) + lv_obj_get_style_pad_column(ui_FlexPanel, LV_PART_MAIN);
-    if(step <= 0) return;
-
-    int32_t sx = lv_obj_get_scroll_x(ui_FlexPanel);
-    if(sx < 0) sx = 0;
-
-    int32_t max = sx + lv_obj_get_scroll_right(ui_FlexPanel);
-    int32_t target = ((sx + step / 2) / step + dir) * step;
-
-    if(target < 0) target = 0;
-    if(target > max) target = max;
-
-    lv_obj_scroll_to_x(ui_FlexPanel, target, LV_ANIM_ON);
-}
-
-void flex_scroll_next(lv_event_t * e)
-{
-    LV_UNUSED(e);
-    flex_scroll_step(1);
-}
-
-void flex_scroll_previous(lv_event_t * e)
-{
-    LV_UNUSED(e);
-    flex_scroll_step(-1);
-}
-
+// Still here for a CALL FUNCTION event in SquareLine to reach. Nothing in the
+// current export wires one: the theme is the UI Settings Theme row. main.cpp's
+// rtps_poll_cb notices a switch either way and saves it.
 void theme_toggle(lv_event_t * e)
 {
     LV_UNUSED(e);

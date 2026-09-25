@@ -1,6 +1,6 @@
 # pace-hmi-fw
 
-<img src="docs/screenshots/MainScreenFlex.png" alt="Main Screen" width="260">
+<img src="docs/screenshots/LockedScreen.png" alt="Locked screen" width="200"> <img src="docs/screenshots/MenuOverlay.png" alt="Burger menu" width="200"> <img src="docs/screenshots/DriveScreen.png" alt="Drive screen" width="200">
 
 Firmware for the RAMMP wheelchair HMI: an M5Stack Tab5 (ESP32-P4) on the [RAMMP HMI PCB](https://github.com/rammp-org/pace-hmi-pcb).
 
@@ -8,7 +8,7 @@ Firmware for the RAMMP wheelchair HMI: an M5Stack Tab5 (ESP32-P4) on the [RAMMP 
 - Tab5 (ESP32-P4), 720x1280 portrait touch panel
 - 3D hall joystick (X / Y / twist) on the ADCs, up to 4 buttons on GPIO
 - W5500 SPI Ethernet for RTPS
-- WIP: haptic motor over I2C
+- DRV2605 haptic motor over I2C
 
 ## Build and flash
 - Clone with the shared RTPS spec: `git clone --recursive` (or `git submodule update --init`).
@@ -17,38 +17,54 @@ Firmware for the RAMMP wheelchair HMI: an M5Stack Tab5 (ESP32-P4) on the [RAMMP 
 - Or put the [release](https://github.com/rammp-org/pace-hmi-fw/releases) images in `precompiled/` and run `.\flash_precompiled.ps1` (needs esptool v5+).
 
 ## Screens
-- Joystick only: **push up and hold** to enter, **pull and hold** (or hold the button) to leave. The bottom prompt says which.
-- The UI is designed in SquareLine Studio ([pace-hmi-gui](https://github.com/rammp-org/pace-hmi-gui)); `components/ui/` is its export (`import_ui.ps1`). Don't edit it here.
+
+The UI follows RAMMP UI spec V2. Every screen has the same frame: the status bar, the **DRIVE / STATE** band, the screen's own content, and the **burger key** at the bottom, which opens the menu. [docs/ui-architecture.md](docs/ui-architecture.md) explains how it all works: where the screens come from, how the menu is built, how touch and the joystick move around, and how the chair's state reaches the screen.
+
+- **Driving**: on the Locked screen, **hold the joystick button** until the ring closes. The MIB decides: the Drive screen opens only once it says the chair is driving. Hold the button again on the Drive screen to stop. While driving, the burger key asks the MIB to stop first, and the menu opens once it has.
+- **Moving around**: touch, or the joystick. Push to move the highlight, press the button to select. Down past the last item reaches the burger key.
+- **Refusals**: a greyed row or button refuses with a double click (heard and felt), and a banner says why.
+- The UI is designed in [pace-hmi-gui](https://github.com/rammp-org/pace-hmi-gui) (`tools/build_ui.py` + SquareLine Studio); `components/ui/` is its export, brought in with `import_ui.ps1`. Don't edit it here.
 
 | | | |
 |:--:|:--:|:--:|
-| <img src="docs/screenshots/BootScreen.png" width="200"> | <img src="docs/screenshots/MainScreenFlex.png" width="200"> | <img src="docs/screenshots/DriveScreen.png" width="200"> |
-| Boot splash | Home pager | Drive: speed, drive mode |
-| <img src="docs/screenshots/SeatAdjustmentFlexScreen.png" width="200"> | <img src="docs/screenshots/GenericActionsScreen.png" width="200"> | <img src="docs/screenshots/SpecificSettingScreen.png" width="200"> |
-| Seat functions | Generic actions | Setting page (brightness, actuators) |
-| <img src="docs/screenshots/RDScreen.png" width="200"> | <img src="docs/screenshots/DiagnosticsScreen.png" width="200"> | <img src="docs/screenshots/LogScreen.png" width="200"> |
-| PIN before DEBUG ACTUATORS | Live MCB diagnostics | System logs |
-| <img src="docs/screenshots/JoystickTest.png" width="200"> | | |
-| Joystick test and calibration | | |
+| <img src="docs/screenshots/LockedScreen.png" width="200"> | <img src="docs/screenshots/MenuOverlay.png" width="200"> | <img src="docs/screenshots/DriveScreen.png" width="200"> |
+| Locked: hold the button to drive | The burger menu | Drive: speed, range, drive mode |
+| <img src="docs/screenshots/SeatScreen.png" width="200"> | <img src="docs/screenshots/SeatAxisScreen.png" width="200"> | <img src="docs/screenshots/SkunkWorksScreen.png" width="200"> |
+| Seat Functions | One motion: jog, presets, "<" back | Skunk Works: one-press actions |
+| <img src="docs/screenshots/SettingsScreen.png" width="200"> | <img src="docs/screenshots/DiagnosticsScreen.png" width="200"> | <img src="docs/screenshots/LogScreen.png" width="200"> |
+| UI Settings | Live MCB diagnostics | System log |
+| <img src="docs/screenshots/BenchGateScreen.png" width="200"> | <img src="docs/screenshots/BenchMotorsScreen.png" width="200"> | <img src="docs/screenshots/JoystickScreen.png" width="200"> |
+| Bench: the PIN | DEBUG ACTUATORS | Joystick test and CALIBRATE |
 
-- **Drive / Seat**: only enter while the MCB link is up and its state is OK; otherwise a red banner says why.
-- **Generic actions**: one row per entry in `main/actions_spec.h` (haptic test, self test, seat up, restart).
+### The burger menu
 
-## Settings menu
+| row | opens |
+| --- | --- |
+| Drive | the Drive screen while driving, else the Locked screen; greyed while the MCB could not drive |
+| Seat Functions | the four seat motions; greyed while the MCB could not move the seat |
+| Bench | the PIN (1234), then DEBUG ACTUATORS: step each actuator with - / + |
+| Diagnostics | live readings from the MCB |
+| Joystick | the stick test; press and hold CALIBRATE (or the stick button) to calibrate |
+| Log | the last 500 serial log lines |
+| Skunk Works | one-press actions from `main/actions_spec.h`: haptic test, self test, seat up, FPS counter, restart |
+| UI Settings | the settings below |
+
+**DRIVE** in the band goes home from anywhere.
+
+### UI Settings
 
 | row | what it does |
 | --- | --- |
-| CHANGE THEME | switch the colour theme (saved) |
-| SCREEN BRIGHTNESS | backlight 5-100 % (saved); the side button and RTPS can set it too |
-| DIAGNOSTICS | live readings from the MCB, see below |
-| DEBUG ACTUATORS | PIN, then step each actuator with -/+ (the MCB moves it) |
-| SELF TEST | checks the HMI; results on screen and on serial |
-| SYSTEM LOGS | the last 500 serial log lines |
-| FPS COUNTER | show the render rate |
-| HAPTIC TEST | buzz the vibration motor |
-| Joystick Test → CALIBRATE | 6-step stick calibration, saved to flash |
+| Brightness | backlight 5-100 %; the side button and RTPS can set it too |
+| Theme | Dark or Day |
+| Menu slide | animate the menu opening (off = instant) |
+| Flip screen | turn the picture and touch 180 degrees, for a unit mounted upside down |
+| Stick sensitivity | 1-10: how far the stick moves before the highlight does |
+| Stick left/right, Stick fwd/back | mirror an axis |
+| Stick axes | swap X and Y |
+| Sounds | touch and joystick clicks; warnings sound either way |
 
-Saved settings live in LittleFS (`/storage`), so they survive a reboot.
+Every row is one line in `main/settings_spec.h`, and every value is saved in LittleFS (`/storage`), so it survives a reboot. The stick mapping rows are refused while driving.
 
 ## RTPS
 
@@ -95,9 +111,9 @@ How the messages reach the screens:
 - No MibStatus for 2 s → "RTPS LINK LOST"; Drive and Seat are refused.
 - `MibSystemState` is the interlock: the chair drives only in `ENABLED`, and the MIB disables manual seat control while it is driving, so the seat screen needs `IDLE`. `INITIALIZING` and `ERROR` bar both.
 - The MIB decides whether the chair drives, both ways. The DriveScreen is a view of one fact: it opens whenever the state is `ENABLED` and closes when it stops being `ENABLED`, whoever asked — so the screen can never disagree with the chair.
-- Holding the stick up sends a **DriveCommand** and waits. Leaving is a request too: the exit gesture sends `DISABLE` and the screen closes only when the MIB actually stops, so a refused exit keeps you on the drive screen.
-- Picking a drive profile sends a `DriveCommand` carrying it, and the three buttons highlight `MibStatus.activeProfile` — what the MIB reports, never what was pressed. A profile the chair refuses never lights up.
-- Three refusals get the ErrorWarningPanel for 3 s, with the MIB's own `error_message` when it sent one: **DRIVE REFUSED: NOT GRANTED** (asked, never got `ENABLED`) and **DRIVING STOPPED** (the MIB disabled driving by itself) on the home screen, and **EXIT REFUSED** on the drive screen itself.
+- Holding the joystick button on the Locked screen sends a **DriveCommand** and waits. Leaving is a request too: the button hold on the Drive screen, or the burger key there, sends `DISABLE`, and the screen closes only when the MIB actually stops, so a refused exit keeps you on the drive screen.
+- Picking a drive mode (Manual = `HIGH`, Assist = `NORMAL`, Auto = `LOW`) sends a `DriveCommand` carrying it, and the three buttons highlight `MibStatus.activeProfile` — what the MIB reports, never what was pressed. A profile the chair refuses never lights up.
+- Three refusals get the error banner for 3 s, with the MIB's own `error_message` when it sent one: **DRIVE REFUSED: NOT GRANTED** (asked, never got `ENABLED`) and **DRIVING STOPPED** (the MIB disabled driving by itself) on the Locked screen, and **EXIT REFUSED** on the drive screen itself.
 - **MibStatus.currentSeatState** → the numbers on the seat screen and the DEBUG ACTUATORS rows. The MIB owns every position: a press asks, and the number moves when the next status says the seat did. A refusal reaches the HMI as an axis that did not move — there is no per-request verdict on the wire.
 - Each seat press sends a **SeatCommand** with an **absolute** target, so a step button and a preset are the same message, and a lost or repeated one cannot drift the seat.
 - The wire carries the seat in whole units (degrees, millimetres); the screens step and draw raw integers, converted at the wire boundary by `seat_raw()` / `seat_units()`.
@@ -133,7 +149,8 @@ One row in `messages/joystick_message.hpp` (rammp-rtps); the HMI screens and the
 | `python scripts/rtps_selftest.py` | runs the self test over RTPS (exit 0 = pass) |
 | `python scripts/rtps_mcb_sim.py` | CLI version of the GUI (`--cycle` walks every state) |
 | `python scripts/rtps_adc_plot.py` | live joystick plot (needs matplotlib) |
-| `cd sim; python run.py` | the screens on a PC, no board ([sim/README.md](sim/README.md)) |
+| `python scripts/hmi_ui.py shot out.png` | the board's screen, and taps / keys / `walk`, over TCP; needs `CONFIG_HMI_REMOTE_UI` in your local `sdkconfig` (never in `sdkconfig.defaults`) |
+| `cd sim; python run.py` | the old screens on a PC, parked since spec V2 ([sim/README.md](sim/README.md)) |
 
 <img src="docs/screenshots/McbSimGui.png" alt="MCB simulator" width="480">
 
