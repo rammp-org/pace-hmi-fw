@@ -41,7 +41,7 @@ import shutil
 import sys
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
-IMAGE_DIR = REPO_ROOT / "main" / "ui" / "images"
+IMAGE_DIR = REPO_ROOT / "components" / "ui" / "images"
 UI_SOURCE_DIRS = ("screens", "components")
 
 # LV_COLOR_INDEXED_PALETTE_SIZE, src/misc/lv_color.h
@@ -200,7 +200,7 @@ def suspicious_scales() -> list[str]:
     """
     notes = []
     for sub in UI_SOURCE_DIRS:
-        for path in sorted((REPO_ROOT / "main" / "ui" / sub).glob("*.c")):
+        for path in sorted((REPO_ROOT / "components" / "ui" / sub).glob("*.c")):
             for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
                 m = re.search(r"lv_image_set_scale\(\s*(\w+)\s*,\s*(\d+)\s*\)", line)
                 if m and int(m.group(2)) < 100:
@@ -274,7 +274,7 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    check = sub.add_parser("check", help="audit main/ui/images/*.c")
+    check = sub.add_parser("check", help="audit components/ui/images/*.c")
     check.add_argument("--fix", action="store_true",
                        help="rewrite indexed images in place as A8, or RGB565A8 "
                             "when the palette carries colour")

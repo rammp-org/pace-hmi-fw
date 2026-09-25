@@ -8,7 +8,7 @@ with no Tab5 and no MCB on the bench.
 | <img src="../docs/screenshots/Simulator.png" width="230"> | <img src="../docs/screenshots/SimulatorBench.png" width="230"> |
 | The panel: exactly 720x1280, nothing but what the firmware drew | The bench: a D-pad, two buttons, and the mapping mockup |
 
-The screens themselves are not a mockup: this compiles `main/ui/`, the same
+The screens themselves are not a mockup: this compiles `components/ui/`, the same
 SquareLine export the firmware builds, unmodified, against upstream LVGL 9.5.
 Layout, fonts, images, colours, styles and the flex pager are the real thing at
 the panel's real 720x1280. What is reimplemented is the layer around them; see
@@ -39,7 +39,7 @@ are always the panel's.
 
 Windows only for now. The display backend is LVGL's native Win32 driver, which
 is what keeps the dependency list this short; adding LVGL's SDL backend would
-lift that, and nothing in `main/ui/` would have to change.
+lift that, and nothing in `components/ui/` would have to change.
 
 ## Two windows
 
@@ -57,7 +57,7 @@ be smaller than its display: `lv_display.c`'s `update_resolution()` writes every
 screen's coords straight from the display resolution, and the Win32 backend
 re-applies that whenever the window is sized. A wider display therefore
 stretches the SquareLine screens and drags every `LV_ALIGN_CENTER` in
-`main/ui/` off centre. Keeping the bench on its own display is what keeps the
+`components/ui/` off centre. Keeping the bench on its own display is what keeps the
 panel honest, and it means a screenshot of the panel window is a screenshot of
 the product, with no sim affordance covering a prompt, an arrow or a status
 label.
@@ -153,7 +153,7 @@ Two paths feed the UI, and they meet at the subjects:
   D-pad -----+                       |                          +-> ADC subjects -> JoystickTest bars
                                      +-> LVGL keypad indev ------> focus walking, flex pager
 
-  keyboard ----> sim_mcb (500 ms) -> rammp_mcb_status_t -> sim_nav_on_mcb_status -> subjects -> main/ui widgets
+  keyboard ----> sim_mcb (500 ms) -> rammp_mcb_status_t -> sim_nav_on_mcb_status -> subjects -> components/ui widgets
 ```
 
 Nothing outside `sim_nav.c` touches a widget directly. Everything goes through
@@ -225,7 +225,7 @@ So, when you change:
 - **the joystick calibration or deadzone**, change `sim_input.c`, and extend its selftest if the expected values move.
 - **a subject or a binding**, mirror it in `sim_nav.c`. If a widget stops updating in the sim but works on the board, a missing binding here is the first thing to check.
 - **an LVGL Kconfig option** in `sdkconfig.defaults`, mirror it in `lv_conf.h`. Kconfig `select`s dependencies automatically and a plain `lv_conf.h` does not, so a new option may need its dependencies spelled out too. `LV_USE_VECTOR_GRAPHIC` needing `LV_USE_MATRIX` and `LV_USE_FLOAT` is the worked example already in the file.
-- **anything under `main/ui/`**, nothing: that tree is compiled as-is, and `import_ui.ps1` can rewrite it freely. The CMake glob picks up new screens and components without edits.
+- **anything under `components/ui/`**, nothing: that tree is compiled as-is, and `import_ui.ps1` can rewrite it freely. The CMake glob picks up new screens and components without edits.
 - **the button hardware**, in this order: add the bit to `messages/joystick_message.hpp`, read the pin in `main.cpp`, and only then move the function out of the mockup's proposal list in `sim_bench.c` and mark it `in_firmware`. The mockup exists to inform that decision, never to record it.
 
 The one thing here that is deliberately *not* a mirror of anything is the

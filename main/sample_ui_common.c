@@ -1,5 +1,5 @@
 // Shared helpers for the hand-written sample_ui_* screens. Staged in main/
-// (not main/ui/) so import_ui.ps1 never touches it.
+// (not components/ui/) so import_ui.ps1 never touches it.
 
 #include "sample_ui_common.h"
 

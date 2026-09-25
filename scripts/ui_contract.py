@@ -182,22 +182,22 @@ _LABEL_RE = re.compile(r'lv_label_set_text\(\s*(ui_[A-Za-z0-9_]+)\s*,\s*"((?:[^"
 
 
 def repo_root() -> pathlib.Path:
-    """Walk up from this file until main/ui is in sight."""
+    """Walk up from this file until components/ui is in sight."""
     directory = pathlib.Path(__file__).resolve().parent
     while True:
-        if (directory / "main" / "ui").is_dir():
+        if (directory / "components" / "ui").is_dir():
             return directory
         if directory.parent == directory:
-            raise SystemExit("could not find main/ui above this script")
+            raise SystemExit("could not find components/ui above this script")
         directory = directory.parent
 
 
 def scan(root: pathlib.Path) -> tuple[dict[str, str], dict[str, str]]:
     parents: dict[str, str] = {}
     labels: dict[str, str] = {}
-    sources = list((root / "main" / "ui").rglob("*.c"))
+    sources = list((root / "components" / "ui").rglob("*.c"))
     if not sources:
-        raise SystemExit("main/ui holds no .c files - did the import run?")
+        raise SystemExit("components/ui holds no .c files - did the import run?")
     for path in sources:
         text = path.read_text(encoding="utf-8", errors="replace")
         for symbol, parent in _CREATE_RE.findall(text):

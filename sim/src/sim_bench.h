@@ -11,7 +11,7 @@
  * update_resolution() writes every screen's coords straight from the display
  * resolution, and the Win32 backend calls it whenever the window is sized. A
  * wider display therefore stretches the SquareLine screens and drags every
- * LV_ALIGN_CENTER in main/ui/ off-centre, which would make the sim actively
+ * LV_ALIGN_CENTER in components/ui/ off-centre, which would make the sim actively
  * misleading. A separate display keeps the panel exactly 720x1280.
  *
  * ---------------------------------------------------------------------------

@@ -58,7 +58,7 @@ CONFIG_COMPILER_OPTIMIZATION_PERF=y
 # 6.0 the SPI-Ethernet chip drivers moved out of esp_eth to the registry).
 CONFIG_ETH_USE_SPI_ETHERNET=y
 
-# Font sizes referenced by the SquareLine UI export (main/ui/screens). Any size
+# Font sizes referenced by the SquareLine UI export (components/ui/screens). Any size
 # used there must be enabled here or the build fails on an undeclared
 # lv_font_montserrat_<N>.
 CONFIG_LV_FONT_MONTSERRAT_20=y
@@ -102,14 +102,14 @@ CONFIG_FREERTOS_HZ=1000
 # SVG rendering is OFF, and with it the whole vector engine.
 #
 # The SquareLine export embeds SVG assets as raw .svg text in
-# main/ui/images/ui_img_*.c, and drawing those needs LV_USE_SVG -> depends on
+# components/ui/images/ui_img_*.c, and drawing those needs LV_USE_SVG -> depends on
 # LV_USE_VECTOR_GRAPHIC -> whose only software backend is ThorVG. So one image
 # pulled in the entire vector rasteriser.
 #
 # By the end there was exactly ONE such asset left: the BootScreen wordmark.
 # It is now pre-rasterised at build time into main/boot_logo.c as an A8 alpha
 # mask, and main.cpp swaps it over the export's SVG source after ui_init (the
-# swap lives there because import_ui.ps1 mirrors main/ui/ with robocopy /MIR and
+# swap lives there because import_ui.ps1 mirrors components/ui/ with robocopy /MIR and
 # would put the SVG back on the next import). Re-generate that file if the logo
 # artwork changes.
 #

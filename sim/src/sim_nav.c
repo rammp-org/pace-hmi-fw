@@ -1224,7 +1224,7 @@ void sim_nav_reset(void) {
   lv_obj_scroll_to_x(ui_SeatAdjustmentScreenFlexPanel, 0, LV_ANIM_OFF);
 
   /* ui_BootScreen's own SquareLine handler (ui_event_BootScreen, in
-   * main/ui/screens/ui_BootScreen.c) re-arms the 2500 ms auto-advance to
+   * components/ui/screens/ui_BootScreen.c) re-arms the 2500 ms auto-advance to
    * MainScreenFlex on LV_EVENT_SCREEN_LOADED, so this is a real "reboot"
    * rather than a shortcut back into the app -- matching hardware, which
    * has no way to skip the splash either. */

@@ -24,7 +24,7 @@ What it does:
    binary.
 2. Configures ``sim/build/`` on first run. CMake fetches LVGL 9.5 itself, so
    there is nothing to install by hand and no ESP-IDF involved.
-3. Builds ``main/ui/`` -- the same SquareLine export the firmware compiles,
+3. Builds ``components/ui/`` -- the same SquareLine export the firmware compiles,
    unmodified -- plus the simulator's input, navigation and fake-MCB layers.
 4. Launches the executable and forwards its exit code.
 
@@ -64,7 +64,7 @@ def check_platform():
     nothing installed beyond a compiler -- no SDL, no vcpkg. That choice is
     what makes it Windows-only today. Porting to Linux/macOS means adding
     LVGL's SDL backend in ``sim/CMakeLists.txt`` and ``sim/lv_conf.h``
-    alongside the Win32 one; nothing in ``main/ui/`` would have to change.
+    alongside the Win32 one; nothing in ``components/ui/`` would have to change.
 
     Returns:
         True if this platform is supported.
