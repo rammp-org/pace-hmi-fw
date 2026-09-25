@@ -31,7 +31,8 @@
 #include "simple_lowpass_filter.hpp"
 
 #include "ui.h"
-// StatusPanel is a SquareLine *component*, so its children are reached by index
+// The chrome (DriveBand, ErrorBanner, TopBar, MenuKey, MenuOverlay) is made of
+// SquareLine *components*, so their children are reached by index
 // through ui_comp_get_child() rather than by a ui_* global.
 #include "components/ui_comp_driveband.h"
 #include "components/ui_comp_errorbanner.h"
@@ -69,7 +70,7 @@ static std::vector<uint8_t> audio_bytes;
 static std::recursive_mutex lvgl_mutex;
 
 // ---------------------------------------------------------------------------
-// Frame-rate instrumentation (temporary; remove once tuning is finished).
+// Frame-rate instrumentation: a bench switch, off in every build that ships.
 //
 // Reports over serial rather than the LVGL perf overlay, so throughput can be
 // measured without eyes on the panel. RENDER_START/RENDER_READY fire only when
@@ -82,7 +83,6 @@ static std::recursive_mutex lvgl_mutex;
 // ---------------------------------------------------------------------------
 static constexpr bool kFpsInstrument = false;
 static constexpr bool kFpsStress = false;
-static constexpr bool kFpsHideImages = false;
 static std::atomic<uint32_t> fps_frames{0};
 static std::atomic<uint64_t> fps_render_us_total{0};
 static std::atomic<uint32_t> fps_render_us_max{0};
@@ -105,7 +105,7 @@ static lv_subject_t adc_x_subject;
 static lv_subject_t adc_y_subject;
 static lv_subject_t adc_twist_subject;
 // The MIB's state, as reported over RTPS. The joystick is a slave here: this holds
-// whatever the MIB last said, and every StatusPanel on every screen follows it. One
+// whatever the MIB last said, and every DriveBand on every screen follows it. One
 // subject, because MibSystemState answers both of a panel's labels - where the message
 // it replaced needed a drive status and a fault. Values are the MIB::MibSystemState
 // enum from messages/mib_message.hpp.
@@ -242,7 +242,7 @@ static std::atomic<bool> stick_drives{false};
 // Defined with the burger menu (see "The burger menu, and moving around with
 // the joystick"); declared here for the screens and gestures above it.
 static void nav_use_group(lv_group_t *g, const lv_obj_t *screen);
-static void nav_arrive(lv_obj_t *screen);
+static void nav_arrive(const lv_obj_t *screen);
 static void nav_mirror_states(lv_obj_t *obj);
 // Open the menu on the next screen to load: the burger key on Drive asks the
 // MIB to stop first, and the menu follows once it has, over the Locked screen.
@@ -343,7 +343,7 @@ static void gpio48_panel_observer(lv_observer_t *observer, lv_subject_t *subject
 /////////////////////////////////////////////////////////////////////////////
 // MCB status panel
 //
-// One observer serves both labels on all four StatusPanel instances. It sets
+// One observer serves both labels on every DriveBand instance. It sets
 // the text (from the shared spec, so the MCB's logs and these labels use the
 // same words) and the colour — a style property, which has no built-in
 // binding, hence an observer rather than lv_label_bind_text.
@@ -421,10 +421,9 @@ static void mcb_status_label_observer(lv_observer_t *observer, lv_subject_t *) {
   }
 }
 
-// Binds one StatusPanel instance's two labels to the two subjects. Called once
-// per instance at startup: ui_init builds all four and nothing destroys them,
-// so there is no rebinding to do on a screen change. If a screen ever does get
-// destroyed and re-created, its panel needs this run again.
+// Binds one DriveBand instance's two labels to the two subjects. Called once
+// per instance at startup, and again by the *_ensure function of each screen
+// built on demand, since destroying a screen takes its bindings with it.
 static void bind_status_panel(lv_obj_t *panel) {
   if (panel == nullptr) {
     return;
@@ -474,7 +473,7 @@ static constexpr float kTwistRangeDeadbandMv = 40.0f;
 // it feeds the joystick's X with no inversion. ADC1_CH0 (GPIO16) is the
 // VERTICAL axis and reads *lower* moving up, so it feeds Y with invert_output
 // — after which +Y is up, as the rest of the code assumes. Twist reads higher
-// clockwise. Fixed here so every consumer (UI bars, the keypad pager, RTPS)
+// clockwise. Fixed here so every consumer (UI bars, the keypad, RTPS)
 // sees correct axes without compensating itself; joystick_cal.cpp's step
 // prompts rely on the same directions.
 static espp::FloatRangeMapper::Config stick_horizontal_config(const JoystickCal &cal) {
@@ -701,8 +700,8 @@ static void rtps_poll_cb(lv_timer_t *) {
 // Backlight
 //
 // One brightness setting, 5..100 %, whoever changes it: the RTPS brightness
-// command, the Tab5's side button, and the SCREEN BRIGHTNESS page of the
-// SpecificSettingScreen. Saved a second after it stops changing, so a run
+// command, the Tab5's side button, and the Brightness row of UI Settings.
+// Saved a second after it stops changing, so a run
 // of steps is one flash write rather than one per step.
 /////////////////////////////////////////////////////////////////////////////
 
@@ -888,11 +887,12 @@ static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c);
 /////////////////////////////////////////////////////////////////////////////
 // Push-and-hold gestures
 //
-// Two places in the HMI ask the user to hold an input for kHoldMs before
+// Three places in the HMI ask the user to hold an input for kHoldMs before
 // something happens:
 //
 //   LockedScreen   stick button    enters driving mode  -> DriveScreen
 //   DriveScreen    stick button    leaves driving mode  -> LockedScreen
+//   JoystickScreen stick button, or a finger on CALIBRATE: starts calibration
 //
 // Both on the button, never the stick (issue #11): an enable held on the stick
 // left the user holding it forward the moment the chair would take it, and
@@ -907,29 +907,23 @@ static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c);
 // reverse: an exit on LV_KEY_DOWN there fired every time the user drove
 // backwards, so it exits on the stick button instead.
 //
-// Neither survivor draws a progress widget: spec V2 has no unlock arc and no
-// exit bars. Each still owns a subject, because the fill runs through it and
-// that is what tells a completed hold from a tap; a widget can be bound to it
-// later without touching the driver.
+// Each gesture's fill runs through a subject: the ring round the padlock and
+// Calibrate's meter are bound to theirs, and the exit hold's has no widget.
 //
 // The lock state itself (locked_subject) is declared with the other subjects at
-// the top of the file. While locked, LockedScreen is the only screen reachable:
-// the menu key is not on it.
+// the top of the file. Locked still leaves the menu reachable -- Log, UI
+// Settings and the bench tools are useful with the chair not driving -- but
+// nothing moves: the stick only drives from Drive (stick_drives).
 /////////////////////////////////////////////////////////////////////////////
 
 static constexpr uint32_t kHoldMs = 1000; // hold time to fill a gesture widget
-// Dead time before an exit bar starts filling. Down on the seat buttons page and
-// left on the adjustment page each do double duty — they step the focus grid as
-// well as feeding a hold gesture — so without this every single navigation step
-// ticks its bar up and snaps it back. Longer than a key-repeat step (250 ms), so
-// stepping through a grid leaves the bars alone entirely.
-//
-// The arcs get none of this: nothing shares their input, and they should answer
-// the moment the stick moves.
+// Dead time before a hold starts filling. The stick button doubles as select,
+// and a select is a press shorter than this (kSelectMaxUs), so a tap never
+// ticks a fill up and snaps it back.
 static constexpr uint32_t kBarGraceMs = 500;
 static constexpr int32_t kHoldMax = 100; // arc/bar range (LVGL's default)
-// Beat between the unlock landing and the pager moving on to the Drive page,
-// so the READY TO DRIVE state is legible rather than a flash.
+// Beat between the unlock landing and the Drive screen dissolving in, so the
+// unlocked padlock is legible rather than a flash.
 static constexpr uint32_t kUnlockAdvanceMs = 1000;
 // Poll cadence for the inputs. Matched to the ADC task's 33 ms period: joy_key
 // cannot change faster than that, so a shorter period would only burn LVGL task
@@ -1157,8 +1151,8 @@ static HoldGesture unlock_gesture{
 //
 // Spec V2 navigates with the burger menu: the key at the bottom of every
 // screen opens a full-screen overlay of destinations, and DRIVE in the band
-// goes home from anywhere. There is no pager and no hold-to-enter gesture any
-// more, so a screen change is just a screen change.
+// goes home from anywhere. A screen change is just a screen change (see
+// docs/ui-architecture.md).
 //
 // Swaps go through the SquareLine helper rather than lv_screen_load, so they
 // take the same path as the boot screen's own transition and re-create the
@@ -1198,14 +1192,14 @@ static bool seat_ready() {
 /////////////////////////////////////////////////////////////////////////////
 // Saying why driving is not permitted
 //
-// One cause, three ErrorWarningPanels. On MainScreenFlex: why a push into the
-// DriveScreen or the SeatAdjustmentFlexScreen was refused - both enter
-// gestures are gated in applies(), so a refused push otherwise does nothing at
-// all. On the DriveScreen and the SeatAdjustmentFlexScreen: why it was cut
-// short, by the link dropping or the MCB faulting. All word the cause from
-// hmi_rtps_spec.hpp.
+// One cause, several ErrorBanners. On the Locked screen, and on the screens a
+// menu refusal can happen over: why a request to drive, or to open Seat
+// Functions, was refused - the unlock hold is gated in applies(), so a refused
+// one otherwise does nothing at all. On the DriveScreen and the SeatScreen: why
+// it was cut short, by the link dropping or the MCB faulting. All word the
+// cause from hmi_rtps_spec.hpp.
 //
-// entry_refused_subject records only THAT a push was refused. Both panels work
+// entry_refused_subject records only THAT a request was refused. The banners work
 // out WHY from the link and state subjects whenever any of them changes, so
 // they always name the current cause - cable back in but no DHCP lease yet,
 // say - rather than the one at the moment it first went wrong.
@@ -1266,7 +1260,7 @@ static RefusalText link_refusal_text(RtpsLinkState link) {
   return {"", ""}; // only asked when not CONNECTED
 }
 
-// Fills an ErrorWarningPanel with why driving is not permitted right now. The
+// Fills an ErrorBanner with why driving is not permitted right now. The
 // titles are the caller's, because the same cause reads differently as a
 // refused push and as a drive cut short; so is visibility.
 static void fill_drive_blocked_panel(lv_obj_t *panel, const char *link_title,
@@ -1336,7 +1330,8 @@ static void banner_show(lv_obj_t *panel, bool up) {
   }
 }
 
-// MainScreenFlex. Says which entry was refused, and hides itself the moment
+// Locked, and the screens a menu refusal lands on. Says which request was
+// refused, and hides itself the moment
 // the MCB is ready again, so it never claims a fault that has already cleared.
 static void entry_refused_panel_observer(lv_observer_t *observer, lv_subject_t *) {
   lv_obj_t *panel = lv_observer_get_target_obj(observer);
@@ -1393,7 +1388,7 @@ static void bind_entry_refused_panel(lv_obj_t *panel) {
   bind_to_drive_blocked_cause(panel, entry_refused_panel_observer);
 }
 
-// DriveScreen and SeatAdjustmentFlexScreen. No push to wait for here: entry already required a live
+// DriveScreen and SeatScreen. No push to wait for here: entry already required a live
 // link and an OK state, so anything else means it was lost mid-drive. The banner stays up for as
 // long as that lasts rather than timing out, and clears by itself when the link and state recover.
 // A state neither board knows counts as not OK (mcb_ready compares against OK), so it raises the
@@ -1701,10 +1696,8 @@ static HoldGesture drive_exit_gesture{
     .grace_ms = kBarGraceMs,
 };
 
-// Which page of the seat screen's own pager is showing: 0 = the function
-// buttons, 1 = the adjustment panel. Kept as a plain flag rather than derived
-// from the scroll position, because the slide is animated and a derived value
-// would flip halfway through it.
+// Which page of the seat screen is showing: 0 = the function buttons, 1 = the
+// adjustment panel over them (spec 04b).
 static int seat_page = 0;
 
 // Defined with the rest of the seat navigation below, which is where the button
@@ -1786,27 +1779,24 @@ static void hold_poll_cb(lv_timer_t *) {
 }
 
 /////////////////////////////////////////////////////////////////////////////
-// SeatAdjustmentFlexScreen: joystick navigation of both pages
+// SeatScreen: joystick navigation of both pages
 //
-// Both pages lay their buttons out with LV_FLEX_FLOW_ROW_WRAP, so the joystick
-// walks them as the grid the user sees rather than as the flat list LVGL's own
-// focus_next would give. Each page has its own group and its own cursor:
+// The joystick walks each page as the grid the user sees rather than as the
+// flat list LVGL's own focus_next would give. Each page has its own group and
+// its own cursor:
 //
-//   buttons page                    adjustment page
-//   [ Elevation ] [ Real Tilt ]     [     -     ] [     +     ]
-//   [ FW Tilt   ] [ Side Tilt ]     [ 0deg ] [ 15deg ] [ 25deg ]
-//   [ Static    ] [ Dynamic   ]
+//   function buttons                adjustment page (spec 04b)
+//   [ FB Tilt   ] [ Side Tilt   ]   [ < ]
+//   [ Elevation ] [ Translation ]   [     -     ] [     +     ]
+//   [ Static    ] [ Dynamic     ]   [ 0deg ] [ 15deg ] [ 25deg ]
 //
-// Note the adjustment page's rows are different lengths, which is why a grid
-// carries a per-row count rather than one column total.
+// The rows are different lengths, which is why a grid carries a per-row count
+// rather than one column total. The ButtonGrid also serves the bench gate's
+// PIN pad.
 //
-// Selecting one of the four live function buttons names it on the adjustment
-// page and slides the pager across. The adjustment buttons are navigable and
-// pressable but carry no handler of their own yet, so pressing one only shows
-// LVGL's pressed state.
-//
-// Spec V2 splits this into SeatScreen and SeatAxisScreen, which phase 5 lays
-// out; until then this drives the pager the old screen still has.
+// Picking one of the four function buttons names its motion on the adjustment
+// page and shows it over the buttons; "<", or left from the first column,
+// hides it again. The page's buttons step the motion or send it to a preset.
 /////////////////////////////////////////////////////////////////////////////
 
 static constexpr int kGridMaxRows = 4; // the PIN pad's bottom row is the fourth
@@ -1887,8 +1877,7 @@ static void grid_key_cb(lv_event_t *e) {
     g->row++;
     break;
   case LV_KEY_LEFT:
-    // Left off the adjustment page's left edge is "back": the seat pager's
-    // second page has no other way to its first now the hold gestures are gone.
+    // Left off the adjustment page's left edge is "back", as "<" is.
     if (g == &seat_adjust_grid && g->col == 0) {
       seat_show_buttons_page();
       return;
@@ -2133,11 +2122,11 @@ static void rd_keypad_cb(lv_event_t *e) {
 }
 
 /////////////////////////////////////////////////////////////////////////////
-// SpecificSettingScreen: pages of -/+ rows
+// SettingsScreen: pages of -/+ rows
 //
 // One screen for every setting that is a few numbers. A page is a title, a
 // line of instructions and some rows; each row is the export's
-// ActuatorComponent (Parameter1 is only the template, deleted at boot): short
+// SettingRow component (Parameter1 is only the template, deleted at boot): short
 // label, label, value, and - / + buttons that grey out at the ends of the
 // range. Up/down move between rows, left/right step the focused one (holding
 // the stick repeats), and touch works on the buttons.
@@ -2145,9 +2134,9 @@ static void rd_keypad_cb(lv_event_t *e) {
 // Two kinds of page, which differ only in what a step does:
 //   settings   settings_spec.h. The step sets the row's subject, clamped to
 //              the range; whatever owns that subject applies and saves it.
-//   actuators  RAMMP_ACTUATOR_TABLE, reached through the PIN. The HMI owns
-//              none of these values: a step publishes a REQUEST, and a row's
-//              number changes only when the MCB's actuator-state sample says
+//   actuators  RAMMP_SEAT_AXIS_TABLE, reached through the PIN (DEBUG
+//              ACTUATORS). The HMI owns none of these values: a step publishes a
+//              SeatCommand, and a row's number changes only when MibStatus says
 //              so. That keeps a limit or an interlock one decision made in one
 //              place, instead of two boards disagreeing about where the seat is.
 //
@@ -2177,7 +2166,7 @@ struct SettingRow {
   StepperSpec spec;
   lv_subject_t *value; // the row's whole truth; kValueUnknown until known
   int index;           // position on the page; on the actuators page, the actuator id
-  lv_obj_t *row;       // the ActuatorComponent root; what takes focus
+  lv_obj_t *row;       // the SettingRow root; what takes focus
   lv_obj_t *value_label;
   lv_obj_t *minus;
   lv_obj_t *plus;
@@ -2655,7 +2644,7 @@ static void setting_focus_cb(lv_event_t *e) {
   set_focused_recursive(lv_event_get_target_obj(e), lv_event_get_code(e) == LV_EVENT_FOCUSED);
 }
 
-// ErrorWarningPanel6. Raised only on a page that needs the MCB - the
+// ErrorBanner6. Raised only on a page that needs the MCB - the
 // actuators - and then exactly as on the drive and seat screens: while the
 // link is down or the MCB's state is not OK.
 static void setting_warning_observer(lv_observer_t *observer, lv_subject_t *) {
@@ -2753,19 +2742,18 @@ static void setting_page_open(int32_t page) {
 }
 
 /////////////////////////////////////////////////////////////////////////////
-// GenericActionsScreen: a list of one-press actions
+// SkunkWorksScreen: a grid of one-press actions
 //
-// Entered by holding the stick up on the GENERIC ACTIONS pager page, left by
-// pulling and holding. One button per entry in actions_spec.h: the spec gives
-// each its title, subtitle and whether it needs the MCB; kActionRun below says
-// what it does. Up/down move between buttons; the stick button (or a tap) runs
-// the focused one.
+// The menu's Skunk Works row. One tile per entry in actions_spec.h: the spec
+// gives each its title, subtitle and whether it needs the MCB; kActionRun below
+// says what it does. The stick walks the tiles as a grid; the stick button (or
+// a tap) runs the focused one.
 //
 // A button that needs the MCB greys out while mcb_ready() is false, so it says
 // nothing would happen before anyone presses it - and the local actions stay
 // reachable, which a full-screen banner would not allow.
 //
-// Like the SpecificSettingScreen, the screen and its buttons exist only
+// Like the SettingsScreen, the screen and its tiles exist only
 // while it is up - see "Screens built on demand".
 /////////////////////////////////////////////////////////////////////////////
 
@@ -3237,21 +3225,18 @@ struct NavChrome {
 static NavChrome nav_chrome[16];
 
 static NavChrome *nav_chrome_of(const lv_obj_t *screen) {
-  for (NavChrome &c : nav_chrome) {
-    if (c.screen != nullptr && c.screen == screen) {
-      return &c;
-    }
-  }
-  return nullptr;
+  NavChrome *const end = std::end(nav_chrome);
+  NavChrome *const found = std::find_if(std::begin(nav_chrome), end, [screen](const NavChrome &c) {
+    return c.screen != nullptr && c.screen == screen;
+  });
+  return found != end ? found : nullptr;
 }
 
 static void nav_chrome_forget_cb(lv_event_t *e) {
   const lv_obj_t *key = lv_event_get_target_obj(e);
-  for (NavChrome &c : nav_chrome) {
-    if (c.key == key) {
-      c = {};
-    }
-  }
+  std::replace_if(
+      std::begin(nav_chrome), std::end(nav_chrome),
+      [key](const NavChrome &c) { return c.key == key; }, NavChrome{});
 }
 
 // The group the screen underneath uses, so closing the menu can hand it back.
@@ -3489,7 +3474,7 @@ static void nav_home() {
 // (nav_drop_row, in screen_loaded_cb), which is the spec's "the screen
 // underneath swaps to the destination, then the panel drops".
 static void nav_go(NavDest dest) {
-  lv_obj_t *const before = lv_screen_active();
+  const lv_obj_t *const before = lv_screen_active();
   if (nav_menu_open != nullptr) {
     lv_obj_add_flag(nav_menu_open, LV_OBJ_FLAG_HIDDEN);
     for (uint32_t id : kNavRowIds) {
@@ -3698,11 +3683,14 @@ static void nav_claim_clicks(lv_obj_t *obj) {
 // One screen's chrome. `band` is the DriveBand whose DRIVE cell goes home.
 static void nav_attach_chrome(lv_obj_t *key, lv_obj_t *overlay, lv_obj_t *band) {
   lv_obj_t *screen = lv_obj_get_screen(key);
-  for (NavChrome &c : nav_chrome) {
-    if (c.screen == nullptr || c.screen == screen) {
-      c = {screen, key, overlay};
-      break;
-    }
+  // This screen's slot if it had one (a screen rebuilt on demand), else the
+  // first free one.
+  NavChrome *const slot =
+      std::find_if(std::begin(nav_chrome), std::end(nav_chrome), [screen](const NavChrome &c) {
+        return c.screen == nullptr || c.screen == screen;
+      });
+  if (slot != std::end(nav_chrome)) {
+    *slot = {screen, key, overlay};
   }
   lv_obj_add_event_cb(key, nav_chrome_forget_cb, LV_EVENT_DELETE, nullptr);
 
@@ -3751,7 +3739,7 @@ static void nav_attach_chrome(lv_obj_t *key, lv_obj_t *overlay, lv_obj_t *band) 
 
 // Hands the joystick to the screen being shown and puts the cursor at its top.
 // Called on load; closing the menu restores the group without this reset.
-static void nav_enter_screen(lv_obj_t *screen) {
+static void nav_enter_screen(const lv_obj_t *screen) {
   if (screen == ui_SeatScreen) {
     seat_buttons_grid.row = 0;
     seat_buttons_grid.col = 0;
@@ -3784,7 +3772,7 @@ static void nav_enter_screen(lv_obj_t *screen) {
 
 // Replays the row press on the destination's own overlay: shown where the old
 // one was, the picked row negative, then slid away over the new screen.
-static void nav_drop_menu(lv_obj_t *screen) {
+static void nav_drop_menu(const lv_obj_t *screen) {
   const int row = nav_drop_row;
   nav_drop_row = -1;
   NavChrome *c = nav_chrome_of(screen);
@@ -3818,19 +3806,16 @@ static const char *active_screen_name() {
       {&ui_SkunkWorksScreen, "SkunkWorksScreen"},
       {&ui_DiagnosticsScreen, "DiagnosticsScreen"},
   };
-  for (const Named &entry : kScreens) {
-    if (*entry.obj == screen) {
-      return entry.name;
-    }
-  }
-  return "?";
+  const Named *const found = std::find_if(std::begin(kScreens), std::end(kScreens),
+                                          [screen](const Named &e) { return *e.obj == screen; });
+  return found != std::end(kScreens) ? found->name : "?";
 }
 
 static void screen_loaded_cb(lv_event_t *e) { nav_arrive(lv_event_get_target_obj(e)); }
 
 // Everything that happens when a screen comes up: on SCREEN_LOADED, or by
 // hand from nav_go when the destination was already the screen up.
-static void nav_arrive(lv_obj_t *screen) {
+static void nav_arrive(const lv_obj_t *screen) {
   // The overlay that was up belonged to the screen being left. It was closed on
   // the way out, but a screen reached any other way (the unlock timer, a
   // completed hold) has to leave the menu behind too.
@@ -3871,20 +3856,21 @@ static void nav_arrive(lv_obj_t *screen) {
 // Ignoring `area` and flushing full-screen IS correct here: call_flush_cb passes
 // the buffer START (not an offset), and refr_sync_areas already copies the
 // previous frame's invalid areas forward, so both buffers stay coherent.
-// ===== TEMPORARY render benchmark + content profiler - remove before shipping =====
-// `render` is everything LVGL did between one flush finishing and the next
-// starting (the CPU cost of drawing); `present` is the vsync wait inside
-// present_frame. Measured so far, full-screen invalidate every 10 ms:
-//   MainScreenFlex  86.0 ms      empty screen  19.5 ms
-// so ~77% of a frame is content, not the frame buffer.
+// ---------------------------------------------------------------------------
+// Overdraw
+//
+// What a full-screen redraw costs is mostly content, not the frame buffer: the
+// render benchmark (kFpsInstrument) measured 86 ms for a busy screen against
+// 19.5 ms for an empty one. The biggest share of that content was fills
+// nobody could see, which is what strip_screen_overdraw takes out.
+// ---------------------------------------------------------------------------
 static espp::Logger logger_overdraw({.tag = "overdraw", .level = espp::Logger::Verbosity::INFO});
 
 // Overdraw: SquareLine gives every container an opaque background, so a page
 // nested three deep repaints the same theme colour three times before anything
-// visible lands on top. Measured on MainScreenFlex with a full-screen redraw,
-// those redundant fills were ~35 ms of an 86 ms frame -- the FlexPanel, the
-// LockedPanel and the GraphicsPanel each filling the exact colour the screen
-// had already painted.
+// visible lands on top. Measured on the old home pager with a full-screen
+// redraw, those redundant fills were ~35 ms of an 86 ms frame -- three nested
+// panels each filling the exact colour the screen had already painted.
 //
 // A fill is redundant when the object is a plain opaque rectangle in exactly
 // the colour already on the screen behind it: same colour, no corner radius, no
@@ -3961,14 +3947,14 @@ static void strip_all_overdraw() {
 //
 // ui_init builds every screen at boot, and every widget lands in internal RAM
 // - the DMA-capable pool the W5500's SPI bounce buffer is later allocated from,
-// with no NULL check behind it. With the SpecificSettingScreen and the
-// GenericActionsScreen both resident that pool bottomed out at 415 B, after the
-// board had already boot-looped on it. So these two are destroyed right after
+// with no NULL check behind it. With the Settings and Skunk Works screens both
+// resident that pool bottomed out at 415 B, after the board had already
+// boot-looped on it. So these, and Diagnostics, are destroyed right after
 // ui_init, built when opened, and destroyed again once left: at most one exists
-// at a time, and neither while RTPS starts.
+// at a time, and none while RTPS starts.
 //
-// Everything the firmware hangs on one of them - StatusPanel and TopBar
-// bindings, exit bar, warning panel, load hooks - is redone by its *_ensure
+// Everything the firmware hangs on one of them - DriveBand, TopBar and menu
+// bindings, warning banner, load hooks - is redone by its *_ensure
 // function each time it is built. All of it is object-bound, so it goes with
 // the screen.
 /////////////////////////////////////////////////////////////////////////////
@@ -4040,7 +4026,7 @@ static void actions_screen_ensure() {
   bind_rtps_label(ui_TopBar9);
   bind_clock_label(ui_TopBar9);
   nav_attach_chrome(ui_MenuKey8, ui_MenuOverlay8, ui_DriveBand8);
-  // Its ErrorWarningPanel stays down: an action that needs the MCB greys out
+  // Its ErrorBanner stays down: an action that needs the MCB greys out
   // instead (action_ready_observer), which keeps the local ones reachable.
   lv_obj_add_flag(ui_ErrorBanner7, LV_OBJ_FLAG_HIDDEN);
   lv_obj_add_event_cb(ui_SkunkWorksScreen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, nullptr);
@@ -4075,7 +4061,7 @@ static void diagnostics_screen_ensure() {
   bind_rtps_label(ui_TopBar10);
   bind_clock_label(ui_TopBar10);
   nav_attach_chrome(ui_MenuKey9, ui_MenuOverlay9, ui_DriveBand9);
-  // The red, blinking readings are this screen's warning: the ErrorWarningPanel
+  // The red, blinking readings are this screen's warning: the ErrorBanner
   // would cover exactly what someone opened the screen to look at.
   lv_obj_add_flag(ui_ErrorBanner8, LV_OBJ_FLAG_HIDDEN);
   for (lv_subject_t *subject : {&diag_rate_subject, &diag_stale_subject, &rtps_blink_subject}) {
@@ -4656,7 +4642,6 @@ extern "C" void app_main(void) {
   }
 
   // Query LCD controller
-  auto controller_type = tab5.get_display_controller();
   const char *controller_name = tab5.get_display_controller_name();
   logger.info(controller_name);
 
@@ -4929,14 +4914,15 @@ extern "C" void app_main(void) {
   // pointer to it (lv_screen_active() before this call) and lv_screen_load()
   // it again.
   logger.info("Loading SquareLine UI...");
-  // The Tab5 panel is natively 720x1280 portrait; rotate LVGL 270 degrees so
-  // the UI is 1280x720 landscape (use ROTATION_90 for the other direction).
+  // The Tab5 panel is natively 720x1280 portrait, which is what the UI is drawn
+  // for. DIRECT rendering needs rotation 0; Flip screen turns the picture in
+  // the flush instead (set_display_flipped).
   lv_display_set_rotation(lv_display_get_default(), LV_DISPLAY_ROTATION_0);
   ui_init();
   // ui_init builds every screen, and this one is dead: the actuators are a
-  // page of the SpecificSettingScreen now. Its widget tree sits in internal
-  // RAM, and the W5500's SPI bounce buffer is allocated from the same
-  // DMA-capable pool when RTPS starts - with the Generic Actions screen added
+  // page of the SettingsScreen now (DEBUG ACTUATORS). Its widget tree sits in
+  // internal RAM, and the W5500's SPI bounce buffer is allocated from the same
+  // DMA-capable pool when RTPS starts - with the Skunk Works screen added
   // that pool ran dry and the board boot-looped (spi_master does not check the
   // allocation). Delete the screen in SquareLine and this line goes too: the
   // build fails on it, which is the reminder.
@@ -4970,9 +4956,7 @@ extern "C" void app_main(void) {
   lv_obj_set_style_image_recolor_opa(ui_Image3, LV_OPA_COVER, LV_PART_MAIN);
 
   // Benchmark against a real screen rather than the boot screen, whose logo
-  // otherwise dominates every measurement. Temporary, paired with
-  // kFpsInstrument. kFpsHideImages went with the flex pager's two scaled
-  // RGB565A8 images; spec V2 draws none.
+  // otherwise dominates every measurement. Only with kFpsInstrument.
   if (kFpsInstrument) {
     lv_screen_load(ui_DriveScreen);
   }
@@ -5118,8 +5102,8 @@ extern "C" void app_main(void) {
   bind_mcb_lost_panel(ui_ErrorBanner4); // DriveScreen
   bind_mcb_lost_panel(ui_ErrorBanner1); // SeatScreen
   // Initialised before the bind: the panel's observer reads it on its first
-  // run. LockedScreen's banner, because a refused unlock is what it reports now
-  // (entry_refusal_poll), and the pager page it used to live on is gone.
+  // run. LockedScreen's banner, because a refused unlock is what it reports
+  // (entry_refusal_poll).
   bind_entry_refused_panel(ui_ErrorBanner2); // LockedScreen
   // A refusal from the menu (Seat Functions, no MCB) can happen on any screen,
   // so the screens whose banner has no other job say it too. Diagnostics and
@@ -5182,8 +5166,8 @@ extern "C" void app_main(void) {
       .task_config = {.name = "Button", .stack_size_bytes = 4 * 1024, .priority = 5},
   });
 
-  // Joystick as an LVGL keypad input device, driving the MainScreenFlex
-  // horizontal pager. The read function runs on the LVGL task and drains the
+  // Joystick as an LVGL keypad input device, moving the cursor through each
+  // screen's focus group. The read function runs on the LVGL task and drains the
   // latch the ADC task fills, so one flick of the stick = one PRESSED cycle =
   // one LV_EVENT_KEY. Touch keeps working; indevs coexist.
   logger.info("Adding joystick keypad input device...");
@@ -5264,11 +5248,10 @@ extern "C" void app_main(void) {
   lv_arc_set_range(ui_LockRing, 0, kHoldMax);
   lv_obj_remove_flag(ui_LockRing, LV_OBJ_FLAG_CLICKABLE);
 
-  // The two push-and-hold gestures left, polled by one shared timer — only the
+  // The three push-and-hold gestures, polled by one shared timer — only the
   // gesture whose applies() is true on the current screen can be filling at any
-  // moment. Neither draws a progress widget any more: the spec-V2 screens have
-  // no unlock arc and no exit bars, so the subjects exist only to carry the
-  // fill so hold_poll can tell a hold from a tap.
+  // moment. The subjects carry the fill, which is how hold_poll tells a hold
+  // from a tap and what the ring and Calibrate's meter are bound to.
   lv_subject_init_int(&unlock_gesture.progress, 0);
   lv_subject_init_int(&drive_exit_gesture.progress, 0);
   lv_subject_init_int(&calibrate_gesture.progress, 0);
@@ -5284,7 +5267,7 @@ extern "C" void app_main(void) {
   lv_timer_create(hold_poll_cb, kHoldPollMs, nullptr);
 
   // LogScreen: TextArea1 shows the serial output log_capture has kept. Its
-  // ErrorWarningPanel5 is deliberately left unbound (hidden): a link-lost
+  // ErrorBanner5 is left for menu refusals only: a link-lost
   // banner would cover the log at exactly the moment someone wants to read it.
   log_view_init();
   // Down at the newest line leaves the log for the burger key.
@@ -5502,7 +5485,7 @@ extern "C" void app_main(void) {
       },
   });
 
-  // RDScreen: the PIN pad and its four checkboxes.
+  // BenchGateScreen: the PIN pad and its four dots.
   //
   // The checkboxes need no observer of their own - each one is CHECKED exactly
   // when the entry has reached it, which lv_obj_bind_state_if_ge says directly.
@@ -5565,7 +5548,7 @@ extern "C" void app_main(void) {
     }
   }
 
-  // SpecificSettingScreen: what outlives the screen, which is built on demand
+  // SettingsScreen: what outlives the screen, which is built on demand
   // (settings_screen_ensure). The seat values it steps are initialised further
   // up, with the seat screen that shares them.
 
@@ -5885,7 +5868,6 @@ extern "C" void app_main(void) {
   // line is printed. The log is divided down because 30 lines/s is the
   // console-flood pattern that starved LVGL once before.
   static constexpr auto kAdcUpdatePeriod = 33ms; // 30 Hz: ADC read, LVGL bars, RTPS publish
-  static constexpr int kAdcLogDivider = 6;       // serial log every Nth cycle (~5 Hz)
   // Twist is the noisy axis (~50 mV peak-to-peak at rest, where X/Y read ~1
   // mV): each cycle averages this many oneshot reads of it, which costs no
   // lag, then lowpasses the result to iron out what is left. 80 ms is short
@@ -5893,9 +5875,6 @@ extern "C" void app_main(void) {
   static constexpr int kTwistOversample = 8;
   static espp::SimpleLowpassFilter twist_lowpass({.time_constant = 0.08f});
   auto adc_task_fn = [&adc, &channels](std::mutex &m, std::condition_variable &cv) {
-    static uint32_t cycle = 0;
-    const bool log_this_cycle = (cycle++ % kAdcLogDivider) == 0;
-
     // see the AXIS WIRING note at the calibrations: CH1 is horizontal, CH0 is
     // vertical
     auto vert_mv = adc.get_mv(channels[0]);  // ADC1_CH0 (GPIO16)
@@ -6002,11 +5981,17 @@ extern "C" void app_main(void) {
       }
       {
         // lv_subject_set_int runs the bar's observer callback synchronously,
-        // which touches the widget, so it needs the LVGL lock
-        std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
-        lv_subject_set_int(&adc_x_subject, static_cast<int32_t>(stick_x * 100.0f));
-        lv_subject_set_int(&adc_y_subject, static_cast<int32_t>(stick_y * 100.0f));
-        lv_subject_set_int(&adc_twist_subject, static_cast<int32_t>(stick.z() * 100.0f));
+        // which touches the widget, so it needs the LVGL lock. Tried, not
+        // waited for: the UI holds it for a whole frame (a full redraw is
+        // ~100 ms, more with Flip screen), and the stick's path to the MCB
+        // below must not queue behind a render. A busy UI just gets the bars
+        // one cycle later.
+        std::unique_lock<std::recursive_mutex> lock(lvgl_mutex, std::try_to_lock);
+        if (lock.owns_lock()) {
+          lv_subject_set_int(&adc_x_subject, static_cast<int32_t>(stick_x * 100.0f));
+          lv_subject_set_int(&adc_y_subject, static_cast<int32_t>(stick_y * 100.0f));
+          lv_subject_set_int(&adc_twist_subject, static_cast<int32_t>(stick.z() * 100.0f));
+        }
       }
 
       // send the MCB the same calibrated -1..+1 values the bars show (+Y
@@ -6031,19 +6016,6 @@ extern "C" void app_main(void) {
                       vert_mv.value_or(0.0f), twist_mv.value_or(0.0f), adc_published,
                       joy_button_pressed.load());
 
-    if (log_this_cycle) {
-      auto fmt_mv = [](const std::optional<float> &v) {
-        return v ? fmt::format("{} mV", static_cast<int>(*v)) : std::string("no value");
-      };
-      // monotonically increasing tag: if the serial log ever goes quiet and
-      // later resumes with a gap in this counter, the task kept running and the
-      // console transport dropped the lines; a continuous sequence would mean
-      // the task itself had paused
-      // cppcheck-suppress unreadVariable
-      static uint32_t print_seq = 0;
-      // fmt::print("#{} horiz(CH1): {}\tvert(CH0): {}\ttwist: {}\n", print_seq++,
-      //            fmt_mv(horiz_mv), fmt_mv(vert_mv), fmt_mv(twist_mv));
-    }
     // NOTE: sleeping in this way allows the sleep to exit early when the
     // task is being stopped / destroyed
     {
@@ -6066,7 +6038,7 @@ extern "C" void app_main(void) {
   // backlight directly (no LVGL), so it's safe from the RTPS receive task.
   rtps_comms_on_brightness(
       [](float percent) { brightness_set(static_cast<int>(std::lround(percent))); });
-  // MCB status -> the two StatusPanel labels. Runs on the RTPS receive task,
+  // MCB status -> the two DriveBand labels. Runs on the RTPS receive task,
   // so it only writes subjects — and takes the LVGL lock to do it, because
   // lv_subject_set_int runs the observers synchronously on this task and they
   // touch widgets.

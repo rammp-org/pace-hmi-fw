@@ -9,6 +9,7 @@
 #include <thread>
 #include <vector>
 
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_pthread.h"
 #include "lvgl.h"
@@ -97,42 +98,59 @@ bool send_line(int sock, const std::string &line) {
 /// as active. It costs ~170 ms; this is a debug channel, and a frame that is
 /// right matters more than a frame that is quick.
 ///
-/// The lock is held for the whole send. Letting go between rows would let the
-/// LVGL task redraw into the buffer mid-transfer and tear the capture.
+/// The frame is copied out under the LVGL lock and sent after it is let go.
+/// Sending under the lock stalled the LVGL task for the ~2.6 s the socket
+/// takes over 1.8 MB, and a stick-button hold started straight after that
+/// stall was lost -- a debug channel must not change what it is observing.
+/// The copy is one PSRAM buffer, allocated on the first SHOT and kept.
 bool send_shot(int sock, int step) {
-  std::lock_guard<std::recursive_mutex> lock(*cfg.lvgl_mutex);
-  lv_display_t *disp = lv_display_get_default();
-  for (int i = 0; i < 2; i++) {
-    lv_obj_invalidate(lv_screen_active());
-    lv_refr_now(disp);
-  }
-  const lv_draw_buf_t *buf = lv_display_get_buf_active(disp);
-  if (buf == nullptr || buf->data == nullptr) {
-    return send_line(sock, "ERR no display buffer");
-  }
-  if (buf->header.cf != LV_COLOR_FORMAT_RGB565) {
-    return send_line(sock, "ERR display is not RGB565 (cf " +
-                               std::to_string(static_cast<int>(buf->header.cf)) + ")");
-  }
-
-  const int32_t out_w = buf->header.w / step;
-  const int32_t out_h = buf->header.h / step;
-  bool ok = send_line(sock, "FRAME " + std::to_string(out_w) + " " + std::to_string(out_h) + " " +
-                                std::to_string(static_cast<size_t>(out_w) * out_h * 2));
-  std::vector<uint16_t> row(static_cast<size_t>(out_w));
-  for (int32_t y = 0; ok && y < out_h; y++) {
-    const auto *src = reinterpret_cast<const uint16_t *>(buf->data + static_cast<size_t>(y) * step *
-                                                                         buf->header.stride);
-    if (step == 1) {
-      ok = send_all(sock, src, static_cast<size_t>(out_w) * 2);
-      continue;
+  static uint16_t *copy = nullptr;
+  int32_t out_w = 0;
+  int32_t out_h = 0;
+  {
+    std::lock_guard<std::recursive_mutex> lock(*cfg.lvgl_mutex);
+    lv_display_t *disp = lv_display_get_default();
+    for (int i = 0; i < 2; i++) {
+      lv_obj_invalidate(lv_screen_active());
+      lv_refr_now(disp);
     }
-    for (int32_t x = 0; x < out_w; x++) {
-      row[static_cast<size_t>(x)] = src[x * step];
+    const lv_draw_buf_t *buf = lv_display_get_buf_active(disp);
+    if (buf == nullptr || buf->data == nullptr) {
+      return send_line(sock, "ERR no display buffer");
     }
-    ok = send_all(sock, row.data(), row.size() * 2);
+    if (buf->header.cf != LV_COLOR_FORMAT_RGB565) {
+      return send_line(sock, "ERR display is not RGB565 (cf " +
+                                 std::to_string(static_cast<int>(buf->header.cf)) + ")");
+    }
+    out_w = buf->header.w / step;
+    out_h = buf->header.h / step;
+    static size_t copy_px = 0;
+    const size_t px = static_cast<size_t>(out_w) * out_h;
+    if (px > copy_px) {
+      heap_caps_free(copy);
+      copy = static_cast<uint16_t *>(heap_caps_malloc(px * 2, MALLOC_CAP_SPIRAM));
+      copy_px = copy != nullptr ? px : 0;
+    }
+    if (copy == nullptr) {
+      return send_line(sock, "ERR no memory for the capture");
+    }
+    for (int32_t y = 0; y < out_h; y++) {
+      const auto *src = reinterpret_cast<const uint16_t *>(
+          buf->data + static_cast<size_t>(y) * step * buf->header.stride);
+      uint16_t *dst = copy + static_cast<size_t>(y) * out_w;
+      if (step == 1) {
+        memcpy(dst, src, static_cast<size_t>(out_w) * 2);
+        continue;
+      }
+      for (int32_t x = 0; x < out_w; x++) {
+        dst[x] = src[x * step];
+      }
+    }
   }
-  return ok;
+  const size_t bytes = static_cast<size_t>(out_w) * out_h * 2;
+  return send_line(sock, "FRAME " + std::to_string(out_w) + " " + std::to_string(out_h) + " " +
+                             std::to_string(bytes)) &&
+         send_all(sock, copy, bytes);
 }
 
 void touch_to(int32_t x, int32_t y, bool down) {

@@ -32,8 +32,9 @@
  *
  * What it can and cannot reach. The joystick directions it injects go into the
  * keypad latch LVGL reads, never into the stick values sent to the MCB, so it
- * cannot drive the chair. It CAN press anything on screen: ACTIVATE DRIVE, the
- * seat and actuator jog buttons, the drive mode. Those move things. There is no
+ * cannot steer the chair. It CAN press anything on screen and hold the stick
+ * button (BTN): asking the MIB to drive, the seat and actuator jog buttons, the
+ * drive mode. Those move things. There is no
  * authentication, so anything on the network can do it -- which is why the
  * channel is compiled out unless CONFIG_HMI_REMOTE_UI is set, and must stay out
  * of anything that leaves the bench.

@@ -1,5 +1,5 @@
 /*
- * settings_spec.h - settings shown on the SpecificSettingScreen.
+ * settings_spec.h - settings shown on the SettingsScreen (UI Settings).
  *
  * - A page is a title, a line of instructions, and every parameter that names
  *   it, in table order. More rows on a page = more X lines.
