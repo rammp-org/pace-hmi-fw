@@ -1,5 +1,5 @@
 /*
- * settings_spec.h - settings shown on the SpecificSettingScreen.
+ * settings_spec.h - settings shown on the SettingsScreen (UI Settings).
  *
  * - A page is a title, a line of instructions, and every parameter that names
  *   it, in table order. More rows on a page = more X lines.
@@ -12,12 +12,23 @@
 
 /* P(NAME, title, instructions) */
 #define SETTINGS_PAGE_TABLE(P)                                                                     \
-  P(SCREEN_BRIGHTNESS, "SCREEN BRIGHTNESS",                                                        \
-    "Left/right or -/+ to change. Saved automatically. Pull and hold to exit.")
+  P(UI, "UI Settings", "Left/right or -/+ to change. Saved automatically.")
 
-/* X(PAGE, NAME, short, label, min, max, step, decimals, unit) */
+/* X(PAGE, NAME, short, label, min, max, step, decimals, unit, default)
+   A row whose values are names rather than numbers (Theme, Menu slide...) is
+   0..n-1 here; main.cpp's kSettingParamNames says what each value reads.
+   Every row is saved in settings.txt under its NAME, lowercase (settings.cpp),
+   and starts at `default` until it has been. */
 #define SETTINGS_PARAM_TABLE(X)                                                                    \
-  X(SCREEN_BRIGHTNESS, BRIGHTNESS, "S1", "Brightness", 5, 100, 5, 0, "%")
+  X(UI, BRIGHTNESS, "S1", "Brightness", 5, 100, 5, 0, "%", 75)                                     \
+  X(UI, THEME, "S2", "Theme", 0, 1, 1, 0, "", 0)                                                   \
+  X(UI, MENU_SLIDE, "S3", "Menu slide", 0, 1, 1, 0, "", 0)                                         \
+  X(UI, FLIP, "S4", "Flip screen", 0, 1, 1, 0, "", 0)                                              \
+  X(UI, STICK_SENSITIVITY, "S5", "Stick sensitivity", 1, 10, 1, 0, "", 9)                          \
+  X(UI, STICK_INVERT_X, "S6", "Stick left/right", 0, 1, 1, 0, "", 0)                               \
+  X(UI, STICK_INVERT_Y, "S7", "Stick fwd/back", 0, 1, 1, 0, "", 0)                                 \
+  X(UI, STICK_SWAP, "S8", "Stick axes", 0, 1, 1, 0, "", 0)                                         \
+  X(UI, SOUNDS, "S9", "Sounds", 0, 1, 1, 0, "", 1)
 
 /* SETTINGS_PAGE_SCREEN_BRIGHTNESS, ..., SETTINGS_PAGE_COUNT */
 enum {

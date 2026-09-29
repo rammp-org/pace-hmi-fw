@@ -8,14 +8,6 @@
 lv_obj_t * ui_BootScreen = NULL;
 lv_obj_t * ui_Image3 = NULL;
 // event funtions
-void ui_event_BootScreen(lv_event_t * e)
-{
-    lv_event_code_t event_code = lv_event_get_code(e);
-
-    if(event_code == LV_EVENT_SCREEN_LOADED) {
-        _ui_screen_change(&ui_MainScreenFlex, LV_SCREEN_LOAD_ANIM_NONE, 0, 2500, &ui_MainScreenFlex_screen_init);
-    }
-}
 
 // build funtions
 
@@ -34,8 +26,6 @@ void ui_BootScreen_screen_init(void)
     lv_obj_add_flag(ui_Image3, LV_OBJ_FLAG_CLICKABLE);     /// Flags
     lv_obj_remove_flag(ui_Image3, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_image_set_scale(ui_Image3, 300);
-
-    lv_obj_add_event_cb(ui_BootScreen, ui_event_BootScreen, LV_EVENT_ALL, NULL);
 
 }
 

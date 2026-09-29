@@ -52,3 +52,31 @@ void ui_comp_GenericActionsComponent1_create_hook(lv_obj_t * comp)
 void ui_comp_DiagnosticComponent_create_hook(lv_obj_t * comp)
 {
 }
+
+void ui_comp_DiagRow_create_hook(lv_obj_t * comp)
+{
+}
+
+void ui_comp_DriveBand_create_hook(lv_obj_t * comp)
+{
+}
+
+void ui_comp_ErrorBanner_create_hook(lv_obj_t * comp)
+{
+}
+
+void ui_comp_MenuKey_create_hook(lv_obj_t * comp)
+{
+}
+
+void ui_comp_MenuOverlay_create_hook(lv_obj_t * comp)
+{
+}
+
+void ui_comp_SettingRow_create_hook(lv_obj_t * comp)
+{
+}
+
+void ui_comp_SlotTile_create_hook(lv_obj_t * comp)
+{
+}

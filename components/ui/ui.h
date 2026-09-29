@@ -32,16 +32,17 @@ extern "C" {
 ///////////////////// SCREENS ////////////////////
 
 #include "screens/ui_BootScreen.h"
-#include "screens/ui_JoystickTest.h"
-#include "screens/ui_MainScreenFlex.h"
-#include "screens/ui_DriveScreen.h"
-#include "screens/ui_SeatAdjustmentFlexScreen.h"
-#include "screens/ui_RDScreen.h"
-#include "screens/ui_ActuatorsScreen.h"
+#include "screens/ui_SeatScreen.h"
+#include "screens/ui_BenchMotorsScreen.h"
 #include "screens/ui_LogScreen.h"
-#include "screens/ui_SpecificSettingScreen.h"
-#include "screens/ui_GenericActionsScreen.h"
+#include "screens/ui_SettingsScreen.h"
+#include "screens/ui_SkunkWorksScreen.h"
 #include "screens/ui_DiagnosticsScreen.h"
+#include "screens/ui_UpdateScreen.h"
+#include "screens/ui_LockedScreen.h"
+#include "screens/ui_DriveScreen.h"
+#include "screens/ui_JoystickScreen.h"
+#include "screens/ui_BenchGateScreen.h"
 
 ///////////////////// VARIABLES ////////////////////
 
@@ -52,18 +53,22 @@ extern lv_obj_t * ui____initial_actions0;
 
 // IMAGES AND IMAGE SETS
 LV_IMG_DECLARE(ui_img_rammp_type_white_svg);    // assets/RAMMP_Type_White.svg
-LV_IMG_DECLARE(ui_img_lock_png);    // assets/Lock.png
-LV_IMG_DECLARE(ui_img_unlock_png);    // assets/Unlock.png
-LV_IMG_DECLARE(ui_img_arrow_left_png);    // assets/arrow_left.png
-LV_IMG_DECLARE(ui_img_arrow_png);    // assets/arrow.png
-LV_IMG_DECLARE(ui_img_107617181);    // assets/turbo-rasterized.png
-LV_IMG_DECLARE(ui_img_rammp_wheelchair_png);    // assets/rammp_wheelchair.png
-LV_IMG_DECLARE(ui_img_action_png);    // assets/action.png
 
 // FONTS
 LV_FONT_DECLARE(ui_font_IBMPlexSansBold82);
 LV_FONT_DECLARE(ui_font_IBMPlexSansMedium264);
 LV_FONT_DECLARE(ui_font_IBMPlexSansMedium53);
+LV_FONT_DECLARE(ui_font_IBMPlexSansRegular24);
+LV_FONT_DECLARE(ui_font_IBMPlexSansRegular264);
+LV_FONT_DECLARE(ui_font_IBMPlexSansRegular28);
+LV_FONT_DECLARE(ui_font_IBMPlexSansRegular34);
+LV_FONT_DECLARE(ui_font_IBMPlexSansRegular44);
+LV_FONT_DECLARE(ui_font_IBMPlexSansRegular53);
+LV_FONT_DECLARE(ui_font_IBMPlexSansRegular99);
+LV_FONT_DECLARE(ui_font_MontserratRegular28);
+LV_FONT_DECLARE(ui_font_MontserratSemiBold24);
+LV_FONT_DECLARE(ui_font_MontserratSemiBold44);
+LV_FONT_DECLARE(ui_font_MontserratSemiBold53);
 
 // UI INIT
 void ui_init(void);

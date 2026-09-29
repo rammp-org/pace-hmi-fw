@@ -395,14 +395,13 @@ JoystickCal joystick_cal_current() {
 }
 
 void joystick_cal_init_ui(const JoystickCalUi &config) {
-  if (!config.screen || !config.button || !config.button_label || !config.instructions ||
-      !config.blink) {
-    logger.error("JoystickTest widgets missing from the UI export; CALIBRATE is disabled");
+  if (!config.screen || !config.instructions || !config.blink) {
+    logger.error("JoystickScreen widgets missing from the UI export; CALIBRATE is disabled");
     return;
   }
   ui = config;
   idle_text = lv_label_get_text(ui.instructions);
-  button_text = lv_label_get_text(ui.button_label);
+  button_text = ui.button_label != nullptr ? lv_label_get_text(ui.button_label) : "CALIBRATE";
   lv_subject_init_string(&text_subject, text_buf, text_prev_buf, sizeof(text_buf),
                          idle_text.c_str());
   lv_subject_init_int(&prompting_subject, 0);
@@ -410,11 +409,27 @@ void joystick_cal_init_ui(const JoystickCalUi &config) {
   lv_label_bind_text(ui.instructions, &text_subject, nullptr);
   lv_subject_add_observer_obj(&prompting_subject, instructions_observer, ui.instructions, nullptr);
   lv_subject_add_observer_obj(ui.blink, instructions_observer, ui.instructions, nullptr);
-  lv_subject_add_observer_obj(&running_subject, button_label_observer, ui.button_label, nullptr);
-  lv_obj_add_event_cb(ui.button, button_cb, LV_EVENT_CLICKED, nullptr);
+  // Optional since spec V2: the menu row starts the run instead.
+  if (ui.button_label != nullptr) {
+    lv_subject_add_observer_obj(&running_subject, button_label_observer, ui.button_label, nullptr);
+  }
+  if (ui.button != nullptr) {
+    lv_obj_add_event_cb(ui.button, button_cb, LV_EVENT_CLICKED, nullptr);
+  }
   lv_obj_add_event_cb(ui.screen, screen_unload_cb, LV_EVENT_SCREEN_UNLOAD_START, nullptr);
   timer = lv_timer_create(tick_cb, kTickMs, nullptr);
   lv_timer_pause(timer);
+}
+
+void joystick_cal_toggle() {
+  if (ui.screen == nullptr) {
+    return; // no UI bound: nothing to prompt with
+  }
+  if (running) {
+    cancel("menu");
+  } else {
+    start();
+  }
 }
 
 void joystick_cal_note_raw(float horizontal_mv, float vertical_mv, float twist_mv) {

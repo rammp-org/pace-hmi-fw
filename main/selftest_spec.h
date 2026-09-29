@@ -87,7 +87,7 @@ enum {
  *            attached.
  *
  * time.render_*  RENDER_START..RENDER_READY for one full-screen invalidate,
- *            flush and vsync wait included, on MainScreenFlex with the results
+ *            flush and vsync wait included, on the screen that is up, with the results
  *            panel hidden and only its small blinking banner up: 95 ms mean,
  *            103 ms worst (88 / 91 with nothing up at all - the blink costs
  *            ~7 ms a frame). Depends on which screen is up, so compare runs

@@ -190,6 +190,10 @@ inline constexpr char kHmiLinkRefusedTitle[] = "DRIVE REFUSED: RTPS LINK"; // dr
 inline constexpr char kHmiMcbRefusedTitle[] = "DRIVE REFUSED: MCB STATE";
 inline constexpr char kHmiSeatLinkRefusedTitle[] = "SEAT REFUSED: RTPS LINK"; // seat refused
 inline constexpr char kHmiSeatMcbRefusedTitle[] = "SEAT REFUSED: MCB STATE";
+// Driving, and then the link or the MCB went: not a refusal -- nothing was
+// asked -- so it says what happened.
+inline constexpr char kHmiDriveLostLinkTitle[] = "DRIVING STOPPED: RTPS LINK";
+inline constexpr char kHmiDriveLostMcbTitle[] = "DRIVING STOPPED: MCB STATE";
 inline constexpr char kHmiLinkLostTitle[] = "RTPS LINK LOST"; // lost on drive/seat screen
 inline constexpr char kHmiMcbFaultTitle[] = "MCB STATE FAULT";
 
@@ -201,10 +205,10 @@ inline constexpr char kHmiDriveNotGrantedText[] = "MIB DID NOT ENABLE DRIVING";
 inline constexpr char kHmiDriveNotGrantedFooter[] = "Request timed out";
 inline constexpr char kHmiDriveStoppedTitle[] = "DRIVING STOPPED";
 inline constexpr char kHmiDriveStoppedText[] = "MIB DISABLED DRIVING";
-inline constexpr char kHmiDriveStoppedFooter[] = "Hold up to ask again";
+inline constexpr char kHmiDriveStoppedFooter[] = "Hold the stick button again";
 inline constexpr char kHmiExitRefusedTitle[] = "EXIT REFUSED";
 inline constexpr char kHmiExitRefusedText[] = "MIB IS STILL DRIVING";
-inline constexpr char kHmiExitRefusedFooter[] = "Hold the button again";
+inline constexpr char kHmiExitRefusedFooter[] = "Try the menu or button again";
 static_assert(sizeof(kHmiDriveNotGrantedText) <= kErrorTextLen &&
                   sizeof(kHmiDriveStoppedText) <= kErrorTextLen &&
                   sizeof(kHmiExitRefusedText) <= kErrorTextLen,

@@ -33,16 +33,17 @@ void ui_init(void)
                                                false, LV_FONT_DEFAULT);
     lv_disp_set_theme(dispp, theme);
     ui_BootScreen_screen_init();
-    ui_JoystickTest_screen_init();
-    ui_MainScreenFlex_screen_init();
-    ui_DriveScreen_screen_init();
-    ui_SeatAdjustmentFlexScreen_screen_init();
-    ui_RDScreen_screen_init();
-    ui_ActuatorsScreen_screen_init();
+    ui_SeatScreen_screen_init();
+    ui_BenchMotorsScreen_screen_init();
     ui_LogScreen_screen_init();
-    ui_SpecificSettingScreen_screen_init();
-    ui_GenericActionsScreen_screen_init();
+    ui_SettingsScreen_screen_init();
+    ui_SkunkWorksScreen_screen_init();
     ui_DiagnosticsScreen_screen_init();
+    ui_UpdateScreen_screen_init();
+    ui_LockedScreen_screen_init();
+    ui_DriveScreen_screen_init();
+    ui_JoystickScreen_screen_init();
+    ui_BenchGateScreen_screen_init();
     ui____initial_actions0 = lv_obj_create(NULL);
     lv_disp_load_scr(ui_BootScreen);
 }
@@ -50,14 +51,15 @@ void ui_init(void)
 void ui_destroy(void)
 {
     ui_BootScreen_screen_destroy();
-    ui_JoystickTest_screen_destroy();
-    ui_MainScreenFlex_screen_destroy();
-    ui_DriveScreen_screen_destroy();
-    ui_SeatAdjustmentFlexScreen_screen_destroy();
-    ui_RDScreen_screen_destroy();
-    ui_ActuatorsScreen_screen_destroy();
+    ui_SeatScreen_screen_destroy();
+    ui_BenchMotorsScreen_screen_destroy();
     ui_LogScreen_screen_destroy();
-    ui_SpecificSettingScreen_screen_destroy();
-    ui_GenericActionsScreen_screen_destroy();
+    ui_SettingsScreen_screen_destroy();
+    ui_SkunkWorksScreen_screen_destroy();
     ui_DiagnosticsScreen_screen_destroy();
+    ui_UpdateScreen_screen_destroy();
+    ui_LockedScreen_screen_destroy();
+    ui_DriveScreen_screen_destroy();
+    ui_JoystickScreen_screen_destroy();
+    ui_BenchGateScreen_screen_destroy();
 }

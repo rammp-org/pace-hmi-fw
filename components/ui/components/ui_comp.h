@@ -17,17 +17,14 @@ void del_component_child_event_cb(lv_event_t * e);
 
 lv_obj_t * ui_comp_get_child(lv_obj_t * comp, uint32_t child_idx);
 extern uint32_t LV_EVENT_GET_COMP_CHILD;
-#include "ui_comp_actuatorcomponent.h"
-#include "ui_comp_arrowspanel.h"
-#include "ui_comp_diagnosticcomponent.h"
-#include "ui_comp_errorwarningpanel.h"
-#include "ui_comp_exitbarpress.h"
-#include "ui_comp_exitbarpull.h"
-#include "ui_comp_exitbarpushleft.h"
-#include "ui_comp_genericactionscomponent1.h"
-#include "ui_comp_statuspanel.h"
+#include "ui_comp_diagrow.h"
+#include "ui_comp_driveband.h"
+#include "ui_comp_errorbanner.h"
+#include "ui_comp_menukey.h"
+#include "ui_comp_menuoverlay.h"
+#include "ui_comp_settingrow.h"
+#include "ui_comp_slottile.h"
 #include "ui_comp_topbar.h"
-#include "ui_comp_unlockarc.h"
 
 #ifdef __cplusplus
 } /*extern "C"*/

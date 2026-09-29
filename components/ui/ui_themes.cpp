@@ -14,6 +14,15 @@ const ui_theme_variable_t _ui_theme_alpha_text[2] = {255, 255};
 
 const ui_theme_variable_t _ui_theme_color_focused[2] = {0x0000FF, 0x0000FF};
 const ui_theme_variable_t _ui_theme_alpha_focused[2] = {255, 255};
+
+const ui_theme_variable_t _ui_theme_color_text_muted[2] = {0xB3B3B3, 0x4D4D4D};
+const ui_theme_variable_t _ui_theme_alpha_text_muted[2] = {255, 255};
+
+const ui_theme_variable_t _ui_theme_color_ok[2] = {0x3DDC84, 0x0F7A3D};
+const ui_theme_variable_t _ui_theme_alpha_ok[2] = {255, 255};
+
+const ui_theme_variable_t _ui_theme_color_alert[2] = {0xE01B24, 0xE01B24};
+const ui_theme_variable_t _ui_theme_alpha_alert[2] = {255, 255};
 uint8_t ui_theme_idx = UI_THEME_DEFAULT;
 
 

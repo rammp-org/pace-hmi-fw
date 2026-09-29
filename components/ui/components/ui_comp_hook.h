@@ -10,17 +10,14 @@
 extern "C" {
 #endif
 
-void ui_comp_ActuatorComponent_create_hook(lv_obj_t * comp);
-void ui_comp_ArrowsPanel_create_hook(lv_obj_t * comp);
-void ui_comp_DiagnosticComponent_create_hook(lv_obj_t * comp);
-void ui_comp_ErrorWarningPanel_create_hook(lv_obj_t * comp);
-void ui_comp_ExitBarPress_create_hook(lv_obj_t * comp);
-void ui_comp_ExitBarPull_create_hook(lv_obj_t * comp);
-void ui_comp_ExitBarPushLeft_create_hook(lv_obj_t * comp);
-void ui_comp_GenericActionsComponent1_create_hook(lv_obj_t * comp);
-void ui_comp_StatusPanel_create_hook(lv_obj_t * comp);
+void ui_comp_DiagRow_create_hook(lv_obj_t * comp);
+void ui_comp_DriveBand_create_hook(lv_obj_t * comp);
+void ui_comp_ErrorBanner_create_hook(lv_obj_t * comp);
+void ui_comp_MenuKey_create_hook(lv_obj_t * comp);
+void ui_comp_MenuOverlay_create_hook(lv_obj_t * comp);
+void ui_comp_SettingRow_create_hook(lv_obj_t * comp);
+void ui_comp_SlotTile_create_hook(lv_obj_t * comp);
 void ui_comp_TopBar_create_hook(lv_obj_t * comp);
-void ui_comp_UnlockArc_create_hook(lv_obj_t * comp);
 
 #ifdef __cplusplus
 } /*extern "C"*/
