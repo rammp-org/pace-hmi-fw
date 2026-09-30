@@ -197,6 +197,7 @@ void ui_LogScreen_screen_init(void)
 
 
 
+
 }
 
 void ui_LogScreen_screen_destroy(void)

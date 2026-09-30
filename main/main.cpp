@@ -46,8 +46,10 @@
 #include "keypad_input.hpp"
 #include "oneshot_adc.hpp"
 
+#include "about_ui.hpp"
 #include "actions_spec.h"
 #include "boot_logo.h"
+#include "fw_info.hpp"
 #include "internet_ui.hpp"
 #include "joystick_cal.hpp"
 #include "log_capture.hpp"
@@ -3213,28 +3215,48 @@ static constexpr uint32_t kRowPressMs = 300;
 // p21 "HOME BUTTON": a dissolve from any screen back to Drive.
 static constexpr uint32_t kHomeFadeMs = 120;
 
-// The nine destinations, in the order MenuOverlay draws them, and the child id
-// of each row. Adding a row in SquareLine means a line in each of these two and
-// a case in nav_go -- the row order is the menu order, nothing else encodes it.
+// The destinations, in the order MenuOverlay draws them, and the child id of
+// each row. The menu has two levels: the top rows, and Settings' own rows on
+// the SubMenu panel (after its "< Settings" row, which is the way back up).
+// Adding a row in SquareLine means a line in each of these two and a case in
+// nav_go -- the row order is the menu order, nothing else encodes it.
 enum NavDest {
   NAV_DRIVE, // "Drive": the Drive screen, or Locked (where it is asked for)
   NAV_SEAT,  // "Seat Functions"
   // The rest alphabetically.
   NAV_BENCH,    // "Bench", behind the PIN gate
   NAV_DIAG,     // "Diagnostics"
-  NAV_INTERNET, // "Internet Settings": Ethernet or WiFi, and which network
   NAV_JOYSTICK, // "Joystick", the test screen with CALIBRATE on it
   NAV_LOG,      // "Log"
-  NAV_SETTINGS, // "Settings"
+  NAV_SETTINGS, // "Settings": opens the level below rather than a screen
   NAV_SKUNK,    // "Skunk Works"
+  NAV_TOP_COUNT,
+  // Settings' level, in SubMenu order.
+  NAV_SET_DISPLAY = NAV_TOP_COUNT, // "Display & sound": a Settings page
+  NAV_SET_STICK,                   // "Joystick & driving": a Settings page
+  NAV_INTERNET,                    // "Internet": Ethernet or WiFi, and which network
+  NAV_ABOUT,                       // "About": the firmware, and the board
   NAV_DEST_COUNT,
 };
 
 static const uint32_t kNavRowIds[NAV_DEST_COUNT] = {
-    UI_COMP_MENUOVERLAY_ROW1, UI_COMP_MENUOVERLAY_ROW2, UI_COMP_MENUOVERLAY_ROW3,
-    UI_COMP_MENUOVERLAY_ROW4, UI_COMP_MENUOVERLAY_ROW5, UI_COMP_MENUOVERLAY_ROW6,
-    UI_COMP_MENUOVERLAY_ROW7, UI_COMP_MENUOVERLAY_ROW8, UI_COMP_MENUOVERLAY_ROW9,
+    UI_COMP_MENUOVERLAY_ROW1,
+    UI_COMP_MENUOVERLAY_ROW2,
+    UI_COMP_MENUOVERLAY_ROW3,
+    UI_COMP_MENUOVERLAY_ROW4,
+    UI_COMP_MENUOVERLAY_ROW5,
+    UI_COMP_MENUOVERLAY_ROW6,
+    UI_COMP_MENUOVERLAY_ROW7,
+    UI_COMP_MENUOVERLAY_ROW8,
+    UI_COMP_MENUOVERLAY_SUBMENU_SUBROW2,
+    UI_COMP_MENUOVERLAY_SUBMENU_SUBROW3,
+    UI_COMP_MENUOVERLAY_SUBMENU_SUBROW4,
+    UI_COMP_MENUOVERLAY_SUBMENU_SUBROW5,
 };
+// The panel that holds Settings' level over the top rows, and its first row,
+// "< Settings", which goes back up.
+static constexpr uint32_t kNavSubMenuId = UI_COMP_MENUOVERLAY_SUBMENU;
+static constexpr uint32_t kNavSubBackId = UI_COMP_MENUOVERLAY_SUBMENU_SUBROW1;
 
 // Each screen's key and overlay, filled in as nav_attach_chrome wires them, so
 // "the burger key on the screen that is up" is one lookup. The screens built on
@@ -3268,6 +3290,8 @@ static lv_group_t *nav_screen_group = nullptr;
 // press the destination's own overlay replays on arrival, sliding away.
 static lv_timer_t *nav_press_timer = nullptr;
 static int nav_drop_row = -1;
+// Which level the open menu shows: false = the top rows, true = Settings'.
+static bool nav_menu_sub = false;
 
 // --- the look ------------------------------------------------------------------
 
@@ -3387,10 +3411,12 @@ static void nav_menu_hide_cb(lv_anim_t *a) {
   auto *overlay = static_cast<lv_obj_t *>(a->var);
   lv_obj_add_flag(overlay, LV_OBJ_FLAG_HIDDEN);
   // A row replayed on arrival (nav_drop_row) goes back to resting once it is
-  // out of sight, ready for the next time this overlay opens.
+  // out of sight, and the overlay to its top level, ready for the next time it
+  // opens.
   for (uint32_t id : kNavRowIds) {
     lv_obj_remove_state(ui_comp_get_child(overlay, id), LV_STATE_CHECKED);
   }
+  lv_obj_add_flag(ui_comp_get_child(overlay, kNavSubMenuId), LV_OBJ_FLAG_HIDDEN);
 }
 
 static void nav_menu_slide(lv_obj_t *overlay, int32_t from, int32_t to, bool hide_after) {
@@ -3435,6 +3461,7 @@ static void nav_close_menu() {
   }
   lv_obj_t *overlay = nav_menu_open;
   nav_menu_open = nullptr;
+  nav_menu_sub = false; // the overlay goes back to its top level once hidden
   if (nav_press_timer != nullptr) {
     lv_timer_delete(nav_press_timer);
     nav_press_timer = nullptr;
@@ -3449,6 +3476,44 @@ static void nav_close_menu() {
   nav_update_stick_gate();
 }
 
+// Shows one level of the open menu -- the top rows, or Settings' over them --
+// and gives the stick that level's rows, the cursor on `focus`.
+static void nav_menu_level(lv_obj_t *overlay, bool sub, lv_obj_t *focus) {
+  nav_menu_sub = sub;
+  lv_obj_set_flag(ui_comp_get_child(overlay, kNavSubMenuId), LV_OBJ_FLAG_HIDDEN, !sub);
+
+  // The rows belong to whichever overlay is up, so the group is rebuilt rather
+  // than filled once: every screen has its own instance of all of them. The
+  // key goes last, so down from the bottom row reaches it and a press closes.
+  lv_group_remove_all_objs(menu_group);
+  // The menu wraps: down from the burger key is the top row again, up from
+  // the top row is the key. It is the one list short enough that going round
+  // is quicker than going back.
+  lv_group_set_wrap(menu_group, true);
+  if (sub) {
+    lv_group_add_obj(menu_group, ui_comp_get_child(overlay, kNavSubBackId));
+  }
+  for (int i = sub ? NAV_TOP_COUNT : 0; i < (sub ? NAV_DEST_COUNT : NAV_TOP_COUNT); i++) {
+    lv_group_add_obj(menu_group, ui_comp_get_child(overlay, kNavRowIds[i]));
+  }
+  if (NavChrome *c = nav_chrome_of(lv_screen_active())) {
+    lv_group_add_obj(menu_group, c->key);
+  }
+  lv_indev_set_group(joystick_indev, menu_group);
+  lv_group_focus_obj(focus);
+}
+
+// Into Settings' level, the cursor on its first section; and back up, the
+// cursor on Settings.
+static void nav_menu_enter_settings(lv_obj_t *overlay) {
+  nav_menu_level(overlay, true, ui_comp_get_child(overlay, kNavRowIds[NAV_TOP_COUNT]));
+}
+
+static void nav_menu_leave_settings(lv_obj_t *overlay) {
+  nav_menu_level(overlay, false, ui_comp_get_child(overlay, kNavRowIds[NAV_SETTINGS]));
+}
+
+// Always opens at the top level, wherever it was last left.
 static void nav_open_menu(lv_obj_t *overlay) {
   if (nav_menu_open != nullptr) {
     return;
@@ -3457,23 +3522,7 @@ static void nav_open_menu(lv_obj_t *overlay) {
   lv_obj_remove_flag(overlay, LV_OBJ_FLAG_HIDDEN);
   nav_menu_slide(overlay, kMenuHiddenY, kMenuShownY, false);
   nav_key_open_look(lv_screen_active(), true);
-
-  // The rows belong to whichever overlay is up, so the group is rebuilt rather
-  // than filled once: every screen has its own instance of all seven. The key
-  // goes last, so down from the bottom row reaches it and a press closes.
-  lv_group_remove_all_objs(menu_group);
-  // The menu wraps: down from the burger key is the top row again, up from
-  // the top row is the key. It is the one list short enough that going round
-  // is quicker than going back.
-  lv_group_set_wrap(menu_group, true);
-  for (uint32_t id : kNavRowIds) {
-    lv_group_add_obj(menu_group, ui_comp_get_child(overlay, id));
-  }
-  if (NavChrome *c = nav_chrome_of(lv_screen_active())) {
-    lv_group_add_obj(menu_group, c->key);
-  }
-  lv_indev_set_group(joystick_indev, menu_group);
-  lv_group_focus_obj(ui_comp_get_child(overlay, kNavRowIds[0]));
+  nav_menu_level(overlay, false, ui_comp_get_child(overlay, kNavRowIds[0]));
   nav_update_stick_gate();
 }
 
@@ -3505,6 +3554,7 @@ static void nav_go(NavDest dest) {
     nav_key_open_look(lv_screen_active(), false);
     lv_group_remove_all_objs(menu_group);
     nav_menu_open = nullptr;
+    nav_menu_sub = false;
     nav_drop_row = dest;
   }
   switch (dest) {
@@ -3537,11 +3587,19 @@ static void nav_go(NavDest dest) {
                       &ui_BenchGateScreen_screen_init);
     break;
   case NAV_SETTINGS:
-    setting_page_open(0);
+    break; // a level of the menu, not a screen: nav_row_cb opens it
+  case NAV_SET_DISPLAY:
+    setting_page_open(SETTINGS_PAGE_DISPLAY);
+    break;
+  case NAV_SET_STICK:
+    setting_page_open(SETTINGS_PAGE_STICK);
     break;
   case NAV_INTERNET:
     _ui_screen_change(&ui_InternetScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
                       &ui_InternetScreen_screen_init);
+    break;
+  case NAV_ABOUT:
+    _ui_screen_change(&ui_AboutScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0, &ui_AboutScreen_screen_init);
     break;
   case NAV_JOYSTICK:
     _ui_screen_change(&ui_JoystickScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
@@ -3550,7 +3608,7 @@ static void nav_go(NavDest dest) {
   case NAV_DEST_COUNT:
     break;
   }
-  // A row picked on its own screen (Settings from Settings): LVGL skips
+  // A row picked on its own screen (one Settings page from another): LVGL skips
   // a load of the screen already up, so SCREEN_LOADED never comes, and the
   // stick would be left on the menu's group -- emptied above -- with nothing
   // to focus until another screen loaded. Arrive by hand instead.
@@ -3561,11 +3619,13 @@ static void nav_go(NavDest dest) {
   dest_screens[NAV_SEAT] = ui_SeatScreen;
   dest_screens[NAV_BENCH] = ui_BenchGateScreen;
   dest_screens[NAV_DIAG] = ui_DiagnosticsScreen;
-  dest_screens[NAV_INTERNET] = ui_InternetScreen;
   dest_screens[NAV_JOYSTICK] = ui_JoystickScreen;
   dest_screens[NAV_LOG] = ui_LogScreen;
   dest_screens[NAV_SKUNK] = ui_SkunkWorksScreen;
-  dest_screens[NAV_SETTINGS] = ui_SettingsScreen;
+  dest_screens[NAV_SET_DISPLAY] = ui_SettingsScreen;
+  dest_screens[NAV_SET_STICK] = ui_SettingsScreen;
+  dest_screens[NAV_INTERNET] = ui_InternetScreen;
+  dest_screens[NAV_ABOUT] = ui_AboutScreen;
   if (dest < NAV_DEST_COUNT && dest_screens[dest] == before && lv_screen_active() == before) {
     nav_arrive(before);
   }
@@ -3587,6 +3647,14 @@ static void nav_row_cb(lv_event_t *e) {
   // spot rather than opening a screen whose every button would be refused in
   // turn.
   const auto dest = static_cast<NavDest>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
+  // Settings changes the menu's level rather than the screen: at once, with no
+  // row press to wait out, since nothing underneath moves.
+  if (dest == NAV_SETTINGS) {
+    if (nav_menu_open != nullptr) {
+      nav_menu_enter_settings(nav_menu_open);
+    }
+    return;
+  }
   if (dest == NAV_SEAT && !mcb_ready()) {
     // Refused where it was picked: the menu stays up, the row stays greyed,
     // and the reason is waiting on the banner underneath once it closes.
@@ -3604,6 +3672,13 @@ static void nav_row_cb(lv_event_t *e) {
   lv_obj_add_state(lv_event_get_target_obj(e), LV_STATE_CHECKED);
   nav_press_timer = lv_timer_create(nav_press_done_cb, kRowPressMs, lv_event_get_user_data(e));
   lv_timer_set_repeat_count(nav_press_timer, 1);
+}
+
+// "< Settings": back up to the top level.
+static void nav_sub_back_cb(lv_event_t *) {
+  if (nav_press_timer == nullptr && nav_menu_open != nullptr) {
+    nav_menu_leave_settings(nav_menu_open);
+  }
 }
 
 // The key toggles; user_data is the overlay on the same screen.
@@ -3628,9 +3703,12 @@ static void nav_key_cb(lv_event_t *e) {
 
 // The stick on a menu row. The keypad indev hands arrows to the focused object
 // rather than moving the group, so the walk is done here. Right is "go", like
-// the chevron says; left closes, like the key.
+// the chevron says; left is "back": up a level from Settings' rows, and closed
+// from the top, like the key.
 static void nav_row_key_cb(lv_event_t *e) {
   lv_obj_t *row = lv_event_get_target_obj(e);
+  const bool back_row =
+      nav_menu_open != nullptr && row == ui_comp_get_child(nav_menu_open, kNavSubBackId);
   switch (lv_event_get_key(e)) {
   case LV_KEY_UP:
     lv_group_focus_prev(lv_obj_get_group(row));
@@ -3639,11 +3717,17 @@ static void nav_row_key_cb(lv_event_t *e) {
     lv_group_focus_next(lv_obj_get_group(row));
     return;
   case LV_KEY_RIGHT:
-    lv_obj_send_event(row, LV_EVENT_CLICKED, nullptr);
+    if (!back_row) { // its chevron points the other way
+      lv_obj_send_event(row, LV_EVENT_CLICKED, nullptr);
+    }
     return;
   case LV_KEY_LEFT:
   case LV_KEY_ESC:
-    nav_close_menu();
+    if (nav_menu_sub && nav_menu_open != nullptr) {
+      nav_menu_leave_settings(nav_menu_open);
+    } else {
+      nav_close_menu();
+    }
     return;
   default:
     return;
@@ -3746,6 +3830,18 @@ static void nav_attach_chrome(lv_obj_t *key, lv_obj_t *overlay, lv_obj_t *band) 
                         reinterpret_cast<void *>(static_cast<intptr_t>(i)));
     lv_obj_add_event_cb(row, nav_row_key_cb, LV_EVENT_KEY, nullptr);
   }
+  // Settings' level: opaque over the top rows, and clickable so a tap below its
+  // last row does not reach the top-level row underneath.
+  lv_obj_t *sub = ui_comp_get_child(overlay, kNavSubMenuId);
+  keep_overlay_fill(sub);
+  lv_obj_add_flag(sub, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_t *back = ui_comp_get_child(overlay, kNavSubBackId);
+  nav_claim_clicks(back);
+  set_focused_recursive(back, false);
+  nav_mirror_states(back);
+  nav_ring_style(back, 0, 0);
+  lv_obj_add_event_cb(back, nav_sub_back_cb, LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(back, nav_row_key_cb, LV_EVENT_KEY, nullptr);
   // Drive and Seat Functions grey while the MCB could not act on them, the same
   // test and the same look as the MCB tiles on Skunk Works -- still walkable,
   // so the cursor never sticks on one, and refused by nav_row_cb if picked.
@@ -3785,6 +3881,10 @@ static void nav_enter_screen(const lv_obj_t *screen) {
     diag_focus(0);
   } else if (screen == ui_InternetScreen) {
     internet_ui_on_load(); // its own groups, one per page
+  } else if (screen == ui_AboutScreen) {
+    about_ui_on_load();
+    lv_group_remove_all_objs(joystick_group); // nothing to pick: only the key
+    nav_use_group(joystick_group, screen);
   } else if (screen == ui_LogScreen && log_view_group() != nullptr) {
     nav_use_group(log_view_group(), screen);
     log_view_on_load();
@@ -3809,6 +3909,9 @@ static void nav_drop_menu(const lv_obj_t *screen) {
     return;
   }
   lv_obj_remove_flag(c->overlay, LV_OBJ_FLAG_HIDDEN);
+  // A pick from Settings' level is replayed on that level.
+  lv_obj_set_flag(ui_comp_get_child(c->overlay, kNavSubMenuId), LV_OBJ_FLAG_HIDDEN,
+                  row < NAV_TOP_COUNT);
   lv_obj_add_state(ui_comp_get_child(c->overlay, kNavRowIds[row]), LV_STATE_CHECKED);
   nav_menu_slide(c->overlay, kMenuShownY, kMenuHiddenY, true);
 }
@@ -3831,6 +3934,7 @@ static const char *active_screen_name() {
       {&ui_BenchMotorsScreen, "BenchMotorsScreen"},
       {&ui_LogScreen, "LogScreen"},
       {&ui_InternetScreen, "InternetScreen"},
+      {&ui_AboutScreen, "AboutScreen"},
       {&ui_UpdateScreen, "UpdateScreen"},
       {&ui_SettingsScreen, "SettingsScreen"},
       {&ui_SkunkWorksScreen, "SkunkWorksScreen"},
@@ -3963,7 +4067,8 @@ static void strip_all_overdraw() {
   const lv_obj_t *const screens[] = {ui_LockedScreen,    ui_DriveScreen,       ui_SeatScreen,
                                      ui_BenchGateScreen, ui_SettingsScreen,    ui_JoystickScreen,
                                      ui_LogScreen,       ui_SkunkWorksScreen,  ui_DiagnosticsScreen,
-                                     ui_UpdateScreen,    ui_BenchMotorsScreen, ui_InternetScreen};
+                                     ui_UpdateScreen,    ui_BenchMotorsScreen, ui_InternetScreen,
+                                     ui_AboutScreen};
   const uint32_t stripped =
       std::accumulate(std::begin(screens), std::end(screens), uint32_t{0},
                       [](uint32_t sum, const lv_obj_t *screen) {
@@ -5106,6 +5211,7 @@ extern "C" void app_main(void) {
       {ui_TopBar6, ui_DriveBand5, ui_MenuKey6, ui_MenuOverlay6, true},     // LogScreen
       {ui_TopBar11, ui_DriveBand10, ui_MenuKey10, ui_MenuOverlay10, true}, // UpdateScreen
       {ui_TopBar12, ui_DriveBand12, ui_MenuKey12, ui_MenuOverlay12, true}, // InternetScreen
+      {ui_TopBar13, ui_DriveBand13, ui_MenuKey13, ui_MenuOverlay13, true}, // AboutScreen
   };
   for (const ScreenChrome &c : kChrome) {
     bind_status_panel(c.band);
@@ -5147,6 +5253,7 @@ extern "C" void app_main(void) {
   bind_entry_refused_panel(ui_ErrorBanner11); // BenchGateScreen
   bind_entry_refused_panel(ui_ErrorBanner9);  // UpdateScreen
   bind_entry_refused_panel(ui_ErrorBanner12); // InternetScreen
+  bind_entry_refused_panel(ui_ErrorBanner13); // AboutScreen
   // Diagnostics readings, and whether they are live: before the poll timer
   // that keeps the latter current, and before any RTPS sample can land.
   for (auto &item : diag_value) {
@@ -5411,6 +5518,7 @@ extern "C" void app_main(void) {
       .claim_clicks = nav_claim_clicks,
       .refuse = refusal_feedback,
   });
+  about_ui_init();
 
   lv_subject_init_string(&seat_function_subject, seat_function_buf, seat_function_prev_buf,
                          sizeof(seat_function_buf), lv_label_get_text(ui_AngleSettingLabel));
@@ -5443,8 +5551,9 @@ extern "C" void app_main(void) {
   // Hand the joystick between groups as the screen changes. Every screen
   // ui_init builds, so each route in and out is covered; the ones built on
   // demand register it in their own *_screen_ensure().
-  for (lv_obj_t *screen : {ui_LockedScreen, ui_DriveScreen, ui_SeatScreen, ui_BenchGateScreen,
-                           ui_JoystickScreen, ui_LogScreen, ui_UpdateScreen, ui_InternetScreen}) {
+  for (lv_obj_t *screen :
+       {ui_LockedScreen, ui_DriveScreen, ui_SeatScreen, ui_BenchGateScreen, ui_JoystickScreen,
+        ui_LogScreen, ui_UpdateScreen, ui_InternetScreen, ui_AboutScreen}) {
     lv_obj_add_event_cb(screen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, nullptr);
   }
 
@@ -5609,12 +5718,10 @@ extern "C" void app_main(void) {
   setting_group = lv_group_create();
 
   // Initialised before the screen's warning panel ever binds to it.
-  lv_subject_init_int(&setting_page_subject, SETTINGS_PAGE_UI);
+  lv_subject_init_int(&setting_page_subject, SETTINGS_PAGE_DISPLAY);
 
-  // SCREEN BRIGHTNESS no longer needs a button of its own: "Settings" in
-  // the burger menu opens page 0, which is that page (setting_page_open(0) in
-  // nav_go). Add a second page to settings_spec.h and the screen grows a
-  // chooser; until then the menu row IS the chooser.
+  // Which page is up is chosen in the burger menu: Settings' level has a row
+  // per page (nav_go), so the screen needs no chooser of its own.
 
   // SkunkWorksScreen: what outlives the screen, which is built on demand
   // (actions_screen_ensure).
@@ -6085,6 +6192,10 @@ extern "C" void app_main(void) {
                               .task_config = {.name = "Read ADC"},
                               .log_level = espp::Logger::Verbosity::INFO});
   adc_task.start();
+
+  // The firmware's SHA-256 for the About screen: ~4 MB of flash read on a
+  // low-priority thread, so it waits behind everything above.
+  fw_info_start();
 
   // bring up W5500 Ethernet + RTPS last so a missing cable / module can't
   // delay the HMI; on failure the UI keeps running without comms

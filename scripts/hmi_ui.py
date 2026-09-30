@@ -42,21 +42,31 @@ PORT = 3333
 TIMEOUT_S = 20.0
 
 # The burger key, centred in the bottom 162 px of a 720x1280 panel, and the
-# seven menu rows: 131 px each, starting at the top of the 921 px body.
+# menu rows: eight divide the 921 px body, starting at its top. Settings opens
+# a second level over them with the same row height: "< Settings" (back), then
+# SETTINGS_ROWS.
 MENU_KEY = (360, 1198)
 BODY_TOP = 195
-ROW_HEIGHT = 921 // 9  # nine rows divide the 921 px body
+ROW_HEIGHT = 921 // 8
 MENU_ROWS = [
     "Drive",
     "Seat Functions",
     "Bench",
     "Diagnostics",
-    "Internet Settings",
     "Joystick",
     "Log",
     "Settings",
     "Skunk Works",
 ]
+SETTINGS_ROWS = [
+    "Display & sound",
+    "Joystick & driving",
+    "Internet",
+    "About",
+]
+# Every destination as `go` names it: a top row, or "Settings/<section>".
+DESTINATIONS = ([row for row in MENU_ROWS if row != "Settings"]
+                + ["Settings/" + row for row in SETTINGS_ROWS])
 
 
 def row_point(index: int) -> tuple[int, int]:
@@ -149,15 +159,25 @@ class Hmi:
         return self.tap(*MENU_KEY)
 
     def go(self, row: str) -> str:
-        """Open the menu and take the row whose label starts with `row`."""
+        """Open the menu and take the row whose label starts with `row`; a
+        Settings section as "Settings/<section>" (e.g. "settings/about")."""
+        top, _, section = row.partition("/")
         matches = [i for i, name in enumerate(MENU_ROWS)
-                   if name.lower().startswith(row.lower())]
+                   if name.lower().startswith(top.lower())]
         if not matches:
-            raise SystemExit(f"no menu row starts with {row!r}; rows are {MENU_ROWS}")
+            raise SystemExit(f"no menu row starts with {top!r}; rows are {MENU_ROWS}")
         self.open_menu()
         time.sleep(0.4)  # the 280 ms slide, plus a little
         out = self.tap(*row_point(matches[0]))
         time.sleep(0.4)
+        if section:
+            sub = [i for i, name in enumerate(SETTINGS_ROWS)
+                   if name.lower().startswith(section.lower())]
+            if not sub:
+                raise SystemExit(f"no Settings row starts with {section!r}; "
+                                 f"rows are {SETTINGS_ROWS}")
+            out = self.tap(*row_point(sub[0] + 1))  # after the back row
+            time.sleep(0.4)
         return out
 
     def home(self) -> str:
@@ -238,10 +258,11 @@ def cmd_walk(hmi: Hmi, out: pathlib.Path, half: bool) -> int:
     out.mkdir(parents=True, exist_ok=True)
     hmi.home()
     results = [(hmi.screen(), capture(hmi, out / "00-home.png", half))]
-    for index, row in enumerate(MENU_ROWS, start=1):
+    for index, row in enumerate(DESTINATIONS, start=1):
         hmi.go(row)
         name = hmi.screen()
-        png = capture(hmi, out / f"{index:02d}-{row.replace(' ', '-').lower()}.png", half)
+        stem = row.replace("Settings/", "settings-").replace(" & ", "-").replace(" ", "-")
+        png = capture(hmi, out / f"{index:02d}-{stem.lower()}.png", half)
         results.append((name, png))
         hmi.home()
     width = max(len(name) for name, _ in results)

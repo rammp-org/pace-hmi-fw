@@ -62,11 +62,12 @@ ErrorBanner, MenuKey and MenuOverlay, are the *chrome*.
 | SeatScreen | 04, 04b | menu: Seat Functions |
 | BenchGateScreen | - | menu: Bench (the PIN, then DEBUG ACTUATORS) |
 | DiagnosticsScreen | - | menu: Diagnostics |
-| InternetScreen | - | menu: Internet Settings (the link, the WiFi network, its status) |
+| InternetScreen | - | menu: Settings > Internet (the link, the WiFi network, its status) |
+| AboutScreen | - | menu: Settings > About (the firmware, the release check, the board) |
 | JoystickScreen | - | menu: Joystick (the stick test and CALIBRATE) |
 | LogScreen | - | menu: Log |
 | SkunkWorksScreen | - | menu: Skunk Works |
-| SettingsScreen | - | menu: Settings; after the PIN, DEBUG ACTUATORS |
+| SettingsScreen | - | menu: Settings > Display & sound, Settings > Joystick & driving; after the PIN, DEBUG ACTUATORS |
 
 SettingsScreen, SkunkWorksScreen and DiagnosticsScreen are built when first opened and
 destroyed on the way out ("Screens built on demand" in `main.cpp`): their rows are
@@ -77,17 +78,17 @@ generated at runtime, and keeping them all resident ran internal RAM out.
 ### One component, one instance per screen
 
 The menu is a SquareLine *component*, `MenuOverlay`, drawn by `build_menuoverlay` in
-`build_ui.py`: a 720 x 921 panel with nine rows, 102 px each. Each row is a `Row<n>` panel
+`build_ui.py`: a 720 x 921 panel with eight rows, 115 px each. Each row is a `Row<n>` panel
 holding a `RowGround<n>` with a `RowLabel<n>` and a chevron.
 
 LVGL screens are separate object trees, so a widget cannot appear on two of them. Every
-screen therefore has its own instance of all the chrome, `MenuOverlay1` ... `MenuOverlay12`,
-each with its own nine rows. The firmware treats them as one menu:
+screen therefore has its own instance of all the chrome, `MenuOverlay1` ... `MenuOverlay13`,
+each with its own rows. The firmware treats them as one menu:
 
 - **`kChrome`** (in `app_main`) lists every screen's TopBar, DriveBand, MenuKey and
   MenuOverlay.
 - **`nav_attach_chrome`** wires one screen's set: the key's click and key events, and for
-  each of the nine rows the click, the stick's arrows, the cursor and pressed looks, and,
+  each row the click, the stick's arrows, the cursor and pressed looks, and,
   on Drive and Seat Functions, the observers that grey the row while the MCB could not act
   on it.
 - **`nav_chrome[]`** remembers which key and overlay belong to which screen, so "the menu of
@@ -111,12 +112,34 @@ A row's index is its `NavDest`: `nav_row_cb` receives the index and `nav_go` swi
 `scripts/ui_contract.py` checks that `RowLabel<n>` still reads what the enum expects, so a
 reordered export cannot open the wrong screen.
 
+### Two levels
+
+Settings is not a screen but a second level of the same menu. The overlay holds a hidden
+`SubMenu` panel over the top rows: a "< Settings" row (`SubRow1`), then one row per section
+(`SubRow2`...). `NavDest` lists the top rows first, up to `NAV_TOP_COUNT`, then the sections;
+`kNavRowIds` maps both kinds to their child ids.
+
+- Picking Settings calls `nav_menu_enter_settings`: the panel shows, and `nav_menu_level`
+  refills `menu_group` with its rows (back row first) and the key, the cursor on the first
+  section. No row press to wait out: nothing underneath changes.
+- "< Settings", or the stick to the LEFT on any section, is `nav_menu_leave_settings`: back
+  to the top rows with the cursor on Settings. LEFT at the top closes the menu, as before.
+- The menu always opens at the top (`nav_open_menu`), and the overlay goes back to its top
+  level once hidden (`nav_menu_hide_cb`).
+- A section is picked like any row, and `nav_drop_menu` replays the press on the destination's
+  overlay with its SubMenu shown.
+
 **To add, remove or reorder a row**, change all of these together:
 
-1. `rows` in `build_menuoverlay` (pace-hmi-gui), then export and import.
-2. `NavDest` and `kNavRowIds` in `main.cpp` (a new row also needs `UI_COMP_MENUOVERLAY_ROW<n>`).
+1. `rows` (or `subrows`, for Settings' level) in `build_menuoverlay` (pace-hmi-gui), then
+   export and import.
+2. `NavDest` and `kNavRowIds` in `main.cpp` (a new row also needs its `UI_COMP_MENUOVERLAY_*`).
 3. The `case` in `nav_go`, and its line in `nav_go`'s `dest_screens` table.
-4. `cui_RowLabel<n>` in `scripts/ui_contract.py`, and `MENU_ROWS` in `scripts/hmi_ui.py`.
+4. `cui_RowLabel<n>` / `cui_SubRowLabel<n>` in `scripts/ui_contract.py`, and `MENU_ROWS` /
+   `SETTINGS_ROWS` in `scripts/hmi_ui.py`.
+
+A new Settings section that is a page of rows is a `P(...)` line in `settings_spec.h` plus its
+rows' page; `nav_go` opens it with `setting_page_open(SETTINGS_PAGE_<NAME>)`.
 
 ### What happens on a pick
 
@@ -161,12 +184,12 @@ with the screen's burger key appended last, so "down past the bottom" reaches th
 
 | group | screen |
 | --- | --- |
-| `menu_group` | the open menu: nine rows, then the key (wraps) |
+| `menu_group` | the open menu: the rows of the level that is up, then the key (wraps) |
 | `seat_group`, `seat_adjust_group` | Seat: the function buttons; the adjustment page |
 | `rd_group` | BenchGate: the PIN pad |
 | `setting_group`, `actions_group`, `diag_group` | Settings, Skunk Works, Diagnostics |
 | `log_view_group()` (`main/log_view.cpp`) | Log |
-| `main_group`, `networks_group`, `password_group` (`main/internet_ui.cpp`) | Internet Settings: the main page, the network list, the keyboard |
+| `main_group`, `networks_group`, `password_group` (`main/internet_ui.cpp`) | Internet: the main page, the network list, the keyboard |
 | `joystick_group` | everything else: Locked, Drive, Joystick |
 
 `nav_arrive` runs whenever a screen comes up (SCREEN_LOADED, or by hand when a row picks
@@ -237,7 +260,12 @@ flowchart LR
   setting is a table line, its names in `kSettingParamNames`, its subject in
   `kSettingParamValue`, and a `case` in `setting_store_observer` if it needs applying.
 - **Skunk Works** tiles come from `main/actions_spec.h`, one line each.
-- **Internet Settings** lives in `main/internet_ui.cpp`, not in the settings rows. Its three
+- **About** is `main/about_ui.cpp`, fed by `main/fw_info.cpp`: a low-priority thread hashes
+  the running image at boot (~0.5 s for 4 MB) and looks that hash up in
+  `/storage/fwinfo.txt`, which only `scripts/fw_verify.py` on the PC writes, and only for a
+  `.bin` whose digest is a GitHub release's. A line there can only match the image it was
+  written for, so the file is never wrong about the running firmware.
+- **Internet** lives in `main/internet_ui.cpp`, not in the settings rows. Its three
   pages share one screen: the main page (Ethernet or WiFi, the network, the status) and two
   panels drawn over it, the network list and the password keyboard. The choice is the
   `network` setting (on a page of its own in `settings_spec.h`), read at boot. The WiFi scan
