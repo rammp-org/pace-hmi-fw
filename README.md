@@ -35,6 +35,8 @@ The UI follows RAMMP UI spec V2. Every screen has the same frame: the status bar
 | UI Settings | Live MCB diagnostics | System log |
 | <img src="docs/screenshots/BenchGateScreen.png" width="200"> | <img src="docs/screenshots/BenchMotorsScreen.png" width="200"> | <img src="docs/screenshots/JoystickScreen.png" width="200"> |
 | Bench: the PIN | DEBUG ACTUATORS | Joystick test and CALIBRATE |
+| <img src="docs/screenshots/InternetScreen.png" width="200"> | <img src="docs/screenshots/InternetPassword.png" width="200"> | |
+| Internet Settings: the link and its status | Joining a WiFi network | |
 
 ### The burger menu
 
@@ -44,6 +46,7 @@ The UI follows RAMMP UI spec V2. Every screen has the same frame: the status bar
 | Seat Functions | the four seat motions; greyed while the MCB could not move the seat |
 | Bench | the PIN (1234), then DEBUG ACTUATORS: step each actuator with - / + |
 | Diagnostics | live readings from the MCB |
+| Internet Settings | Ethernet or WiFi, the WiFi network, and the link's status: see [Network](#network) |
 | Joystick | the stick test; press and hold CALIBRATE (or the stick button) to calibrate |
 | Log | the last 500 serial log lines |
 | Skunk Works | one-press actions from `main/actions_spec.h`: haptic test, self test, seat up, FPS counter, restart |
@@ -63,21 +66,26 @@ The UI follows RAMMP UI spec V2. Every screen has the same frame: the status bar
 | Stick left/right, Stick fwd/back | mirror an axis |
 | Stick axes | swap X and Y |
 | Sounds | touch and joystick clicks; warnings sound either way |
-| Network | WiFi or Wired (the W5500); the HMI restarts 3 s after it changes |
 
-Every row is one line in `main/settings_spec.h`, and every value is saved in LittleFS (`/storage`), so it survives a reboot. The stick mapping and Network rows are refused while driving.
+Every row is one line in `main/settings_spec.h`, and every value is saved in LittleFS (`/storage`), so it survives a reboot. The stick mapping rows are refused while driving.
 
 ## Network
 
-RTPS runs over one link, picked by **UI Settings → Network** and brought up at boot:
+RTPS runs over one link, chosen in **Internet Settings** and brought up at boot:
 
-- **WiFi** (the default): the Tab5's ESP32-C6, over SDIO through esp_hosted, 2.4 GHz only. The network is built in from your local `sdkconfig`, never `sdkconfig.defaults`:
-  ```
-  CONFIG_HMI_WIFI_SSID="my-network"
-  CONFIG_HMI_WIFI_PASSWORD="my-password"
-  ```
-  (or `idf.py menuconfig` → RAMMP HMI). With no SSID built in, WiFi means Wired. A network with a login page (captive portal) will not work; a PC's Mobile Hotspot does, and puts the bench PC on the same subnet.
-- **Wired**: the W5500 on the M5-Bus header, as before.
+- **WiFi** (the default): the Tab5's ESP32-C6, over SDIO through esp_hosted, 2.4 GHz only.
+- **Ethernet**: the W5500 on the M5-Bus header.
+
+Changing the choice is saved at once and takes effect on the next boot: **Restart to apply** appears while the link in use is not the one chosen.
+
+**Joining a WiFi network**, on the Tab5 itself: Internet Settings → the WiFi network row scans and lists what it hears, strongest first. Pick one, type its password (shown as typed) and press OK. The HMI tries it first, and saves it (`/storage/wifi.txt`) only once it has joined; a wrong password says so and the old network stays. This works on either link: on Ethernet the C6 joins only to prove the password, then lets go, and takes no address.
+
+With no network saved, the one built into your local `sdkconfig` is used (never `sdkconfig.defaults`):
+```
+CONFIG_HMI_WIFI_SSID="my-network"
+CONFIG_HMI_WIFI_PASSWORD="my-password"
+```
+(or `idf.py menuconfig` → RAMMP HMI). With neither, WiFi means Ethernet. A network with a login page (captive portal) will not work; a PC's Mobile Hotspot does, and puts the bench PC on the same subnet.
 
 The serial log says which link came up (`Network: WiFi`), the C6's firmware, the RSSI and the lease. A lost network is rejoined on its own, and a lease that comes back with a different address moves RTPS to it within 2 s. The self test's `net.wifi_rssi` checks the signal on WiFi. Power save is off on the C6, but an access point that sleeps or shares its radio (a laptop hotspot also on another network) still delays frames to the next beacon: `rtps.rtt_*` shows it.
 

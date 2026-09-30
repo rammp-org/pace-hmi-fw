@@ -43,6 +43,7 @@ extern "C" {
 #include "screens/ui_DriveScreen.h"
 #include "screens/ui_JoystickScreen.h"
 #include "screens/ui_BenchGateScreen.h"
+#include "screens/ui_InternetScreen.h"
 
 ///////////////////// VARIABLES ////////////////////
 

@@ -5,6 +5,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
+#include <fstream>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -12,6 +13,7 @@
 #include <string_view>
 #include <thread>
 #include <tuple>
+#include <vector>
 
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
@@ -32,6 +34,7 @@
 #include "logger.hpp"
 #include "rtps_participant.hpp"
 #include "rtps_pubsub.hpp"
+#include "storage.hpp"
 #include "task.hpp"
 
 using namespace std::chrono_literals;
@@ -51,9 +54,11 @@ constexpr int kSpiClockMhz = 20;   // W5500 max is 33; 20 tolerates jumper wires
 constexpr int kRxPollPeriodMs = 0; // 0 = RX on the INT line; N = poll every N ms (rules out INT)
 
 // WiFi: the Tab5's ESP32-C6 does the radio (esp_hosted over SDIO, pins in sdkconfig.defaults).
-// The network comes from the local sdkconfig; empty = no WiFi, see rtps_comms_wifi_configured.
-constexpr char kWifiSsid[] = CONFIG_HMI_WIFI_SSID;
-constexpr char kWifiPassword[] = CONFIG_HMI_WIFI_PASSWORD;
+// The network is the one saved from the Internet Settings screen; until there is one, the
+// one built in from the local sdkconfig. Neither = no WiFi, see rtps_comms_wifi_configured.
+constexpr char kBuiltInWifiSsid[] = CONFIG_HMI_WIFI_SSID;
+constexpr char kBuiltInWifiPassword[] = CONFIG_HMI_WIFI_PASSWORD;
+constexpr char kWifiFile[] = "wifi.txt";  // "ssid=...\npassword=...\n", beside settings.txt
 constexpr char kHostname[] = "rammp-hmi"; // what the access point's client list shows
 
 constexpr auto kHeartbeatPeriod = 2s; // bench counter on rammp::kHmiCounter
@@ -74,6 +79,16 @@ std::atomic<int64_t> last_status_us{0};   // last MibStatus, esp_timer time; 0 =
 std::atomic<uint32_t> lease_ip{0};        // the DHCP lease, IPv4 in network order
 std::atomic<uint32_t> lease_gw{0};
 std::atomic<uint32_t> participant_ip{0}; // the address RTPS is bound to; 0 = none
+
+// The WiFi network to join, and the radio's other jobs (Internet Settings: scan, join test).
+std::mutex wifi_network_mutex; // wifi_ssid / wifi_password
+std::string wifi_ssid;
+std::string wifi_password;
+std::mutex wifi_op_mutex;                 // the stack's bring-up, a scan, a join: one at a time
+bool wifi_stack_up = false;               // under wifi_op_mutex
+std::atomic<bool> wifi_hold{false};       // a scan or a join owns the radio: no auto-reconnect
+std::atomic<int> wifi_join_state{0};      // 0 idle, 1 waiting, 2 joined, 3 refused
+std::atomic<uint8_t> wifi_join_reason{0}; // why the last attempt was refused
 
 // The participant and the publishers are made and dropped by the rtps_start / rtps_pub
 // tasks, one after the other (start_ / stop_participant). Every publish() holds
@@ -368,40 +383,118 @@ bool initialize_ethernet() {
 // every few seconds. Event task only.
 uint8_t wifi_last_reason = 0;
 
+// `live`: WiFi is the link RTPS runs over, so this handler owns link_up / got_ip and keeps
+// the network joined. With Ethernet as the link the radio is only up for the Internet
+// Settings screen (a scan, a join test) and must leave the link's state alone.
 void wifi_event_handler(void *, esp_event_base_t, int32_t event_id, void *event_data) {
+  const bool live = net_link == NetLink::WIFI;
   if (event_id == WIFI_EVENT_STA_START) {
-    esp_wifi_connect();
+    if (live && !wifi_hold) {
+      esp_wifi_connect();
+    }
   } else if (event_id == WIFI_EVENT_STA_CONNECTED) {
     const auto *event = static_cast<wifi_event_sta_connected_t *>(event_data);
-    wifi_last_reason = 0;
-    link_up = true; // before the RSSI, which reads nothing without it
-    logger.info("WiFi joined '{}' on channel {} ({} dBm)", kWifiSsid, event->channel,
-                rtps_comms_wifi_rssi().value_or(0));
+    int expected = 1;
+    wifi_join_state.compare_exchange_strong(expected, 2);
+    if (live) {
+      wifi_last_reason = 0;
+      link_up = true; // before the RSSI, which reads nothing without it
+      logger.info("WiFi joined '{}' on channel {} ({} dBm)", rtps_comms_wifi_ssid(), event->channel,
+                  rtps_comms_wifi_rssi().value_or(0));
+    }
   } else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
     const auto *event = static_cast<wifi_event_sta_disconnected_t *>(event_data);
-    if (link_up || event->reason != wifi_last_reason) {
-      logger.warn("WiFi: not connected to '{}' (reason {}), retrying", kWifiSsid,
-                  static_cast<int>(event->reason));
+    // ASSOC_LEAVE is our own esp_wifi_disconnect, not an answer to a join.
+    if (event->reason != WIFI_REASON_ASSOC_LEAVE) {
+      wifi_join_reason = event->reason;
+      int expected = 1;
+      wifi_join_state.compare_exchange_strong(expected, 3);
     }
-    wifi_last_reason = event->reason;
-    link_up = false;
-    got_ip = false;     // the lease does not survive the association
-    esp_wifi_connect(); // the C6 scans and retries; this only asks it to
+    if (live) {
+      if (!wifi_hold && (link_up || event->reason != wifi_last_reason)) {
+        logger.warn("WiFi: not connected to '{}' (reason {}), retrying", rtps_comms_wifi_ssid(),
+                    static_cast<int>(event->reason));
+      }
+      wifi_last_reason = event->reason;
+      link_up = false;
+      got_ip = false; // the lease does not survive the association
+      if (!wifi_hold) {
+        esp_wifi_connect(); // the C6 scans and retries; this only asks it to
+      }
+    }
   }
+}
+
+// The saved network, else the built-in one. Before the link is chosen.
+void wifi_load() {
+  std::string ssid;
+  std::string password;
+  std::ifstream in(storage_path(kWifiFile));
+  std::string line;
+  while (std::getline(in, line)) {
+    if (!line.empty() && line.back() == '\r') {
+      line.pop_back();
+    }
+    if (line.rfind("ssid=", 0) == 0) {
+      ssid = line.substr(5);
+    } else if (line.rfind("password=", 0) == 0) {
+      password = line.substr(9);
+    }
+  }
+  const bool saved = !ssid.empty();
+  if (!saved) {
+    ssid = kBuiltInWifiSsid;
+    password = kBuiltInWifiPassword;
+  }
+  if (!ssid.empty()) {
+    logger.info("WiFi network: '{}' ({})", ssid, saved ? "saved" : "built in");
+  }
+  std::lock_guard<std::mutex> lock(wifi_network_mutex);
+  wifi_ssid = ssid;
+  wifi_password = password;
+}
+
+bool wifi_set_network(const std::string &ssid, const std::string &password) {
+  wifi_config_t config = {};
+  // Both fields may be full with no terminator (a 32-byte SSID is legal): copy by length.
+  std::memcpy(config.sta.ssid, ssid.data(), std::min(ssid.size(), sizeof(config.sta.ssid)));
+  std::memcpy(config.sta.password, password.data(),
+              std::min(password.size(), sizeof(config.sta.password)));
+  // the weakest security accepted: WPA2 or better when there is a password (WPA3 too)
+  config.sta.threshold.authmode = password.empty() ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA2_PSK;
+  config.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
+  return check(esp_wifi_set_config(WIFI_IF_STA, &config), "esp_wifi_set_config");
 }
 
 // The ESP32-C6 over SDIO (esp_hosted) -> esp_wifi_remote -> esp_netif with a DHCP client.
 // esp_wifi_init resets the C6 and waits for it, several seconds: not on app_main's time.
-bool initialize_wifi() {
+//
+// With WiFi as the link this joins the known network and keeps it joined. With Ethernet as
+// the link it only brings the radio up, for the Internet Settings screen to scan and to
+// test a password: that station never takes an address (its DHCP client is stopped) and
+// ranks under Ethernet for routing, so it cannot pull RTPS or its multicast off the cable.
+// Under wifi_op_mutex; once.
+bool wifi_stack_start() {
+  if (wifi_stack_up) {
+    return true;
+  }
+  const bool live = net_link == NetLink::WIFI;
   if (!initialize_netif()) {
     return false;
   }
-  esp_netif_t *netif = esp_netif_create_default_wifi_sta();
-  if (!netif) {
+  esp_netif_inherent_config_t netif_config = ESP_NETIF_INHERENT_DEFAULT_WIFI_STA();
+  if (!live) {
+    netif_config.route_prio = 10; // Ethernet's is 50
+  }
+  esp_netif_t *netif = esp_netif_create_wifi(WIFI_IF_STA, &netif_config);
+  if (!netif || !check(esp_wifi_set_default_wifi_sta_handlers(), "WiFi netif handlers")) {
     logger.error("Failed to create the WiFi netif");
     return false;
   }
   esp_netif_set_hostname(netif, kHostname);
+  if (!live) {
+    esp_netif_dhcpc_stop(netif);
+  }
   const wifi_init_config_t init_config = WIFI_INIT_CONFIG_DEFAULT();
   if (!check(esp_wifi_init(&init_config), "esp_wifi_init (ESP32-C6 over SDIO)")) {
     return false;
@@ -412,19 +505,22 @@ bool initialize_wifi() {
                 version.patch1);
   }
   esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, nullptr);
-  esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &got_ip_event_handler, nullptr);
-  esp_event_handler_register(IP_EVENT, IP_EVENT_STA_LOST_IP, &lost_ip_event_handler, nullptr);
+  if (live) {
+    esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &got_ip_event_handler, nullptr);
+    esp_event_handler_register(IP_EVENT, IP_EVENT_STA_LOST_IP, &lost_ip_event_handler, nullptr);
+  }
 
-  wifi_config_t config = {};
-  std::strncpy(reinterpret_cast<char *>(config.sta.ssid), kWifiSsid, sizeof(config.sta.ssid));
-  std::strncpy(reinterpret_cast<char *>(config.sta.password), kWifiPassword,
-               sizeof(config.sta.password));
-  // the weakest security accepted: WPA2 or better when there is a password (WPA3 too)
-  config.sta.threshold.authmode = kWifiPassword[0] ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
-  config.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
-  if (!check(esp_wifi_set_mode(WIFI_MODE_STA), "esp_wifi_set_mode") ||
-      !check(esp_wifi_set_config(WIFI_IF_STA, &config), "esp_wifi_set_config") ||
-      !check(esp_wifi_start(), "esp_wifi_start")) {
+  if (!check(esp_wifi_set_mode(WIFI_MODE_STA), "esp_wifi_set_mode")) {
+    return false;
+  }
+  // Before the start: the handler joins on STA_START.
+  if (live) {
+    std::lock_guard<std::mutex> lock(wifi_network_mutex);
+    if (!wifi_set_network(wifi_ssid, wifi_password)) {
+      return false;
+    }
+  }
+  if (!check(esp_wifi_start(), "esp_wifi_start")) {
     return false;
   }
   // Power save holds frames to the next beacon (100 ms and up): the joystick stream
@@ -432,8 +528,19 @@ bool initialize_wifi() {
   check(esp_wifi_set_ps(WIFI_PS_NONE), "esp_wifi_set_ps");
   wifi_ps_type_t ps = WIFI_PS_MAX_MODEM;
   esp_wifi_get_ps(&ps);
-  logger.info("WiFi up, joining '{}' (power save {})", kWifiSsid, static_cast<int>(ps));
+  if (live) {
+    logger.info("WiFi up, joining '{}' (power save {})", rtps_comms_wifi_ssid(),
+                static_cast<int>(ps));
+  } else {
+    logger.info("WiFi radio up for Internet Settings; Ethernet stays the link");
+  }
+  wifi_stack_up = true;
   return true;
+}
+
+bool initialize_wifi() {
+  std::lock_guard<std::mutex> lock(wifi_op_mutex);
+  return wifi_stack_start();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -610,7 +717,142 @@ const char *rtps_comms_net_link_name(NetLink link) {
   return link == NetLink::WIFI ? "WiFi" : "Ethernet";
 }
 
-bool rtps_comms_wifi_configured() { return kWifiSsid[0] != 0; }
+bool rtps_comms_wifi_configured() { return !rtps_comms_wifi_ssid().empty(); }
+
+std::string rtps_comms_wifi_ssid() {
+  std::lock_guard<std::mutex> lock(wifi_network_mutex);
+  return wifi_ssid;
+}
+
+std::string rtps_comms_ip() { return got_ip ? ip_string(lease_ip) : std::string(); }
+
+std::optional<std::vector<WifiNetworkFound>> rtps_comms_wifi_scan() {
+  std::lock_guard<std::mutex> lock(wifi_op_mutex);
+  if (!wifi_stack_start()) {
+    return std::nullopt;
+  }
+  const bool live = net_link == NetLink::WIFI;
+  // The C6 refuses a scan while it is mid-connect, which is where a live link that
+  // cannot reach its network sits: hold the retries for the length of the scan.
+  wifi_hold = true;
+  if (live && !link_up) {
+    esp_wifi_disconnect();
+    std::this_thread::sleep_for(200ms);
+  }
+  wifi_scan_config_t config = {};
+  const bool scanned = check(esp_wifi_scan_start(&config, true), "esp_wifi_scan_start");
+  uint16_t count = 24; // more than the list can usefully show
+  std::vector<wifi_ap_record_t> records(count);
+  const bool read =
+      scanned && check(esp_wifi_scan_get_ap_records(&count, records.data()), "scan results");
+  wifi_hold = false;
+  if (live && !link_up) {
+    esp_wifi_connect();
+  }
+  if (!read) {
+    return std::nullopt;
+  }
+  std::vector<WifiNetworkFound> found;
+  for (uint16_t i = 0; i < count; i++) {
+    const std::string ssid(reinterpret_cast<const char *>(records[i].ssid));
+    const bool known = std::any_of(found.begin(), found.end(),
+                                   [&ssid](const WifiNetworkFound &n) { return n.ssid == ssid; });
+    if (!ssid.empty() && !known) { // hidden networks have no name to show
+      found.push_back({ssid, records[i].rssi, records[i].authmode != WIFI_AUTH_OPEN});
+    }
+  }
+  std::sort(found.begin(), found.end(),
+            [](const WifiNetworkFound &a, const WifiNetworkFound &b) { return a.rssi > b.rssi; });
+  logger.info("WiFi scan: {} networks", found.size());
+  return found;
+}
+
+WifiJoin rtps_comms_wifi_join(const std::string &ssid, const std::string &password) {
+  std::lock_guard<std::mutex> lock(wifi_op_mutex);
+  if (!wifi_stack_start()) {
+    return WifiJoin::FAILED;
+  }
+  const bool live = net_link == NetLink::WIFI;
+  logger.info("WiFi: trying '{}'", ssid);
+  wifi_hold = true;
+  esp_wifi_disconnect(); // leave the current network, or stop a connect in progress
+  std::this_thread::sleep_for(300ms);
+
+  WifiJoin result = WifiJoin::FAILED;
+  if (wifi_set_network(ssid, password)) {
+    // Two attempts: one missed beacon must not read as "not found". A wrong
+    // password is final: asked again, the AP only answers "connection failed".
+    for (int attempt = 0;
+         attempt < 2 && result != WifiJoin::JOINED && result != WifiJoin::WRONG_PASSWORD;
+         attempt++) {
+      wifi_join_reason = 0;
+      wifi_join_state = 1;
+      if (!check(esp_wifi_connect(), "esp_wifi_connect")) {
+        break;
+      }
+      for (int waited = 0; waited < 12000 && wifi_join_state == 1; waited += 100) {
+        std::this_thread::sleep_for(100ms);
+      }
+      if (wifi_join_state == 2) {
+        result = WifiJoin::JOINED;
+        break;
+      }
+      switch (wifi_join_reason.load()) {
+      case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
+      case WIFI_REASON_HANDSHAKE_TIMEOUT:
+      case WIFI_REASON_AUTH_FAIL:
+      case WIFI_REASON_MIC_FAILURE:
+        result = WifiJoin::WRONG_PASSWORD;
+        break;
+      case WIFI_REASON_NO_AP_FOUND:
+      case WIFI_REASON_NO_AP_FOUND_W_COMPATIBLE_SECURITY:
+      case WIFI_REASON_NO_AP_FOUND_IN_AUTHMODE_THRESHOLD:
+      case WIFI_REASON_NO_AP_FOUND_IN_RSSI_THRESHOLD:
+        result = WifiJoin::NOT_FOUND;
+        break;
+      default:
+        result = WifiJoin::FAILED;
+        break;
+      }
+      logger.warn("WiFi: '{}' refused (reason {})", ssid, static_cast<int>(wifi_join_reason));
+      esp_wifi_disconnect();
+      std::this_thread::sleep_for(300ms);
+    }
+  }
+  wifi_join_state = 0;
+
+  if (result == WifiJoin::JOINED) {
+    std::string text = "ssid=" + ssid + "\npassword=" + password + "\n";
+    storage_write(kWifiFile, text);
+    {
+      std::lock_guard<std::mutex> network_lock(wifi_network_mutex);
+      wifi_ssid = ssid;
+      wifi_password = password;
+    }
+    logger.info("WiFi: '{}' joined and saved", ssid);
+    if (!live) {
+      esp_wifi_disconnect(); // proved; Ethernet stays the link until a restart picks WiFi
+    }
+    wifi_hold = false;
+  } else {
+    // Back to the network that was in force, if any.
+    std::string old_ssid;
+    std::string old_password;
+    {
+      std::lock_guard<std::mutex> network_lock(wifi_network_mutex);
+      old_ssid = wifi_ssid;
+      old_password = wifi_password;
+    }
+    if (!old_ssid.empty()) {
+      wifi_set_network(old_ssid, old_password);
+    }
+    wifi_hold = false;
+    if (live) {
+      esp_wifi_connect();
+    }
+  }
+  return result;
+}
 
 NetLink rtps_comms_net_link() { return net_link; }
 
@@ -661,7 +903,7 @@ std::string rtps_comms_link_state_meaning(RtpsLinkState state) {
   case RtpsLinkState::LINK_DOWN:
     return net_link == NetLink::WIFI
                ? fmt::format("not connected to WiFi '{}': out of range, or wrong password?",
-                             kWifiSsid)
+                             rtps_comms_wifi_ssid())
                : "no Ethernet link: cable unplugged?";
   case RtpsLinkState::NO_IP:
     return "link up, but no DHCP lease";
@@ -675,10 +917,11 @@ std::string rtps_comms_link_state_meaning(RtpsLinkState state) {
 }
 
 bool rtps_comms_start(NetLink wanted) {
+  wifi_load();
   const bool wifi = wanted == NetLink::WIFI && rtps_comms_wifi_configured();
   if (wanted == NetLink::WIFI && !wifi) {
-    logger.warn("Network is WiFi, but no network is built in (CONFIG_HMI_WIFI_SSID): "
-                "using Ethernet");
+    logger.warn("Connection is WiFi, but no network is known (Internet Settings, or "
+                "CONFIG_HMI_WIFI_SSID): using Ethernet");
   }
   net_link = wifi ? NetLink::WIFI : NetLink::ETHERNET;
   logger.info("Network: {}", rtps_comms_net_link_name(net_link));

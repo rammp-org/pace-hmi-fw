@@ -48,6 +48,7 @@
 
 #include "actions_spec.h"
 #include "boot_logo.h"
+#include "internet_ui.hpp"
 #include "joystick_cal.hpp"
 #include "log_capture.hpp"
 #include "log_view.hpp"
@@ -2225,8 +2226,8 @@ static constexpr const char *kThemeNames[] = {"Dark", "Day"};
 static constexpr const char *kOnOffNames[] = {"Off", "On"};
 static constexpr const char *kMirrorNames[] = {"Normal", "Mirror"};
 static constexpr const char *kSwapNames[] = {"Normal", "Swap"};
-// NetLink order. "Wired", not "Ethernet": the value box fits about six letters.
-static constexpr const char *kNetworkNames[] = {"Wired", "WiFi"};
+// NetLink order. Not a UI Settings row: Internet Settings draws it as two buttons.
+static constexpr const char *kNetworkNames[] = {"Ethernet", "WiFi"};
 static const char *const *const kSettingParamNames[] = {
     nullptr,       // SETTINGS_PARAM_BRIGHTNESS
     kThemeNames,   // SETTINGS_PARAM_THEME
@@ -2311,41 +2312,6 @@ static void stepper_format(const StepperSpec &spec, int32_t raw, char *out, size
 
 static void set_display_flipped(bool on); // screen flip, beside direct_flush_cb
 
-// UI Settings "Network". RTPS binds to one link at boot, so moving to the other
-// takes a restart: once the row has sat on it for kNetworkRestartDelayMs, so that
-// stepping past it does nothing and stepping back cancels. Only a change of the
-// link actually used counts - with no WiFi network built in both values mean
-// Ethernet (rtps_comms_start), and the first run at boot is never one.
-static constexpr uint32_t kNetworkRestartDelayMs = 3000;
-static lv_timer_t *network_restart_timer = nullptr;
-
-static void network_restart_cb(lv_timer_t *timer) {
-  lv_timer_pause(timer);
-  if (lv_subject_get_int(&locked_subject) == 0) {
-    return; // driving: the row refuses a change then, so this is belt and braces
-  }
-  static espp::Logger net_logger({.tag = "network", .level = espp::Logger::Verbosity::INFO});
-  net_logger.warn("Network changed to {}: restarting to use it",
-                  kNetworkNames[lv_subject_get_int(&network_subject)]);
-  esp_restart();
-}
-
-static void network_restart_check(int value) {
-  if (network_restart_timer == nullptr) { // the first run, at bind time: before RTPS starts
-    network_restart_timer = lv_timer_create(network_restart_cb, kNetworkRestartDelayMs, nullptr);
-    lv_timer_pause(network_restart_timer);
-    return;
-  }
-  const bool wifi = value == static_cast<int>(NetLink::WIFI) && rtps_comms_wifi_configured();
-  const NetLink wanted = wifi ? NetLink::WIFI : NetLink::ETHERNET;
-  if (wanted == rtps_comms_net_link()) {
-    lv_timer_pause(network_restart_timer);
-  } else {
-    lv_timer_reset(network_restart_timer);
-    lv_timer_resume(network_restart_timer);
-  }
-}
-
 // Applies and saves one of the UI Settings rows that has no observer of its
 // own (brightness and theme do). user_data is its SETTINGS_PARAM_*.
 static void setting_store_observer(lv_observer_t *observer, lv_subject_t *subject) {
@@ -2371,9 +2337,6 @@ static void setting_store_observer(lv_observer_t *observer, lv_subject_t *subjec
     break;
   case SETTINGS_PARAM_SOUNDS:
     sounds_on.store(value != 0);
-    break;
-  case SETTINGS_PARAM_NETWORK:
-    network_restart_check(value);
     break;
   default:
     break; // MENU_SLIDE: read where it is used, nothing to apply
@@ -2778,11 +2741,10 @@ static void setting_page_open(int32_t page) {
       if (kSettingParams[i].page == page) {
         StepperSpec spec = kSettingParams[i].spec;
         spec.names = kSettingParamNames[i];
-        // Remapping the stick changes which way a push drives the chair, and a
-        // new network restarts the HMI, so neither is done mid-drive.
+        // Remapping the stick changes which way a push drives the chair, so it
+        // is not done mid-drive.
         spec.locked_only = i == SETTINGS_PARAM_STICK_INVERT_X ||
-                           i == SETTINGS_PARAM_STICK_INVERT_Y || i == SETTINGS_PARAM_STICK_SWAP ||
-                           i == SETTINGS_PARAM_NETWORK;
+                           i == SETTINGS_PARAM_STICK_INVERT_Y || i == SETTINGS_PARAM_STICK_SWAP;
         setting_row_add(spec, kSettingParamValue[i], false);
       }
     }
@@ -3243,7 +3205,7 @@ static constexpr uint32_t kRowPressMs = 300;
 // p21 "HOME BUTTON": a dissolve from any screen back to Drive.
 static constexpr uint32_t kHomeFadeMs = 120;
 
-// The eight destinations, in the order MenuOverlay draws them, and the child id
+// The nine destinations, in the order MenuOverlay draws them, and the child id
 // of each row. Adding a row in SquareLine means a line in each of these two and
 // a case in nav_go -- the row order is the menu order, nothing else encodes it.
 enum NavDest {
@@ -3252,6 +3214,7 @@ enum NavDest {
   // The rest alphabetically.
   NAV_BENCH,    // "Bench", behind the PIN gate
   NAV_DIAG,     // "Diagnostics"
+  NAV_INTERNET, // "Internet Settings": Ethernet or WiFi, and which network
   NAV_JOYSTICK, // "Joystick", the test screen with CALIBRATE on it
   NAV_LOG,      // "Log"
   NAV_SKUNK,    // "Skunk Works"
@@ -3262,7 +3225,7 @@ enum NavDest {
 static const uint32_t kNavRowIds[NAV_DEST_COUNT] = {
     UI_COMP_MENUOVERLAY_ROW1, UI_COMP_MENUOVERLAY_ROW2, UI_COMP_MENUOVERLAY_ROW3,
     UI_COMP_MENUOVERLAY_ROW4, UI_COMP_MENUOVERLAY_ROW5, UI_COMP_MENUOVERLAY_ROW6,
-    UI_COMP_MENUOVERLAY_ROW7, UI_COMP_MENUOVERLAY_ROW8,
+    UI_COMP_MENUOVERLAY_ROW7, UI_COMP_MENUOVERLAY_ROW8, UI_COMP_MENUOVERLAY_ROW9,
 };
 
 // Each screen's key and overlay, filled in as nav_attach_chrome wires them, so
@@ -3568,6 +3531,10 @@ static void nav_go(NavDest dest) {
   case NAV_SETTINGS:
     setting_page_open(0);
     break;
+  case NAV_INTERNET:
+    _ui_screen_change(&ui_InternetScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
+                      &ui_InternetScreen_screen_init);
+    break;
   case NAV_JOYSTICK:
     _ui_screen_change(&ui_JoystickScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
                       &ui_JoystickScreen_screen_init);
@@ -3586,6 +3553,7 @@ static void nav_go(NavDest dest) {
   dest_screens[NAV_SEAT] = ui_SeatScreen;
   dest_screens[NAV_BENCH] = ui_BenchGateScreen;
   dest_screens[NAV_DIAG] = ui_DiagnosticsScreen;
+  dest_screens[NAV_INTERNET] = ui_InternetScreen;
   dest_screens[NAV_JOYSTICK] = ui_JoystickScreen;
   dest_screens[NAV_LOG] = ui_LogScreen;
   dest_screens[NAV_SKUNK] = ui_SkunkWorksScreen;
@@ -3807,6 +3775,8 @@ static void nav_enter_screen(const lv_obj_t *screen) {
   } else if (screen == ui_DiagnosticsScreen) {
     nav_use_group(diag_group, screen);
     diag_focus(0);
+  } else if (screen == ui_InternetScreen) {
+    internet_ui_on_load(); // its own groups, one per page
   } else if (screen == ui_LogScreen && log_view_group() != nullptr) {
     nav_use_group(log_view_group(), screen);
     log_view_on_load();
@@ -3852,6 +3822,7 @@ static const char *active_screen_name() {
       {&ui_BenchGateScreen, "BenchGateScreen"},
       {&ui_BenchMotorsScreen, "BenchMotorsScreen"},
       {&ui_LogScreen, "LogScreen"},
+      {&ui_InternetScreen, "InternetScreen"},
       {&ui_UpdateScreen, "UpdateScreen"},
       {&ui_SettingsScreen, "SettingsScreen"},
       {&ui_SkunkWorksScreen, "SkunkWorksScreen"},
@@ -3981,10 +3952,10 @@ static uint32_t strip_screen_overdraw(const lv_obj_t *screen) {
 // theme-change pass cannot drift apart. The screens built on demand are
 // nullptr while they do not exist, and skipped.
 static void strip_all_overdraw() {
-  const lv_obj_t *const screens[] = {ui_LockedScreen,    ui_DriveScreen,      ui_SeatScreen,
-                                     ui_BenchGateScreen, ui_SettingsScreen,   ui_JoystickScreen,
-                                     ui_LogScreen,       ui_SkunkWorksScreen, ui_DiagnosticsScreen,
-                                     ui_UpdateScreen,    ui_BenchMotorsScreen};
+  const lv_obj_t *const screens[] = {ui_LockedScreen,    ui_DriveScreen,       ui_SeatScreen,
+                                     ui_BenchGateScreen, ui_SettingsScreen,    ui_JoystickScreen,
+                                     ui_LogScreen,       ui_SkunkWorksScreen,  ui_DiagnosticsScreen,
+                                     ui_UpdateScreen,    ui_BenchMotorsScreen, ui_InternetScreen};
   const uint32_t stripped =
       std::accumulate(std::begin(screens), std::end(screens), uint32_t{0},
                       [](uint32_t sum, const lv_obj_t *screen) {
@@ -5125,6 +5096,7 @@ extern "C" void app_main(void) {
       {ui_TopBar5, ui_DriveBand11, ui_MenuKey11, ui_MenuOverlay11, true},  // BenchGateScreen
       {ui_TopBar6, ui_DriveBand5, ui_MenuKey6, ui_MenuOverlay6, true},     // LogScreen
       {ui_TopBar11, ui_DriveBand10, ui_MenuKey10, ui_MenuOverlay10, true}, // UpdateScreen
+      {ui_TopBar12, ui_DriveBand12, ui_MenuKey12, ui_MenuOverlay12, true}, // InternetScreen
   };
   for (const ScreenChrome &c : kChrome) {
     bind_status_panel(c.band);
@@ -5165,6 +5137,7 @@ extern "C" void app_main(void) {
   bind_entry_refused_panel(ui_ErrorBanner10); // JoystickScreen
   bind_entry_refused_panel(ui_ErrorBanner11); // BenchGateScreen
   bind_entry_refused_panel(ui_ErrorBanner9);  // UpdateScreen
+  bind_entry_refused_panel(ui_ErrorBanner12); // InternetScreen
   // Diagnostics readings, and whether they are live: before the poll timer
   // that keeps the latter current, and before any RTPS sample can land.
   for (auto &item : diag_value) {
@@ -5416,6 +5389,20 @@ extern "C" void app_main(void) {
   // It covers the function buttons: its fill is what hides them.
   keep_overlay_fill(ui_SeatAdjustmentPanel);
 
+  // InternetScreen: Ethernet or WiFi, the network list and the password page.
+  // Its two pages cover the body, so their fill is what hides it.
+  keep_overlay_fill(ui_NetPickPanel);
+  keep_overlay_fill(ui_NetPwPanel);
+  internet_ui_init({
+      .lvgl_mutex = &lvgl_mutex,
+      .connection = &network_subject,
+      .use_group = [](lv_group_t *group) { nav_use_group(group, ui_InternetScreen); },
+      .focus_ring = nav_focus_ring,
+      .mirror_states = nav_mirror_states,
+      .claim_clicks = nav_claim_clicks,
+      .refuse = refusal_feedback,
+  });
+
   lv_subject_init_string(&seat_function_subject, seat_function_buf, seat_function_prev_buf,
                          sizeof(seat_function_buf), lv_label_get_text(ui_AngleSettingLabel));
   lv_label_bind_text(ui_AngleSettingLabel, &seat_function_subject, nullptr);
@@ -5448,7 +5435,7 @@ extern "C" void app_main(void) {
   // ui_init builds, so each route in and out is covered; the ones built on
   // demand register it in their own *_screen_ensure().
   for (lv_obj_t *screen : {ui_LockedScreen, ui_DriveScreen, ui_SeatScreen, ui_BenchGateScreen,
-                           ui_JoystickScreen, ui_LogScreen, ui_UpdateScreen}) {
+                           ui_JoystickScreen, ui_LogScreen, ui_UpdateScreen, ui_InternetScreen}) {
     lv_obj_add_event_cb(screen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, nullptr);
   }
 
@@ -6122,7 +6109,7 @@ extern "C" void app_main(void) {
     }
   });
   if (!rtps_comms_start(static_cast<NetLink>(settings_get(SETTINGS_PARAM_NETWORK)))) {
-    logger.warn("RTPS comms not started (Ethernet bring-up failed)");
+    logger.warn("RTPS comms not started (network bring-up failed)");
   }
 
   // The remote UI debug channel (CONFIG_HMI_REMOTE_UI, off by default). Last,

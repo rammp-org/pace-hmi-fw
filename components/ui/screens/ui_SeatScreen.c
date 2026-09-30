@@ -961,6 +961,7 @@ void ui_SeatScreen_screen_init(void)
 
 
 
+
 }
 
 void ui_SeatScreen_screen_destroy(void)

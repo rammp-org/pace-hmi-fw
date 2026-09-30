@@ -12,7 +12,8 @@
 
 /* P(NAME, title, instructions) */
 #define SETTINGS_PAGE_TABLE(P)                                                                     \
-  P(UI, "UI Settings", "Left/right or -/+ to change. Saved automatically.")
+  P(UI, "UI Settings", "Left/right or -/+ to change. Saved automatically.")                        \
+  P(NET, "Internet Settings", "Shown on the InternetScreen, not as rows.")
 
 /* X(PAGE, NAME, short, label, min, max, step, decimals, unit, default)
    A row whose values are names rather than numbers (Theme, Menu slide...) is
@@ -20,8 +21,9 @@
    Every row is saved in settings.txt under its NAME, lowercase (settings.cpp),
    and starts at `default` until it has been.
    NETWORK is what RTPS runs over, 0 = Ethernet (the W5500), 1 = WiFi (the ESP32-C6;
-   Ethernet anyway when no CONFIG_HMI_WIFI_SSID is built in). Read at boot, so a change
-   restarts the HMI (main.cpp, network_restart_cb). */
+   Ethernet anyway while no WiFi network is known). It is on a page of its own because the
+   InternetScreen draws it as two choice buttons (internet_ui.cpp), not as a -/+ row. Read
+   at boot, so a change takes a restart, which that screen offers. */
 #define SETTINGS_PARAM_TABLE(X)                                                                    \
   X(UI, BRIGHTNESS, "S1", "Brightness", 5, 100, 5, 0, "%", 75)                                     \
   X(UI, THEME, "S2", "Theme", 0, 1, 1, 0, "", 0)                                                   \
@@ -32,7 +34,7 @@
   X(UI, STICK_INVERT_Y, "S7", "Stick fwd/back", 0, 1, 1, 0, "", 0)                                 \
   X(UI, STICK_SWAP, "S8", "Stick axes", 0, 1, 1, 0, "", 0)                                         \
   X(UI, SOUNDS, "S9", "Sounds", 0, 1, 1, 0, "", 1)                                                 \
-  X(UI, NETWORK, "S10", "Network", 0, 1, 1, 0, "", 1)
+  X(NET, NETWORK, "N1", "Connection", 0, 1, 1, 0, "", 1)
 
 /* SETTINGS_PAGE_SCREEN_BRIGHTNESS, ..., SETTINGS_PAGE_COUNT */
 enum {
