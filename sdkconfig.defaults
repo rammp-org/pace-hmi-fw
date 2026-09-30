@@ -288,3 +288,41 @@ CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 CONFIG_RTPS_LIMIT_NUM_STATELESS_WRITERS=6
 CONFIG_RTPS_LIMIT_NUM_STATELESS_READERS=6
 CONFIG_RTPS_LIMIT_MAX_NUM_READER_CALLBACKS=6
+
+# --- WiFi: the Tab5's ESP32-C6 over SDIO (esp_hosted 2.x + esp_wifi_remote) ---
+# The P4 has no radio. The C6 runs M5Stack's esp_hosted slave firmware, and the
+# esp_wifi API here is forwarded to it over SDIO slot 1 (CLK 12, CMD 13, D0..D3
+# 11..8, reset GPIO15, power from IO expander 0x44 P0): the Tab5 board preset
+# supplies those. Which link RTPS uses, WiFi or the W5500, is the Network row of
+# UI Settings (settings.txt); the network name and password are
+# CONFIG_HMI_WIFI_SSID / _PASSWORD in the local sdkconfig, never in this file.
+CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
+CONFIG_ESP_HOSTED_CP_TARGET_ESP32C6=y
+CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE=y
+CONFIG_ESP32P4_TAB5_C6_BOARD=y
+CONFIG_ESP_HOSTED_SDIO_SLOT_1=y
+CONFIG_ESP_HOSTED_SDIO_4_BIT_BUS=y
+CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_CMD_SLOT_1=13
+CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_CLK_SLOT_1=12
+CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_D0_SLOT_1=11
+CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_D1_4BIT_BUS_SLOT_1=10
+CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_D2_4BIT_BUS_SLOT_1=9
+CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_D3_4BIT_BUS_SLOT_1=8
+CONFIG_ESP_HOSTED_SDIO_GPIO_RESET_SLAVE=15
+# "Active high" in esp_hosted's words: GPIO15 rests HIGH and a LOW pulse resets
+# the C6. The Tab5 preset picks active low, which holds the C6 in reset and every
+# SDIO probe times out (send_op_cond 0x107); measured on the bench unit.
+# esp_hosted 3.x agrees (it always parks the pin high).
+CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH=y
+CONFIG_ESP_HOSTED_SLAVE_RESET_ON_EVERY_HOST_BOOTUP=y
+# esp_hosted starts its SDIO tasks and buffer pool from a constructor, whichever
+# link is picked. The tasks' stacks go to PSRAM. The pool goes altogether: it is
+# 31 x 1.5 KB = 46 KB of internal DMA-capable RAM held from boot, the pool the
+# W5500 lives on (see the internal RAM split above). Without it each packet is
+# allocated as it is sent, so only WiFi pays. Not MEMPOOL_PREFER_SPIRAM either:
+# IDF 6.0's SD host wants PSRAM buffers aligned to the 128-byte L2 cache line in
+# address and length, esp_hosted aligns them to 64, and SDIO writes fail (0x102).
+CONFIG_ESP_HOSTED_DFLT_TASK_FROM_SPIRAM=y
+# CONFIG_ESP_HOSTED_USE_MEMPOOL is not set
+# A C6 that stops answering must cost the HMI its WiFi, not a reboot.
+# CONFIG_ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE is not set

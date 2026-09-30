@@ -19,4 +19,22 @@ menu "RAMMP HMI"
             (which is not in git) while working on the UI, not in
             sdkconfig.defaults -- that one ships.
 
+    config HMI_WIFI_SSID
+        string "WiFi network name (SSID)"
+        default ""
+        help
+            The network the HMI joins when UI Settings -> Network is WiFi (the
+            Tab5's ESP32-C6, 2.4 GHz only). Empty = no WiFi: the HMI uses
+            Ethernet (the W5500) whatever that setting says.
+
+            Set it, and HMI_WIFI_PASSWORD, in your local sdkconfig (not in git),
+            never in sdkconfig.defaults. A network behind a login page (a
+            captive portal) will not work: nothing on the HMI can log in.
+
+    config HMI_WIFI_PASSWORD
+        string "WiFi password"
+        default ""
+        help
+            WPA2/WPA3 passphrase for HMI_WIFI_SSID. Empty = an open network.
+
 endmenu

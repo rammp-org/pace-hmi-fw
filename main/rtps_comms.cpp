@@ -4,6 +4,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstring>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -20,9 +21,11 @@
 #include "esp_eth_phy_w5500.h"
 #include "esp_event.h"
 #include "esp_heap_caps.h"
+#include "esp_hosted.h"
 #include "esp_mac.h"
 #include "esp_netif.h"
 #include "esp_timer.h"
+#include "esp_wifi.h"
 #include "lwip/ip_addr.h"
 #include "ping/ping_sock.h"
 
@@ -47,6 +50,12 @@ constexpr gpio_num_t kPinInt = GPIO_NUM_4;
 constexpr int kSpiClockMhz = 20;   // W5500 max is 33; 20 tolerates jumper wires
 constexpr int kRxPollPeriodMs = 0; // 0 = RX on the INT line; N = poll every N ms (rules out INT)
 
+// WiFi: the Tab5's ESP32-C6 does the radio (esp_hosted over SDIO, pins in sdkconfig.defaults).
+// The network comes from the local sdkconfig; empty = no WiFi, see rtps_comms_wifi_configured.
+constexpr char kWifiSsid[] = CONFIG_HMI_WIFI_SSID;
+constexpr char kWifiPassword[] = CONFIG_HMI_WIFI_PASSWORD;
+constexpr char kHostname[] = "rammp-hmi"; // what the access point's client list shows
+
 constexpr auto kHeartbeatPeriod = 2s; // bench counter on rammp::kHmiCounter
 constexpr int64_t kMibStatusTimeoutUs =
     std::chrono::duration_cast<std::chrono::microseconds>(rammp::kMibStatusTimeout).count();
@@ -55,16 +64,22 @@ constexpr int64_t kDiagRateWindowUs = 4'000'000;
 espp::Logger logger({.tag = "rtps_comms", .level = espp::Logger::Verbosity::INFO});
 
 // Link state: the event handlers, the RTPS task and the LVGL poll all touch these.
-std::atomic<bool> eth_failed{false};
+std::atomic<NetLink> net_link{NetLink::ETHERNET}; // set once, before any task starts
+std::atomic<bool> net_failed{false};
 std::atomic<bool> link_up{false};
 std::atomic<bool> got_ip{false};
 std::atomic<bool> peer_matched{false};    // a latch: espp only reports "matched"
 std::atomic<bool> endpoints_ready{false}; // every publisher below exists
 std::atomic<int64_t> last_status_us{0};   // last MibStatus, esp_timer time; 0 = never
-std::string ip_address;
-esp_netif_ip_info_t ip_info{};
+std::atomic<uint32_t> lease_ip{0};        // the DHCP lease, IPv4 in network order
+std::atomic<uint32_t> lease_gw{0};
+std::atomic<uint32_t> participant_ip{0}; // the address RTPS is bound to; 0 = none
 
+// The participant and the publishers are made and dropped by the rtps_start / rtps_pub
+// tasks, one after the other (start_ / stop_participant). Every publish() holds
+// endpoints_mutex, so a publisher is never dropped under a task that is using it.
 std::unique_ptr<Rtps> participant;
+std::mutex endpoints_mutex;
 std::unique_ptr<espp::Task> heartbeat_task;
 
 // HMI -> MCB / PC
@@ -117,7 +132,13 @@ template <class T> bool subscribe(const rammp::Topic<T> &topic, void (*on_msg)(c
 
 // Quiet until the endpoints exist and a peer has matched: no one to send to yet.
 template <class T> bool publish(const Publisher<T> &pub, const T &msg) {
+  std::lock_guard<std::mutex> lock(endpoints_mutex);
   return endpoints_ready && peer_matched && pub->publish(msg);
+}
+
+std::string ip_string(uint32_t addr) {
+  const esp_ip4_addr_t ip{addr};
+  return fmt::format("{}.{}.{}.{}", IP2STR(&ip));
 }
 
 // PC -> HMI bench command. The self test's run and pong ride it, tagged in the top nibble.
@@ -201,7 +222,8 @@ void on_diagnostics(const rammp::Diagnostics &d) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// Ethernet
+// The link: Ethernet or WiFi, whichever rtps_comms_start was given. Only one is
+// brought up, so RTPS and its multicast have one interface to choose from.
 
 void eth_event_handler(void *, esp_event_base_t, int32_t event_id, void *) {
   if (event_id == ETHERNET_EVENT_CONNECTED) {
@@ -215,10 +237,11 @@ void eth_event_handler(void *, esp_event_base_t, int32_t event_id, void *) {
 }
 
 void got_ip_event_handler(void *, esp_event_base_t, int32_t, void *event_data) {
-  ip_info = static_cast<ip_event_got_ip_t *>(event_data)->ip_info;
-  ip_address = fmt::format("{}.{}.{}.{}", IP2STR(&ip_info.ip));
-  logger.info("Got IP {} (gateway {}.{}.{}.{})", ip_address, IP2STR(&ip_info.gw));
-  got_ip = true;
+  const esp_netif_ip_info_t &info = static_cast<ip_event_got_ip_t *>(event_data)->ip_info;
+  lease_gw = info.gw.addr;
+  lease_ip = info.ip.addr;
+  logger.info("Got IP {} (gateway {})", ip_string(info.ip.addr), ip_string(info.gw.addr));
+  got_ip = true; // an address other than RTPS's rebinds it: heartbeat_tick
 }
 
 void lost_ip_event_handler(void *, esp_event_base_t, int32_t, void *) {
@@ -266,13 +289,17 @@ bool check(esp_err_t err, const char *what) {
   return err == ESP_OK;
 }
 
-// W5500 over SPI -> esp_eth -> esp_netif with a DHCP client
-bool initialize_ethernet() {
+bool initialize_netif() {
   if (!check(esp_netif_init(), "esp_netif_init")) {
     return false;
   }
-  if (esp_err_t err = esp_event_loop_create_default();
-      err != ESP_ERR_INVALID_STATE && !check(err, "event loop")) {
+  esp_err_t err = esp_event_loop_create_default();
+  return err == ESP_ERR_INVALID_STATE || check(err, "event loop");
+}
+
+// W5500 over SPI -> esp_eth -> esp_netif with a DHCP client
+bool initialize_ethernet() {
+  if (!initialize_netif()) {
     return false;
   }
   if (esp_err_t err = gpio_install_isr_service(0);
@@ -337,14 +364,89 @@ bool initialize_ethernet() {
   return true;
 }
 
+// Why the last attempt to join failed, so a network that stays away logs once, not
+// every few seconds. Event task only.
+uint8_t wifi_last_reason = 0;
+
+void wifi_event_handler(void *, esp_event_base_t, int32_t event_id, void *event_data) {
+  if (event_id == WIFI_EVENT_STA_START) {
+    esp_wifi_connect();
+  } else if (event_id == WIFI_EVENT_STA_CONNECTED) {
+    const auto *event = static_cast<wifi_event_sta_connected_t *>(event_data);
+    wifi_last_reason = 0;
+    link_up = true; // before the RSSI, which reads nothing without it
+    logger.info("WiFi joined '{}' on channel {} ({} dBm)", kWifiSsid, event->channel,
+                rtps_comms_wifi_rssi().value_or(0));
+  } else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
+    const auto *event = static_cast<wifi_event_sta_disconnected_t *>(event_data);
+    if (link_up || event->reason != wifi_last_reason) {
+      logger.warn("WiFi: not connected to '{}' (reason {}), retrying", kWifiSsid,
+                  static_cast<int>(event->reason));
+    }
+    wifi_last_reason = event->reason;
+    link_up = false;
+    got_ip = false;     // the lease does not survive the association
+    esp_wifi_connect(); // the C6 scans and retries; this only asks it to
+  }
+}
+
+// The ESP32-C6 over SDIO (esp_hosted) -> esp_wifi_remote -> esp_netif with a DHCP client.
+// esp_wifi_init resets the C6 and waits for it, several seconds: not on app_main's time.
+bool initialize_wifi() {
+  if (!initialize_netif()) {
+    return false;
+  }
+  esp_netif_t *netif = esp_netif_create_default_wifi_sta();
+  if (!netif) {
+    logger.error("Failed to create the WiFi netif");
+    return false;
+  }
+  esp_netif_set_hostname(netif, kHostname);
+  const wifi_init_config_t init_config = WIFI_INIT_CONFIG_DEFAULT();
+  if (!check(esp_wifi_init(&init_config), "esp_wifi_init (ESP32-C6 over SDIO)")) {
+    return false;
+  }
+  esp_hosted_coprocessor_fwver_t version{};
+  if (esp_hosted_get_coprocessor_fwversion(&version) == ESP_OK) {
+    logger.info("ESP32-C6 runs esp_hosted {}.{}.{}", version.major1, version.minor1,
+                version.patch1);
+  }
+  esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, nullptr);
+  esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &got_ip_event_handler, nullptr);
+  esp_event_handler_register(IP_EVENT, IP_EVENT_STA_LOST_IP, &lost_ip_event_handler, nullptr);
+
+  wifi_config_t config = {};
+  std::strncpy(reinterpret_cast<char *>(config.sta.ssid), kWifiSsid, sizeof(config.sta.ssid));
+  std::strncpy(reinterpret_cast<char *>(config.sta.password), kWifiPassword,
+               sizeof(config.sta.password));
+  // the weakest security accepted: WPA2 or better when there is a password (WPA3 too)
+  config.sta.threshold.authmode = kWifiPassword[0] ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
+  config.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
+  if (!check(esp_wifi_set_mode(WIFI_MODE_STA), "esp_wifi_set_mode") ||
+      !check(esp_wifi_set_config(WIFI_IF_STA, &config), "esp_wifi_set_config") ||
+      !check(esp_wifi_start(), "esp_wifi_start")) {
+    return false;
+  }
+  // Power save holds frames to the next beacon (100 ms and up): the joystick stream
+  // and MibStatus both need the radio awake.
+  check(esp_wifi_set_ps(WIFI_PS_NONE), "esp_wifi_set_ps");
+  wifi_ps_type_t ps = WIFI_PS_MAX_MODEM;
+  esp_wifi_get_ps(&ps);
+  logger.info("WiFi up, joining '{}' (power save {})", kWifiSsid, static_cast<int>(ps));
+  return true;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // RTPS
 
+// On the current lease.
 bool start_participant() {
   // the W5500's per-frame SPI bounce buffer comes from this pool, unchecked
   logger.info("DMA-capable heap: {} free", heap_caps_get_free_size(MALLOC_CAP_DMA));
+  participant_ip = lease_ip.load();
+  const std::string address = ip_string(participant_ip);
   participant = std::make_unique<Rtps>(Rtps::Config{
-      .interface_address = ip_address,
+      .interface_address = address,
       .on_publisher_matched = [] { peer_matched = true; },
       .on_subscriber_matched = [] { peer_matched = true; },
       .log_level = espp::Logger::Verbosity::INFO, // DEBUG traces discovery
@@ -356,35 +458,76 @@ bool start_participant() {
   }
 
   // 5 writers + 5 readers, plus SPDP's pair: the budget set in sdkconfig.defaults
-  counter_pub = make_publisher(rammp::kHmiCounter);
-  joystick_pub = make_publisher(rammp::kJoystickXYTwist);
-  seat_pub = make_publisher(rammp::kJoystickSeatCommand);
-  drive_pub = make_publisher(rammp::kJoystickDriveCommand);
-  report_pub = make_publisher(rammp::kSelfTestReport);
-  const bool ok = counter_pub && joystick_pub && seat_pub && drive_pub && report_pub &&
-                  subscribe(rammp::kHmiCommand, on_command) &&
-                  subscribe(rammp::kHmiBrightness, on_brightness) &&
-                  subscribe(MIB::kMibStatus, on_mib_status) &&
-                  subscribe(rammp::kMcbDiagnostics, on_diagnostics);
+  bool ok = false;
+  {
+    std::lock_guard<std::mutex> lock(endpoints_mutex);
+    counter_pub = make_publisher(rammp::kHmiCounter);
+    joystick_pub = make_publisher(rammp::kJoystickXYTwist);
+    seat_pub = make_publisher(rammp::kJoystickSeatCommand);
+    drive_pub = make_publisher(rammp::kJoystickDriveCommand);
+    report_pub = make_publisher(rammp::kSelfTestReport);
+    ok = counter_pub && joystick_pub && seat_pub && drive_pub && report_pub;
+  }
+  ok = ok && subscribe(rammp::kHmiCommand, on_command) &&
+       subscribe(rammp::kHmiBrightness, on_brightness) &&
+       subscribe(MIB::kMibStatus, on_mib_status) &&
+       subscribe(rammp::kMcbDiagnostics, on_diagnostics);
   if (!ok) {
     return false;
   }
   endpoints_ready = true;
-  logger.info("RTPS up on {}", ip_address);
+  logger.info("RTPS up on {} ({})", address, rtps_comms_net_link_name(net_link));
+  return true;
+}
 
-  // bench heartbeat: a counter on rammp::kHmiCounter every kHeartbeatPeriod
-  heartbeat_task = std::make_unique<espp::Task>(espp::Task::Config{
-      .callback = [](std::mutex &m, std::condition_variable &cv) -> bool {
-        static uint32_t counter = 0;
-        if (publish(counter_pub, rammp::UInt32{++counter}) && counter % 10 == 1) {
-          logger.info("Heartbeat {}", counter);
-        }
-        std::unique_lock<std::mutex> lock(m);
-        cv.wait_for(lock, kHeartbeatPeriod);
-        return false; // keep running
-      },
-      .task_config = {.name = "rtps_pub", .stack_size_bytes = 6 * 1024, .priority = 5}});
-  return heartbeat_task->start();
+// Drops the participant and its endpoints, for start_participant to bind anew. The
+// publishers leave under endpoints_mutex, so no publish() is inside one, and are destroyed
+// after it: stop() waits for reader callbacks, and one of those may be publishing.
+void stop_participant() {
+  Publisher<rammp::UInt32> counter;
+  Publisher<rammp::XYTwist> joystick;
+  Publisher<rammp::SeatCommand> seat;
+  Publisher<rammp::DriveCommand> drive;
+  Publisher<rammp::SelfTestReport> report;
+  {
+    std::lock_guard<std::mutex> lock(endpoints_mutex);
+    endpoints_ready = false;
+    counter = std::move(counter_pub);
+    joystick = std::move(joystick_pub);
+    seat = std::move(seat_pub);
+    drive = std::move(drive_pub);
+    report = std::move(report_pub);
+  }
+  counter.reset(); // the writers before the participant they are registered on
+  joystick.reset();
+  seat.reset();
+  drive.reset();
+  report.reset();
+  participant.reset();  // stops it: sockets, threads and endpoint pools
+  peer_matched = false; // the new participant is discovered afresh
+  participant_ip = 0;
+}
+
+// The bench heartbeat (a counter on rammp::kHmiCounter every kHeartbeatPeriod), and the
+// watch on the lease. RTPS binds to one address, so a lease that comes back different
+// (an access point or DHCP server that forgot the last one) takes a new participant.
+// Here, not in the IP event handler, which must not block.
+bool heartbeat_tick(std::mutex &m, std::condition_variable &cv) {
+  const uint32_t bound = participant_ip;
+  if (got_ip && bound != 0 && lease_ip != bound) {
+    logger.warn("IP changed from {} to {}: rebinding RTPS", ip_string(bound), ip_string(lease_ip));
+    stop_participant();
+    if (!start_participant()) {
+      logger.error("RTPS participant failed to restart");
+    }
+  }
+  static uint32_t counter = 0;
+  if (publish(counter_pub, rammp::UInt32{++counter}) && counter % 10 == 1) {
+    logger.info("Heartbeat {}", counter);
+  }
+  std::unique_lock<std::mutex> lock(m);
+  cv.wait_for(lock, kHeartbeatPeriod);
+  return false; // keep running
 }
 
 } // namespace
@@ -463,9 +606,25 @@ RtpsMcbStats rtps_comms_mcb_stats() {
   return mcb_stats;
 }
 
+const char *rtps_comms_net_link_name(NetLink link) {
+  return link == NetLink::WIFI ? "WiFi" : "Ethernet";
+}
+
+bool rtps_comms_wifi_configured() { return kWifiSsid[0] != 0; }
+
+NetLink rtps_comms_net_link() { return net_link; }
+
+std::optional<int> rtps_comms_wifi_rssi() {
+  wifi_ap_record_t ap{};
+  if (net_link != NetLink::WIFI || !link_up || esp_wifi_sta_get_ap_info(&ap) != ESP_OK) {
+    return std::nullopt;
+  }
+  return ap.rssi;
+}
+
 RtpsLinkState rtps_comms_link_state() {
-  if (eth_failed) {
-    return RtpsLinkState::ETH_FAILED;
+  if (net_failed) {
+    return RtpsLinkState::NET_FAILED;
   }
   if (!link_up) {
     return RtpsLinkState::LINK_DOWN;
@@ -480,8 +639,8 @@ RtpsLinkState rtps_comms_link_state() {
 
 const char *rtps_comms_link_state_name(RtpsLinkState state) {
   switch (state) {
-  case RtpsLinkState::ETH_FAILED:
-    return "ETH_FAILED";
+  case RtpsLinkState::NET_FAILED:
+    return "NET_FAILED";
   case RtpsLinkState::LINK_DOWN:
     return "LINK_DOWN";
   case RtpsLinkState::NO_IP:
@@ -496,10 +655,14 @@ const char *rtps_comms_link_state_name(RtpsLinkState state) {
 
 std::string rtps_comms_link_state_meaning(RtpsLinkState state) {
   switch (state) {
-  case RtpsLinkState::ETH_FAILED:
-    return "W5500 did not answer at boot";
+  case RtpsLinkState::NET_FAILED:
+    return net_link == NetLink::WIFI ? "the ESP32-C6 (WiFi) did not start"
+                                     : "W5500 did not answer at boot";
   case RtpsLinkState::LINK_DOWN:
-    return "no Ethernet link: cable unplugged?";
+    return net_link == NetLink::WIFI
+               ? fmt::format("not connected to WiFi '{}': out of range, or wrong password?",
+                             kWifiSsid)
+               : "no Ethernet link: cable unplugged?";
   case RtpsLinkState::NO_IP:
     return "link up, but no DHCP lease";
   case RtpsLinkState::NO_PEER:
@@ -511,24 +674,42 @@ std::string rtps_comms_link_state_meaning(RtpsLinkState state) {
   return "?";
 }
 
-bool rtps_comms_start() {
-  logger.info("W5500: SCK {}, MOSI {}, MISO {}, CS {}, INT {}", static_cast<int>(kPinSck),
-              static_cast<int>(kPinMosi), static_cast<int>(kPinMiso), static_cast<int>(kPinCs),
-              static_cast<int>(kPinInt));
-  if (!initialize_ethernet()) {
-    eth_failed = true;
-    return false;
+bool rtps_comms_start(NetLink wanted) {
+  const bool wifi = wanted == NetLink::WIFI && rtps_comms_wifi_configured();
+  if (wanted == NetLink::WIFI && !wifi) {
+    logger.warn("Network is WiFi, but no network is built in (CONFIG_HMI_WIFI_SSID): "
+                "using Ethernet");
   }
-  // DHCP can take tens of seconds (or a cable goes in later): wait in the background.
+  net_link = wifi ? NetLink::WIFI : NetLink::ETHERNET;
+  logger.info("Network: {}", rtps_comms_net_link_name(net_link));
+  if (!wifi) {
+    logger.info("W5500: SCK {}, MOSI {}, MISO {}, CS {}, INT {}", static_cast<int>(kPinSck),
+                static_cast<int>(kPinMosi), static_cast<int>(kPinMiso), static_cast<int>(kPinCs),
+                static_cast<int>(kPinInt));
+    if (!initialize_ethernet()) {
+      net_failed = true;
+      return false;
+    }
+  }
+  // WiFi's bring-up takes seconds and DHCP tens of them (or a cable goes in later): wait
+  // in the background.
   static auto startup_task = std::make_unique<espp::Task>(espp::Task::Config{
       .callback = [](std::mutex &m, std::condition_variable &cv) -> bool {
+        static bool wifi_started = false;
+        if (net_link == NetLink::WIFI && !wifi_started) {
+          wifi_started = true;
+          if (!initialize_wifi()) {
+            net_failed = true;
+            return true; // nothing to wait for
+          }
+        }
         if (!got_ip) {
           std::unique_lock<std::mutex> lock(m);
           cv.wait_for(lock, 500ms);
           return false; // keep waiting
         }
         ip_addr_t gateway{};
-        ipaddr_aton(fmt::format("{}.{}.{}.{}", IP2STR(&ip_info.gw)).c_str(), &gateway);
+        ipaddr_aton(ip_string(lease_gw).c_str(), &gateway);
         if (!run_ping(gateway, "gateway")) {
           logger.warn("Gateway unreachable: discovery with LAN peers will likely fail");
         }
@@ -537,7 +718,13 @@ bool rtps_comms_start() {
         run_ping(internet, "internet");
         if (!start_participant()) {
           logger.error("RTPS participant failed to start");
+          return true; // the pools are sized at build time: a retry fails the same way
         }
+        // 8 KB where a heartbeat needs 2: a rebind runs start_participant on it
+        heartbeat_task = std::make_unique<espp::Task>(espp::Task::Config{
+            .callback = heartbeat_tick,
+            .task_config = {.name = "rtps_pub", .stack_size_bytes = 8 * 1024, .priority = 5}});
+        heartbeat_task->start();
         return true; // one-shot
       },
       .task_config = {.name = "rtps_start", .stack_size_bytes = 8 * 1024, .priority = 5}});

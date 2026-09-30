@@ -545,7 +545,7 @@ private:
     const RtpsLinkState state = rtps_comms_link_state();
     const auto rank = static_cast<int>(state);
     const std::string detail = rtps_comms_link_state_meaning(state);
-    // ranks: ETH_FAILED < LINK_DOWN < NO_IP < NO_PEER < CONNECTED
+    // ranks: NET_FAILED < LINK_DOWN < NO_IP < NO_PEER < CONNECTED
     // the cause goes on the row that fails, not on every row: "McbStatus
     // arriving" beside a passing Ethernet link only muddies what it proves
     const bool link = rank >= static_cast<int>(RtpsLinkState::NO_IP);
@@ -556,6 +556,13 @@ private:
       record(ST_RTPS_LINK, 1);
     } else {
       unmeasurable(ST_RTPS_LINK, detail);
+    }
+    const NetLink net = rtps_comms_net_link();
+    if (const auto rssi = rtps_comms_wifi_rssi()) {
+      record(ST_NET_WIFI_RSSI, *rssi);
+    } else {
+      unmeasurable(ST_NET_WIFI_RSSI,
+                   net == NetLink::WIFI ? detail : std::string("on Ethernet, not WiFi"));
     }
   }
 

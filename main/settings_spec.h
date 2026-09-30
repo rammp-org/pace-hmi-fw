@@ -18,7 +18,10 @@
    A row whose values are names rather than numbers (Theme, Menu slide...) is
    0..n-1 here; main.cpp's kSettingParamNames says what each value reads.
    Every row is saved in settings.txt under its NAME, lowercase (settings.cpp),
-   and starts at `default` until it has been. */
+   and starts at `default` until it has been.
+   NETWORK is what RTPS runs over, 0 = Ethernet (the W5500), 1 = WiFi (the ESP32-C6;
+   Ethernet anyway when no CONFIG_HMI_WIFI_SSID is built in). Read at boot, so a change
+   restarts the HMI (main.cpp, network_restart_cb). */
 #define SETTINGS_PARAM_TABLE(X)                                                                    \
   X(UI, BRIGHTNESS, "S1", "Brightness", 5, 100, 5, 0, "%", 75)                                     \
   X(UI, THEME, "S2", "Theme", 0, 1, 1, 0, "", 0)                                                   \
@@ -28,7 +31,8 @@
   X(UI, STICK_INVERT_X, "S6", "Stick left/right", 0, 1, 1, 0, "", 0)                               \
   X(UI, STICK_INVERT_Y, "S7", "Stick fwd/back", 0, 1, 1, 0, "", 0)                                 \
   X(UI, STICK_SWAP, "S8", "Stick axes", 0, 1, 1, 0, "", 0)                                         \
-  X(UI, SOUNDS, "S9", "Sounds", 0, 1, 1, 0, "", 1)
+  X(UI, SOUNDS, "S9", "Sounds", 0, 1, 1, 0, "", 1)                                                 \
+  X(UI, NETWORK, "S10", "Network", 0, 1, 1, 0, "", 1)
 
 /* SETTINGS_PAGE_SCREEN_BRIGHTNESS, ..., SETTINGS_PAGE_COUNT */
 enum {

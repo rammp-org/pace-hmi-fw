@@ -4,6 +4,13 @@ cmake_minimum_required(VERSION 3.20)
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
+# esp_wifi_remote picks its Kconfig by `orsource Kconfig.idf_v$ESP_IDF_VERSION.in`,
+# and ships a 6.0 one, not a 6.0.0 one. The v6.0 PowerShell profile exports
+# "6.0.0" (other shells may export nothing), and a missing file is skipped
+# silently: the WiFi slave target and every option under it vanish, and
+# esp_hosted falls back to an ESP32-H2 with no WiFi. Pin it to major.minor.
+set(ENV{ESP_IDF_VERSION} "${IDF_VERSION_MAJOR}.${IDF_VERSION_MINOR}")
+
 # The shared RTPS spec (messages, topics, tables): the rammp-rtps git submodule.
 set(RAMMP_RTPS_COMPONENTS "${CMAKE_CURRENT_LIST_DIR}/external/rammp-rtps/components")
 if(NOT EXISTS "${RAMMP_RTPS_COMPONENTS}/rammp_rtps_messages")

@@ -7,7 +7,7 @@ Firmware for the RAMMP wheelchair HMI: an M5Stack Tab5 (ESP32-P4) on the [RAMMP 
 ## Hardware
 - Tab5 (ESP32-P4), 720x1280 portrait touch panel
 - 3D hall joystick (X / Y / twist) on the ADCs, up to 4 buttons on GPIO
-- W5500 SPI Ethernet for RTPS
+- RTPS over WiFi (the Tab5's own ESP32-C6) or W5500 SPI Ethernet: see [Network](#network)
 - DRV2605 haptic motor over I2C
 
 ## Build and flash
@@ -63,8 +63,23 @@ The UI follows RAMMP UI spec V2. Every screen has the same frame: the status bar
 | Stick left/right, Stick fwd/back | mirror an axis |
 | Stick axes | swap X and Y |
 | Sounds | touch and joystick clicks; warnings sound either way |
+| Network | WiFi or Wired (the W5500); the HMI restarts 3 s after it changes |
 
-Every row is one line in `main/settings_spec.h`, and every value is saved in LittleFS (`/storage`), so it survives a reboot. The stick mapping rows are refused while driving.
+Every row is one line in `main/settings_spec.h`, and every value is saved in LittleFS (`/storage`), so it survives a reboot. The stick mapping and Network rows are refused while driving.
+
+## Network
+
+RTPS runs over one link, picked by **UI Settings → Network** and brought up at boot:
+
+- **WiFi** (the default): the Tab5's ESP32-C6, over SDIO through esp_hosted, 2.4 GHz only. The network is built in from your local `sdkconfig`, never `sdkconfig.defaults`:
+  ```
+  CONFIG_HMI_WIFI_SSID="my-network"
+  CONFIG_HMI_WIFI_PASSWORD="my-password"
+  ```
+  (or `idf.py menuconfig` → RAMMP HMI). With no SSID built in, WiFi means Wired. A network with a login page (captive portal) will not work; a PC's Mobile Hotspot does, and puts the bench PC on the same subnet.
+- **Wired**: the W5500 on the M5-Bus header, as before.
+
+The serial log says which link came up (`Network: WiFi`), the C6's firmware, the RSSI and the lease. A lost network is rejoined on its own, and a lease that comes back with a different address moves RTPS to it within 2 s. The self test's `net.wifi_rssi` checks the signal on WiFi. Power save is off on the C6, but an access point that sleeps or shares its radio (a laptop hotspot also on another network) still delays frames to the next beacon: `rtps.rtt_*` shows it.
 
 ## RTPS
 
@@ -155,4 +170,4 @@ One row in `messages/joystick_message.hpp` (rammp-rtps); the HMI screens and the
 <img src="docs/screenshots/McbSimGui.png" alt="MCB simulator" width="480">
 
 - Nothing arriving? The PC picked the wrong network adapter: set **Via** in the GUI, or `--advertised-address <PC_IP>`.
-- The serial log shows the Ethernet link, the IP, and every MCB status change.
+- The serial log shows the link (WiFi or Ethernet), the IP, and every MCB status change.

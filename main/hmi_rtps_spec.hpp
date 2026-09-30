@@ -218,11 +218,16 @@ static_assert(sizeof(kHmiDriveNotGrantedFooter) <= kErrorFooterLen &&
                   sizeof(kHmiExitRefusedFooter) <= kErrorFooterLen,
               "refusal footer outgrows the banner it shares with MIB faults");
 
-/* body / footer per link state short of connected */
+/* body / footer per link state short of connected; the first two per link (Network in
+   UI Settings: the W5500's Ethernet, or WiFi through the Tab5's ESP32-C6) */
 inline constexpr char kHmiEthFailedText[] = "W5500 ETHERNET INIT FAILED AT BOOT";
 inline constexpr char kHmiEthFailedFooter[] = "Power-cycle HMI to retry";
 inline constexpr char kHmiLinkDownText[] = "NO ETHERNET LINK";
 inline constexpr char kHmiLinkDownFooter[] = "Check cable/switch to MCB";
+inline constexpr char kHmiWifiFailedText[] = "WIFI (ESP32-C6) INIT FAILED AT BOOT";
+inline constexpr char kHmiWifiFailedFooter[] = "Power-cycle HMI to retry";
+inline constexpr char kHmiWifiDownText[] = "NOT CONNECTED TO WIFI";
+inline constexpr char kHmiWifiDownFooter[] = "Check the WiFi network";
 inline constexpr char kHmiNoIpText[] = "LINK UP, NO DHCP LEASE";
 inline constexpr char kHmiNoIpFooter[] = "Check DHCP server";
 inline constexpr char kHmiNoPeerText[] = "NO MibStatus IN 2000 MS";
