@@ -25,6 +25,8 @@ bool rtps_comms_wifi_configured();
 std::string rtps_comms_wifi_ssid();
 /// The link's DHCP lease as text, "" while it has none. Any task.
 std::string rtps_comms_ip();
+/// The name the HMI gives DHCP ("rammp-hmi"): what an access point's client list shows.
+const char *rtps_comms_hostname();
 
 /// One network a scan heard.
 struct WifiNetworkFound {

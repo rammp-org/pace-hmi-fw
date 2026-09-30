@@ -204,6 +204,8 @@ void ui_DiagnosticsScreen_screen_init(void)
 
 
 
+
+
     ui_DiagnosticsFreqLabel = lv_label_create(ui_DiagnosticsScreen);
     lv_obj_set_width(ui_DiagnosticsFreqLabel, 300);
     lv_obj_set_height(ui_DiagnosticsFreqLabel, 40);
