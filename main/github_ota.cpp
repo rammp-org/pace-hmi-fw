@@ -1,0 +1,600 @@
+#include "github_ota.hpp"
+
+#include <algorithm>
+#include <array>
+#include <cstring>
+#include <memory>
+#include <mutex>
+#include <string_view>
+#include <thread>
+
+#include "cJSON.h"
+#include "esp_app_desc.h"
+#include "esp_crt_bundle.h"
+#include "esp_flash_partitions.h"
+#include "esp_heap_caps.h"
+#include "esp_http_client.h"
+#include "esp_image_format.h"
+#include "esp_ota_ops.h"
+#include "esp_partition.h"
+#include "esp_pthread.h"
+#include "esp_rom_crc.h"
+#include "esp_timer.h"
+#include "format.hpp"
+#include "fw_info.hpp"
+#include "logger.hpp"
+#include "psa/crypto.h"
+
+// In this image, and so in every image built from this code: an image that
+// has it confirms its own boot (github_ota_boot_confirm), one without it
+// predates that and is installed already confirmed. Referenced by the search
+// below, and external so the compiler keeps it whole in .rodata.
+extern "C" const char kHmiConfirmsItsBoot[];
+const char kHmiConfirmsItsBoot[] = "RAMMP-HMI:confirms-its-boot:v1";
+
+namespace {
+
+espp::Logger logger({.tag = "github_ota", .level = espp::Logger::Verbosity::INFO});
+
+constexpr char kReleasesUrl[] =
+    "https://api.github.com/repos/rammp-org/pace-hmi-fw/releases?per_page=30";
+constexpr char kAssetName[] = "rammp-hmi-p4.bin";
+constexpr char kUserAgent[] = "pace-hmi-fw";
+constexpr int kHttpTimeoutMs = 20000;
+constexpr int kMaxRedirects = 5;
+constexpr size_t kChunkBytes = 16 * 1024;
+constexpr size_t kBlockBytes = 64 * 1024; // the flash's erase block
+// TLS (certificate checks included) and the espp logger on top: the OTA
+// thread's stack is internal RAM, since it writes flash.
+constexpr size_t kInstallStackBytes = 12 * 1024;
+// The OTA data partition holds two copies of the boot choice, a flash sector each.
+constexpr uint32_t kOtaDataSector = 0x1000;
+// Release notes longer than this are cut: the panel is for a glance.
+constexpr size_t kNotesMaxChars = 1800;
+
+std::mutex status_mutex;
+OtaStatus status; // under status_mutex
+
+///////////////////////////////////////////////////////////////////////////////
+// Progress
+
+void set_stage(OtaStage stage, const std::string &message) {
+  logger.info("{}", message);
+  std::lock_guard<std::mutex> lock(status_mutex);
+  status.stage = stage;
+  status.message = message;
+  status.log += message + "\n";
+}
+
+void set_done(size_t done) {
+  std::lock_guard<std::mutex> lock(status_mutex);
+  status.done = done;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// HTTP
+
+// A GET, opened, its redirects followed: GitHub answers a release asset with a
+// 302 to its storage host. The caller reads the body and cleans up.
+struct Http {
+  esp_http_client_handle_t client = nullptr;
+  int status = 0;
+  int64_t length = -1;
+  ~Http() {
+    if (client != nullptr) {
+      esp_http_client_close(client);
+      esp_http_client_cleanup(client);
+    }
+  }
+};
+
+std::string open_get(Http &http, const char *url, bool api) {
+  esp_http_client_config_t config = {};
+  config.url = url;
+  config.method = HTTP_METHOD_GET;
+  config.timeout_ms = kHttpTimeoutMs;
+  config.user_agent = kUserAgent; // GitHub refuses requests without one
+  config.buffer_size = 4096;
+  config.buffer_size_tx = 2048; // the redirect's signed URL is ~900 characters
+  config.crt_bundle_attach = esp_crt_bundle_attach;
+  http.client = esp_http_client_init(&config);
+  if (http.client == nullptr) {
+    return "Could not start HTTPS (out of memory?)";
+  }
+  if (api) {
+    esp_http_client_set_header(http.client, "Accept", "application/vnd.github+json");
+    esp_http_client_set_header(http.client, "X-GitHub-Api-Version", "2022-11-28");
+  }
+  for (int hop = 0; hop <= kMaxRedirects; hop++) {
+    if (esp_err_t err = esp_http_client_open(http.client, 0); err != ESP_OK) {
+      logger.warn("Opening {}: {}", url, esp_err_to_name(err));
+      return "No connection. Is the HMI online?";
+    }
+    http.length = esp_http_client_fetch_headers(http.client);
+    http.status = esp_http_client_get_status_code(http.client);
+    switch (http.status) {
+    case 301:
+    case 302:
+    case 303:
+    case 307:
+    case 308:
+      esp_http_client_flush_response(http.client, nullptr);
+      // Changing host closes the connection; the next open makes a new one.
+      esp_http_client_set_redirection(http.client);
+      continue;
+    case 200:
+      return "";
+    case 403:
+    case 429:
+      // 60 API requests an hour per address without a token.
+      return "GitHub's limit is reached. Try in an hour.";
+    default:
+      return fmt::format("GitHub answered HTTP {}", http.status);
+    }
+  }
+  return "Too many redirects";
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// The release list
+
+// cJSON builds a node per value (~2,000 for the list), each a few dozen bytes:
+// under CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL, so malloc would put them all in
+// internal RAM. The W5500 and SDIO drivers need that RAM, so put them in PSRAM.
+void cjson_in_psram() {
+  static std::once_flag once;
+  std::call_once(once, [] {
+    cJSON_Hooks hooks = {};
+    hooks.malloc_fn = [](size_t size) {
+      return heap_caps_malloc_prefer(size, 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT);
+    };
+    hooks.free_fn = free;
+    cJSON_InitHooks(&hooks);
+  });
+}
+
+std::string json_string(const cJSON *obj, const char *key) {
+  const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
+  return cJSON_IsString(item) && item->valuestring != nullptr ? item->valuestring : "";
+}
+
+// The release text as the panel can draw it: the font is ASCII (plus a few),
+// and the size report CI appends is a table no one can read at this size.
+std::string readable_notes(std::string_view body) {
+  for (std::string_view cut : {"### ESP-IDF Size Report", "<!--"}) {
+    if (const size_t at = body.find(cut); at != std::string_view::npos) {
+      body = body.substr(0, at);
+    }
+  }
+  std::string out;
+  out.reserve(std::min(body.size(), kNotesMaxChars) + 8);
+  for (size_t i = 0; i < body.size() && out.size() < kNotesMaxChars; i++) {
+    const auto c = static_cast<unsigned char>(body[i]);
+    if (c == '\r' || c == '`' || (c == '*' && i + 1 < body.size() && body[i + 1] == '*')) {
+      i += c == '*' ? 1 : 0; // "**" is bold: drop both
+      continue;
+    }
+    if (c < 0x80) {
+      if (c == '\n' && out.size() >= 2 && out.back() == '\n' && out[out.size() - 2] == '\n') {
+        continue; // at most one blank line
+      }
+      out += static_cast<char>(c);
+      continue;
+    }
+    // UTF-8: a few punctuation marks have ASCII stand-ins, the rest is dropped.
+    const std::string_view rest = body.substr(i);
+    struct Swap {
+      std::string_view utf8, ascii;
+    };
+    static constexpr Swap kSwaps[] = {{"—", "-"},  {"–", "-"},  {"‘", "'"},  {"’", "'"},
+                                      {"“", "\""}, {"”", "\""}, {"→", "->"}, {"…", "..."}};
+    const auto swap = std::find_if(std::begin(kSwaps), std::end(kSwaps),
+                                   [&](const Swap &s) { return rest.starts_with(s.utf8); });
+    if (swap != std::end(kSwaps)) {
+      out += swap->ascii;
+    }
+    size_t len = c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : c >= 0xC0 ? 2 : 1;
+    i += len - 1;
+  }
+  while (!out.empty() && (out.back() == '\n' || out.back() == ' ')) {
+    out.pop_back();
+  }
+  if (out.size() >= kNotesMaxChars) {
+    out += "...";
+  }
+  return out;
+}
+
+std::vector<GithubRelease> parse_releases(const std::string &json, std::string &error) {
+  cjson_in_psram();
+  std::unique_ptr<cJSON, decltype(&cJSON_Delete)> root(
+      cJSON_ParseWithLength(json.data(), json.size()), cJSON_Delete);
+  if (!cJSON_IsArray(root.get())) {
+    error = "GitHub's answer was not a release list";
+    return {};
+  }
+  std::vector<GithubRelease> releases;
+  const cJSON *item = nullptr;
+  cJSON_ArrayForEach(item, root.get()) {
+    if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(item, "draft"))) {
+      continue;
+    }
+    GithubRelease r;
+    r.tag = json_string(item, "tag_name");
+    r.prerelease = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(item, "prerelease"));
+    r.published = json_string(item, "published_at").substr(0, 10);
+    r.notes = readable_notes(json_string(item, "body"));
+    const cJSON *asset = nullptr;
+    cJSON_ArrayForEach(asset, cJSON_GetObjectItemCaseSensitive(item, "assets")) {
+      if (json_string(asset, "name") != kAssetName) {
+        continue;
+      }
+      r.url = json_string(asset, "browser_download_url");
+      const cJSON *size = cJSON_GetObjectItemCaseSensitive(asset, "size");
+      r.size = cJSON_IsNumber(size) ? static_cast<size_t>(size->valuedouble) : 0;
+      const std::string digest = json_string(asset, "digest"); // "sha256:<hex>"
+      if (digest.starts_with("sha256:") && digest.size() == 7 + 64) {
+        r.sha256 = digest.substr(7);
+      }
+    }
+    if (!r.tag.empty()) {
+      releases.push_back(std::move(r));
+    }
+  }
+  return releases;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Installing
+
+// The OTA data sector entry the last esp_ota_set_boot_partition wrote, marked
+// VALID: the bootloader then boots it without waiting for it to confirm. For
+// images that predate github_ota_boot_confirm, which would otherwise be rolled
+// back at their first reset. The CRC covers only ota_seq, so it still holds.
+esp_err_t mark_next_boot_valid() {
+  const esp_partition_t *otadata =
+      esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_OTA, nullptr);
+  if (otadata == nullptr) {
+    return ESP_ERR_NOT_FOUND;
+  }
+  std::array<esp_ota_select_entry_t, 2> entry{};
+  int newest = -1;
+  for (int i = 0; i < 2; i++) {
+    if (esp_partition_read(otadata, i * kOtaDataSector, &entry[i], sizeof(entry[i])) != ESP_OK) {
+      return ESP_FAIL;
+    }
+    const bool valid =
+        entry[i].ota_seq != UINT32_MAX &&
+        entry[i].crc == esp_rom_crc32_le(UINT32_MAX, reinterpret_cast<uint8_t *>(&entry[i].ota_seq),
+                                         sizeof(entry[i].ota_seq));
+    if (valid && (newest < 0 || entry[i].ota_seq > entry[newest].ota_seq)) {
+      newest = i;
+    }
+  }
+  if (newest < 0) {
+    return ESP_ERR_INVALID_STATE;
+  }
+  entry[newest].ota_state = ESP_OTA_IMG_VALID;
+  // A reset between the erase and the write leaves this sector blank, and the
+  // bootloader falls back to the other one: the image running now.
+  esp_err_t err = esp_partition_erase_range(otadata, newest * kOtaDataSector, kOtaDataSector);
+  if (err == ESP_OK) {
+    err = esp_partition_write(otadata, newest * kOtaDataSector, &entry[newest],
+                              sizeof(entry[newest]));
+  }
+  return err;
+}
+
+std::string hex(const uint8_t *bytes, size_t n) {
+  static constexpr char kHex[] = "0123456789abcdef";
+  std::string out;
+  for (size_t i = 0; i < n; i++) {
+    out += kHex[bytes[i] >> 4];
+    out += kHex[bytes[i] & 0xF];
+  }
+  return out;
+}
+
+// The image header, first segment header and app description, in the order
+// esptool lays them out: enough to tell whose image this is before writing it.
+constexpr size_t kDescEnd =
+    sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t) + sizeof(esp_app_desc_t);
+
+std::string check_header(const uint8_t *data) {
+  esp_image_header_t header;
+  esp_app_desc_t desc;
+  std::memcpy(&header, data, sizeof(header));
+  std::memcpy(&desc, data + sizeof(header) + sizeof(esp_image_segment_header_t), sizeof(desc));
+  if (header.magic != ESP_IMAGE_HEADER_MAGIC || desc.magic_word != ESP_APP_DESC_MAGIC_WORD) {
+    return "The file is not firmware";
+  }
+  if (header.chip_id != CONFIG_IDF_FIRMWARE_CHIP_ID) {
+    return "The file is firmware for another chip";
+  }
+  const esp_app_desc_t *running = esp_app_get_description();
+  if (std::strncmp(desc.project_name, running->project_name, sizeof(desc.project_name)) != 0) {
+    return fmt::format("The file is '{:.32s}', not this HMI's firmware", desc.project_name);
+  }
+  logger.info("Image: {} {:.32s}, built {:.16s} {:.16s}", desc.project_name, desc.version,
+              desc.date, desc.time);
+  return "";
+}
+
+// Everything between choosing the release and setting the next boot. Returns
+// why it stopped, or "" when the image is written and verified.
+std::string install(const GithubRelease &release) {
+  const esp_partition_t *slot = esp_ota_get_next_update_partition(nullptr);
+  if (slot == nullptr) {
+    return "No update slot: this board's partition table predates updates. Flash it once over USB.";
+  }
+  if (release.size > slot->size) {
+    return fmt::format("The image ({} KB) is larger than the update slot", release.size / 1024);
+  }
+
+  set_stage(OtaStage::CONNECTING, release.url.starts_with("https://github.com/")
+                                      ? "Connecting to GitHub..."
+                                      : "Connecting to " + release.url);
+  Http http;
+  if (std::string err = open_get(http, release.url.c_str(), false); !err.empty()) {
+    return err;
+  }
+  const size_t total = http.length > 0 ? static_cast<size_t>(http.length) : release.size;
+  if (release.size != 0 && total != release.size) {
+    return fmt::format("GitHub sent {} bytes, the release lists {}", total, release.size);
+  }
+  {
+    std::lock_guard<std::mutex> lock(status_mutex);
+    status.total = total;
+  }
+
+  esp_ota_handle_t ota = 0;
+  // Erased as it is written, rather than 4 MB up front with the socket idle.
+  if (esp_err_t err = esp_ota_begin(slot, OTA_WITH_SEQUENTIAL_WRITES, &ota); err != ESP_OK) {
+    return err == ESP_ERR_OTA_ROLLBACK_INVALID_STATE
+               ? "This firmware has not confirmed its own boot yet. Try again in a minute."
+               : fmt::format("Could not start writing ({})", esp_err_to_name(err));
+  }
+  set_stage(OtaStage::DOWNLOADING,
+            fmt::format("Downloading {} ({} KB) to {}", release.tag, total / 1024, slot->label));
+
+  if (psa_crypto_init() != PSA_SUCCESS) {
+    esp_ota_abort(ota);
+    return "PSA crypto did not start";
+  }
+  psa_hash_operation_t sha = PSA_HASH_OPERATION_INIT;
+  psa_hash_setup(&sha, PSA_ALG_SHA_256);
+
+  const std::string_view marker(kHmiConfirmsItsBoot);
+  bool has_marker = false;
+  std::string carry; // the tail of the last chunk, for a marker across two
+
+  // Written a whole block at a time: esp_ota_write erases what each write
+  // covers, and a 64 KB-aligned 64 KB range is one block erase where the same
+  // bytes in reads' sizes are sixteen sector erases (measured: 78 KB/s).
+  std::unique_ptr<uint8_t, decltype(&free)> block(
+      static_cast<uint8_t *>(heap_caps_malloc(kBlockBytes, MALLOC_CAP_SPIRAM)), free);
+  if (!block) {
+    esp_ota_abort(ota);
+    psa_hash_abort(&sha);
+    return "No memory for the download";
+  }
+  size_t fill = 0; // bytes in `block`
+  size_t done = 0; // bytes received
+  bool header_checked = false;
+  // The first block holds the header: nothing is written before it is checked.
+  auto write_block = [&]() -> std::string {
+    if (!header_checked) {
+      if (fill < kDescEnd) {
+        return "The file is too short to be firmware";
+      }
+      if (std::string err = check_header(block.get()); !err.empty()) {
+        return err;
+      }
+      header_checked = true;
+    }
+    if (esp_err_t err = esp_ota_write(ota, block.get(), fill); err != ESP_OK) {
+      return fmt::format("Writing flash failed ({})", esp_err_to_name(err));
+    }
+    fill = 0;
+    return "";
+  };
+  const int64_t started_us = esp_timer_get_time();
+  std::string failed;
+  while (failed.empty()) {
+    uint8_t *data = block.get() + fill;
+    const int n = esp_http_client_read(http.client, reinterpret_cast<char *>(data),
+                                       static_cast<int>(kBlockBytes - fill));
+    if (n < 0) {
+      failed = "The download broke off";
+      break;
+    }
+    if (n == 0) {
+      if (!esp_http_client_is_complete_data_received(http.client) || done != total) {
+        failed = fmt::format("The download stopped at {} of {} KB", done / 1024, total / 1024);
+      } else if (fill > 0) {
+        failed = write_block(); // the tail
+      }
+      break;
+    }
+    const size_t len = static_cast<size_t>(n);
+    psa_hash_update(&sha, data, len);
+    if (!has_marker) {
+      carry.append(reinterpret_cast<const char *>(data), len);
+      has_marker = carry.find(marker) != std::string::npos;
+      carry.erase(0, carry.size() - std::min(carry.size(), marker.size() - 1));
+    }
+    fill += len;
+    done += len;
+    if (fill == kBlockBytes) {
+      failed = write_block();
+    }
+    set_done(done);
+  }
+  std::array<uint8_t, 32> digest{};
+  size_t digest_len = 0;
+  const bool hashed =
+      psa_hash_finish(&sha, digest.data(), digest.size(), &digest_len) == PSA_SUCCESS &&
+      digest_len == digest.size();
+  if (!failed.empty()) {
+    esp_ota_abort(ota);
+    return failed;
+  }
+  const int64_t ms = (esp_timer_get_time() - started_us) / 1000;
+  set_stage(OtaStage::VERIFYING,
+            fmt::format("Downloaded {} KB in {:.1f} s ({:.0f} KB/s). Checking...", done / 1024,
+                        ms / 1000.0, ms > 0 ? done / 1.024 / ms : 0.0));
+
+  // esp_ota_end checks the image itself: its segments and its own SHA-256.
+  if (esp_err_t err = esp_ota_end(ota); err != ESP_OK) {
+    return err == ESP_ERR_OTA_VALIDATE_FAILED
+               ? "The image is damaged: it failed its own check"
+               : fmt::format("Finishing the write failed ({})", esp_err_to_name(err));
+  }
+  const std::string sha256 = hashed ? hex(digest.data(), digest.size()) : "";
+  if (!release.sha256.empty()) {
+    if (sha256 != release.sha256) {
+      return "The file is not the one GitHub published (SHA-256 differs)";
+    }
+    set_stage(OtaStage::VERIFYING, "SHA-256 matches GitHub's digest");
+  }
+
+  if (esp_err_t err = esp_ota_set_boot_partition(slot); err != ESP_OK) {
+    return fmt::format("Could not select the new image ({})", esp_err_to_name(err));
+  }
+  if (has_marker) {
+    set_stage(OtaStage::VERIFYING,
+              "It confirms its own boot: a reset before it does brings this firmware back");
+  } else if (esp_err_t err = mark_next_boot_valid(); err == ESP_OK) {
+    set_stage(OtaStage::VERIFYING,
+              "An older release: installed as confirmed, it will not roll back by itself");
+  } else {
+    logger.warn("Could not mark the older image valid ({}): its first reset rolls it back",
+                esp_err_to_name(err));
+  }
+  if (!sha256.empty() && sha256 == release.sha256) {
+    // What About shows: this image is the release's file, byte for byte.
+    fw_info_record_release(sha256, release.tag, release.prerelease);
+  }
+  return "";
+}
+
+void start_thread(const char *name, size_t stack, void (*fn)()) {
+  // esp_pthread_set_cfg is per calling task and sticks: put back what was
+  // there, so threads this task starts later do not inherit this one's.
+  esp_pthread_cfg_t previous = esp_pthread_get_default_config();
+  const bool had_previous = esp_pthread_get_cfg(&previous) == ESP_OK;
+  esp_pthread_cfg_t cfg = esp_pthread_get_default_config();
+  cfg.stack_size = stack;
+  cfg.prio = 3; // under the UI, the stick and RTPS
+  cfg.thread_name = name;
+  esp_pthread_set_cfg(&cfg);
+  std::thread(fn).detach();
+  if (had_previous) {
+    esp_pthread_set_cfg(&previous);
+  } else {
+    const esp_pthread_cfg_t defaults = esp_pthread_get_default_config();
+    esp_pthread_set_cfg(&defaults);
+  }
+}
+
+GithubRelease installing; // what the install thread works on; set before it starts
+
+} // namespace
+
+GithubReleases github_releases_fetch() {
+  GithubReleases out;
+  Http http;
+  if (out.error = open_get(http, kReleasesUrl, true); !out.error.empty()) {
+    logger.warn("Release list: {}", out.error);
+    return out;
+  }
+  std::string json;
+  json.reserve(http.length > 0 ? static_cast<size_t>(http.length) : 160 * 1024);
+  std::unique_ptr<char, decltype(&free)> buf(
+      static_cast<char *>(heap_caps_malloc(kChunkBytes, MALLOC_CAP_SPIRAM)), free);
+  if (!buf) {
+    out.error = "No memory for the release list";
+    return out;
+  }
+  for (;;) {
+    const int n = esp_http_client_read(http.client, buf.get(), kChunkBytes);
+    if (n < 0) {
+      out.error = "The release list broke off";
+      return out;
+    }
+    if (n == 0) {
+      break;
+    }
+    json.append(buf.get(), n);
+  }
+  out.releases = parse_releases(json, out.error);
+  out.ok = out.error.empty();
+  if (sizeof(CONFIG_HMI_OTA_TEST_URL) > 1) {
+    // An image to try before it is published (Kconfig HMI_OTA_TEST_URL).
+    GithubRelease test{};
+    test.tag = "Test image";
+    test.prerelease = true;
+    test.notes = "Not a release: whatever " CONFIG_HMI_OTA_TEST_URL " serves.";
+    test.url = CONFIG_HMI_OTA_TEST_URL;
+    out.releases.insert(out.releases.begin(), std::move(test));
+  }
+  logger.info("Release list: {} releases ({} bytes of JSON)", out.releases.size(), json.size());
+  return out;
+}
+
+bool github_ota_start(const GithubRelease &release) {
+  {
+    std::lock_guard<std::mutex> lock(status_mutex);
+    if (status.stage == OtaStage::CONNECTING || status.stage == OtaStage::DOWNLOADING ||
+        status.stage == OtaStage::VERIFYING || status.stage == OtaStage::DONE) {
+      return false;
+    }
+    status = OtaStatus{};
+    status.stage = OtaStage::CONNECTING;
+    status.tag = release.tag;
+  }
+  installing = release;
+  start_thread("github_ota", kInstallStackBytes, [] {
+    const std::string failed = install(installing);
+    if (failed.empty()) {
+      set_stage(OtaStage::DONE, fmt::format("Installed {}. Restarting...", installing.tag));
+    } else {
+      set_stage(OtaStage::FAILED, failed);
+    }
+  });
+  return true;
+}
+
+OtaStatus github_ota_status() {
+  std::lock_guard<std::mutex> lock(status_mutex);
+  return status;
+}
+
+void github_ota_boot_report() {
+  const esp_partition_t *running = esp_ota_get_running_partition();
+  esp_ota_img_states_t state = ESP_OTA_IMG_UNDEFINED;
+  if (running == nullptr || esp_ota_get_state_partition(running, &state) != ESP_OK) {
+    logger.info("Running from {} (no OTA state: flashed over USB)",
+                running != nullptr ? running->label : "?");
+    return;
+  }
+  logger.info("Running from {}: {}", running->label,
+              state == ESP_OTA_IMG_PENDING_VERIFY ? "an update, not yet confirmed"
+              : state == ESP_OTA_IMG_VALID        ? "confirmed"
+                                                  : "as flashed over USB");
+  if (const esp_partition_t *last = esp_ota_get_last_invalid_partition(); last != nullptr) {
+    logger.warn("An update in {} did not confirm itself and was rolled back", last->label);
+  }
+}
+
+void github_ota_boot_confirm() {
+  esp_ota_img_states_t state = ESP_OTA_IMG_UNDEFINED;
+  const esp_partition_t *running = esp_ota_get_running_partition();
+  if (running == nullptr || esp_ota_get_state_partition(running, &state) != ESP_OK) {
+    return; // no OTA data: a USB flash, nothing to confirm
+  }
+  if (state == ESP_OTA_IMG_PENDING_VERIFY) {
+    const esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
+    logger.info("Confirmed the updated firmware in {}: {}", running->label, esp_err_to_name(err));
+  }
+}

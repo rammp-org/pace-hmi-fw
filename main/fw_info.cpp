@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <ctime>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -15,6 +17,7 @@
 #include "esp_partition.h"
 #include "esp_pthread.h"
 #include "esp_timer.h"
+#include "format.hpp"
 #include "logger.hpp"
 #include "psa/crypto.h"
 #include "storage.hpp"
@@ -143,6 +146,30 @@ void fw_info_start() {
     const esp_pthread_cfg_t defaults = esp_pthread_get_default_config();
     esp_pthread_set_cfg(&defaults);
   }
+}
+
+void fw_info_record_release(const std::string &sha256, const std::string &tag, bool prerelease) {
+  if (find_release(sha256)) {
+    return; // already there
+  }
+  std::string contents;
+  {
+    std::ifstream in(storage_path(kReleasesFile));
+    contents.assign(std::istreambuf_iterator<char>(in), {});
+  }
+  if (!contents.empty() && contents.back() != '\n') {
+    contents += '\n';
+  }
+  // When it was checked, if the clock knows (the MCB or the RTC set it).
+  char checked[32] = "unknown";
+  const std::time_t now = std::time(nullptr);
+  std::tm utc{};
+  if (gmtime_r(&now, &utc) != nullptr && utc.tm_year + 1900 >= 2025) {
+    std::strftime(checked, sizeof(checked), "%Y-%m-%dT%H:%M:%SZ", &utc);
+  }
+  contents +=
+      fmt::format("{}  {}  {}  {}\n", sha256, tag, prerelease ? "prerelease" : "release", checked);
+  storage_write(kReleasesFile, contents);
 }
 
 FwInfo fw_info() {

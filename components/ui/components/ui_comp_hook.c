@@ -84,3 +84,7 @@ void ui_comp_SlotTile_create_hook(lv_obj_t * comp)
 void ui_comp_NetRow_create_hook(lv_obj_t * comp)
 {
 }
+
+void ui_comp_ReleaseRow_create_hook(lv_obj_t * comp)
+{
+}

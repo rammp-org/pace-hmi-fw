@@ -50,6 +50,7 @@
 #include "actions_spec.h"
 #include "boot_logo.h"
 #include "fw_info.hpp"
+#include "github_ota.hpp"
 #include "internet_ui.hpp"
 #include "joystick_cal.hpp"
 #include "log_capture.hpp"
@@ -58,6 +59,8 @@
 #include "rtps_comms.hpp"
 #include "selftest.hpp"
 #include "settings.hpp"
+#include "storage.hpp"
+#include "update_ui.hpp"
 
 #include "driver/ppa.h"
 #include "esp_cache.h"
@@ -3214,6 +3217,8 @@ static constexpr uint32_t kMenuSlideMs = 280;
 static constexpr uint32_t kRowPressMs = 300;
 // p21 "HOME BUTTON": a dissolve from any screen back to Drive.
 static constexpr uint32_t kHomeFadeMs = 120;
+// How long an updated image runs before it keeps itself (github_ota_boot_confirm).
+static constexpr uint32_t kOtaConfirmAfterMs = 30'000;
 
 // The destinations, in the order MenuOverlay draws them, and the child id of
 // each row. The menu has two levels: the top rows, and Settings' own rows on
@@ -3235,6 +3240,7 @@ enum NavDest {
   NAV_SET_DISPLAY = NAV_TOP_COUNT, // "Display & sound": a Settings page
   NAV_SET_STICK,                   // "Joystick & driving": a Settings page
   NAV_INTERNET,                    // "Internet": Ethernet or WiFi, and which network
+  NAV_UPDATE,                      // "Firmware update": a release from GitHub
   NAV_ABOUT,                       // "About": the firmware, and the board
   NAV_DEST_COUNT,
 };
@@ -3252,6 +3258,7 @@ static const uint32_t kNavRowIds[NAV_DEST_COUNT] = {
     UI_COMP_MENUOVERLAY_SUBMENU_SUBROW3,
     UI_COMP_MENUOVERLAY_SUBMENU_SUBROW4,
     UI_COMP_MENUOVERLAY_SUBMENU_SUBROW5,
+    UI_COMP_MENUOVERLAY_SUBMENU_SUBROW6,
 };
 // The panel that holds Settings' level over the top rows, and its first row,
 // "< Settings", which goes back up.
@@ -3598,6 +3605,10 @@ static void nav_go(NavDest dest) {
     _ui_screen_change(&ui_InternetScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
                       &ui_InternetScreen_screen_init);
     break;
+  case NAV_UPDATE:
+    _ui_screen_change(&ui_UpdateScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
+                      &ui_UpdateScreen_screen_init);
+    break;
   case NAV_ABOUT:
     _ui_screen_change(&ui_AboutScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0, &ui_AboutScreen_screen_init);
     break;
@@ -3625,6 +3636,7 @@ static void nav_go(NavDest dest) {
   dest_screens[NAV_SET_DISPLAY] = ui_SettingsScreen;
   dest_screens[NAV_SET_STICK] = ui_SettingsScreen;
   dest_screens[NAV_INTERNET] = ui_InternetScreen;
+  dest_screens[NAV_UPDATE] = ui_UpdateScreen;
   dest_screens[NAV_ABOUT] = ui_AboutScreen;
   if (dest < NAV_DEST_COUNT && dest_screens[dest] == before && lv_screen_active() == before) {
     nav_arrive(before);
@@ -3881,6 +3893,8 @@ static void nav_enter_screen(const lv_obj_t *screen) {
     diag_focus(0);
   } else if (screen == ui_InternetScreen) {
     internet_ui_on_load(); // its own groups, one per page
+  } else if (screen == ui_UpdateScreen) {
+    update_ui_on_load(); // its own groups, one per page
   } else if (screen == ui_AboutScreen) {
     about_ui_on_load();
     lv_group_remove_all_objs(joystick_group); // nothing to pick: only the key
@@ -4729,6 +4743,10 @@ extern "C" void app_main(void) {
   log_capture_start();
   espp::Logger logger({.tag = "M5Stack Tab5 Example", .level = espp::Logger::Verbosity::INFO});
   logger.info("Starting example!");
+  // Before anything reads /storage: the first boot of the two-slot layout brings the
+  // calibration and settings over from where the old partition table kept them.
+  storage_migrate_legacy();
+  github_ota_boot_report();
 
   //! [m5stack tab5 example]
   espp::M5StackTab5 &tab5 = espp::M5StackTab5::get();
@@ -5519,6 +5537,31 @@ extern "C" void app_main(void) {
       .refuse = refusal_feedback,
   });
   about_ui_init();
+
+  // UpdateScreen: the GitHub releases, one release, and an install running.
+  // Its two pages cover the body, so their fill is what hides it.
+  keep_overlay_fill(ui_UpdatePickPanel);
+  keep_overlay_fill(ui_UpdateRunPanel);
+  update_ui_init({
+      .lvgl_mutex = &lvgl_mutex,
+      .use_group = [](lv_group_t *group) { nav_use_group(group, ui_UpdateScreen); },
+      .focus_ring = nav_focus_ring,
+      .mirror_states = nav_mirror_states,
+      .claim_clicks = nav_claim_clicks,
+      .refuse = refusal_feedback,
+      // Never under a driving chair: the restart waits for the MIB to stop.
+      .may_restart =
+          [] {
+            return static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject)) !=
+                   MIB::MibSystemState::ENABLED;
+          },
+  });
+  // An updated image boots unconfirmed, and the bootloader rolls back to the
+  // one before if it resets first. Confirmed once the UI has run this long:
+  // the LVGL task is up and nothing has crashed it (github_ota.hpp).
+  lv_timer_set_repeat_count(
+      lv_timer_create([](lv_timer_t *) { github_ota_boot_confirm(); }, kOtaConfirmAfterMs, nullptr),
+      1);
 
   lv_subject_init_string(&seat_function_subject, seat_function_buf, seat_function_prev_buf,
                          sizeof(seat_function_buf), lv_label_get_text(ui_AngleSettingLabel));
