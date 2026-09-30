@@ -54,8 +54,8 @@ MENU_ROWS = [
     "Internet Settings",
     "Joystick",
     "Log",
+    "Settings",
     "Skunk Works",
-    "UI Settings",
 ]
 
 

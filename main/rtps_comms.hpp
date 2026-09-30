@@ -12,7 +12,7 @@
 
 #include "hmi_rtps_spec.hpp"
 
-/// What RTPS runs over: UI Settings -> Network, picked at boot (a change restarts the HMI).
+/// What RTPS runs over: Internet Settings, picked at boot (a change takes a restart).
 enum class NetLink : uint8_t {
   ETHERNET, ///< the W5500 on the M5-Bus header
   WIFI,     ///< the ESP32-C6 over SDIO, joined to rtps_comms_wifi_ssid()

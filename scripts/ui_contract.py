@@ -189,8 +189,8 @@ LABELS: dict[str, str] = {
     "cui_RowLabel5": "Internet Settings",
     "cui_RowLabel6": "Joystick",
     "cui_RowLabel7": "Log",
-    "cui_RowLabel8": "Skunk Works",
-    "cui_RowLabel9": "UI Settings",
+    "cui_RowLabel8": "Settings",
+    "cui_RowLabel9": "Skunk Works",
 }
 
 _CREATE_RE = re.compile(

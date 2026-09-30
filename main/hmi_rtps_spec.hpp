@@ -219,7 +219,7 @@ static_assert(sizeof(kHmiDriveNotGrantedFooter) <= kErrorFooterLen &&
               "refusal footer outgrows the banner it shares with MIB faults");
 
 /* body / footer per link state short of connected; the first two per link (Network in
-   UI Settings: the W5500's Ethernet, or WiFi through the Tab5's ESP32-C6) */
+   Internet Settings: the W5500's Ethernet, or WiFi through the Tab5's ESP32-C6) */
 inline constexpr char kHmiEthFailedText[] = "W5500 ETHERNET INIT FAILED AT BOOT";
 inline constexpr char kHmiEthFailedFooter[] = "Power-cycle HMI to retry";
 inline constexpr char kHmiLinkDownText[] = "NO ETHERNET LINK";

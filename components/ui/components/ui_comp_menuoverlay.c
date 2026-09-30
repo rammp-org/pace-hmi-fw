@@ -929,7 +929,7 @@ lv_obj_t * ui_MenuOverlay_create(lv_obj_t * comp_parent)
     lv_obj_set_height(cui_RowLabel8, LV_SIZE_CONTENT);    /// 1
     lv_obj_set_x(cui_RowLabel8, 30);
     lv_obj_set_y(cui_RowLabel8, 22);
-    lv_label_set_text(cui_RowLabel8, "Skunk Works");
+    lv_label_set_text(cui_RowLabel8, "Settings");
     ui_object_set_themeable_style_property(cui_RowLabel8, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_text);
     ui_object_set_themeable_style_property(cui_RowLabel8, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
@@ -1048,7 +1048,7 @@ lv_obj_t * ui_MenuOverlay_create(lv_obj_t * comp_parent)
     lv_obj_set_height(cui_RowLabel9, LV_SIZE_CONTENT);    /// 1
     lv_obj_set_x(cui_RowLabel9, 30);
     lv_obj_set_y(cui_RowLabel9, 22);
-    lv_label_set_text(cui_RowLabel9, "UI Settings");
+    lv_label_set_text(cui_RowLabel9, "Skunk Works");
     ui_object_set_themeable_style_property(cui_RowLabel9, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_text);
     ui_object_set_themeable_style_property(cui_RowLabel9, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,

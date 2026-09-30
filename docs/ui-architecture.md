@@ -66,7 +66,7 @@ ErrorBanner, MenuKey and MenuOverlay, are the *chrome*.
 | JoystickScreen | - | menu: Joystick (the stick test and CALIBRATE) |
 | LogScreen | - | menu: Log |
 | SkunkWorksScreen | - | menu: Skunk Works |
-| SettingsScreen | - | menu: UI Settings; after the PIN, DEBUG ACTUATORS |
+| SettingsScreen | - | menu: Settings; after the PIN, DEBUG ACTUATORS |
 
 SettingsScreen, SkunkWorksScreen and DiagnosticsScreen are built when first opened and
 destroyed on the way out ("Screens built on demand" in `main.cpp`): their rows are
@@ -164,7 +164,7 @@ with the screen's burger key appended last, so "down past the bottom" reaches th
 | `menu_group` | the open menu: nine rows, then the key (wraps) |
 | `seat_group`, `seat_adjust_group` | Seat: the function buttons; the adjustment page |
 | `rd_group` | BenchGate: the PIN pad |
-| `setting_group`, `actions_group`, `diag_group` | UI Settings, Skunk Works, Diagnostics |
+| `setting_group`, `actions_group`, `diag_group` | Settings, Skunk Works, Diagnostics |
 | `log_view_group()` (`main/log_view.cpp`) | Log |
 | `main_group`, `networks_group`, `password_group` (`main/internet_ui.cpp`) | Internet Settings: the main page, the network list, the keyboard |
 | `joystick_group` | everything else: Locked, Drive, Joystick |
@@ -232,7 +232,7 @@ flowchart LR
 
 ## 6. Settings, sounds and the rest
 
-- **UI Settings** rows come from `main/settings_spec.h`, one line each; the firmware builds
+- **Settings** rows come from `main/settings_spec.h`, one line each; the firmware builds
   a `SettingRow` per line and saves every value to `/storage/settings.txt`. Adding a
   setting is a table line, its names in `kSettingParamNames`, its subject in
   `kSettingParamValue`, and a `case` in `setting_store_observer` if it needs applying.

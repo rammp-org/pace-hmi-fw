@@ -209,13 +209,14 @@ static lv_group_t *seat_group = nullptr;        // seat screen, function buttons
 static lv_group_t *seat_adjust_group = nullptr; // seat screen, adjustment page
 static lv_group_t *rd_group = nullptr;          // the bench gate's PIN keypad
 
-// Two of the UI Settings rows; the third is brightness_subject. Up here because
+// The Settings rows; brightness has its own brightness_subject. Up here because
 // rtps_poll_cb keeps the theme row in step and the menu reads the slide. Each
 // observer (app_main) applies and saves its value.
 static lv_subject_t theme_subject;             // 0 = dark (UI_THEME_DEFAULT), 1 = day
 static lv_subject_t menu_slide_subject;        // 0 = the menu appears at once, 1 = it slides
 static lv_subject_t flip_subject;              // 1 = the panel is turned 180 degrees
 static lv_subject_t stick_sensitivity_subject; // 1..10, see stick_key_thresholds
+static lv_subject_t drive_speed_subject;       // 1..10 tenths: the stick's scale to the MCB
 static lv_subject_t stick_invert_x_subject;    // 1 = left and right swap over
 static lv_subject_t stick_invert_y_subject;    // 1 = forward and back swap over
 static lv_subject_t stick_swap_subject;        // 1 = the stick's X and Y trade places
@@ -225,10 +226,11 @@ static lv_subject_t network_subject;           // NetLink: 0 = Ethernet, 1 = WiF
 // What the ADC task needs of those, as plain atomics it can read without the
 // LVGL lock. Written by setting_store_observer.
 static std::atomic<int> stick_sensitivity{SETTINGS_STICK_SENSITIVITY_MAX - 1};
+static std::atomic<int> drive_speed{SETTINGS_DRIVE_SPEED_MAX};
 static std::atomic<bool> stick_invert_x{false};
 static std::atomic<bool> stick_invert_y{false};
 static std::atomic<bool> stick_swap{false};
-// UI Settings "Sounds". Read by play_click from the touch task as well as LVGL's.
+// Settings "Sounds". Read by play_click from the touch task as well as LVGL's.
 static std::atomic<bool> sounds_on{true};
 
 // The burger menu's overlay while it is up, else null. Up here because the
@@ -689,7 +691,7 @@ static void rtps_poll_cb(lv_timer_t *) {
     // Same reason, different property: the theme switch restored the redundant
     // background fills, so take them out again.
     strip_all_overdraw();
-    // The switch itself is the UI Settings Theme row (or a CALL FUNCTION
+    // The switch itself is the Settings Theme row (or a CALL FUNCTION
     // event reaching ui_events.cpp's theme_toggle, or the remote UI); this is
     // where firmware first sees the result, so it is saved from here, and the
     // row is brought into step with a switch it did not make.
@@ -702,7 +704,7 @@ static void rtps_poll_cb(lv_timer_t *) {
 // Backlight
 //
 // One brightness setting, 5..100 %, whoever changes it: the RTPS brightness
-// command, the Tab5's side button, and the Brightness row of UI Settings.
+// command, the Tab5's side button, and the Brightness row of Settings.
 // Saved a second after it stops changing, so a run
 // of steps is one flash write rather than one per step.
 /////////////////////////////////////////////////////////////////////////////
@@ -2214,6 +2216,7 @@ static lv_subject_t *const kSettingParamValue[] = {
     &menu_slide_subject,        // SETTINGS_PARAM_MENU_SLIDE
     &flip_subject,              // SETTINGS_PARAM_FLIP
     &stick_sensitivity_subject, // SETTINGS_PARAM_STICK_SENSITIVITY
+    &drive_speed_subject,       // SETTINGS_PARAM_DRIVE_SPEED
     &stick_invert_x_subject,    // SETTINGS_PARAM_STICK_INVERT_X
     &stick_invert_y_subject,    // SETTINGS_PARAM_STICK_INVERT_Y
     &stick_swap_subject,        // SETTINGS_PARAM_STICK_SWAP
@@ -2226,7 +2229,7 @@ static constexpr const char *kThemeNames[] = {"Dark", "Day"};
 static constexpr const char *kOnOffNames[] = {"Off", "On"};
 static constexpr const char *kMirrorNames[] = {"Normal", "Mirror"};
 static constexpr const char *kSwapNames[] = {"Normal", "Swap"};
-// NetLink order. Not a UI Settings row: Internet Settings draws it as two buttons.
+// NetLink order. Not a Settings row: Internet Settings draws it as two buttons.
 static constexpr const char *kNetworkNames[] = {"Ethernet", "WiFi"};
 static const char *const *const kSettingParamNames[] = {
     nullptr,       // SETTINGS_PARAM_BRIGHTNESS
@@ -2234,6 +2237,7 @@ static const char *const *const kSettingParamNames[] = {
     kOnOffNames,   // SETTINGS_PARAM_MENU_SLIDE
     kOnOffNames,   // SETTINGS_PARAM_FLIP
     nullptr,       // SETTINGS_PARAM_STICK_SENSITIVITY
+    nullptr,       // SETTINGS_PARAM_DRIVE_SPEED
     kMirrorNames,  // SETTINGS_PARAM_STICK_INVERT_X
     kMirrorNames,  // SETTINGS_PARAM_STICK_INVERT_Y
     kSwapNames,    // SETTINGS_PARAM_STICK_SWAP
@@ -2312,7 +2316,7 @@ static void stepper_format(const StepperSpec &spec, int32_t raw, char *out, size
 
 static void set_display_flipped(bool on); // screen flip, beside direct_flush_cb
 
-// Applies and saves one of the UI Settings rows that has no observer of its
+// Applies and saves one of the Settings rows that has no observer of its
 // own (brightness and theme do). user_data is its SETTINGS_PARAM_*.
 static void setting_store_observer(lv_observer_t *observer, lv_subject_t *subject) {
   const int param =
@@ -2325,6 +2329,9 @@ static void setting_store_observer(lv_observer_t *observer, lv_subject_t *subjec
     break;
   case SETTINGS_PARAM_STICK_SENSITIVITY:
     stick_sensitivity.store(value);
+    break;
+  case SETTINGS_PARAM_DRIVE_SPEED:
+    drive_speed.store(value);
     break;
   case SETTINGS_PARAM_STICK_INVERT_X:
     stick_invert_x.store(value != 0);
@@ -2741,10 +2748,11 @@ static void setting_page_open(int32_t page) {
       if (kSettingParams[i].page == page) {
         StepperSpec spec = kSettingParams[i].spec;
         spec.names = kSettingParamNames[i];
-        // Remapping the stick changes which way a push drives the chair, so it
-        // is not done mid-drive.
+        // Remapping the stick changes which way a push drives the chair, and
+        // the speed how far, so neither is done mid-drive.
         spec.locked_only = i == SETTINGS_PARAM_STICK_INVERT_X ||
-                           i == SETTINGS_PARAM_STICK_INVERT_Y || i == SETTINGS_PARAM_STICK_SWAP;
+                           i == SETTINGS_PARAM_STICK_INVERT_Y || i == SETTINGS_PARAM_STICK_SWAP ||
+                           i == SETTINGS_PARAM_DRIVE_SPEED;
         setting_row_add(spec, kSettingParamValue[i], false);
       }
     }
@@ -3217,8 +3225,8 @@ enum NavDest {
   NAV_INTERNET, // "Internet Settings": Ethernet or WiFi, and which network
   NAV_JOYSTICK, // "Joystick", the test screen with CALIBRATE on it
   NAV_LOG,      // "Log"
+  NAV_SETTINGS, // "Settings"
   NAV_SKUNK,    // "Skunk Works"
-  NAV_SETTINGS, // "UI Settings"
   NAV_DEST_COUNT,
 };
 
@@ -3387,7 +3395,7 @@ static void nav_menu_hide_cb(lv_anim_t *a) {
 
 static void nav_menu_slide(lv_obj_t *overlay, int32_t from, int32_t to, bool hide_after) {
   lv_anim_delete(overlay, nav_menu_anim_cb);
-  // Instant unless UI Settings turns the slide on: straight to where the
+  // Instant unless Settings turns the slide on: straight to where the
   // slide would have ended, hidden if that is where it was going.
   if (lv_subject_get_int(&menu_slide_subject) == 0) {
     lv_obj_set_y(overlay, to);
@@ -3542,7 +3550,7 @@ static void nav_go(NavDest dest) {
   case NAV_DEST_COUNT:
     break;
   }
-  // A row picked on its own screen (UI Settings from UI Settings): LVGL skips
+  // A row picked on its own screen (Settings from Settings): LVGL skips
   // a load of the screen already up, so SCREEN_LOADED never comes, and the
   // stick would be left on the menu's group -- emptied above -- with nothing
   // to focus until another screen loaded. Arrive by hand instead.
@@ -4107,7 +4115,7 @@ static void direct_flush_cb(lv_display_t *disp, const lv_area_t * /*area*/, uint
 }
 
 /////////////////////////////////////////////////////////////////////////////
-// Screen flip (UI Settings "Flip screen")
+// Screen flip (Settings "Flip screen")
 //
 // Turns the picture 180 degrees for a unit mounted upside down. LVGL keeps
 // drawing upright; the P4's pixel-processing accelerator (PPA) turns the
@@ -5012,13 +5020,14 @@ extern "C" void app_main(void) {
         }
       },
       nullptr);
-  // The rest of UI Settings: each row's subject starts at its saved value, and
+  // The rest of Settings: each row's subject starts at its saved value, and
   // setting_store_observer applies it (on this first run too, which is what
   // puts a saved flip or stick mapping back at boot) and saves any change.
   for (const auto &[subject, param] : std::initializer_list<std::pair<lv_subject_t *, int>>{
            {&menu_slide_subject, SETTINGS_PARAM_MENU_SLIDE},
            {&flip_subject, SETTINGS_PARAM_FLIP},
            {&stick_sensitivity_subject, SETTINGS_PARAM_STICK_SENSITIVITY},
+           {&drive_speed_subject, SETTINGS_PARAM_DRIVE_SPEED},
            {&stick_invert_x_subject, SETTINGS_PARAM_STICK_INVERT_X},
            {&stick_invert_y_subject, SETTINGS_PARAM_STICK_INVERT_Y},
            {&stick_swap_subject, SETTINGS_PARAM_STICK_SWAP},
@@ -5104,7 +5113,7 @@ extern "C" void app_main(void) {
     bind_clock_label(c.bar);
     nav_attach_chrome(c.key, c.overlay, c.band_goes_home ? c.band : nullptr);
   }
-  // The menu stays reachable while locked: Log, Diagnostics, UI Settings and
+  // The menu stays reachable while locked: Log, Diagnostics, Settings and
   // the bench tools are all useful with the chair not driving -- and without an
   // MCB at all. Locked still means nothing moves: the band reads LOCKED on every
   // screen and the stick only drives from Drive (stick_drives).
@@ -5602,7 +5611,7 @@ extern "C" void app_main(void) {
   // Initialised before the screen's warning panel ever binds to it.
   lv_subject_init_int(&setting_page_subject, SETTINGS_PAGE_UI);
 
-  // SCREEN BRIGHTNESS no longer needs a button of its own: "UI Settings" in
+  // SCREEN BRIGHTNESS no longer needs a button of its own: "Settings" in
   // the burger menu opens page 0, which is that page (setting_page_open(0) in
   // nav_go). Add a second page to settings_spec.h and the screen grows a
   // chooser; until then the menu row IS the chooser.
@@ -5953,7 +5962,7 @@ extern "C" void app_main(void) {
       // horizontal channel, Y the vertical one (inverted, see "Joystick
       // mapping").
       stick.update(*horiz_mv, *vert_mv, twist_smoothed);
-      // The stick as mounted: UI Settings can swap its axes and mirror either
+      // The stick as mounted: Settings can swap its axes and mirror either
       // one. Applied here, once, so the bars, the UI keys and the MCB all get
       // the same stick. Swap first, then mirror, so "mirror left/right" always
       // means the direction the user pushes, whatever the swap did.
@@ -5976,7 +5985,7 @@ extern "C" void app_main(void) {
       // without needing to pass through center. The larger component wins, so a
       // diagonal resolves to one direction rather than two.
       //
-      // How far the stick must go to count as a key is the UI Settings stick
+      // How far the stick must go to count as a key is the Settings stick
       // sensitivity, 1..10. stick.x()/y() are rescaled past the circular dead
       // zone -- 0 at its edge, 1 at the gate -- so the thresholds are fractions
       // of the travel OUTSIDE it: level 1 engages at 0.30 (about 36% of the
@@ -6043,10 +6052,18 @@ extern "C" void app_main(void) {
       // the next row from moving the chair. The bars keep moving, to show the
       // stick is being read. Quiet no-op until RTPS is up and a subscriber is
       // discovered.
-      const bool neutral = calibrating || !stick_drives.load();
-      adc_published = rtps_comms_publish_adc(
-          neutral ? 0.0f : stick_x, neutral ? 0.0f : stick_y, neutral ? 0.0f : stick.z(),
-          joy_button_pressed.load() ? rammp::Buttons::JOYSTICK : rammp::Buttons::NONE);
+      //
+      // Settings "Speed sensitivity" scales all three axes on the way, as if the
+      // stick moved that much less: 1.0x sends it as it is, 0.1x a tenth of it.
+      // Only here -- the bars and the UI keys keep the stick as it is.
+      const float speed =
+          static_cast<float>(std::clamp<int>(drive_speed.load(), SETTINGS_DRIVE_SPEED_MIN,
+                                             SETTINGS_DRIVE_SPEED_MAX)) /
+          static_cast<float>(SETTINGS_DRIVE_SPEED_MAX);
+      const float scale = calibrating || !stick_drives.load() ? 0.0f : speed;
+      adc_published = rtps_comms_publish_adc(stick_x * scale, stick_y * scale, stick.z() * scale,
+                                             joy_button_pressed.load() ? rammp::Buttons::JOYSTICK
+                                                                       : rammp::Buttons::NONE);
     }
     // Every cycle, valid or not: the self test measures the loop's cadence and
     // how often a read fails, as well as the values. A no-op unless a run is
@@ -6170,7 +6187,7 @@ static void click_now(espp::M5StackTab5 &tab5) {
 }
 
 // The click: a touch landing, the stick button selecting, a hold completing.
-// Silent with UI Settings "Sounds" off.
+// Silent with Settings "Sounds" off.
 static void play_click(espp::M5StackTab5 &tab5) {
   if (sounds_on.load()) {
     click_now(tab5);

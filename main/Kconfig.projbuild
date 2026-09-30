@@ -23,9 +23,10 @@ menu "RAMMP HMI"
         string "WiFi network name (SSID)"
         default ""
         help
-            The network the HMI joins when UI Settings -> Network is WiFi (the
-            Tab5's ESP32-C6, 2.4 GHz only). Empty = no WiFi: the HMI uses
-            Ethernet (the W5500) whatever that setting says.
+            The network the HMI joins when Internet Settings is on WiFi (the
+            Tab5's ESP32-C6, 2.4 GHz only), until one is joined from that
+            screen. Empty, with none joined = no WiFi: the HMI uses Ethernet
+            (the W5500) whatever that setting says.
 
             Set it, and HMI_WIFI_PASSWORD, in your local sdkconfig (not in git),
             never in sdkconfig.defaults. A network behind a login page (a
