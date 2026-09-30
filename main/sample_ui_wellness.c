@@ -1,5 +1,5 @@
 // Standalone sample-UI screen: static mockup only, not wired to any sensor.
-// Staged here (main/, not main/ui/) so import_ui.ps1 never touches it.
+// Staged here (main/, not components/ui/) so import_ui.ps1 never touches it.
 
 #include "sample_ui_wellness.h"
 

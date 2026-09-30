@@ -1,6 +1,11 @@
 name: Static analysis
 
-on: [pull_request]
+# push is here as well as pull_request: see the note in build.yml --
+# pull_request events on this repo do not currently create runs.
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
 
 jobs:
   static_analysis:
@@ -9,12 +14,19 @@ jobs:
     steps:
     - name: Checkout repo
       uses: actions/checkout@v7
+      with:
+        submodules: recursive
 
     - name: Run static analysis
       uses: esp-cpp/StaticAnalysis@master
       with:
         # Do not build the project and do not use cmake to generate compile_commands.json
         use_cmake: false
+
+        # components/ui is SquareLine Studio output: it is regenerated wholesale on
+        # every export, so findings there cannot be fixed durably. Excluding it
+        # keeps the report pointed at hand-written code.
+        exclude_dir: components/ui
 
         # (Optional) cppcheck args
         cppcheck_args: --check-level=exhaustive --force --enable=all --inline-suppr --inconclusive --platform=mips32 --std=c++17 --suppressions-list=$GITHUB_WORKSPACE/suppressions.txt

@@ -1,5 +1,5 @@
 // Standalone sample-UI screen: static mockup only, not wired to any sensor.
-// Staged here (main/, not main/ui/) so import_ui.ps1 never touches it.
+// Staged here (main/, not components/ui/) so import_ui.ps1 never touches it.
 
 #include "sample_ui_drive_mode.h"
 
@@ -13,7 +13,7 @@ static const char *kModeDescriptions[3] = {"Smooth, low speed", "Stable, all ter
                                            "Max speed, responsive"};
 
 static void mode_card_event_cb(lv_event_t *e) {
-  lv_obj_t *clicked = lv_event_get_target_obj(e);
+  const lv_obj_t *clicked = lv_event_get_target_obj(e);
   for (int i = 0; i < 3; i++) {
     if (mode_cards[i] == clicked) {
       lv_obj_add_state(mode_cards[i], LV_STATE_CHECKED);

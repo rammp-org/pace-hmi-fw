@@ -1,0 +1,41 @@
+menu "RAMMP HMI"
+
+    config HMI_REMOTE_UI
+        bool "Remote UI debug channel (screenshots + input injection)"
+        default n
+        help
+            Opens a TCP server on port 3333 that hands out the current frame as
+            raw RGB565 and injects touch, joystick and button input, so the whole
+            UI can be walked and captured from scripts/hmi_ui.py instead of by
+            someone looking at the panel.
+
+            It cannot drive the chair: injected joystick directions only move
+            the UI's focus and never reach the stick values sent to the MCB.
+            It CAN press anything on screen -- ACTIVATE DRIVE, the seat and
+            actuator jog buttons -- and it has no authentication, so anything on
+            the same network can.
+
+            Off by default for that reason. Turn it on in your local sdkconfig
+            (which is not in git) while working on the UI, not in
+            sdkconfig.defaults -- that one ships.
+
+    config HMI_WIFI_SSID
+        string "WiFi network name (SSID)"
+        default ""
+        help
+            The network the HMI joins when Internet Settings is on WiFi (the
+            Tab5's ESP32-C6, 2.4 GHz only), until one is joined from that
+            screen. Empty, with none joined = no WiFi: the HMI uses Ethernet
+            (the W5500) whatever that setting says.
+
+            Set it, and HMI_WIFI_PASSWORD, in your local sdkconfig (not in git),
+            never in sdkconfig.defaults. A network behind a login page (a
+            captive portal) will not work: nothing on the HMI can log in.
+
+    config HMI_WIFI_PASSWORD
+        string "WiFi password"
+        default ""
+        help
+            WPA2/WPA3 passphrase for HMI_WIFI_SSID. Empty = an open network.
+
+endmenu

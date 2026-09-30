@@ -4,26 +4,19 @@ cmake_minimum_required(VERSION 3.20)
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
-# add the component directories that we want to use
-set(EXTRA_COMPONENT_DIRS
+# esp_wifi_remote picks its Kconfig by `orsource Kconfig.idf_v$ESP_IDF_VERSION.in`,
+# and ships a 6.0 one, not a 6.0.0 one. The v6.0 PowerShell profile exports
+# "6.0.0" (other shells may export nothing), and a missing file is skipped
+# silently: the WiFi slave target and every option under it vanish, and
+# esp_hosted falls back to an ESP32-H2 with no WiFi. Pin it to major.minor.
+set(ENV{ESP_IDF_VERSION} "${IDF_VERSION_MAJOR}.${IDF_VERSION_MINOR}")
 
-  # NOTE: if you add any custom components, you should add them to a
-  #       `components/` folder within this repository and update the line below
-  #       to point to it.
-  #
-  # "components/"
-
-  # NOTE: if we didn't use the idf-component-manager to get the espp
-  #       dependencies, we could instead have ESPP be a submodule within our
-  #       'components' folder, which would mean we'd need to add it to the DIRS:
-  #
-  # "components/espp/components/"
-  #
-  # NOTE: alternatively, we could install espp system-wide, so we could just
-  #       point it to wherever we have espp installed.
-  #
-  # "/path/to/espp/components/"
-)
+# The shared RTPS spec (messages, topics, tables): the rammp-rtps git submodule.
+set(RAMMP_RTPS_COMPONENTS "${CMAKE_CURRENT_LIST_DIR}/external/rammp-rtps/components")
+if(NOT EXISTS "${RAMMP_RTPS_COMPONENTS}/rammp_rtps_messages")
+  message(FATAL_ERROR "Missing the rammp-rtps submodule: run git submodule update --init")
+endif()
+set(EXTRA_COMPONENT_DIRS "${RAMMP_RTPS_COMPONENTS}")
 
 set(
   COMPONENTS
@@ -52,7 +45,12 @@ set(
 # LV_USE_STDLIB_MALLOC isn't exposed through LVGL's Kconfig and CONFIG_LV_CONF_SKIP
 # is set, so it has to come from the command line. Global (not per-component) so
 # every translation unit sees the same allocator.
-idf_build_set_property(COMPILE_DEFINITIONS "LV_USE_STDLIB_MALLOC=LV_STDLIB_CLIB" APPEND)
+#
+# CUSTOM rather than CLIB: main/lv_mem_psram.c takes every LVGL allocation from
+# PSRAM. With plain malloc the widget tree sat in internal RAM, which on the P4
+# is all DMA-capable - the pool the W5500's SPI bounce buffers come from, and
+# running it dry boot-loops the board. See that file.
+idf_build_set_property(COMPILE_DEFINITIONS "LV_USE_STDLIB_MALLOC=LV_STDLIB_CUSTOM" APPEND)
 
 project(rammp-hmi-p4)
 
@@ -64,7 +62,7 @@ set(CMAKE_CXX_STANDARD 20)
 # -Wattributes; IDF v6.0 makes it fatal via its build-wide -Werror. Hit by the
 # Tab5 BSP's camera.cpp, which includes <pthread.h> after <driver/ppa.h> has
 # pulled in hal/assert.h. Toolchain header issue, not a BSP one.
-idf_component_get_property(tab5_lib espp__m5stack-tab5 COMPONENT_LIB)
+idf_component_get_property(tab5_lib m5stack-tab5 COMPONENT_LIB)
 target_compile_options(${tab5_lib} PRIVATE -Wno-error=attributes)
 
 # ThorVG's base64 decoder guards with `encoded[3] < 0` on a `const char*`.
@@ -73,3 +71,22 @@ target_compile_options(${tab5_lib} PRIVATE -Wno-error=attributes)
 # issue, pulled in only because LV_USE_THORVG is on for SVG rendering.
 idf_component_get_property(lvgl_lib lvgl__lvgl COMPONENT_LIB)
 target_compile_options(${lvgl_lib} PRIVATE -Wno-error=type-limits)
+
+# Refresh precompiled/ after every build, so flash_precompiled.ps1 always has the
+# image this tree just produced. The folder is gitignored -- it is build output, not
+# source; the copy anyone without a toolchain flashes comes from a release asset.
+#
+# Ordering is by target, not by output file: IDF's app binary is produced by a
+# custom command whose declared output is a `.bin_timestamp` sentinel rather than
+# the .bin itself (components/esptool_py/project_include.cmake), so ninja has no
+# rule making `rammp-hmi-p4.bin` and a file-level DEPENDS on it fails a clean
+# build outright. `bootloader` is an ExternalProject and nothing else orders it
+# against the app, so it has to be named here too. Only `all` pulls this target
+# in, so `idf.py app` stays as cheap as it was.
+idf_build_get_property(python PYTHON)
+add_custom_target(precompiled ALL
+  COMMAND ${python} "${CMAKE_CURRENT_LIST_DIR}/scripts/export_precompiled.py"
+          --build-dir "${CMAKE_BINARY_DIR}"
+          --out-dir "${CMAKE_CURRENT_LIST_DIR}/precompiled"
+  VERBATIM USES_TERMINAL)
+add_dependencies(precompiled app bootloader partition_table_bin)

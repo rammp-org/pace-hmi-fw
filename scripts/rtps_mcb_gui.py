@@ -1,0 +1,1085 @@
+#!/usr/bin/env python3
+"""Desktop panel for driving the joystick HMI's status labels over RTPS.
+
+The window equivalent of ``rtps_mcb_sim.py``: preset buttons for the states the
+firmware knows, a raw spinbox for values it does not, a free-text override for
+each label, and a cycle that walks the lot hands-free. It plays the MCB's half
+of the joystick's commands too: DriveCommand decides whether the HMI's drive
+screen opens, and SeatCommand moves the seat values on the Seat tab. It imports
+the same publisher ``rtps_mcb_sim.py`` uses — so anything learned here applies
+to the CLI tool and vice versa.
+
+Usage:
+  python rtps_mcb_gui.py
+  python rtps_mcb_gui.py --peer 10.0.0.133 --advertised-address 100.92.133.114
+
+Both settings are editable in the window; the flags only prefill them. The
+"Via" dropdown lists this PC's IPv4 addresses, which matters on a machine with
+VirtualBox/Tailscale/VPN adapters: RTPS leaves by exactly one interface, and the
+automatic pick is often a virtual one.
+
+tkinter only, no third-party dependency, matching the stdlib-only RTPS side.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import queue
+import sys
+import threading
+import time
+import tkinter as tk
+from tkinter import simpledialog, ttk
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import rammp_rtps as spec  # noqa: E402  (path setup must run first)
+
+# The drive-mode buttons on the Tab5's Drive screen, left to right, and the
+# profile each one asks for (main.cpp, bind_drive_profile_button). The bench
+# shows the same names in the same order, so a button here is the button
+# there; the wire name follows in brackets.
+HMI_DRIVE_MODES = [
+    ("Manual", spec.DRIVE_PROFILE_HIGH),
+    ("Assist", spec.DRIVE_PROFILE_NORMAL),
+    ("Auto", spec.DRIVE_PROFILE_LOW),
+]
+
+
+def profile_label(value: int) -> str:
+    """'Manual (HIGH)' for a profile the HMI has a button for, else the wire name."""
+    wire = spec.DRIVE_PROFILE_NAMES.get(value, "?")
+    for name, profile in HMI_DRIVE_MODES:
+        if profile == value:
+            return f"{name} ({wire})"
+    return wire
+import rtps_host  # noqa: E402
+import rtps_drive_game  # noqa: E402
+import rtps_mcb_sim  # noqa: E402
+import rtps_net  # noqa: E402
+
+LOG_MAX_LINES = 500
+TICK_MS = 100
+#: How many times to try finding and connecting to the board on startup
+#: before giving up and leaving it to Detect/Scan.
+AUTOCONNECT_ATTEMPTS = 3
+#: Grace after connecting before deciding an attempt worked. Discovery has
+#: to complete and the first publish has to find a target inside this.
+AUTOCONNECT_VERIFY_MS = 4000
+#: Pause between a failed attempt and the next one.
+AUTOCONNECT_RETRY_MS = 1500
+
+#: Prefilled error banner. Only shown on the HMI while STATE is not OK, so this
+#: is there to make flipping to ERROR immediately show something realistic
+#: rather than an empty red panel.
+DEFAULT_ERROR_TEXT = "MOTOR CONTROLLER OVERTEMPERATURE"
+DEFAULT_ERROR_FOOTER = "REDUCE SPEED AND PULL OVER"
+
+#: "Via" entry meaning "work it out from whichever adapter reaches the peer".
+AUTO_ADAPTER = "Auto (follow the route to the board)"
+
+
+class McbPanel:
+    """The window, plus the harness thread it starts and stops."""
+
+    def __init__(self, root: tk.Tk, cli: argparse.Namespace) -> None:
+        self.root = root
+        self.cli = cli
+        self.harness: rtps_mcb_sim.SystemStatePublisher | None = None
+        self.thread: threading.Thread | None = None
+
+        # The harness runs on its own thread and tkinter is not thread-safe, so
+        # log lines cross over through a queue that _tick drains on the UI
+        # thread. rtps_host.log calls this from the network thread.
+        self.log_queue: queue.Queue[str] = queue.Queue()
+        rtps_host.LOG_SINK = self.log_queue.put
+        # Worker threads hand results back here; only _tick touches widgets.
+        self.result_queue: queue.Queue[tuple] = queue.Queue()
+        self.adapters: list = []
+
+        # Owned here rather than by the harness so the drive window can be
+        # opened before connecting and survive a disconnect; the harness borrows
+        # it and reads the speed off it.
+        self.car = rtps_drive_game.CarModel()
+        self.drive_view = None
+        # Auto-connect bookkeeping. _auto_active is cleared by success or by any
+        # manual Connect/Detect/Scan: once the user takes over, the retries must
+        # not reach in behind them.
+        self._auto_active = True
+        self._auto_attempt = 0
+        self._auto_pending = False
+        self.cycling = False
+        self.cycle_job: str | None = None
+        self.cycle_index = 0
+        self._rate_seq = 0
+        self._rate_time = time.monotonic()
+        self._rate = 0.0
+
+        self.config = rtps_net.load_config()
+
+        root.title("RAMMP MCB simulator")
+        # The panels used to stack straight onto the root. They are on a
+        # notebook now because the seat table is tall enough that sharing
+        # one column with everything else pushed the log off-screen. The log
+        # stays outside it: it is how you tell whether anything is working, and
+        # that should not depend on which tab is showing.
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill="both", expand=True, padx=4, pady=(4, 0))
+        status_tab = ttk.Frame(self.notebook)
+        drive_tab = ttk.Frame(self.notebook)
+        seat_tab = ttk.Frame(self.notebook)
+        self.notebook.add(status_tab, text="Status")
+        self.notebook.add(drive_tab, text="Drive")
+        self.notebook.add(seat_tab, text="Seat")
+        diagnostics_tab = ttk.Frame(self.notebook)
+        self.notebook.add(diagnostics_tab, text="Diagnostics")
+
+        self._build_connection(status_tab)
+        self._build_status_controls(status_tab)
+        self._build_drive_request(drive_tab)
+        self._build_error_banner(status_tab)
+        self._build_joystick(status_tab)
+        self._build_cycle(status_tab)
+        self._build_seat(seat_tab)
+        self._build_diagnostics(diagnostics_tab)
+        self._build_log()
+        root.after(TICK_MS, self._tick)
+        root.protocol("WM_DELETE_WINDOW", self._on_close)
+        # Passive only, and on a worker thread: opening the window must not
+        # block, and nothing scans the network unless Scan is pressed.
+        root.after(200, self._auto_step)
+
+    # ---------------------------------------------------------------- widgets
+
+    def _build_connection(self, parent: tk.Widget) -> None:
+        frame = ttk.LabelFrame(parent, text="Connection", padding=8)
+        frame.pack(fill="x", padx=8, pady=(8, 4))
+
+        ttk.Label(frame, text="Board").grid(row=0, column=0, sticky="w")
+        self.peer_var = tk.StringVar(
+            value=(self.cli.peer[0] if self.cli.peer else self.config.get("peer", ""))
+        )
+        ttk.Entry(frame, textvariable=self.peer_var, width=18).grid(row=0, column=1, padx=(4, 4))
+        self.detect_button = ttk.Button(frame, text="Detect", command=self._on_detect)
+        self.detect_button.grid(row=0, column=2)
+        self.scan_button = ttk.Button(frame, text="Scan...", command=self._on_scan)
+        self.scan_button.grid(row=0, column=3, padx=(4, 12))
+
+        ttk.Label(frame, text="Via").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        self.address_var = tk.StringVar(
+            value=self.cli.advertised_address or self.config.get("advertised_address")
+            or AUTO_ADAPTER
+        )
+        self.address_combo = ttk.Combobox(frame, textvariable=self.address_var, width=46)
+        self.address_combo.grid(row=1, column=1, columnspan=3, sticky="w", padx=(4, 12),
+                                pady=(6, 0))
+        self._refresh_adapters()
+
+        self.connect_button = ttk.Button(frame, text="Connect", command=self._toggle_connection)
+        self.connect_button.grid(row=0, column=4)
+        # tk.Button rather than ttk: on Windows the default "vista" ttk theme
+        # draws buttons from a native bitmap and silently ignores `background`,
+        # so a ttk style would store the colour and change nothing. The classic
+        # widget honours it.
+        self.drive_button = tk.Button(
+            frame, text="Drive view", command=self._toggle_drive_view,
+            bg="#1a6dd4", fg="white", activebackground="#2f82ea", activeforeground="white",
+            relief="raised", borderwidth=1, padx=10, cursor="hand2")
+        self.drive_button.grid(row=0, column=5, padx=(8, 0))
+
+        self.connection_label = ttk.Label(frame, text="not connected")
+        self.connection_label.grid(row=1, column=4, columnspan=2, sticky="w", pady=(6, 0))
+
+        ttk.Label(
+            frame,
+            text="Via defaults to Auto, which picks the adapter that actually routes to the "
+                 "board \u2014 not the one that reaches the internet.",
+            foreground="#666666",
+        ).grid(row=2, column=0, columnspan=6, sticky="w", pady=(6, 0))
+
+    def _build_status_controls(self, parent: tk.Widget) -> None:
+        # One panel where there were two: MibSystemState is both the drive status and
+        # the fault, so ENABLED and ERROR are presets of the same control.
+        self.state_text_var = tk.StringVar()
+        self.state_raw_var = tk.StringVar(value=str(spec.MIB_SYSTEM_STATE_IDLE))
+
+        self._build_one_status(
+            parent, "System state", spec.MIB_SYSTEM_STATE_NAMES, self.state_raw_var,
+            self.state_text_var, self._set_state, self._set_state_raw,
+        )
+
+    def _build_drive_request(self, parent: tk.Widget) -> None:
+        """The MCB's half of DriveCommand: what was asked, and what to answer.
+
+        The HMI asks before it drives and waits for SystemState to agree, so
+        refusing here is the only way to see what it does when the chair will
+        not go: it should give up after MIB_STATUS_TIMEOUT_MS and say so rather
+        than sit on a drive screen that pretends the chair is moving.
+        """
+        frame = ttk.LabelFrame(parent, text="Drive requests (from the joystick)", padding=8)
+        frame.pack(fill="x", padx=8, pady=(8, 4))
+
+        self.drive_request_label = ttk.Label(frame, text="none yet")
+        self.drive_request_label.grid(row=0, column=0, columnspan=3, sticky="w")
+
+        self.refuse_drive_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            frame, text="Refuse ENABLE", variable=self.refuse_drive_var,
+            command=self._apply_refuse_drive,
+        ).grid(row=0, column=3, sticky="e", padx=(16, 0))
+        # Leaving the drive screen is a request as well, and this is the only way to
+        # see what the HMI does when the chair will not stop.
+        self.refuse_stop_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            frame, text="Refuse DISABLE", variable=self.refuse_stop_var,
+            command=self._apply_refuse_drive,
+        ).grid(row=0, column=4, sticky="e", padx=(12, 0))
+
+        ttk.Label(
+            frame,
+            text="Granting one moves the state to ENABLED, which is what opens the HMI's "
+                 "drive screen. Refuse it and the HMI should give up after "
+                 f"{spec.MIB_STATUS_TIMEOUT_MS} ms and raise its refusal banner. Refuse "
+                 "DISABLE and it cannot leave the drive screen, and says so. The MIB "
+                 "disables manual seat control while ENABLED, so the seat screen wants IDLE.",
+            foreground="#666666", wraplength=560, justify="left",
+        ).grid(row=1, column=0, columnspan=5, sticky="w", pady=(6, 0))
+
+        profile = ttk.LabelFrame(parent, text="Drive profile (what MibStatus reports)",
+                                 padding=8)
+        profile.pack(fill="x", padx=8, pady=4)
+
+        self.profile_raw_var = tk.StringVar(value=str(spec.DRIVE_PROFILE_NORMAL))
+        column = 0
+        # The HMI's own buttons first, in its order and with its names, then
+        # any profile the spec's enum has that the HMI has no button for.
+        shown = [profile for _, profile in HMI_DRIVE_MODES]
+        extra = [v for v in sorted(spec.DRIVE_PROFILE_NAMES) if v not in shown]
+        for value in shown + extra:
+            ttk.Button(
+                profile, text=profile_label(value), width=15,
+                command=lambda v=value: self._set_profile(v),
+            ).grid(row=0, column=column, padx=(0, 4))
+            column += 1
+        ttk.Label(profile, text="raw").grid(row=0, column=column, padx=(12, 4))
+        ttk.Spinbox(profile, from_=0, to=255, width=5, textvariable=self.profile_raw_var).grid(
+            row=0, column=column + 1)
+        ttk.Button(profile, text="Send", command=self._set_profile_raw).grid(
+            row=0, column=column + 2, padx=4)
+
+        self.follow_profile_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            profile, text="Follow the joystick's request", variable=self.follow_profile_var,
+            command=self._apply_follow_profile,
+        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(8, 0))
+
+        ttk.Label(
+            profile,
+            text="The HMI publishes its profile on DriveCommand and waits to see it come back "
+                 "here, and highlights the button this reports - not the one that was pressed. "
+                 "Untick Follow (a preset does it for you) to report something else, which is a "
+                 "profile change the chair did not grant.",
+            foreground="#666666", wraplength=560, justify="left",
+        ).grid(row=2, column=0, columnspan=column + 3, sticky="w", pady=(6, 0))
+
+    def _apply_refuse_drive(self) -> None:
+        if self.harness is None:
+            self._append_log("[gui] not connected")
+            return
+        self.harness.refuse_drive = self.refuse_drive_var.get()
+        self.harness.refuse_stop = self.refuse_stop_var.get()
+
+    def _set_profile(self, value: int) -> None:
+        self.profile_raw_var.set(str(value))
+        self._set_profile_raw()
+
+    def _set_profile_raw(self) -> None:
+        """Report a profile of the bench's choosing, which means not following."""
+        if self.harness is None:
+            self._append_log("[gui] not connected")
+            return
+        # Setting one by hand and still following the joystick would put the
+        # value back on the next DriveCommand, so the button would look broken.
+        self.follow_profile_var.set(False)
+        self.harness.follow_profile = False
+        self.harness.profile = self._raw(self.profile_raw_var)
+        self._publish()
+
+    def _apply_follow_profile(self) -> None:
+        if self.harness is None:
+            self._append_log("[gui] not connected")
+            return
+        self.harness.follow_profile = self.follow_profile_var.get()
+        if self.harness.follow_profile:
+            self.harness.profile = self.harness.requested_profile
+            self._publish()
+
+    def _update_drive_request(self) -> None:
+        """Called from _tick: the harness's view of the last DriveCommand."""
+        if self.harness is None:
+            return
+        request = spec.DRIVE_REQUEST_NAMES.get(self.harness.drive_request, "?")
+        asked = profile_label(self.harness.requested_profile)
+        reported = profile_label(self.harness.profile)
+        state = spec.MIB_SYSTEM_STATE_NAMES.get(self.harness.system_state, "?")
+        agree = "" if self.harness.profile == self.harness.requested_profile else "  (overridden)"
+        self.drive_request_label.configure(
+            text=f"last: {request}  profile asked {asked}, reporting {reported}{agree}"
+                 f"  →  state {state}")
+        # The box tracks the harness while it follows, so it never shows a stale
+        # number next to a ticked Follow.
+        if self.harness.follow_profile:
+            self.profile_raw_var.set(str(self.harness.profile))
+
+    def _build_one_status(self, parent, title, names, raw_var, text_var, on_preset,
+                          on_raw) -> None:
+        frame = ttk.LabelFrame(parent, text=title, padding=8)
+        frame.pack(fill="x", padx=8, pady=4)
+
+        column = 0
+        # presets come from the spec's enum names, so a new enum value in the
+        # header turns into a button here without touching this file
+        for value in sorted(names):
+            ttk.Button(
+                frame, text=names[value], width=10,
+                command=lambda v=value: on_preset(v),
+            ).grid(row=0, column=column, padx=(0, 4))
+            column += 1
+
+        ttk.Label(frame, text="raw").grid(row=0, column=column, padx=(12, 4))
+        ttk.Spinbox(frame, from_=0, to=255, width=5, textvariable=raw_var).grid(
+            row=0, column=column + 1
+        )
+        ttk.Button(frame, text="Send", command=on_raw).grid(row=0, column=column + 2, padx=4)
+
+        ttk.Label(frame, text="label").grid(row=1, column=0, sticky="w", pady=(8, 0))
+        entry = ttk.Entry(frame, textvariable=text_var, width=20)
+        entry.grid(row=1, column=1, columnspan=2, sticky="w", pady=(8, 0))
+        entry.bind("<Return>", lambda _event: self._apply_overrides())
+        ttk.Button(frame, text="Set", command=self._apply_overrides).grid(
+            row=1, column=column, padx=(12, 4), pady=(8, 0)
+        )
+        ttk.Button(
+            frame, text="Clear",
+            command=lambda v=text_var: (v.set(""), self._apply_overrides()),
+        ).grid(row=1, column=column + 1, pady=(8, 0))
+        ttk.Label(
+            frame, text=f"max {spec.MCB_TEXT_LEN - 1} chars, ASCII", foreground="#666666"
+        ).grid(row=1, column=column + 2, padx=(8, 0), pady=(8, 0), sticky="w")
+
+    def _build_error_banner(self, parent: tk.Widget) -> None:
+        frame = ttk.LabelFrame(parent, text="Error banner", padding=8)
+        frame.pack(fill="x", padx=8, pady=4)
+
+        self.error_text_var = tk.StringVar(value=DEFAULT_ERROR_TEXT)
+        self.error_footer_var = tk.StringVar(value=DEFAULT_ERROR_FOOTER)
+        for row, (label, var, limit) in enumerate((
+            ("body", self.error_text_var, spec.ERROR_TEXT_LEN),
+            ("footer", self.error_footer_var, spec.ERROR_FOOTER_LEN),
+        )):
+            ttk.Label(frame, text=label).grid(row=row, column=0, sticky="w", pady=2)
+            entry = ttk.Entry(frame, textvariable=var, width=46)
+            entry.grid(row=row, column=1, padx=4, pady=2)
+            entry.bind("<Return>", lambda _event: self._apply_error_text())
+            ttk.Label(frame, text=f"max {limit - 1}", foreground="#666666").grid(
+                row=row, column=2, sticky="w"
+            )
+        ttk.Button(frame, text="Set", command=self._apply_error_text).grid(row=0, column=3, padx=6)
+        ttk.Button(
+            frame, text="Clear",
+            command=lambda: (self.error_text_var.set(""), self.error_footer_var.set(""),
+                             self._apply_error_text()),
+        ).grid(row=1, column=3, padx=6)
+        ttk.Label(
+            frame,
+            text="The panel only shows on the HMI while STATE is not OK.",
+            foreground="#666666",
+        ).grid(row=2, column=0, columnspan=4, sticky="w", pady=(6, 0))
+
+    def _build_joystick(self, parent: tk.Widget) -> None:
+        """Read-only view of what the joystick is publishing back to us."""
+        frame = ttk.LabelFrame(parent, text="Joystick (from the HMI)", padding=8)
+        frame.pack(fill="x", padx=8, pady=4)
+
+        self.axis_bars = {}
+        self.axis_labels = {}
+        for row, axis in enumerate(("X", "Y", "Twist")):
+            ttk.Label(frame, text=axis, width=6).grid(row=row, column=0, sticky="w")
+            # Deflection as 0-100 with centre at 50, so a resting stick sits
+            # mid-bar and either direction is visible.
+            bar = ttk.Progressbar(frame, orient="horizontal", length=320, maximum=100)
+            bar.grid(row=row, column=1, padx=4, pady=1)
+            value = ttk.Label(frame, text="-", width=22)
+            value.grid(row=row, column=2, sticky="w")
+            self.axis_bars[axis] = bar
+            self.axis_labels[axis] = value
+
+        self.button_label = ttk.Label(frame, text="button: -", width=22)
+        self.button_label.grid(row=3, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        self.speed_label = ttk.Label(frame, text="emulated speed: 0.0")
+        self.speed_label.grid(row=3, column=2, sticky="w", pady=(6, 0))
+
+    def _build_seat(self, parent: tk.Widget) -> None:
+        """One row per seat axis in the shared spec table.
+
+        The MCB owns these values, so this tab IS the MCB as far as the HMI is
+        concerned: what the entries hold is what the joystick will be told, and
+        the reject dropdown is how a refusal the bench cannot otherwise produce
+        (an interlock, a stalled motor) gets in front of the HMI.
+        """
+        frame = ttk.LabelFrame(parent, text="Seat values (the MCB owns these)", padding=8)
+        frame.pack(fill="x", padx=8, pady=4)
+
+        for column, heading in enumerate(("", "Seat axis", "Value", "Range", "Next request")):
+            ttk.Label(frame, text=heading, foreground="#666666").grid(
+                row=0, column=column, sticky="w", padx=4, pady=(0, 4)
+            )
+
+        #: per-axis widgets and vars, indexed to match spec.SEAT_AXES
+        self.seat_value_vars: list[tk.StringVar] = []
+        self.seat_entries: list[ttk.Entry] = []
+        self.seat_reject_vars: list[tk.StringVar] = []
+
+        # "accept" plus every refusal the spec names, so a new RESULT_ in the
+        # header turns up here without touching this file.
+        # The bench's own reasons, not the spec's: MibStatus carries no per-request
+        # verdict, so a refusal reaches the HMI only as an axis that did not move.
+        reject_choices = ["accept"] + [
+            name for value, name in sorted(rtps_mcb_sim.SEAT_RESULTS.items())
+            if value != rtps_mcb_sim.SEAT_RESULT_OK
+        ]
+
+        for index, axis in enumerate(spec.SEAT_AXES):
+            row = index + 1
+            ttk.Label(frame, text=axis.short, width=4).grid(row=row, column=0, sticky="w",
+                                                                padx=4)
+            ttk.Label(frame, text=axis.label, width=16).grid(row=row, column=1, sticky="w",
+                                                                 padx=4)
+
+            value_var = tk.StringVar(value="-")
+            entry = ttk.Entry(frame, textvariable=value_var, width=9, justify="right")
+            entry.grid(row=row, column=2, padx=4, pady=1)
+            # Enter applies; the tick refreshes the box only while it is not
+            # focused, so a value arriving from a joystick press cannot
+            # overwrite what someone is halfway through typing.
+            entry.bind("<Return>", lambda _event, i=index: self._set_seat_axis(i))
+            self.seat_value_vars.append(value_var)
+            self.seat_entries.append(entry)
+
+            ttk.Label(
+                frame,
+                text=f"{axis.format(axis.min_value)} .. "
+                     f"{axis.format(axis.max_value)} {axis.unit}"
+                     f"  (step {axis.format(axis.step)})",
+                foreground="#666666",
+            ).grid(row=row, column=3, sticky="w", padx=4)
+
+            reject_var = tk.StringVar(value="accept")
+            ttk.Combobox(frame, textvariable=reject_var, values=reject_choices, width=11,
+                         state="readonly").grid(row=row, column=4, padx=4)
+            self.seat_reject_vars.append(reject_var)
+
+        buttons = ttk.Frame(frame)
+        buttons.grid(row=len(spec.SEAT_AXES) + 1, column=0, columnspan=5, sticky="w", pady=(8, 0))
+        ttk.Button(buttons, text="Apply values", command=self._set_all_seat_axes).pack(side="left")
+        ttk.Button(buttons, text="Centre all", command=self._centre_seat_axes).pack(side="left",
+                                                                                    padx=(8, 0))
+        ttk.Button(buttons, text="Accept all", command=self._accept_all_seat_axes).pack(
+            side="left", padx=(8, 0))
+        ttk.Label(
+            frame,
+            text="Values update live as the HMI's requests are accepted \u2014 it sends an "
+                 "absolute target, and this is what decides whether the seat gets there. Set one "
+                 "here to put an axis somewhere directly; the HMI is told on the next publish.",
+            foreground="#666666", wraplength=560, justify="left",
+        ).grid(row=len(spec.SEAT_AXES) + 2, column=0, columnspan=5, sticky="w", pady=(6, 0))
+
+        # What the HMI actually asked for, which is the half the values above do
+        # not show: a refused request leaves the value where it was, so without
+        # this there is no way to tell a refusal from a press that never arrived.
+        requests = ttk.LabelFrame(parent, text="Seat requests (from the joystick)", padding=8)
+        requests.pack(fill="x", padx=8, pady=4)
+        self.seat_request_label = ttk.Label(requests, text="no request yet")
+        self.seat_request_label.pack(anchor="w")
+        ttk.Label(
+            requests,
+            text="Targets are absolute: a preset button and a -/+ step are the same message, so "
+                 "this is the whole of what the HMI asks for.",
+            foreground="#666666", wraplength=560, justify="left",
+        ).pack(anchor="w", pady=(6, 0))
+
+    def _set_seat_axis(self, index: int) -> None:
+        """Push one typed value into the harness, clamped to the spec range."""
+        if self.harness is None:
+            return
+        axis = spec.SEAT_AXES[index]
+        try:
+            raw = axis.parse(self.seat_value_vars[index].get())
+        except ValueError:
+            # Put the harness's value back rather than leaving the typo in
+            # place looking like it took effect.
+            self.seat_value_vars[index].set(
+                axis.format(self.harness.seat_values[index])
+            )
+            return
+        self.harness.seat_values[index] = raw
+        self.harness.seat_dirty = True
+        self.root.focus_set()  # drop focus so the tick resumes refreshing the box
+
+    def _set_all_seat_axes(self) -> None:
+        for index in range(len(spec.SEAT_AXES)):
+            self._set_seat_axis(index)
+
+    def _centre_seat_axes(self) -> None:
+        if self.harness is None:
+            return
+        for index, axis in enumerate(spec.SEAT_AXES):
+            self.harness.seat_values[index] = (axis.min_value + axis.max_value) // 2
+        self.harness.seat_dirty = True
+        self.root.focus_set()
+
+    def _accept_all_seat_axes(self) -> None:
+        for var in self.seat_reject_vars:
+            var.set("accept")
+
+    def _update_seat(self) -> None:
+        """Called from _tick: harness -> value boxes, dropdowns -> harness."""
+        if self.harness is None:
+            return
+        self._update_seat_request()
+        name_to_result = {name: value for value, name in rtps_mcb_sim.SEAT_RESULTS.items()}
+        focused = self.root.focus_get()
+        for index, axis in enumerate(spec.SEAT_AXES):
+            if self.seat_entries[index] is not focused:
+                text = axis.format(self.harness.seat_values[index])
+                if self.seat_value_vars[index].get() != text:
+                    self.seat_value_vars[index].set(text)
+            # Pushed every tick rather than on a change event: it is one
+            # assignment, and it means a dropdown set before connecting is in
+            # force the moment a harness exists.
+            choice = self.seat_reject_vars[index].get()
+            self.harness.seat_reject[index] = (
+                None if choice == "accept" else name_to_result.get(choice)
+            )
+
+    def _update_seat_request(self) -> None:
+        """The last SeatCommand and the verdict the harness gave it."""
+        command = self.harness.last_seat_command
+        if command is None:
+            self.seat_request_label.configure(text="no request yet")
+            return
+        axis_id, target = command
+        known = 0 <= axis_id < len(spec.SEAT_AXES)
+        axis = spec.SEAT_AXES[axis_id] if known else None
+        name = axis.label if known else f"axis #{axis_id}"
+        shown = f"{target:g} {axis.unit}" if known else str(target)
+        verdict = rtps_mcb_sim.SEAT_RESULTS.get(self.harness.seat_result, "?")
+        self.seat_request_label.configure(text=f"last: {name} → {shown} : {verdict}")
+
+    def _build_diagnostics(self, parent: tk.Widget) -> None:
+        """Fake readings for every item in the spec's RAMMP_DIAG_TABLE.
+
+        Sent with each status tick. Untick to stop them: the HMI's Diagnostics
+        screen should turn red and blink within DIAG_TIMEOUT_MS.
+        """
+        frame = ttk.LabelFrame(parent, text="Diagnostics (fake readings)", padding=8)
+        frame.pack(fill="x", padx=8, pady=4)
+        self.diagnostics_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(frame, text="Send diagnostics", variable=self.diagnostics_var).pack(
+            anchor="w")
+        self.diagnostics_label = ttk.Label(frame, text="not connected", font=("Consolas", 10),
+                                           justify="left")
+        self.diagnostics_label.pack(anchor="w", pady=(6, 0))
+
+    def _update_diagnostics(self) -> None:
+        self.harness.diagnostics_enabled = self.diagnostics_var.get()
+        if not self.harness.diagnostics_enabled:
+            self.diagnostics_label.configure(text="STOPPED - the HMI should show them stale")
+            return
+        values = self.harness.diagnostics_values
+        if not values:
+            self.diagnostics_label.configure(text="no readings sent yet")
+            return
+        lines = []
+        for item, readings in zip(spec.DIAGNOSTICS, values):
+            parts = [f"{unit} {item.format(raw, field)}"
+                     for field, (unit, raw) in enumerate(zip(item.units, readings)) if unit]
+            lines.append(f"{item.short} {item.label}: " + ", ".join(parts))
+        self.diagnostics_label.configure(text="\n".join(lines))
+
+    def _build_cycle(self, parent: tk.Widget) -> None:
+        frame = ttk.Frame(parent, padding=(8, 4))
+        frame.pack(fill="x")
+
+        self.cycle_button = ttk.Button(frame, text="Start cycle", command=self._toggle_cycle)
+        self.cycle_button.pack(side="left")
+
+        ttk.Label(frame, text="dwell").pack(side="left", padx=(12, 4))
+        self.dwell_var = tk.StringVar(value="3.0")
+        ttk.Spinbox(frame, from_=0.5, to=30.0, increment=0.5, width=5,
+                    textvariable=self.dwell_var).pack(side="left")
+
+        # The HMI's self test (checks and limits in main/selftest_spec.h). The
+        # harness answers its pings and logs the report as it arrives; this only
+        # asks for a run. rtps_selftest.py does the same from a terminal.
+        ttk.Button(frame, text="Run self test", command=self._run_selftest).pack(
+            side="left", padx=(24, 0))
+
+        self.status_label = ttk.Label(frame, text="idle")
+        self.status_label.pack(side="right")
+
+    def _run_selftest(self) -> None:
+        if self.harness is None:
+            self._append_log("[gui] connect before running the self test")
+            return
+        run_id = self.harness.request_selftest()
+        self._append_log(f"[selftest] requested run {run_id}; results follow in this log")
+        self.root.after(1000, self._selftest_resend, run_id, 1)
+
+    def _selftest_resend(self, run_id: int, attempt: int) -> None:
+        """Resend until the HMI says it started: the command topic is best-effort."""
+        if self.harness is None or run_id in self.harness.selftest_reports or attempt >= 6:
+            return
+        self.harness.send_selftest_command(run_id)
+        self.root.after(1000, self._selftest_resend, run_id, attempt + 1)
+
+    def _toggle_drive_view(self) -> None:
+        """Open (or close) the car window.
+
+        Deliberately works while disconnected: the window opening and saying so
+        is far better feedback than a button that appears to do nothing. The car
+        simply sits still until joystick samples start arriving.
+        """
+        if self.drive_view is not None:
+            self.drive_view.close()
+            return
+        self.drive_view = rtps_drive_game.DriveView(
+            self.root, self.car, status_fn=self._drive_status,
+            on_close=self._drive_view_closed)
+        self.drive_button.configure(text="Close drive view")
+
+    def _drive_status(self) -> str:
+        """One line for the drive window about where its input is coming from."""
+        if self.harness is None:
+            return "not connected - press Connect on the MCB panel to drive"
+        if self.harness.joystick is None:
+            return "connected, waiting for joystick samples"
+        return "set the drive profile on the Tab5"
+
+    def _drive_view_closed(self) -> None:
+        self.drive_view = None
+        self.drive_button.configure(text="Drive view")
+
+    def _build_log(self) -> None:
+        frame = ttk.LabelFrame(self.root, text="Log", padding=4)
+        frame.pack(fill="both", expand=True, padx=8, pady=(4, 8))
+        self.log_text = tk.Text(frame, height=12, width=90, wrap="none", state="disabled")
+        self.log_text.pack(side="left", fill="both", expand=True)
+        scroll = ttk.Scrollbar(frame, command=self.log_text.yview)
+        scroll.pack(side="right", fill="y")
+        self.log_text.configure(yscrollcommand=scroll.set)
+
+    # ------------------------------------------------------------ connection
+
+    def _refresh_adapters(self) -> None:
+        """Populate the Via dropdown with named adapters, Auto first."""
+        self.adapters = rtps_net.list_adapters()
+        values = [AUTO_ADAPTER]
+        # Live adapters first; a down one is almost never the answer but is
+        # still worth offering rather than hiding.
+        values += [a.label() for a in self.adapters if a.is_up]
+        values += [a.label() for a in self.adapters if not a.is_up]
+        self.address_combo["values"] = values
+
+    def _selected_address(self) -> str | None:
+        """The advertised address to use, or None for Auto."""
+        chosen = self.address_var.get().strip()
+        if not chosen or chosen == AUTO_ADAPTER:
+            return None
+        for adapter in self.adapters:
+            if chosen == adapter.label():
+                return adapter.ip
+        return chosen  # a hand-typed address
+
+    def _auto_step(self) -> None:
+        """One attempt at finding the board and connecting to it.
+
+        Runs on open so the common case — board on, address remembered — needs
+        no clicks at all. Retries because discovery is a network operation and
+        one miss is not evidence the board is absent; gives up after a few so a
+        genuinely absent board does not leave the panel looping forever.
+        """
+        if not self._auto_active or self.harness is not None:
+            return
+        self._auto_attempt += 1
+        if self._auto_attempt > AUTOCONNECT_ATTEMPTS:
+            self._auto_active = False
+            self.connection_label.configure(
+                text=f"auto-connect gave up after {AUTOCONNECT_ATTEMPTS} tries")
+            self._append_log("[gui] auto-connect gave up - use Detect, or Scan for a subnet")
+            return
+        self._append_log(f"[gui] auto-connect attempt {self._auto_attempt}"
+                         f"/{AUTOCONNECT_ATTEMPTS}")
+        self._auto_pending = True
+        self._start_discovery()
+
+    def _auto_verify(self) -> None:
+        """Did the attempt actually reach the board, or only open a socket?"""
+        if not self._auto_active:
+            return
+        if self.harness is not None and self.harness.announced_targets > 0:
+            self._auto_active = False
+            self._append_log("[gui] auto-connect succeeded")
+            return
+        self._append_log("[gui] connected but nothing answered; retrying")
+        if self.harness is not None:
+            self._disconnect()
+        self.root.after(AUTOCONNECT_RETRY_MS, self._auto_step)
+
+    def _cancel_autoconnect(self) -> None:
+        """A manual action takes precedence over the retry sequence."""
+        if self._auto_active:
+            self._auto_active = False
+
+    def _start_discovery(self) -> None:
+        """Find the board on a worker thread; never blocks the window."""
+        if self.harness is not None:
+            self._append_log("[gui] disconnect before detecting")
+            return
+        saved = self.peer_var.get().strip() or self.config.get("peer")
+        self.detect_button.configure(state="disabled")
+        self.connection_label.configure(text="looking for the board...")
+
+        def work() -> None:
+            found = rtps_net.discover_board(saved, progress=self.log_queue.put)
+            self.result_queue.put(("detect", found))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_detect(self) -> None:
+        self._cancel_autoconnect()
+        self._start_discovery()
+
+    def _on_scan(self) -> None:
+        """Sweep a subnet, after showing which one."""
+        self._cancel_autoconnect()
+        if self.harness is not None:
+            self._append_log("[gui] disconnect before scanning")
+            return
+        default = rtps_net.subnet_guess(self.peer_var.get().strip()
+                                        or self.config.get("peer"))
+        subnet = simpledialog.askstring(
+            "Scan for the board",
+            "Subnet to sweep with RTPS discovery probes:",
+            initialvalue=default, parent=self.root)
+        if not subnet:
+            return
+        self.scan_button.configure(state="disabled")
+        self.connection_label.configure(text=f"scanning {subnet}...")
+
+        def work() -> None:
+            try:
+                found = rtps_net.scan_subnet(subnet, progress=self.log_queue.put)
+            except ValueError as exc:
+                self.log_queue.put(f"[gui] {subnet} is not a valid subnet: {exc}")
+                found = []
+            self.result_queue.put(("scan", found[0] if found else None))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _discovery_finished(self, kind: str, found: str | None) -> None:
+        self.detect_button.configure(state="normal")
+        self.scan_button.configure(state="normal")
+        auto, self._auto_pending = self._auto_pending, False
+        if found:
+            self.peer_var.set(found)
+            adapter = rtps_net.adapter_for(found)
+            via = adapter.label() if adapter else "unknown"
+            self.connection_label.configure(text=f"found {found} via {via}")
+            self._append_log(f"[gui] board at {found}, reachable via {via}")
+            if auto and self._auto_active and self.harness is None:
+                self._connect()
+                self.root.after(AUTOCONNECT_VERIFY_MS, self._auto_verify)
+            return
+        hint = "try Scan" if kind == "detect" else "check the subnet, and that the board is on"
+        self.connection_label.configure(text=f"board not found - {hint}")
+        if auto and self._auto_active:
+            self.root.after(AUTOCONNECT_RETRY_MS, self._auto_step)
+
+    def _toggle_connection(self) -> None:
+        self._cancel_autoconnect()
+        if self.harness is None:
+            self._connect()
+        else:
+            self._disconnect()
+
+    def _connect(self) -> None:
+        args = rtps_mcb_sim.build_harness_args(
+            argparse.Namespace(
+                node_name=self.cli.node_name,
+                domain_id=self.cli.domain_id,
+                participant_id=self.cli.participant_id,
+                bind_address=None,
+                advertised_address=self._selected_address()
+                or rtps_net.source_address_for(self.peer_var.get().strip()),
+                multicast_interface=self.cli.multicast_interface,
+                multicast_group=self.cli.multicast_group,
+                period=self.cli.period,
+                trace_packets=self.cli.trace_packets,
+                peer=[self.peer_var.get().strip()] if self.peer_var.get().strip() else None,
+                peer_participant_ids=self.cli.peer_participant_ids,
+            )
+        )
+        try:
+            self.harness = rtps_mcb_sim.SystemStatePublisher(args, car=self.car)
+        except OSError as exc:
+            # a bad address or a port already taken by another script
+            self._append_log(f"[gui] connect failed: {exc}")
+            self.connection_label.configure(text="connect failed")
+            self.harness = None
+            return
+        self.thread = threading.Thread(target=self.harness.run, daemon=True)
+        self.thread.start()
+        # A fresh publisher starts IDLE, which is the interesting state to be in on
+        # connecting: the HMI allows both the seat screen and a drive request from it.
+        self.harness.system_state = spec.MIB_SYSTEM_STATE_IDLE
+        self.state_raw_var.set(str(spec.MIB_SYSTEM_STATE_IDLE))
+        self._apply_refuse_drive()
+        self._apply_follow_profile()
+        self._apply_overrides()
+        self._apply_error_text()
+        self.connect_button.configure(text="Disconnect")
+        self.connection_label.configure(text=f"publishing as {args.advertised_address}")
+        # Only remember settings that actually stood up a participant.
+        rtps_net.save_config({
+            "peer": self.peer_var.get().strip() or None,
+            "advertised_address": args.advertised_address,
+            "period": self.cli.period,
+        })
+
+    def _disconnect(self) -> None:
+        self._stop_cycle()
+        if self.harness is not None:
+            self.harness.stop()  # run() returns and closes the sockets
+        if self.thread is not None:
+            self.thread.join(timeout=2.0)
+        self.harness = None
+        self.thread = None
+        self.connect_button.configure(text="Connect")
+        self.connection_label.configure(text="not connected")
+        self.status_label.configure(text="idle")
+
+    # -------------------------------------------------------------- sending
+
+    def _publish(self) -> None:
+        """Send immediately so the panel follows the click, not the next period.
+
+        Shares the UDP socket with the harness thread's periodic publish, which
+        is fine: sendto is atomic per datagram, and a torn seq counter is only a
+        diagnostic.
+        """
+        if self.harness is None:
+            self._append_log("[gui] not connected")
+            return
+        self.harness.publish_now()
+
+    def _set_state(self, value: int) -> None:
+        self.state_raw_var.set(str(value))
+        self._set_state_raw()
+
+    def _set_state_raw(self) -> None:
+        if self.harness is None:
+            self._append_log("[gui] not connected")
+            return
+        self.harness.system_state = self._raw(self.state_raw_var)
+        self._publish()
+
+    def _raw(self, var: tk.StringVar) -> int:
+        try:
+            return int(var.get()) & 0xFF
+        except ValueError:
+            self._append_log(f"[gui] '{var.get()}' is not a number; sending 0")
+            return 0
+
+    def _apply_error_text(self) -> None:
+        if self.harness is None:
+            self._append_log("[gui] not connected")
+            return
+        self.harness.error_message = self.error_text_var.get()
+        self.harness.error_footer = self.error_footer_var.get()
+        self._publish()
+
+    def _apply_overrides(self) -> None:
+        if self.harness is None:
+            return
+        self.harness.status_text = self.state_text_var.get()
+        self._publish()
+
+    # ---------------------------------------------------------------- cycle
+
+    def _cycle_steps(self):
+        """(drive, state, paused) triples: the four combinations, then a gap.
+
+        The gap is longer than the HMI's staleness timeout, so one lap also
+        exercises link loss and recovery.
+        """
+        return [
+            (spec.MIB_SYSTEM_STATE_INITIALIZING, False),
+            (spec.MIB_SYSTEM_STATE_IDLE, False),
+            (spec.MIB_SYSTEM_STATE_ENABLED, False),
+            (spec.MIB_SYSTEM_STATE_ERROR, False),
+            (spec.MIB_SYSTEM_STATE_IDLE, True),
+        ]
+
+    def _toggle_cycle(self) -> None:
+        if self.cycling:
+            self._stop_cycle()
+        elif self.harness is None:
+            self._append_log("[gui] connect before starting the cycle")
+        else:
+            self.cycling = True
+            self.cycle_index = 0
+            self.cycle_button.configure(text="Stop cycle")
+            self._cycle_step()
+
+    def _stop_cycle(self) -> None:
+        self.cycling = False
+        if self.cycle_job is not None:
+            self.root.after_cancel(self.cycle_job)
+            self.cycle_job = None
+        if self.harness is not None:
+            self.harness.paused = False
+        self.cycle_button.configure(text="Start cycle")
+
+    def _cycle_step(self) -> None:
+        # Driven by root.after rather than a thread, so it cannot race the
+        # harness state the buttons also write.
+        if not self.cycling or self.harness is None:
+            return
+        try:
+            dwell = max(0.5, float(self.dwell_var.get()))
+        except ValueError:
+            dwell = 3.0
+        state, paused = self._cycle_steps()[self.cycle_index]
+        self.cycle_index = (self.cycle_index + 1) % len(self._cycle_steps())
+
+        self.harness.paused = paused
+        if paused:
+            delay = max(dwell, spec.MIB_STATUS_TIMEOUT_MS / 1000.0 + 1.0)
+            self._append_log(f"[cycle] paused {delay:.1f}s - HMI should go stale")
+        else:
+            delay = dwell
+            self.harness.system_state = state
+            self.state_raw_var.set(str(state))
+            self.harness.publish_now()
+        self.cycle_job = self.root.after(int(delay * 1000), self._cycle_step)
+
+    # ----------------------------------------------------------------- tick
+
+    def _append_log(self, message: str) -> None:
+        self.log_text.configure(state="normal")
+        self.log_text.insert("end", message + "\n")
+        # keep the widget from growing without bound over a long session
+        line_count = int(self.log_text.index("end-1c").split(".")[0])
+        if line_count > LOG_MAX_LINES:
+            self.log_text.delete("1.0", f"{line_count - LOG_MAX_LINES}.0")
+        self.log_text.see("end")
+        self.log_text.configure(state="disabled")
+
+    def _tick(self) -> None:
+        while True:
+            try:
+                self._append_log(self.log_queue.get_nowait())
+            except queue.Empty:
+                break
+        while True:
+            try:
+                kind, payload = self.result_queue.get_nowait()
+            except queue.Empty:
+                break
+            if kind in ("detect", "scan"):
+                self._discovery_finished(kind, payload)
+
+        if self.harness is not None:
+            now = time.monotonic()
+            elapsed = now - self._rate_time
+            if elapsed >= 1.0:
+                sent = (self.harness.seq - self._rate_seq) & 0xFF
+                self._rate = sent / elapsed
+                self._rate_seq = self.harness.seq
+                self._rate_time = now
+            # Also steps the car; update() takes its own dt, so this and the
+            # publisher's own tick cannot double-integrate.
+            self.harness.step_speed()
+            self._update_joystick()
+            self._update_seat()
+            self._update_diagnostics()
+            self._update_drive_request()
+            targets = max(0, self.harness.announced_targets)
+            paused = " PAUSED" if self.harness.paused else ""
+            self.status_label.configure(
+                text=f"seq {self.harness.seq} - {self._rate:.1f} Hz - {targets} target(s){paused}"
+            )
+        self.root.after(TICK_MS, self._tick)
+
+    def _update_joystick(self) -> None:
+        sample = self.harness.joystick if self.harness is not None else None
+        if sample is None:
+            for axis in self.axis_bars:
+                self.axis_bars[axis]["value"] = 50
+                self.axis_labels[axis].configure(text="no data")
+            self.button_label.configure(text="button: no data")
+            return
+        x, y, twist, buttons = sample[0], sample[1], sample[2], sample[3]
+        # Already -1..+1 and calibrated on the HMI (+Y forward).
+        for axis, value in (("X", x), ("Y", y), ("Twist", twist)):
+            self.axis_bars[axis]["value"] = max(0, min(100, 50 + value * 50))
+            self.axis_labels[axis].configure(text=f"{value:+.2f}")
+        # The profile is not in the stick sample: it arrives on DriveCommand.
+        profile = profile_label(self.harness.profile)
+        pressed = bool(buttons & spec.BUTTONS_JOYSTICK)
+        self.button_label.configure(
+            text=f"button: {'PRESSED' if pressed else 'released'}   profile: {profile}")
+        self.speed_label.configure(
+            text=f"emulated speed: {self.harness.speed_tenths / 10:.1f}")
+
+    def _on_close(self) -> None:
+        self._disconnect()
+        rtps_host.LOG_SINK = None
+        self.root.destroy()
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Window for driving the joystick HMI's status labels over RTPS."
+    )
+    parser.add_argument("--peer", action="append", default=None, metavar="HOST",
+                        help="Prefill the peer field (hostname or IP)")
+    parser.add_argument("--advertised-address", default=None,
+                        help="Prefill the 'Via' field with this local IPv4 address")
+    parser.add_argument("--node-name", default="mcb_gui", help="Local participant name")
+    parser.add_argument("--domain-id", type=int, default=0, help="RTPS domain id")
+    parser.add_argument("--participant-id", type=int, default=14,
+                        help="Local participant id; distinct from the other scripts (10-13)")
+    parser.add_argument("--multicast-interface", default=None,
+                        help="IPv4 interface for the multicast join/send, if it differs")
+    parser.add_argument("--multicast-group", default="239.255.0.1",
+                        help="RTPS metatraffic multicast group")
+    parser.add_argument("--period", type=float, default=spec.MIB_STATUS_PERIOD_MS / 1000.0,
+                        help="Seconds between republishes of the current status")
+    parser.add_argument("--peer-participant-ids", type=rtps_host.parse_participant_id_range,
+                        default="0-3", metavar="IDS",
+                        help="Participant ids to try on each peer, as '0-3' or '0,1,2'")
+    parser.add_argument("--trace-packets", action="store_true",
+                        help="Log every received UDP packet and its RTPS submessage headers")
+    cli = parser.parse_args()
+
+    root = tk.Tk()
+    McbPanel(root, cli)
+    root.mainloop()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

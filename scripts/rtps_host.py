@@ -27,6 +27,7 @@ import select
 import socket
 import struct
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Set, Tuple
@@ -64,6 +65,9 @@ SEDP_PUBLICATIONS_WRITER_ENTITY_ID = b"\x00\x00\x03\xc2"
 SEDP_PUBLICATIONS_READER_ENTITY_ID = b"\x00\x00\x03\xc7"
 SEDP_SUBSCRIPTIONS_WRITER_ENTITY_ID = b"\x00\x00\x04\xc2"
 SEDP_SUBSCRIPTIONS_READER_ENTITY_ID = b"\x00\x00\x04\xc7"
+#: The 'no particular reader' entity id. A writer that matched us through
+#: SEDP replaces it with our reader's own id, which topic_for_sample uses.
+ENTITYID_UNKNOWN = bytes(4)
 USER_WRITER_NO_KEY_KIND = 0x03
 USER_READER_NO_KEY_KIND = 0x04
 
@@ -162,7 +166,18 @@ class ReaderConfig:
     entity_index: int
 
 
+#: Optional callable receiving every log line as well as stdout. Set by a GUI
+#: that wants the harness output in a widget; called from the network thread, so
+#: whatever is assigned here must be safe to call from there (a Queue.put is).
+LOG_SINK = None
+
+
 def log(message: str) -> None:
+    if LOG_SINK is not None:
+        try:
+            LOG_SINK(message)
+        except Exception:  # a broken sink must not take the network thread down
+            pass
     print(message, flush=True)
 
 
@@ -201,6 +216,23 @@ def compute_port_mapping(domain_id: int, participant_id: int) -> PortMapping:
         user_multicast=base + USER_MULTICAST_OFFSET,
         user_unicast=base + USER_UNICAST_OFFSET + participant_offset,
     )
+
+
+def parse_participant_id_range(text: str) -> List[int]:
+    """Parse '0-3' or '0,1,2' into a list of participant ids."""
+    ids: List[int] = []
+    for part in text.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part[1:]:
+            first, _, last = part.partition("-")
+            ids.extend(range(int(first), int(last) + 1))
+        else:
+            ids.append(int(part))
+    if not ids:
+        raise ValueError(f"no participant ids in '{text}'")
+    return ids
 
 
 def guess_local_ipv4() -> str:
@@ -497,7 +529,17 @@ class RtpsHostHarness:
         # repeating forever exhausts its pool: "MemoryPool RESSOURCE LIMIT
         # EXCEEDED". Send a few times to cover packet loss, then stop.
         self.sedp_announce_counts: Dict[bytes, int] = {}
+        # same cap, but keyed by (address, port) for peers seeded by hand — they
+        # are never discovered via SPDP, so they have no participant GUID
+        self.peer_sedp_counts: Dict[Tuple[str, int], int] = {}
+        # Each endpoint's SEDP announcement, built once and then resent
+        # verbatim; see _sedp_announcement for why the bytes must not change.
+        self._sedp_messages: Dict[Tuple[str, int], bytes] = {}
         self.joined_user_multicast_groups: Set[str] = set()
+
+        # Peers to reach without multicast discovery (see seed_peer_discovery).
+        self.peer_addresses = self._resolve_peers()
+        self.peer_participant_ids = list(getattr(args, "peer_participant_ids", None) or [])
 
         self.local_writers = [
             WriterConfig(
@@ -507,10 +549,11 @@ class RtpsHostHarness:
                 entity_index=0,
             )
         ] if args.publish_topic else []
+        subscribe_type_name = getattr(args, "subscribe_type_name", None) or args.type_name
         self.local_readers = [
             ReaderConfig(
                 topic_name=topic_name,
-                type_name=args.type_name,
+                type_name=subscribe_type_name,
                 reliable=False,
                 entity_index=index,
             )
@@ -524,13 +567,36 @@ class RtpsHostHarness:
         self._configure_multicast_sender(self.metatraffic_unicast_sock)
         self._configure_multicast_sender(self.user_unicast_sock)
 
+        # Lets a caller end run() without a KeyboardInterrupt or a --duration,
+        # which is what a GUI's Disconnect needs.
+        self._stop_event = threading.Event()
         self.next_discovery_send = 0.0
         self.next_publish_send = 0.0
         self.last_no_participant_log = 0.0
         self.last_unknown_writer_log = 0.0
 
+    @staticmethod
+    def _ignore_icmp_port_unreachable(sock: socket.socket) -> None:
+        """Stop Windows turning an ICMP port-unreachable into a fatal socket error.
+
+        On Windows a UDP sendto that draws an ICMP port-unreachable makes the
+        *next* recvfrom on that socket raise ConnectionResetError (WinError
+        10054), and the socket stays poisoned. RTPS sprays discovery at ports
+        that may not be open yet — a peer that has not created a participant, or
+        a --peer participant-id sweep where only one id is real — so this is
+        normal traffic, not an error. SIO_UDP_CONNRESET(False) suppresses it.
+        No-op everywhere else, where UDP already ignores ICMP.
+        """
+        if not hasattr(socket, "SIO_UDP_CONNRESET"):
+            return
+        try:
+            sock.ioctl(socket.SIO_UDP_CONNRESET, False)
+        except OSError as exc:
+            log(f"[socket] could not disable UDP connreset reporting: {exc}")
+
     def _create_bound_udp_socket(self, port: int) -> socket.socket:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        self._ignore_icmp_port_unreachable(sock)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         if hasattr(socket, "SO_REUSEPORT"):
             try:
@@ -545,6 +611,7 @@ class RtpsHostHarness:
 
     def _create_metatraffic_multicast_socket(self) -> socket.socket:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        self._ignore_icmp_port_unreachable(sock)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         if hasattr(socket, "SO_REUSEPORT"):
             try:
@@ -561,12 +628,22 @@ class RtpsHostHarness:
             sock.bind((self.args.bind_address, self.ports.metatraffic_multicast))
         interface_ip = self.args.multicast_interface or self.args.advertised_address
         membership = socket.inet_aton(self.args.multicast_group) + socket.inet_aton(interface_ip)
-        sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, membership)
+        try:
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, membership)
+        except OSError as exc:
+            # A point-to-point overlay interface (Tailscale, most VPNs) carries
+            # no multicast and rejects the join. That is fatal for ordinary
+            # discovery but harmless when --peer is seeding it by unicast, so
+            # only refuse when there is no peer to fall back on.
+            if not getattr(self.args, "peer", None):
+                raise
+            log(f"[multicast] join on {interface_ip} failed ({exc}); relying on --peer instead")
         sock.setblocking(False)
         return sock
 
     def _create_user_multicast_socket(self) -> socket.socket:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        self._ignore_icmp_port_unreachable(sock)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         if hasattr(socket, "SO_REUSEPORT"):
             try:
@@ -597,7 +674,14 @@ class RtpsHostHarness:
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 1)
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
         interface_ip = self.args.multicast_interface or self.args.advertised_address
-        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(interface_ip))
+        try:
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(interface_ip))
+        except OSError as exc:
+            # See _create_metatraffic_multicast_socket: no multicast on this
+            # interface is survivable only because --peer does not need it.
+            if not getattr(self.args, "peer", None):
+                raise
+            log(f"[multicast] sender setup on {interface_ip} failed ({exc}); --peer only")
 
     def _next_sequence(self, writer_entity_id: bytes) -> int:
         value = self.sequence_numbers.get(writer_entity_id, 1)
@@ -721,6 +805,32 @@ class RtpsHostHarness:
             payload,
         )
 
+    def _sedp_announcement(self, endpoint) -> bytes:
+        """This endpoint's SEDP message, built once and resent verbatim.
+
+        The peer's builtin SEDP reader is reliable, so it only accepts sequence
+        numbers in order. Rebuilding the message for every repeat gave each
+        copy a fresh number, so one announcement lost from a burst stalled every
+        later one for good - no repeat ever carried the number it was waiting
+        for. Seen on the bench over Tailscale: of seven announcements the HMI
+        took the first four, and the readers behind the lost fifth never
+        matched. Resending the same bytes lets a repeat fill exactly the hole,
+        and a peer that already has it drops the duplicate.
+        """
+        is_writer = isinstance(endpoint, WriterConfig)
+        key = ("pub" if is_writer else "sub", endpoint.entity_index)
+        message = self._sedp_messages.get(key)
+        if message is None:
+            message = (self.build_sedp_publication_message(endpoint) if is_writer
+                       else self.build_sedp_subscription_message(endpoint))
+            self._sedp_messages[key] = message
+        return message
+
+    def _sedp_announcements(self) -> List[bytes]:
+        """Every local endpoint's announcement, writers then readers, in a fixed order."""
+        return ([self._sedp_announcement(writer) for writer in self.local_writers]
+                + [self._sedp_announcement(reader) for reader in self.local_readers])
+
     def build_data_message(self, writer: WriterConfig, cdr_payload: bytes) -> bytes:
         # Standard RTPS: the DATA serializedPayload is exactly the CDR-encapsulated sample.
         writer_entity_id = entity_id_for_index(writer.entity_index, USER_WRITER_NO_KEY_KIND)
@@ -732,12 +842,84 @@ class RtpsHostHarness:
             cdr_payload,
         )
 
+    def _send_metatraffic(self, payload: bytes, target: Tuple[str, int]) -> bool:
+        """sendto on the metatraffic socket, tolerating a closed peer port."""
+        try:
+            self.metatraffic_unicast_sock.sendto(payload, target)
+            return True
+        except OSError:
+            return False
+
+    def _resolve_peers(self) -> List[str]:
+        """Resolve --peer hostnames/IPs to addresses, skipping what won't resolve."""
+        resolved: List[str] = []
+        for peer in getattr(self.args, "peer", None) or []:
+            try:
+                address = socket.gethostbyname(peer)
+            except socket.gaierror as exc:
+                log(f"[peer] could not resolve '{peer}': {exc}")
+                continue
+            if address not in resolved:
+                resolved.append(address)
+                # A subnet scan seeds hundreds of peers at once; one line each
+                # would bury whatever the scan was run to find.
+                if not getattr(self.args, "quiet", False):
+                    log(f"[peer] seeding discovery at {peer}"
+                        + (f" ({address})" if address != peer else ""))
+        return resolved
+
+    def seed_peer_discovery(self) -> None:
+        """Unicast SPDP+SEDP straight at a known peer, for links with no multicast.
+
+        Normal RTPS discovery needs multicast, which an L3 overlay (Tailscale,
+        most VPNs) or a routed subnet will not carry. Given the peer's address we
+        can skip it: its metatraffic unicast port is a pure function of the
+        domain and participant id, so announce to each candidate id directly.
+
+        embeddedRTPS registers the sender on our SPDP, then answers with SEDP
+        unicast to the metatraffic locator our announcement advertised — so the
+        rest of discovery follows without a single multicast packet. Our own SEDP
+        goes with it, because the peer's reader will not accept our DATA until it
+        has matched our writer.
+        """
+        if not self.peer_addresses:
+            return
+        spdp = self.build_spdp_announce_message()
+        for address in self.peer_addresses:
+            for participant_id in self.peer_participant_ids:
+                port = compute_port_mapping(self.args.domain_id, participant_id).metatraffic_unicast
+                target = (address, port)
+                # SPDP repeats forever: it is a liveliness refresh, and the peer
+                # dedupes by GUID (findRemoteParticipant -> refresh, not add).
+                if not self._send_metatraffic(spdp, target):
+                    continue  # nothing listening on this id; try the next
+                # SEDP does not: embeddedRTPS adds a proxy per announcement it
+                # accepts with no dedupe, so repeating forever could exhaust its
+                # pool. (The copies are verbatim, so a peer that already took
+                # one drops the repeat; the cap is belt and braces.)
+                sent = self.peer_sedp_counts.get(target, 0)
+                if sent >= self.SEDP_ANNOUNCE_REPEATS:
+                    continue
+                self.peer_sedp_counts[target] = sent + 1
+                for message in self._sedp_announcements():
+                    self._send_metatraffic(message, target)
+                    time.sleep(self.SEDP_SEND_GAP_S)
+
     def send_spdp_announce_now(self) -> None:
         payload = self.build_spdp_announce_message()
-        self.metatraffic_unicast_sock.sendto(
-            payload,
-            (self.args.multicast_group, self.ports.metatraffic_multicast),
-        )
+        try:
+            self.metatraffic_unicast_sock.sendto(
+                payload,
+                (self.args.multicast_group, self.ports.metatraffic_multicast),
+            )
+        except OSError as exc:
+            # An interface with no multicast route (Tailscale, most VPNs); the
+            # unicast seeding below is what reaches the peer in that case.
+            if not self.peer_addresses:
+                raise
+            if not getattr(self, "_warned_multicast_send", False):
+                self._warned_multicast_send = True
+                log(f"[multicast] SPDP send failed ({exc}); seeding --peer by unicast only")
         # embeddedRTPS (espp/rtps >= 1.2.0) drops any SEDP message whose sender
         # it has not already registered via SPDP, so a peer that never receives
         # our multicast announcement will silently ignore our endpoints. Mirror
@@ -751,7 +933,13 @@ class RtpsHostHarness:
                 (participant.address, participant.ports.metatraffic_unicast),
             )
 
-    SEDP_ANNOUNCE_REPEATS = 3
+    # Rounds of SEDP per peer. Each round can repair one hole left by the ones
+    # before it (see _sedp_announcement), so this is how many losses discovery
+    # survives.
+    SEDP_ANNOUNCE_REPEATS = 5
+    # Gap between the announcements in a round. Sent back to back, a round is
+    # a burst the HMI's W5500 does not always take whole.
+    SEDP_SEND_GAP_S = 0.005
 
     def send_sedp_announcements_to(self, participant: ParticipantProxy) -> None:
         target = (participant.address, participant.ports.metatraffic_unicast)
@@ -761,13 +949,13 @@ class RtpsHostHarness:
         if sent >= self.SEDP_ANNOUNCE_REPEATS:
             return
         self.sedp_announce_counts[participant.participant_guid] = sent + 1
-        for writer in self.local_writers:
-            self.metatraffic_unicast_sock.sendto(self.build_sedp_publication_message(writer), target)
-        for reader in self.local_readers:
-            self.metatraffic_unicast_sock.sendto(self.build_sedp_subscription_message(reader), target)
+        for message in self._sedp_announcements():
+            self.metatraffic_unicast_sock.sendto(message, target)
+            time.sleep(self.SEDP_SEND_GAP_S)
 
     def send_discovery_now(self) -> None:
         self.send_spdp_announce_now()
+        self.seed_peer_discovery()
         for participant in list(self.discovered_participants.values()):
             self.send_sedp_announcements_to(participant)
 
@@ -793,7 +981,10 @@ class RtpsHostHarness:
         for reader in self.discovered_readers.values():
             if reader.topic_name != writer.topic_name:
                 continue
-            if reader.multicast_locators:
+            # A seeded peer is, by definition, somewhere multicast does not
+            # reach, so its advertised multicast locator is a dead end — take
+            # the unicast one even when both are offered.
+            if reader.multicast_locators and not self.peer_addresses:
                 for multicast_address, multicast_port in reader.multicast_locators:
                     target = (multicast_address, multicast_port)
                     if target not in targets:
@@ -809,18 +1000,38 @@ class RtpsHostHarness:
             target = (participant.address, participant.ports.user_unicast)
             if participant.address and participant.ports.user_unicast > 0 and target not in targets:
                 targets.append(target)
+        if targets:
+            return targets
+        # Last resort for a seeded peer whose SEDP never came back (a one-way
+        # link, e.g. a NATing subnet router). Its user unicast port is the same
+        # pure function of domain + participant id, so publish blind: if our
+        # SEDP reached it, its reader is listening there and matched our writer.
+        for address in self.peer_addresses:
+            for participant_id in self.peer_participant_ids:
+                port = compute_port_mapping(self.args.domain_id, participant_id).user_unicast
+                target = (address, port)
+                if target not in targets:
+                    targets.append(target)
         return targets
+
+    def send_user_datagram(self, payload: bytes, target: Tuple[str, int]) -> bool:
+        """sendto on the user socket, tolerating a peer port that is not open."""
+        try:
+            self.user_unicast_sock.sendto(payload, target)
+            return True
+        except OSError as exc:
+            log(f"[publish] send to {target[0]}:{target[1]} failed: {exc}")
+            return False
 
     def _publish_value(self, writer: WriterConfig, value: int, target: Optional[tuple[str, int]] = None) -> bool:
         payload = self.build_data_message(writer, serialize_uint32_cdr(value))
         if target is not None:
-            self.user_unicast_sock.sendto(payload, target)
-            return True
+            return self.send_user_datagram(payload, target)
         targets = self._build_user_targets(writer)
         if not targets:
             return False
         for destination in targets:
-            self.user_unicast_sock.sendto(payload, destination)
+            self.send_user_datagram(payload, destination)
         return True
 
     # Reader entity to answer with, per builtin writer we may hear a HEARTBEAT from.
@@ -858,7 +1069,9 @@ class RtpsHostHarness:
 
     def handle_metatraffic_packet(self, packet: bytes, sender_ip: str) -> None:
         self.respond_to_heartbeats(packet, sender_ip)
-        for _guid_prefix, writer_id, serialized_payload in parse_rtps_data_messages(packet):
+        for _guid_prefix, writer_id, serialized_payload, _reader_id in parse_rtps_data_messages(
+            packet
+        ):
             parameters = parse_parameter_list(serialized_payload)
             if not parameters:
                 continue
@@ -953,32 +1166,60 @@ class RtpsHostHarness:
                 f"reliability={endpoint.reliability} participant={guid_to_string(endpoint.participant_guid)}"
             )
 
+    def topic_for_sample(self, guid_prefix: bytes, writer_id: bytes,
+                         reader_id: bytes) -> Optional[str]:
+        """Which topic a DATA submessage belongs to, or None if it can't be placed.
+
+        The normal route is SEDP: the writer GUID is looked up in the endpoints
+        the peer announced. A peer seeded by --peer never announces them to us,
+        though — embeddedRTPS sends SEDP only to participants it discovered
+        itself, and a unicast SPDP does not put us in that set, so
+        discovered_writers stays empty and every sample would be dropped as
+        "undiscovered".
+
+        The sample still carries the reader entity id the writer addressed it
+        to, which it learned from OUR subscription announcement. That names one
+        of our own readers, so it places the sample just as definitively.
+        """
+        writer = self.discovered_writers.get(guid_prefix + writer_id)
+        if writer is not None:
+            return writer.topic_name
+        if reader_id and reader_id != ENTITYID_UNKNOWN:
+            for reader in self.local_readers:
+                if entity_id_for_index(reader.entity_index, USER_READER_NO_KEY_KIND) == reader_id:
+                    return reader.topic_name
+        return None
+
     def handle_user_packet(self, packet: bytes, sender_ip: str, sender_port: int) -> None:
         subscribed_topics = {reader.topic_name for reader in self.local_readers}
-        for guid_prefix, writer_id, serialized_payload in parse_rtps_data_messages(packet):
-            # Standard RTPS: resolve the topic from the writer GUID via SEDP discovery state.
-            writer_guid = guid_prefix + writer_id
-            writer = self.discovered_writers.get(writer_guid)
-            if writer is None:
-                # Sample arrived before its writer was discovered via SEDP; drop it (best-effort).
-                # Surface it (rate-limited) so a missing SEDP exchange is visible rather than silent.
+        for guid_prefix, writer_id, serialized_payload, reader_id in parse_rtps_data_messages(
+            packet
+        ):
+            topic_name = self.topic_for_sample(guid_prefix, writer_id, reader_id)
+            if topic_name is None:
+                # Neither SEDP nor the addressed reader id could place this
+                # sample. Surface it (rate-limited) rather than dropping silently.
                 now = time.monotonic()
                 if now - self.last_unknown_writer_log > 2.0:
                     log(
                         f"[data] received {len(serialized_payload)}-byte sample from UNDISCOVERED "
-                        f"writer {guid_to_string(writer_guid)} at {sender_ip}:{sender_port}; cannot "
-                        f"route without SEDP (discovered_writers={len(self.discovered_writers)})"
+                        f"writer {guid_to_string(guid_prefix + writer_id)} at "
+                        f"{sender_ip}:{sender_port}, addressed to reader {reader_id.hex()}; cannot "
+                        f"route (discovered_writers={len(self.discovered_writers)})"
                     )
                     self.last_unknown_writer_log = now
                 continue
-            topic_name = writer.topic_name
             if topic_name not in subscribed_topics:
                 continue
+            writer = self.discovered_writers.get(guid_prefix + writer_id)
             maybe_value = deserialize_uint32_cdr(serialized_payload)
             if maybe_value is None:
                 continue
+            # writer is None when the sample was routed by reader id alone, so
+            # its QoS is not something we ever learned
+            reliability = writer.reliability if writer is not None else "unknown"
             log(
-                f"[data] topic='{topic_name}' value={maybe_value} reliability={writer.reliability} "
+                f"[data] topic='{topic_name}' value={maybe_value} reliability={reliability} "
                 f"from {sender_ip}:{sender_port} writer={hex_string(writer_id)}"
             )
             if self.args.echo_received and self.local_writers:
@@ -997,28 +1238,34 @@ class RtpsHostHarness:
         self.next_discovery_send = start_time
         self.next_publish_send = start_time + self.args.publish_interval
 
-        log(
-            "Starting RTPS host harness\n"
-            f"  node: {self.args.node_name}\n"
-            f"  advertised address: {self.args.advertised_address}\n"
-            f"  domain/participant: {self.args.domain_id}/{self.args.participant_id}\n"
-            f"  ports: meta_mc={self.ports.metatraffic_multicast}, meta_uc={self.ports.metatraffic_unicast}, "
-            f"user_mc={self.ports.user_multicast}, user_uc={self.ports.user_unicast}"
-        )
-        if self.local_readers:
-            log("  readers: " + ", ".join(reader.topic_name for reader in self.local_readers))
-        if self.local_writers:
-            writer = self.local_writers[0]
-            writer_mode = "echo responder" if self.args.echo_received else "periodic publisher"
-            interval_text = (
-                f", publish value={self.args.publish_value} every {self.args.publish_interval:.2f}s"
-                if self.args.publish_interval > 0
-                else ""
+        # Probe and scan participants are created and torn down constantly;
+        # their banners would drown the log they exist to populate.
+        if not getattr(self.args, "quiet", False):
+            log(
+                "Starting RTPS host harness\n"
+                f"  node: {self.args.node_name}\n"
+                f"  advertised address: {self.args.advertised_address}\n"
+                f"  domain/participant: {self.args.domain_id}/{self.args.participant_id}\n"
+                f"  ports: meta_mc={self.ports.metatraffic_multicast}, "
+                f"meta_uc={self.ports.metatraffic_unicast}, "
+                f"user_mc={self.ports.user_multicast}, user_uc={self.ports.user_unicast}"
             )
-            log(f"  writer: {writer.topic_name} ({reliability_to_name(writer.reliable)}, {writer_mode}{interval_text})")
+            if self.local_readers:
+                log("  readers: " + ", ".join(r.topic_name for r in self.local_readers))
+            if self.local_writers:
+                writer = self.local_writers[0]
+                writer_mode = "echo responder" if self.args.echo_received else "periodic publisher"
+                interval_text = (
+                    f", publish value={self.args.publish_value} "
+                    f"every {self.args.publish_interval:.2f}s"
+                    if self.args.publish_interval > 0
+                    else ""
+                )
+                log(f"  writer: {writer.topic_name} "
+                    f"({reliability_to_name(writer.reliable)}, {writer_mode}{interval_text})")
 
         try:
-            while True:
+            while not self._stop_event.is_set():
                 now = time.monotonic()
                 if now >= self.next_discovery_send:
                     self.send_discovery_now()
@@ -1041,7 +1288,14 @@ class RtpsHostHarness:
                     0.2,
                 )
                 for sock in readable:
-                    packet, sender = sock.recvfrom(4096)
+                    try:
+                        packet, sender = sock.recvfrom(4096)
+                    except ConnectionResetError:
+                        # A previous send drew an ICMP port-unreachable. The
+                        # ioctl above normally suppresses this; if it did not
+                        # take, dropping the read is still better than killing
+                        # discovery over a closed port on the peer.
+                        continue
                     sender_ip, sender_port = sender[0], sender[1]
                     is_user = sock is self.user_unicast_sock or sock is self.user_multicast_sock
                     if getattr(self.args, "trace_packets", False):
@@ -1057,6 +1311,10 @@ class RtpsHostHarness:
             log("Stopping RTPS host harness")
         finally:
             self.close()
+
+    def stop(self) -> None:
+        """Ask run() to return. Safe from any thread; run() closes the sockets."""
+        self._stop_event.set()
 
     def close(self) -> None:
         for sock in (
@@ -1160,13 +1418,19 @@ def build_acknack_message(
     ) + bytes(body)
 
 
-def parse_rtps_data_messages(packet: bytes) -> List[tuple[bytes, bytes, bytes]]:
-    """Return (guid_prefix, writer_id, serialized_payload) for each DATA submessage."""
+def parse_rtps_data_messages(packet: bytes) -> List[tuple[bytes, bytes, bytes, bytes]]:
+    """Return (guid_prefix, writer_id, serialized_payload, reader_id) per DATA submessage.
+
+    reader_id is the entity the writer addressed the sample to. It is often
+    ENTITYID_UNKNOWN, but a writer that matched us through SEDP fills it in with
+    our own reader's entity id — which is the only way to route a sample when
+    the writer itself was never discovered (see topic_for_sample).
+    """
     if len(packet) < 20 or not packet.startswith(RTPS_MAGIC):
         return []
     guid_prefix = packet[8:20]
     offset = 20
-    messages: List[tuple[bytes, bytes, bytes]] = []
+    messages: List[tuple[bytes, bytes, bytes, bytes]] = []
     while offset + 4 <= len(packet):
         kind = packet[offset]
         flags = packet[offset + 1]
@@ -1184,9 +1448,10 @@ def parse_rtps_data_messages(packet: bytes) -> List[tuple[bytes, bytes, bytes]]:
         del extra_flags
         if (flags & 0x02) != 0 or octets_to_inline_qos != DATA_SUBMESSAGE_OCTETS_TO_INLINE_QOS:
             continue
+        reader_id = payload[4:8]
         writer_id = payload[8:12]
         serialized_payload = payload[20:]
-        messages.append((guid_prefix, writer_id, serialized_payload))
+        messages.append((guid_prefix, writer_id, serialized_payload, reader_id))
     return messages
 
 
@@ -1242,7 +1507,7 @@ def run_self_test() -> int:
     parsed = parse_rtps_data_messages(message)
     check("one DATA submessage parsed", len(parsed) == 1)
     if parsed:
-        got_prefix, got_writer_id, payload = parsed[0]
+        got_prefix, got_writer_id, payload, _reader_id = parsed[0]
         check("guid_prefix recovered", got_prefix == prefix)
         check("writer_id recovered", got_writer_id == writer_id)
         check("serializedPayload is raw CDR (no framing)", payload == cdr)
@@ -1281,6 +1546,16 @@ def parse_args() -> argparse.Namespace:
         help="IPv4 interface to use for multicast join/send (defaults to advertised address)",
     )
     parser.add_argument("--multicast-group", default="239.255.0.1", help="RTPS metatraffic multicast group")
+    parser.add_argument(
+        "--peer", action="append", default=None, metavar="HOST",
+        help="Hostname or IP of a peer to reach without multicast discovery (repeatable). "
+             "Use this when the peer is routed rather than on-link — over Tailscale, a VPN or "
+             "another subnet — since none of those carry the multicast RTPS discovery needs. "
+             "The ESP32 is usually 'espressif'.")
+    parser.add_argument(
+        "--peer-participant-ids", type=parse_participant_id_range, default="0-3", metavar="IDS",
+        help="Participant ids to try on each --peer, as '0-3' or '0,1,2' (default 0-3). The peer's "
+             "metatraffic port is derived from these, so the sweep covers not knowing its id.")
     parser.add_argument("--trace-packets", action="store_true",
                         help="Log every received UDP packet and its RTPS submessage headers")
     parser.add_argument("--enclave", default="/", help="Enclave string advertised in SPDP user data")

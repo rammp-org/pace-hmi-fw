@@ -1,38 +1,72 @@
 # Imports the SquareLine Studio UI export into this example project.
 #
-# Mirrors the export directory into main/ui/, excluding SquareLine's own
+# Mirrors the export directory into components/ui/, excluding SquareLine's own
 # CMakeLists.txt (its add_library(ui ...) conflicts with the ESP-IDF component
-# build), filelist.txt, and project.info. Mirroring also deletes files for
+# build, and the repo keeps its own there), filelist.txt, project.info, and
+# ui_events.cpp. Excluded files are also never purged. Mirroring also deletes files for
 # screens that were renamed/removed in SquareLine, which would otherwise stay
 # behind and break the build (SRC_DIRS compiles everything in ui/).
 #
-# Usage: .\import_ui.ps1 [-Source <path-to-squareline-export>]
+# After mirroring it converts any indexed image (I1/I2/I4/I8) in the export: to A8
+# when the palette is a single ink, to RGB565A8 when it carries real colour.
+# The sw renderer cannot draw indexed data, so those images fault or vanish as soon
+# as they are scaled or rotated. SquareLine infers the format from the source PNG's
+# colour count (256 or fewer distinct colours -> indexed) and cannot emit A8 at all,
+# so a single-ink icon can only ever arrive indexed. The conversion is therefore
+# unconditional rather than a prompt. Each rewritten file keeps a .c.orig beside it.
 #
-# By default the export is expected as a sibling of this repo:
-#   <parent>\rammp-hmi-p4\import_ui.ps1   (this script)
-#   <parent>\ui_standalone                (the SquareLine export)
+# Usage: .\import_ui.ps1 [-Source <path-to-squareline-export>] [-bfm]
+#
+# -bfm builds, flashes and monitors with idf.py once the import succeeds,
+# loading the ESP-IDF PowerShell environment first if idf.py is not on PATH.
+#
+# By default the export is expected as a sibling of this repo, or of any
+# directory above it:
+#   <parent>\<this repo>\import_ui.ps1   (this script)
+#   <parent>\ui_c_files                  (the SquareLine export)
 
 param(
-    [string]$Source
+    [string]$Source,
+    # -bfm: hand off to idf.py once the import is done.
+    [Alias("bfm")]
+    [switch]$BuildFlashMonitor
 )
 
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = $PSScriptRoot
 if (-not $Source) {
-    $Source = Join-Path (Split-Path -Parent $RepoRoot) "ui_standalone"
+    # The export normally sits beside this repo, but moving the repo down a
+    # level (ATDev\<repo> -> ATDev\rammp\<repo>) silently broke a hard-coded
+    # "..\ui_c_files". Walk up from the repo and take the first ui_c_files that
+    # actually looks like an export.
+    $probe = Split-Path -Parent $RepoRoot
+    while ($probe) {
+        $candidate = Join-Path $probe "ui_c_files"
+        if (Test-Path (Join-Path $candidate "ui.c")) {
+            $Source = $candidate
+            break
+        }
+        $probe = Split-Path -Parent $probe
+    }
+    if (-not $Source) {
+        $Source = Join-Path (Split-Path -Parent $RepoRoot) "ui_c_files"
+    }
 }
 $Source = [System.IO.Path]::GetFullPath($Source)
 
-$Dest = Join-Path $RepoRoot "main\ui"
-$Excluded = @("CMakeLists.txt", "filelist.txt", "project.info")
+$Dest = Join-Path $RepoRoot "components\ui"
+# ui_events.cpp holds hand-written Call-function bodies; SquareLine regenerates
+# it with empty stubs, so keep the repo copy and ignore the exported one.
+$Excluded = @("CMakeLists.txt", "filelist.txt", "project.info", "ui_events.cpp")
 
 # --- sanity checks on the export ---------------------------------------------
 if (-not (Test-Path $Source -PathType Container)) {
     $repoName = Split-Path -Leaf $RepoRoot
     Write-Error @"
-SquareLine export directory not found: $Source
-Expected 'ui_standalone' to sit beside '$repoName' in $(Split-Path -Parent $RepoRoot).
+SquareLine export directory not found.
+Looked for a 'ui_c_files' directory beside '$repoName' and beside each of its
+parent directories, starting at $(Split-Path -Parent $RepoRoot).
 Either export/move the UI there, or pass the path explicitly:
   .\import_ui.ps1 -Source <path-to-squareline-export>
 "@
@@ -52,7 +86,8 @@ Write-Host ""
 
 # Snapshot the source file set so we can tell afterwards whether screens were
 # added or removed (see the CMake re-configure step below).
-$srcsBefore = @(Get-ChildItem $Dest -Recurse -Filter *.c -File -ErrorAction SilentlyContinue |
+$srcsBefore = @(Get-ChildItem $Dest -Recurse -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Extension -in ".c", ".cpp" } |
     ForEach-Object { $_.FullName } | Sort-Object)
 
 # --- mirror copy, excluding SquareLine's build/project files ------------------
@@ -73,52 +108,32 @@ if ($rc -eq 0) {
     Write-Host "Import complete (robocopy code $rc)."
 }
 
-# --- drop SquareLine's duplicate generated font sources -----------------------
-# SquareLine writes each generated font .c into BOTH assets/ and fonts/. Only the
-# fonts/ copy is compiled (ui/assets is deliberately not in SRC_DIRS), and these
-# run to megabytes each - enough to OOM clang-format in the pre-commit hook. Keep
-# the real source assets (.ttf/.fcfg/.bin/.svg) and drop the duplicate .c. Done
-# after the mirror because robocopy /XF rejects an absolute wildcard path.
-$dupFonts = @(Get-ChildItem (Join-Path $Dest "assets") -Filter *.c -File -ErrorAction SilentlyContinue)
-if ($dupFonts) {
-    $dupFonts | Remove-Item -Force
-    Write-Host ""
-    Write-Host "Dropped duplicate generated font source from ui/assets (ui/fonts copy is the one built):"
-    $dupFonts | ForEach-Object { Write-Host "  assets/$($_.Name)" }
-}
-
 # --- force a CMake re-configure when screens were added or removed ------------
 # SRC_DIRS expands its glob only when CMake configures. Delete a screen in
 # SquareLine and ninja keeps a rule for the vanished file ("missing and no known
 # rule to make it"); add one and it is silently never compiled. Touching the
 # component's CMakeLists.txt makes ninja re-run CMake on the next build, since
 # CMake emits a rule tying build.ninja to those files.
-$srcsAfter = @(Get-ChildItem $Dest -Recurse -Filter *.c -File -ErrorAction SilentlyContinue |
+$srcsAfter = @(Get-ChildItem $Dest -Recurse -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Extension -in ".c", ".cpp" } |
     ForEach-Object { $_.FullName } | Sort-Object)
+$UiCMake = Join-Path $Dest "CMakeLists.txt"
 if (Compare-Object $srcsBefore $srcsAfter) {
-    $mainCMake = Join-Path $RepoRoot "main\CMakeLists.txt"
-    if (Test-Path $mainCMake) {
-        (Get-Item $mainCMake).LastWriteTime = Get-Date
+    if (Test-Path $UiCMake) {
+        (Get-Item $UiCMake).LastWriteTime = Get-Date
         Write-Host ""
-        Write-Host "Source file set changed - touched main/CMakeLists.txt so CMake re-configures."
+        Write-Host "Source file set changed - touched components/ui/CMakeLists.txt so CMake re-configures."
     }
 }
 
 # --- warn about mirrored ui/ subdirs that the build does not compile ----------
-# main/CMakeLists.txt lists ui subdirectories in SRC_DIRS explicitly. When
+# components/ui/CMakeLists.txt lists its subdirectories in SRC_DIRS explicitly. When
 # SquareLine starts exporting a new folder of sources (e.g. ui/images for an
 # added image asset), the mirror brings it in but nothing compiles it, and the
 # only symptom is an "undefined reference to ui_img_*" at link time. Flag it
 # here instead.
-#
-# ui/assets is deliberately not compiled: SquareLine puts the raw source assets
-# there (.ttf/.svg/.fcfg) plus a duplicate copy of the generated font .c that
-# also lands in ui/fonts - compiling both gives duplicate symbols.
-$NotCompiled = @("assets")
-
-$MainCMake = Join-Path $RepoRoot "main\CMakeLists.txt"
-if (Test-Path $MainCMake) {
-    $cmakeText = Get-Content $MainCMake -Raw
+if (Test-Path $UiCMake) {
+    $cmakeText = Get-Content $UiCMake -Raw
     $srcDirs = @()
     if ($cmakeText -match '(?s)SRC_DIRS\s+((?:"[^"]*"\s*)+)') {
         $srcDirs = [regex]::Matches($Matches[1], '"([^"]*)"') |
@@ -127,22 +142,21 @@ if (Test-Path $MainCMake) {
 
     if (-not $srcDirs) {
         Write-Host ""
-        Write-Host "WARNING: could not parse SRC_DIRS from $MainCMake - skipping source-dir check."
+        Write-Host "WARNING: could not parse SRC_DIRS from $UiCMake - skipping source-dir check."
     } else {
         $missing = Get-ChildItem $Dest -Directory |
-            Where-Object { $NotCompiled -notcontains $_.Name } |
             Where-Object { Get-ChildItem $_.FullName -Filter *.c -File } |
-            Where-Object { $srcDirs -notcontains "ui/$($_.Name)" } |
+            Where-Object { $srcDirs -notcontains $_.Name } |
             ForEach-Object { $_.Name }
 
         if ($missing) {
             Write-Host ""
             Write-Host "WARNING: these ui/ subdirectories contain .c files but are not in"
-            Write-Host "SRC_DIRS in main/CMakeLists.txt, so they will not be compiled"
+            Write-Host "SRC_DIRS in components/ui/CMakeLists.txt, so they will not be compiled"
             Write-Host "(expect 'undefined reference' errors at link time):"
             $missing | ForEach-Object { Write-Host "  ui/$_" }
             Write-Host ""
-            Write-Host "Add them to SRC_DIRS in main/CMakeLists.txt to fix."
+            Write-Host "Add them to SRC_DIRS in components/ui/CMakeLists.txt to fix."
         }
     }
 }
@@ -160,6 +174,145 @@ if (Test-Path $eventsHeader) {
     }
 }
 
+# --- convert indexed images the renderer cannot draw --------------------------
+# The sw renderer has no indexed support, so LVGL falls back to a line-by-line
+# decoder that breaks under any transform: a scaled-up image wraps a uint32_t
+# offset and panics, a scaled-down or rotated one silently draws nothing.
+#
+# There is no way to avoid this upstream. SquareLine infers the format from the
+# source PNG's colour count -- 256 or fewer distinct colours exports indexed
+# (measured: Lock 247 -> I8, turbo 1105 -> RGB565A8) -- and a single-ink alpha
+# mask is one RGB times at most 256 alpha levels, so it is always under that
+# bound. SquareLine cannot emit A8 at all. So convert unconditionally rather
+# than asking a question whose answer is always yes, and just say what changed.
+# A colourful palette (a photo that quantised under 256 colours) becomes
+# RGB565A8 instead of A8, which triples its flash cost -- hence the per-file
+# format and byte count in the report below.
+$assetTool = Join-Path $RepoRoot "scripts\ui_assets.py"
+if (-not (Test-Path $assetTool)) {
+    # nothing to do
+} elseif (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+    Write-Host ""
+    Write-Host "NOTE: python not on PATH - skipped the image colour-format conversion."
+} else {
+    $assetReport = & python $assetTool check --fix
+    $assetFailed = $LASTEXITCODE -ne 0
+    $converted = @($assetReport | Where-Object { $_ -match '^\s+converted ' })
+
+    if ($converted.Count -gt 0) {
+        Write-Host ""
+        Write-Host "WARNING: converted $($converted.Count) image(s) out of indexed colour formats." -ForegroundColor Yellow
+        $converted | ForEach-Object { Write-Host $_ -ForegroundColor Yellow }
+        Write-Host "Indexed images fault or draw nothing when scaled or rotated. This runs" -ForegroundColor Yellow
+        Write-Host "on every import: SquareLine picks indexed for any source PNG with 256 or" -ForegroundColor Yellow
+        Write-Host "fewer colours and cannot export A8. Originals kept as .c.orig." -ForegroundColor Yellow
+    }
+
+    # Anything the converter refused (a map the descriptor disagrees with, i.e. an
+    # export this tool cannot parse) needs a person to look at it, so make it loud.
+    $refused = @($assetReport | Where-Object { $_ -match 'CANNOT convert' })
+    if ($refused.Count -gt 0) {
+        Write-Host ""
+        $refused | ForEach-Object { Write-Host $_ -ForegroundColor Red }
+        Write-Host "Those images are still indexed and will fault or vanish when transformed." -ForegroundColor Red
+    }
+
+    # Everything else the tool reported (e.g. the set_scale advisory) prints plain.
+    $assetReport |
+        Where-Object { $_ -notmatch '^\s+converted |CANNOT convert|^Converting ' } |
+        Where-Object { $_.Trim() -ne "" } |
+        ForEach-Object { Write-Host $_ }
+
+    if ($assetFailed -and $refused.Count -eq 0) {
+        Write-Host ""
+        Write-Host "NOTE: image check reported a problem it could not fix automatically."
+    }
+}
+
+# --- check the export still matches what main.cpp reaches for ----------------
+# The compiler catches renames and deletions on its own (undefined symbol). What
+# it cannot catch is renumbering: SquareLine names instances by creation order
+# across the whole project, so adding one StatusPanel can renumber the ones on
+# every other screen. ui_StatusPanel4 then still compiles and still exists -- it
+# just lives on a different screen now, and the firmware binds MCB telemetry to
+# the wrong panel with nothing to show for it. ui_contract.py asserts those
+# relationships; the tables in it are what main.cpp believes.
+$contractTool = Join-Path $RepoRoot "scripts\ui_contract.py"
+if (-not (Test-Path $contractTool)) {
+    # nothing to do
+} elseif (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+    Write-Host ""
+    Write-Host "NOTE: python not on PATH - skipped the export/firmware contract check."
+} else {
+    Write-Host ""
+    $contractReport = & python $contractTool
+    if ($LASTEXITCODE -ne 0) {
+        $contractReport | ForEach-Object { Write-Host $_ -ForegroundColor Red }
+        Write-Host ""
+        Write-Host "Import finished, but the firmware would now bind to the wrong widgets." -ForegroundColor Red
+        Write-Host "Not building. Fix the above first." -ForegroundColor Red
+        exit 1
+    }
+    $contractReport | ForEach-Object { Write-Host $_ }
+}
+
+# --- optionally hand off to idf.py -------------------------------------------
+if (-not $BuildFlashMonitor) {
+    Write-Host ""
+    Write-Host "Rebuild with: idf.py build flash monitor  (or re-run with -bfm)"
+    exit 0
+}
+
+# idf.py is not on PATH by default; the ESP-IDF PowerShell profile defines it as
+# a global alias. Skip loading when it already resolves - the profile prepends to
+# PATH every time it runs, so re-sourcing it in an already-exported shell just
+# grows PATH.
+if (-not (Get-Command "idf.py" -ErrorAction SilentlyContinue)) {
+    # The filename carries the IDF version, so a toolchain upgrade moves it.
+    $idfProfile = "C:\Espressif\tools\Microsoft.v6.0.PowerShell_profile.ps1"
+    if (-not (Test-Path $idfProfile)) {
+        $idfProfile = Get-ChildItem "C:\Espressif\tools\Microsoft.*.PowerShell_profile.ps1" `
+            -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+    }
+    if (-not $idfProfile) {
+        Write-Error @"
+-bfm needs idf.py, but neither idf.py nor an ESP-IDF PowerShell profile was found
+under C:\Espressif\tools. Open an ESP-IDF shell and run 'idf.py build flash monitor'
+by hand, or re-run the import without -bfm.
+"@
+        exit 1
+    }
+
+    Write-Host ""
+    Write-Host "Loading ESP-IDF environment: $idfProfile"
+    # The profile activates a venv and probes for optional tools; a stray
+    # non-terminating error there must not abort the import script.
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $idfProfile | Out-Null
+    } finally {
+        $ErrorActionPreference = $prevEAP
+    }
+
+    if (-not (Get-Command "idf.py" -ErrorAction SilentlyContinue)) {
+        Write-Error "idf.py is still not available after loading $idfProfile."
+        exit 1
+    }
+}
+
 Write-Host ""
-Write-Host "Rebuild with: idf.py build flash monitor"
-exit 0
+Write-Host "Running: idf.py build flash monitor"
+Write-Host ""
+# Run from the repo root: the import can be launched from anywhere, but idf.py
+# resolves the project from the working directory.
+Push-Location $RepoRoot
+try {
+    idf.py build flash monitor
+    $idfExit = $LASTEXITCODE
+} finally {
+    Pop-Location
+}
+exit $idfExit

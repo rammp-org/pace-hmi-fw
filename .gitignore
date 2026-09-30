@@ -35,6 +35,12 @@ sdkconfig
 sdkconfig.old
 managed_components/
 
+# precompiled/ is build output, not source. Every `idf.py build` refreshes it (see the
+# `precompiled` target in CMakeLists.txt) so flash_precompiled.ps1 has something to flash,
+# but none of it is committed: CI builds the same images and attaches them to each release
+# (.github/workflows/package_main.yml), which is where anyone without a toolchain gets them.
+precompiled/
+
 # Python
 __pycache__/
 
