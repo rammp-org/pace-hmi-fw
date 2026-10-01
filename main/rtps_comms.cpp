@@ -103,6 +103,8 @@ Publisher<rammp::XYTwist> joystick_pub;
 Publisher<rammp::SeatCommand> seat_pub;
 Publisher<rammp::DriveCommand> drive_pub;
 Publisher<rammp::SelfTestReport> report_pub;
+Publisher<rammp::XYTwist> seat_stick_pub;   // seat test: SeatControlScreen, Seat
+Publisher<rammp::XYTwist> swivel_stick_pub; // seat test: SeatControlScreen, Swivel
 
 std::function<void(float)> brightness_handler;
 std::function<void(const MIB::MibStatus &)> mib_status_handler;
@@ -148,7 +150,7 @@ template <class T> bool subscribe(const rammp::Topic<T> &topic, void (*on_msg)(c
 // Quiet until the endpoints exist and a peer has matched: no one to send to yet.
 template <class T> bool publish(const Publisher<T> &pub, const T &msg) {
   std::lock_guard<std::mutex> lock(endpoints_mutex);
-  return endpoints_ready && peer_matched && pub->publish(msg);
+  return endpoints_ready && peer_matched && pub && pub->publish(msg);
 }
 
 std::string ip_string(uint32_t addr) {
@@ -564,7 +566,7 @@ bool start_participant() {
     return false;
   }
 
-  // 5 writers + 5 readers, plus SPDP's pair: the budget set in sdkconfig.defaults
+  // 7 writers and the readers below, plus SPDP's pair: the budget set in sdkconfig.defaults
   bool ok = false;
   {
     std::lock_guard<std::mutex> lock(endpoints_mutex);
@@ -574,6 +576,10 @@ bool start_participant() {
     drive_pub = make_publisher(rammp::kJoystickDriveCommand);
     report_pub = make_publisher(rammp::kSelfTestReport);
     ok = counter_pub && joystick_pub && seat_pub && drive_pub && report_pub;
+    // The seat test's pair is not worth the link: without them (no room in the pool,
+    // logged by make_publisher) only SeatControlScreen goes quiet.
+    seat_stick_pub = make_publisher(rammp::kJoystickSeatXYTwist);
+    swivel_stick_pub = make_publisher(rammp::kJoystickSwivelXYTwist);
   }
   ok = ok && subscribe(rammp::kHmiCommand, on_command) &&
        subscribe(rammp::kHmiBrightness, on_brightness) &&
@@ -596,6 +602,8 @@ void stop_participant() {
   Publisher<rammp::SeatCommand> seat;
   Publisher<rammp::DriveCommand> drive;
   Publisher<rammp::SelfTestReport> report;
+  Publisher<rammp::XYTwist> seat_stick;
+  Publisher<rammp::XYTwist> swivel_stick;
   {
     std::lock_guard<std::mutex> lock(endpoints_mutex);
     endpoints_ready = false;
@@ -604,12 +612,16 @@ void stop_participant() {
     seat = std::move(seat_pub);
     drive = std::move(drive_pub);
     report = std::move(report_pub);
+    seat_stick = std::move(seat_stick_pub);
+    swivel_stick = std::move(swivel_stick_pub);
   }
   counter.reset(); // the writers before the participant they are registered on
   joystick.reset();
   seat.reset();
   drive.reset();
   report.reset();
+  seat_stick.reset();
+  swivel_stick.reset();
   participant.reset();  // stops it: sockets, threads and endpoint pools
   peer_matched = false; // the new participant is discovered afresh
   participant_ip = 0;
@@ -660,6 +672,19 @@ void rtps_comms_on_selftest_pong(std::function<void(uint16_t, int)> handler) {
 
 bool rtps_comms_publish_adc(float x, float y, float twist, rammp::Buttons buttons) {
   return publish(joystick_pub, rammp::XYTwist{x, y, twist, buttons});
+}
+
+bool rtps_comms_publish_seat_stick(SeatStick target, float x, float y, float twist,
+                                   rammp::Buttons buttons) {
+  switch (target) {
+  case SeatStick::SEAT:
+    return publish(seat_stick_pub, rammp::XYTwist{x, y, twist, buttons});
+  case SeatStick::SWIVEL:
+    return publish(swivel_stick_pub, rammp::XYTwist{x, y, twist, buttons});
+  case SeatStick::NONE:
+    break;
+  }
+  return false;
 }
 
 bool rtps_comms_publish_drive(rammp::DriveRequest request, MIB::DriveProfile profile) {

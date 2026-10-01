@@ -142,6 +142,7 @@ class McbPanel:
         self._build_joystick(status_tab)
         self._build_cycle(status_tab)
         self._build_seat(seat_tab)
+        self._build_seat_sticks(seat_tab)
         self._build_diagnostics(diagnostics_tab)
         self._build_log()
         root.after(TICK_MS, self._tick)
@@ -576,6 +577,59 @@ class McbPanel:
         shown = f"{target:g} {axis.unit}" if known else str(target)
         verdict = rtps_mcb_sim.SEAT_RESULTS.get(self.harness.seat_result, "?")
         self.seat_request_label.configure(text=f"last: {name} → {shown} : {verdict}")
+
+    def _build_seat_sticks(self, parent: tk.Widget) -> None:
+        """Seat test: the stick the HMI's SeatControlScreen sends, seat and swivel.
+
+        Read-only, like the Joystick panel on the Status tab. The HMI sends on one
+        of these only while SeatControlScreen is up (Seat or Swivel on its Seat
+        page), so each says how long ago its last sample was.
+        """
+        frame = ttk.LabelFrame(parent, text="Seat / swivel stick (from SeatControlScreen)",
+                               padding=8)
+        frame.pack(fill="x", padx=8, pady=4)
+        self.seat_stick_bars: dict[tuple[str, str], ttk.Progressbar] = {}
+        self.seat_stick_values: dict[tuple[str, str], ttk.Label] = {}
+        self.seat_stick_state: dict[str, ttk.Label] = {}
+        row = 0
+        for topic, name in rtps_mcb_sim.SEAT_STICK_TOPICS.items():
+            ttk.Label(frame, text=f"{name.capitalize()}  ({topic})").grid(
+                row=row, column=0, columnspan=3, sticky="w", pady=(6 if row else 0, 0))
+            row += 1
+            for axis in ("X", "Y", "Twist"):
+                ttk.Label(frame, text=axis, width=6).grid(row=row, column=0, sticky="w")
+                bar = ttk.Progressbar(frame, orient="horizontal", length=320, maximum=100)
+                bar.grid(row=row, column=1, padx=4, pady=1)
+                value = ttk.Label(frame, text="-", width=22)
+                value.grid(row=row, column=2, sticky="w")
+                self.seat_stick_bars[(name, axis)] = bar
+                self.seat_stick_values[(name, axis)] = value
+                row += 1
+            state = ttk.Label(frame, text="no data")
+            state.grid(row=row, column=0, columnspan=3, sticky="w")
+            self.seat_stick_state[name] = state
+            row += 1
+
+    def _update_seat_sticks(self) -> None:
+        h = self.harness
+        now = time.monotonic()
+        for name, state in self.seat_stick_state.items():
+            sample = h.seat_sticks.get(name) if h is not None else None
+            if sample is None:
+                for axis in ("X", "Y", "Twist"):
+                    self.seat_stick_bars[(name, axis)]["value"] = 50
+                    self.seat_stick_values[(name, axis)].configure(text="no data")
+                state.configure(text="no data")
+                continue
+            x, y, twist, buttons = sample
+            for axis, value in (("X", x), ("Y", y), ("Twist", twist)):
+                self.seat_stick_bars[(name, axis)]["value"] = max(0, min(100, 50 + value * 50))
+                self.seat_stick_values[(name, axis)].configure(text=f"{value:+.2f}")
+            pressed = bool(buttons & spec.BUTTONS_JOYSTICK)
+            age = now - h.seat_stick_at[name]
+            live = "LIVE" if age < 0.5 else f"idle, last {age:.1f} s ago"
+            state.configure(text=f"{live} - {h.seat_stick_rx[name]} samples - "
+                                 f"button {'PRESSED' if pressed else 'released'}")
 
     def _build_diagnostics(self, parent: tk.Widget) -> None:
         """Fake readings for every item in the spec's RAMMP_DIAG_TABLE.
@@ -1014,6 +1068,7 @@ class McbPanel:
             self.harness.step_speed()
             self._update_joystick()
             self._update_seat()
+            self._update_seat_sticks()
             self._update_diagnostics()
             self._update_drive_request()
             targets = max(0, self.harness.announced_targets)

@@ -44,6 +44,7 @@ extern "C" {
 #include "screens/ui_JoystickScreen.h"
 #include "screens/ui_BenchGateScreen.h"
 #include "screens/ui_InternetScreen.h"
+#include "screens/ui_SeatControlScreen.h"
 
 ///////////////////// VARIABLES ////////////////////
 

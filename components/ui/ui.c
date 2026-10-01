@@ -45,6 +45,7 @@ void ui_init(void)
     ui_JoystickScreen_screen_init();
     ui_BenchGateScreen_screen_init();
     ui_InternetScreen_screen_init();
+    ui_SeatControlScreen_screen_init();
     ui____initial_actions0 = lv_obj_create(NULL);
     lv_disp_load_scr(ui_BootScreen);
 }
@@ -64,4 +65,5 @@ void ui_destroy(void)
     ui_JoystickScreen_screen_destroy();
     ui_BenchGateScreen_screen_destroy();
     ui_InternetScreen_screen_destroy();
+    ui_SeatControlScreen_screen_destroy();
 }

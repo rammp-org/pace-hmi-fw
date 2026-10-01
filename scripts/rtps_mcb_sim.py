@@ -58,6 +58,13 @@ import rtps_net  # noqa: E402
 SEAT_RESULT_OK = 0
 SEAT_RESULTS = {0: "OK", 1: "AT_MIN", 2: "AT_MAX", 3: "INHIBITED", 4: "UNKNOWN_AXIS"}
 
+#: Seat test (dev-seat-control): the HMI's SeatControlScreen sends the stick on one of
+#: these instead of TOPIC_JOYSTICK_XY_TWIST, by what it was opened for.
+SEAT_STICK_TOPICS = {
+    spec.TOPIC_JOYSTICK_SEAT_XY_TWIST: "seat",
+    spec.TOPIC_JOYSTICK_SWIVEL_XY_TWIST: "swivel",
+}
+
 #: Full stick deflection takes the emulated speed from 0 to max in roughly
 #: this many seconds. Deliberately unhurried so the number is readable as it
 #: moves rather than snapping to an end stop.
@@ -105,6 +112,12 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
         # -1..+1, already calibrated by the HMI. The profile is not in here: it
         # arrives on DriveCommand, which is the only thing that changes it.
         self.joystick: tuple[float, float, float, int] | None = None
+        # Seat test: the stick from SeatControlScreen, keyed by SEAT_STICK_TOPICS'
+        # names. The sample, how many arrived, and when the last did (monotonic).
+        self.seat_sticks: dict[str, tuple[float, float, float, int] | None] = {
+            name: None for name in SEAT_STICK_TOPICS.values()}
+        self.seat_stick_rx: dict[str, int] = {name: 0 for name in SEAT_STICK_TOPICS.values()}
+        self.seat_stick_at: dict[str, float] = {name: 0.0 for name in SEAT_STICK_TOPICS.values()}
         # The chair being simulated. It is the single source of speed: what the
         # Tab5 displays is read straight off it, so the number on the screen and
         # the car in the drive view cannot disagree. Accepted from the caller so
@@ -152,7 +165,9 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
         # No seat writer any more: the seat rides MibStatus, which the harness's own
         # periodic publish sends.
         for topic, type_name in ((spec.TOPIC_JOYSTICK_SEAT_COMMAND, spec.TYPE_SEAT_COMMAND),
-                                 (spec.TOPIC_JOYSTICK_DRIVE_COMMAND, spec.TYPE_DRIVE_COMMAND)):
+                                 (spec.TOPIC_JOYSTICK_DRIVE_COMMAND, spec.TYPE_DRIVE_COMMAND),
+                                 (spec.TOPIC_JOYSTICK_SEAT_XY_TWIST, spec.TYPE_XY_TWIST),
+                                 (spec.TOPIC_JOYSTICK_SWIVEL_XY_TWIST, spec.TYPE_XY_TWIST)):
             self.local_readers.append(rtps_host.ReaderConfig(
                 topic_name=topic,
                 type_name=type_name,
@@ -321,6 +336,19 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
             self.seat_result = SEAT_RESULT_OK
         return self.seat_result
 
+    def _note_seat_stick(self, name: str, sample: tuple[float, float, float, int]) -> None:
+        """Keep a seat/swivel stick sample; log when it starts and stops moving."""
+        before = self.seat_sticks[name]
+        self.seat_sticks[name] = sample
+        self.seat_stick_rx[name] += 1
+        self.seat_stick_at[name] = time.monotonic()
+        moving = any(abs(v) > 0.0 for v in sample[:3])
+        was_moving = before is not None and any(abs(v) > 0.0 for v in before[:3])
+        if moving != was_moving:
+            x, y, twist = sample[:3]
+            rtps_host.log(f"[{name} stick] " + (
+                f"moving x={x:+.2f} y={y:+.2f} twist={twist:+.2f}" if moving else "centred"))
+
     def handle_user_packet(self, packet: bytes, sender_ip: str, sender_port: int) -> None:
         """Capture joystick samples, seat requests and drive requests."""
         for guid_prefix, writer_id, payload, reader_id in rtps_host.parse_rtps_data_messages(
@@ -332,6 +360,10 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
                 if sample is not None:
                     self.joystick = sample
                     self.adc_rx_count += 1
+            elif topic in SEAT_STICK_TOPICS:
+                sample = spec.unpack_xy_twist(payload)
+                if sample is not None:
+                    self._note_seat_stick(SEAT_STICK_TOPICS[topic], sample)
             elif topic == spec.TOPIC_HMI_COUNTER:
                 self._answer_selftest_ping(payload)
             elif topic == spec.TOPIC_SELFTEST_REPORT:

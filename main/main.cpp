@@ -204,10 +204,11 @@ static void keep_overlay_fill(lv_obj_t *obj) {
 
 static lv_indev_t *joystick_indev = nullptr;
 static lv_group_t *joystick_group = nullptr;
-static lv_group_t *menu_group = nullptr;        // the menu overlay's rows
-static lv_group_t *seat_group = nullptr;        // seat screen, function buttons page
-static lv_group_t *seat_adjust_group = nullptr; // seat screen, adjustment page
-static lv_group_t *rd_group = nullptr;          // the bench gate's PIN keypad
+static lv_group_t *menu_group = nullptr;         // the menu overlay's rows
+static lv_group_t *seat_group = nullptr;         // seat screen, function buttons page
+static lv_group_t *seat_adjust_group = nullptr;  // seat screen, adjustment page
+static lv_group_t *rd_group = nullptr;           // the bench gate's PIN keypad
+static lv_group_t *seat_control_group = nullptr; // SeatControlScreen: its back button
 
 // The Settings rows; brightness has its own brightness_subject. Up here because
 // rtps_poll_cb keeps the theme row in step and the menu reads the slide. Each
@@ -242,6 +243,13 @@ static lv_obj_t *nav_menu_open = nullptr;
 // nav_update_stick_gate, read by the ADC task, which sends the MCB a centred
 // stick whenever it is false.
 static std::atomic<bool> stick_drives{false};
+
+// Seat test (dev-seat-control): which topic the stick moves the seat on right now.
+// SeatControlScreen up, the menu shut and the MIB idle; NONE otherwise. Written by
+// nav_update_stick_gate like stick_drives, read by the ADC task.
+static std::atomic<SeatStick> stick_seat{SeatStick::NONE};
+// What SeatControlScreen was opened for: Seat or Swivel on the Seat screen. LVGL task.
+static SeatStick seat_control_target = SeatStick::SEAT;
 
 // Defined with the burger menu (see "The burger menu, and moving around with
 // the joystick"); declared here for the screens and gestures above it.
@@ -1590,7 +1598,10 @@ static void drive_screen_follow_state() {
   }
   // The seat screen needs the MCB as much as driving does. Losing it there is
   // a way out, not a screen left looking live: home, with the reason.
-  if (lv_screen_active() == ui_SeatScreen && !mcb_ready()) {
+  const lv_obj_t *const screen = lv_screen_active();
+  if ((screen == ui_SeatScreen ||
+       (ui_SeatControlScreen != nullptr && screen == ui_SeatControlScreen)) &&
+      !mcb_ready()) {
     nav_home();
     entry_refused_show(kRefusedSeat, kDriveRefusedShowMs);
     return;
@@ -1604,6 +1615,9 @@ static void drive_screen_follow_state() {
 
 static void drive_wait_poll() {
   drive_screen_follow_state();
+  // The seat test's stick also hangs on the MIB's state, which no navigation
+  // event reports: re-read here, on the same tick.
+  nav_update_stick_gate();
   const int64_t now = esp_timer_get_time();
   if (drive_exit_until_us != 0 && now >= drive_exit_until_us) {
     // Asked to stop and the chair is still driving. Say so and stay put: the screen
@@ -1714,6 +1728,13 @@ static int seat_page = 0;
 // Defined with the rest of the seat navigation below, which is where the button
 // grid it restores focus into is declared.
 static void seat_show_buttons_page();
+
+// Seat and Swivel on the seat screen: SeatControlScreen, the seat test. Defined with
+// the screens built on demand.
+static void seat_control_open(SeatStick target);
+// Coming back from SeatControlScreen, the seat screen's cursor goes back to the
+// button that opened it rather than to the top. Set just before the change.
+static bool seat_control_returning = false;
 
 // Calibrate is press-and-HOLD, never a tap: a run takes the stick over for the
 // best part of a minute, so it should not start from a brush of the screen or
@@ -1992,10 +2013,15 @@ static void seat_click_cb(lv_event_t *e) {
   lv_obj_t *button = lv_event_get_target_obj(e);
   grid_sync_cursor(&seat_buttons_grid, button);
 
+  // The third row, Seat and Swivel: the stick straight to the seat (the seat test).
+  if (button == ui_SeatButton5 || button == ui_SeatButton6) {
+    seat_control_open(button == ui_SeatButton5 ? SeatStick::SEAT : SeatStick::SWIVEL);
+    return;
+  }
   auto *label = static_cast<lv_obj_t *>(lv_event_get_user_data(e));
   const int axis = seat_button_axis(seat_buttons_grid.row, seat_buttons_grid.col);
   if (!label || axis < 0) {
-    return; // Static and Dynamic, and any button with no row in the table
+    return; // any button with no row in the table
   }
   lv_subject_copy_string(&seat_function_subject, lv_label_get_text(label));
   // What the adjustment page's buttons and its two numbers now refer to.
@@ -3375,6 +3401,12 @@ static void nav_to_key() {
 static void nav_update_stick_gate() {
   stick_drives.store(lv_subject_get_int(&locked_subject) == 0 &&
                      lv_screen_active() == ui_DriveScreen && nav_menu_open == nullptr);
+  // The seat test the same way, and only while the MIB would take manual seat
+  // control (seat_ready: IDLE). Re-checked on every rtps_poll tick, so a MIB that
+  // starts driving or faults cuts the seat stick within one tick.
+  const bool seat = ui_SeatControlScreen != nullptr && lv_screen_active() == ui_SeatControlScreen &&
+                    nav_menu_open == nullptr && seat_ready();
+  stick_seat.store(seat ? seat_control_target : SeatStick::NONE);
 }
 
 // --- the menu ------------------------------------------------------------------
@@ -3768,9 +3800,18 @@ static void nav_attach_chrome(lv_obj_t *key, lv_obj_t *overlay, lv_obj_t *band) 
 // Called on load; closing the menu restores the group without this reset.
 static void nav_enter_screen(const lv_obj_t *screen) {
   if (screen == ui_SeatScreen) {
-    seat_buttons_grid.row = 0;
-    seat_buttons_grid.col = 0;
+    // Back from SeatControlScreen: on Seat or Swivel, whichever opened it.
+    seat_buttons_grid.row = seat_control_returning ? 2 : 0;
+    seat_buttons_grid.col =
+        seat_control_returning && seat_control_target == SeatStick::SWIVEL ? 1 : 0;
+    seat_control_returning = false;
     seat_show_buttons_page();
+  } else if (ui_SeatControlScreen != nullptr && screen == ui_SeatControlScreen) {
+    // The back button is the only thing the cursor ever holds: the stick is
+    // moving the seat, and its arrows land on a button with no key handler, so
+    // they walk nothing. The stick button clicks it, which is "stop".
+    nav_use_group(seat_control_group, screen);
+    lv_group_focus_obj(ui_SeatControlBack);
   } else if (screen == ui_BenchGateScreen) {
     nav_use_group(rd_group, screen);
     rd_focus(0);
@@ -3835,6 +3876,7 @@ static const char *active_screen_name() {
       {&ui_SettingsScreen, "SettingsScreen"},
       {&ui_SkunkWorksScreen, "SkunkWorksScreen"},
       {&ui_DiagnosticsScreen, "DiagnosticsScreen"},
+      {&ui_SeatControlScreen, "SeatControlScreen"},
   };
   const Named *const found = std::find_if(std::begin(kScreens), std::end(kScreens),
                                           [screen](const Named &e) { return *e.obj == screen; });
@@ -3960,10 +4002,11 @@ static uint32_t strip_screen_overdraw(const lv_obj_t *screen) {
 // theme-change pass cannot drift apart. The screens built on demand are
 // nullptr while they do not exist, and skipped.
 static void strip_all_overdraw() {
-  const lv_obj_t *const screens[] = {ui_LockedScreen,    ui_DriveScreen,       ui_SeatScreen,
-                                     ui_BenchGateScreen, ui_SettingsScreen,    ui_JoystickScreen,
-                                     ui_LogScreen,       ui_SkunkWorksScreen,  ui_DiagnosticsScreen,
-                                     ui_UpdateScreen,    ui_BenchMotorsScreen, ui_InternetScreen};
+  const lv_obj_t *const screens[] = {
+      ui_LockedScreen,      ui_DriveScreen,    ui_SeatScreen,        ui_BenchGateScreen,
+      ui_SettingsScreen,    ui_JoystickScreen, ui_LogScreen,         ui_SkunkWorksScreen,
+      ui_DiagnosticsScreen, ui_UpdateScreen,   ui_BenchMotorsScreen, ui_InternetScreen,
+      ui_SeatControlScreen};
   const uint32_t stripped =
       std::accumulate(std::begin(screens), std::end(screens), uint32_t{0},
                       [](uint32_t sum, const lv_obj_t *screen) {
@@ -4101,6 +4144,84 @@ static void diagnostics_screen_ensure() {
   lv_obj_add_event_cb(ui_DiagnosticsScreen, diagnostics_screen_unloaded_cb,
                       LV_EVENT_SCREEN_UNLOADED, nullptr);
   strip_screen_overdraw(ui_DiagnosticsScreen);
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// SeatControlScreen: the stick straight to the seat (dev-seat-control)
+//
+// A bench test, not for main. Seat and Swivel on the seat screen open it, and
+// while it is up -- menu shut, MIB idle (nav_update_stick_gate) -- the ADC task
+// sends the stick on that one's own XYTwist topic, rammp/joystick/seat/xy_twist
+// or rammp/joystick/swivel/xy_twist, the way Drive sends it on
+// rammp/joystick/xy_twist (which stays centred here). The bars show what is
+// sent. "<", or the stick button, goes back to the seat screen.
+/////////////////////////////////////////////////////////////////////////////
+
+static void seat_control_screen_destroy_cb(void *) {
+  if (ui_SeatControlScreen != nullptr && lv_screen_active() != ui_SeatControlScreen) {
+    ui_SeatControlScreen_screen_destroy();
+  }
+}
+
+static void seat_control_screen_unloaded_cb(lv_event_t *) {
+  lv_async_call(seat_control_screen_destroy_cb, nullptr);
+}
+
+static void seat_control_back_cb(lv_event_t *) {
+  seat_control_returning = true;
+  _ui_screen_change(&ui_SeatScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0, &ui_SeatScreen_screen_init);
+}
+
+static void seat_control_screen_ensure() {
+  if (ui_SeatControlScreen != nullptr) {
+    return;
+  }
+  ui_SeatControlScreen_screen_init();
+  bind_status_panel(ui_DriveBand13);
+  bind_rtps_label(ui_TopBar13);
+  bind_clock_label(ui_TopBar13);
+  nav_attach_chrome(ui_MenuKey13, ui_MenuOverlay13, ui_DriveBand13);
+  // The seat screen's banner: the link or the MCB lost. Losing either takes the
+  // screen home anyway (drive_screen_follow_state), with the reason.
+  bind_mcb_lost_panel(ui_ErrorBanner13);
+  // The same calibrated stick the JoystickScreen draws, -100..+100.
+  for (lv_obj_t *bar : {ui_SeatControlXBar, ui_SeatControlYBar, ui_SeatControlTwistBar}) {
+    lv_bar_set_range(bar, -100, 100);
+    lv_obj_remove_flag(bar, LV_OBJ_FLAG_CLICKABLE);
+  }
+  lv_bar_bind_value(ui_SeatControlXBar, &adc_x_subject);
+  lv_bar_bind_value(ui_SeatControlYBar, &adc_y_subject);
+  lv_bar_bind_value(ui_SeatControlTwistBar, &adc_twist_subject);
+  nav_claim_clicks(ui_SeatControlBack);
+  nav_focus_ring(ui_SeatControlBack);
+  nav_mirror_states(ui_SeatControlBack);
+  lv_obj_add_event_cb(ui_SeatControlBack, seat_control_back_cb, LV_EVENT_CLICKED, nullptr);
+  lv_group_add_obj(seat_control_group, ui_SeatControlBack);
+  lv_obj_add_event_cb(ui_SeatControlScreen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, nullptr);
+  lv_obj_add_event_cb(ui_SeatControlScreen, seat_control_screen_unloaded_cb,
+                      LV_EVENT_SCREEN_UNLOADED, nullptr);
+  strip_screen_overdraw(ui_SeatControlScreen);
+}
+
+static void seat_control_open(SeatStick target) {
+  // The MIB takes manual seat control only while idle, not while it drives: the
+  // gate's own test, refused here rather than opening a screen that sends nothing.
+  if (!seat_ready()) {
+    refusal_feedback();
+    return;
+  }
+  seat_control_target = target;
+  seat_control_screen_ensure();
+  const bool seat = target == SeatStick::SEAT;
+  lv_label_set_text(ui_SeatControlTitle, seat ? "Seat" : "Swivel");
+  lv_label_set_text(ui_SeatControlTopic, seat ? RAMMP_TOPIC_JOYSTICK_SEAT_XY_TWIST
+                                              : RAMMP_TOPIC_JOYSTICK_SWIVEL_XY_TWIST);
+  lv_label_set_text(ui_SeatControlHint, seat ? "Move the joystick to move the seat.\n"
+                                               "Press the joystick button, or <, to stop."
+                                             : "Move the joystick to turn the swivel.\n"
+                                               "Press the joystick button, or <, to stop.");
+  _ui_screen_change(&ui_SeatControlScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
+                    &ui_SeatControlScreen_screen_init);
 }
 
 static void direct_flush_cb(lv_display_t *disp, const lv_area_t * /*area*/, uint8_t *px_map) {
@@ -4961,6 +5082,7 @@ extern "C" void app_main(void) {
   ui_SettingsScreen_screen_destroy();
   ui_SkunkWorksScreen_screen_destroy();
   ui_DiagnosticsScreen_screen_destroy();
+  ui_SeatControlScreen_screen_destroy();
 
   // Swap the boot logo from the export's embedded SVG to a pre-rasterised A8
   // mask (main/boot_logo.c). Done here rather than in the SquareLine project
@@ -5397,6 +5519,8 @@ extern "C" void app_main(void) {
   }
   // It covers the function buttons: its fill is what hides them.
   keep_overlay_fill(ui_SeatAdjustmentPanel);
+  // SeatControlScreen's: only its back button, added each time the screen is built.
+  seat_control_group = lv_group_create();
 
   // InternetScreen: Ethernet or WiFi, the network list and the password page.
   // Its two pages cover the body, so their fill is what hides it.
@@ -6061,9 +6185,33 @@ extern "C" void app_main(void) {
                                              SETTINGS_DRIVE_SPEED_MAX)) /
           static_cast<float>(SETTINGS_DRIVE_SPEED_MAX);
       const float scale = calibrating || !stick_drives.load() ? 0.0f : speed;
-      adc_published = rtps_comms_publish_adc(stick_x * scale, stick_y * scale, stick.z() * scale,
-                                             joy_button_pressed.load() ? rammp::Buttons::JOYSTICK
-                                                                       : rammp::Buttons::NONE);
+      const rammp::Buttons buttons =
+          joy_button_pressed.load() ? rammp::Buttons::JOYSTICK : rammp::Buttons::NONE;
+      adc_published =
+          rtps_comms_publish_adc(stick_x * scale, stick_y * scale, stick.z() * scale, buttons);
+
+      // Seat test (dev-seat-control): on SeatControlScreen the stick goes to the seat
+      // or the swivel instead, on that one's own topic, as it is -- the drive speed
+      // setting is for driving. Only while it is up (stick_seat), then a centred stick
+      // kSeatStickStopSamples times, so the seat is told to stop rather than left to
+      // time out on a stream that just ended.
+      {
+        static constexpr int kSeatStickStopSamples = 10; // ~1/3 s at kAdcUpdatePeriod
+        static SeatStick moving = SeatStick::NONE;       // the topic last sent a live stick
+        static int stop_left = 0;
+        const SeatStick target = calibrating ? SeatStick::NONE : stick_seat.load();
+        if (target != SeatStick::NONE) {
+          if (moving != SeatStick::NONE && moving != target) {
+            rtps_comms_publish_seat_stick(moving, 0.0f, 0.0f, 0.0f, rammp::Buttons::NONE);
+          }
+          rtps_comms_publish_seat_stick(target, stick_x, stick_y, stick.z(), buttons);
+          moving = target;
+          stop_left = kSeatStickStopSamples;
+        } else if (stop_left > 0) {
+          rtps_comms_publish_seat_stick(moving, 0.0f, 0.0f, 0.0f, rammp::Buttons::NONE);
+          stop_left--;
+        }
+      }
     }
     // Every cycle, valid or not: the self test measures the loop's cadence and
     // how often a read fails, as well as the values. A no-op unless a run is

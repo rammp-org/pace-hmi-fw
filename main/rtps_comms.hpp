@@ -78,6 +78,15 @@ void rtps_comms_on_selftest_pong(std::function<void(uint16_t seq, int peer_rx)> 
 // Publishers: any task. They return false, quietly, until the participant is up
 // and a peer has matched.
 bool rtps_comms_publish_adc(float x, float y, float twist, rammp::Buttons buttons);
+/// Seat test (dev-seat-control): which topic SeatControlScreen sends the stick on.
+enum class SeatStick : uint8_t {
+  NONE,   ///< not on SeatControlScreen: nothing to send
+  SEAT,   ///< rammp::kJoystickSeatXYTwist
+  SWIVEL, ///< rammp::kJoystickSwivelXYTwist
+};
+/// The stick on the seat or the swivel topic, the same XYTwist as driving. NONE sends nothing.
+bool rtps_comms_publish_seat_stick(SeatStick target, float x, float y, float twist,
+                                   rammp::Buttons buttons);
 /// Ask the MIB to enable or disable driving, with the profile to drive with.
 bool rtps_comms_publish_drive(rammp::DriveRequest request, MIB::DriveProfile profile);
 /// Ask the MIB to put one seat axis at `target` (absolute, in the axis' whole units).

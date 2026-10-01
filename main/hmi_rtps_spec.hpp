@@ -28,7 +28,18 @@
 #define RAMMP_TOPIC_SELFTEST_REPORT "rammp/selftest/report" /* HMI -> PC */
 #define RAMMP_TYPE_SELFTEST_REPORT "rammp/msg/SelfTestReport"
 
+/* Seat test (dev-seat-control, not for main): the stick straight to the seat or the
+   swivel, from SeatControlScreen. The same XYTwist as driving, on topics of their own so
+   the MCB can tell the three apart. Here rather than in rammp-rtps while it is a test. */
+#define RAMMP_TOPIC_JOYSTICK_SEAT_XY_TWIST "rammp/joystick/seat/xy_twist"
+#define RAMMP_TOPIC_JOYSTICK_SWIVEL_XY_TWIST "rammp/joystick/swivel/xy_twist"
+
 namespace rammp {
+
+inline constexpr Topic<XYTwist> kJoystickSeatXYTwist{RAMMP_TOPIC_JOYSTICK_SEAT_XY_TWIST,
+                                                     RAMMP_TYPE_XY_TWIST};
+inline constexpr Topic<XYTwist> kJoystickSwivelXYTwist{RAMMP_TOPIC_JOYSTICK_SWIVEL_XY_TWIST,
+                                                       RAMMP_TYPE_XY_TWIST};
 
 using std::chrono::milliseconds;
 
