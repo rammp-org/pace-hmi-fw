@@ -151,6 +151,19 @@ PARENTS: dict[str, str] = {
     "ui_AboutVerdict": "ui_AboutContent",
     "ui_AboutSha1": "ui_AboutContent",
     "ui_AboutSha2": "ui_AboutContent",
+
+    # UpdateScreen: what update_ui.cpp fills -- the list page, then the two
+    # panels over the body (one release; the install running)
+    "ui_UpdateInstalled": "ui_UpdateContent",
+    "ui_UpdateStatus": "ui_UpdateContent",
+    "ui_UpdateList": "ui_UpdateContent",
+    "ui_ReleaseRowTemplate": "ui_UpdateList",
+    "ui_UpdatePickBack": "ui_UpdatePickPanel",
+    "ui_UpdatePickNotes": "ui_UpdateNotesBox",
+    "ui_UpdateInstallButton": "ui_UpdatePickPanel",
+    "ui_UpdateProgressBar": "ui_UpdateRunPanel",
+    "ui_UpdateRunLog": "ui_UpdateLogBox",
+    "ui_UpdateRunButton": "ui_UpdateRunPanel",
 }
 
 for _screen, (_bar, _band, _banner, _key, _overlay) in CHROME.items():
@@ -202,7 +215,8 @@ LABELS: dict[str, str] = {
     "cui_SubRowLabel2": "Display & sound",
     "cui_SubRowLabel3": "Joystick & driving",
     "cui_SubRowLabel4": "Internet",
-    "cui_SubRowLabel5": "About",
+    "cui_SubRowLabel5": "Firmware update",
+    "cui_SubRowLabel6": "About",
 }
 
 _CREATE_RE = re.compile(

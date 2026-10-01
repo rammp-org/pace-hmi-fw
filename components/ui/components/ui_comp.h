@@ -23,6 +23,7 @@ extern uint32_t LV_EVENT_GET_COMP_CHILD;
 #include "ui_comp_menukey.h"
 #include "ui_comp_menuoverlay.h"
 #include "ui_comp_netrow.h"
+#include "ui_comp_releaserow.h"
 #include "ui_comp_settingrow.h"
 #include "ui_comp_slottile.h"
 #include "ui_comp_topbar.h"

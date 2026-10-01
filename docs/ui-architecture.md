@@ -63,6 +63,7 @@ ErrorBanner, MenuKey and MenuOverlay, are the *chrome*.
 | BenchGateScreen | - | menu: Bench (the PIN, then DEBUG ACTUATORS) |
 | DiagnosticsScreen | - | menu: Diagnostics |
 | InternetScreen | - | menu: Settings > Internet (the link, the WiFi network, its status) |
+| UpdateScreen | - | menu: Settings > Firmware update (the GitHub releases, installing one) |
 | AboutScreen | - | menu: Settings > About (the firmware, the release check, the board) |
 | JoystickScreen | - | menu: Joystick (the stick test and CALIBRATE) |
 | LogScreen | - | menu: Log |
@@ -190,6 +191,7 @@ with the screen's burger key appended last, so "down past the bottom" reaches th
 | `setting_group`, `actions_group`, `diag_group` | Settings, Skunk Works, Diagnostics |
 | `log_view_group()` (`main/log_view.cpp`) | Log |
 | `main_group`, `networks_group`, `password_group` (`main/internet_ui.cpp`) | Internet: the main page, the network list, the keyboard |
+| `list_group`, `pick_group`, `run_group` (`main/update_ui.cpp`) | Firmware update: the releases, one release, the install |
 | `joystick_group` | everything else: Locked, Drive, Joystick |
 
 `nav_arrive` runs whenever a screen comes up (SCREEN_LOADED, or by hand when a row picks
@@ -265,6 +267,12 @@ flowchart LR
   `/storage/fwinfo.txt`, which only `scripts/fw_verify.py` on the PC writes, and only for a
   `.bin` whose digest is a GitHub release's. A line there can only match the image it was
   written for, so the file is never wrong about the running firmware.
+- **Firmware update** is `main/update_ui.cpp` over `main/github_ota.cpp`, laid out like
+  Internet: the release list is the screen's body, and one release and the install running
+  are two panels over it. The list comes from GitHub's REST API on a worker thread each time
+  the screen opens; the rows are `ReleaseRow`s made into `UpdateList`. An install runs on a
+  thread of its own and outlives the screen: a timer on the LVGL task follows it, and
+  restarts the HMI when it is done and the chair is not driving.
 - **Internet** lives in `main/internet_ui.cpp`, not in the settings rows. Its three
   pages share one screen: the main page (Ethernet or WiFi, the network, the status) and two
   panels drawn over it, the network list and the password keyboard. The choice is the

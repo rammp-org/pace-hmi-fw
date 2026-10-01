@@ -927,6 +927,13 @@ bool rtps_comms_start(NetLink wanted) {
   }
   net_link = wifi ? NetLink::WIFI : NetLink::ETHERNET;
   logger.info("Network: {}", rtps_comms_net_link_name(net_link));
+  // lwIP now, not on the task below: WiFi's bring-up starts it seconds later, and
+  // anything opening a socket in between (the remote UI's listener, a GitHub
+  // request) asserts on lwIP's "Invalid mbox". Starting it again later is a no-op.
+  if (!initialize_netif()) {
+    net_failed = true;
+    return false;
+  }
   if (!wifi) {
     logger.info("W5500: SCK {}, MOSI {}, MISO {}, CS {}, INT {}", static_cast<int>(kPinSck),
                 static_cast<int>(kPinMosi), static_cast<int>(kPinMiso), static_cast<int>(kPinCs),

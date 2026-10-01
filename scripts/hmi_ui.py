@@ -62,6 +62,7 @@ SETTINGS_ROWS = [
     "Display & sound",
     "Joystick & driving",
     "Internet",
+    "Firmware update",
     "About",
 ]
 # Every destination as `go` names it: a top row, or "Settings/<section>".

@@ -38,4 +38,20 @@ menu "RAMMP HMI"
         help
             WPA2/WPA3 passphrase for HMI_WIFI_SSID. Empty = an open network.
 
+    config HMI_OTA_TEST_URL
+        string "Firmware update: one more image to offer, from this URL"
+        default ""
+        help
+            Settings > Firmware update lists the GitHub releases. Set this and
+            the list starts with one more entry, "Test image", that installs
+            whatever this URL serves -- an http:// one is fine -- so an update
+            can be tried before it is published, e.g.
+
+                python -m http.server 8070 --directory build
+                http://<this PC>:8070/rammp-hmi-p4.bin
+
+            The same checks apply as to a release, except that there is no
+            digest to compare it with. For your local sdkconfig only; empty in
+            sdkconfig.defaults, which ships.
+
 endmenu

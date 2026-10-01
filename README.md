@@ -15,6 +15,7 @@ Firmware for the RAMMP wheelchair HMI: an M5Stack Tab5 (ESP32-P4) on the [RAMMP 
 - With ESP-IDF v6.0: `idf.py build flash monitor`
 - Without a toolchain: download the programmer from **Actions → Build and Package Main → Artifacts** and run it.
 - Or put the [release](https://github.com/rammp-org/pace-hmi-fw/releases) images in `precompiled/` and run `.\flash_precompiled.ps1` (needs esptool v5+).
+- Once flashed, the Tab5 updates itself from the releases: see [Firmware update](#firmware-update). The first flash of a board still on the old single-slot partition table has to be over USB.
 
 ## Screens
 
@@ -37,8 +38,10 @@ The UI follows RAMMP UI spec V2. Every screen has the same frame: the status bar
 | Bench: the PIN | DEBUG ACTUATORS | Joystick test and CALIBRATE |
 | <img src="docs/screenshots/SettingsMenu.png" width="200"> | <img src="docs/screenshots/InternetScreen.png" width="200"> | <img src="docs/screenshots/InternetPassword.png" width="200"> |
 | The menu's Settings level | Internet: the link and its status | Joining a WiFi network |
-| <img src="docs/screenshots/AboutScreen.png" width="200"> | | |
-| About: firmware, release check, board | | |
+| <img src="docs/screenshots/AboutScreen.png" width="200"> | <img src="docs/screenshots/UpdateScreen.png" width="200"> | <img src="docs/screenshots/UpdateRelease.png" width="200"> |
+| About: firmware, release check, board | Firmware update: the GitHub releases | One release, and Install |
+| <img src="docs/screenshots/UpdateInstalling.png" width="200"> | | |
+| Installing it | | |
 
 ### The burger menu
 
@@ -64,6 +67,7 @@ Settings opens a second level in the same menu. **< Settings** (or the stick to 
 | Display & sound | **Brightness** (5-100 %; the side button and RTPS can set it too), **Theme** (Dark or Day), **Menu slide** (animate the menu opening), **Flip screen** (turn the picture and touch 180 degrees, for a unit mounted upside down), **Sounds** (touch and joystick clicks; warnings sound either way) |
 | Joystick & driving | **Stick sensitivity** (1-10: how far the stick moves before the highlight does; the UI only), **Speed sensitivity** (0.1x-1.0x: scales what the stick sends the MCB, as if it moved that much less), **Stick left/right**, **Stick fwd/back** (mirror an axis), **Stick axes** (swap X and Y). All but the first are refused while driving |
 | Internet | Ethernet or WiFi, the WiFi network, and the link's status: see [Network](#network) |
+| Firmware update | the GitHub releases; pick one and install it: see [Firmware update](#firmware-update) |
 | About | the firmware, whether it is a published release, and the board: see [About](#about) |
 
 Every row is one line in `main/settings_spec.h`, and every value is saved in LittleFS (`/storage`), so it survives a reboot.
@@ -84,7 +88,20 @@ pip install esptool littlefs-python
 python scripts/fw_verify.py --bin precompiled/rammp-hmi-p4.bin --port COM6
 ```
 
+An update from **Settings → Firmware update** needs none of this: the Tab5 compares the file with GitHub's digest as it downloads it, and writes the line itself.
+
 It looks the `.bin`'s SHA-256 up among the releases and, when one matches, adds a line to `/storage/fwinfo.txt` on the board (`<sha256> <tag> <release|prerelease> <checked>`). The Tab5 looks up its own hash there, so a line only ever vouches for the image it was written for. The rest of the storage is left as it was: the partition is read back, the file is added with littlefs-python, every other file is checked unchanged, and only the changed 4 KB sectors are written; the read-back is kept in `build/fw_verify/`. `flash_precompiled.ps1` runs it after flashing. A board flashed any other way shows red until it has been checked.
+
+### Firmware update
+
+**Settings → Firmware update** lists the [releases](https://github.com/rammp-org/pace-hmi-fw/releases), newest first, with the one running marked **Installed**. Pick one to see its date, size and notes, then **Install**. The Tab5 downloads `rammp-hmi-p4.bin` itself over HTTPS (WiFi or Ethernet, whichever is up; ~1 minute through a laptop hotspot), writes it to the flash slot not running, and restarts into it. Nothing changes if anything fails on the way; the page says why, and **Back** returns to the list.
+
+- **Checks** before the new image is used: it is this project's firmware for this chip (from its header, before anything is written), it passes its own image check, and its SHA-256 is the digest GitHub publishes for the file. The last also makes About show it as a release.
+- **Rollback**: firmware from this version on confirms itself once it has run for 30 s. If it resets before that (it crashes, or loses power), the Tab5 goes back to the firmware it was updated from, and says so in the log at boot. Releases older than this feature cannot confirm themselves, so they are installed as confirmed; going back from one of those is a USB flash.
+- **Never while driving**: an install that finishes while the chair drives restarts the HMI only once the MIB reports it has stopped.
+- GitHub allows 60 unauthenticated API requests an hour per address; the list is fetched each time the screen opens.
+- **Testing an image before publishing it**: set `CONFIG_HMI_OTA_TEST_URL` in your local `sdkconfig` (for example `http://<PC>:8070/rammp-hmi-p4.bin`, served with `python -m http.server 8070 --directory build`), and the list starts with a **Test image** entry that installs whatever that URL serves.
+- Code: `main/github_ota.cpp` (the release list, the download, the checks, rollback) and `main/update_ui.cpp` (the three pages). Flash layout: `partitions.csv`, two 6 MB app slots.
 
 ## Network
 
