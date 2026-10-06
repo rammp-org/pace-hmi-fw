@@ -24,8 +24,8 @@ B2  deliberate reset, 90 s capture, boot_check.py. "WiFi joined" without "Got
     IP" for 60 s: restart tethering (once per run) and watch 60 s more; still no
     IP: INVALID. A flashed build that FAILs B2 is followed by a restore of the
     last-good image: if last-good boots with an IP the candidate's FAIL stands,
-    otherwise B2 is INVALID. With --flash and B2 PASS the build is saved as
-    last-good <label>.
+    otherwise B2 is INVALID. With --flash and every step PASS the build is
+    saved as last-good <label> at the end of the run.
 B3  compare_selftest.py (no sim may run).   B4  walk_check.py.   B5  scenario_drive.py.
 """
 
@@ -206,9 +206,6 @@ class Run:
         if not report["problems"]:
             self.ip = report["ip"]
             self.summary["board_ip"] = self.ip
-            if self.a.flash:
-                saved = flash.save(self.a.build_dir, self.a.label, "B2 PASS")
-                notes.append(f"saved last-good {saved}")
             return self.record("B2", "PASS", notes=notes, **report)
         if not self.a.flash:
             verdict = "INVALID" if no_ip_rule and only_ip_missing(report) else "FAIL"
@@ -313,6 +310,9 @@ def main() -> int:
         run.summary["verdict"] = ("FAIL" if "FAIL" in verdicts else
                                   "INVALID" if "INVALID" in verdicts else
                                   "INCOMPLETE" if "NOT_RUN" in verdicts else "PASS")
+        # Last-good only when every step passed (B0..B5 all run and PASS).
+        if a.flash and verdicts and all(v == "PASS" for v in verdicts):
+            run.summary["saved_last_good"] = str(flash.save(a.build_dir, a.label, "B0-B5 PASS"))
         run.save()
         common.log(f"lease: {lease.release(owner)}")
     print(json.dumps({k: v["verdict"] for k, v in run.summary["steps"].items()}, indent=1))
