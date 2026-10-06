@@ -6,6 +6,7 @@ idf_component_register(SRC_DIRS "."
                          drv2605
                          file_system
                          filters
+                         hmi_format
                          input_drivers
                          joystick
                          lvgl
