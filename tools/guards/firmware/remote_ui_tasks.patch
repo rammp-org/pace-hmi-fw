@@ -1,0 +1,125 @@
+diff --git a/main/remote_ui.cpp b/main/remote_ui.cpp
+index aae4266..f05ae0f 100644
+--- a/main/remote_ui.cpp
++++ b/main/remote_ui.cpp
+@@ -2,9 +2,13 @@
+ 
+ #if CONFIG_HMI_REMOTE_UI
+ 
++#include <algorithm>
++#include <array>
+ #include <atomic>
++#include <cstddef>
+ #include <cstdio>
+ #include <cstring>
++#include <memory>
+ #include <string>
+ #include <thread>
+ #include <vector>
+@@ -12,6 +16,10 @@
+ #include "esp_heap_caps.h"
+ #include "esp_log.h"
+ #include "esp_pthread.h"
++#include "freertos/FreeRTOS.h"
++#include "freertos/freertos_debug.h"
++#include "freertos/idf_additions.h"
++#include "freertos/task.h"
+ #include "lvgl.h"
+ #include "lwip/sockets.h"
+ #include "ui.h"
+@@ -200,6 +208,72 @@ int arg(const std::vector<std::string> &words, size_t index, int fallback = 0) {
+   return std::atoi(words[index].c_str());
+ }
+ 
++// TASKS (G10, docs/plans/app-main-shrink.md V11): every task's name, priority,
++// core and stack, for tools/guards/task_dump.py. The scheduler is suspended
++// (this core) while the list is walked, as freertos_debug.h asks: a task
++// deleted meanwhile would leave a dangling handle. Only copies happen inside.
++constexpr UBaseType_t kMaxTasks = 64; // the board runs about 30
++
++struct TaskRow {
++  std::array<char, configMAX_TASK_NAME_LEN> name{};
++  UBaseType_t priority = 0;
++  BaseType_t core = 0;
++  uint32_t stack_bytes = 0;
++  uint32_t stack_free = 0;
++};
++
++struct TaskTable {
++  std::array<TaskSnapshot_t, kMaxTasks> snapshots{};
++  std::array<TaskRow, kMaxTasks> rows{};
++  UBaseType_t count = 0;
++};
++
++void take_tasks(TaskTable &table) {
++  vTaskSuspendAll();
++  const UBaseType_t n = uxTaskGetSnapshotAll(table.snapshots.data(), kMaxTasks, nullptr);
++  for (UBaseType_t i = 0; i < n; ++i) {
++    const TaskSnapshot_t &snap = table.snapshots[i];
++    auto task = static_cast<TaskHandle_t>(snap.pxTCB);
++    if (task == nullptr) {
++      continue; // a corrupt list entry: the iterator hands back no handle
++    }
++    TaskRow &row = table.rows[table.count++];
++    std::strncpy(row.name.data(), pcTaskGetName(task), row.name.size() - 1);
++    row.priority = uxTaskPriorityGet(task);
++    row.core = xTaskGetCoreID(task);
++    // pxEndOfStack is the last usable slot, aligned down: the created size to
++    // within the port's alignment
++    row.stack_bytes = static_cast<uint32_t>((snap.pxEndOfStack - xTaskGetStackStart(task) + 1) *
++                                            static_cast<std::ptrdiff_t>(sizeof(StackType_t)));
++    // ESP-IDF reports the high-water mark in bytes, not words
++    row.stack_free = static_cast<uint32_t>(uxTaskGetStackHighWaterMark(task));
++  }
++  // returns whether resuming already yielded: nothing to act on
++  static_cast<void>(xTaskResumeAll());
++}
++
++// One line: OK {"tasks":[{"name":..,"prio":..,"core":..,"stack_bytes":..,
++// "stack_free":..},...],"complete":true}; core -1 = not pinned.
++bool send_tasks(int sock) {
++  auto table = std::make_unique<TaskTable>(); // ~2.5 KB: off this task's stack
++  take_tasks(*table);
++  std::string out = "OK {\"tasks\":[";
++  for (UBaseType_t i = 0; i < table->count; ++i) {
++    const TaskRow &row = table->rows[i];
++    std::string name(row.name.data());
++    // IDF's names and ours: keep the line valid JSON whatever they hold
++    std::replace_if(
++        name.begin(), name.end(), [](char c) { return c == '"' || c == '\\' || c < ' '; }, '?');
++    out += std::string(i > 0 ? "," : "") + "{\"name\":\"" + name +
++           "\",\"prio\":" + std::to_string(row.priority) +
++           ",\"core\":" + std::to_string(row.core == tskNO_AFFINITY ? -1 : row.core) +
++           ",\"stack_bytes\":" + std::to_string(row.stack_bytes) +
++           ",\"stack_free\":" + std::to_string(row.stack_free) + "}";
++  }
++  out += std::string("],\"complete\":") + (table->count < kMaxTasks ? "true" : "false") + "}";
++  return send_line(sock, out);
++}
++
+ bool handle(int sock, const std::string &line) {
+   const std::vector<std::string> words = split(line);
+   if (words.empty()) {
+@@ -210,6 +284,9 @@ bool handle(int sock, const std::string &line) {
+   if (verb == "PING") {
+     return send_line(sock, "OK");
+   }
++  if (verb == "TASKS") {
++    return send_tasks(sock);
++  }
+   if (verb == "SHOT") {
+     const int step = arg(words, 1, 1) == 2 ? 2 : 1;
+     return send_shot(sock, step);
+diff --git a/main/remote_ui.hpp b/main/remote_ui.hpp
+index f2f5574..d434cd5 100644
+--- a/main/remote_ui.hpp
++++ b/main/remote_ui.hpp
+@@ -26,6 +26,8 @@
+  *   FOCUS                     where input stands: the joystick's focused object
+  *                             (x,y,size,state) and each pointer's state
+  *   PING                      OK, for a liveness check
++ *   TASKS                     every task's name, priority, core and stack, as one
++ *                             JSON line (tools/guards/task_dump.py, guard G10)
+  *
+  * One client at a time: a second connection is accepted and closed, so a
+  * half-dead session cannot lock the channel out.
