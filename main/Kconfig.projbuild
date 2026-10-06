@@ -54,4 +54,63 @@ menu "RAMMP HMI"
             digest to compare it with. For your local sdkconfig only; empty in
             sdkconfig.defaults, which ships.
 
+    config HMI_BENCH_DA7280_TEST
+        bool "Bench: DA7280 haptic driver tests at boot"
+        default n
+        help
+            Runs the DA7280 bring-up probe (CHIP_REV read) and the driver's
+            functional test from app_main, before the IO expanders come up:
+            15 numbered vibrations ([DA7280 TEST NN/15]) on the LRA, with
+            pauses, so boot takes that much longer and the motor buzzes.
+
+            A bench feature (CS-LAY-09): off by default and in
+            sdkconfig.defaults, which ships; ci/sdkconfig.bench turns it on for
+            the bench variant L0 builds. The self test's DA7280 row does not
+            depend on it: that one reads the boot I2C probe.
+
+    # Hidden: CONFIG_HMI_BENCH_DA7280_TEST as 0/1. sdkconfig.h leaves an unset
+    # bool undefined, so without this the C++ would need #ifdef to read it; an
+    # int is always defined and becomes a constexpr with no preprocessor
+    # conditional (CS-TYP-05; the L0 ratchet's if_config count).
+    config HMI_BENCH_DA7280_TEST_AS_INT
+        int
+        default 1 if HMI_BENCH_DA7280_TEST
+        default 0
+
+    config HMI_DEBUG_FPS
+        bool "Debug: per-second frame-rate report ([FPS])"
+        default n
+        help
+            Measures what LVGL actually renders (RENDER_START to RENDER_READY)
+            and logs once a second, at debug level under the "fps" tag:
+                [FPS] 59.8 fps | render avg 4.12 ms | max 6.03 ms
+            It also loads the Drive screen at boot instead of the boot screen,
+            whose logo would otherwise dominate the numbers.
+
+            A debug feature (CS-LAY-09): off by default and never in
+            sdkconfig.defaults, which ships. Turn it on in your local sdkconfig.
+
+    config HMI_DEBUG_FPS_STRESS
+        bool "Debug: invalidate the whole screen every LVGL cycle"
+        depends on HMI_DEBUG_FPS
+        default n
+        help
+            A static SquareLine screen invalidates nothing and renders nothing,
+            so HMI_DEBUG_FPS alone measures an idle screen. This forces a full
+            redraw every cycle: the sustained worst case.
+
+    # Hidden: the two FPS options as 0/1. sdkconfig.h leaves an unset bool
+    # undefined, so without these the C++ would need #ifdef to read them; an
+    # int is always defined and becomes a constexpr with no preprocessor
+    # conditional (CS-TYP-05; the L0 ratchet's if_config count).
+    config HMI_DEBUG_FPS_AS_INT
+        int
+        default 1 if HMI_DEBUG_FPS
+        default 0
+
+    config HMI_DEBUG_FPS_STRESS_AS_INT
+        int
+        default 1 if HMI_DEBUG_FPS_STRESS
+        default 0
+
 endmenu

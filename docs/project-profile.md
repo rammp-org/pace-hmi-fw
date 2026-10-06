@@ -30,10 +30,15 @@ yet measured or decided, and "none" means checked and absent.
 
   | Variant | How | Differences |
   | --- | --- | --- |
-  | default / release | `sdkconfig.defaults` | Ethernet is the default network setting; remote UI off |
-  | bench test | `-D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.wifi.local"` (untracked) | `CONFIG_HMI_REMOTE_UI=y`, Wi-Fi SSID and password |
+  | default / release | `sdkconfig.defaults` | Ethernet is the default network setting; remote UI, DA7280 boot test and FPS report off |
+  | bench (CI) | `-D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;ci/sdkconfig.bench"` | `CONFIG_HMI_REMOTE_UI=y`, `CONFIG_HMI_BENCH_DA7280_TEST=y` (the DA7280 tests run at boot) |
+  | bench test (board) | `-D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.wifi.local"` (untracked) | `CONFIG_HMI_REMOTE_UI=y`, Wi-Fi SSID and password; DA7280 boot test off unless that file sets it |
+  | debug FPS | a local sdkconfig with `CONFIG_HMI_DEBUG_FPS=y` (and optionally `CONFIG_HMI_DEBUG_FPS_STRESS=y`) | per-second `[FPS]` report at debug level (tag `fps`); DriveScreen loaded at boot; stress invalidates the whole screen every LVGL cycle |
 
-  CI builds only the default variant today.
+  CI (`.github/workflows/build.yml`, `l0.yml`) builds the default and the bench (CI) variants;
+  `l0.yml` fails if `sdkconfig.defaults` turns on any of the debug or bench options above. The
+  debug FPS variant is not built in CI: its code is in `if constexpr` arms, compiled in every
+  build.
 - Branch protection on `main` and `dev`: not recorded (CS-GIT-05). Until then approvals are by
   review only.
 
