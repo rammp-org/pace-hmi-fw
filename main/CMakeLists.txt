@@ -28,6 +28,7 @@ idf_component_register(SRC_DIRS "."
                          mbedtls
                          esp_http_client
                          rammp_rtps_messages
+                         fw_core
                        EMBED_TXTFILES click.wav)
 
 # The commit the About screen shows beside the version. Read when CMake
