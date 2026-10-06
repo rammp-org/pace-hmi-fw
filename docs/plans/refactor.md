@@ -40,7 +40,7 @@ C = confirmed in code by the auditor and spot-checked by the orchestrator; S = s
 | H8 | CS-ERR-04 | A NaN or huge seat value from the MIB is UB in `seat_raw`; one press then commands the axis to its min or max. Unknown seat value steps from `min` | `hmi_rtps_spec.hpp:90-94`, `main.cpp:2531-2536` | C |
 | H9 | CS-SAF-03 | An ADC read failure stops XYTwist instead of sending neutral, and isn't shown | `main.cpp:6110` | C |
 | H10 | CS-SAF-02 | No neutral-stick check before ENABLE or before the gate opens; seat presses not gated on `seat_ready` | `main.cpp:1652`, `3418`, `1979` | C |
-| H11 | CS-SAF-06, CS-CON | No task watchdog on any app task; ADC task at priority 0, unpinned, 1,496 B stack free; TWDT fired on `main` at 8 s into boot (board 2) | `main.cpp:6248`; boot log | C |
+| H11 | CS-SAF-06, CS-CON | No task watchdog on any app task; ADC task at priority 0, unpinned, 1,496 B stack free; TWDT fired on `main` at 8 s into boot (board 2) (corrected 2026-10-06: measured prio 5 via the pthread default, core picked by first FPU use; see hazard-fixes C4) | `main.cpp:6248`; boot log | C |
 | H12 | CS-SAF-03 | A reset or panic is never shown (`esp_reset_reason` unread); battery "78%" and range "19 mi" are permanent placeholders | `ui_comp_topbar.c:42`, `ui_DriveScreen.c:189` | C |
 | H14 | CS-SAF, CS-OWN-09 | The stick-button bit reaches XYTwist only after the Button task takes `lvgl_mutex` (held for a whole render, ~100 ms): up to 3 ADC cycles late | `main.cpp:856-865` | C |
 | H15 | CS-UI-02 | `app_main` builds the UI without the lock (5050–5800) while the side-button and GPIO48 tasks are already live: a press during boot can corrupt LVGL's lists | `main.cpp:5003`, `5329`, `743`, `856` | C |

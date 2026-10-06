@@ -1,0 +1,25 @@
+{
+  "about": "G2 exports.py excuses. One finding per entry; every entry needs a reason and is printed on every run. Add only after review.",
+  "allow": [
+    {"rule": "E3", "symbol": "kHmiConfirmsItsBoot", "object": "main/github_ota.cpp.obj",
+     "reason": "deliberate: external so the compiler keeps the marker string whole in .rodata; github_ota's image search looks for it (main/github_ota.cpp:31-36)"},
+    {"rule": "E3", "symbol": "lv_malloc_core", "object": "main/lv_mem_psram.c.obj",
+     "reason": "LVGL LV_STDLIB_CUSTOM allocator hook, declared by LVGL's lv_mem.h (third-party header)"},
+    {"rule": "E3", "symbol": "lv_realloc_core", "object": "main/lv_mem_psram.c.obj",
+     "reason": "LVGL LV_STDLIB_CUSTOM allocator hook, declared by LVGL's lv_mem.h (third-party header)"},
+    {"rule": "E3", "symbol": "lv_free_core", "object": "main/lv_mem_psram.c.obj",
+     "reason": "LVGL LV_STDLIB_CUSTOM allocator hook, declared by LVGL's lv_mem.h (third-party header)"},
+    {"rule": "E3", "symbol": "lv_mem_init", "object": "main/lv_mem_psram.c.obj",
+     "reason": "LVGL LV_STDLIB_CUSTOM allocator hook, declared by LVGL's lv_mem.h (third-party header)"},
+    {"rule": "E3", "symbol": "lv_mem_deinit", "object": "main/lv_mem_psram.c.obj",
+     "reason": "LVGL LV_STDLIB_CUSTOM allocator hook, declared by LVGL's lv_mem.h (third-party header)"},
+    {"rule": "E3", "symbol": "lv_mem_add_pool", "object": "main/lv_mem_psram.c.obj",
+     "reason": "LVGL LV_STDLIB_CUSTOM allocator hook, declared by LVGL's lv_mem.h (third-party header)"},
+    {"rule": "E3", "symbol": "lv_mem_remove_pool", "object": "main/lv_mem_psram.c.obj",
+     "reason": "LVGL LV_STDLIB_CUSTOM allocator hook, declared by LVGL's lv_mem.h (third-party header)"},
+    {"rule": "E3", "symbol": "lv_mem_monitor_core", "object": "main/lv_mem_psram.c.obj",
+     "reason": "LVGL LV_STDLIB_CUSTOM allocator hook, declared by LVGL's lv_mem.h (third-party header)"},
+    {"rule": "E3", "symbol": "lv_mem_test_core", "object": "main/lv_mem_psram.c.obj",
+     "reason": "LVGL LV_STDLIB_CUSTOM allocator hook, declared by LVGL's lv_mem.h (third-party header)"}
+  ]
+}
