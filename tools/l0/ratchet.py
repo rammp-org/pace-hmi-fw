@@ -35,6 +35,8 @@ Rules
   non-const `static`/`thread_local` variables at block scope (function-local
   statics, in lambdas too) and static data members at class scope. Namespace-scope
   statics are mutable_globals, not this.
+- locks: the espp Task callback's own mutex and condition variable are not locks
+  (CS-OWN-08), in the exact idiom only: see TASK_PARAMS_RE. Any other mutex counts.
 - app_main_lines (CS-LAY-01: app_main <= 300 lines): non-blank code lines (comments
   stripped, as `lines`) of the function named app_main, in whichever unit holds it.
   Like `lines`: a path in the baseline must not grow; any other path must stay
@@ -447,11 +449,89 @@ def count_casts(code: str) -> int:
     return count
 
 
+# The espp Task callback's own mutex and condition variable (CS-OWN-08 allows exactly these).
+# The idiom, and nothing looser:
+#     [..](std::mutex &m, std::condition_variable &cv) [-> bool] {      (or a named function)
+#       ...
+#       std::unique_lock<std::mutex> lock(m);
+#       cv.wait_for(lock, period);                                      (or wait_until)
+#     }
+# Every use of `m` in the body is such a unique_lock declaration, every use of each lock
+# variable (in its scope) is the first argument of cv.wait_for/wait_until, and every use of
+# `cv` is such a wait. Then the parameter's `std::mutex` and each declaration's
+# `unique_lock`/`mutex` are not counted as locks. Anything else, and any other mutex, counts.
+TASK_PARAMS_RE = re.compile(
+    r"\(\s*std::mutex\s*&\s*(\w+)\s*,\s*std::condition_variable\s*&\s*(\w+)\s*\)"
+    r"\s*(?:(?:mutable|noexcept|override|final)\s*)*(?:->\s*bool\s*)?\{"
+)
+TASK_LOCK_DECL = r"std::unique_lock\s*<\s*std::mutex\s*>\s+(\w+)\s*\(\s*{m}\s*\)\s*;"
+TASK_WAIT = r"\b{cv}\s*\.\s*wait_(?:for|until)\s*\(\s*(\w+)\s*,"
+
+
+def _block_end(code: str, i: int) -> int:
+    """Index of the `}` that closes the block containing position i (len(code) if none)."""
+    depth = 0
+    for j in range(i, len(code)):
+        if code[j] == "{":
+            depth += 1
+        elif code[j] == "}":
+            if depth == 0:
+                return j
+            depth -= 1
+    return len(code)
+
+
+def task_idiom_spans(code: str) -> list[tuple[int, int]]:
+    """Spans (in `code`) whose lock matches are the espp Task idiom's own mutex, not locks."""
+    spans: list[tuple[int, int]] = []
+    for pm in TASK_PARAMS_RE.finditer(code):
+        mutex, cv = pm.group(1), pm.group(2)
+        body_start = pm.end()
+        body_end = _block_end(code, body_start)
+        body = code[body_start:body_end]
+        decls = list(re.finditer(TASK_LOCK_DECL.format(m=re.escape(mutex)), body))
+        if not decls:
+            continue
+        decl_spans = [(d.start(), d.end()) for d in decls]
+
+        def inside(pos: int, ranges: list[tuple[int, int]]) -> bool:
+            return any(a <= pos < b for a, b in ranges)
+
+        if any(not inside(u.start(), decl_spans) for u in re.finditer(rf"\b{re.escape(mutex)}\b", body)):
+            continue  # the mutex is used for something else
+        scopes = [(d.group(1), d.end(), _block_end(body, d.end())) for d in decls]
+        waits = list(re.finditer(TASK_WAIT.format(cv=re.escape(cv)), body))
+
+        def wait_ok(w: re.Match[str]) -> bool:
+            return any(w.group(1) == name and a <= w.start() < b for name, a, b in scopes)
+
+        if any(not wait_ok(w) for w in waits) or len(waits) != len(re.findall(rf"\b{re.escape(cv)}\b", body)):
+            continue  # cv used for something other than a timed wait on the idiom's lock
+        lock_args = [(w.start(1), w.end(1)) for w in waits]
+        ok = True
+        for name, a, b in scopes:
+            for u in re.finditer(rf"\b{re.escape(name)}\b", body[a:b]):
+                if not inside(a + u.start(), lock_args):
+                    ok = False  # the lock is unlocked, moved or passed somewhere else
+        if not ok:
+            continue
+        spans.append((pm.start(), pm.end()))
+        spans.extend((body_start + a, body_start + b) for a, b in decl_spans)
+    return spans
+
+
+def lock_matches(code: str) -> list[re.Match[str]]:
+    """`locks` matches in `code`, without the espp Task idiom's own mutex."""
+    spans = task_idiom_spans(code)
+    return [m for m in REGEX_METRICS["locks"].finditer(code) if not any(a <= m.start() < b for a, b in spans)]
+
+
 def measure(path: str, text: str) -> dict[str, int]:
     """Every metric for one unit of source text."""
     code = strip_code(text)
     no_inc = INCLUDE_LINE_RE.sub("", code)
     m: dict[str, int] = {name: len(rx.findall(no_inc)) for name, rx in REGEX_METRICS.items()}
+    m["locks"] = len(lock_matches(no_inc))
     m["lines"] = sum(1 for ln in code.split("\n") if ln.strip())
     m["if_config"] = len(IF_CONFIG_RE.findall(code))
     m["lv_outside_ui"] = 0 if is_ui_file(path) else len(LV_RE.findall(no_inc))
@@ -875,6 +955,73 @@ def _selftest_app_main(expect: Expect) -> None:
            lowered(legacy, {UNIT: {**zero, "app_main_lines": 300}})["app_main_lines"], {})
 
 
+def _selftest_task_idiom(expect: Expect) -> None:
+    """CS-OWN-08: the espp Task callback's own mutex/cv is not a lock; exactly that idiom only."""
+    sig = "(std::mutex &m, std::condition_variable &cv)"
+
+    def locks(code: str) -> int:
+        return measure("components/x/src/x.cpp", code)["locks"]
+
+    allowed = {
+        "lambda -> bool, wait_for":
+            f"void start() {{\n  auto t = espp::Task({{.callback = []{sig} -> bool {{\n  work();\n"
+            "  {\n    std::unique_lock<std::mutex> lock(m);\n    cv.wait_for(lock, 10ms);\n  }\n"
+            "  return false;\n}});\n}\n",
+        "named function, wait_for":
+            f"bool tick{sig} {{\n  std::unique_lock<std::mutex> lock(m);\n  cv.wait_for(lock, 1s);\n"
+            "  return false;\n}\n",
+        "capturing lambda, wait_until with a predicate":
+            f"auto fn = [&a, &b]{sig} {{\n  std::unique_lock<std::mutex> lk(m);\n"
+            "  cv.wait_until(lk, deadline, []() { return false; });\n  return false;\n};\n",
+        "two waits in two blocks":
+            f"auto fn = []{sig} {{\n  {{\n    std::unique_lock<std::mutex> a(m);\n    cv.wait_for(a, 1ms);\n  }}\n"
+            "  {\n    std::unique_lock<std::mutex> b(m);\n    cv.wait_for(b, 2ms);\n  }\n  return false;\n};\n",
+    }
+    for what, code in allowed.items():
+        expect(f"task idiom not a lock: {what}", locks(code), 0)
+    # Another lock of the same name in a sibling scope is a different variable, and still counts.
+    expect("task idiom: another mutex in the callback still counts",
+           locks(f"auto fn = []{sig} -> bool {{\n  {{\n    std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);\n"
+                 "    draw();\n  }\n  std::unique_lock<std::mutex> lock(m);\n  cv.wait_until(lock, t, []() { return false; });\n"
+                 "  return false;\n};\n"), 2)
+    counted = {
+        "m used directly": (f"auto fn = []{sig} {{\n  m.lock();\n  std::unique_lock<std::mutex> lk(m);\n"
+                            "  cv.wait_for(lk, 1ms);\n  return false;\n};\n", 3),  # m.lock() is no pattern
+        "lock_guard on m": (f"auto fn = []{sig} {{\n  std::lock_guard<std::mutex> g(m);\n  return false;\n}};\n", 3),
+        "unique_lock without <std::mutex>": (f"auto fn = []{sig} {{\n  std::unique_lock lk(m);\n"
+                                             "  cv.wait_for(lk, 1ms);\n  return false;\n};\n", 2),
+        "lock unlocked by hand": (f"auto fn = []{sig} {{\n  std::unique_lock<std::mutex> lk(m);\n"
+                                  "  cv.wait_for(lk, 1ms);\n  lk.unlock();\n  return false;\n};\n", 3),
+        "lock passed on": (f"auto fn = []{sig} {{\n  std::unique_lock<std::mutex> lk(m);\n"
+                           "  cv.wait_for(lk, 1ms);\n  helper(lk);\n  return false;\n};\n", 3),
+        "untimed cv.wait": (f"auto fn = []{sig} {{\n  std::unique_lock<std::mutex> lk(m);\n"
+                            "  cv.wait(lk);\n  return false;\n};\n", 3),
+        "cv notified": (f"auto fn = []{sig} {{\n  std::unique_lock<std::mutex> lk(m);\n"
+                        "  cv.wait_for(lk, 1ms);\n  cv.notify_all();\n  return false;\n};\n", 3),
+        "wait on another lock": (f"auto fn = []{sig} {{\n  std::unique_lock<std::mutex> lk(m);\n"
+                                 "  cv.wait_for(other, 1ms);\n  return false;\n};\n", 3),
+        "recursive_mutex parameter": ("auto fn = [](std::recursive_mutex &m, std::condition_variable &cv) {\n"
+                                      "  std::unique_lock<std::recursive_mutex> lk(m);\n  cv.wait_for(lk, 1ms);\n"
+                                      "  return false;\n};\n", 3),
+        "three-parameter callback": ("auto fn = [](std::mutex &m, std::condition_variable &cv, bool &n) {\n"
+                                     "  std::unique_lock<std::mutex> lk(m);\n  cv.wait_for(lk, 1ms);\n"
+                                     "  return false;\n};\n", 3),
+        "no wait at all": (f"auto fn = []{sig} {{\n  return false;\n}};\n", 1),
+        "prototype only": (f"bool tick{sig};\n", 1),
+        "a member mutex": ("class A {\n  std::mutex mu_;\n  void f() {\n    std::unique_lock<std::mutex> lk(mu_);\n"
+                           "    cv_.wait_for(lk, 1ms);\n  }\n};\n", 3),
+    }
+    for what, (code, want) in counted.items():
+        expect(f"task idiom: still a lock ({what})", locks(code), want)
+    path = "components/x/src/x.cpp"
+    expect("new path with only the idiom is clean",
+           violations({}, {path: measure(path, allowed["lambda -> bool, wait_for"])}), [])
+    expect("new path with the idiom and one more mutex fails",
+           violations({}, {path: measure(path, allowed["named function, wait_for"] + "std::mutex extra;\n")}),
+           [f"locks {path}: 1 > 0 (not in baseline: must be clean)", f"mutable_globals {path}: 1 > 0 (not in "
+            "baseline: must be clean)"])
+
+
 def selftest() -> int:
     failures: list[str] = []
 
@@ -1018,6 +1165,7 @@ def selftest() -> int:
 
     _selftest_strict_functions(expect)
     _selftest_app_main(expect)
+    _selftest_task_idiom(expect)
 
     for f in failures:
         print(f"selftest FAIL {f}")
