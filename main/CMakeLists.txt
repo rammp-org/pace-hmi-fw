@@ -7,6 +7,7 @@ idf_component_register(SRC_DIRS "."
                          file_system
                          filters
                          hmi_format
+                         hmi_models
                          input_drivers
                          joystick
                          lvgl
