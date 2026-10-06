@@ -96,9 +96,11 @@ First-party components (`main` and `components/*` except `joystick`, `m5stack-ta
 flowchart LR
   c_fw_core["fw_core"]
   c_hmi_format["hmi_format"]
+  c_hmi_models["hmi_models"]
   c_joystick["joystick (vendored)"]:::safety
   c_m5stack_tab5["m5stack-tab5 (vendored)"]
   c_main["main"]:::safety
+  c_ota_parse["ota_parse"]
   c_rammp_rtps_messages["rammp_rtps_messages (submodule)"]:::safety
   c_ui["ui"]:::gen
   g_ESP_IDF["ESP-IDF · 13"]
@@ -109,14 +111,17 @@ flowchart LR
   c_fw_core -.-> g_espp
   c_main -.-> c_fw_core
   c_main -.-> c_hmi_format
+  c_main -.-> c_hmi_models
   c_main -.-> c_joystick
   c_main -.-> c_m5stack_tab5
+  c_main -.-> c_ota_parse
   c_main -.-> c_rammp_rtps_messages
   c_main -.-> c_ui
   c_main -.-> g_ESP_IDF
   c_main -.-> g_espp
   c_main -.-> g_Espressif_registry
   c_main -.-> g_LVGL
+  c_ota_parse -.-> g_Espressif_registry
   classDef hw fill:#d9dde3,stroke:#7a8590,color:#111
   classDef safety stroke:#c0392b,stroke-width:3px
   classDef gen stroke-dasharray:5 4

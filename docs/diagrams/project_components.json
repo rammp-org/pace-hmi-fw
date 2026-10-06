@@ -14,6 +14,10 @@
       "reqs": [],
       "priv_reqs": []
     },
+    "hmi_models": {
+      "reqs": [],
+      "priv_reqs": []
+    },
     "main": {
       "reqs": [],
       "priv_reqs": [
@@ -69,13 +73,21 @@
         "espressif__w5500",
         "fw_core",
         "hmi_format",
+        "hmi_models",
         "joystick",
         "lvgl__lvgl",
         "lwip",
         "m5stack-tab5",
         "mbedtls",
+        "ota_parse",
         "rammp_rtps_messages",
         "ui"
+      ]
+    },
+    "ota_parse": {
+      "reqs": [],
+      "priv_reqs": [
+        "espressif__cjson"
       ]
     }
   },
