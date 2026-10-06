@@ -56,7 +56,7 @@ Drafts, pushed and **not merged** (each needs two human approvals):
 | Diagrams | `python tools/gen_diagrams/gen_diagrams.py check` | PASS |
 | Split equivalence | `python tools/split_main.py verify`; `python tools/split_guard.py <ref> <cand>` | PASS at each image-neutral merge |
 | IDF builds | `idf.py -B <dir> [-D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.wifi.local"] build` | every merged state and every draft: exit 0. Warnings: 0 since the tooling merge (1 third-party `hal` warning before, and in drafts built from older bases) |
-| Board | `python tools/bench/run_bench.py --build-dir <dir> --label <l> --flash --tree <tree>` | baseline, split, m2, m3, m4, m5: B0–B5 PASS; final build a9a040f: B0–B5 + B4b PASS (`C:enchesultsinal-a9a040f-20261006-042751`). The board runs final-a9a040f |
+| Board | `python tools/bench/run_bench.py --build-dir <dir> --label <l> --flash --tree <tree>` | baseline, split, m2, m3, m4, m5: B0–B5 PASS; final build a9a040f: B0–B5 + B4b PASS (`C:/b/bench/results/final-a9a040f-20261006-042751`). The board runs final-a9a040f |
 | CI | `gh run list --branch dev_refactor` | a9a040f (last firmware change): Static analysis 37456062431, L0 37456062371 (incl. host-l1), Build 37456062439, all success. HEAD a4a323f (tools only): Static analysis and L0 success; Build was still running at 04:45. Red earlier tonight: Static analysis from 02:25 (fw_core merge) to 03:3x and again 03:4x–04:2x, both fixed without suppressions |
 
 ## Not verified, or weaker than it looks
