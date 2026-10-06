@@ -48,14 +48,6 @@ public:
   /// @return The value.
   [[nodiscard]] T read() const noexcept { return value_.load(std::memory_order_acquire); }
 
-  /// @brief The write end, for the producer's Config.
-  /// @return A handle that can only write.
-  [[nodiscard]] Writer<AtomicValue> writer() noexcept { return Writer<AtomicValue>{*this}; }
-
-  /// @brief The read end, for a consumer's Config.
-  /// @return A handle that can only read.
-  [[nodiscard]] Reader<AtomicValue> reader() noexcept { return Reader<AtomicValue>{*this}; }
-
 private:
   std::atomic<T> value_;
 };
@@ -91,5 +83,25 @@ public:
 private:
   AtomicValue<T> *value_;
 };
+
+/// @brief The write end of @p value, for the producer's Config.
+/// @details A free function taking the channel by non-const reference, not a member: only
+///          code that can mutate the channel hands out its ends, and a const channel
+///          cannot give away a write end (CS-OWN-06).
+/// @param value The channel; it must outlive the handle.
+/// @return A handle that can only write.
+template <class T> [[nodiscard]] Writer<AtomicValue<T>> writer(AtomicValue<T> &value) noexcept {
+  return Writer<AtomicValue<T>>{value};
+}
+
+/// @brief The read end of @p value, for a consumer's Config.
+/// @details A free function taking the channel by non-const reference, not a member: only
+///          code that can mutate the channel hands out its ends, and a const channel
+///          cannot give away a write end (CS-OWN-06).
+/// @param value The channel; it must outlive the handle.
+/// @return A handle that can only read.
+template <class T> [[nodiscard]] Reader<AtomicValue<T>> reader(AtomicValue<T> &value) noexcept {
+  return Reader<AtomicValue<T>>{value};
+}
 
 } // namespace hmi::fw

@@ -96,14 +96,6 @@ public:
     return changed ? ReadStatus::CHANGED : ReadStatus::UNCHANGED;
   }
 
-  /// @brief The write end, for a producer's Config.
-  /// @return A handle that can only write.
-  [[nodiscard]] Writer<Mailbox> writer() noexcept { return Writer<Mailbox>{*this}; }
-
-  /// @brief The read end, for the consumer's Config.
-  /// @return A handle that can only read.
-  [[nodiscard]] Reader<Mailbox> reader() noexcept { return Reader<Mailbox>{*this}; }
-
 private:
   port::RawQueue<T, 1> slot_;
   T last_; // Reader-side copy: touched only after reader_checker_ passes.
@@ -153,5 +145,25 @@ public:
 private:
   Mailbox<T> *mailbox_;
 };
+
+/// @brief The write end of @p mailbox, for a producer's Config.
+/// @details A free function taking the channel by non-const reference, not a member: only
+///          code that can mutate the channel hands out its ends, and a const channel
+///          cannot give away a write end (CS-OWN-06).
+/// @param mailbox The channel; it must outlive the handle.
+/// @return A handle that can only write.
+template <class T> [[nodiscard]] Writer<Mailbox<T>> writer(Mailbox<T> &mailbox) noexcept {
+  return Writer<Mailbox<T>>{mailbox};
+}
+
+/// @brief The read end of @p mailbox, for the consumer's Config.
+/// @details A free function taking the channel by non-const reference, not a member: only
+///          code that can mutate the channel hands out its ends, and a const channel
+///          cannot give away a write end (CS-OWN-06).
+/// @param mailbox The channel; it must outlive the handle.
+/// @return A handle that can only read.
+template <class T> [[nodiscard]] Reader<Mailbox<T>> reader(Mailbox<T> &mailbox) noexcept {
+  return Reader<Mailbox<T>>{mailbox};
+}
 
 } // namespace hmi::fw

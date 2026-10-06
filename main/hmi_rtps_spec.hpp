@@ -164,7 +164,7 @@ inline constexpr Topic<SelfTestReport> kSelfTestReport{RAMMP_TOPIC_SELFTEST_REPO
      pong  PC  -> HMI  kHmiCommand  PONG | peer_rx[27:16] | seq[15:0]
    Untagged values are the plain heartbeat. The report is STARTED, one RESULT
    per check, FINISHED, then all of it again: dedupe on (run_id, kind, index).
-   The checks themselves: main/selftest_spec.h. */
+   The checks themselves: main/selftest_spec.hpp. */
 
 inline constexpr uint32_t kSelfTestTagMask = 0xF0000000;
 

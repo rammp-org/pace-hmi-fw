@@ -5,7 +5,7 @@
  * @brief The HMI self test: runner, on-screen overlay and RTPS report.
  *
  * What is checked, and the limits each check is held to, live in
- * selftest_spec.h - that header is the spec. This module only measures.
+ * selftest_spec.hpp - that header is the spec. This module only measures.
  *
  * A run starts from the SELF TEST settings row (selftest_request LOCAL) or
  * from a PC over RTPS (see "Self test" in hmi_rtps_spec.hpp). Either
@@ -23,7 +23,7 @@
 #include <vector>
 
 /// Board-specific probes the runner calls. main.cpp fills these in; one left
-/// empty makes its check unmeasurable, which selftest_spec.h turns into a FAIL
+/// empty makes its check unmeasurable, which selftest_spec.hpp turns into a FAIL
 /// or a SKIP according to that check's `need`.
 struct SelfTestPlatform {
   /// The lock every LVGL call is made under (see CLAUDE.md).
