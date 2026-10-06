@@ -21,9 +21,6 @@ struct DriveState {
   // When SEND_ENABLE asked: ARM_WARN and ARM_GIVEUP count from that moment, as
   // drive_request_enter did.
   int64_t ask_at_us = 0;
-  // Whether this step's actions include OPEN_MENU_ON_ARRIVAL: the relock writes
-  // nav_menu_on_arrival either way before the Locked screen loads.
-  bool step_menu_on_arrival = false;
   // For a corrupted session state. Made at start-up with the rest, so the fault path
   // constructs nothing (CS-SAF-04).
   espp::Logger logger{{.tag = "drive", .level = espp::Logger::Verbosity::INFO}};
@@ -235,13 +232,16 @@ static bool drive_perform_lock(hmi::drive_session::Action action) {
 static bool drive_perform_screen(hmi::drive_session::Action action) {
   using hmi::drive_session::Action;
   switch (action) {
-  case Action::GO_LOCKED_SCREEN:
-    // Before the load: an instant screen change runs nav_arrive inside it.
-    nav_menu_on_arrival = drive_state.step_menu_on_arrival;
-    locked_screen_go();
-    return true;
+  // Every relock sets the menu-on-arrival flag (rows 3-9) before GO_LOCKED_SCREEN: an
+  // instant screen change runs nav_arrive inside the load.
   case Action::OPEN_MENU_ON_ARRIVAL:
-    drive_state.step_menu_on_arrival = true;
+    nav_menu_on_arrival = true;
+    return true;
+  case Action::CLEAR_MENU_ON_ARRIVAL:
+    nav_menu_on_arrival = false;
+    return true;
+  case Action::GO_LOCKED_SCREEN:
+    locked_screen_go();
     return true;
   case Action::UNLOCK_TIMER_DONE:
     unlock_advance_timer = nullptr; // repeat_count 1: LVGL deletes it after its callback
@@ -311,7 +311,6 @@ static bool drive_session_apply(hmi::drive_session::Input input,
     drive_state.logger.error("corrupted drive session state, safe state entered (input {})",
                              static_cast<int>(input));
   }
-  drive_state.step_menu_on_arrival = false;
   for (const hmi::drive_session::Action action : actions) {
     drive_perform(action);
   }

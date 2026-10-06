@@ -28,21 +28,22 @@ constexpr Actions UNLOCK_ON_DRIVING{Action::CLEAR_WARN,          Action::CLEAR_G
                                     Action::CLEAR_THEN_MENU,     Action::LOCK_OPEN_VISUAL,
                                     Action::CANCEL_UNLOCK_TIMER, Action::START_UNLOCK_TIMER,
                                     Action::SET_UNLOCKED,        Action::GATE_UPDATE};
-// F2, branch 2: stopped while unlocked. Never sends DISABLE (H5). Rows 3-9.
+// F2, branch 2: stopped while unlocked. Never sends DISABLE (H5). Rows 3-9. The menu over
+// the Locked screen only when the burger key asked (row 7); every other relock clears it.
 constexpr Actions RELOCK_STOPPED{Action::CLEAR_EXIT_DEADLINE, Action::CLEAR_EXIT_REQUESTED,
-                                 Action::CLEAR_THEN_MENU,     Action::CANCEL_UNLOCK_TIMER,
-                                 Action::RING_REST,           Action::GO_LOCKED_SCREEN,
-                                 Action::SET_LOCKED,          Action::GATE_UPDATE,
-                                 Action::SHOW_DRIVE_STOPPED};
+                                 Action::CLEAR_THEN_MENU,     Action::CLEAR_MENU_ON_ARRIVAL,
+                                 Action::CANCEL_UNLOCK_TIMER, Action::RING_REST,
+                                 Action::GO_LOCKED_SCREEN,    Action::SET_LOCKED,
+                                 Action::GATE_UPDATE,         Action::SHOW_DRIVE_STOPPED};
 constexpr Actions RELOCK_LOST{Action::CLEAR_EXIT_DEADLINE, Action::CLEAR_EXIT_REQUESTED,
-                              Action::CLEAR_THEN_MENU,     Action::CANCEL_UNLOCK_TIMER,
-                              Action::RING_REST,           Action::GO_LOCKED_SCREEN,
-                              Action::SET_LOCKED,          Action::GATE_UPDATE,
-                              Action::SHOW_DRIVE_LOST};
-constexpr Actions RELOCK_ASKED{Action::CLEAR_EXIT_DEADLINE, Action::CLEAR_EXIT_REQUESTED,
-                               Action::CLEAR_THEN_MENU,     Action::CANCEL_UNLOCK_TIMER,
-                               Action::RING_REST,           Action::GO_LOCKED_SCREEN,
-                               Action::SET_LOCKED,          Action::GATE_UPDATE};
+                              Action::CLEAR_THEN_MENU,     Action::CLEAR_MENU_ON_ARRIVAL,
+                              Action::CANCEL_UNLOCK_TIMER, Action::RING_REST,
+                              Action::GO_LOCKED_SCREEN,    Action::SET_LOCKED,
+                              Action::GATE_UPDATE,         Action::SHOW_DRIVE_LOST};
+constexpr Actions RELOCK_ASKED{
+    Action::CLEAR_EXIT_DEADLINE,   Action::CLEAR_EXIT_REQUESTED, Action::CLEAR_THEN_MENU,
+    Action::CLEAR_MENU_ON_ARRIVAL, Action::CANCEL_UNLOCK_TIMER,  Action::RING_REST,
+    Action::GO_LOCKED_SCREEN,      Action::SET_LOCKED,           Action::GATE_UPDATE};
 constexpr Actions RELOCK_ASKED_THEN_MENU{
     Action::CLEAR_EXIT_DEADLINE,  Action::CLEAR_EXIT_REQUESTED, Action::CLEAR_THEN_MENU,
     Action::OPEN_MENU_ON_ARRIVAL, Action::CANCEL_UNLOCK_TIMER,  Action::RING_REST,
@@ -116,6 +117,7 @@ constexpr Effect NO_EFFECT{.sets = 0, .clears = 0};
   case Action::GO_LOCKED_SCREEN:
   case Action::GATE_UPDATE:
   case Action::OPEN_MENU_ON_ARRIVAL:
+  case Action::CLEAR_MENU_ON_ARRIVAL:
   case Action::GO_DRIVE_SCREEN:
   case Action::NAV_HOME:
   case Action::SHOW_REFUSED_DRIVE:

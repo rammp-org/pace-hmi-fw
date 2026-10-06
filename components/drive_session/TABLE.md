@@ -5,6 +5,11 @@ Status: **AI-derived, unreviewed** (2026-10-06, agent O). Characterises the code
 behaviour, hazards included. It is not a design. Fixing a row is a behaviour change: it needs two
 human approvals (CS-SAF-05) and a new table.
 
+Correction (2026-10-06, agent A2, for the owner's review): rows 3–6, 8 and 9 gain
+CLEAR_MENU_ON_ARRIVAL. The code has always written `nav_menu_on_arrival := then_menu` on every
+relock (frag_drive.inc:75, orig 1598); the table recorded only the `true` case (row 7). The
+firmware's behaviour does not change; the table now says what it does.
+
 The data is `include/drive_session_table.hpp`, namespace `hmi::drive_session`; its enums and row
 structs are in `include/drive_session_types.hpp`. Those headers win
 over this page. This page is the same table for reading, plus a D4 diagram, the hazards, and the
@@ -74,9 +79,11 @@ Abbreviations: DOK = DRIVING_OK, RDY = MCB_READY, LINK = LINK_CONNECTED.
 Action groups, expanded in the header:
 - **F1** = CLEAR_WARN, CLEAR_GIVEUP, CLEAR_EXIT_DEADLINE, CLEAR_EXIT_REQUESTED, CLEAR_THEN_MENU,
   LOCK_OPEN_VISUAL, CANCEL_UNLOCK_TIMER, START_UNLOCK_TIMER, SET_UNLOCKED, GATE_UPDATE.
-- **F2** = CLEAR_EXIT_DEADLINE, CLEAR_EXIT_REQUESTED, CLEAR_THEN_MENU, [OPEN_MENU_ON_ARRIVAL],
-  CANCEL_UNLOCK_TIMER, RING_REST, GO_LOCKED_SCREEN, SET_LOCKED, GATE_UPDATE, [banner].
-  It never sends DISABLE.
+- **F2** = CLEAR_EXIT_DEADLINE, CLEAR_EXIT_REQUESTED, CLEAR_THEN_MENU,
+  OPEN_MENU_ON_ARRIVAL or CLEAR_MENU_ON_ARRIVAL, CANCEL_UNLOCK_TIMER, RING_REST, GO_LOCKED_SCREEN,
+  SET_LOCKED, GATE_UPDATE, [banner]. It never sends DISABLE. The menu flag is
+  `nav_menu_on_arrival := then_menu` (frag_drive.inc:75, orig 1598), written before the load:
+  OPEN only in row 7, CLEAR in every other relock (DSO-013).
 - **ASK(m)** = SEND_DISABLE, SET_EXIT_REQUESTED, (m ? SET_THEN_MENU : CLEAR_THEN_MENU),
   ARM_EXIT_DEADLINE.
 - **ADV** = UNLOCK_TIMER_DONE, GO_DRIVE_SCREEN.
@@ -85,13 +92,13 @@ Action groups, expanded in the header:
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | LOCKED | TICK_FOLLOW | +DOK | UNLOCKING | F1 **(H1: unlocks with no request)** | frag_drive.inc:51-62 (orig 1574-1585) |
 | 2 | ASKING | TICK_FOLLOW | +DOK | UNLOCKING | F1 | frag_drive.inc:51-62 (orig 1574-1585) |
-| 3 | UNLOCKING | TICK_FOLLOW | +LINK !DOK | LOCKED | F2 + SHOW_DRIVE_STOPPED **(H5)** | frag_drive.inc:64-83 (orig 1587-1606) |
-| 4 | UNLOCKING | TICK_FOLLOW | !DOK !LINK | LOCKED | F2 + SHOW_DRIVE_LOST **(H5)** | frag_drive.inc:64-83 (orig 1587-1606) |
-| 5 | DRIVING | TICK_FOLLOW | +LINK !DOK | LOCKED | F2 + SHOW_DRIVE_STOPPED **(H5)** | frag_drive.inc:64-83 (orig 1587-1606) |
-| 6 | DRIVING | TICK_FOLLOW | !DOK !LINK | LOCKED | F2 + SHOW_DRIVE_LOST **(H5)** | frag_drive.inc:64-83 (orig 1587-1606) |
+| 3 | UNLOCKING | TICK_FOLLOW | +LINK !DOK | LOCKED | F2 with CLEAR_MENU_ON_ARRIVAL + SHOW_DRIVE_STOPPED **(H5)** | frag_drive.inc:64-83 (orig 1587-1606) |
+| 4 | UNLOCKING | TICK_FOLLOW | !DOK !LINK | LOCKED | F2 with CLEAR_MENU_ON_ARRIVAL + SHOW_DRIVE_LOST **(H5)** | frag_drive.inc:64-83 (orig 1587-1606) |
+| 5 | DRIVING | TICK_FOLLOW | +LINK !DOK | LOCKED | F2 with CLEAR_MENU_ON_ARRIVAL + SHOW_DRIVE_STOPPED **(H5)** | frag_drive.inc:64-83 (orig 1587-1606) |
+| 6 | DRIVING | TICK_FOLLOW | !DOK !LINK | LOCKED | F2 with CLEAR_MENU_ON_ARRIVAL + SHOW_DRIVE_LOST **(H5)** | frag_drive.inc:64-83 (orig 1587-1606) |
 | 7 | EXITING | TICK_FOLLOW | +THEN_MENU !DOK | LOCKED | F2 with OPEN_MENU_ON_ARRIVAL, no banner | frag_drive.inc:64-83 (orig 1587-1606) |
-| 8 | EXITING | TICK_FOLLOW | !DOK !THEN_MENU | LOCKED | F2, no banner (link loss counts as the user's exit) | frag_drive.inc:64-83 (orig 1587-1606) |
-| 9 | EXIT_REFUSED | TICK_FOLLOW | !DOK | LOCKED | F2, no banner, no menu | frag_drive.inc:64-83 (orig 1587-1606) |
+| 8 | EXITING | TICK_FOLLOW | !DOK !THEN_MENU | LOCKED | F2 with CLEAR_MENU_ON_ARRIVAL, no banner (link loss counts as the user's exit) | frag_drive.inc:64-83 (orig 1587-1606) |
+| 9 | EXIT_REFUSED | TICK_FOLLOW | !DOK | LOCKED | F2 with CLEAR_MENU_ON_ARRIVAL, no banner, no menu | frag_drive.inc:64-83 (orig 1587-1606) |
 | 10 | LOCKED | TICK_FOLLOW | +ON_SEAT !DOK !RDY | LOCKED | NAV_HOME, SHOW_REFUSED_SEAT | frag_drive.inc:87-90 (orig 1610-1613) |
 | 11 | ASKING | TICK_FOLLOW | +ON_SEAT !DOK !RDY | ASKING | NAV_HOME, SHOW_REFUSED_SEAT (returns before F4: ring rest waits a tick) | frag_drive.inc:87-90 (orig 1610-1613) |
 | 12 | ASKING | TICK_FOLLOW | !DOK !WARN_ARMED !ON_SEAT | LOCKED | RING_REST | frag_drive.inc:94-96 (orig 1617-1619) |
@@ -346,6 +353,9 @@ to a different phase whose guard is an error or a timeout. `static_assert` and D
     until the next screen arrival, and the menu would open there.
   - The table assumes this cannot happen, because EXITING with THEN_MENU needs the Drive screen.
     Question: is there a path (remote UI, kFpsInstrument) that breaks that assumption?
+  - Bounded either way: every other relock (rows 3–6, 8, 9) and the safe state write the flag
+    false before their load (CLEAR_MENU_ON_ARRIVAL), so a latched flag lasts at most until the
+    next relock.
 - **U6. Banner lifetime not modelled.** `entry_refusal_poll`'s clearing branch (frag_refusal.inc:305-315,
   orig 1496-1506) and `entry_refused_timer` decide how long a SHOW_* stays up. The table records
   only the raise and its dwell. Question: should the banner state (`entry_refused_subject`) become

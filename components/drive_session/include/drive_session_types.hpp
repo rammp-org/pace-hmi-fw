@@ -236,13 +236,14 @@ enum class Action : std::uint8_t {
   LOCK_OPEN_VISUAL, // lock_open's visual half: lock_waiting := false, ring full, shackle up,
                     // STRONG_CLICK haptic
   // lock state (set_locked, frag_lock.inc:64-79, orig 1129-1144)
-  CANCEL_UNLOCK_TIMER,  // delete unlock_advance_timer if armed
-  START_UNLOCK_TIMER,   // one-shot kUnlockAdvance -> UNLOCK_TIMER
-  SET_UNLOCKED,         // locked_subject := 0
-  SET_LOCKED,           // locked_subject := 1
-  GO_LOCKED_SCREEN,     // instant load of LockedScreen (nav_arrive runs inside it)
-  GATE_UPDATE,          // nav_update_stick_gate()
-  OPEN_MENU_ON_ARRIVAL, // nav_menu_on_arrival := true before the load: the menu opens over Locked
+  CANCEL_UNLOCK_TIMER,   // delete unlock_advance_timer if armed
+  START_UNLOCK_TIMER,    // one-shot kUnlockAdvance -> UNLOCK_TIMER
+  SET_UNLOCKED,          // locked_subject := 0
+  SET_LOCKED,            // locked_subject := 1
+  GO_LOCKED_SCREEN,      // instant load of LockedScreen (nav_arrive runs inside it)
+  GATE_UPDATE,           // nav_update_stick_gate()
+  OPEN_MENU_ON_ARRIVAL,  // nav_menu_on_arrival := true before the load: the menu opens over Locked
+  CLEAR_MENU_ON_ARRIVAL, // nav_menu_on_arrival := false before the load: no menu over Locked
   // unlock advance (unlock_advance_cb)
   UNLOCK_TIMER_DONE, // unlock_advance_timer := nullptr (LVGL deletes the one-shot)
   GO_DRIVE_SCREEN,   // fade to DriveScreen over kUnlockDissolve; gate re-evaluated at SCREEN_LOADED
@@ -259,8 +260,10 @@ enum class Action : std::uint8_t {
   SHOW_REFUSED_DRIVE_MENU, // kRefusedDriveMenu (7), 3000 ms
   REFUSAL_FEEDBACK,        // refusal_feedback(): refusal haptic and sound
 };
-inline constexpr std::size_t kActionCount = 35;
-inline constexpr std::size_t kMaxActions = 10;
+inline constexpr std::size_t kActionCount = 36;
+// 11: the relock rows use 10, and DriveSession::SAFE_STATE_ACTIONS 11 (it also clears the
+// menu-on-arrival flag before it loads the Locked screen).
+inline constexpr std::size_t kMaxActions = 11;
 using Actions = std::array<Action, kMaxActions>;
 
 constexpr Actions acts(std::initializer_list<Action> l) noexcept {

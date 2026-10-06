@@ -31,7 +31,8 @@ public:
   ///          row's `to`, updates the hidden variables and writes the row's actions to @p out,
   ///          in order, padded with `Action::NONE`. No matching row: nothing changes and @p out
   ///          is all `NONE`. A phase or input outside its enum (a corrupted value) sends the
-  ///          session to the safe state: LOCKED, DISABLE sent, gate update requested.
+  ///          session to the safe state: LOCKED, DISABLE sent, no menu on arrival, gate
+  ///          update requested.
   /// @param in The input. A tick is the four inputs of `TICK_SEQUENCE`, in order, one Env.
   /// @param env The environment sampled when the input arrived.
   /// @param out The actions for the caller to perform, in order.
@@ -60,11 +61,10 @@ public:
 
   /// @brief The safe-state actions, in order (also what a corrupted value produces).
   static constexpr Actions SAFE_STATE_ACTIONS{
-      Action::SEND_DISABLE,        Action::CLEAR_WARN,
-      Action::CLEAR_EXIT_DEADLINE, Action::CLEAR_EXIT_REQUESTED,
-      Action::CLEAR_THEN_MENU,     Action::CANCEL_UNLOCK_TIMER,
-      Action::RING_REST,           Action::GO_LOCKED_SCREEN,
-      Action::SET_LOCKED,          Action::GATE_UPDATE};
+      Action::SEND_DISABLE,         Action::CLEAR_WARN,      Action::CLEAR_EXIT_DEADLINE,
+      Action::CLEAR_EXIT_REQUESTED, Action::CLEAR_THEN_MENU, Action::CLEAR_MENU_ON_ARRIVAL,
+      Action::CANCEL_UNLOCK_TIMER,  Action::RING_REST,       Action::GO_LOCKED_SCREEN,
+      Action::SET_LOCKED,           Action::GATE_UPDATE};
 
 private:
   friend struct DriveSessionTestPeer; // test-only access, defined in the test tree

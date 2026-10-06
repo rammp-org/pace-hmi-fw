@@ -252,3 +252,60 @@ TEST_CASE("DSO-012 the table's data has the reviewed fingerprint", "[drive_sessi
   std::printf("FINGERPRINT 0x%016llX\n", static_cast<unsigned long long>(ds::table_fingerprint()));
   TEST_ASSERT_TRUE(ds::table_fingerprint() == ds::TABLE_FINGERPRINT);
 }
+
+namespace {
+// Index of `x` in a row's actions, or kMaxActions when it is not there.
+std::size_t index_of(const ds::Actions &a, ds::Action x) {
+  for (std::size_t i = 0; i < a.size(); ++i) {
+    if (a[i] == x) {
+      return i;
+    }
+  }
+  return ds::kMaxActions;
+}
+} // namespace
+
+TEST_CASE("DSO-013 every relock sets the menu-on-arrival flag to then_menu before it loads the "
+          "Locked screen",
+          "[drive_session_table]") {
+  using ds::Action;
+  // The rule, row by row: a row that loads the Locked screen has exactly one of
+  // OPEN_MENU_ON_ARRIVAL / CLEAR_MENU_ON_ARRIVAL, before GO_LOCKED_SCREEN; no other row has
+  // either. OPEN only where the row's guard requires THEN_MENU.
+  std::size_t relocks = 0;
+  for (const auto &t : ds::TRANSITIONS) {
+    const std::size_t load = index_of(t.actions, Action::GO_LOCKED_SCREEN);
+    const std::size_t open = index_of(t.actions, Action::OPEN_MENU_ON_ARRIVAL);
+    const std::size_t clear = index_of(t.actions, Action::CLEAR_MENU_ON_ARRIVAL);
+    if (load == ds::kMaxActions) {
+      TEST_ASSERT_TRUE_MESSAGE(open == ds::kMaxActions && clear == ds::kMaxActions, t.code.data());
+      continue;
+    }
+    ++relocks;
+    TEST_ASSERT_TRUE_MESSAGE((open < load) != (clear < load), t.code.data());
+    TEST_ASSERT_TRUE_MESSAGE(open == ds::kMaxActions || clear == ds::kMaxActions, t.code.data());
+    const bool wants_menu = (t.guard.need_true & ds::bit(ds::Guard::THEN_MENU)) != 0;
+    TEST_ASSERT_TRUE_MESSAGE(wants_menu == (open < load), t.code.data());
+  }
+  TEST_ASSERT_EQUAL_size_t(7, relocks); // rows 3-9
+  // The same rule as a function of the state: in every valid combination a relock row
+  // matches, the flag it writes is the hidden THEN_MENU (nav_menu_on_arrival := then_menu).
+  unsigned long checked = 0;
+  unsigned long bad = 0;
+  for_each_valid([&](Phase p, GuardMask hidden, Input in, GuardMask guards) {
+    const std::size_t r = ds::find_row(p, in, guards);
+    if (r >= ds::TRANSITIONS.size()) {
+      return;
+    }
+    const ds::Actions &a = ds::TRANSITIONS[r].actions;
+    if (index_of(a, Action::GO_LOCKED_SCREEN) == ds::kMaxActions) {
+      return;
+    }
+    ++checked;
+    const bool then_menu = (hidden & ds::bit(ds::Guard::THEN_MENU)) != 0;
+    const bool opens = index_of(a, Action::OPEN_MENU_ON_ARRIVAL) != ds::kMaxActions;
+    bad += then_menu == opens ? 0UL : 1UL;
+  });
+  TEST_ASSERT_TRUE(checked > 0);
+  TEST_ASSERT_EQUAL_UINT32(0, bad);
+}

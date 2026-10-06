@@ -1,7 +1,7 @@
 # L1 host app: invariants of the as-is drive session transition table.
 # Deviation (owner-approved 2026-10-06): host-native g++ in WSL, not the IDF linux target (TS-UNIT-01, CS-HAL-04).
-- id: DSO-001..012
-  title: drive_session_table.hpp invariants (counts, exclusivity, reachability, phase invariants, way out, hold poll coverage, stick gate, fingerprint)
+- id: DSO-001..013
+  title: drive_session_table.hpp invariants (counts, exclusivity, reachability, phase invariants, way out, hold poll coverage, stick gate, fingerprint, menu-on-arrival rule)
   level: L1
   path: components/drive_session/test/oracle_selfcheck
   requirements: []

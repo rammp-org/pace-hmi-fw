@@ -209,21 +209,24 @@ inline constexpr Actions kF1Unlock =
           Action::GATE_UPDATE});
 
 // drive_screen_follow_state, branch 2 (frag_drive.inc:64-83): the clears, then
+// nav_menu_on_arrival := then_menu (frag_drive.inc:75, orig 1598: OPEN_MENU_ON_ARRIVAL
+// when the burger key asked, CLEAR_MENU_ON_ARRIVAL otherwise), then
 // set_locked(true) = cancel timer, lock_visual_rest, instant Locked screen,
 // subject, gate. drive_request is NOT touched: no DISABLE on any relock (H5).
 // The banner only when the stop was not asked (exit_requested false).
 inline constexpr Actions kF2LockStopped =
     acts({Action::CLEAR_EXIT_DEADLINE, Action::CLEAR_EXIT_REQUESTED, Action::CLEAR_THEN_MENU,
-          Action::CANCEL_UNLOCK_TIMER, Action::RING_REST, Action::GO_LOCKED_SCREEN,
-          Action::SET_LOCKED, Action::GATE_UPDATE, Action::SHOW_DRIVE_STOPPED});
-inline constexpr Actions kF2LockLost =
-    acts({Action::CLEAR_EXIT_DEADLINE, Action::CLEAR_EXIT_REQUESTED, Action::CLEAR_THEN_MENU,
-          Action::CANCEL_UNLOCK_TIMER, Action::RING_REST, Action::GO_LOCKED_SCREEN,
-          Action::SET_LOCKED, Action::GATE_UPDATE, Action::SHOW_DRIVE_LOST});
+          Action::CLEAR_MENU_ON_ARRIVAL, Action::CANCEL_UNLOCK_TIMER, Action::RING_REST,
+          Action::GO_LOCKED_SCREEN, Action::SET_LOCKED, Action::GATE_UPDATE,
+          Action::SHOW_DRIVE_STOPPED});
+inline constexpr Actions kF2LockLost = acts(
+    {Action::CLEAR_EXIT_DEADLINE, Action::CLEAR_EXIT_REQUESTED, Action::CLEAR_THEN_MENU,
+     Action::CLEAR_MENU_ON_ARRIVAL, Action::CANCEL_UNLOCK_TIMER, Action::RING_REST,
+     Action::GO_LOCKED_SCREEN, Action::SET_LOCKED, Action::GATE_UPDATE, Action::SHOW_DRIVE_LOST});
 inline constexpr Actions kF2LockAsked =
     acts({Action::CLEAR_EXIT_DEADLINE, Action::CLEAR_EXIT_REQUESTED, Action::CLEAR_THEN_MENU,
-          Action::CANCEL_UNLOCK_TIMER, Action::RING_REST, Action::GO_LOCKED_SCREEN,
-          Action::SET_LOCKED, Action::GATE_UPDATE});
+          Action::CLEAR_MENU_ON_ARRIVAL, Action::CANCEL_UNLOCK_TIMER, Action::RING_REST,
+          Action::GO_LOCKED_SCREEN, Action::SET_LOCKED, Action::GATE_UPDATE});
 inline constexpr Actions kF2LockAskedMenu =
     acts({Action::CLEAR_EXIT_DEADLINE, Action::CLEAR_EXIT_REQUESTED, Action::CLEAR_THEN_MENU,
           Action::OPEN_MENU_ON_ARRIVAL, Action::CANCEL_UNLOCK_TIMER, Action::RING_REST,

@@ -375,7 +375,8 @@ TEST_CASE("DRV-016 a corrupted phase or input sends the session to the safe stat
   }
 }
 
-TEST_CASE("DRV-017 the safe state from any state is LOCKED, DISABLE sent, gate updated",
+TEST_CASE("DRV-017 the safe state from any state is LOCKED, DISABLE sent, no menu on arrival, "
+          "gate updated",
           "[drive][safety]") {
   for (std::size_t pi = 0; pi < ds::kPhaseCount; ++pi) {
     for (unsigned hi = 0; hi < HIDDEN_COMBOS; ++hi) {
@@ -390,6 +391,8 @@ TEST_CASE("DRV-017 the safe state from any state is LOCKED, DISABLE sent, gate u
       TEST_ASSERT_TRUE(contains(out, Action::SEND_DISABLE));
       TEST_ASSERT_TRUE(contains(out, Action::SET_LOCKED));
       TEST_ASSERT_TRUE(contains(out, Action::GATE_UPDATE));
+      // No menu over the Locked screen it loads (the relocks' rule, TABLE.md rows 3-9).
+      TEST_ASSERT_TRUE(contains(out, Action::CLEAR_MENU_ON_ARRIVAL));
     }
   }
 }

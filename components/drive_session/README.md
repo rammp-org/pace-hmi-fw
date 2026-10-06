@@ -14,7 +14,7 @@ behaviour change and needs two human approvals and a new table (CS-SAF-05).
 | The table's vocabulary: the Phase, Input, Guard and Action enums, Env, the row structs | `include/drive_session_types.hpp` |
 | The code: `DriveSession`, the hand-written transition function | `include/drive_session.hpp`, `src/drive_session.cpp` |
 | The table's fingerprint: one 64-bit number over every row, pinned by a `static_assert` | `include/drive_session_fingerprint.hpp` |
-| The table's own invariants (DSO-001..012) | `test/oracle_selfcheck` |
+| The table's own invariants (DSO-001..013) | `test/oracle_selfcheck` |
 | The oracle: the code against the table (DRV-001..021, TS-UNIT-08) | `test/oracle` |
 
 The header `drive_session_table.hpp` is a declaration: it is never edited to make a check pass.
@@ -47,7 +47,7 @@ and action list, or change nothing where no row matches.
 | --- | --- | --- | --- |
 | REQ-DRV-01 | A new session is LOCKED, with DISABLE as the request and nothing armed | – | DRV-021 |
 | REQ-DRV-02 | On a tick, a locked session whose MIB is driving (link up, ENABLED) unlocks: clears every wait and exit latch, opens the padlock, starts the 1 s advance timer, unlocks and updates the gate; whether or not it asked (H1) | 1–2 | DRV-001 |
-| REQ-DRV-03 | On a tick, an unlocked session whose MIB is not driving relocks: Locked screen, gate updated, no DISABLE sent (H5). An exit the user asked for raises no banner, and opens the menu if the burger key asked for it; otherwise the banner says DRIVE_STOPPED with the link up and DRIVE_LOST with it down | 3–9 | DRV-001 |
+| REQ-DRV-03 | On a tick, an unlocked session whose MIB is not driving relocks: Locked screen, gate updated, no DISABLE sent (H5). Before the Locked screen loads, the menu-on-arrival flag is set to whether the burger key asked for the exit (open the menu: row 7) and cleared on every other relock. An exit the user asked for raises no banner; otherwise the banner says DRIVE_STOPPED with the link up and DRIVE_LOST with it down | 3–9 | DRV-001 |
 | REQ-DRV-04 | On a tick, locked on the Seat screen without the MCB: home, with the seat refusal. Otherwise, asking with the answer window gone: the ring rests (LOCKED) | 10–13 | DRV-001, DRV-014 |
 | REQ-DRV-05 | On a tick, an exit not granted by its deadline is refused: EXIT_REFUSED, banner, menu flag cleared, DISABLE not re-sent (H6) | 14 | DRV-002 |
 | REQ-DRV-06 | On a tick, an ask not granted within its answer window raises NOT_GRANTED once; the ring keeps going until the next tick | 15 | DRV-003, DRV-014 |
@@ -62,7 +62,7 @@ and action list, or change nothing where no row matches.
 | REQ-DRV-15 | Any (phase, hidden, input, env) that no row lists changes nothing and returns no action | all | DRV-001..011 |
 | REQ-DRV-16 | Every row of the table is reachable from a state inside the table's contract, and the oracle drives every input | all | DRV-012 |
 | REQ-DRV-17 | Every state reachable from the start keeps the phase invariants (`PHASE_INVARIANTS`) | all | DRV-015 |
-| REQ-DRV-18 | A corrupted phase or input sends the session to the safe state (LOCKED; DISABLE sent; waits, exit latch, menu flag and advance timer cleared; ring at rest; Locked screen; gate updated) and `step` returns false so the caller reports it | – | DRV-016, DRV-017, DRV-018 |
+| REQ-DRV-18 | A corrupted phase or input sends the session to the safe state (LOCKED; DISABLE sent; waits, exit latch, menu flag, menu-on-arrival flag and advance timer cleared; ring at rest; Locked screen; gate updated) and `step` returns false so the caller reports it | – | DRV-016, DRV-017, DRV-018 |
 | REQ-DRV-19 | The stick drives only when unlocked, on the Drive screen, with no menu open (`stick_drives`) | §4 | DRV-019 |
 | REQ-DRV-20 | The stick scale is 0 while calibrating or gated, else the speed; a NaN speed passes an open gate (pinned as-is) | §4 | DRV-020 |
 
