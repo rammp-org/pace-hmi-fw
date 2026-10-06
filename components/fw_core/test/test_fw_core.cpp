@@ -118,6 +118,13 @@ public:
   }
 };
 
+} // namespace
+
+// TEST_CASE expands to file-scope definitions: the cases sit outside the anonymous namespace,
+// as in every other host app, so a parser that does not expand the macro (cppcheck, with no
+// include path to tests/host) still reads the file. Helpers between cases get their own
+// anonymous namespace.
+
 // ---------------------------------------------------------------------------------------------
 // Mailbox
 
@@ -160,7 +167,7 @@ TEST_CASE("FWC-004 a mailbox writer never blocks, from a task or an ISR", "[fw_c
   // return at once. A blocking write would hang here (and the runner's timeout would fail it).
   constexpr unsigned WRITES = 10000;
   fw::Mailbox<SpeedMsg> mailbox({.initial = {0, 0}, .reader_checker = RECORDING});
-  auto writer = mailbox.writer();
+  auto writer = fw::writer(mailbox);
   const auto start = std::chrono::steady_clock::now();
   for (unsigned i = 1; i <= WRITES; ++i) {
     writer.write({static_cast<int>(i), i});
@@ -171,7 +178,7 @@ TEST_CASE("FWC-004 a mailbox writer never blocks, from a task or an ISR", "[fw_c
   TEST_ASSERT_TRUE(elapsed < 2s);
   TEST_ASSERT_FALSE(woken);
   SpeedMsg out{};
-  auto reader = mailbox.reader();
+  auto reader = fw::reader(mailbox);
   TEST_ASSERT_EQUAL(fw::ReadStatus::CHANGED, reader.read(out));
   TEST_ASSERT_EQUAL_INT(-1, out.speed_mm_s);
   TEST_ASSERT_EQUAL_UINT(WRITES + 1, out.seq);
@@ -197,9 +204,11 @@ TEST_CASE("FWC-005 a mailbox read off the reader's task fails and consumes nothi
 // ---------------------------------------------------------------------------------------------
 // Queue
 
+namespace {
 using DropQueue = fw::Queue<EventMsg, 4, fw::FullPolicy::DROP_NEWEST_COUNT>;
 using BlockQueue = fw::Queue<EventMsg, 2, fw::FullPolicy::BLOCK_TIMEOUT>;
 using FaultQueue = fw::Queue<EventMsg, 2, fw::FullPolicy::RAISE_FAULT>;
+} // namespace
 
 TEST_CASE("FWC-006 a queue keeps order", "[fw_core]") {
   DropQueue queue({.name = "order", .receiver_checker = RECORDING});
@@ -292,7 +301,7 @@ TEST_CASE("FWC-010 a RAISE_FAULT queue sets its fault flag, logs once and keeps 
   TEST_ASSERT_EQUAL_UINT32(0, queue.dropped());
   TEST_ASSERT_TRUE(contains(log, "queue 'intents' overflowed"));
   TEST_ASSERT_EQUAL_size_t(log.find("overflowed"), log.rfind("overflowed")); // logged once
-  auto receiver = queue.receiver();
+  auto receiver = fw::receiver(queue);
   TEST_ASSERT_TRUE(receiver.faulted());
   receiver.clear_fault();
   TEST_ASSERT_FALSE(queue.faulted());
@@ -305,9 +314,9 @@ TEST_CASE("FWC-011 send_from_isr never waits and applies each full policy", "[fw
   DropQueue drop({.name = "isr_drop", .receiver_checker = RECORDING});
   BlockQueue block({.name = "isr_block", .send_timeout = 5000ms, .receiver_checker = RECORDING});
   FaultQueue fault({.name = "isr_fault", .receiver_checker = RECORDING});
-  auto drop_tx = drop.sender();
-  auto block_tx = block.sender();
-  auto fault_tx = fault.sender();
+  auto drop_tx = fw::sender(drop);
+  auto block_tx = fw::sender(block);
+  auto fault_tx = fw::sender(fault);
   int queued = 0;
   bool woken = true;
   const auto start = std::chrono::steady_clock::now();
@@ -335,7 +344,7 @@ TEST_CASE("FWC-012 drain hands over the waiting messages in order", "[fw_core]")
   std::error_code ec;
   TEST_ASSERT_TRUE(queue.send({1}, ec));
   TEST_ASSERT_TRUE(queue.send({2}, ec));
-  auto receiver = queue.receiver();
+  auto receiver = fw::receiver(queue);
   std::array<int, 3> seen{};
   std::size_t n = 0;
   TEST_ASSERT_EQUAL_size_t(2, receiver.drain([&](const EventMsg &m) { seen.at(n++) = m.id; }));
@@ -375,8 +384,8 @@ TEST_CASE("FWC-013 a queue receive off the receiver's task fails and consumes no
 TEST_CASE("FWC-014 an atomic value returns the last write through narrow handles", "[fw_core]") {
   static_assert(std::atomic<Verdict>::is_always_lock_free);
   fw::AtomicValue<Verdict> verdict({.initial = Verdict::UNKNOWN});
-  auto writer = verdict.writer();
-  auto reader = verdict.reader();
+  auto writer = fw::writer(verdict);
+  auto reader = fw::reader(verdict);
   TEST_ASSERT_EQUAL(Verdict::UNKNOWN, reader.read());
   run_on_thread("selftest", [&] { writer.write(Verdict::PASS); });
   TEST_ASSERT_EQUAL(Verdict::PASS, reader.read());
@@ -505,11 +514,13 @@ TEST_CASE("FWC-020 a failed ownership check logs and returns false in a release 
 // ---------------------------------------------------------------------------------------------
 // Owned<T>
 
+namespace {
 struct Counter {
   explicit Counter(int start)
       : value(start) {}
   int value;
 };
+} // namespace
 
 TEST_CASE("FWC-021 Owned runs the access on its owner only", "[fw_core]") {
   g_failure = {};
@@ -576,6 +587,7 @@ TEST_CASE("FWC-023 errors and enums have names for logs", "[fw_core]") {
   TEST_ASSERT_TRUE(fw::to_string(static_cast<fw::FullPolicy>(99)) == "UNKNOWN");
 }
 
+namespace {
 struct Unmarked {
   int x;
 };
@@ -587,6 +599,7 @@ struct Holder {
   static constexpr bool IS_MESSAGE = true;
   std::string text;
 };
+} // namespace
 
 TEST_CASE("FWC-024 messages and context tokens obey their compile-time rules", "[fw_core]") {
   // The rules the must-not-compile tests prove from the other side (TS-UNIT-06).
@@ -622,5 +635,3 @@ TEST_CASE("FWC-025 the host port names tasks and cuts long names to fit", "[fw_c
   TEST_ASSERT_TRUE(id != hmi::fw::port::NO_TASK);
   TEST_ASSERT_TRUE(id != hmi::fw::port::current_task());
 }
-
-} // namespace

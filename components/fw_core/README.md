@@ -17,7 +17,7 @@ Status: new, **not wired into the firmware yet** (no other component requires it
 | REQ-FWC-04 | A queue keeps order, has a declared depth (1..64), and a drain takes at most that depth | FWC-006, FWC-012, mnc_queue_depth_zero |
 | REQ-FWC-05 | A full queue acts on its declared policy: DROP_NEWEST_COUNT drops and counts, BLOCK_TIMEOUT waits at most its timeout then fails, RAISE_FAULT fails and sets a fault flag and logs once; from an ISR none of them waits | FWC-007..011 |
 | REQ-FWC-06 | The atomic channel accepts only types whose `std::atomic` is always lock-free | FWC-014, mnc_atomic_not_lock_free |
-| REQ-FWC-07 | A handle exposes one end of one channel (Writer/Reader, Sender/Receiver) | FWC-004, FWC-011, FWC-012, FWC-014, mnc_writer_cannot_read |
+| REQ-FWC-07 | A handle exposes one end of one channel (Writer/Reader, Sender/Receiver) | FWC-004, FWC-011, FWC-012, FWC-014, mnc_writer_cannot_read, mnc_const_channel_no_writer |
 | REQ-FWC-08 | A `ThreadChecker` passes on its owner, and fails on any other task and in any ISR, reporting the function, `file:line`, the caller task and the owner task | FWC-015..018 |
 | REQ-FWC-09 | A failed ownership check aborts in a test build and logs and returns false in a release build (`OWNERSHIP_CHECKS_ABORT`) | FWC-019, FWC-020 |
 | REQ-FWC-10 | `Owned<T>` runs an access only on its owner task, and only with a context token | FWC-021 |
@@ -53,7 +53,9 @@ struct SpeedMsg {
 fw::Mailbox<SpeedMsg> speed({.initial = {0}});
 fw::Queue<IntentMsg, 8, fw::FullPolicy::RAISE_FAULT> intents({.name = "intents"});
 
-// Producer Config gets speed.writer() / intents.sender(); consumer gets the other end.
+// Producer Config gets fw::writer(speed) / fw::sender(intents); consumer gets fw::reader(speed)
+// / fw::receiver(intents). The factories take the channel by non-const reference, so a const
+// channel cannot hand out a write end.
 SpeedMsg now{};
 if (reader.read(now) == fw::ReadStatus::CHANGED) { /* ... */ }
 receiver.drain([&](const IntentMsg &m) { handle(m); });

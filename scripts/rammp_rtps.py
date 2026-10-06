@@ -85,7 +85,7 @@ def find_header(relative: str = HEADER_RELATIVE_PATH) -> str:
         directory = parent
 
 
-#: this HMI's additions (timing, display limits, bench topics), beside selftest_spec.h
+#: this HMI's additions (timing, display limits, bench topics), beside selftest_spec.hpp
 HEADER_PATH = find_header()
 #: the shared messages, topics and tables (the rammp-rtps submodule)
 SHARED_HEADER_PATH = find_header(SHARED_HEADER_RELATIVE_PATH)
@@ -397,7 +397,7 @@ INT32_MIN = -(2 ** 31)
 INT32_MAX = 2 ** 31 - 1
 
 #: the self test's check table: every check, its limits and why (beside HEADER_PATH)
-SELFTEST_SPEC_PATH = os.path.join(os.path.dirname(HEADER_PATH), "selftest_spec.h")
+SELFTEST_SPEC_PATH = os.path.join(os.path.dirname(HEADER_PATH), "selftest_spec.hpp")
 # Check{Id::ID, "name", "unit", lo, hi, Need::..., "what it proves"},  (the kChecks rows)
 _SELFTEST_ROW_RE = re.compile(
     r'^\s*Check\{\s*Id::([A-Z0-9_]+)\s*,\s*"([^"]*)"\s*,\s*"([^"]*)"\s*,\s*([^,]+?)\s*,'
@@ -411,7 +411,7 @@ def _selftest_limit(text: str, no_limit_name: str, no_limit: int) -> int:
 
 
 class SelfTestSpecRow(NamedTuple):
-    """One check of main/selftest_spec.h. lo/hi are INT32_MIN/INT32_MAX for "no limit"."""
+    """One check of main/selftest_spec.hpp. lo/hi are INT32_MIN/INT32_MAX for "no limit"."""
 
     id: str    # SYS_RESET
     name: str  # "sys.clean_reset"
@@ -423,11 +423,11 @@ class SelfTestSpecRow(NamedTuple):
 
 
 def parse_selftest_spec(text: str) -> list[SelfTestSpecRow]:
-    """The check table in `text` (selftest_spec.h), in table order."""
+    """The check table in `text` (selftest_spec.hpp), in table order."""
     rows = []
     for check_id, name, unit, lo, hi, need, desc in _SELFTEST_ROW_RE.findall(text):
         if need not in _SELFTEST_NEEDS:
-            raise ValueError(f"selftest_spec.h: {name}: unknown need {need}")
+            raise ValueError(f"selftest_spec.hpp: {name}: unknown need {need}")
         rows.append(SelfTestSpecRow(
             check_id, name, unit,
             _selftest_limit(lo, "kAnyLo", INT32_MIN),
@@ -437,7 +437,7 @@ def parse_selftest_spec(text: str) -> list[SelfTestSpecRow]:
 
 
 def load_selftest_spec(path: str = SELFTEST_SPEC_PATH) -> dict[str, SelfTestSpecRow]:
-    """This checkout's selftest_spec.h, keyed by check name (in table order)."""
+    """This checkout's selftest_spec.hpp, keyed by check name (in table order)."""
     with open(path, encoding="utf-8") as handle:
         rows = parse_selftest_spec(handle.read())
     if not rows:

@@ -81,7 +81,7 @@ static std::optional<uint8_t> drv2605_status() {
 // output stage run end to end - not that a motor is attached. The chip's own
 // actuator diagnostic would, but on the bench unit it reported DIAG_RESULT in
 // open- and closed-loop mode alike, so it cannot be told apart from a missing
-// motor and is not used (see hap.drv_play in selftest_spec.h).
+// motor and is not used (see hap.drv_play in selftest_spec.hpp).
 static std::optional<bool> drv2605_play_click(std::string &detail) {
   if (!haptic || !drv2605_read_register) {
     detail = "DRV2605 not initialised";

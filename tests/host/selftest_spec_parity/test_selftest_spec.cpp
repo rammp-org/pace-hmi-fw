@@ -1,4 +1,4 @@
-// L1: the self-test check table (main/selftest_spec.h) and its host-script copy
+// L1: the self-test check table (main/selftest_spec.hpp) and its host-script copy
 // (TS-UNIT-04, CS-TYP-03). Three views must agree row for row, in order: the firmware's
 // table, the golden rows characterised from it (golden_rows.json), and the parse that
 // scripts/rammp_rtps.py (used by rtps_selftest.py) makes of the header. Then the table's
@@ -10,7 +10,7 @@
 #include <span>
 #include <string_view>
 
-#include "selftest_spec.h"
+#include "selftest_spec.hpp"
 #include "test_case.hpp"
 
 namespace {
@@ -93,14 +93,14 @@ void expect_text(const char *want, std::string_view got, const char *at) {
   TEST_ASSERT_TRUE_MESSAGE(std::string_view(want) == got, at);
 }
 
-} // namespace
-
-TEST_CASE("SST-001 the firmware's check table matches the golden rows, in order",
-          "[selftest_spec]") {
-  TEST_ASSERT_EQUAL_UINT32_MESSAGE(std::size(kGolden), kChecks.size(), "row count");
-  for (std::size_t i = 0; i < kChecks.size() && i < std::size(kGolden); ++i) {
+// The firmware's table against the golden rows. The golden rows come in as a span (like
+// expect_rows), not as kGolden itself: a reader that cannot see the generated
+// golden_rows.inc (cppcheck, with no build folder) would take kGolden to be empty.
+void expect_table(std::span<const Row> golden) {
+  TEST_ASSERT_EQUAL_UINT32_MESSAGE(golden.size(), kChecks.size(), "row count");
+  for (std::size_t i = 0; i < kChecks.size() && i < golden.size(); ++i) {
     const Check &c = kChecks[i];
-    const Row &g = kGolden[i];
+    const Row &g = golden[i];
     char at[96];
     where(at, i, g.name);
     expect_text(g.id, kIdNames[selftest_spec::index_of(c.id)], at);
@@ -113,7 +113,14 @@ TEST_CASE("SST-001 the firmware's check table matches the golden rows, in order"
   }
 }
 
-TEST_CASE("SST-002 the host scripts' parse of selftest_spec.h matches the golden rows, in order",
+} // namespace
+
+TEST_CASE("SST-001 the firmware's check table matches the golden rows, in order",
+          "[selftest_spec]") {
+  expect_table(kGolden);
+}
+
+TEST_CASE("SST-002 the host scripts' parse of selftest_spec.hpp matches the golden rows, in order",
           "[selftest_spec]") {
   expect_rows(kGolden, kScript);
 }

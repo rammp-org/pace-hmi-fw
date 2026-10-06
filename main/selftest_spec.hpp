@@ -1,5 +1,5 @@
 /**
- * @file selftest_spec.h
+ * @file selftest_spec.hpp
  * @brief The HMI self test: every check it runs, and the limits it is held to.
  *
  * THIS FILE IS THE SPEC. A firmware change is checked by running the self test
@@ -41,9 +41,10 @@
  * (CS-CFG-03).
  */
 
-#ifndef SELFTEST_SPEC_H
-#define SELFTEST_SPEC_H
+#ifndef SELFTEST_SPEC_HPP
+#define SELFTEST_SPEC_HPP
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -315,17 +316,14 @@ static_assert(ids_match_rows(), "Id and kChecks disagree: same checks, same orde
 /// @brief Every row has lo <= hi, a name and a why, and a known need.
 /// @return true when every row is well formed
 consteval bool rows_well_formed() {
-  for (const Check &c : kChecks) {
+  return std::all_of(kChecks.begin(), kChecks.end(), [](const Check &c) {
     const bool need_ok =
         c.need == Need::REQUIRED || c.need == Need::OPTIONAL || c.need == Need::REMOTE;
-    if (c.lo > c.hi || c.name.empty() || c.why.empty() || !need_ok) {
-      return false;
-    }
-  }
-  return true;
+    return c.lo <= c.hi && !c.name.empty() && !c.why.empty() && need_ok;
+  });
 }
 static_assert(rows_well_formed(),
-              "a selftest_spec.h row has lo > hi, no name or why, or a bad need");
+              "a selftest_spec.hpp row has lo > hi, no name or why, or a bad need");
 
 /// @brief No two rows share a name: tools key the report on it.
 /// @return true when the names are unique
@@ -339,7 +337,7 @@ consteval bool names_unique() {
   }
   return true;
 }
-static_assert(names_unique(), "two selftest_spec.h rows share a name");
+static_assert(names_unique(), "two selftest_spec.hpp rows share a name");
 
 } // namespace selftest_spec
 

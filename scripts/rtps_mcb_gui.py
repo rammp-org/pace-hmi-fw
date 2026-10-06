@@ -620,7 +620,7 @@ class McbPanel:
         ttk.Spinbox(frame, from_=0.5, to=30.0, increment=0.5, width=5,
                     textvariable=self.dwell_var).pack(side="left")
 
-        # The HMI's self test (checks and limits in main/selftest_spec.h). The
+        # The HMI's self test (checks and limits in main/selftest_spec.hpp). The
         # harness answers its pings and logs the report as it arrives; this only
         # asks for a run. rtps_selftest.py does the same from a terminal.
         ttk.Button(frame, text="Run self test", command=self._run_selftest).pack(

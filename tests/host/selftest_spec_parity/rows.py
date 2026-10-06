@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The self-test check table as rows, for the parity app (TS-UNIT-04, CS-TYP-03).
 
-Three views of main/selftest_spec.h must agree, row for row and in order:
+Three views of main/selftest_spec.hpp must agree, row for row and in order:
   - golden_rows.json: the table as it was characterised (written once, by `golden`);
   - the host scripts' parse of the header (rammp_rtps.parse_selftest_spec, which
     rtps_selftest.py uses);
