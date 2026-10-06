@@ -422,7 +422,7 @@ def make_baseline(current: dict[str, dict[str, int]]) -> dict[str, dict[str, int
 #   channel helpers ..."); `#ifdef CONFIG_` in a component's config header (CS-TYP-05:
 #   "Each Kconfig option becomes a constexpr value, once, in the component's config header").
 RULE_PLACEMENTS: dict[str, re.Pattern[str]] = {
-    "locks": re.compile(r"^components/fw_core/"),
+    "locks": re.compile(r"^components/fw_core/(include/fw_core/port/|src/port_)"),
     "if_config": re.compile(r"^components/[^/]+/include/(.+/)?config\.hpp$"),
 }
 
@@ -698,7 +698,9 @@ def selftest() -> int:
            measure("x.hpp", "inline bool f(bool c, int x = {}) noexcept { return c; }\n")["mutable_globals"], 0)
     expect("a real braced global still counts", measure("x.cpp", "int g{3};\n")["mutable_globals"], 1)
     expect("locks allowed in the channel helpers",
-           violations({}, {"components/fw_core/src/q.cpp": {**zero, "locks": 2}}), [])
+           violations({}, {"components/fw_core/include/fw_core/port/q.hpp": {**zero, "locks": 2}}), [])
+    expect("locks not allowed in the rest of fw_core",
+           len(violations({}, {"components/fw_core/src/check.cpp": {**zero, "locks": 1}})), 1)
     expect("locks still forbidden elsewhere",
            len(violations({}, {"components/x/src/q.cpp": {**zero, "locks": 2}})), 1)
     expect("CONFIG_ allowed in a component config header",
