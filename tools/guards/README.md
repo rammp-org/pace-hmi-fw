@@ -77,6 +77,14 @@ case lines and summary line. That is the host L1 app contract minus C++: no comp
 entries yet: `run.py check` requires `TEST_CASE` in C/C++ sources for an L1 app and has no L0
 runner (Parked, see below).
 
+## CI
+
+- `l0.yml` job `checks`: the four `selftest`s (no toolchain needed).
+- `l0.yml` job `bench-build`: after the bench build, `init_order.py check --variant bench` and
+  `exports.py check` on `build_bench`, in the IDF image (they need its readelf/objdump/nm).
+- `build.yml` job `build`: after the default build, the same two on `build` (`--variant default`).
+- `task_dump` / `observer_census` checks need a board: bench runner only.
+
 ## G10 firmware half: the remote UI `TASKS` verb
 
 The plan asks for the task dump "in the self-test JSON". Two things stand in the way:
