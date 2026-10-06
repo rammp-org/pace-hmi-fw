@@ -44,6 +44,7 @@
 #ifndef SELFTEST_SPEC_HPP
 #define SELFTEST_SPEC_HPP
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -315,14 +316,11 @@ static_assert(ids_match_rows(), "Id and kChecks disagree: same checks, same orde
 /// @brief Every row has lo <= hi, a name and a why, and a known need.
 /// @return true when every row is well formed
 consteval bool rows_well_formed() {
-  for (const Check &c : kChecks) {
+  return std::all_of(kChecks.begin(), kChecks.end(), [](const Check &c) {
     const bool need_ok =
         c.need == Need::REQUIRED || c.need == Need::OPTIONAL || c.need == Need::REMOTE;
-    if (c.lo > c.hi || c.name.empty() || c.why.empty() || !need_ok) {
-      return false;
-    }
-  }
-  return true;
+    return c.lo <= c.hi && !c.name.empty() && !c.why.empty() && need_ok;
+  });
 }
 static_assert(rows_well_formed(),
               "a selftest_spec.hpp row has lo > hi, no name or why, or a bad need");
