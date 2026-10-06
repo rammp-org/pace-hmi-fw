@@ -113,8 +113,10 @@ yet measured or decided, and "none" means checked and absent.
 
 - Board runner: `tools/bench/run_bench.py` (B0-B5; lease file `C:/Users/halai/Offline_Documents/ATDev/rammp/.board-lease`;
   last-good images in `C:/b/bench/good/`; results in `C:/b/bench/results/`). Flakiness seen on
-  2026-10-06: `time.render_max` outside its 20 % band in 1 of 6 runs on m3; `pwr.vbat` read about
-  4.4 V (taken as "no pack") in 2 of 5 runs on the drive-session draft only.
+  2026-10-06: `time.render_max` outside 20 % in 1 of 6 runs on m3 (band widened to 30 %, owner P4).
+- Power: board 2 has NO battery; it is powered over PoE (owner, 2026-10-06). `pwr.vbat` therefore
+  does not read a battery: the ~8.4 V it reports, the occasional ~4.4 V reads and the top bar's
+  "78 %" are not battery state. Ignored for now (owner, P3).
 - Peer simulators: `scripts/rtps_mcb_sim.py --peer <ip> --bind-address 192.168.137.2`, with stdin
   commands `e`, `ok`, `x`, `s`. `scripts/rtps_selftest.py` acts as the MCB during a self-test run.
 - Debug channel: `scripts/hmi_ui.py` on TCP 3333 (screenshots, taps, keys, walk). Test builds

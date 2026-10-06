@@ -122,3 +122,15 @@ Drafts, pushed and **not merged** (each needs two human approvals):
 3. Answer P1–P8.
 4. Open the PR `dev_refactor` → `dev` (CS-GIT-02: one change per PR; split it per step if you prefer).
 5. Wire `idf.py clang-check` into the ratchet; add stick injection to the bench (test-only Kconfig) so B5 can see the gate.
+
+## Owner decisions, 2026-10-06 morning
+
+| # | Decision |
+| --- | --- |
+| P1 | Leave history: the SSID stays in c9915f8 (already redacted in the tree) |
+| P3 | Ignore the 4.4 V reads: board 2 has no battery and runs on PoE, so `pwr.vbat` is not a battery reading (the bench agent's "pack fitted" claim was wrong) |
+| P4 | Widen `time.render_max` to ±30 % (`tools/bench/compare_selftest.py`, band `pct30`); the m3 re-check that failed at 66.9 ms now judges PASS |
+| P5 | Fix first: H2 (POST before motion), H3 (open-circuit stick), H5/H6 (DISABLE on lock, re-sent) |
+| P6 | Topology: accept RAISE_FAULT for SEAT_REQUEST and SELFTEST_REQ |
+| P7 | Reasoned suppressions allowed in test-only legacy oracles and fixtures, recorded in the profile |
+| PR | No PR for now: first make the code work well and handle the issues and hazards |
