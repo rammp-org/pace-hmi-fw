@@ -13,8 +13,8 @@ literally; "Read ADC" runs on espp defaults: prio 0, unpinned).
 The dump: the bench build's remote UI answers `TASKS` with one JSON line,
 `OK {"tasks":[{"name","prio","core","stack_bytes","stack_free"}...],"complete":true}`
 (core -1 = unpinned; stack_bytes = the created size to within 16 B of alignment;
-stack_free = the high-water mark). That command is the firmware patch
-tools/guards/firmware/remote_ui_tasks.patch (not applied yet: see README). `fetch` reads
+stack_free = the high-water mark). That verb is in main/remote_ui.cpp (bench builds,
+CONFIG_HMI_REMOTE_UI; see README). `fetch` reads
 it and, with --into, adds it to the self-test JSON as "tasks". `check --dump` takes that
 JSON, a fetch output, or a text log holding the `OK {"tasks":...}` line.
 
@@ -88,7 +88,7 @@ def fetch(ip: str, port: int = PORT) -> dict:
         raise gl.GuardError(f"remote UI at {ip}:{port}: {exc}") from exc
     line = buf.split(b"\n", 1)[0].decode("utf-8", "replace").strip()
     if not line.startswith("OK {"):
-        raise gl.GuardError(f"TASKS answered {line[:120]!r} (firmware without the TASKS patch?)")
+        raise gl.GuardError(f"TASKS answered {line[:120]!r} (not a bench build, or firmware older than the TASKS verb?)")
     return parse_dump(line[3:])
 
 

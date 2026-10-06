@@ -77,7 +77,7 @@ case lines and summary line. That is the host L1 app contract minus C++: no comp
 entries yet: `run.py check` requires `TEST_CASE` in C/C++ sources for an L1 app and has no L0
 runner (Parked, see below).
 
-## G10 firmware half: `firmware/remote_ui_tasks.patch` (not applied)
+## G10 firmware half: the remote UI `TASKS` verb
 
 The plan asks for the task dump "in the self-test JSON". Two things stand in the way:
 1. The self-test JSON is built by `rtps_selftest.py` from the RTPS report rows, which are a fixed
@@ -87,19 +87,17 @@ The plan asks for the task dump "in the self-test JSON". Two things stand in the
    (`tools/l0/ratchet.py`) fails any non-blank line added: tried, `lines 1089 > baseline 1030`,
    plus `if_config` and `log_direct`.
 
-So the dump rides the bench-only remote UI instead. `TASKS` answers one JSON line, and
-`task_dump.py fetch --into selftest.json` merges it into the self-test JSON. The patch adds
-`take_tasks`/`send_tasks` and the `TASKS` verb to `main/remote_ui.cpp`, which compiles only
-with `CONFIG_HMI_REMOTE_UI`, and one doc line to `remote_ui.hpp`. It walks the task list with
-`uxTaskGetSnapshotAll` under `vTaskSuspendAll` (the usage `freertos_debug.h` documents), then
-reads name, priority, core (`xTaskGetCoreID`), the created stack size
+So the dump rides the bench-only remote UI instead (orchestrator decision, recorded under V11 in
+the plan). `TASKS` answers one JSON line, and `task_dump.py fetch --into selftest.json` merges
+it into the self-test JSON file on the PC. `take_tasks`/`send_tasks` in `main/remote_ui.cpp`
+(compiled only with `CONFIG_HMI_REMOTE_UI`) walk the task list with `uxTaskGetSnapshotAll`
+under `vTaskSuspendAll` (the usage `freertos_debug.h` documents; the trace facility stays off),
+then read name, priority, core (`xTaskGetCoreID`), the created stack size
 (`pxEndOfStack - xTaskGetStackStart`) and the high-water mark. The scheduler is suspended on one
 core for roughly a millisecond (the high-water scans). Nothing runs unless the PC sends `TASKS`.
-Checked: `-fsyntax-only` with both builds' full flags (bench and default): exit 0.
-`ratchet.py check`: PASS. clang-format 14: no change. `git apply --check`: clean.
 
-To land it: `git apply tools/guards/firmware/remote_ui_tasks.patch`, build the bench variant,
-then `task_dump.py fetch` and `task_dump.py baseline --dump` (review), then `check`.
+First use on the bench: `task_dump.py fetch`, then `task_dump.py baseline --dump` (review the
+observed IDF/espp tasks it adds), then `check`.
 
 ## G11 firmware design (parked)
 
