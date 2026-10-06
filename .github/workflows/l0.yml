@@ -21,6 +21,9 @@ jobs:
     steps:
     - name: Checkout repo
       uses: actions/checkout@v7
+      with:
+        # Full history: ratchet.py check re-verifies transfer grants against their base commit.
+        fetch-depth: 0
 
     # ubuntu-latest (24.04) ships Python 3.12; both scripts are stdlib only.
     - name: Ratchet self test
