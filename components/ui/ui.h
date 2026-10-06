@@ -38,13 +38,13 @@ extern "C" {
 #include "screens/ui_SettingsScreen.h"
 #include "screens/ui_SkunkWorksScreen.h"
 #include "screens/ui_DiagnosticsScreen.h"
-#include "screens/ui_UpdateScreen.h"
 #include "screens/ui_LockedScreen.h"
 #include "screens/ui_DriveScreen.h"
 #include "screens/ui_JoystickScreen.h"
 #include "screens/ui_BenchGateScreen.h"
 #include "screens/ui_InternetScreen.h"
 #include "screens/ui_AboutScreen.h"
+#include "screens/ui_UpdateScreen.h"
 
 ///////////////////// VARIABLES ////////////////////
 

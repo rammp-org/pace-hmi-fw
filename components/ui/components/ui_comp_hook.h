@@ -16,6 +16,7 @@ void ui_comp_ErrorBanner_create_hook(lv_obj_t * comp);
 void ui_comp_MenuKey_create_hook(lv_obj_t * comp);
 void ui_comp_MenuOverlay_create_hook(lv_obj_t * comp);
 void ui_comp_NetRow_create_hook(lv_obj_t * comp);
+void ui_comp_ReleaseRow_create_hook(lv_obj_t * comp);
 void ui_comp_SettingRow_create_hook(lv_obj_t * comp);
 void ui_comp_SlotTile_create_hook(lv_obj_t * comp);
 void ui_comp_TopBar_create_hook(lv_obj_t * comp);

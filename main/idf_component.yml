@@ -70,3 +70,5 @@ dependencies:
   # 2.x, not 3.x: 3.x speaks only RPC-V2 and needs 3.x firmware on the C6, which the
   # Tab5 does not ship with.
   espressif/esp_hosted: '~2.12.11'
+  # JSON for GitHub's release list (github_ota.cpp); IDF 6.0 no longer ships cJSON.
+  espressif/cjson: ^1.7.19

@@ -3,7 +3,7 @@ idf_component_register(SRC_DIRS "."
                        PRIV_REQUIRES adc button drv2605 file_system filters input_drivers joystick lvgl m5stack-tab5 ui esp_driver_ppa
                                      rtps cdr w5500 esp_eth esp_netif esp_event lwip esp_app_format
                                      esp_wifi esp_hosted
-                                     app_update bootloader_support esp_partition mbedtls
+                                     app_update bootloader_support esp_partition mbedtls esp_http_client
                                      rammp_rtps_messages
                        EMBED_TXTFILES click.wav)
 

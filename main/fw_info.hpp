@@ -47,3 +47,8 @@ void fw_info_start();
 
 /// What is known so far. Any task.
 FwInfo fw_info();
+
+/// Adds the line for an image the board itself checked against GitHub (an
+/// update from a release: github_ota.cpp), in the format fw_verify.py writes.
+/// It describes that image, which runs from the next boot.
+void fw_info_record_release(const std::string &sha256, const std::string &tag, bool prerelease);

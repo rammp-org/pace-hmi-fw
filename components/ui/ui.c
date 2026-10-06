@@ -39,13 +39,13 @@ void ui_init(void)
     ui_SettingsScreen_screen_init();
     ui_SkunkWorksScreen_screen_init();
     ui_DiagnosticsScreen_screen_init();
-    ui_UpdateScreen_screen_init();
     ui_LockedScreen_screen_init();
     ui_DriveScreen_screen_init();
     ui_JoystickScreen_screen_init();
     ui_BenchGateScreen_screen_init();
     ui_InternetScreen_screen_init();
     ui_AboutScreen_screen_init();
+    ui_UpdateScreen_screen_init();
     ui____initial_actions0 = lv_obj_create(NULL);
     lv_disp_load_scr(ui_BootScreen);
 }
@@ -59,11 +59,11 @@ void ui_destroy(void)
     ui_SettingsScreen_screen_destroy();
     ui_SkunkWorksScreen_screen_destroy();
     ui_DiagnosticsScreen_screen_destroy();
-    ui_UpdateScreen_screen_destroy();
     ui_LockedScreen_screen_destroy();
     ui_DriveScreen_screen_destroy();
     ui_JoystickScreen_screen_destroy();
     ui_BenchGateScreen_screen_destroy();
     ui_InternetScreen_screen_destroy();
     ui_AboutScreen_screen_destroy();
+    ui_UpdateScreen_screen_destroy();
 }
