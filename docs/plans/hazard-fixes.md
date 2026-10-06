@@ -132,3 +132,10 @@ shared file: B1 merges before B2's boot hook.
 | D2 | Firmware-only for H3: detect the high rail, NaN and failed reads; the low-rail open circuit (0 mV) is a documented residual hazard |
 | D3 | Pending: the owner asks the MCB team about the XYTwist timeout and DISABLE semantics; C3 sign-off waits for the answer |
 | Phase A | Approved to start on the draft branches (incl. the table-type move with a fingerprint, and the CLEAR_MENU_ON_ARRIVAL table correction as its own commit for review) |
+
+## 8. Findings during Phase A
+
+| Finding | Where | Action |
+| --- | --- | --- |
+| A lazily built `static espp::Logger` on a fault path (CS-SAF-04) | `components/fw_core/src/port_freertos.cpp:17` (`log_error`) | Construct at start-up before fw_core is used in a safety island |
+| clang-tidy is not in CI (cppcheck only), so the 60-line limit holds only via `idf.py clang-check`, which needs a clang-toolchain build | `.github/workflows/static_analysis.yml` | Add a clang-toolchain clang-check job |
