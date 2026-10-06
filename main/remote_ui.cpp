@@ -16,7 +16,9 @@
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_private/freertos_idf_additions_priv.h"
 #include "esp_pthread.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/freertos_debug.h"
 #include "freertos/idf_additions.h"
@@ -212,9 +214,27 @@ int arg(const std::vector<std::string> &words, size_t index, int fallback = 0) {
 }
 
 // TASKS (G10, docs/plans/app-main-shrink.md V11): every task's name, priority,
-// core and stack, for tools/guards/task_dump.py. The scheduler is suspended
-// (this core) while the list is walked, as freertos_debug.h asks: a task
-// deleted meanwhile would leave a dangling handle. Only copies happen inside.
+// core and stack, for tools/guards/task_dump.py.
+//
+// The walk holds the kernel lock, so it is consistent across BOTH cores. On this
+// dual-core IDF FreeRTOS (not CONFIG_FREERTOS_SMP), vTaskSuspendAll only stops the
+// calling core's scheduler (FreeRTOS-Kernel/tasks.c:2499-2524:
+// ++uxSchedulerSuspended[portGET_CORE_ID()], the lock released again).
+// uxTaskGetSnapshotAll/xTaskGetNext take no lock
+// (esp_additions/freertos_tasks_c_additions.h:976, :1061). Under the old
+// vTaskSuspendAll, the other core moved tasks between the lists mid-walk: one bench
+// dump in 9 listed a task twice, and a task deleted there could leave a dangling
+// TCB. Every task list change takes xKernelLock. prvTakeKernelLock() is IDF's
+// wrapper to take it from outside tasks.c (esp_private/freertos_idf_additions_priv.h:
+// 140-160; it is taskENTER_CRITICAL(&xKernelLock), freertos_tasks_c_additions.h:42-46;
+// event_groups.c:569-572 uses it the same way). It is declared only for dual-core
+// non-SMP builds, so another kernel configuration fails to compile here.
+// uxTaskGetSystemState (CONFIG_FREERTOS_USE_TRACE_FACILITY) takes the same lock,
+// but it hands back the name as a pointer into the TCB and no pxEndOfStack, so the
+// rest would be read after the lock was dropped. Inside the lock: only copies and
+// non-blocking reads. uxTaskPriorityGet and xTaskGetCoreID take xKernelLock again,
+// which IDF spinlocks allow on the owning core (esp_hw_support/include/spinlock.h:
+// 103-112). The high-water scans make it the longest part; "locked_us" reports it.
 constexpr UBaseType_t kMaxTasks = 64; // the board runs about 30
 
 struct TaskRow {
@@ -254,16 +274,26 @@ struct TaskTable {
   std::array<TaskSnapshot_t, kMaxTasks> snapshots{};
   std::array<TaskRow, kMaxTasks> rows{};
   UBaseType_t count = 0;
+  uint32_t dup_handles = 0; // a TCB seen twice: the walk was not consistent
+  int64_t locked_us = 0;    // how long the kernel lock was held
 };
 
 void take_tasks(TaskTable &table) {
-  vTaskSuspendAll();
+  const int64_t t0 = esp_timer_get_time();
+  prvTakeKernelLock();
   const UBaseType_t n = uxTaskGetSnapshotAll(table.snapshots.data(), kMaxTasks, nullptr);
   for (UBaseType_t i = 0; i < n; ++i) {
     const TaskSnapshot_t &snap = table.snapshots[i];
     auto task = static_cast<TaskHandle_t>(snap.pxTCB);
     if (task == nullptr) {
       continue; // a corrupt list entry: the iterator hands back no handle
+    }
+    // belt and braces: under the lock a TCB cannot appear twice; count it if it does
+    const auto first = table.snapshots.begin();
+    if (std::any_of(first, first + i,
+                    [&](const TaskSnapshot_t &s) { return s.pxTCB == snap.pxTCB; })) {
+      ++table.dup_handles;
+      continue;
     }
     TaskRow &row = table.rows[table.count++];
     std::strncpy(row.name.data(), pcTaskGetName(task), row.name.size() - 1);
@@ -282,12 +312,13 @@ void take_tasks(TaskTable &table) {
     // ESP-IDF reports the high-water mark in bytes, not words
     row.stack_free = static_cast<uint32_t>(uxTaskGetStackHighWaterMark(task));
   }
-  // returns whether resuming already yielded: nothing to act on
-  static_cast<void>(xTaskResumeAll());
+  prvReleaseKernelLock();
+  table.locked_us = esp_timer_get_time() - t0;
 }
 
 // One line: OK {"tasks":[{"name":..,"prio":..,"core":..,"stack_bytes":..,
-// "stack_free":..,"coproc_pinned":..},...],"complete":true}; core -1 = not pinned.
+// "stack_free":..,"coproc_pinned":..},...],"complete":true,"dup_handles":0,
+// "locked_us":..}; core -1 = not pinned.
 bool send_tasks(int sock) {
   auto table = std::make_unique<TaskTable>(); // ~2.5 KB: off this task's stack
   take_tasks(*table);
@@ -305,7 +336,9 @@ bool send_tasks(int sock) {
            ",\"stack_free\":" + std::to_string(row.stack_free) +
            ",\"coproc_pinned\":" + (row.coproc_pinned ? "true" : "false") + "}";
   }
-  out += std::string("],\"complete\":") + (table->count < kMaxTasks ? "true" : "false") + "}";
+  out += std::string("],\"complete\":") + (table->count < kMaxTasks ? "true" : "false") +
+         ",\"dup_handles\":" + std::to_string(table->dup_handles) +
+         ",\"locked_us\":" + std::to_string(table->locked_us) + "}";
   return send_line(sock, out);
 }
 
