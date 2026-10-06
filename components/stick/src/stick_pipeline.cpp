@@ -65,7 +65,7 @@ Position mount(Position p, bool swap, bool invert_x, bool invert_y) {
 // conversion, written out.
 KeyThresholds key_thresholds(int sensitivity) {
   const int level = std::clamp<int>(sensitivity, SENSITIVITY_MIN, SENSITIVITY_MAX);
-  const float engage = 0.30f - static_cast<float>(level - 1) * (0.29f / 9.0f);
+  const float engage = 0.30f - (static_cast<float>(level - 1) * (0.29f / 9.0f));
   return {.engage = engage, .release = engage * 0.5f};
 }
 
