@@ -1,16 +1,14 @@
 #include "joystick_cal.hpp"
 
-#include <algorithm>
 #include <atomic>
-#include <cmath>
 #include <cstdio>
 #include <fstream>
 #include <mutex>
-#include <numeric>
 #include <string>
 #include <utility>
 
 #include "cal_record.hpp"
+#include "cal_run.hpp"
 #include "logger.hpp"
 #include "storage.hpp"
 
@@ -24,44 +22,11 @@ using hmi::cal::kFileName;
 using hmi::cal::kFullTravelMv;
 using hmi::cal::plausible;
 
-// The run ticks at the ADC task's 33 ms, so every tick sees a fresh sample.
-constexpr uint32_t kTickMs = 33;
-constexpr int kTicksPerSecond = 1000 / kTickMs;
-// Time to read the first prompt and take a hand off the stick before the rest
-// position is sampled.
-constexpr int kSettleTicks = kTicksPerSecond * 3 / 2;
-// A position is taken once the axis has held it this long...
-constexpr int kHoldTicks = kTicksPerSecond;
-// ...moving no more than this, peak to peak. Twist is the noisy pot.
-constexpr std::array<float, 3> kSteadyMv = {30.0f, 30.0f, 60.0f};
-// How far past rest counts as pushed "fully" is kFullTravelMv (cal_record.hpp).
-// The bench stick travels ~1470 mV each way from rest, so this needs a clear
-// push to the gate - a stick held half-way is not taken for the end - while
-// leaving room for a unit with a shorter throw. Also the least travel a saved
-// calibration may claim.
-// Within this of rest counts as let go, for the last step.
-constexpr float kReleasedMv = 150.0f;
-constexpr int kStepTimeoutTicks = kTicksPerSecond * 20;
-// How long the result stays up before the screen's own text comes back.
-constexpr int kResultTicks = kTicksPerSecond * 3;
-constexpr int kStepCount = 8; // let go, six directions, let go
-
-struct Direction {
-  JoystickAxis axis;
-  float sign; // +1: this end reads above rest
-  const char *prompt;
-};
-// Signs follow main.cpp's AXIS WIRING note: horizontal reads higher to the
-// right, vertical reads LOWER pushed forward, twist reads higher clockwise.
-constexpr Direction kDirections[] = {
-    {JOY_HORIZONTAL, -1.0f, "Push the joystick fully LEFT and hold it"},
-    {JOY_HORIZONTAL, +1.0f, "Push the joystick fully RIGHT and hold it"},
-    {JOY_VERTICAL, -1.0f, "Push the joystick fully FORWARD and hold it"},
-    {JOY_VERTICAL, +1.0f, "Pull the joystick fully BACK and hold it"},
-    {JOY_TWIST, +1.0f, "Twist the joystick fully CLOCKWISE and hold it"},
-    {JOY_TWIST, -1.0f, "Twist the joystick fully COUNTER-CLOCKWISE and hold it"},
-};
-constexpr int kDirectionCount = static_cast<int>(sizeof(kDirections) / sizeof(kDirections[0]));
+// The run itself - its steps, timing and limits - is the model in
+// components/joystick_cal (cal_run.hpp); this file is its view.
+using hmi::cal::Action;
+using hmi::cal::Input;
+using hmi::cal::kTickMs;
 
 // Shared between tasks.
 std::mutex cal_mutex;
@@ -88,49 +53,12 @@ std::optional<JoystickCal> read_file(const std::string &path) {
 bool write_file(const JoystickCal &cal) { return storage_write(kFileName, hmi::cal::encode(cal)); }
 
 /////////////////////////////////////////////////////////////////////////////
-// The run. Everything below is the LVGL task's: the timer, the button and the
-// subjects all run under the lock lv_timer_handler() is called with.
+// The run's view. Everything below is the LVGL task's: the model, the timer,
+// the button and the subjects all run under the lock lv_timer_handler() is
+// called with.
 /////////////////////////////////////////////////////////////////////////////
 
-enum class Phase { IDLE, REST, DIRECTION, RELEASE, RESULT };
-
-// The last kHoldTicks samples of all three axes.
-struct Window {
-  std::array<std::array<float, 3>, kHoldTicks> samples{};
-  std::size_t count = 0;
-  std::size_t next = 0;
-
-  void clear() { count = next = 0; }
-  void push(const std::array<float, 3> &mv) {
-    samples[next] = mv;
-    next = (next + 1) % kHoldTicks;
-    count = std::min<std::size_t>(count + 1, kHoldTicks);
-  }
-  bool full() const { return count == kHoldTicks; }
-  float spread(std::size_t axis) const {
-    float lo = samples[0][axis], hi = lo;
-    for (std::size_t i = 1; i < count; ++i) {
-      lo = std::min(lo, samples[i][axis]);
-      hi = std::max(hi, samples[i][axis]);
-    }
-    return hi - lo;
-  }
-  float mean(std::size_t axis) const {
-    const float sum = std::accumulate(
-        std::begin(samples), std::begin(samples) + static_cast<std::ptrdiff_t>(count), 0.0f,
-        [axis](float acc, const auto &s) { return acc + s[axis]; });
-    return sum / static_cast<float>(count);
-  }
-};
-
-struct Run {
-  Phase phase = Phase::IDLE;
-  int direction = 0; // index into kDirections, in the DIRECTION phase
-  int ticks = 0;     // since the current step began
-  Window window;
-  JoystickCal cal{};
-};
-Run run;
+hmi::cal::CalibrationRun run(hmi::cal::CalibrationRun::Config{});
 
 JoystickCalUi ui;
 lv_timer_t *timer = nullptr;
@@ -152,49 +80,21 @@ void feedback() {
   }
 }
 
-void begin_step(Phase phase) {
-  run.phase = phase;
-  run.ticks = 0;
-  run.window.clear();
-}
-
-void show_prompt(int step, const char *text) {
-  const std::string prompt = fmt::format("Step {} of {}\n{}", step, kStepCount, text);
+void show_prompt() {
+  const std::string prompt = run.prompt();
   lv_subject_copy_string(&text_subject, prompt.c_str());
   lv_subject_set_int(&prompting_subject, 1);
 }
 
 void finish(const char *message) {
   running = false;
-  begin_step(Phase::RESULT);
   lv_subject_set_int(&prompting_subject, 0);
   lv_subject_set_int(&running_subject, 0);
   lv_subject_copy_string(&text_subject, message);
 }
 
-void start() {
-  run = Run{};
-  begin_step(Phase::REST);
-  running = true;
-  lv_subject_set_int(&running_subject, 1);
-  show_prompt(1, "Let go of the joystick and keep still");
-  lv_timer_resume(timer);
-  logger.info("calibration started");
-}
-
-void next_direction(int index) {
-  run.direction = index;
-  begin_step(Phase::DIRECTION);
-  show_prompt(index + 2, kDirections[index].prompt);
-}
-
 void complete() {
-  const JoystickCal &cal = run.cal;
-  if (!plausible(cal)) { // every end was taken past kFullTravelMv, so not expected
-    logger.error("calibration rejected: {}", describe(cal));
-    finish("Calibration failed: travel too short.\nNothing changed.");
-    return;
-  }
+  const JoystickCal &cal = run.record();
   const bool saved = write_file(cal);
   {
     std::lock_guard<std::mutex> lock(cal_mutex);
@@ -207,95 +107,57 @@ void complete() {
                : "Calibrated, but could not save to flash.\nIt will be lost at power-off.");
 }
 
-void tick_rest(const std::array<float, 3> &mv) {
-  if (run.ticks <= kSettleTicks) {
+// Carries out what the model asked for. `why` names who cancelled, for CANCEL.
+void act(Action action, const char *why) {
+  switch (action) {
+  case Action::NONE:
     return;
-  }
-  run.window.push(mv);
-  if (!run.window.full()) {
+  case Action::BEGIN:
+    running = true;
+    lv_subject_set_int(&running_subject, 1);
+    show_prompt();
+    lv_timer_resume(timer);
+    logger.info("calibration started");
     return;
-  }
-  for (std::size_t axis = 0; axis < 3; ++axis) {
-    if (run.window.spread(axis) > kSteadyMv[axis]) {
-      return; // still being touched; the window slides on
-    }
-  }
-  for (std::size_t axis = 0; axis < 3; ++axis) {
-    run.cal[axis].center_mv = run.window.mean(axis);
-  }
-  feedback();
-  next_direction(0);
-}
-
-void tick_direction(const std::array<float, 3> &mv) {
-  const Direction &d = kDirections[run.direction];
-  if ((mv[d.axis] - run.cal[d.axis].center_mv) * d.sign < kFullTravelMv) {
-    run.window.clear(); // not there yet, or let go early: start the hold again
+  case Action::NEXT:
+    feedback();
+    show_prompt();
     return;
-  }
-  run.window.push(mv);
-  if (!run.window.full() || run.window.spread(d.axis) > kSteadyMv[d.axis]) {
-    return;
-  }
-  (d.sign > 0 ? run.cal[d.axis].max_mv : run.cal[d.axis].min_mv) = run.window.mean(d.axis);
-  feedback();
-  if (run.direction + 1 < kDirectionCount) {
-    next_direction(run.direction + 1);
-  } else {
-    begin_step(Phase::RELEASE);
-    show_prompt(kStepCount, "Let go of the joystick");
-  }
-}
-
-void tick_release(const std::array<float, 3> &mv) {
-  for (std::size_t axis = 0; axis < 3; ++axis) {
-    if (std::fabs(mv[axis] - run.cal[axis].center_mv) > kReleasedMv) {
-      run.window.clear();
-      return;
-    }
-  }
-  run.window.push(mv);
-  if (run.window.full()) {
+  case Action::COMPLETE:
     complete();
-  }
-}
-
-void tick_cb(lv_timer_t *) {
-  const std::array<float, 3> mv = {latest_mv[0].load(), latest_mv[1].load(), latest_mv[2].load()};
-  run.ticks++;
-  switch (run.phase) {
-  case Phase::IDLE:
+    return;
+  case Action::REJECT: // every end was taken past kFullTravelMv, so not expected
+    logger.error("calibration rejected: {}", describe(run.record()));
+    finish("Calibration failed: travel too short.\nNothing changed.");
+    return;
+  case Action::TIME_OUT:
+    logger.warn("calibration timed out at step {}", run.from_step());
+    finish("Timed out.\nNothing changed.");
+    return;
+  case Action::CANCEL:
+    logger.info("calibration cancelled ({})", why);
+    finish("Calibration cancelled.\nNothing changed.");
+    return;
+  case Action::SHOW_IDLE:
+    lv_subject_copy_string(&text_subject, idle_text.c_str());
     lv_timer_pause(timer);
     return;
-  case Phase::RESULT:
-    if (run.ticks >= kResultTicks) {
-      lv_subject_copy_string(&text_subject, idle_text.c_str());
-      run.phase = Phase::IDLE;
-      lv_timer_pause(timer);
-    }
+  case Action::PAUSE:
+    lv_timer_pause(timer);
     return;
-  case Phase::REST:
-    tick_rest(mv);
-    break;
-  case Phase::DIRECTION:
-    tick_direction(mv);
-    break;
-  case Phase::RELEASE:
-    tick_release(mv);
-    break;
   }
-  if (run.phase != Phase::RESULT && run.ticks > kStepTimeoutTicks) {
-    logger.warn("calibration timed out at step {}", run.phase == Phase::DIRECTION
-                                                        ? run.direction + 2
-                                                        : (run.phase == Phase::REST ? 1 : 8));
-    finish("Timed out.\nNothing changed.");
-  }
+}
+
+void start() { act(run.handle(Input::START), nullptr); }
+
+void tick_cb(lv_timer_t *) {
+  const hmi::cal::Sample mv = {latest_mv[0].load(), latest_mv[1].load(), latest_mv[2].load()};
+  act(run.handle(Input::TICK, mv), nullptr);
 }
 
 void cancel(const char *why) {
   if (running) {
-    logger.info("calibration cancelled ({})", why);
-    finish("Calibration cancelled.\nNothing changed.");
+    act(run.handle(Input::CANCEL), why);
   }
 }
 

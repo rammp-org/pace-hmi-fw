@@ -15,6 +15,10 @@
  * only feeds it samples and picks up the result between two cycles, so the
  * joystick is never reconfigured from two tasks at once.
  *
+ * The record, its file and the run's logic live in components/joystick_cal
+ * (cal_record.hpp, cal_run.hpp, plain C++ with host tests); this file and
+ * joystick_cal.cpp are the LVGL view, the file I/O and the shared state.
+ *
  * Kept in <file system root>/joystick_cal.txt (espp::FileSystem: LittleFS on
  * the `storage` partition), as text, so it can be read off a board by eye.
  */

@@ -20,9 +20,11 @@ MC  := $(REPO)/managed_components
 CMP := $(REPO)/components/joystick_cal
 
 SRCS_UNDER_TEST  := $(CMP)/src/cal_record.cpp \
+                    $(CMP)/src/cal_run.cpp \
                     $(REPO)/main/joystick_cal.cpp
 TEST_SRCS        := $(HERE)/test_joystick_cal.cpp \
                     $(HERE)/test_cal_record.cpp \
+                    $(HERE)/test_cal_run.cpp \
                     $(HERE)/fakes/fake_lvgl.cpp \
                     $(HERE)/fakes/fake_storage.cpp
 THIRD_PARTY_SRCS := $(MC)/espp__logger/src/logger.cpp

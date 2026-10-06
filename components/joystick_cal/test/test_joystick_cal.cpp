@@ -15,6 +15,7 @@
 
 #include <array>
 #include <cstdio>
+#include <limits>
 #include <optional>
 #include <random>
 #include <string>
@@ -873,4 +874,31 @@ TEST_CASE("CAL-035 HAZARD the run reuses the last noted sample: periods with no 
     (void)fake_lvgl::tick(widgets().timer); // the ADC task noted nothing new
   }
   TEST_ASSERT_TRUE(starts_with(shown(), "Step 2 of 8"));
+}
+
+TEST_CASE("CAL-036 HAZARD a NaN sample passes every hold check; a NaN rest ends the run as "
+          "travel too short, with nothing changed",
+          "[cal][run][hazard]") {
+  start_clean();
+  const JoystickCal before = joystick_cal_current();
+  const int writes = fake_storage::write_calls();
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  joystick_cal_toggle();
+  (void)hold(nan, 1510.0f, 1477.0f, kSettleTicks + kHoldTicks); // rest "taken" with a NaN centre
+  TEST_ASSERT_TRUE(starts_with(shown(), "Step 2 of 8"));
+  (void)hold(1507.0f, 1510.0f, 1477.0f, kHoldTicks); // "fully left" while at rest: taken
+  TEST_ASSERT_TRUE(starts_with(shown(), "Step 3 of 8"));
+  do_directions(6); // the other ends (and left again, ignored by then)
+  StdoutCapture cap;
+  do_release();
+  do_release();
+  const std::string log = cap.stop();
+  TEST_ASSERT_FALSE(joystick_cal_running());
+  TEST_ASSERT_EQUAL_STRING("Calibration failed: travel too short.\nNothing changed.",
+                           shown().c_str());
+  TEST_ASSERT_TRUE_MESSAGE(contains(log, "[joy_cal/E]"), log.c_str());
+  TEST_ASSERT_TRUE_MESSAGE(contains(log, "]: calibration rejected: horizontal "), log.c_str());
+  TEST_ASSERT_TRUE(same(joystick_cal_current(), before));
+  TEST_ASSERT_FALSE(joystick_cal_take_new().has_value());
+  TEST_ASSERT_EQUAL_INT(writes, fake_storage::write_calls());
 }
