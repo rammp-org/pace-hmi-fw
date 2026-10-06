@@ -123,3 +123,12 @@ that never regenerate goldens from the new code.
 
 The drive table is serialised (lane D); the other lanes run in parallel. `app_main` is the only
 shared file: B1 merges before B2's boot hook.
+
+## 7. Owner decisions (2026-10-06)
+
+| # | Decision |
+| --- | --- |
+| D1 | The owner is the only approver for now (CS-SAF-05 deviation in the profile); nothing safety-relevant merges to `dev` until a second reviewer exists |
+| D2 | Firmware-only for H3: detect the high rail, NaN and failed reads; the low-rail open circuit (0 mV) is a documented residual hazard |
+| D3 | Pending: the owner asks the MCB team about the XYTwist timeout and DISABLE semantics; C3 sign-off waits for the answer |
+| Phase A | Approved to start on the draft branches (incl. the table-type move with a fingerprint, and the CLEAR_MENU_ON_ARRIVAL table correction as its own commit for review) |
