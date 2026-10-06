@@ -7,8 +7,7 @@
     "c_cast": {
       "main/da7280.hpp": 42,
       "main/hmi_rtps_spec.hpp": 28,
-      "main/lv_mem_psram.c": 1,
-      "main/main.cpp": 1
+      "main/lv_mem_psram.c": 1
     },
     "esp_error_check": {},
     "esp_timer_create": {},
@@ -42,8 +41,8 @@
       "main/remote_ui.cpp": 1
     },
     "lines": {
-      "main/main.cpp": 4023,
-      "main/selftest.cpp": 1045
+      "main/main.cpp": 3984,
+      "main/selftest.cpp": 1030
     },
     "locks": {
       "main/da7280.hpp": 18,
@@ -81,7 +80,7 @@
       "main/joystick_cal.cpp": 16,
       "main/log_capture.cpp": 8,
       "main/log_view.cpp": 7,
-      "main/main.cpp": 144,
+      "main/main.cpp": 143,
       "main/remote_ui.cpp": 6,
       "main/rtps_comms.cpp": 32,
       "main/selftest.cpp": 25,
