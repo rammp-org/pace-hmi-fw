@@ -223,19 +223,25 @@ struct TaskRow {
   BaseType_t core = 0;
   uint32_t stack_bytes = 0;
   uint32_t stack_free = 0;
-  bool coproc = false; // has used the FPU/PIE/HWLP: the port pinned it to `core`
+  bool coproc_pinned = false; // has used the FPU or PIE: the port pinned it to `core`
 };
 
 // The coprocessor save area ESP-IDF 6.0's RISC-V port keeps at the top of every
 // task's stack, set up at creation (FreeRTOS-Kernel/portable/riscv/port.c:276
-// pxRetrieveCoprocSaveAreaFromStackPointer, :426). When a task first uses a
-// coprocessor the port pins it to the core it is running on (portasm.S:99
-// vPortTaskPinToCore). When that context must later be saved, it carves the
-// save area from the BOTTOM of the stack and moves the TCB's pxStack up past it
-// (port.c:787-815; 132 B for the FPU, RvFPUSaveArea). xTaskGetStackStart then
-// returns the moved address, 132+ B short of what the task was created with.
-// The original start is kept in sa_tcbstack, and sa_allocator is non-zero once
-// a coprocessor has been used.
+// pxRetrieveCoprocSaveAreaFromStackPointer, :426). Its fields mean:
+// - sa_allocator/sa_tcbstack: set by the first pxPortGetCoprocArea call for the
+//   task (port.c:793-799), which is the HWLP check on every switch-in
+//   (portasm.S:814 calls :195-207). So they are set for every task that has ever run, and
+//   say nothing about coprocessor use. sa_tcbstack is the stack start the task
+//   was created with.
+// - the saved contexts: when a coprocessor context must be saved, the port
+//   carves it from the BOTTOM of the stack and moves the TCB's pxStack up past
+//   it (port.c:800-815; 132 B for the FPU, RvFPUSaveArea), so
+//   xTaskGetStackStart reads 132+ B short of the created size.
+// - sa_enable: bit FPU_COPROC_IDX or PIE_COPROC_IDX is set by the trap on the
+//   task's first use of that coprocessor (portasm.S:111-114). The same trap pins
+//   the task to the core it is running on (portasm.S:99 vPortTaskPinToCore).
+//   Only HWLP's bit is ever cleared (portasm.S:224), and HWLP does not pin.
 static_assert(SOC_CPU_COPROC_NUM > 0, "this port keeps a coprocessor save area");
 const RvCoprocSaveArea &coproc_area(const TaskSnapshot_t &snap) {
   const auto top = reinterpret_cast<uintptr_t>(snap.pxEndOfStack);
@@ -264,12 +270,13 @@ void take_tasks(TaskTable &table) {
     row.priority = uxTaskPriorityGet(task);
     row.core = xTaskGetCoreID(task);
     const RvCoprocSaveArea &sa = coproc_area(snap);
-    row.coproc = sa.sa_allocator != 0;
+    constexpr uint32_t kPinningCoprocs = (1U << FPU_COPROC_IDX) | (1U << PIE_COPROC_IDX);
+    row.coproc_pinned = (static_cast<uint32_t>(sa.sa_enable) & kPinningCoprocs) != 0;
     // from the start the task was created with (see coproc_area) to
     // pxEndOfStack, the last slot aligned down to 16 B (tasks.c:1054-1064): the
     // created size, less 0-15 B of that alignment
-    const auto *start =
-        row.coproc ? static_cast<const StackType_t *>(sa.sa_tcbstack) : xTaskGetStackStart(task);
+    const auto *start = sa.sa_allocator != 0 ? static_cast<const StackType_t *>(sa.sa_tcbstack)
+                                             : xTaskGetStackStart(task);
     row.stack_bytes = static_cast<uint32_t>((snap.pxEndOfStack - start + 1) *
                                             static_cast<std::ptrdiff_t>(sizeof(StackType_t)));
     // ESP-IDF reports the high-water mark in bytes, not words
@@ -280,7 +287,7 @@ void take_tasks(TaskTable &table) {
 }
 
 // One line: OK {"tasks":[{"name":..,"prio":..,"core":..,"stack_bytes":..,
-// "stack_free":..,"coproc":..},...],"complete":true}; core -1 = not pinned.
+// "stack_free":..,"coproc_pinned":..},...],"complete":true}; core -1 = not pinned.
 bool send_tasks(int sock) {
   auto table = std::make_unique<TaskTable>(); // ~2.5 KB: off this task's stack
   take_tasks(*table);
@@ -296,7 +303,7 @@ bool send_tasks(int sock) {
            ",\"core\":" + std::to_string(row.core == tskNO_AFFINITY ? -1 : row.core) +
            ",\"stack_bytes\":" + std::to_string(row.stack_bytes) +
            ",\"stack_free\":" + std::to_string(row.stack_free) +
-           ",\"coproc\":" + (row.coproc ? "true" : "false") + "}";
+           ",\"coproc_pinned\":" + (row.coproc_pinned ? "true" : "false") + "}";
   }
   out += std::string("],\"complete\":") + (table->count < kMaxTasks ? "true" : "false") + "}";
   return send_line(sock, out);
