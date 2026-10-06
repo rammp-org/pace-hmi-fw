@@ -46,3 +46,6 @@ __pycache__/
 
 # Claude Code project files
 .claude/
+
+# test runner output (tests/run.py)
+results/
