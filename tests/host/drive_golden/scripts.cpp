@@ -2,10 +2,12 @@
 
 #include "scripts.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <format>
 #include <initializer_list>
+#include <iterator>
 
 #include "probe.hpp"
 
@@ -359,9 +361,7 @@ void note_row(hmi::drive_session::Phase p, hmi::drive_session::Input in,
 
 std::vector<Scenario> scenarios() {
   std::vector<Scenario> s = hand_written();
-  for (Scenario &w : random_walks()) {
-    s.push_back(std::move(w));
-  }
+  std::ranges::move(random_walks(), std::back_inserter(s));
   return s;
 }
 

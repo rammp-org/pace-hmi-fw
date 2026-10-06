@@ -180,7 +180,7 @@ inline void lv_timer_resume(lv_timer_t *timer) {
 }
 
 inline void ring_spin_cb(void *, std::int32_t) {}
-inline bool lv_anim_delete(void *var, lv_anim_exec_xcb_t exec_cb) {
+inline bool lv_anim_delete(const void *var, lv_anim_exec_xcb_t exec_cb) {
   golden::raw(std::format("lv_anim_delete({}, {})", shim::name_of(var),
                           exec_cb == &ring_spin_cb ? "ring_spin_cb" : "?"));
   golden::port("lock_open_visual");

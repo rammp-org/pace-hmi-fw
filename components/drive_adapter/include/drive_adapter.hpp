@@ -150,6 +150,7 @@ public:
 private:
   friend struct DriveAdapterTestPeer; // test-only access, defined in the test tree
 
+  // For the enumerators (Action::X). Parameters spell the type out: an enum, passed by value.
   using Action = hmi::drive_session::Action;
 
   // A recovering check (CS-ERR-04): an input that arrives while another is being performed
@@ -185,14 +186,14 @@ private:
       logger_.error("corrupted drive session state, safe state entered (input {})",
                     static_cast<int>(in));
     }
-    for (const Action action : actions) {
+    for (const hmi::drive_session::Action action : actions) {
       perform(action);
     }
     return actions[0] != Action::NONE;
   }
 
   // One action, by the family that owns it. NONE and a value that is no Action: nothing.
-  void perform(Action action) {
+  void perform(hmi::drive_session::Action action) {
     (void)(perform_request(action) || perform_deadline(action) || perform_lock(action) ||
            perform_screen(action) || perform_banner(action));
   }
@@ -204,7 +205,7 @@ private:
   }
 
   // The DriveCommand: ask, re-ask, or re-publish the request as it stands.
-  bool perform_request(Action action) {
+  bool perform_request(hmi::drive_session::Action action) {
     switch (action) {
     case Action::SEND_ENABLE:
       ask_at_us_ = view_.now_us();
@@ -222,7 +223,7 @@ private:
   }
 
   // The deadlines and the exit latches.
-  bool perform_deadline(Action action) {
+  bool perform_deadline(hmi::drive_session::Action action) {
     switch (action) {
     case Action::ARM_WARN:
       wait_warn_us_ = ask_at_us_ + answer_us_;
@@ -247,7 +248,7 @@ private:
     }
   }
 
-  bool perform_latch(Action action) {
+  bool perform_latch(hmi::drive_session::Action action) {
     switch (action) {
     case Action::SET_EXIT_REQUESTED:
       exit_requested_ = true;
@@ -267,7 +268,7 @@ private:
   }
 
   // The padlock, the lock state and the stick gate.
-  bool perform_lock(Action action) {
+  bool perform_lock(hmi::drive_session::Action action) {
     switch (action) {
     case Action::RING_WAIT:
       view_.ring_wait();
@@ -299,7 +300,7 @@ private:
   }
 
   // The screens: the Locked screen (and the menu over it), the Drive screen, home.
-  bool perform_screen(Action action) {
+  bool perform_screen(hmi::drive_session::Action action) {
     switch (action) {
     case Action::OPEN_MENU_ON_ARRIVAL:
       view_.menu_on_arrival(true);
@@ -325,7 +326,7 @@ private:
   }
 
   // The banners and the refusal feedback.
-  bool perform_banner(Action action) {
+  bool perform_banner(hmi::drive_session::Action action) {
     switch (action) {
     case Action::SHOW_REFUSED_DRIVE:
       view_.show_banner(DriveBanner::REFUSED_DRIVE);
