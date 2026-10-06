@@ -41,6 +41,9 @@ Rules (exit 0 PASS, 1 FAIL, 2 bad input):
   T3 a running task the table does not list fails (a new task is an architecture change,
      CORE ask-first);
   T4 `complete` false (the firmware's list was cut) fails;
+  T6 a task name twice in a complete dump, unless the table marks it `"multi_instance": true`,
+     or a non-zero `dup_handles` (the firmware saw one TCB twice): the walk was inconsistent
+     or the board runs two tasks under one name;
   T5 stack_free below a task's `stack_free_min` (a floor, set only once the stress test gives
      CS-MEM-04 margins; none yet) fails.
 Core (T2): a number must match exactly. "fpu" accepts -1 (no FPU use yet), or 0/1 only with
@@ -78,20 +81,27 @@ FIELDS = ("prio", "core", "stack_bytes")
 
 # ---------------------------------------------------------------- reading dumps
 
+def _dump_of(data: dict, complete_default: bool) -> dict:
+    out = {"tasks": data["tasks"], "complete": bool(data.get("complete", complete_default))}
+    for extra in ("dup_handles", "locked_us"):  # firmware after the kernel-lock walk
+        if extra in data:
+            out[extra] = data[extra]
+    return out
+
+
 def parse_dump(text: str) -> dict:
-    """{"tasks": [...], "complete": bool} from a JSON file's text or a log holding the line."""
+    """{"tasks": [...], "complete": bool, ...} from a JSON file's text or a log line."""
     text = text.lstrip("﻿")
     try:
         data = json.loads(text)
         if isinstance(data, dict) and isinstance(data.get("tasks"), list):
-            return {"tasks": data["tasks"], "complete": bool(data.get("complete", True))}
+            return _dump_of(data, True)
     except json.JSONDecodeError:
         pass
     for line in reversed(text.splitlines()):  # the newest answer in a log wins
         i = line.find('{"tasks":')
         if i >= 0:
-            data = json.loads(line[i:])
-            return {"tasks": data["tasks"], "complete": bool(data.get("complete", False))}
+            return _dump_of(json.loads(line[i:]), False)
     raise gl.GuardError('no task dump found (want JSON with "tasks", or an `OK {"tasks":...}` line)')
 
 
@@ -154,16 +164,23 @@ def compare(dump: dict, table: dict) -> tuple[list[str], list[str]]:
     tol = int(table.get("stack_tolerance_bytes", 16))
     fails: list[str] = []
     notes: list[str] = []
+    declared: dict[str, dict] = {}
+    for d in table.get("tasks", []):
+        declared.setdefault(str(d["name"])[:n], d)
     running: dict[str, dict] = {}
     for t in dump["tasks"]:
         key = str(t.get("name", ""))[:n]
         if key in running:
-            notes.append(f"two running tasks are named '{key}': compared the first")
+            if declared.get(key, {}).get("multi_instance") is True:
+                notes.append(f"'{key}' runs more than once (declared multi_instance): compared the first")
+            elif dump.get("complete", False):
+                fails.append(f"T6 '{key}' is listed twice in one dump")
             continue
         running[key] = t
-    declared: dict[str, dict] = {}
-    for d in table.get("tasks", []):
-        declared.setdefault(str(d["name"])[:n], d)
+    if dump.get("dup_handles"):
+        fails.append(f"T6 the firmware saw {dump['dup_handles']} task(s) twice in one walk")
+    if "locked_us" in dump:
+        notes.append(f"kernel lock held {dump['locked_us']} us for the walk")
     if not dump.get("complete", False):
         fails.append("T4 the firmware's task list was cut short (complete=false)")
     for key, d in declared.items():
@@ -252,6 +269,9 @@ def cmd_fetch(args) -> int:
         data = json.loads(into.read_text(encoding="utf-8")) if into.is_file() else {}
         data["tasks"] = dump["tasks"]
         data["tasks_complete"] = dump["complete"]
+        for extra in ("dup_handles", "locked_us"):
+            if extra in dump:
+                data[f"tasks_{extra}"] = dump[extra]
         gl.write_json(into, data)
         print(f"added the dump to {into} as \"tasks\"")
     return 0
@@ -263,7 +283,11 @@ def read_dump(path: str) -> dict:
         raise gl.GuardError(f"no dump {p}")
     data = json.loads(p.read_text(encoding="utf-8")) if p.suffix == ".json" else None
     if isinstance(data, dict) and "tasks_complete" in data:  # a self-test JSON with --into
-        return {"tasks": data["tasks"], "complete": bool(data["tasks_complete"])}
+        out = {"tasks": data["tasks"], "complete": bool(data["tasks_complete"])}
+        for extra in ("dup_handles", "locked_us"):
+            if f"tasks_{extra}" in data:
+                out[extra] = data[f"tasks_{extra}"]
+        return out
     return parse_dump(p.read_text(encoding="utf-8", errors="replace"))
 
 
@@ -443,6 +467,28 @@ def t_committed_baseline_valid() -> None:
         gl.expect(f"{t['name']} source", bool(t.get("source")), True)
         gl.expect(f"{t['name']} has no fixed stack_free", "stack_free" in t, False)
         gl.expect(f"{t['name']} core", t["core"] in (-1, 0, 1, "fpu"), True)
+        gl.expect(f"{t['name']} multi_instance", t.get("multi_instance", False) in (True, False), True)
+
+
+def t_duplicates() -> None:
+    d = parse_dump(SAMPLE_LINE)
+    d["tasks"].append(dict(d["tasks"][3]))          # Button twice, as on the e2f59ec board
+    fails, _ = compare(d, SAMPLE_TABLE)
+    gl.expect("duplicate name fails", fails, ["T6 'Button' is listed twice in one dump"])
+    table = json.loads(json.dumps(SAMPLE_TABLE))
+    table["tasks"][3]["multi_instance"] = True
+    fails, notes = compare(d, table)
+    gl.expect("multi_instance allows it", fails, [])
+    gl.expect("multi_instance noted", any("multi_instance" in x for x in notes), True)
+    d["complete"] = False                            # a cut list: T4 says it, not T6
+    fails, _ = compare(d, SAMPLE_TABLE)
+    gl.expect("cut list", fails, ["T4 the firmware's task list was cut short (complete=false)"])
+    line = SAMPLE_LINE.replace('"complete":true}', '"complete":true,"dup_handles":1,"locked_us":850}')
+    d = parse_dump(line)
+    gl.expect("extras parsed", (d["dup_handles"], d["locked_us"]), (1, 850))
+    fails, notes = compare(d, SAMPLE_TABLE)
+    gl.expect("dup_handles fails", fails, ["T6 the firmware saw 1 task(s) twice in one walk"])
+    gl.expect("lock time noted", any("850 us" in x for x in notes), True)
 
 
 def cmd_selftest(_args) -> int:
@@ -456,6 +502,7 @@ def cmd_selftest(_args) -> int:
         ("TSK-007 merge adds observed tasks and never overwrites a declared value", t_merge),
         ("TSK-008 the committed baseline has unique names, a start and a source each", t_committed_baseline_valid),
         ("TSK-009 a core off the table fails unless declared fpu and pinned by FPU use", t_core_needs_coproc),
+        ("TSK-010 a name twice in a complete dump fails unless multi_instance", t_duplicates),
     ])
 
 

@@ -65,7 +65,8 @@ the move by regenerating the baseline in that step's PR.
   name in 2+ objects. Today's build has 33, all GCC clones (`.isra`, `.part`) of fmt/std
   templates, so the rule would be noise.
 - **task_dump**: T1 a `boot` task is missing; T2 prio/core differ, or stack outside
-  [declared-16 B, declared]; T3 a running task is undeclared; T4 the list was cut; T5
+  [declared-16 B, declared]; T3 a running task is undeclared; T4 the list was cut; T6 a name twice in a complete dump
+  (unless the table says `"multi_instance": true`) or `dup_handles` > 0; T5
   `stack_free` under a declared `stack_free_min` floor (none yet: CS-MEM-04 margins wait for the
   stress test; a fixed `stack_free` is never compared). Names compare on 15 characters
   (`configMAX_TASK_NAME_LEN` 16). ESP-IDF pins an unpinned task to the core of its first FPU
@@ -104,8 +105,8 @@ So the dump rides the bench-only remote UI instead (orchestrator decision, recor
 the plan). `TASKS` answers one JSON line, and `task_dump.py fetch --into selftest.json` merges
 it into the self-test JSON file on the PC. `take_tasks`/`send_tasks` in `main/remote_ui.cpp`
 (compiled only with `CONFIG_HMI_REMOTE_UI`) walk the task list with `uxTaskGetSnapshotAll`
-under `vTaskSuspendAll` (the usage `freertos_debug.h` documents; the trace facility stays off),
-then read name, priority, core (`xTaskGetCoreID`), the created stack size and the high-water
+while holding the kernel lock (`prvTakeKernelLock`, IDF's wrapper for `xKernelLock`; see
+below), then read name, priority, core (`xTaskGetCoreID`), the created stack size and the high-water
 mark. The stack size is `pxEndOfStack` minus the start the task was created with: once a task
 has used a coprocessor, IDF 6.0's RISC-V port carves the save area (132 B for the FPU) from the
 bottom of the stack and moves the TCB's `pxStack` past it (`port.c:787-815`). So
@@ -113,9 +114,16 @@ bottom of the stack and moves the TCB's `pxStack` past it (`port.c:787-815`). So
 start is in the coprocessor save area at the stack top (`sa_tcbstack`). `coproc_pinned` is
 that area's enable mask (`sa_enable`), bit FPU or PIE. The trap on a task's first use of either
 sets the bit and pins the task (`portasm.S:99,111-114`). `sa_allocator` is no use as a flag:
-the HWLP check on every switch-in sets it for every task that has run. The scheduler is
-suspended on one
-core for roughly a millisecond (the high-water scans). Nothing runs unless the PC sends `TASKS`.
+the HWLP check on every switch-in sets it for every task that has run.
+
+Why the kernel lock: on this dual-core (non-SMP) IDF FreeRTOS, `vTaskSuspendAll` stops only the
+calling core's scheduler (`tasks.c:2499-2524`), and the list walk takes no lock. So the other core
+could move a task between lists mid-walk: one e2f59ec dump in 9 listed `tab5_audio micr` twice, and
+a task deleted there could have left a dangling TCB. `uxTaskGetSystemState` (trace facility) takes
+the same lock, but it returns the name as a pointer into the TCB and no `pxEndOfStack`, so those
+would be read after unlocking. Everything is copied inside the lock. The answer carries
+`dup_handles` (a TCB seen twice: should stay 0) and `locked_us` (how long both cores' kernel was
+held, mostly the high-water scans). Nothing runs unless the PC sends `TASKS`.
 
 First use on the bench: `task_dump.py fetch`, then `task_dump.py baseline --dump` (review the
 observed IDF/espp tasks it adds), then `check`.
