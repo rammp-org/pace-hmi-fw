@@ -83,7 +83,9 @@ static ButtonGrid seat_buttons_grid;
 static ButtonGrid seat_adjust_grid;
 
 // --- main/frag_seat.inc:51-106 -----------------------------------------------------------------
-static void grid_key_cb(lv_event_t *e) {
+// Changed from the source for cppcheck (constParameterPointer): the parameter is pointer to
+// const; the body is unchanged and does not write through it.
+static void grid_key_cb(const lv_event_t *e) {
   auto *g = static_cast<ButtonGrid *>(lv_event_get_user_data(e));
   // The cursor is whichever cell holds focus, not wherever it was last left:
   // coming back up from the burger key, the group put focus on a cell without
@@ -141,7 +143,9 @@ static void grid_key_cb(lv_event_t *e) {
 }
 
 // --- main/frag_seat.inc:110-120 ----------------------------------------------------------------
-static void grid_sync_cursor(ButtonGrid *g, lv_obj_t *button) {
+// Changed from the source for cppcheck (constParameterPointer): the parameter is pointer to
+// const; the body is unchanged and does not write through it.
+static void grid_sync_cursor(ButtonGrid *g, const lv_obj_t *button) {
   for (int r = 0; r < g->rows; r++) {
     for (int c = 0; c < g->cols[r]; c++) {
       if (g->cell[r][c] != nullptr && g->cell[r][c] == button) {
@@ -176,7 +180,9 @@ static void rd_pin_reset() {
 }
 
 // --- main/frag_bench_pin.inc:70-105 ------------------------------------------------------------
-static void rd_keypad_cb(lv_event_t *e) {
+// Changed from the source for cppcheck (constParameterPointer): the parameter is pointer to
+// const; the body is unchanged and does not write through it.
+static void rd_keypad_cb(const lv_event_t *e) {
   const int digit = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
   // Touch moves the cursor too, so the joystick carries on from where a finger
   // last landed rather than from where the stick left off.
