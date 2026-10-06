@@ -30,50 +30,33 @@
 namespace {
 
 /////////////////////////////////////////////////////////////////////////////
-// The spec, as C++
+// The spec (selftest_spec.h: the table, its invariants and each row's verdict)
 /////////////////////////////////////////////////////////////////////////////
 
-enum Id : uint8_t {
-#define ST_ENUM(id, name, unit, lo, hi, need, desc) ST_##id,
-  SELFTEST_TABLE(ST_ENUM)
-#undef ST_ENUM
-      ST_COUNT
-};
+using selftest_spec::Check;
+using selftest_spec::Id;
+using selftest_spec::index_of;
+using selftest_spec::kAnyHi;
+using selftest_spec::kAnyLo;
+using selftest_spec::kChecks;
+using selftest_spec::kPingPeriodMs;
+using selftest_spec::kRenderFrames;
+using selftest_spec::kSettleMs;
+using selftest_spec::kWindowMs;
 
-struct Spec {
-  const char *name;
-  const char *unit;
-  int32_t lo;
-  int32_t hi;
-  int need;
-  const char *desc;
-};
-
-constexpr Spec kSpec[] = {
-#define ST_ROW(id, name, unit, lo, hi, need, desc) {name, unit, lo, hi, need, desc},
-    SELFTEST_TABLE(ST_ROW)
-#undef ST_ROW
-};
-static_assert(std::size(kSpec) == ST_COUNT);
-static_assert(ST_COUNT < 256, "the report carries the check index as a uint8_t");
-
-constexpr bool spec_limits_ok() {
-  return std::all_of(std::begin(kSpec), std::end(kSpec),
-                     [](const Spec &s) { return s.lo <= s.hi; });
-}
-static_assert(spec_limits_ok(), "a selftest_spec.h row has lo > hi");
-
-bool is_yes_no(const Spec &s) { return s.lo == 1 && s.hi == 1 && s.unit[0] == '\0'; }
+// the number of checks; the report carries it, and each check's index, as a uint8_t
+// (selftest_spec.h asserts it fits)
+constexpr uint8_t kCount = static_cast<uint8_t>(kChecks.size());
 
 /// "182 KB", "yes", "0.7%": how a value reads on screen and in the log.
-std::string format_value(const Spec &s, int32_t value) {
-  if (is_yes_no(s)) {
+std::string format_value(const Check &s, int32_t value) {
+  if (s.is_yes_no()) {
     return value ? "yes" : "no";
   }
-  if (std::string_view(s.unit) == "0.1%") {
+  if (s.unit == "0.1%") {
     return fmt::format("{}.{}%", value / 10, std::abs(value % 10));
   }
-  return s.unit[0] ? fmt::format("{} {}", value, s.unit) : fmt::format("{}", value);
+  return !s.unit.empty() ? fmt::format("{} {}", value, s.unit) : fmt::format("{}", value);
 }
 
 /// format_value, shortened for the overlay's narrow columns: microseconds of a
@@ -81,7 +64,7 @@ std::string format_value(const Spec &s, int32_t value) {
 /// unit up, each to one decimal. Only the screen uses it; the serial log and
 /// the report keep the spec's own units. (At full length the widest row was
 /// 361 px against a 340 px column on the 720 px screen.)
-std::string compact_value(const Spec &s, int32_t value) {
+std::string compact_value(const Check &s, int32_t value) {
   // one decimal only while it still matters: "4.9 ms" but "88 ms". With the
   // decimal kept everywhere the widest row fitted its column by 1 px, so any
   // longer reading on a failing run would have been cut off again.
@@ -102,14 +85,14 @@ std::string compact_value(const Spec &s, int32_t value) {
   return format_value(s, value);
 }
 
-std::string format_limits(const Spec &s) {
+std::string format_limits(const Check &s) {
   if (s.lo == s.hi) {
-    return is_yes_no(s) ? "yes" : fmt::format("= {}", format_value(s, s.lo));
+    return s.is_yes_no() ? "yes" : fmt::format("= {}", format_value(s, s.lo));
   }
-  if (s.lo == ST_ANY_LO) {
+  if (s.lo == kAnyLo) {
     return fmt::format("<= {}", format_value(s, s.hi));
   }
-  if (s.hi == ST_ANY_HI) {
+  if (s.hi == kAnyHi) {
     return fmt::format(">= {}", format_value(s, s.lo));
   }
   return fmt::format("{} .. {}", format_value(s, s.lo), format_value(s, s.hi));
@@ -151,13 +134,13 @@ constexpr UBaseType_t kTaskPriority = 3;
 constexpr int kMaxColumns = 3;
 constexpr size_t kTitleLen = 128;
 constexpr size_t kStatusLen = 256;
-constexpr size_t kColumnLen = 64 * ST_COUNT; // PSRAM; room for every row in one column
+constexpr size_t kColumnLen = 64 * kCount; // PSRAM; room for every row in one column
 // The rows fill as many columns as the display is wide enough for: two on the
 // Tab5's 720 px portrait canvas, three at 1100 px or more. Measured from the
 // display rather than assumed - the first version assumed 1280 px landscape and
 // put the second column half off the screen and the third wholly off it.
 int ui_columns = 2;
-int ui_rows_per_column = (ST_COUNT + 1) / 2;
+int ui_rows_per_column = (kCount + 1) / 2;
 
 constexpr uint32_t kColourPass = 0x2ECC71;
 constexpr uint32_t kColourFail = 0xFF5050;
@@ -223,7 +206,7 @@ std::atomic<bool> adc_armed{false};
 
 // RTPS ping/pong, from the RTPS receive task.
 constexpr uint32_t kMaxPings = 256;
-static_assert(ST_WINDOW_MS / ST_PING_PERIOD_MS < kMaxPings, "ping bookkeeping is too small");
+static_assert(kWindowMs / kPingPeriodMs < kMaxPings, "ping bookkeeping is too small");
 // Round-trip bookkeeping, alive only while a window is open. On the heap (PSRAM,
 // at this size) rather than in .bss, which is internal RAM - the DMA-capable
 // pool the W5500 depends on, and the one thing this board is short of.
@@ -326,10 +309,10 @@ public:
     ui_refresh();
 
     status("Hands off the joystick - measuring it at rest in a moment");
-    vTaskDelay(pdMS_TO_TICKS(ST_SETTLE_MS));
+    vTaskDelay(pdMS_TO_TICKS(kSettleMs));
 
     status(fmt::format("Observing for {} s: joystick, ADC, RTPS, UI responsiveness",
-                       ST_WINDOW_MS / 1000));
+                       kWindowMs / 1000));
     observe_window();
     ui_refresh();
 
@@ -344,7 +327,7 @@ public:
     // last, so the low-water mark and the stacks cover everything above
     check_memory();
 
-    for (uint8_t i = 0; i < ST_COUNT; ++i) {
+    for (uint8_t i = 0; i < kCount; ++i) {
       if (!out_[i].done) {
         // a spec row with nothing behind it must not pass by omission
         out_[i] = Outcome{.done = true,
@@ -363,36 +346,34 @@ private:
   // --- recording ----------------------------------------------------------
 
   void record(Id id, int32_t value, std::string detail = {}) {
-    const Spec &s = kSpec[id];
-    Outcome &o = out_[id];
+    const Check &s = selftest_spec::check(id);
+    Outcome &o = out_[index_of(id)];
     o.done = true;
     o.measured = true;
     o.value = value;
     o.detail = std::move(detail);
-    o.result = (value >= s.lo && value <= s.hi) ? rammp::SelfTestResult::PASS
-                                                : rammp::SelfTestResult::FAIL;
-    publish_result(id);
+    o.result = s.in_limits(value) ? rammp::SelfTestResult::PASS : rammp::SelfTestResult::FAIL;
+    publish_result(index_of(id));
   }
 
   void unmeasurable(Id id, std::string reason) {
-    const Spec &s = kSpec[id];
-    Outcome &o = out_[id];
+    const Check &s = selftest_spec::check(id);
+    Outcome &o = out_[index_of(id)];
     o.done = true;
     o.measured = false;
     o.detail = std::move(reason);
-    const bool required = s.need == ST_REQUIRED || (s.need == ST_REMOTE && remote_);
-    o.result = required ? rammp::SelfTestResult::FAIL : rammp::SelfTestResult::SKIP;
-    publish_result(id);
+    o.result = s.required(remote_) ? rammp::SelfTestResult::FAIL : rammp::SelfTestResult::SKIP;
+    publish_result(index_of(id));
   }
 
   void publish_result(uint8_t id) const {
-    const Spec &s = kSpec[id];
+    const Check &s = kChecks[id];
     const Outcome &o = out_[id];
     rammp::SelfTestReport report{};
     report.run_id = run_id_;
     report.kind = rammp::SelfTestKind::RESULT;
     report.index = id;
-    report.count = ST_COUNT;
+    report.count = kCount;
     report.result = o.result;
     report.value = o.value;
     report.lo = s.lo;
@@ -418,7 +399,7 @@ private:
     rammp::SelfTestReport report{};
     report.run_id = run_id_;
     report.kind = kind;
-    report.count = ST_COUNT;
+    report.count = kCount;
     report.value = value;
     report.lo = lo;
     report.hi = hi;
@@ -435,23 +416,24 @@ private:
                        reason != ESP_RST_TASK_WDT && reason != ESP_RST_WDT &&
                        reason != ESP_RST_BROWNOUT && reason != ESP_RST_CPU_LOCKUP &&
                        reason != ESP_RST_PWR_GLITCH;
-    record(ST_SYS_RESET, clean ? 1 : 0, fmt::format("reset reason: {}", reset_reason_name(reason)));
-    record(ST_SYS_CPU, esp_clk_cpu_freq() / 1000000);
-    record(ST_SYS_UPTIME, static_cast<int32_t>(esp_timer_get_time() / 1000000));
+    record(Id::SYS_RESET, clean ? 1 : 0,
+           fmt::format("reset reason: {}", reset_reason_name(reason)));
+    record(Id::SYS_CPU, esp_clk_cpu_freq() / 1000000);
+    record(Id::SYS_UPTIME, static_cast<int32_t>(esp_timer_get_time() / 1000000));
   }
 
   // The run prints its own progress, so by now a working capture has grown; one
   // that is stuck, or that something has routed stdout around, has not.
   void check_log() {
     const uint32_t now = log_capture_count();
-    record(ST_LOG_CAPTURE, log_capture_active() && now > log_count_before_ ? 1 : 0,
+    record(Id::LOG_CAPTURE, log_capture_active() && now > log_count_before_ ? 1 : 0,
            fmt::format("{} lines since boot, {} this run", now, now - log_count_before_));
   }
 
   void check_board() {
     if (!platform.i2c_probe) {
-      unmeasurable(ST_I2C_MISSING, "no I2C probe");
-      unmeasurable(ST_I2C_COUNT, "no I2C probe");
+      unmeasurable(Id::I2C_MISSING, "no I2C probe");
+      unmeasurable(Id::I2C_COUNT, "no I2C probe");
     } else {
       // Scan the whole bus again rather than re-probing the boot list, so the
       // count stands on its own: one boot on the bench found nothing, and a
@@ -464,9 +446,10 @@ private:
           found += fmt::format(" {:02x}", address);
         }
       }
-      record(ST_I2C_COUNT, static_cast<int32_t>(now.size()), found.empty() ? "none" : "at" + found);
+      record(Id::I2C_COUNT, static_cast<int32_t>(now.size()),
+             found.empty() ? "none" : "at" + found);
       if (platform.boot_i2c_devices.empty()) {
-        unmeasurable(ST_I2C_MISSING, "the boot-time scan found no devices");
+        unmeasurable(Id::I2C_MISSING, "the boot-time scan found no devices");
       } else {
         std::string missing;
         int32_t lost = 0;
@@ -476,68 +459,68 @@ private:
             missing += fmt::format(" 0x{:02x}", address);
           }
         }
-        record(ST_I2C_MISSING, lost, missing.empty() ? std::string() : "gone:" + missing);
+        record(Id::I2C_MISSING, lost, missing.empty() ? std::string() : "gone:" + missing);
       }
     }
 
     const auto accel = platform.imu_accel_mg ? platform.imu_accel_mg() : std::nullopt;
     if (accel) {
-      record(ST_IMU_ACCEL, *accel);
+      record(Id::IMU_ACCEL, *accel);
     } else {
-      unmeasurable(ST_IMU_ACCEL, "no accelerometer reading");
+      unmeasurable(Id::IMU_ACCEL, "no accelerometer reading");
     }
 
     const auto vbat = platform.battery_mv ? platform.battery_mv() : std::nullopt;
     if (!vbat) {
-      unmeasurable(ST_PWR_VBAT, "battery monitor did not answer");
+      unmeasurable(Id::PWR_VBAT, "battery monitor did not answer");
     } else if (*vbat < 5000) {
       // no 2S pack reads this low (pwr.vbat in selftest_spec.h); the raw
       // reading goes in the detail, because the bench unit flips between this
       // and a full pack on one boot
-      unmeasurable(ST_PWR_VBAT, fmt::format("reads {} mV: taken as no pack fitted", *vbat));
+      unmeasurable(Id::PWR_VBAT, fmt::format("reads {} mV: taken as no pack fitted", *vbat));
     } else {
-      record(ST_PWR_VBAT, *vbat);
+      record(Id::PWR_VBAT, *vbat);
     }
   }
 
   void check_haptic_presence() {
     const auto status = platform.drv2605_status ? platform.drv2605_status() : std::nullopt;
     if (status) {
-      record(ST_HAP_DRV_ID, *status >> 5);
+      record(Id::HAP_DRV_ID, *status >> 5);
       // OVER_TEMP (bit 1) and OC_DETECT (bit 0) latch until read
-      record(ST_HAP_DRV_FAULT, (*status & 0x03) == 0 ? 1 : 0,
+      record(Id::HAP_DRV_FAULT, (*status & 0x03) == 0 ? 1 : 0,
              fmt::format("STATUS 0x{:02x}", *status));
     } else {
-      unmeasurable(ST_HAP_DRV_ID, "DRV2605 did not answer");
-      unmeasurable(ST_HAP_DRV_FAULT, "DRV2605 did not answer");
+      unmeasurable(Id::HAP_DRV_ID, "DRV2605 did not answer");
+      unmeasurable(Id::HAP_DRV_FAULT, "DRV2605 did not answer");
     }
     if (platform.da7280_found) {
-      record(ST_HAP_DA7280, 1);
+      record(Id::HAP_DA7280, 1);
     } else {
-      unmeasurable(ST_HAP_DA7280, "not fitted (no ACK at 0x4a at boot)");
+      unmeasurable(Id::HAP_DA7280, "not fitted (no ACK at 0x4a at boot)");
     }
   }
 
   void check_haptic_play() {
     if (!platform.drv2605_play) {
-      unmeasurable(ST_HAP_DRV_PLAY, "no DRV2605");
+      unmeasurable(Id::HAP_DRV_PLAY, "no DRV2605");
       return;
     }
     std::string detail;
     const auto ok = platform.drv2605_play(detail);
     if (ok) {
-      record(ST_HAP_DRV_PLAY, *ok ? 1 : 0, detail);
+      record(Id::HAP_DRV_PLAY, *ok ? 1 : 0, detail);
     } else {
-      unmeasurable(ST_HAP_DRV_PLAY, detail);
+      unmeasurable(Id::HAP_DRV_PLAY, detail);
     }
   }
 
   void check_display() {
-    record(ST_DISP_DIRECT, platform.direct_render ? 1 : 0);
+    record(Id::DISP_DIRECT, platform.direct_render ? 1 : 0);
     if (platform.backlight_percent) {
-      record(ST_DISP_BACKLIGHT, platform.backlight_percent());
+      record(Id::DISP_BACKLIGHT, platform.backlight_percent());
     } else {
-      unmeasurable(ST_DISP_BACKLIGHT, "no backlight probe");
+      unmeasurable(Id::DISP_BACKLIGHT, "no backlight probe");
     }
   }
 
@@ -550,18 +533,18 @@ private:
     // arriving" beside a passing Ethernet link only muddies what it proves
     const bool link = rank >= static_cast<int>(RtpsLinkState::NO_IP);
     const bool lease = rank >= static_cast<int>(RtpsLinkState::NO_PEER);
-    record(ST_NET_LINK, link ? 1 : 0, link ? std::string() : detail);
-    record(ST_NET_IP, lease ? 1 : 0, lease ? std::string() : detail);
+    record(Id::NET_LINK, link ? 1 : 0, link ? std::string() : detail);
+    record(Id::NET_IP, lease ? 1 : 0, lease ? std::string() : detail);
     if (state == RtpsLinkState::CONNECTED) {
-      record(ST_RTPS_LINK, 1);
+      record(Id::RTPS_LINK, 1);
     } else {
-      unmeasurable(ST_RTPS_LINK, detail);
+      unmeasurable(Id::RTPS_LINK, detail);
     }
     const NetLink net = rtps_comms_net_link();
     if (const auto rssi = rtps_comms_wifi_rssi()) {
-      record(ST_NET_WIFI_RSSI, *rssi);
+      record(Id::NET_WIFI_RSSI, *rssi);
     } else {
-      unmeasurable(ST_NET_WIFI_RSSI,
+      unmeasurable(Id::NET_WIFI_RSSI,
                    net == NetLink::WIFI ? detail : std::string("on Ethernet, not WiFi"));
     }
   }
@@ -575,7 +558,7 @@ private:
     }
     {
       auto fresh = std::make_unique<PingLog>();
-      fresh->rtt_us.reserve(ST_WINDOW_MS / ST_PING_PERIOD_MS + 1);
+      fresh->rtt_us.reserve(kWindowMs / kPingPeriodMs + 1);
       std::lock_guard<std::mutex> lock(ping_mutex);
       ping_log = std::move(fresh); // opens the window: pongs count from here
     }
@@ -584,7 +567,7 @@ private:
     adc_armed = true;
 
     const int64_t start_us = esp_timer_get_time();
-    const int64_t end_us = start_us + ST_WINDOW_MS * 1000LL;
+    const int64_t end_us = start_us + kWindowMs * 1000LL;
     int64_t next_ping_us = start_us;
     uint32_t pings_sent = 0;
     uint32_t ping_seq = 0;
@@ -603,7 +586,7 @@ private:
           ping_log->sent_us[ping_seq] = 0; // never went out: a stray pong must not count
         }
         ping_seq++;
-        next_ping_us += ST_PING_PERIOD_MS * 1000LL;
+        next_ping_us += kPingPeriodMs * 1000LL;
       }
       // How long the UI lock is held against a waiter: the worst case is how
       // long a producer task (ADC, RTPS) can be stuck behind a redraw.
@@ -627,16 +610,16 @@ private:
     }
 
     if (platform.lvgl_mutex) {
-      record(ST_TIME_UI_STALL, static_cast<int32_t>(stall_max_us));
+      record(Id::TIME_UI_STALL, static_cast<int32_t>(stall_max_us));
     } else {
-      unmeasurable(ST_TIME_UI_STALL, "no LVGL lock");
+      unmeasurable(Id::TIME_UI_STALL, "no LVGL lock");
     }
 
     if (rtc_start && rtc_end) {
-      record(ST_RTC_TICK, static_cast<int32_t>(*rtc_end - *rtc_start),
-             fmt::format("over a {} ms window", ST_WINDOW_MS));
+      record(Id::RTC_TICK, static_cast<int32_t>(*rtc_end - *rtc_start),
+             fmt::format("over a {} ms window", kWindowMs));
     } else {
-      unmeasurable(ST_RTC_TICK, "RTC read failed");
+      unmeasurable(Id::RTC_TICK, "RTC read failed");
     }
 
     judge_adc();
@@ -647,33 +630,34 @@ private:
   void judge_adc() {
     const auto cal_centers =
         platform.joystick_cal_centers_mv ? platform.joystick_cal_centers_mv() : std::nullopt;
-    record(ST_JOY_CAL, cal_centers ? 1 : 0, cal_centers ? "" : "defaults in use: press CALIBRATE");
+    record(Id::JOY_CAL, cal_centers ? 1 : 0, cal_centers ? "" : "defaults in use: press CALIBRATE");
     AdcCapture c;
     {
       std::lock_guard<std::mutex> lock(adc_mutex);
       c = adc_capture;
     }
     if (c.cycles == 0) {
-      for (Id id : {ST_TIME_ADC_AVG, ST_TIME_ADC_MAX, ST_JOY_VALID, ST_JOY_X, ST_JOY_Y,
-                    ST_JOY_TWIST, ST_JOY_X_NOISE, ST_JOY_Y_NOISE, ST_JOY_TWIST_NOISE, ST_JOY_X_CAL,
-                    ST_JOY_Y_CAL, ST_JOY_TWIST_CAL, ST_JOY_BUTTON, ST_RTPS_ADC_HZ}) {
+      for (Id id :
+           {Id::TIME_ADC_AVG, Id::TIME_ADC_MAX, Id::JOY_VALID, Id::JOY_X, Id::JOY_Y, Id::JOY_TWIST,
+            Id::JOY_X_NOISE, Id::JOY_Y_NOISE, Id::JOY_TWIST_NOISE, Id::JOY_X_CAL, Id::JOY_Y_CAL,
+            Id::JOY_TWIST_CAL, Id::JOY_BUTTON, Id::RTPS_ADC_HZ}) {
         unmeasurable(id, "ADC task not running");
       }
       return;
     }
     if (c.periods > 0) {
-      record(ST_TIME_ADC_AVG, static_cast<int32_t>(c.period_sum_us / c.periods),
+      record(Id::TIME_ADC_AVG, static_cast<int32_t>(c.period_sum_us / c.periods),
              fmt::format("{} cycles", c.cycles));
-      record(ST_TIME_ADC_MAX, static_cast<int32_t>(c.period_max_us));
+      record(Id::TIME_ADC_MAX, static_cast<int32_t>(c.period_max_us));
     } else {
-      unmeasurable(ST_TIME_ADC_AVG, "one cycle only");
-      unmeasurable(ST_TIME_ADC_MAX, "one cycle only");
+      unmeasurable(Id::TIME_ADC_AVG, "one cycle only");
+      unmeasurable(Id::TIME_ADC_MAX, "one cycle only");
     }
-    record(ST_JOY_VALID, static_cast<int32_t>(c.valid * 100 / c.cycles),
+    record(Id::JOY_VALID, static_cast<int32_t>(c.valid * 100 / c.cycles),
            fmt::format("{} of {} cycles", c.valid, c.cycles));
-    const Id rest[3] = {ST_JOY_X, ST_JOY_Y, ST_JOY_TWIST};
-    const Id noise[3] = {ST_JOY_X_NOISE, ST_JOY_Y_NOISE, ST_JOY_TWIST_NOISE};
-    const Id cal_off[3] = {ST_JOY_X_CAL, ST_JOY_Y_CAL, ST_JOY_TWIST_CAL};
+    const Id rest[3] = {Id::JOY_X, Id::JOY_Y, Id::JOY_TWIST};
+    const Id noise[3] = {Id::JOY_X_NOISE, Id::JOY_Y_NOISE, Id::JOY_TWIST_NOISE};
+    const Id cal_off[3] = {Id::JOY_X_CAL, Id::JOY_Y_CAL, Id::JOY_TWIST_CAL};
     for (int axis = 0; axis < 3; ++axis) {
       if (c.valid == 0) {
         unmeasurable(rest[axis], "no valid sample");
@@ -693,29 +677,29 @@ private:
         unmeasurable(cal_off[axis], "no saved calibration");
       }
     }
-    record(ST_JOY_BUTTON, c.button_seen ? 0 : 1,
+    record(Id::JOY_BUTTON, c.button_seen ? 0 : 1,
            c.button_seen ? "pressed during the at-rest capture" : "");
     if (c.published == 0) {
-      unmeasurable(ST_RTPS_ADC_HZ, "no subscriber for the joystick topic");
+      unmeasurable(Id::RTPS_ADC_HZ, "no subscriber for the joystick topic");
     } else {
-      record(ST_RTPS_ADC_HZ, static_cast<int32_t>(c.published * 1000 / ST_WINDOW_MS),
-             fmt::format("{} samples in {} ms", c.published, ST_WINDOW_MS));
+      record(Id::RTPS_ADC_HZ, static_cast<int32_t>(c.published * 1000 / kWindowMs),
+             fmt::format("{} samples in {} ms", c.published, kWindowMs));
     }
   }
 
   void judge_mcb(const RtpsMcbStats &mcb) {
     if (mcb.samples < 2) {
       const std::string why = fmt::format("{} McbStatus in the window", mcb.samples);
-      unmeasurable(ST_RTPS_MCB_PERIOD, why);
-      unmeasurable(ST_RTPS_MCB_GAP, why);
-      unmeasurable(ST_RTPS_MCB_LOSS, why);
+      unmeasurable(Id::RTPS_MCB_PERIOD, why);
+      unmeasurable(Id::RTPS_MCB_GAP, why);
+      unmeasurable(Id::RTPS_MCB_LOSS, why);
       return;
     }
     const int64_t mean_us = (mcb.last_us - mcb.first_us) / (mcb.samples - 1);
-    record(ST_RTPS_MCB_PERIOD, static_cast<int32_t>(mean_us / 1000),
+    record(Id::RTPS_MCB_PERIOD, static_cast<int32_t>(mean_us / 1000),
            fmt::format("{} samples", mcb.samples));
-    record(ST_RTPS_MCB_GAP, static_cast<int32_t>(mcb.max_gap_us / 1000));
-    record(ST_RTPS_MCB_LOSS, static_cast<int32_t>(mcb.lost * 1000 / (mcb.samples + mcb.lost)),
+    record(Id::RTPS_MCB_GAP, static_cast<int32_t>(mcb.max_gap_us / 1000));
+    record(Id::RTPS_MCB_LOSS, static_cast<int32_t>(mcb.lost * 1000 / (mcb.samples + mcb.lost)),
            fmt::format("{} lost of {}", mcb.lost, mcb.samples + mcb.lost));
   }
 
@@ -727,9 +711,9 @@ private:
     if (sent == 0 || rtts.empty()) {
       const std::string why =
           sent == 0 ? "RTPS not up, or nothing subscribed to pings" : "no pong: no self-test peer";
-      unmeasurable(ST_RTPS_RTT_P50, why);
-      unmeasurable(ST_RTPS_RTT_P99, why);
-      unmeasurable(ST_RTPS_PING_LOSS, why);
+      unmeasurable(Id::RTPS_RTT_P50, why);
+      unmeasurable(Id::RTPS_RTT_P99, why);
+      unmeasurable(Id::RTPS_PING_LOSS, why);
       return;
     }
     std::sort(rtts.begin(), rtts.end());
@@ -742,10 +726,10 @@ private:
     peer_rx = std::min(peer_rx, sent);
     const uint32_t lost_up = sent - peer_rx;
     const uint32_t lost_down = peer_rx > received ? peer_rx - received : 0;
-    record(ST_RTPS_RTT_P50, static_cast<int32_t>(percentile(50)),
+    record(Id::RTPS_RTT_P50, static_cast<int32_t>(percentile(50)),
            fmt::format("min {} us, max {} us", rtts.front(), rtts.back()));
-    record(ST_RTPS_RTT_P99, static_cast<int32_t>(percentile(99)));
-    record(ST_RTPS_PING_LOSS, static_cast<int32_t>((sent - received) * 1000 / sent),
+    record(Id::RTPS_RTT_P99, static_cast<int32_t>(percentile(99)));
+    record(Id::RTPS_PING_LOSS, static_cast<int32_t>((sent - received) * 1000 / sent),
            peer_rx_known
                ? fmt::format("{} sent, {} lost out, {} lost back", sent, lost_up, lost_down)
                : fmt::format("{} sent, {} back (plain echo: no direction)", sent, received));
@@ -757,8 +741,8 @@ private:
   // the invalidation is made under the LVGL lock, so no render is in flight.
   void check_render() {
     if (!platform.lvgl_mutex) {
-      unmeasurable(ST_TIME_RENDER_AVG, "no LVGL lock");
-      unmeasurable(ST_TIME_RENDER_MAX, "no LVGL lock");
+      unmeasurable(Id::TIME_RENDER_AVG, "no LVGL lock");
+      unmeasurable(Id::TIME_RENDER_MAX, "no LVGL lock");
       return;
     }
     // Measured with the overlay hidden: it is a full-screen opaque panel of
@@ -768,7 +752,7 @@ private:
     uint64_t total_us = 0;
     uint32_t max_us = 0;
     uint32_t frames = 0;
-    for (int i = 0; i < ST_RENDER_FRAMES; ++i) {
+    for (int i = 0; i < kRenderFrames; ++i) {
       uint32_t before = 0;
       {
         std::lock_guard<std::recursive_mutex> lock(*platform.lvgl_mutex);
@@ -791,39 +775,39 @@ private:
     }
     render_banner(false);
     if (frames == 0) {
-      unmeasurable(ST_TIME_RENDER_AVG, "no frame rendered");
-      unmeasurable(ST_TIME_RENDER_MAX, "no frame rendered");
+      unmeasurable(Id::TIME_RENDER_AVG, "no frame rendered");
+      unmeasurable(Id::TIME_RENDER_MAX, "no frame rendered");
       return;
     }
-    record(ST_TIME_RENDER_AVG, static_cast<int32_t>(total_us / frames),
-           fmt::format("{} of {} frames", frames, ST_RENDER_FRAMES));
-    record(ST_TIME_RENDER_MAX, static_cast<int32_t>(max_us));
+    record(Id::TIME_RENDER_AVG, static_cast<int32_t>(total_us / frames),
+           fmt::format("{} of {} frames", frames, kRenderFrames));
+    record(Id::TIME_RENDER_MAX, static_cast<int32_t>(max_us));
   }
 
   void check_memory() {
     constexpr uint32_t kInternal = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
     const auto kb = [](size_t bytes) { return static_cast<int32_t>(bytes / 1024); };
-    record(ST_MEM_INT_FREE, kb(heap_caps_get_free_size(kInternal)));
-    record(ST_MEM_INT_MIN, kb(heap_caps_get_minimum_free_size(kInternal)),
+    record(Id::MEM_INT_FREE, kb(heap_caps_get_free_size(kInternal)));
+    record(Id::MEM_INT_MIN, kb(heap_caps_get_minimum_free_size(kInternal)),
            fmt::format("{} KB before this run", kb(int_min_before_)));
-    record(ST_MEM_INT_BLOCK, kb(heap_caps_get_largest_free_block(kInternal)));
-    record(ST_MEM_DMA_FREE, kb(heap_caps_get_free_size(MALLOC_CAP_DMA)));
+    record(Id::MEM_INT_BLOCK, kb(heap_caps_get_largest_free_block(kInternal)));
+    record(Id::MEM_DMA_FREE, kb(heap_caps_get_free_size(MALLOC_CAP_DMA)));
     // In bytes, not KB: the question is whether one Ethernet frame's bounce
     // buffer would still fit, and rounding down to KB would fail a block that
     // is big enough.
-    record(ST_MEM_DMA_MIN, static_cast<int32_t>(heap_caps_get_minimum_free_size(MALLOC_CAP_DMA)),
+    record(Id::MEM_DMA_MIN, static_cast<int32_t>(heap_caps_get_minimum_free_size(MALLOC_CAP_DMA)),
            fmt::format("{} B before this run", dma_min_before_));
-    record(ST_MEM_DMA_BLOCK,
+    record(Id::MEM_DMA_BLOCK,
            static_cast<int32_t>(heap_caps_get_largest_free_block(MALLOC_CAP_DMA)));
-    record(ST_MEM_PSRAM_FREE, kb(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)));
-    record(ST_MEM_HEAP_OK, heap_caps_check_integrity_all(true) ? 1 : 0);
+    record(Id::MEM_PSRAM_FREE, kb(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)));
+    record(Id::MEM_HEAP_OK, heap_caps_check_integrity_all(true) ? 1 : 0);
     // (No LVGL pool check: this build's LVGL allocates from the system heap,
     // so it is already inside the figures above, and lv_mem_monitor reports
     // nothing.)
 
-    check_stack(ST_MEM_STK_LVGL, "lv_task");
-    check_stack(ST_MEM_STK_ADC, "Read ADC");
-    check_stack(ST_MEM_STK_RTPS, "rtps_pub");
+    check_stack(Id::MEM_STK_LVGL, "lv_task");
+    check_stack(Id::MEM_STK_ADC, "Read ADC");
+    check_stack(Id::MEM_STK_RTPS, "rtps_pub");
   }
 
   void check_stack(Id id, const char *task_name) {
@@ -853,12 +837,12 @@ private:
                remote_ ? "remote" : "local", version_);
     fmt::print("[SELFTEST] {:<4}  {:<18} {:>14}  {:<20} {}\n", "", "check", "measured", "limit",
                "detail");
-    for (uint8_t i = 0; i < ST_COUNT; ++i) {
-      const Spec &s = kSpec[i];
+    for (uint8_t i = 0; i < kCount; ++i) {
+      const Check &s = kChecks[i];
       const Outcome &o = out_[i];
       fmt::print("[SELFTEST] {:<4}  {:<18} {:>14}  {:<20} {}\n", result_tag(o.result), s.name,
                  o.measured ? format_value(s, o.value) : "-", format_limits(s),
-                 o.detail.empty() ? s.desc : o.detail);
+                 o.detail.empty() ? s.why : std::string_view(o.detail));
     }
     fmt::print("[SELFTEST] ===== {} - {} pass, {} fail, {} skip in {}.{} s =====\n",
                passed ? "PASS" : "FAIL", pass, fail, skip, elapsed_ms / 1000,
@@ -872,7 +856,7 @@ private:
     publish_marker(rammp::SelfTestKind::FINISHED, pass, fail, skip, timing);
     // The report topic is best-effort: send it all once more so a reader that
     // dropped a sample can complete the table (it de-duplicates on index).
-    for (uint8_t i = 0; i < ST_COUNT; ++i) {
+    for (uint8_t i = 0; i < kCount; ++i) {
       publish_result(i);
     }
     publish_marker(rammp::SelfTestKind::FINISHED, pass, fail, skip, timing);
@@ -913,7 +897,7 @@ private:
   }
 
   std::string row_text(uint8_t i) const {
-    const Spec &s = kSpec[i];
+    const Check &s = kChecks[i];
     const Outcome &o = out_[i];
     if (!o.done) {
       return fmt::format("#{:06x} .  {}#", kColourPending, s.name);
@@ -1011,7 +995,7 @@ private:
       std::string text;
       for (int row = 0; row < ui_rows_per_column; ++row) {
         const int i = column * ui_rows_per_column + row;
-        if (i >= ST_COUNT) {
+        if (i >= kCount) {
           break;
         }
         text += row_text(static_cast<uint8_t>(i));
@@ -1027,7 +1011,7 @@ private:
   size_t int_min_before_ = 0;
   size_t dma_min_before_ = 0;
   uint32_t log_count_before_ = 0;
-  std::array<Outcome, ST_COUNT> out_{};
+  std::array<Outcome, kCount> out_{};
 };
 
 void selftest_task(void *) {
@@ -1084,7 +1068,7 @@ void overlay_clicked_cb(lv_event_t *) { selftest_ui_dismiss(); }
 bool prepare_overlay() {
   const int32_t width = lv_display_get_horizontal_resolution(lv_display_get_default());
   ui_columns = width >= 1100 ? 3 : 2;
-  ui_rows_per_column = (ST_COUNT + ui_columns - 1) / ui_columns;
+  ui_rows_per_column = (kCount + ui_columns - 1) / ui_columns;
   char *title = alloc_text(kTitleLen);
   char *status = alloc_text(kStatusLen);
   std::array<char *, kMaxColumns> columns{};
@@ -1211,7 +1195,7 @@ void selftest_init(SelfTestPlatform config) {
       selftest_request(SelfTestTrigger::REMOTE, run_id);
     }
   });
-  logger.info("ready: {} checks (selftest_spec.h)", static_cast<int>(ST_COUNT));
+  logger.info("ready: {} checks (selftest_spec.h)", static_cast<int>(kCount));
 }
 
 bool selftest_request(SelfTestTrigger trigger, uint8_t run_id) {
