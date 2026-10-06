@@ -118,6 +118,13 @@ public:
   }
 };
 
+} // namespace
+
+// TEST_CASE expands to file-scope definitions: the cases sit outside the anonymous namespace,
+// as in every other host app, so a parser that does not expand the macro (cppcheck, with no
+// include path to tests/host) still reads the file. Helpers between cases get their own
+// anonymous namespace.
+
 // ---------------------------------------------------------------------------------------------
 // Mailbox
 
@@ -197,9 +204,11 @@ TEST_CASE("FWC-005 a mailbox read off the reader's task fails and consumes nothi
 // ---------------------------------------------------------------------------------------------
 // Queue
 
+namespace {
 using DropQueue = fw::Queue<EventMsg, 4, fw::FullPolicy::DROP_NEWEST_COUNT>;
 using BlockQueue = fw::Queue<EventMsg, 2, fw::FullPolicy::BLOCK_TIMEOUT>;
 using FaultQueue = fw::Queue<EventMsg, 2, fw::FullPolicy::RAISE_FAULT>;
+} // namespace
 
 TEST_CASE("FWC-006 a queue keeps order", "[fw_core]") {
   DropQueue queue({.name = "order", .receiver_checker = RECORDING});
@@ -505,11 +514,13 @@ TEST_CASE("FWC-020 a failed ownership check logs and returns false in a release 
 // ---------------------------------------------------------------------------------------------
 // Owned<T>
 
+namespace {
 struct Counter {
   explicit Counter(int start)
       : value(start) {}
   int value;
 };
+} // namespace
 
 TEST_CASE("FWC-021 Owned runs the access on its owner only", "[fw_core]") {
   g_failure = {};
@@ -576,6 +587,7 @@ TEST_CASE("FWC-023 errors and enums have names for logs", "[fw_core]") {
   TEST_ASSERT_TRUE(fw::to_string(static_cast<fw::FullPolicy>(99)) == "UNKNOWN");
 }
 
+namespace {
 struct Unmarked {
   int x;
 };
@@ -587,6 +599,7 @@ struct Holder {
   static constexpr bool IS_MESSAGE = true;
   std::string text;
 };
+} // namespace
 
 TEST_CASE("FWC-024 messages and context tokens obey their compile-time rules", "[fw_core]") {
   // The rules the must-not-compile tests prove from the other side (TS-UNIT-06).
@@ -622,5 +635,3 @@ TEST_CASE("FWC-025 the host port names tasks and cuts long names to fit", "[fw_c
   TEST_ASSERT_TRUE(id != hmi::fw::port::NO_TASK);
   TEST_ASSERT_TRUE(id != hmi::fw::port::current_task());
 }
-
-} // namespace
