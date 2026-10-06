@@ -32,6 +32,44 @@ jobs:
     - name: UI contract (SquareLine export vs what main.cpp assumes)
       run: python3 scripts/ui_contract.py
 
+    - name: Diagrams (CS-ARC-02; generated parts match docs/architecture.md)
+      run: |
+        python3 tools/gen_diagrams/gen_diagrams.py selftest
+        python3 tools/gen_diagrams/gen_diagrams.py check
+
+    - name: Test manifest (TS-DEF-02)
+      run: |
+        python3 -m pip install --quiet pyyaml
+        python3 tests/run.py check
+
+    # Debug channels stay out of what ships (CS-LAY-09; plan H13): the remote UI can press
+    # the stick button, and an OTA test URL bypasses the release check.
+    - name: Release defaults keep debug features off
+      run: |
+        ! grep -Eq '^CONFIG_HMI_REMOTE_UI=y' sdkconfig.defaults
+        ! grep -Eq '^CONFIG_HMI_OTA_TEST_URL="[^"]+"' sdkconfig.defaults
+
+  host-l1:
+    # L1 host tests (tests/run.py). They need the espp headers, which the component
+    # manager fetches during a reconfigure; the IDF image also has g++ and Unity.
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v7
+      with:
+        submodules: recursive
+
+    - name: L1 host tests
+      uses: espressif/esp-idf-ci-action@v1
+      with:
+        esp_idf_version: ${{ env.IDF_VERSION }}
+        path: "."
+        target: ${{ env.IDF_TARGET }}
+        command: >-
+          idf.py reconfigure
+          && pip install --quiet pyyaml
+          && UNITY_DIR=$IDF_PATH/components/unity/unity/src python3 tests/run.py run --all --seed 1
+
   bench-build:
     # The bench variant: the remote UI debug channel on (ci/sdkconfig.bench). Its own
     # build dir and sdkconfig, so the overlay is not shadowed by another config.
