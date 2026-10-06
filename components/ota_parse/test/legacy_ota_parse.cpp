@@ -229,18 +229,21 @@ std::string check_header(const uint8_t *data) {
   return "";
 }
 
-// ---- verbatim: main/github_ota.cpp:388-396 (install()'s write_block, before esp_ota_write) ----
+// ---- main/github_ota.cpp:388-396 (install()'s write_block, before esp_ota_write) ------------
+// Restructured for cppcheck, same answers: the original is the `if (!header_checked) { ... }`
+// block of a lambda whose `header_checked` (captured, false until the first block passes)
+// persists across blocks. This oracle models the first block only, where `header_checked` is
+// always false, so the copy kept that flag as a local that cppcheck reported as an always-true
+// condition (knownConditionTrueFalse) and a write never read (unreadVariable). The block's body
+// is kept as it was; only the flag around it is gone. Not a firmware finding: in the original
+// the flag is live state.
 
 std::string first_block_check(const uint8_t *data, size_t fill) {
-  bool header_checked = false;
-  if (!header_checked) {
-    if (fill < kDescEnd) {
-      return "The file is too short to be firmware";
-    }
-    if (std::string err = check_header(data); !err.empty()) {
-      return err;
-    }
-    header_checked = true;
+  if (fill < kDescEnd) {
+    return "The file is too short to be firmware";
+  }
+  if (std::string err = check_header(data); !err.empty()) {
+    return err;
   }
   return "";
 }

@@ -4,6 +4,7 @@
 // cdr::deserialize<T>, managed_components/espp__rtps/include/rtps_pubsub.hpp:88-102, 182),
 // and field-by-field equality with floats compared bit for bit (NaN == NaN, -0 != +0).
 
+#include <algorithm>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -108,12 +109,9 @@ inline bool eq(const rammp::MotorState &a, const rammp::MotorState &b) {
 /// True if a decoded text holds a byte the Python codec cannot carry unchanged: a NUL
 /// (it cuts the string there) or a non-ASCII byte (it drops or replaces it).
 inline bool odd_text(const std::string &s) {
-  for (const char c : s) {
-    if (c == '\0' || static_cast<unsigned char>(c) >= 0x80U) {
-      return true;
-    }
-  }
-  return false;
+  return std::any_of(s.begin(), s.end(), [](const char c) {
+    return c == '\0' || static_cast<unsigned char>(c) >= 0x80U;
+  });
 }
 template <class T> bool odd_text(const T &) { return false; }
 inline bool odd_text(const MIB::MibStatus &m) {

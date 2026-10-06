@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <span>
@@ -162,15 +163,16 @@ std::vector<GithubRelease> parse_releases(const std::string &json, std::string &
   std::vector<hmi::ota::Release> parsed = hmi::ota::parse_releases(json, kAssetName, error);
   std::vector<GithubRelease> releases;
   releases.reserve(parsed.size());
-  for (hmi::ota::Release &r : parsed) {
-    releases.push_back(GithubRelease{.tag = std::move(r.tag),
-                                     .prerelease = r.prerelease,
-                                     .published = std::move(r.published),
-                                     .notes = std::move(r.notes),
-                                     .url = std::move(r.url),
-                                     .size = r.size,
-                                     .sha256 = std::move(r.sha256)});
-  }
+  std::transform(parsed.begin(), parsed.end(), std::back_inserter(releases),
+                 [](hmi::ota::Release &r) {
+                   return GithubRelease{.tag = std::move(r.tag),
+                                        .prerelease = r.prerelease,
+                                        .published = std::move(r.published),
+                                        .notes = std::move(r.notes),
+                                        .url = std::move(r.url),
+                                        .size = r.size,
+                                        .sha256 = std::move(r.sha256)};
+                 });
   return releases;
 }
 

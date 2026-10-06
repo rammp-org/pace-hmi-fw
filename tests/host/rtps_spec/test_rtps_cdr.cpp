@@ -472,9 +472,8 @@ TEST_CASE("RTPS-052 one byte forced to 0x00, 0x80 or 0xFF anywhere, and seeded r
     for (int i = 0; i < 2000; ++i) {
       const auto n = static_cast<size_t>(next_random(state) % (2 * wire.size() + 16));
       Bytes data(n);
-      for (uint8_t &b : data) {
-        b = static_cast<uint8_t>(next_random(state));
-      }
+      std::generate(data.begin(), data.end(),
+                    [&state] { return static_cast<uint8_t>(next_random(state)); });
       if (n >= 4 && (i % 2) == 0) { // half keep a valid header, so the body parser is reached
         data[0] = 0x00;
         data[1] = 0x01;

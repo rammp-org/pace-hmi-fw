@@ -4,6 +4,7 @@
 // (subject_screens.hpp); FMT-111..116 compare the code under test with the pre-move code itself
 // over wide sweeps. One behaviour per case.
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -130,9 +131,7 @@ public:
   // A string of up to max_len characters drawn from `alphabet`.
   std::string text(std::string_view alphabet, std::size_t max_len) {
     std::string s(below(max_len + 1), ' ');
-    for (char &c : s) {
-      c = alphabet[below(alphabet.size())];
-    }
+    std::generate(s.begin(), s.end(), [&] { return alphabet[below(alphabet.size())]; });
     return s;
   }
 

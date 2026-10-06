@@ -10,9 +10,11 @@
 // sizes at/above/far above any limit, non-UTF-8, deep nesting, and seeded random bytes. Under
 // -fsanitize=address,undefined a hang, overrun or crash fails the run.
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <iterator>
 #include <optional>
 #include <random>
 #include <string>
@@ -71,11 +73,17 @@ struct Rng {
 
 std::string random_bytes(Rng &rng, std::size_t n) {
   std::string out(n, '\0');
-  for (char &c : out) {
-    c = static_cast<char>(rng.byte());
-  }
+  std::generate(out.begin(), out.end(), [&rng] { return static_cast<char>(rng.byte()); });
   return out;
 }
+
+} // namespace
+} // namespace ota_test
+
+// TEST_CASE expands to file-scope definitions: the cases sit outside the namespaces, as in the
+// other host apps, so a parser that does not expand the macro (cppcheck, with no include path
+// to tests/host) still reads the file. Helpers between cases get their own anonymous namespace.
+using namespace ota_test;
 
 // ---- the release list ------------------------------------------------------------------------
 
@@ -243,9 +251,11 @@ TEST_CASE("OTA-021 a bad escape rejects the whole list, but today \\uZZZZ reads 
   }
 }
 
+namespace {
 std::string nested(std::size_t depth) {
   return R"([{"tag_name":"v1","x":)" + std::string(depth, '[') + std::string(depth, ']') + "}]";
 }
+} // namespace
 
 TEST_CASE("OTA-022 nesting up to cJSON's limit parses; deeper, even 100,000 deep, is rejected "
           "without a crash",
@@ -467,6 +477,7 @@ TEST_CASE("OTA-049 seeded random bytes never crash the notes", "[ota][notes][hos
 
 // ---- the image header (first block of the download) -----------------------------------------
 
+namespace {
 constexpr std::size_t kDescEnd = 24 + 8 + 256;
 constexpr std::size_t kDesc = 24 + 8;
 
@@ -496,6 +507,7 @@ std::vector<std::uint8_t> image_block(std::size_t size, std::string_view project
   }
   return b;
 }
+} // namespace
 
 TEST_CASE("OTA-060 this project's image for this chip is accepted, from 288 bytes up",
           "[ota][header]") {
@@ -566,9 +578,7 @@ TEST_CASE("OTA-066 seeded random first blocks are refused without a crash",
     std::string all;
     for (int i = 0; i < 3000; i++) {
       std::vector<std::uint8_t> b(rng.next(kDescEnd + 64));
-      for (std::uint8_t &v : b) {
-        v = rng.byte();
-      }
+      std::generate(b.begin(), b.end(), [&rng] { return rng.byte(); });
       // Every fourth block gets both magics and the chip, so the name check is reached.
       if (i % 4 == 0 && b.size() >= kDescEnd) {
         const std::vector<std::uint8_t> good = image_block(kDescEnd, "");
@@ -723,9 +733,8 @@ TEST_CASE("OTA-101 the marker split across two chunks at any point is found", "[
 
 TEST_CASE("OTA-102 the marker one byte per chunk is found", "[ota][marker]") {
   std::vector<std::string> chunks;
-  for (char c : kMarker) {
-    chunks.emplace_back(1, c);
-  }
+  std::transform(kMarker.begin(), kMarker.end(), std::back_inserter(chunks),
+                 [](char c) { return std::string(1, c); });
   for (const Subject &s : subjects()) {
     TEST_ASSERT_TRUE(s.marker(chunks));
   }
@@ -766,6 +775,3 @@ TEST_CASE("OTA-104 seeded random images and chunkings find the marker exactly wh
     expect_golden(s, "OTA-104", digest(seen));
   }
 }
-
-} // namespace
-} // namespace ota_test
