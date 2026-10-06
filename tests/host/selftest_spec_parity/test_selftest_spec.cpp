@@ -93,14 +93,14 @@ void expect_text(const char *want, std::string_view got, const char *at) {
   TEST_ASSERT_TRUE_MESSAGE(std::string_view(want) == got, at);
 }
 
-} // namespace
-
-TEST_CASE("SST-001 the firmware's check table matches the golden rows, in order",
-          "[selftest_spec]") {
-  TEST_ASSERT_EQUAL_UINT32_MESSAGE(std::size(kGolden), kChecks.size(), "row count");
-  for (std::size_t i = 0; i < kChecks.size() && i < std::size(kGolden); ++i) {
+// The firmware's table against the golden rows. The golden rows come in as a span (like
+// expect_rows), not as kGolden itself: a reader that cannot see the generated
+// golden_rows.inc (cppcheck, with no build folder) would take kGolden to be empty.
+void expect_table(std::span<const Row> golden) {
+  TEST_ASSERT_EQUAL_UINT32_MESSAGE(golden.size(), kChecks.size(), "row count");
+  for (std::size_t i = 0; i < kChecks.size() && i < golden.size(); ++i) {
     const Check &c = kChecks[i];
-    const Row &g = kGolden[i];
+    const Row &g = golden[i];
     char at[96];
     where(at, i, g.name);
     expect_text(g.id, kIdNames[selftest_spec::index_of(c.id)], at);
@@ -111,6 +111,13 @@ TEST_CASE("SST-001 the firmware's check table matches the golden rows, in order"
     TEST_ASSERT_EQUAL_STRING_MESSAGE(g.need, need_name(c.need), at);
     expect_text(g.why, c.why, at);
   }
+}
+
+} // namespace
+
+TEST_CASE("SST-001 the firmware's check table matches the golden rows, in order",
+          "[selftest_spec]") {
+  expect_table(kGolden);
 }
 
 TEST_CASE("SST-002 the host scripts' parse of selftest_spec.hpp matches the golden rows, in order",
