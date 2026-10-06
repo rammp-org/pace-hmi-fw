@@ -1,13 +1,16 @@
 // L1 golden tests for the screen text formatters (components/hmi_format, REQ-FMT-xx in its
-// README). Every case walks a frozen golden table (goldens.hpp, recorded from the pre-move code
-// with LVGL's own printf) through the code under test (subject.hpp). One behaviour per case.
+// README). FMT-001..014 walk a frozen golden table (goldens.hpp, recorded from the pre-move code
+// with LVGL's own printf) through the code under test (subject.hpp); FMT-015..020 compare the
+// code under test with the pre-move code itself over wide sweeps. One behaviour per case.
 
 #include <array>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
 
 #include "goldens.hpp"
+#include "legacy_format.hpp"
 #include "specs.hpp"
 #include "subject.hpp"
 #include "test_case.hpp"
@@ -190,5 +193,165 @@ TEST_CASE("FMT-014 the diagnostics rate reads N.N Hz - Live as the golden table 
     sut::diag_rate_text(g.value, out.data(), out.size());
     const Where where("diag_rate_text", 0, 0, g.value, out.size());
     TEST_ASSERT_EQUAL_STRING_MESSAGE(g.text, out.data(), where.c_str());
+  }
+}
+
+// --- Differential: the component against the pre-move code (legacy_format.cpp, printing with
+// LVGL's own lv_snprintf), byte for byte, over far more inputs than the goldens hold. ---
+
+namespace {
+
+constexpr std::size_t PROBE_SIZE = 48;   // larger than any text here
+constexpr std::size_t CUT_SIZE_MAX = 24; // the cut is checked at every size up to this
+
+using Probe = std::array<char, PROBE_SIZE>;
+
+Probe fresh() {
+  Probe p{};
+  p.fill('#'); // a byte the formatters never write, so a stray write shows
+  return p;
+}
+
+// Compares the whole probe buffers, not only up to the terminator.
+void check_stepper_same(const Row &row, int32_t raw, std::size_t size) {
+  Probe want = fresh();
+  Probe got = fresh();
+  legacy::stepper_format(fmt_test::make_spec<legacy::StepperSpec>(row), raw, want.data(), size);
+  sut::stepper_format(row, raw, got.data(), size);
+  const Where where("stepper_format vs legacy", row.decimals, row.min_value, raw, size);
+  TEST_ASSERT_EQUAL_CHAR_ARRAY_MESSAGE(want.data(), got.data(), want.size(), where.c_str());
+}
+
+void check_seat_same(const Row &row, int32_t raw, std::size_t size) {
+  Probe want = fresh();
+  Probe got = fresh();
+  legacy::seat_format(fmt_test::make_spec<legacy::StepperSpec>(row), raw, want.data(), size);
+  sut::seat_format(row, raw, got.data(), size);
+  const Where where("seat_format vs legacy", row.decimals, row.min_value, raw, size);
+  TEST_ASSERT_EQUAL_CHAR_ARRAY_MESSAGE(want.data(), got.data(), want.size(), where.c_str());
+
+  char want_text[32];
+  char want_footer[40];
+  char got_text[32];
+  char got_footer[40];
+  std::memset(want_text, '#', sizeof(want_text));
+  std::memset(want_footer, '#', sizeof(want_footer));
+  std::memset(got_text, '#', sizeof(got_text));
+  std::memset(got_footer, '#', sizeof(got_footer));
+  legacy::seat_angle_texts(fmt_test::make_spec<legacy::StepperSpec>(row), raw, want_text,
+                           want_footer);
+  sut::seat_angle_texts(row, raw, got_text, got_footer);
+  TEST_ASSERT_EQUAL_CHAR_ARRAY_MESSAGE(want_text, got_text, sizeof(want_text), where.c_str());
+  TEST_ASSERT_EQUAL_CHAR_ARRAY_MESSAGE(want_footer, got_footer, sizeof(want_footer), where.c_str());
+}
+
+template <std::size_t N> void sweep_rows(const std::array<Row, N> &rows) {
+  constexpr int32_t MARGIN = 1000;
+  for (const Row &row : rows) {
+    for (int32_t raw = row.min_value - MARGIN; raw <= row.max_value + MARGIN; ++raw) {
+      check_stepper_same(row, raw, fmt_test::SETTING_TEXT_SIZE);
+      check_seat_same(row, raw, fmt_test::SEAT_TEXT_SIZE);
+    }
+  }
+}
+
+} // namespace
+
+TEST_CASE("FMT-015 every row formats every raw value within 1000 of its range as before the move",
+          "[hmi_format][stepper][seat]") {
+  sweep_rows(fmt_test::SETTINGS_ROWS);
+  sweep_rows(fmt_test::ACTUATOR_ROWS);
+  sweep_rows(fmt_test::SEAT_ROWS);
+  sweep_rows(fmt_test::DIAG_ROWS);
+}
+
+TEST_CASE("FMT-016 decimals 0 to 9 format raw values across the int32 range as before the move",
+          "[hmi_format][stepper]") {
+  constexpr int64_t STRIDE = 104729; // a prime, so the last digits vary
+  for (const Row &row : fmt_test::DECIMALS_ROWS) {
+    for (int64_t raw = INT32_MIN + 1; raw <= INT32_MAX; raw += STRIDE) {
+      check_stepper_same(row, static_cast<int32_t>(raw), fmt_test::SETTING_TEXT_SIZE);
+    }
+    check_stepper_same(row, INT32_MAX, fmt_test::SETTING_TEXT_SIZE);
+  }
+}
+
+TEST_CASE("FMT-017 a text is cut at every buffer size exactly as LVGL's printf cut it",
+          "[hmi_format][stepper][seat]") {
+  for (std::size_t size = 0; size <= CUT_SIZE_MAX; ++size) {
+    for (const Row &row : fmt_test::SETTINGS_ROWS) {
+      for (const int32_t raw : {row.min_value - 1, row.min_value, row.max_value, INT32_MAX}) {
+        check_stepper_same(row, raw, size);
+      }
+    }
+    for (const Row &row : fmt_test::SEAT_ROWS) {
+      for (const int32_t raw : {INT32_MIN, row.min_value, row.max_value, INT32_MIN + 1}) {
+        check_seat_same(row, raw, size);
+      }
+    }
+    for (const Row &row : fmt_test::DECIMALS_ROWS) {
+      check_stepper_same(row, INT32_MIN + 1, size);
+    }
+  }
+}
+
+TEST_CASE("FMT-018 every 4096th float bit pattern gives the same speed as before the move",
+          "[hmi_format][speed]") {
+  constexpr uint64_t STRIDE = 4096;
+  for (uint64_t bits = 0; bits <= UINT32_MAX; bits += STRIDE) {
+    float mps = 0.0f;
+    const auto pattern = static_cast<uint32_t>(bits);
+    std::memcpy(&mps, &pattern, sizeof(mps));
+    const Where where("speed_display_tenths vs legacy", 0, 0, static_cast<long long>(bits), 0);
+    TEST_ASSERT_EQUAL_INT32_MESSAGE(legacy::speed_display_tenths(mps),
+                                    sut::speed_display_tenths(mps), where.c_str());
+  }
+}
+
+TEST_CASE("FMT-019 the speed, rate and clock texts read as before the move over a wide sweep",
+          "[hmi_format][speed][diag][clock]") {
+  for (int32_t v = -20000; v <= 20000; ++v) {
+    Probe want = fresh();
+    Probe got = fresh();
+    legacy::speed_label_text(v, want.data(), want.size());
+    sut::speed_text(v, got.data(), got.size());
+    const Where where("speed_text vs legacy", 0, 0, v, want.size());
+    TEST_ASSERT_EQUAL_CHAR_ARRAY_MESSAGE(want.data(), got.data(), want.size(), where.c_str());
+
+    want = fresh();
+    got = fresh();
+    legacy::diag_rate_text(v, want.data(), want.size());
+    sut::diag_rate_text(v, got.data(), got.size());
+    TEST_ASSERT_EQUAL_CHAR_ARRAY_MESSAGE(want.data(), got.data(), want.size(), where.c_str());
+  }
+  for (int hour = -150; hour <= 150; ++hour) {
+    for (int minute = -150; minute <= 150; ++minute) {
+      std::tm t{};
+      t.tm_hour = hour;
+      t.tm_min = minute;
+      char want[8];
+      char got[8];
+      std::memset(want, '#', sizeof(want));
+      std::memset(got, '#', sizeof(got));
+      legacy::clock_text(t, want);
+      sut::clock_text(t, got);
+      const Where where("clock_text vs legacy", hour, minute, 0, sizeof(want));
+      TEST_ASSERT_EQUAL_CHAR_ARRAY_MESSAGE(want, got, sizeof(want), where.c_str());
+    }
+  }
+}
+
+TEST_CASE("FMT-020 clock_plausible and link_text agree with the pre-move code for every input "
+          "tried",
+          "[hmi_format][clock][link]") {
+  for (int year = -3000; year <= 3000; ++year) {
+    std::tm t{};
+    t.tm_year = year;
+    TEST_ASSERT_EQUAL(legacy::clock_plausible(t), sut::clock_plausible(t));
+  }
+  for (unsigned v = 0; v <= UINT8_MAX; ++v) {
+    const auto link = static_cast<uint8_t>(v);
+    TEST_ASSERT_EQUAL_STRING(legacy::link_text(static_cast<legacy::NetLink>(link)),
+                             sut::link_text(link));
   }
 }

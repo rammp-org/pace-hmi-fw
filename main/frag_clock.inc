@@ -1,11 +1,13 @@
 // split_main.py fragment of main.cpp (frag_clock: original lines 767-852); one TU, see main.cpp.
+#include "hmi_format/topbar.hpp"
 static std::atomic<bool> clock_valid{false};
 static lv_subject_t clock_subject;
 static char clock_buf[8];
 static char clock_prev_buf[8];
 
-// An RTC that lost power reads 2000; anything before 2025 is not a real time.
-static bool clock_plausible(const std::tm &t) { return t.tm_year >= 125; }
+// An RTC that lost power reads 2000; anything before 2025 is not a real time
+// (components/hmi_format, REQ-FMT-06).
+using hmi::format::clock_plausible;
 
 // Any task.
 static void clock_set(const std::tm &local) {
@@ -48,7 +50,7 @@ static void clock_poll_cb(lv_timer_t *) {
     const time_t now = time(nullptr);
     std::tm t{};
     gmtime_r(&now, &t);
-    snprintf(text, sizeof(text), "%02d:%02d", t.tm_hour, t.tm_min);
+    hmi::format::clock_text(t, text);
   }
   if (strcmp(lv_subject_get_string(&clock_subject), text) != 0) {
     lv_subject_copy_string(&clock_subject, text);
@@ -62,8 +64,10 @@ static lv_subject_t link_subject;
 static char link_buf[16];
 static char link_prev_buf[16];
 
+// NetLink -> hmi_format's Link (REQ-FMT-07): anything but WiFi reads Ethernet.
 static const char *link_text(NetLink link) {
-  return link == NetLink::WIFI ? "BT · WI-FI" : "BT · ETH";
+  return hmi::format::link_text(link == NetLink::WIFI ? hmi::format::Link::WIFI
+                                                      : hmi::format::Link::ETHERNET);
 }
 
 static void bind_topbar_labels(lv_obj_t *bar) {
