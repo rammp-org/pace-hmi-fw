@@ -19,6 +19,7 @@
 #include <optional>
 #include <stdlib.h>
 #include <sys/time.h>
+#include <utility>
 #include <vector>
 
 #include "m5stack-tab5.hpp"
@@ -47,6 +48,7 @@
 #include "about_ui.hpp"
 #include "actions_spec.h"
 #include "boot_logo.h"
+#include "drive_adapter.hpp"
 #include "drive_session.hpp"
 #include "fw_info.hpp"
 #include "github_ota.hpp"

@@ -42,8 +42,6 @@ static std::atomic<bool> joy_button_pressed{false};
 // reason as the button: the ADC task must not take the LVGL lock to read it.
 static lv_subject_t drive_profile_subject;
 static std::atomic<MIB::DriveProfile> drive_profile_published{MIB::DriveProfile::NORMAL};
-// Sends the current drive request + profile; defined with the drive gestures.
-static void drive_publish();
 
 // Link health behind those two, polled from rtps_comms (RtpsLinkState). Drives
 // the TopBar's RTPS indicator, and greys the status labels when it is not

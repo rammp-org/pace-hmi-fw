@@ -9,13 +9,15 @@ NAME := drive_golden
 HERE := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 REPO ?= $(abspath $(HERE)/../../..)
 
-# main_unit.cpp compiles main/frag_drive.inc verbatim: the code under test.
-SRCS_UNDER_TEST := $(HERE)/main_unit.cpp \
+# The code under test: main/frag_drive.inc, compiled verbatim by main_unit.cpp, and
+# components/drive_adapter's DriveAdapter, instantiated there and in fake_port.cpp.
+SRCS_UNDER_TEST := $(HERE)/main_unit.cpp $(HERE)/fake_port.cpp \
                    $(REPO)/components/drive_session/src/drive_session.cpp
 TEST_SRCS       := $(HERE)/world.cpp $(HERE)/scripts.cpp $(HERE)/test_drive_golden.cpp
-COVER_SRCS      := $(HERE)/main_unit.cpp
+COVER_SRCS      := $(HERE)/main_unit.cpp $(HERE)/fake_port.cpp
 # shim/ first: its logger.hpp stands in for espp's.
-INCLUDES        := $(HERE)/shim $(HERE) $(REPO)/components/drive_session/include $(REPO)/main
+INCLUDES        := $(HERE)/shim $(HERE) $(REPO)/components/drive_adapter/include \
+                   $(REPO)/components/drive_session/include $(REPO)/main
 
 include $(REPO)/tests/host/common.mk
 

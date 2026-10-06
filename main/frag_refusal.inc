@@ -320,15 +320,14 @@ static void entry_refusal_poll() {
 // shows the DriveScreen only once MibStatus says ENABLED. Two windows, because saying
 // "that was refused" and giving up on the request are different jobs:
 //
-//  - kDriveAnswerUs is when to speak. One MibStatus period plus a margin, so a sample
+//  - kDriveAnswer is when to speak. One MibStatus period plus a margin, so a sample
 //    already in flight when the request went out cannot be mistaken for a refusal.
 //    This is as early as a refusal can honestly be known, and waiting longer just
 //    reads as the HMI ignoring the user.
-//  - kDriveWaitUs is when to stop asking, so a silent MIB is not left with a live
+//  - kDriveWait is when to stop asking, so a silent MIB is not left with a live
 //    request. The warning is long since up by then.
-static constexpr int64_t kDriveAnswerUs =
-    std::chrono::duration_cast<std::chrono::microseconds>(rammp::kMibStatusPeriod +
-                                                          std::chrono::milliseconds{250})
-        .count();
-static constexpr int64_t kDriveWaitUs =
-    std::chrono::duration_cast<std::chrono::microseconds>(rammp::kMibStatusTimeout).count();
+// Both are the drive table's (drive_session_table.hpp), the drive adapter's default
+// windows; here they are held to the RTPS spec they come from.
+static_assert(hmi::drive_session::kDriveAnswer ==
+              rammp::kMibStatusPeriod + std::chrono::milliseconds{250});
+static_assert(hmi::drive_session::kDriveWait == rammp::kMibStatusTimeout);

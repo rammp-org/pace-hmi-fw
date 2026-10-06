@@ -11,6 +11,9 @@
 // Both were recorded once from main/frag_drive.inc as it was before the move (6c431e4, the
 // owner-reviewed table 9b8574f) and are never regenerated from the code under test: a
 // mismatch is a behaviour change, never a reason to re-record (CORE never-list).
+// Since the move (S1b), GLD-001..003 run main/frag_drive.inc's MainDriveView and the
+// DriveAdapter instance through the same shims, and GLD-004 runs the DriveAdapter over a
+// stateful fake port (fake_port.cpp) against golden 1.
 // On a mismatch the actual logs are written to $GOLDEN_ACTUAL_DIR for a diff.
 
 #include <cstddef>
@@ -27,7 +30,8 @@
 
 namespace golden {
 Target main_unit_target();
-}
+Target fake_port_target();
+} // namespace golden
 
 namespace {
 
@@ -123,4 +127,11 @@ TEST_CASE("GLD-003 the golden scenarios take every row of the drive table", "[dr
               golden::scenarios().size(), covered, hmi::drive_session::kTransitionCount,
               hits[hmi::drive_session::kTransitionCount]);
   TEST_ASSERT_EQUAL_UINT(hmi::drive_session::kTransitionCount, covered);
+}
+
+TEST_CASE("GLD-004 DriveAdapter over a stateful fake port calls the port as the frozen port "
+          "golden says",
+          "[drive_golden]") {
+  golden::run_all(golden::fake_port_target());
+  expect_golden(compare_golden(golden::port_log(), "golden_port.txt", "actual_port_fake.txt"));
 }

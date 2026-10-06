@@ -1,7 +1,8 @@
 // The drive code of the main.cpp unit, compiled on the host: main/frag_drive.inc, verbatim,
 // over the recording shims (main_unit_shims.hpp), with its session probed for row coverage
-// (probe.hpp). main_unit_target() is the way in the firmware uses: the same functions, on
-// the same inputs.
+// (probe.hpp). Since the move (S1b) the fragment is MainDriveView plus the DriveAdapter
+// instance (components/drive_adapter), included here as main.cpp includes it.
+// main_unit_target() is the way in the firmware uses: the same functions, on the same inputs.
 
 #include <memory>
 
@@ -11,15 +12,18 @@
 
 // The fragment's session is a probed one (probe.hpp). Test-only, after drive_session.hpp.
 #define DriveSession ProbedSession
+#include "drive_adapter.hpp"
 #include "frag_drive.inc"
 #undef DriveSession
+
+#include "adapter_peer.hpp"
 
 namespace golden {
 
 namespace {
 void reset() {
-  std::destroy_at(&drive_state);
-  std::construct_at(&drive_state);
+  std::destroy_at(&drive_adapter);
+  std::construct_at(&drive_adapter, decltype(drive_adapter)::Config{.view = MainDriveView{}});
   drive_profile_published.store(MIB::DriveProfile::NORMAL);
 }
 bool input(hmi::drive_session::Input in) { return drive_session_input(in); }
@@ -27,9 +31,7 @@ void tick() { drive_wait_poll(); }
 void unlock_hold_done() { drive_unlock_hold_done(); }
 void exit_hold_done() { drive_exit_gesture.completed(); }
 void set_profile(Profile p) { drive_profile_published.store(static_cast<MIB::DriveProfile>(p)); }
-Deadlines deadlines() {
-  return {drive_state.wait_warn_us, drive_state.wait_until_us, drive_state.exit_until_us};
-}
+Deadlines deadlines() { return hmi::drive_adapter::DriveAdapterTestPeer::deadlines(drive_adapter); }
 } // namespace
 
 Target main_unit_target() {

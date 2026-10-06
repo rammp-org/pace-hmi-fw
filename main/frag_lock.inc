@@ -60,8 +60,9 @@ static void lock_ring_hold_observer(lv_observer_t *, lv_subject_t *subject) {
   }
 }
 
-// Locking and unlocking the HMI are the drive session's actions, performed in
-// frag_drive.inc (drive_perform) in the order set_locked() used to run them:
+// Locking and unlocking the HMI are the drive session's actions, performed by the drive
+// adapter (components/drive_adapter, through MainDriveView in frag_drive.inc) in the order
+// set_locked() used to run them:
 //   unlock: CANCEL_UNLOCK_TIMER, START_UNLOCK_TIMER, SET_UNLOCKED, GATE_UPDATE
 //   lock:   CANCEL_UNLOCK_TIMER, RING_REST, GO_LOCKED_SCREEN, SET_LOCKED, GATE_UPDATE
 // They run on the LVGL task: writing locked_subject runs its observers

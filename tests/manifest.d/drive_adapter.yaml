@@ -1,0 +1,14 @@
+# L1 host app for components/drive_adapter: the adapter's own contract (DAD-001..006).
+# spec-deviation(TS-UNIT-01): host-native g++ in WSL, not the IDF linux target (owner, 2026-10-06).
+- id: DAD-L1
+  title: DriveAdapter's contract (start state, re-entry, windows, safe state, U3)
+  level: L1
+  path: components/drive_adapter/test
+  requirements: [REQ-DAD-02, REQ-DAD-03, REQ-DAD-04, REQ-DAD-05, REQ-DAD-06]
+  resources: [host]
+  timeout_s: 120
+  expected_s: 15
+  repeat: 1
+  pass_threshold: 1
+  safety: true
+  artifact: test
