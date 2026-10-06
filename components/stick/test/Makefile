@@ -24,7 +24,8 @@ SYS_INCLUDES    := $(REPO)/components/joystick/include \
                    $(MC)/espp__format/include \
                    $(MC)/espp__format/detail/fmt/include \
                    $(MC)/espp__math/include
-COVER_SRCS      := $(SRCS_UNDER_TEST) $(wildcard $(REPO)/components/stick/include/stick/*.hpp)
+HEADER          := $(REPO)/components/stick/include/stick/stick_pipeline.hpp
+COVER_SRCS      := $(SRCS_UNDER_TEST) $(HEADER)
 
 include $(REPO)/tests/host/common.mk
 
@@ -33,6 +34,22 @@ include $(REPO)/tests/host/common.mk
 # stay verbatim, so that one file builds without -Wconversion (not without
 # -Werror). The extracted code builds with the full set.
 $(call obj_of,$(HERE)/legacy_adc_cycle.cpp): CXX_WARN := $(WARN_FLAGS) -Wno-conversion
+
+# Coverage of the header: cycle() and update_keys() are templates, so their counters live in
+# test_stick.cpp's object. gcov_summary.py (common.mk's `coverage`) reads <obj dir>/<source>.o
+# and the .gcno/.gcda beside it; these links give the header that name, so it is reported
+# with the rest. The links are remade on every coverage run (`coverage` deletes *.gcda).
+ifeq ($(COVERAGE),1)
+HEADER_OBJ := $(call obj_of,$(HEADER))
+TEST_OBJ   := $(call obj_of,$(HERE)/test_stick.cpp)
+.PHONY: header-cov-links
+header-cov-links: $(TEST_OBJ)
+	@mkdir -p $(dir $(HEADER_OBJ))
+	@ln -sf $(TEST_OBJ) $(HEADER_OBJ)
+	@ln -sf $(TEST_OBJ:.o=.gcno) $(HEADER_OBJ:.o=.gcno)
+	@ln -sf $(TEST_OBJ:.o=.gcda) $(HEADER_OBJ:.o=.gcda)
+test: header-cov-links
+endif
 
 GEN_OBJS := $(call obj_of,$(HERE)/gen_golden.cpp $(HERE)/legacy_adc_cycle.cpp) $(TP_OBJS)
 GEN_BIN  := $(OUT)/gen_golden

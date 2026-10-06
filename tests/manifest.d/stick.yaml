@@ -6,7 +6,7 @@
   title: stick pipeline golden vectors, hazards pinned as-is (open/short pot, invalid cycle, gate)
   level: L1
   path: components/stick/test
-  requirements: []
+  requirements: [REQ-STK-01, REQ-STK-02, REQ-STK-03, REQ-STK-04, REQ-STK-05, REQ-STK-06]
   resources: [host]
   timeout_s: 300
   expected_s: 60
