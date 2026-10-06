@@ -43,7 +43,25 @@ Position mount(Position p, bool swap, bool invert_x, bool invert_y) {
   return p;
 }
 
-// main.cpp:1532-1535. The int-to-float conversion was implicit there; it is the same
+// Analog -> keypad level (main.cpp:1518-1535 at 7ea7592; its comment kept).
+// Schmitt trigger (engage past the engage threshold, release below the release
+// one) so the boundary can't chatter; between the two thresholds the previous
+// state holds. The direction is recomputed every cycle, so rolling the stick
+// from one direction to another re-aims without needing to pass through
+// center. The larger component wins, so a diagonal resolves to one direction
+// rather than two.
+//
+// How far the stick must go to count as a key is the Settings stick
+// sensitivity, 1..10. The position is rescaled past the circular dead zone --
+// 0 at its edge, 1 at the gate -- so the thresholds are fractions of the travel
+// OUTSIDE it: level 1 engages at 0.30 (about 36% of the full throw), level 10
+// at 0.01, the moment the stick leaves the dead zone, and the default 9 at
+// ~0.04 (about 14%; it was 0.06, and 0.20 before that). Release is half the
+// engage, so the key lets go on the way back rather than chattering at the
+// boundary. The dead zone itself (center_deadzone_radius, shared with driving)
+// is what keeps rest noise from engaging at any level.
+//
+// The int-to-float conversion was implicit in main.cpp; it is the same
 // conversion, written out.
 KeyThresholds key_thresholds(int sensitivity) {
   const int level = std::clamp<int>(sensitivity, SENSITIVITY_MIN, SENSITIVITY_MAX);
@@ -78,7 +96,10 @@ std::uint32_t key_direction(bool engaged, float x, float y, const KeyCodes &code
   return y > 0 ? codes.up : codes.down;
 }
 
-// main.cpp:1592-1596
+// main.cpp:1592-1596. Settings "Speed sensitivity" scales all three axes on the
+// way to the MCB, as if the stick moved that much less: 1.0x sends it as it is,
+// 0.1x a tenth of it. Only there -- the bars and the UI keys keep the stick as
+// it is.
 float drive_speed_scale(int drive_speed) {
   return static_cast<float>(std::clamp<int>(drive_speed, DRIVE_SPEED_MIN, DRIVE_SPEED_MAX)) /
          static_cast<float>(DRIVE_SPEED_MAX);

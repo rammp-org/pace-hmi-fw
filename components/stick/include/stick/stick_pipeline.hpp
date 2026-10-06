@@ -152,20 +152,25 @@ public:
 
   /// One ADC cycle. Returns whether XYTwist was published. An invalid cycle (any read
   /// missing) calls nothing on `io` and publishes nothing (H9).
-  template <typename Io> [[nodiscard]] bool cycle(Io &io, const RawReadsMv &raw);
+  /// always_inline (also update_keys): the ADC task has ~1.5 kB of stack free and the guard
+  /// is "no less than before" (refactor.md §3.2); inlined, the cycle costs the task's frame
+  /// what the inline code did (RISC-V GCC 15.2 -O2 estimate: +16 B), outlined about +64 B.
+  template <typename Io>
+  [[nodiscard, gnu::always_inline]] inline bool cycle(Io &io, const RawReadsMv &raw);
 
   /// The key trigger's state (for tests).
   [[nodiscard]] bool key_engaged_state() const { return key_engaged_; }
 
 private:
-  template <typename Io> void update_keys(Io &io, const Position &mounted, bool calibrating);
+  template <typename Io>
+  [[gnu::always_inline]] inline void update_keys(Io &io, const Position &mounted, bool calibrating);
 
   Config config_;
   espp::Joystick joystick_;
   bool key_engaged_ = false;
 };
 
-template <typename Io> bool StickPipeline::cycle(Io &io, const RawReadsMv &raw) {
+template <typename Io> inline bool StickPipeline::cycle(Io &io, const RawReadsMv &raw) {
   if (!(raw.vertical_mv && raw.horizontal_mv && raw.twist_mv)) {
     return false;
   }
@@ -194,7 +199,7 @@ template <typename Io> bool StickPipeline::cycle(Io &io, const RawReadsMv &raw) 
 }
 
 template <typename Io>
-void StickPipeline::update_keys(Io &io, const Position &mounted, bool calibrating) {
+inline void StickPipeline::update_keys(Io &io, const Position &mounted, bool calibrating) {
   const KeyThresholds thresholds = key_thresholds(io.sensitivity());
   key_engaged_ = key_engaged(key_engaged_, calibrating, mounted.x, mounted.y, thresholds);
   const std::uint32_t was = io.joy_key();
