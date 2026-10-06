@@ -1,0 +1,15 @@
+# L1 host app for components/hmi_format (cases FMT-001..FMT-014 in test_hmi_format.cpp): the
+# screen text formatters against golden tables recorded from the pre-move code.
+# spec-deviation(TS-UNIT-01): host-native g++ in WSL, not the IDF linux target (owner, 2026-10-06).
+- id: L1-FMT
+  title: screen text formatters (speed, steppers, seat, clock, link, diagnostics) against goldens
+  level: L1
+  path: components/hmi_format/test
+  requirements: []
+  resources: [host]
+  timeout_s: 300
+  expected_s: 60
+  repeat: 1
+  pass_threshold: 1
+  safety: false
+  artifact: test
