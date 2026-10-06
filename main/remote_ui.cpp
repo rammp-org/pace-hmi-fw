@@ -6,6 +6,7 @@
 #include <array>
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -22,6 +23,8 @@
 #include "freertos/task.h"
 #include "lvgl.h"
 #include "lwip/sockets.h"
+#include "riscv/rvruntime-frames.h"
+#include "soc/soc_caps.h"
 #include "ui.h"
 
 namespace {
@@ -220,7 +223,26 @@ struct TaskRow {
   BaseType_t core = 0;
   uint32_t stack_bytes = 0;
   uint32_t stack_free = 0;
+  bool coproc = false; // has used the FPU/PIE/HWLP: the port pinned it to `core`
 };
+
+// The coprocessor save area ESP-IDF 6.0's RISC-V port keeps at the top of every
+// task's stack, set up at creation (FreeRTOS-Kernel/portable/riscv/port.c:276
+// pxRetrieveCoprocSaveAreaFromStackPointer, :426). When a task first uses a
+// coprocessor the port pins it to the core it is running on (portasm.S:99
+// vPortTaskPinToCore). When that context must later be saved, it carves the
+// save area from the BOTTOM of the stack and moves the TCB's pxStack up past it
+// (port.c:787-815; 132 B for the FPU, RvFPUSaveArea). xTaskGetStackStart then
+// returns the moved address, 132+ B short of what the task was created with.
+// The original start is kept in sa_tcbstack, and sa_allocator is non-zero once
+// a coprocessor has been used.
+static_assert(SOC_CPU_COPROC_NUM > 0, "this port keeps a coprocessor save area");
+const RvCoprocSaveArea &coproc_area(const TaskSnapshot_t &snap) {
+  const auto top = reinterpret_cast<uintptr_t>(snap.pxEndOfStack);
+  // the port's own arithmetic: STACKPTR_ALIGN_DOWN(16, top - sizeof(area))
+  return *reinterpret_cast<const RvCoprocSaveArea *>((top - sizeof(RvCoprocSaveArea)) &
+                                                     ~uintptr_t{15});
+}
 
 struct TaskTable {
   std::array<TaskSnapshot_t, kMaxTasks> snapshots{};
@@ -241,9 +263,14 @@ void take_tasks(TaskTable &table) {
     std::strncpy(row.name.data(), pcTaskGetName(task), row.name.size() - 1);
     row.priority = uxTaskPriorityGet(task);
     row.core = xTaskGetCoreID(task);
-    // pxEndOfStack is the last usable slot, aligned down: the created size to
-    // within the port's alignment
-    row.stack_bytes = static_cast<uint32_t>((snap.pxEndOfStack - xTaskGetStackStart(task) + 1) *
+    const RvCoprocSaveArea &sa = coproc_area(snap);
+    row.coproc = sa.sa_allocator != 0;
+    // from the start the task was created with (see coproc_area) to
+    // pxEndOfStack, the last slot aligned down to 16 B (tasks.c:1054-1064): the
+    // created size, less 0-15 B of that alignment
+    const auto *start =
+        row.coproc ? static_cast<const StackType_t *>(sa.sa_tcbstack) : xTaskGetStackStart(task);
+    row.stack_bytes = static_cast<uint32_t>((snap.pxEndOfStack - start + 1) *
                                             static_cast<std::ptrdiff_t>(sizeof(StackType_t)));
     // ESP-IDF reports the high-water mark in bytes, not words
     row.stack_free = static_cast<uint32_t>(uxTaskGetStackHighWaterMark(task));
@@ -253,7 +280,7 @@ void take_tasks(TaskTable &table) {
 }
 
 // One line: OK {"tasks":[{"name":..,"prio":..,"core":..,"stack_bytes":..,
-// "stack_free":..},...],"complete":true}; core -1 = not pinned.
+// "stack_free":..,"coproc":..},...],"complete":true}; core -1 = not pinned.
 bool send_tasks(int sock) {
   auto table = std::make_unique<TaskTable>(); // ~2.5 KB: off this task's stack
   take_tasks(*table);
@@ -268,7 +295,8 @@ bool send_tasks(int sock) {
            "\",\"prio\":" + std::to_string(row.priority) +
            ",\"core\":" + std::to_string(row.core == tskNO_AFFINITY ? -1 : row.core) +
            ",\"stack_bytes\":" + std::to_string(row.stack_bytes) +
-           ",\"stack_free\":" + std::to_string(row.stack_free) + "}";
+           ",\"stack_free\":" + std::to_string(row.stack_free) +
+           ",\"coproc\":" + (row.coproc ? "true" : "false") + "}";
   }
   out += std::string("],\"complete\":") + (table->count < kMaxTasks ? "true" : "false") + "}";
   return send_line(sock, out);
