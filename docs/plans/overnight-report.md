@@ -71,7 +71,7 @@ Drafts, pushed and **not merged** (each needs two human approvals):
 | Battery read 4.4 V (`pwr.vbat` SKIP) | 3 of 20 B3 runs, all on draft images (drive 2/5, cal 1/1); 0 of 14 elsewhere. Lead (unproven): `M5StackTab5::get_battery_status()` reads `battery_status_` without `battery_mutex_` while the Data Display task writes it (`components/m5stack-tab5/src/power.cpp:68`), a data race. |
 | Banner texts (DRIVE_STOPPED, NOT_GRANTED) | The remote UI reports only screen names. |
 | Fragment glue equivalence for `hmi_models` | Rests on an uncommitted scratch harness (3,648 cases) and B4b's 6 board checks. |
-| clang-tidy counts | Not run (`idf.py clang-check`); the ratchet has no clang-tidy metric yet. |
+| clang-tidy counts | Tried at 04:50: `idf.py clang-check` on the GCC bench build (72 s) produced only compiler errors (GCC-only flags such as `-Wno-old-style-declaration`, unknown target CPU), so no check ran on any file. It needs a separate `IDF_TOOLCHAIN=clang` build. The ratchet has no clang-tidy metric yet. |
 | CORE.md loading | Still NOT loaded at 04:10: `hasClaudeMdExternalIncludesApproved` is false for ui_squareline, and the refactor worktree has no entry in `~/.claude.json`. Headless check: "NOT LOADED" in both repos. Agents got the brief and CORE.md by path instead. |
 
 ## Decided unattended (revisit)
