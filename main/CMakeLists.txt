@@ -6,6 +6,8 @@ idf_component_register(SRC_DIRS "."
                          drv2605
                          file_system
                          filters
+                         hmi_format
+                         hmi_models
                          input_drivers
                          joystick
                          lvgl
@@ -30,6 +32,7 @@ idf_component_register(SRC_DIRS "."
                          rammp_rtps_messages
                          fw_core
                          drive_session
+                         ota_parse
                        EMBED_TXTFILES click.wav)
 
 # The commit the About screen shows beside the version. Read when CMake

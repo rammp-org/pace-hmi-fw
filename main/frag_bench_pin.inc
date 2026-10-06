@@ -1,4 +1,5 @@
 // split_main.py fragment of main.cpp (frag_bench_pin: original lines 2047-2151); one TU, see main.cpp.
+#include "hmi_models/pin.hpp"
 /////////////////////////////////////////////////////////////////////////////
 // BenchGateScreen: the 4-digit PIN
 //
@@ -27,10 +28,10 @@ static_assert(kRdPinLen == 4, "the bench gate draws exactly four PIN dots");
 static constexpr int kRdBack = -1;
 static ButtonGrid rd_grid;
 
-// The digits typed so far, NUL-terminated so a full entry is one comparison.
-// The length lives in the subject rather than here, because that is what the
-// dots are bound to; this array is only ever read to judge a full entry.
-static char rd_pin_entry[kRdPinLen + 1];
+// The digits typed so far, and the judgement on the fourth (components/hmi_models).
+// The dots are bound to the subject, which mirrors the model's digit count.
+static_assert(kRdPinLen == hmi::ui::PinModel::PIN_LEN, "the model judges a four-digit PIN");
+static hmi::ui::PinModel rd_pin({.pin = std::string_view(kRdPin, kRdPinLen)});
 static lv_subject_t rd_pin_len_subject;
 
 // The line above the dots, which doubles as the rejection notice. A
@@ -49,10 +50,13 @@ static lv_subject_t rd_pin_message_subject;
 // Empties the entry and puts the prompt back. Runs on every BenchGateScreen
 // load, so the PIN is asked again on every visit rather than latching once per
 // boot.
-static void rd_pin_reset() {
-  rd_pin_entry[0] = '\0';
+static void rd_pin_draw_empty() {
   lv_subject_set_int(&rd_pin_len_subject, 0);
   lv_subject_copy_string(&rd_pin_message_subject, kRdPinPromptText);
+}
+static void rd_pin_reset() {
+  rd_pin.reset();
+  rd_pin_draw_empty();
 }
 
 // Puts the cursor and the focus on one key, by grid index. Used on load so the
@@ -72,35 +76,34 @@ static void rd_keypad_cb(lv_event_t *e) {
   // Touch moves the cursor too, so the joystick carries on from where a finger
   // last landed rather than from where the stick left off.
   grid_sync_cursor(&rd_grid, lv_event_get_target_obj(e));
-  int len = lv_subject_get_int(&rd_pin_len_subject);
 
   if (digit == kRdBack) {
-    if (len > 0) {
-      rd_pin_entry[--len] = '\0';
-      lv_subject_set_int(&rd_pin_len_subject, len);
+    if (rd_pin.backspace()) {
+      lv_subject_set_int(&rd_pin_len_subject, rd_pin.digits());
     }
     return;
   }
 
-  rd_pin_entry[len++] = static_cast<char>('0' + digit);
-  rd_pin_entry[len] = '\0';
-  lv_subject_set_int(&rd_pin_len_subject, len);
+  const hmi::ui::PinPress press = rd_pin.press(digit);
+  lv_subject_set_int(&rd_pin_len_subject, press.typed);
   // Typing clears a previous rejection, so the line reads as a prompt for the
   // entry in progress rather than a verdict on the last one.
   lv_subject_copy_string(&rd_pin_message_subject, kRdPinPromptText);
-  if (len < kRdPinLen) {
-    return;
-  }
 
   // Judged on the fourth digit rather than on an OK key: the row of dots makes
-  // the length obvious, so a confirm step would add nothing. Either branch
-  // empties the entry, which is what keeps `len` below kRdPinLen above.
-  const bool correct = lv_strcmp(rd_pin_entry, kRdPin) == 0;
-  rd_pin_reset();
-  if (correct) {
+  // the length obvious, so a confirm step would add nothing. Either verdict
+  // empties the entry (the model has already emptied its own).
+  switch (press.verdict) {
+  case hmi::ui::PinVerdict::INCOMPLETE:
+    return;
+  case hmi::ui::PinVerdict::ACCEPTED:
+    rd_pin_draw_empty();
     setting_page_open(kActuatorsPage);
     return;
+  case hmi::ui::PinVerdict::REJECTED:
+    rd_pin_draw_empty();
+    lv_subject_copy_string(&rd_pin_message_subject, kRdPinWrongText);
+    return;
   }
-  lv_subject_copy_string(&rd_pin_message_subject, kRdPinWrongText);
 }
 

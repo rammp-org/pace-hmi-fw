@@ -1012,7 +1012,7 @@ extern "C" void app_main(void) {
       kBootHoldMs, nullptr);
   lv_timer_set_repeat_count(boot_done, 1);
 
-  // The self test's checks and their limits are in selftest_spec.h;
+  // The self test's checks and their limits are in selftest_spec.hpp;
   // selftest.cpp measures them. Started from the "Self test" Skunk Works slot,
   // or by a PC over RTPS (scripts/rtps_selftest.py) — which is why this comes
   // before rtps_comms_start: selftest_init registers the self-test RTPS
@@ -1039,7 +1039,7 @@ extern "C" void app_main(void) {
       .battery_mv = []() -> std::optional<int32_t> {
         const auto battery = espp::M5StackTab5::get().get_battery_status();
         // is_present only says the INA226 answered. Whether the reading is a
-        // pack at all is the self test's call (pwr.vbat in selftest_spec.h),
+        // pack at all is the self test's call (pwr.vbat in selftest_spec.hpp),
         // so the raw voltage goes through and can be seen in its detail.
         if (!battery.is_present) {
           return std::nullopt;

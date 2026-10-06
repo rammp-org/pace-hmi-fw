@@ -3,8 +3,10 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <iterator>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <string_view>
 #include <thread>
 
@@ -23,6 +25,7 @@
 #include "format.hpp"
 #include "fw_info.hpp"
 #include "logger.hpp"
+#include "ota_parse/ota_parse.hpp"
 #include "psa/crypto.h"
 
 // In this image, and so in every image built from this code: an image that
@@ -51,8 +54,6 @@ constexpr size_t kBlockBytes = 64 * 1024; // the flash's erase block
 constexpr size_t kInstallStackBytes = 12 * 1024;
 // The OTA data partition holds two copies of the boot choice, a flash sector each.
 constexpr uint32_t kOtaDataSector = 0x1000;
-// Release notes longer than this are cut: the panel is for a glance.
-constexpr size_t kNotesMaxChars = 1800;
 
 std::mutex status_mutex;
 OtaStatus status; // under status_mutex
@@ -155,94 +156,23 @@ void cjson_in_psram() {
   });
 }
 
-std::string json_string(const cJSON *obj, const char *key) {
-  const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
-  return cJSON_IsString(item) && item->valuestring != nullptr ? item->valuestring : "";
-}
-
-// The release text as the panel can draw it: the font is ASCII (plus a few),
-// and the size report CI appends is a table no one can read at this size.
-std::string readable_notes(std::string_view body) {
-  for (std::string_view cut : {"### ESP-IDF Size Report", "<!--"}) {
-    if (const size_t at = body.find(cut); at != std::string_view::npos) {
-      body = body.substr(0, at);
-    }
-  }
-  std::string out;
-  out.reserve(std::min(body.size(), kNotesMaxChars) + 8);
-  for (size_t i = 0; i < body.size() && out.size() < kNotesMaxChars; i++) {
-    const auto c = static_cast<unsigned char>(body[i]);
-    if (c == '\r' || c == '`' || (c == '*' && i + 1 < body.size() && body[i + 1] == '*')) {
-      i += c == '*' ? 1 : 0; // "**" is bold: drop both
-      continue;
-    }
-    if (c < 0x80) {
-      if (c == '\n' && out.size() >= 2 && out.back() == '\n' && out[out.size() - 2] == '\n') {
-        continue; // at most one blank line
-      }
-      out += static_cast<char>(c);
-      continue;
-    }
-    // UTF-8: a few punctuation marks have ASCII stand-ins, the rest is dropped.
-    const std::string_view rest = body.substr(i);
-    struct Swap {
-      std::string_view utf8, ascii;
-    };
-    static constexpr Swap kSwaps[] = {{"—", "-"},  {"–", "-"},  {"‘", "'"},  {"’", "'"},
-                                      {"“", "\""}, {"”", "\""}, {"→", "->"}, {"…", "..."}};
-    const auto swap = std::find_if(std::begin(kSwaps), std::end(kSwaps),
-                                   [&](const Swap &s) { return rest.starts_with(s.utf8); });
-    if (swap != std::end(kSwaps)) {
-      out += swap->ascii;
-    }
-    size_t len = c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : c >= 0xC0 ? 2 : 1;
-    i += len - 1;
-  }
-  while (!out.empty() && (out.back() == '\n' || out.back() == ' ')) {
-    out.pop_back();
-  }
-  if (out.size() >= kNotesMaxChars) {
-    out += "...";
-  }
-  return out;
-}
-
+// The list's parsing is components/ota_parse; this puts its cJSON nodes in PSRAM and hands
+// back the releases as the panel's type.
 std::vector<GithubRelease> parse_releases(const std::string &json, std::string &error) {
   cjson_in_psram();
-  std::unique_ptr<cJSON, decltype(&cJSON_Delete)> root(
-      cJSON_ParseWithLength(json.data(), json.size()), cJSON_Delete);
-  if (!cJSON_IsArray(root.get())) {
-    error = "GitHub's answer was not a release list";
-    return {};
-  }
+  std::vector<hmi::ota::Release> parsed = hmi::ota::parse_releases(json, kAssetName, error);
   std::vector<GithubRelease> releases;
-  const cJSON *item = nullptr;
-  cJSON_ArrayForEach(item, root.get()) {
-    if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(item, "draft"))) {
-      continue;
-    }
-    GithubRelease r;
-    r.tag = json_string(item, "tag_name");
-    r.prerelease = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(item, "prerelease"));
-    r.published = json_string(item, "published_at").substr(0, 10);
-    r.notes = readable_notes(json_string(item, "body"));
-    const cJSON *asset = nullptr;
-    cJSON_ArrayForEach(asset, cJSON_GetObjectItemCaseSensitive(item, "assets")) {
-      if (json_string(asset, "name") != kAssetName) {
-        continue;
-      }
-      r.url = json_string(asset, "browser_download_url");
-      const cJSON *size = cJSON_GetObjectItemCaseSensitive(asset, "size");
-      r.size = cJSON_IsNumber(size) ? static_cast<size_t>(size->valuedouble) : 0;
-      const std::string digest = json_string(asset, "digest"); // "sha256:<hex>"
-      if (digest.starts_with("sha256:") && digest.size() == 7 + 64) {
-        r.sha256 = digest.substr(7);
-      }
-    }
-    if (!r.tag.empty()) {
-      releases.push_back(std::move(r));
-    }
-  }
+  releases.reserve(parsed.size());
+  std::transform(parsed.begin(), parsed.end(), std::back_inserter(releases),
+                 [](hmi::ota::Release &r) {
+                   return GithubRelease{.tag = std::move(r.tag),
+                                        .prerelease = r.prerelease,
+                                        .published = std::move(r.published),
+                                        .notes = std::move(r.notes),
+                                        .url = std::move(r.url),
+                                        .size = r.size,
+                                        .sha256 = std::move(r.sha256)};
+                 });
   return releases;
 }
 
@@ -297,29 +227,40 @@ std::string hex(const uint8_t *bytes, size_t n) {
   return out;
 }
 
-// The image header, first segment header and app description, in the order
-// esptool lays them out: enough to tell whose image this is before writing it.
-constexpr size_t kDescEnd =
-    sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t) + sizeof(esp_app_desc_t);
+// components/ota_parse reads the image header, first segment header and app
+// description from the bytes; these hold it to the layout ESP-IDF builds.
+static_assert(sizeof(esp_image_header_t) == hmi::ota::kImageHeaderBytes);
+static_assert(sizeof(esp_image_segment_header_t) == hmi::ota::kSegmentHeaderBytes);
+static_assert(sizeof(esp_app_desc_t) == hmi::ota::kAppDescBytes);
+static_assert(offsetof(esp_image_header_t, chip_id) == hmi::ota::kChipIdOffset);
+static_assert(sizeof(esp_chip_id_t) == 2);
+static_assert(ESP_IMAGE_HEADER_MAGIC == hmi::ota::kImageMagic);
+static_assert(ESP_APP_DESC_MAGIC_WORD == hmi::ota::kAppDescMagic);
+static_assert(offsetof(esp_app_desc_t, magic_word) == 0);
+static_assert(offsetof(esp_app_desc_t, version) == hmi::ota::kDescVersion.offset);
+static_assert(sizeof(esp_app_desc_t::version) == hmi::ota::kDescVersion.size);
+static_assert(offsetof(esp_app_desc_t, project_name) == hmi::ota::kDescProjectName.offset);
+static_assert(sizeof(esp_app_desc_t::project_name) == hmi::ota::kDescProjectName.size);
+static_assert(offsetof(esp_app_desc_t, time) == hmi::ota::kDescTime.offset);
+static_assert(sizeof(esp_app_desc_t::time) == hmi::ota::kDescTime.size);
+static_assert(offsetof(esp_app_desc_t, date) == hmi::ota::kDescDate.offset);
+static_assert(sizeof(esp_app_desc_t::date) == hmi::ota::kDescDate.size);
+static_assert(CONFIG_IDF_FIRMWARE_CHIP_ID >= 0 && CONFIG_IDF_FIRMWARE_CHIP_ID <= UINT16_MAX);
 
-std::string check_header(const uint8_t *data) {
-  esp_image_header_t header;
-  esp_app_desc_t desc;
-  std::memcpy(&header, data, sizeof(header));
-  std::memcpy(&desc, data + sizeof(header) + sizeof(esp_image_segment_header_t), sizeof(desc));
-  if (header.magic != ESP_IMAGE_HEADER_MAGIC || desc.magic_word != ESP_APP_DESC_MAGIC_WORD) {
-    return "The file is not firmware";
-  }
-  if (header.chip_id != CONFIG_IDF_FIRMWARE_CHIP_ID) {
-    return "The file is firmware for another chip";
-  }
+// Whether the first block (`fill` bytes) is this project's image for this
+// chip: "" if so, else why not. Before anything is written.
+std::string check_first_block(const uint8_t *data, size_t fill) {
   const esp_app_desc_t *running = esp_app_get_description();
-  if (std::strncmp(desc.project_name, running->project_name, sizeof(desc.project_name)) != 0) {
-    return fmt::format("The file is '{:.32s}', not this HMI's firmware", desc.project_name);
+  const std::string_view running_project(
+      running->project_name, strnlen(running->project_name, sizeof(running->project_name)));
+  hmi::ota::AppDesc desc;
+  std::string err = hmi::ota::check_first_block(std::span<const uint8_t>(data, fill),
+                                                static_cast<uint16_t>(CONFIG_IDF_FIRMWARE_CHIP_ID),
+                                                running_project, desc);
+  if (err.empty()) {
+    logger.info("Image: {} {}, built {} {}", desc.project_name, desc.version, desc.date, desc.time);
   }
-  logger.info("Image: {} {:.32s}, built {:.16s} {:.16s}", desc.project_name, desc.version,
-              desc.date, desc.time);
-  return "";
+  return err;
 }
 
 // Everything between choosing the release and setting the next boot. Returns
@@ -366,9 +307,7 @@ std::string install(const GithubRelease &release) {
   psa_hash_operation_t sha = PSA_HASH_OPERATION_INIT;
   psa_hash_setup(&sha, PSA_ALG_SHA_256);
 
-  const std::string_view marker(kHmiConfirmsItsBoot);
-  bool has_marker = false;
-  std::string carry; // the tail of the last chunk, for a marker across two
+  hmi::ota::MarkerSearch marker(kHmiConfirmsItsBoot);
 
   // Written a whole block at a time: esp_ota_write erases what each write
   // covers, and a 64 KB-aligned 64 KB range is one block erase where the same
@@ -386,10 +325,7 @@ std::string install(const GithubRelease &release) {
   // The first block holds the header: nothing is written before it is checked.
   auto write_block = [&]() -> std::string {
     if (!header_checked) {
-      if (fill < kDescEnd) {
-        return "The file is too short to be firmware";
-      }
-      if (std::string err = check_header(block.get()); !err.empty()) {
+      if (std::string err = check_first_block(block.get(), fill); !err.empty()) {
         return err;
       }
       header_checked = true;
@@ -420,11 +356,7 @@ std::string install(const GithubRelease &release) {
     }
     const size_t len = static_cast<size_t>(n);
     psa_hash_update(&sha, data, len);
-    if (!has_marker) {
-      carry.append(reinterpret_cast<const char *>(data), len);
-      has_marker = carry.find(marker) != std::string::npos;
-      carry.erase(0, carry.size() - std::min(carry.size(), marker.size() - 1));
-    }
+    marker.feed(std::span<const uint8_t>(data, len));
     fill += len;
     done += len;
     if (fill == kBlockBytes) {
@@ -463,7 +395,7 @@ std::string install(const GithubRelease &release) {
   if (esp_err_t err = esp_ota_set_boot_partition(slot); err != ESP_OK) {
     return fmt::format("Could not select the new image ({})", esp_err_to_name(err));
   }
-  if (has_marker) {
+  if (marker.found()) {
     set_stage(OtaStage::VERIFYING,
               "It confirms its own boot: a reset before it does brings this firmware back");
   } else if (esp_err_t err = mark_next_boot_valid(); err == ESP_OK) {

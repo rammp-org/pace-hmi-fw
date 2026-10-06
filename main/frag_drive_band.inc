@@ -1,4 +1,5 @@
 // split_main.py fragment of main.cpp (frag_drive_band: original lines 567-638); one TU, see main.cpp.
+#include "hmi_format/speed.hpp"
 /////////////////////////////////////////////////////////////////////////////
 // DriveScreen: drive-mode selection
 //
@@ -56,22 +57,18 @@ static void drive_mode_publish_observer(lv_observer_t *, lv_subject_t *subject) 
 }
 
 // MibStatus.speed is metres per second; the label shows mph to one decimal.
-// Any task: pure arithmetic, no LVGL.
-static int32_t speed_display_tenths(float mps) {
-  if (!std::isfinite(mps) || mps <= 0.0f) {
-    return 0;
-  }
-  const auto tenths = std::lround(mps * rammp::kMphPerMps * 10.0f);
-  return static_cast<int32_t>(std::clamp<long>(tenths, 0, rammp::kSpeedMaxTenths));
-}
+// Any task: pure arithmetic, no LVGL (components/hmi_format, REQ-FMT-01).
+using hmi::format::speed_display_tenths;
+static_assert(hmi::format::MPH_PER_MPS == rammp::kMphPerMps,
+              "hmi_format's mph per m/s must be the shared spec's");
+static_assert(hmi::format::SPEED_MAX_TENTHS == rammp::kSpeedMaxTenths,
+              "hmi_format's speed clamp must be the shared spec's");
 
 // The speed reaches the subject as tenths; the label wants "N.N". No built-in
-// binding formats an integer that way, so this does the divide itself.
+// binding formats an integer that way, so hmi_format does the divide.
 static void speed_label_observer(lv_observer_t *observer, lv_subject_t *subject) {
-  // int32_t is long on this target, so narrow explicitly rather than hand a
-  // long to a "%d" that -Werror=format would reject
-  const int tenths =
-      static_cast<int>(std::clamp<int32_t>(lv_subject_get_int(subject), 0, rammp::kSpeedMaxTenths));
-  lv_label_set_text_fmt(lv_observer_get_target_obj(observer), "%d.%d", tenths / 10, tenths % 10);
+  char text[8]; // "9.9" at most: the value is clamped to 0..SPEED_MAX_TENTHS
+  hmi::format::speed_text(lv_subject_get_int(subject), text);
+  lv_label_set_text(lv_observer_get_target_obj(observer), text);
 }
 
