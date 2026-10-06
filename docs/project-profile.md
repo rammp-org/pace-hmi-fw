@@ -113,8 +113,10 @@ yet measured or decided, and "none" means checked and absent.
 
 - Board runner: `tools/bench/run_bench.py` (B0-B5; lease file `C:/Users/halai/Offline_Documents/ATDev/rammp/.board-lease`;
   last-good images in `C:/b/bench/good/`; results in `C:/b/bench/results/`). Flakiness seen on
-  2026-10-06: `time.render_max` outside its 20 % band in 1 of 6 runs on m3; `pwr.vbat` read about
-  4.4 V (taken as "no pack") in 2 of 5 runs on the drive-session draft only.
+  2026-10-06: `time.render_max` outside 20 % in 1 of 6 runs on m3 (band widened to 30 %, owner P4).
+- Power: board 2 has NO battery; it is powered over PoE (owner, 2026-10-06). `pwr.vbat` therefore
+  does not read a battery: the ~8.4 V it reports, the occasional ~4.4 V reads and the top bar's
+  "78 %" are not battery state. Ignored for now (owner, P3).
 - Peer simulators: `scripts/rtps_mcb_sim.py --peer <ip> --bind-address 192.168.137.2`, with stdin
   commands `e`, `ok`, `x`, `s`. `scripts/rtps_selftest.py` acts as the MCB during a self-test run.
 - Debug channel: `scripts/hmi_ui.py` on TCP 3333 (screenshots, taps, keys, walk). Test builds
@@ -132,4 +134,6 @@ yet measured or decided, and "none" means checked and absent.
 | TS-UNIT-01, CS-HAL-04 | `tests/` (all L1 apps) | L1 runs as host-native g++ 13 in WSL with IDF's Unity sources, not the IDF `linux` target (not installed; no sudo in WSL) | owner | approved 2026-10-06 (Q6) |
 | CS-LAY (layout) | `main/frag_*.inc` | one-TU fragments of `main.cpp`, so the split cannot change static-init order, linkage or inlining; each fragment becomes a component later | owner | temporary |
 | AI-UNA-02 "never merge" | `dev_refactor` | the owner authorised merges into `dev_refactor` for the 2026-10-06 run (AI-DIS-01) | owner | per run |
+| CS-SAF-05 (two approvals) | safety-relevant changes | one human approver (the owner) until a second reviewer exists; nothing safety-relevant merges to `dev` meanwhile | owner | until a second reviewer is named |
+| CS-SAF-03 (open circuit) | joystick low rail | firmware cannot tell an open pot (0 mV) from full travel (calibrated min 6-11 mV on board 2); firmware-only for now, residual hazard documented in `docs/plans/hazard-fixes.md` | owner | revisit with an EE change |
 | CS-LNG-02 | `main` | `main` keeps IDF's gnu++26 and default warnings until its legacy counts are in the ratchet; new components use `fw_component_options` | owner | open |

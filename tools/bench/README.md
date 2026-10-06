@@ -1,4 +1,4 @@
-# tools/bench: the board-test runner (plan §6, B0–B5)
+# tools/bench: the board-test runner (plan §6, B0–B5 and B4b)
 
 Board 2 (Tab5, ESP32-P4), USB serial number `80:F1:B2:D1:51:A6`, on the Windows hotspot
 192.168.137.0/24 (PC = 192.168.137.2). No motors exist: the MCB is `scripts/rtps_mcb_sim.py`.
@@ -23,6 +23,7 @@ plus the boot capture, self-test JSON, walk PNGs and the sim logs beside it.
 | B2 boot | `board.py` + `boot_check.py` | markers in baseline order with baseline values, nothing forbidden |
 | B3 self test | `compare_selftest.py` | `rtps_selftest.py` exit 0, same IDs and verdicts, values in bands |
 | B4 walk | `walk_check.py` | 13 names == baseline; static screens pixel-equal below y=60 |
+| B4b PIN pad and seat grid | `ui_models_check.py` | wrong PIN 1111 shows the notice and stays; 1234 opens SettingsScreen (actuators page); Seat Functions cursor walk = hmi_models goldens (3 rows of 2, clamped, DOWN off the bottom -> burger key); navigation only, no seat command |
 | B5 drive | `scenario_drive.py` | hold → Drive; `e` → Locked ≤3 s; XYTwist 0 while locked; refused hold never Drive |
 
 Verdicts: PASS, FAIL, INVALID (B0 preflight; B2's no-IP-after-join rule), SKIP (declared on the
@@ -53,6 +54,7 @@ command line), NOT_RUN (nothing to test against, e.g. no IP; or a runner crash: 
 %PY% tools\bench\compare_selftest.py --ip A [--out f.json]     or  --compare-only f.json
 %PY% tools\bench\walk_check.py --ip A --out DIR
 %PY% tools\bench\scenario_drive.py --ip A --out DIR
+%PY% tools\bench\ui_models_check.py --ip A --out DIR
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\bench\hotspot.ps1 status|restart
 ```
 `--tree` (default: this worktree) is where `scripts/` is run from: run the tree that built the

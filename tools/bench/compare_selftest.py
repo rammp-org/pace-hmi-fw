@@ -12,7 +12,9 @@ PASS needs: rtps_selftest.py exit 0; the same check IDs as the baseline; the
 same verdict per check; every value in its band (BANDS below).
 Bands:
   exact    value == baseline (identity, presence, configuration, booleans)
-  pct20    |value - baseline| <= 20 % of baseline (free memory, render/ADC timing)
+  pctN     |value - baseline| <= N % of baseline (pct20: free memory, render/ADC timing;
+           pct30: time.render_max, a worst-case value that was outside 20 % once in 6
+           runs on 2026-10-06; widened on the owner's decision, P4)
   floor80  value >= 80 % of baseline: low-water marks (heap minimum, stack headroom)
            depend on what ran since boot. The baseline was taken at 500 s uptime
            after screenshots; B3 runs ~90 s after a reset, so its marks are higher.
@@ -51,7 +53,7 @@ BANDS = {
     "rtc.tick": "limits", "pwr.vbat": "limits",
     "hap.drv_id": "exact", "hap.drv_fault": "exact", "hap.drv_play": "exact",
     "hap.da7280": "exact", "disp.direct": "exact", "disp.backlight": "exact",
-    "time.render_avg": "pct20", "time.render_max": "pct20", "time.ui_stall": "limits",
+    "time.render_avg": "pct20", "time.render_max": "pct30", "time.ui_stall": "limits",
     "time.adc_avg": "pct20", "time.adc_max": "limits",
     "joy.valid": "limits", "joy.x_rest": "abs:30", "joy.y_rest": "abs:30",
     "joy.twist_rest": "abs:30", "joy.x_noise": "limits", "joy.y_noise": "limits",
@@ -69,9 +71,10 @@ def in_band(band: str, got: dict, base: dict) -> tuple[bool, str]:
         pass
     elif kind == "exact":
         ok, why = v == b, f"{v} != {b}"
-    elif kind == "pct20":
-        ok = v is not None and b is not None and abs(v - b) <= 0.2 * abs(b)
-        why = f"{v} outside {b} +/-20%"
+    elif kind.startswith("pct") and kind[3:].isdigit():
+        pct = int(kind[3:])
+        ok = v is not None and b is not None and abs(v - b) <= pct / 100 * abs(b)
+        why = f"{v} outside {b} +/-{pct}%"
     elif kind == "floor80":
         ok = v is not None and b is not None and v >= 0.8 * b
         why = f"{v} below 80% of {b}"
