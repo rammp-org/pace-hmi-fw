@@ -213,3 +213,12 @@ adapters 0.5); view-init moves inside S4-S6. Total ≈ 14 agent-days, plus one b
 | V12 | **Sequencing:** only S2 (DRV2605 part) and S3 run beside the hazard work. Merge topology (with the `fw::writer` fix) before lifting tasks; lift after C4 (task configs come from `TASKS`, CS-CON-02). S4 → S5 one PR per fragment (lane D) → S6 one PR per fragment, nav last. Only the orchestrator runs `ratchet.py update`, after merges; new hazard UI goes into new view files | feasibility 4, 5, 6, 13 |
 | V13 | **Effort:** ~22–26 agent-days plus reviews (not 14) | feasibility 14 |
 | V14 | **Open for the owner:** the ratchet package (V2, V3); the da7280 functional test that runs at every boot (keep, bench-only Kconfig, or delete); the per-second `[FPS]` print (Kconfig debug, or delete) | feasibility 8 |
+
+## Owner decisions (2026-10-06)
+
+| # | Decision |
+| --- | --- |
+| Ratchet | V2 and V3 approved in full: `static_state`, fn_over_60 enforced in 60-line components, `app_main` ≤300, the espp Task mutex/cv idiom rule (CS-OWN-08), `components/hmi_ui/` as a UI path with `main/*_ui.cpp` frozen, and hash-based `transfer` |
+| DA7280 | The boot-time functional test moves behind a bench-only Kconfig (default off), in its own behaviour commit |
+| [FPS] | Behind a debug Kconfig, default off, logged through espp Logger at debug level |
+| Theme | Board 2 stays on Night (theme 0); the bench re-baselines B2's settings line and B4's static screens, with old and new shown side by side |
