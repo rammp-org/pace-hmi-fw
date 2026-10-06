@@ -1,0 +1,17 @@
+# L1 host app: the drive goldens (app-main-shrink.md S1 / V5). The drive code of the main.cpp
+# unit (main/frag_drive.inc, verbatim, over recording shims) against two frozen call logs, one
+# at the DrivePort and one at the lv_ / rtps_comms_publish_* boundary, over scripted scenarios
+# that take every row of the drive table. Cases GLD-001..003 in tests/host/drive_golden.
+# spec-deviation(TS-UNIT-01): host-native g++ in WSL, not the IDF linux target (owner, 2026-10-06).
+- id: GLD-L1
+  title: the drive code's port and boundary calls equal the goldens frozen before the move
+  level: L1
+  path: tests/host/drive_golden
+  requirements: []
+  resources: [host]
+  timeout_s: 300
+  expected_s: 20
+  repeat: 1
+  pass_threshold: 1
+  safety: true
+  artifact: test
