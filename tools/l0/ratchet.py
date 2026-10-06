@@ -26,7 +26,9 @@ Rules
   not grow; any other path must stay within CS-FIL-01 (header 800, other 1000).
   The baseline holds only files over the limit.
 - fn_over_60 (SHOULD, CS-FIL-01): a path in the baseline must not grow; other
-  paths are not limited by it.
+  paths are not limited by it, except in a component whose own .clang-tidy sets
+  readability-function-size.LineThreshold to 60 (CS-FIL-01 safety code): there it
+  is forbidden like the metrics below.
 - every other metric is forbidden: count <= baseline, and a path absent from the
   baseline must have 0.
 - static_state (CS-CMP-03 [review] "no mutable function-local static"; CS-OWN):
@@ -48,6 +50,7 @@ import pathlib
 import re
 import sys
 import tempfile
+from collections.abc import Callable
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 BASELINE = pathlib.Path(__file__).resolve().parent / "baseline.json"
@@ -548,7 +551,43 @@ RULE_PLACEMENTS: dict[str, re.Pattern[str]] = {
 }
 
 
-def violations(base: dict[str, dict[str, int]], current: dict[str, dict[str, int]]) -> list[str]:
+# A component whose own .clang-tidy sets readability-function-size.LineThreshold to 60 (or
+# less) is safety code for CS-FIL-01 ("Safety-relevant components: function 60, set in their
+# own .clang-tidy"): there fn_over_60 is a hard limit, not a SHOULD. Both YAML forms of
+# CheckOptions are read (list of {key, value}, and a key: value map).
+FUNCTION_SIZE_RE = re.compile(
+    r"readability-function-size\.LineThreshold['\"]?\s*(?:,?\s*value\s*:|:)\s*['\"]?(\d+)"
+)
+
+
+def component_of(path: str) -> str:
+    """`components/<name>` for a component file, `main` for main/."""
+    parts = path.split("/")
+    return "/".join(parts[:2]) if parts[0] == "components" else parts[0]
+
+
+def clang_tidy_threshold(text: str) -> int | None:
+    text = re.sub(r"(?m)#.*$", "", text)
+    m = FUNCTION_SIZE_RE.search(text)
+    return int(m.group(1)) if m else None
+
+
+def strict_components(root: pathlib.Path) -> frozenset[str]:
+    """Components (and main) whose own .clang-tidy sets a function LineThreshold <= 60."""
+    out: set[str] = set()
+    dirs = [root / "main"] + (sorted((root / "components").iterdir()) if (root / "components").is_dir() else [])
+    for d in dirs:
+        f = d / ".clang-tidy"
+        if f.is_file():
+            n = clang_tidy_threshold(read_text(f))
+            if n is not None and n <= SHOULD_FUNCTION:
+                out.add(d.relative_to(root).as_posix())
+    return frozenset(out)
+
+
+def violations(base: dict[str, dict[str, int]], current: dict[str, dict[str, int]],
+               strict: frozenset[str] = frozenset()) -> list[str]:
+    """FAIL lines. `strict`: components where fn_over_60 is a hard limit (strict_components)."""
     bad: list[str] = []
     for path in sorted(current):
         for name in METRICS:
@@ -561,7 +600,10 @@ def violations(base: dict[str, dict[str, int]], current: dict[str, dict[str, int
                 if n > line_limit(path):
                     bad.append(f"lines {path}: {n} > hard limit {line_limit(path)} (CS-FIL-01)")
             elif name == "fn_over_60":
-                pass  # SHOULD only; fn_over_120 is the hard limit
+                if component_of(path) in strict and n > 0:
+                    bad.append(f"fn_over_60 {path}: {n} > 0 ({component_of(path)}/.clang-tidy sets "
+                               f"LineThreshold {SHOULD_FUNCTION}: hard limit, CS-FIL-01)")
+                # elsewhere SHOULD only; fn_over_120 is the hard limit
             elif name in RULE_PLACEMENTS and RULE_PLACEMENTS[name].match(path):
                 pass  # the rule puts it here
             elif n > 0:
@@ -604,7 +646,7 @@ def totals(base: dict[str, dict[str, int]]) -> dict[str, int]:
 def cmd_check(root: pathlib.Path, baseline: pathlib.Path) -> int:
     base = load(baseline)
     current = measure_tree(root)
-    bad = violations(base, current)
+    bad = violations(base, current, strict_components(root))
     for line in bad:
         print(f"FAIL {line}")
     stale = sum(1 for name, paths in base.items() for p, old in paths.items()
@@ -625,7 +667,7 @@ def cmd_update(root: pathlib.Path, baseline: pathlib.Path, init: bool) -> int:
         new = make_baseline(current)
     else:
         base = load(baseline)
-        bad = violations(base, current)
+        bad = violations(base, current, strict_components(root))
         if bad:
             for line in bad:
                 print(f"FAIL {line}")
@@ -723,6 +765,57 @@ SAMPLE_EXPECT = {
 
 def _long_fn(name: str, body_lines: int) -> str:
     return f"void {name}() {{\n" + "  x();\n" * body_lines + "}\n"
+
+
+Expect = Callable[[str, object, object], None]
+
+
+def _selftest_strict_functions(expect: Expect) -> None:
+    """fn_over_60 is a hard limit only in components whose .clang-tidy sets LineThreshold 60."""
+    zero = dict.fromkeys(METRICS, 0)
+    tidy = {
+        "safe": "Checks: '-*'\nInheritParentConfig: true\nCheckOptions:\n"
+                "  - { key: readability-function-size.LineThreshold, value: 60 }\n",
+        "block": "CheckOptions:\n  - key: readability-function-size.LineThreshold\n    value: '60'\n",
+        "map": "CheckOptions:\n  readability-function-size.LineThreshold: 40\n",
+        "loose": "CheckOptions:\n  - { key: readability-function-size.LineThreshold, value: 120 }\n",
+        "commented": "CheckOptions:\n  # - { key: readability-function-size.LineThreshold, value: 60 }\n",
+        "other": "CheckOptions:\n  - { key: readability-function-size.StatementThreshold, value: 60 }\n",
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        for name, text in tidy.items():
+            (root / "components" / name / "src").mkdir(parents=True)
+            (root / "components" / name / ".clang-tidy").write_text(text, encoding="utf-8")
+        (root / "components" / "plain" / "src").mkdir(parents=True)
+        strict = strict_components(root)
+        expect("strict components (LineThreshold <= 60, list/block/map YAML)", sorted(strict),
+               ["components/block", "components/map", "components/safe"])
+        over = {**zero, "fn_over_60": 1}
+        expect("fn_over_60 forbidden in a 60-line component",
+               len(violations({}, {"components/safe/src/a.cpp": over}, strict)), 1)
+        for name in ("loose", "commented", "other", "plain"):
+            expect(f"fn_over_60 still a SHOULD in components/{name}",
+                   violations({}, {f"components/{name}/src/a.cpp": over}, strict), [])
+        expect("fn_over_60 still a SHOULD in main/", violations({}, {"main/x.cpp": over}, strict), [])
+        expect("fn_over_60 SHOULD when no strict set is given",
+               violations({}, {"components/safe/src/a.cpp": over}), [])
+        legacy = {"fn_over_60": {"components/safe/src/a.cpp": 2}}
+        expect("strict legacy within its baseline",
+               violations(legacy, {"components/safe/src/a.cpp": {**zero, "fn_over_60": 2}}, strict), [])
+        expect("strict legacy may not grow",
+               len(violations(legacy, {"components/safe/src/a.cpp": {**zero, "fn_over_60": 3}}, strict)), 1)
+        # End to end: a 61-line function fails check only in the strict component.
+        bl = root / "baseline.json"
+        bl.write_text(dump(make_baseline({})), encoding="utf-8")
+        (root / "components" / "loose" / "src" / "a.cpp").write_text(_long_fn("a", 59), encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()):
+            expect("check: 61-line function in a 120-line component", cmd_check(root, bl), 0)
+            (root / "components" / "safe" / "src" / "a.cpp").write_text(_long_fn("a", 59), encoding="utf-8")
+            expect("check: 61-line function in a 60-line component", cmd_check(root, bl), 1)
+            expect("update refuses it too", cmd_update(root, bl, init=False), 1)
+            (root / "components" / "safe" / "src" / "a.cpp").write_text(_long_fn("a", 58), encoding="utf-8")
+            expect("check: 60-line function in a 60-line component", cmd_check(root, bl), 0)
 
 
 def selftest() -> int:
@@ -848,8 +941,6 @@ def selftest() -> int:
     expect("static_state legacy may fall",
            violations({"static_state": {UNIT: 2}}, {UNIT: {**dict.fromkeys(METRICS, 0), "static_state": 1}}), [])
 
-    for f in failures:
-        print(f"selftest FAIL {f}")
     # Fixes found while integrating (2026-10-06).
     zero = {k: 0 for k in METRICS}
     unit = splice_unit('#include "frag_a.inc" // split_main.py\nint z;', {"main/frag_a.inc": "// hdr\nstatic int q;"})
@@ -867,6 +958,11 @@ def selftest() -> int:
            violations({}, {"components/x/include/x/config.hpp": {**zero, "if_config": 1}}), [])
     expect("CONFIG_ still forbidden elsewhere",
            len(violations({}, {"components/x/src/x.cpp": {**zero, "if_config": 1}})), 1)
+
+    _selftest_strict_functions(expect)
+
+    for f in failures:
+        print(f"selftest FAIL {f}")
     print(f"ratchet selftest: {'FAIL' if failures else 'PASS'} ({len(failures)} failures)")
     return 1 if failures else 0
 
