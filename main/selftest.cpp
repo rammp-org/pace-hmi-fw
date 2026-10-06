@@ -25,12 +25,12 @@
 #include "log_capture.hpp"
 #include "logger.hpp"
 #include "rtps_comms.hpp"
-#include "selftest_spec.h"
+#include "selftest_spec.hpp"
 
 namespace {
 
 /////////////////////////////////////////////////////////////////////////////
-// The spec (selftest_spec.h: the table, its invariants and each row's verdict)
+// The spec (selftest_spec.hpp: the table, its invariants and each row's verdict)
 /////////////////////////////////////////////////////////////////////////////
 
 using selftest_spec::Check;
@@ -45,7 +45,7 @@ using selftest_spec::kSettleMs;
 using selftest_spec::kWindowMs;
 
 // the number of checks; the report carries it, and each check's index, as a uint8_t
-// (selftest_spec.h asserts it fits)
+// (selftest_spec.hpp asserts it fits)
 constexpr uint8_t kCount = static_cast<uint8_t>(kChecks.size());
 
 /// "182 KB", "yes", "0.7%": how a value reads on screen and in the log.
@@ -474,7 +474,7 @@ private:
     if (!vbat) {
       unmeasurable(Id::PWR_VBAT, "battery monitor did not answer");
     } else if (*vbat < 5000) {
-      // no 2S pack reads this low (pwr.vbat in selftest_spec.h); the raw
+      // no 2S pack reads this low (pwr.vbat in selftest_spec.hpp); the raw
       // reading goes in the detail, because the bench unit flips between this
       // and a full pack on one boot
       unmeasurable(Id::PWR_VBAT, fmt::format("reads {} mV: taken as no pack fitted", *vbat));
@@ -1195,6 +1195,9 @@ void selftest_init(SelfTestPlatform config) {
       selftest_request(SelfTestTrigger::REMOTE, run_id);
     }
   });
+  // The text deliberately keeps the header's old name (selftest_spec.h, now
+  // selftest_spec.hpp): it is an external interface, matched byte for byte by
+  // the bench B2 marker and the characterisation baseline (tools/bench/README.md).
   logger.info("ready: {} checks (selftest_spec.h)", static_cast<int>(kCount));
 }
 

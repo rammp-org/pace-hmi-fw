@@ -2,7 +2,7 @@
 """Run the joystick HMI's self test over RTPS and report the verdict.
 
 Every check the HMI makes, and the limits it is held to, live in
-main/selftest_spec.h. This script asks for a run, collects the report and
+main/selftest_spec.hpp. This script asks for a run, collects the report and
 exits with the verdict, so a firmware change can be checked objectively
 instead of by reading the code:
 
@@ -19,7 +19,7 @@ would show up as McbStatus loss - or use the GUI's own "Run self test" button.
 
 On top of the HMI's checks it adds three only this side can make, prefixed
 pc.: that the report arrived whole, that it lists exactly the checks in this
-checkout's selftest_spec.h (catches a board running other firmware than you
+checkout's selftest_spec.hpp (catches a board running other firmware than you
 think), and the joystick sample rate as received here.
 
 The board and adapter are found the way rtps_mcb_sim.py finds them: --peer and
@@ -58,7 +58,7 @@ EXIT_PASS, EXIT_FAIL, EXIT_NO_ANSWER = 0, 1, 2
 
 
 def load_spec() -> dict[str, SpecRow]:
-    """This checkout's selftest_spec.h, keyed by check name."""
+    """This checkout's selftest_spec.hpp, keyed by check name."""
     return spec.load_selftest_spec()
 
 

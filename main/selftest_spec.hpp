@@ -1,5 +1,5 @@
 /**
- * @file selftest_spec.h
+ * @file selftest_spec.hpp
  * @brief The HMI self test: every check it runs, and the limits it is held to.
  *
  * THIS FILE IS THE SPEC. A firmware change is checked by running the self test
@@ -41,8 +41,8 @@
  * (CS-CFG-03).
  */
 
-#ifndef SELFTEST_SPEC_H
-#define SELFTEST_SPEC_H
+#ifndef SELFTEST_SPEC_HPP
+#define SELFTEST_SPEC_HPP
 
 #include <array>
 #include <cstddef>
@@ -325,7 +325,7 @@ consteval bool rows_well_formed() {
   return true;
 }
 static_assert(rows_well_formed(),
-              "a selftest_spec.h row has lo > hi, no name or why, or a bad need");
+              "a selftest_spec.hpp row has lo > hi, no name or why, or a bad need");
 
 /// @brief No two rows share a name: tools key the report on it.
 /// @return true when the names are unique
@@ -339,7 +339,7 @@ consteval bool names_unique() {
   }
   return true;
 }
-static_assert(names_unique(), "two selftest_spec.h rows share a name");
+static_assert(names_unique(), "two selftest_spec.hpp rows share a name");
 
 } // namespace selftest_spec
 

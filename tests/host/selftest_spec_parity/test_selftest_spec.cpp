@@ -1,4 +1,4 @@
-// L1: the self-test check table (main/selftest_spec.h) and its host-script copy
+// L1: the self-test check table (main/selftest_spec.hpp) and its host-script copy
 // (TS-UNIT-04, CS-TYP-03). Three views must agree row for row, in order: the firmware's
 // table, the golden rows characterised from it (golden_rows.json), and the parse that
 // scripts/rammp_rtps.py (used by rtps_selftest.py) makes of the header. Then the table's
@@ -10,7 +10,7 @@
 #include <span>
 #include <string_view>
 
-#include "selftest_spec.h"
+#include "selftest_spec.hpp"
 #include "test_case.hpp"
 
 namespace {
@@ -113,7 +113,7 @@ TEST_CASE("SST-001 the firmware's check table matches the golden rows, in order"
   }
 }
 
-TEST_CASE("SST-002 the host scripts' parse of selftest_spec.h matches the golden rows, in order",
+TEST_CASE("SST-002 the host scripts' parse of selftest_spec.hpp matches the golden rows, in order",
           "[selftest_spec]") {
   expect_rows(kGolden, kScript);
 }
