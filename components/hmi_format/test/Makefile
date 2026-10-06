@@ -18,10 +18,13 @@ REPO ?= $(abspath $(HERE)/../../..)
 COMP     := $(REPO)/components/hmi_format
 LVGL_DIR := $(REPO)/managed_components/lvgl__lvgl
 
-SRCS_UNDER_TEST := $(COMP)/src/diag.cpp \
+SRCS_UNDER_TEST := $(COMP)/src/about.cpp \
+                   $(COMP)/src/diag.cpp \
+                   $(COMP)/src/net.cpp \
                    $(COMP)/src/speed.cpp \
                    $(COMP)/src/stepper.cpp \
-                   $(COMP)/src/topbar.cpp
+                   $(COMP)/src/topbar.cpp \
+                   $(COMP)/src/update.cpp
 TEST_SRCS       := $(HERE)/test_hmi_format.cpp \
                    $(HERE)/legacy_format.cpp \
                    $(HERE)/lvgl_host_shim.cpp \
