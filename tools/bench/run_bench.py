@@ -260,6 +260,8 @@ def main() -> int:
     p.add_argument("--label", required=True)
     p.add_argument("--flash", action="store_true")
     p.add_argument("--steps", default=",".join(ALL_STEPS))
+    p.add_argument("--no-save", action="store_true",
+                   help="never save this build as last-good (drafts that must not stay on the board)")
     p.add_argument("--tree", type=pathlib.Path, default=common.REPO,
                    help="where scripts/ (selftest, sim, hmi_ui) are run from")
     p.add_argument("--ip", default=None, help="board IP when B2 is not in --steps")
@@ -311,7 +313,7 @@ def main() -> int:
                                   "INVALID" if "INVALID" in verdicts else
                                   "INCOMPLETE" if "NOT_RUN" in verdicts else "PASS")
         # Last-good only when every step passed (B0..B5 all run and PASS).
-        if a.flash and verdicts and all(v == "PASS" for v in verdicts):
+        if a.flash and not a.no_save and verdicts and all(v == "PASS" for v in verdicts):
             run.summary["saved_last_good"] = str(flash.save(a.build_dir, a.label, "B0-B5 PASS"))
         run.save()
         common.log(f"lease: {lease.release(owner)}")
