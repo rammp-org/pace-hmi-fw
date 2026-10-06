@@ -1,24 +1,41 @@
 // split_main.py fragment of main.cpp (frag_drive: original lines 1525-1726); one TU, see main.cpp.
-static std::atomic<rammp::DriveRequest> drive_request{rammp::DriveRequest::DISABLE};
-static int64_t drive_wait_until_us; // 0 = not waiting for an answer
-static int64_t drive_wait_warn_us;  // 0 = nothing left to say about that request
-// Leaving is a request too: the MIB decides when driving stops, so the exit gesture
-// asks and this is how long to wait before telling the user it was refused.
-static int64_t drive_exit_until_us; // 0 = not waiting for the MIB to stop
-// Latched separately from the deadline: a refused exit clears the deadline when it
-// raises its warning, and the MIB granting the stop late must still read as the user
-// leaving rather than as the chair stopping on its own.
-static bool drive_exit_requested;
-// The stop was asked by the burger key, not the exit hold: once the MIB grants
-// it, the menu opens over the Locked screen, which is what the key was for.
-static bool drive_exit_then_menu;
+// The drive session's side of the LVGL task, in one place (one owner: the LVGL task).
+// The session decides; these are the timestamps, latches and the logger its actions
+// stand for, with the session itself.
+struct DriveState {
+  std::atomic<rammp::DriveRequest> request{rammp::DriveRequest::DISABLE};
+  int64_t wait_until_us = 0; // 0 = not waiting for an answer
+  int64_t wait_warn_us = 0;  // 0 = nothing left to say about that request
+  // Leaving is a request too: the MIB decides when driving stops, so the exit gesture
+  // asks and this is how long to wait before telling the user it was refused.
+  int64_t exit_until_us = 0; // 0 = not waiting for the MIB to stop
+  // Latched separately from the deadline: a refused exit clears the deadline when it
+  // raises its warning, and the MIB granting the stop late must still read as the user
+  // leaving rather than as the chair stopping on its own.
+  bool exit_requested = false;
+  // The stop was asked by the burger key, not the exit hold: once the MIB grants
+  // it, the menu opens over the Locked screen, which is what the key was for.
+  bool exit_then_menu = false;
+  // The decisions (see "The drive session" below).
+  hmi::drive_session::DriveSession session;
+  // When SEND_ENABLE asked: ARM_WARN and ARM_GIVEUP count from that moment, as
+  // drive_request_enter did.
+  int64_t ask_at_us = 0;
+  // Whether this step's actions include OPEN_MENU_ON_ARRIVAL: the relock writes
+  // nav_menu_on_arrival either way before the Locked screen loads.
+  bool step_menu_on_arrival = false;
+  // For a corrupted session state. Made at start-up with the rest, so the fault path
+  // constructs nothing (CS-SAF-04).
+  espp::Logger logger{{.tag = "drive", .level = espp::Logger::Verbosity::INFO}};
+};
+static DriveState drive_state;
 
 static void drive_publish() {
-  rtps_comms_publish_drive(drive_request.load(), drive_profile_published.load());
+  rtps_comms_publish_drive(drive_state.request.load(), drive_profile_published.load());
 }
 
 static void drive_ask(rammp::DriveRequest request) {
-  drive_request.store(request);
+  drive_state.request.store(request);
   drive_publish();
 }
 
@@ -55,14 +72,6 @@ static void entry_refused_show(int32_t which, uint32_t show_ms) {
 //   which opens the menu only once driving has stopped (rows 21-28). A refused
 //   stop is said and the screen stays put; the request stays latched, so a stop
 //   granted later is still the user's doing (row 14).
-static hmi::drive_session::DriveSession drive_session;
-
-// When SEND_ENABLE asked: ARM_WARN and ARM_GIVEUP count from that moment, as
-// drive_request_enter did.
-static int64_t drive_ask_at_us = 0;
-// Whether this step's actions include OPEN_MENU_ON_ARRIVAL: the relock writes
-// nav_menu_on_arrival either way before the Locked screen loads.
-static bool drive_step_menu_on_arrival = false;
 
 // The screen as the session sees it. Drive is tested first, so the stick gate's
 // test is exactly `lv_screen_active() == ui_DriveScreen`, as it always was.
@@ -106,9 +115,9 @@ static hmi::drive_session::Env drive_env(int64_t now_us) {
           drive_mib_of(static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject))),
       .screen = drive_screen_of(lv_screen_active()),
       .menu_open = nav_menu_open != nullptr,
-      .exit_elapsed = now_us >= drive_exit_until_us,
-      .warn_elapsed = now_us >= drive_wait_warn_us,
-      .giveup_elapsed = now_us >= drive_wait_until_us,
+      .exit_elapsed = now_us >= drive_state.exit_until_us,
+      .warn_elapsed = now_us >= drive_state.wait_warn_us,
+      .giveup_elapsed = now_us >= drive_state.wait_until_us,
   };
 }
 
@@ -126,121 +135,168 @@ static void lock_open_visual() {
   haptic_play(espp::Drv2605::Waveform::STRONG_CLICK, 1);
 }
 
-// One action of the session, with the call it has always been.
-static void drive_perform(hmi::drive_session::Action action) {
+// The session's actions, one family per function, each with the call it has always
+// been. A family returns false for an action that is not its own; drive_perform asks
+// them in turn, so every action is performed by exactly one family, in the order the
+// session returned them.
+
+// The DriveCommand: ask, re-ask, or re-publish the request as it stands.
+static bool drive_perform_request(hmi::drive_session::Action action) {
   using hmi::drive_session::Action;
   switch (action) {
-  case Action::NONE:
-    break;
   case Action::SEND_ENABLE:
-    drive_ask_at_us = esp_timer_get_time();
+    drive_state.ask_at_us = esp_timer_get_time();
     drive_ask(rammp::DriveRequest::ENABLE);
-    break;
+    return true;
   case Action::SEND_DISABLE:
     drive_ask(rammp::DriveRequest::DISABLE);
-    break;
+    return true;
   case Action::PUBLISH_DRIVE:
     drive_publish();
-    break;
+    return true;
+  default:
+    return false;
+  }
+}
+
+// The deadlines and the exit latches.
+static bool drive_perform_deadline(hmi::drive_session::Action action) {
+  using hmi::drive_session::Action;
+  switch (action) {
   case Action::ARM_WARN:
-    drive_wait_warn_us = drive_ask_at_us + kDriveAnswerUs;
-    break;
+    drive_state.wait_warn_us = drive_state.ask_at_us + kDriveAnswerUs;
+    return true;
   case Action::ARM_GIVEUP:
-    drive_wait_until_us = drive_ask_at_us + kDriveWaitUs;
-    break;
+    drive_state.wait_until_us = drive_state.ask_at_us + kDriveWaitUs;
+    return true;
   case Action::CLEAR_WARN:
-    drive_wait_warn_us = 0;
-    break;
+    drive_state.wait_warn_us = 0;
+    return true;
   case Action::CLEAR_GIVEUP:
-    drive_wait_until_us = 0;
-    break;
+    drive_state.wait_until_us = 0;
+    return true;
   case Action::ARM_EXIT_DEADLINE:
-    drive_exit_until_us = esp_timer_get_time() + kDriveAnswerUs;
-    break;
+    drive_state.exit_until_us = esp_timer_get_time() + kDriveAnswerUs;
+    return true;
   case Action::CLEAR_EXIT_DEADLINE:
-    drive_exit_until_us = 0;
-    break;
+    drive_state.exit_until_us = 0;
+    return true;
   case Action::SET_EXIT_REQUESTED:
-    drive_exit_requested = true;
-    break;
+    drive_state.exit_requested = true;
+    return true;
   case Action::CLEAR_EXIT_REQUESTED:
-    drive_exit_requested = false;
-    break;
+    drive_state.exit_requested = false;
+    return true;
   case Action::SET_THEN_MENU:
-    drive_exit_then_menu = true;
-    break;
+    drive_state.exit_then_menu = true;
+    return true;
   case Action::CLEAR_THEN_MENU:
-    drive_exit_then_menu = false;
-    break;
+    drive_state.exit_then_menu = false;
+    return true;
+  default:
+    return false;
+  }
+}
+
+// The padlock, the lock state and the stick gate (what set_locked used to do).
+static bool drive_perform_lock(hmi::drive_session::Action action) {
+  using hmi::drive_session::Action;
+  switch (action) {
   case Action::RING_WAIT:
     lock_visual_wait();
-    break;
+    return true;
   case Action::RING_REST:
     lock_visual_rest();
-    break;
+    return true;
   case Action::LOCK_OPEN_VISUAL:
     lock_open_visual();
-    break;
+    return true;
   case Action::CANCEL_UNLOCK_TIMER:
     unlock_timer_cancel();
-    break;
+    return true;
   case Action::START_UNLOCK_TIMER:
     unlock_timer_start();
-    break;
+    return true;
   case Action::SET_UNLOCKED:
     lv_subject_set_int(&locked_subject, 0);
-    break;
+    return true;
   case Action::SET_LOCKED:
     lv_subject_set_int(&locked_subject, 1);
-    break;
-  case Action::GO_LOCKED_SCREEN:
-    // Before the load: an instant screen change runs nav_arrive inside it.
-    nav_menu_on_arrival = drive_step_menu_on_arrival;
-    locked_screen_go();
-    break;
+    return true;
   case Action::GATE_UPDATE:
     nav_update_stick_gate();
-    break;
+    return true;
+  default:
+    return false;
+  }
+}
+
+// The screens: the Locked screen (and the menu over it), the Drive screen, home.
+static bool drive_perform_screen(hmi::drive_session::Action action) {
+  using hmi::drive_session::Action;
+  switch (action) {
+  case Action::GO_LOCKED_SCREEN:
+    // Before the load: an instant screen change runs nav_arrive inside it.
+    nav_menu_on_arrival = drive_state.step_menu_on_arrival;
+    locked_screen_go();
+    return true;
   case Action::OPEN_MENU_ON_ARRIVAL:
-    drive_step_menu_on_arrival = true;
-    break;
+    drive_state.step_menu_on_arrival = true;
+    return true;
   case Action::UNLOCK_TIMER_DONE:
     unlock_advance_timer = nullptr; // repeat_count 1: LVGL deletes it after its callback
-    break;
+    return true;
   case Action::GO_DRIVE_SCREEN:
     _ui_screen_change(&ui_DriveScreen, LV_SCREEN_LOAD_ANIM_FADE_ON, kUnlockDissolveMs, 0,
                       &ui_DriveScreen_screen_init);
-    break;
+    return true;
   case Action::NAV_HOME:
     nav_home();
-    break;
+    return true;
+  default:
+    return false;
+  }
+}
+
+// The banners (entry_refused_show with each one's dwell) and the refusal feedback.
+static bool drive_perform_banner(hmi::drive_session::Action action) {
+  using hmi::drive_session::Action;
+  switch (action) {
   case Action::SHOW_REFUSED_DRIVE:
     entry_refused_show(kRefusedDrive, kDriveRefusedShowMs);
-    break;
+    return true;
   case Action::SHOW_REFUSED_SEAT:
     entry_refused_show(kRefusedSeat, kDriveRefusedShowMs);
-    break;
+    return true;
   case Action::SHOW_NOT_GRANTED:
     entry_refused_show(kRefusedDriveNotGranted, kDriveRefusedShowMs);
-    break;
+    return true;
   case Action::SHOW_DRIVE_STOPPED:
     entry_refused_show(kRefusedDriveStopped, kDriveRefusedShowMs);
-    break;
+    return true;
   case Action::SHOW_EXIT_REFUSED:
     entry_refused_show(kRefusedExit, kExitRefusedShowMs);
-    break;
+    return true;
   case Action::SHOW_DRIVE_LOST:
     entry_refused_show(kRefusedDriveLost, kDriveRefusedShowMs);
-    break;
+    return true;
   case Action::SHOW_REFUSED_DRIVE_MENU:
     entry_refused_show(kRefusedDriveMenu, kDriveRefusedShowMs);
-    break;
+    return true;
   case Action::REFUSAL_FEEDBACK:
     refusal_feedback();
-    break;
+    return true;
   default:
-    break; // not an Action: DriveSession only returns its own enumerators
+    return false;
   }
+}
+
+// One action of the session. NONE (the padding) and a value that is not an Action
+// are no family's: nothing is done (DriveSession only returns its own enumerators).
+static void drive_perform(hmi::drive_session::Action action) {
+  (void)(drive_perform_request(action) || drive_perform_deadline(action) ||
+         drive_perform_lock(action) || drive_perform_screen(action) ||
+         drive_perform_banner(action));
 }
 
 // One input against an Env already sampled. Returns true when a row of the table
@@ -248,15 +304,14 @@ static void drive_perform(hmi::drive_session::Action action) {
 static bool drive_session_apply(hmi::drive_session::Input input,
                                 const hmi::drive_session::Env &env) {
   hmi::drive_session::Actions actions{};
-  if (!drive_session.step(input, env, actions)) {
+  if (!drive_state.session.step(input, env, actions)) {
     // A corrupted phase or input: the session is LOCKED and `actions` is its safe
-    // state (DISABLE, Locked screen, gate shut), performed below. The logger is
-    // made only on this path, so the normal path allocates nothing new.
-    static espp::Logger drive_logger({.tag = "drive", .level = espp::Logger::Verbosity::INFO});
-    drive_logger.error("corrupted drive session state, safe state entered (input {})",
-                       static_cast<int>(input));
+    // state (DISABLE, Locked screen, gate shut), performed below. The logger was
+    // made at start-up (drive_state), so this path constructs nothing.
+    drive_state.logger.error("corrupted drive session state, safe state entered (input {})",
+                             static_cast<int>(input));
   }
-  drive_step_menu_on_arrival = false;
+  drive_state.step_menu_on_arrival = false;
   for (const hmi::drive_session::Action action : actions) {
     drive_perform(action);
   }
@@ -277,15 +332,15 @@ static bool drive_session_input(hmi::drive_session::Input input) {
 // (rows 1-2) clears the latch.
 static void drive_exit_ask_while_locked() {
   drive_ask(rammp::DriveRequest::DISABLE);
-  drive_exit_requested = true;
-  drive_exit_then_menu = false;
-  drive_exit_until_us = esp_timer_get_time() + kDriveAnswerUs;
+  drive_state.exit_requested = true;
+  drive_state.exit_then_menu = false;
+  drive_state.exit_until_us = esp_timer_get_time() + kDriveAnswerUs;
 }
 
 static void drive_exit_due_while_locked(int64_t now_us) {
-  if (drive_session.locked() && drive_exit_until_us != 0 && now_us >= drive_exit_until_us) {
-    drive_exit_until_us = 0;
-    drive_exit_then_menu = false;
+  if (drive_state.session.locked() && drive_state.exit_until_us != 0 && now_us >= drive_state.exit_until_us) {
+    drive_state.exit_until_us = 0;
+    drive_state.exit_then_menu = false;
     entry_refused_show(kRefusedExit, kExitRefusedShowMs);
   }
 }
@@ -313,7 +368,7 @@ static void drive_unlock_hold_done() {
 
 // The exit hold completed (drive_exit_gesture): ask the MIB to stop (rows 21-24).
 static void drive_exit_hold_done() {
-  if (drive_session.locked()) {
+  if (drive_state.session.locked()) {
     drive_exit_ask_while_locked(); // U3, above
     return;
   }
