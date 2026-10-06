@@ -13,7 +13,7 @@ instead of by reading the code:
 
 It plays the MCB while it runs (it is an rtps_mcb_sim.SystemStatePublisher): the
 HMI's RTPS checks need McbStatus arriving and their pings answered, and a run
-requested from here holds the HMI to all of them (ST_REMOTE in the spec). So
+requested from here holds the HMI to all of them (Need::REMOTE in the spec). So
 close rtps_mcb_gui.py / rtps_mcb_sim.py first - two MCBs publishing at once
 would show up as McbStatus loss - or use the GUI's own "Run self test" button.
 

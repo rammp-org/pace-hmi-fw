@@ -398,11 +398,16 @@ INT32_MAX = 2 ** 31 - 1
 
 #: the self test's check table: every check, its limits and why (beside HEADER_PATH)
 SELFTEST_SPEC_PATH = os.path.join(os.path.dirname(HEADER_PATH), "selftest_spec.h")
-# X(ID, "name", "unit", lo, hi, need, "what it proves")
+# Check{Id::ID, "name", "unit", lo, hi, Need::..., "what it proves"},  (the kChecks rows)
 _SELFTEST_ROW_RE = re.compile(
-    r'^\s*X\(\s*([A-Z0-9_]+)\s*,\s*"([^"]*)"\s*,\s*"([^"]*)"\s*,\s*([^,]+?)\s*,\s*([^,]+?)\s*,'
-    r'\s*(ST_[A-Z]+)\s*,\s*"([^"]*)"\s*\)', re.M)
-_SELFTEST_NEEDS = {"ST_REQUIRED": "required", "ST_OPTIONAL": "optional", "ST_REMOTE": "remote"}
+    r'^\s*Check\{\s*Id::([A-Z0-9_]+)\s*,\s*"([^"]*)"\s*,\s*"([^"]*)"\s*,\s*([^,]+?)\s*,'
+    r'\s*([^,]+?)\s*,\s*Need::([A-Z]+)\s*,\s*"([^"]*)"\s*\}', re.M)
+_SELFTEST_NEEDS = {"REQUIRED": "required", "OPTIONAL": "optional", "REMOTE": "remote"}
+
+
+def _selftest_limit(text: str, no_limit_name: str, no_limit: int) -> int:
+    """A kChecks limit: an integer literal, or kAnyLo/kAnyHi for "no limit"."""
+    return no_limit if text == no_limit_name else int(text, 0)
 
 
 class SelfTestSpecRow(NamedTuple):
@@ -425,8 +430,8 @@ def parse_selftest_spec(text: str) -> list[SelfTestSpecRow]:
             raise ValueError(f"selftest_spec.h: {name}: unknown need {need}")
         rows.append(SelfTestSpecRow(
             check_id, name, unit,
-            INT32_MIN if lo.startswith("ST_ANY") else int(lo, 0),
-            INT32_MAX if hi.startswith("ST_ANY") else int(hi, 0),
+            _selftest_limit(lo, "kAnyLo", INT32_MIN),
+            _selftest_limit(hi, "kAnyHi", INT32_MAX),
             _SELFTEST_NEEDS[need], desc))
     return rows
 
@@ -436,7 +441,7 @@ def load_selftest_spec(path: str = SELFTEST_SPEC_PATH) -> dict[str, SelfTestSpec
     with open(path, encoding="utf-8") as handle:
         rows = parse_selftest_spec(handle.read())
     if not rows:
-        raise RuntimeError(f"{path}: SELFTEST_TABLE parsed to nothing")
+        raise RuntimeError(f"{path}: kChecks parsed to nothing")
     return {row.name: row for row in rows}
 
 
