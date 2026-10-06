@@ -92,7 +92,7 @@ void ui_InternetScreen_screen_init(void)
     lv_obj_set_height(ui_InternetTitle, 47);
     lv_obj_set_x(ui_InternetTitle, 0);
     lv_obj_set_y(ui_InternetTitle, -7);
-    lv_label_set_text(ui_InternetTitle, "Internet Settings");
+    lv_label_set_text(ui_InternetTitle, "Internet");
     ui_object_set_themeable_style_property(ui_InternetTitle, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_text);
     ui_object_set_themeable_style_property(ui_InternetTitle, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
@@ -948,6 +948,7 @@ void ui_InternetScreen_screen_init(void)
     lv_obj_set_height(ui_MenuOverlay12, 921);
     lv_obj_set_x(ui_MenuOverlay12, 0);
     lv_obj_set_y(ui_MenuOverlay12, 195);
+
 
 
 

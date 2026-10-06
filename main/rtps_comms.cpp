@@ -726,6 +726,8 @@ std::string rtps_comms_wifi_ssid() {
 
 std::string rtps_comms_ip() { return got_ip ? ip_string(lease_ip) : std::string(); }
 
+const char *rtps_comms_hostname() { return kHostname; }
+
 std::optional<std::vector<WifiNetworkFound>> rtps_comms_wifi_scan() {
   std::lock_guard<std::mutex> lock(wifi_op_mutex);
   if (!wifi_stack_start()) {

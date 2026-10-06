@@ -98,3 +98,23 @@ if ($code -ne 0) {
     throw "esptool failed with exit code $code"
 }
 Write-Host "done - the board should reboot into the new firmware." -ForegroundColor Green
+
+# Is what was just flashed a published GitHub release? fw_verify.py asks GitHub
+# and, if so, records it on the board, where the About screen shows a green
+# check (see the script). It needs esptool and littlefs-python in the same
+# python; without them the flash still stands, the board just shows red.
+$Python = Get-Command "python.exe", "python" -ErrorAction SilentlyContinue | Select-Object -First 1
+$Verify = Join-Path $PSScriptRoot "scripts\fw_verify.py"
+if ($Python) {
+    & $Python.Source -c "import importlib.util, sys; sys.exit(0 if all(importlib.util.find_spec(m) for m in ('esptool', 'littlefs')) else 1)"
+}
+if ($Python -and $LASTEXITCODE -eq 0) {
+    Write-Host "checking the firmware against GitHub's releases" -ForegroundColor Cyan
+    & $Python.Source $Verify --bin (Join-Path $Dir "rammp-hmi-p4.bin") --port $Port
+} else {
+    Write-Host "Skipped the release check: pip install esptool littlefs-python, then" -ForegroundColor Yellow
+    Write-Host "  python scripts\fw_verify.py --bin precompiled\rammp-hmi-p4.bin --port $Port"
+}
+# The flash worked whatever the check said: "not a release" is information, not
+# a failure of this script.
+exit 0

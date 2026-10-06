@@ -64,6 +64,7 @@ CHROME: dict[str, tuple[str, str, str, str, str]] = {
     "ui_DiagnosticsScreen":  ("10", "9",  "8",  "9",  "9"),
     "ui_UpdateScreen":       ("11", "10", "9",  "10", "10"),
     "ui_InternetScreen":     ("12", "12", "12", "12", "12"),
+    "ui_AboutScreen":        ("13", "13", "13", "13", "13"),
 }
 
 PARENTS: dict[str, str] = {
@@ -144,6 +145,12 @@ PARENTS: dict[str, str] = {
     "ui_NetRowTemplate": "ui_NetList",
     "ui_NetPwBox": "ui_NetPwPanel",
     "ui_NetPwKeyboard": "ui_NetPwPanel",
+
+    # AboutScreen: what about_ui.cpp fills
+    "ui_AboutMark": "ui_AboutContent",
+    "ui_AboutVerdict": "ui_AboutContent",
+    "ui_AboutSha1": "ui_AboutContent",
+    "ui_AboutSha2": "ui_AboutContent",
 }
 
 for _screen, (_bar, _band, _banner, _key, _overlay) in CHROME.items():
@@ -180,17 +187,22 @@ LABELS: dict[str, str] = {
     "ui_BenchKey9Label": "9",
     "ui_BenchKey0Label": "0",
 
-    # The burger menu, in the order nav_go switches on. A row that moves opens
-    # the wrong screen, silently -- nav_row_cb carries only the row index.
+    # The burger menu, in the order nav_go switches on (NavDest). A row that
+    # moves opens the wrong screen, silently -- nav_row_cb carries only the row
+    # index. Top level, then Settings' level: its back row, then its sections.
     "cui_RowLabel1": "Drive",
     "cui_RowLabel2": "Seat Functions",
     "cui_RowLabel3": "Bench",
     "cui_RowLabel4": "Diagnostics",
-    "cui_RowLabel5": "Internet Settings",
-    "cui_RowLabel6": "Joystick",
-    "cui_RowLabel7": "Log",
-    "cui_RowLabel8": "Settings",
-    "cui_RowLabel9": "Skunk Works",
+    "cui_RowLabel5": "Joystick",
+    "cui_RowLabel6": "Log",
+    "cui_RowLabel7": "Settings",
+    "cui_RowLabel8": "Skunk Works",
+    "cui_SubRowLabel1": "Settings",
+    "cui_SubRowLabel2": "Display & sound",
+    "cui_SubRowLabel3": "Joystick & driving",
+    "cui_SubRowLabel4": "Internet",
+    "cui_SubRowLabel5": "About",
 }
 
 _CREATE_RE = re.compile(

@@ -32,11 +32,13 @@ The UI follows RAMMP UI spec V2. Every screen has the same frame: the status bar
 | <img src="docs/screenshots/SeatScreen.png" width="200"> | <img src="docs/screenshots/SeatAxisScreen.png" width="200"> | <img src="docs/screenshots/SkunkWorksScreen.png" width="200"> |
 | Seat Functions | One motion: jog, presets, "<" back | Skunk Works: one-press actions |
 | <img src="docs/screenshots/SettingsScreen.png" width="200"> | <img src="docs/screenshots/DiagnosticsScreen.png" width="200"> | <img src="docs/screenshots/LogScreen.png" width="200"> |
-| Settings | Live MCB diagnostics | System log |
+| Settings: Display & sound | Live MCB diagnostics | System log |
 | <img src="docs/screenshots/BenchGateScreen.png" width="200"> | <img src="docs/screenshots/BenchMotorsScreen.png" width="200"> | <img src="docs/screenshots/JoystickScreen.png" width="200"> |
 | Bench: the PIN | DEBUG ACTUATORS | Joystick test and CALIBRATE |
-| <img src="docs/screenshots/InternetScreen.png" width="200"> | <img src="docs/screenshots/InternetPassword.png" width="200"> | |
-| Internet Settings: the link and its status | Joining a WiFi network | |
+| <img src="docs/screenshots/SettingsMenu.png" width="200"> | <img src="docs/screenshots/InternetScreen.png" width="200"> | <img src="docs/screenshots/InternetPassword.png" width="200"> |
+| The menu's Settings level | Internet: the link and its status | Joining a WiFi network |
+| <img src="docs/screenshots/AboutScreen.png" width="200"> | | |
+| About: firmware, release check, board | | |
 
 ### The burger menu
 
@@ -46,40 +48,54 @@ The UI follows RAMMP UI spec V2. Every screen has the same frame: the status bar
 | Seat Functions | the four seat motions; greyed while the MCB could not move the seat |
 | Bench | the PIN (1234), then DEBUG ACTUATORS: step each actuator with - / + |
 | Diagnostics | live readings from the MCB |
-| Internet Settings | Ethernet or WiFi, the WiFi network, and the link's status: see [Network](#network) |
 | Joystick | the stick test; press and hold CALIBRATE (or the stick button) to calibrate |
 | Log | the last 500 serial log lines |
-| Settings | the settings below |
+| Settings | a second level of the menu: the sections below |
 | Skunk Works | one-press actions from `main/actions_spec.h`: haptic test, self test, seat up, FPS counter, restart |
 
 **DRIVE** in the band goes home from anywhere.
 
 ### Settings
 
-| row | what it does |
-| --- | --- |
-| Brightness | backlight 5-100 %; the side button and RTPS can set it too |
-| Theme | Dark or Day |
-| Menu slide | animate the menu opening (off = instant) |
-| Flip screen | turn the picture and touch 180 degrees, for a unit mounted upside down |
-| Stick sensitivity | 1-10: how far the stick moves before the highlight does (the UI only) |
-| Speed sensitivity | 0.1x-1.0x: scales what the stick sends the MCB, as if it moved that much less; 1.0x = unchanged. Refused while driving |
-| Stick left/right, Stick fwd/back | mirror an axis |
-| Stick axes | swap X and Y |
-| Sounds | touch and joystick clicks; warnings sound either way |
+Settings opens a second level in the same menu. **< Settings** (or the stick to the left) goes back up, and the burger key closes the menu. The menu always reopens at the top.
 
-Every row is one line in `main/settings_spec.h`, and every value is saved in LittleFS (`/storage`), so it survives a reboot. The stick mapping rows are refused while driving.
+| section | what is in it |
+| --- | --- |
+| Display & sound | **Brightness** (5-100 %; the side button and RTPS can set it too), **Theme** (Dark or Day), **Menu slide** (animate the menu opening), **Flip screen** (turn the picture and touch 180 degrees, for a unit mounted upside down), **Sounds** (touch and joystick clicks; warnings sound either way) |
+| Joystick & driving | **Stick sensitivity** (1-10: how far the stick moves before the highlight does; the UI only), **Speed sensitivity** (0.1x-1.0x: scales what the stick sends the MCB, as if it moved that much less), **Stick left/right**, **Stick fwd/back** (mirror an axis), **Stick axes** (swap X and Y). All but the first are refused while driving |
+| Internet | Ethernet or WiFi, the WiFi network, and the link's status: see [Network](#network) |
+| About | the firmware, whether it is a published release, and the board: see [About](#about) |
+
+Every row is one line in `main/settings_spec.h`, and every value is saved in LittleFS (`/storage`), so it survives a reboot.
+
+### About
+
+Version (`git describe` at build time), commit and build date; the firmware's **SHA-256**, which the Tab5 computes from its own flash at boot (~0.5 s) and which equals `sha256sum rammp-hmi-p4.bin`; the board's ID (its MAC, also its USB serial number); and the network.
+
+The mark at the top says whether this is a published release:
+
+- **green check**: the firmware's SHA-256 is the digest GitHub shows for `rammp-hmi-p4.bin` on a release or pre-release.
+- **red cross**: anything else, which includes every local build.
+
+The Tab5 cannot ask GitHub itself, so the PC does, after flashing:
+
+```
+pip install esptool littlefs-python
+python scripts/fw_verify.py --bin precompiled/rammp-hmi-p4.bin --port COM6
+```
+
+It looks the `.bin`'s SHA-256 up among the releases and, when one matches, adds a line to `/storage/fwinfo.txt` on the board (`<sha256> <tag> <release|prerelease> <checked>`). The Tab5 looks up its own hash there, so a line only ever vouches for the image it was written for. The rest of the storage is left as it was: the partition is read back, the file is added with littlefs-python, every other file is checked unchanged, and only the changed 4 KB sectors are written; the read-back is kept in `build/fw_verify/`. `flash_precompiled.ps1` runs it after flashing. A board flashed any other way shows red until it has been checked.
 
 ## Network
 
-RTPS runs over one link, chosen in **Internet Settings** and brought up at boot:
+RTPS runs over one link, chosen in **Settings → Internet** and brought up at boot:
 
 - **WiFi** (the default): the Tab5's ESP32-C6, over SDIO through esp_hosted, 2.4 GHz only.
 - **Ethernet**: the W5500 on the M5-Bus header.
 
 Changing the choice is saved at once and takes effect on the next boot: **Restart to apply** appears while the link in use is not the one chosen.
 
-**Joining a WiFi network**, on the Tab5 itself: Internet Settings → the WiFi network row scans and lists what it hears, strongest first. Pick one, type its password (shown as typed) and press OK. The HMI tries it first, and saves it (`/storage/wifi.txt`) only once it has joined; a wrong password says so and the old network stays. This works on either link: on Ethernet the C6 joins only to prove the password, then lets go, and takes no address.
+**Joining a WiFi network**, on the Tab5 itself: Settings → Internet → the WiFi network row scans and lists what it hears, strongest first. Pick one, type its password (shown as typed) and press OK. The HMI tries it first, and saves it (`/storage/wifi.txt`) only once it has joined; a wrong password says so and the old network stays. This works on either link: on Ethernet the C6 joins only to prove the password, then lets go, and takes no address.
 
 With no network saved, the one built into your local `sdkconfig` is used (never `sdkconfig.defaults`):
 ```

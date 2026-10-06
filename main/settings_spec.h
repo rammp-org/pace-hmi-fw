@@ -10,10 +10,13 @@
 #ifndef SETTINGS_SPEC_H
 #define SETTINGS_SPEC_H
 
-/* P(NAME, title, instructions) */
+/* P(NAME, title, instructions)
+   A page is one row of Settings' level in the burger menu (main.cpp, NavDest), except NET,
+   which the InternetScreen draws. */
 #define SETTINGS_PAGE_TABLE(P)                                                                     \
-  P(UI, "Settings", "Left/right or -/+ to change. Saved automatically.")                           \
-  P(NET, "Internet Settings", "Shown on the InternetScreen, not as rows.")
+  P(DISPLAY, "Display & sound", "Left/right or -/+ to change. Saved automatically.")               \
+  P(STICK, "Joystick & driving", "Left/right or -/+ to change. Saved automatically.")              \
+  P(NET, "Internet", "Shown on the InternetScreen, not as rows.")
 
 /* X(PAGE, NAME, short, label, min, max, step, decimals, unit, default)
    A row whose values are names rather than numbers (Theme, Menu slide...) is
@@ -27,16 +30,16 @@
    InternetScreen draws it as two choice buttons (internet_ui.cpp), not as a -/+ row. Read
    at boot, so a change takes a restart, which that screen offers. */
 #define SETTINGS_PARAM_TABLE(X)                                                                    \
-  X(UI, BRIGHTNESS, "S1", "Brightness", 5, 100, 5, 0, "%", 75)                                     \
-  X(UI, THEME, "S2", "Theme", 0, 1, 1, 0, "", 0)                                                   \
-  X(UI, MENU_SLIDE, "S3", "Menu slide", 0, 1, 1, 0, "", 0)                                         \
-  X(UI, FLIP, "S4", "Flip screen", 0, 1, 1, 0, "", 0)                                              \
-  X(UI, STICK_SENSITIVITY, "S5", "Stick sensitivity", 1, 10, 1, 0, "", 9)                          \
-  X(UI, DRIVE_SPEED, "S6", "Speed sensitivity", 1, 10, 1, 1, "x", 10)                              \
-  X(UI, STICK_INVERT_X, "S7", "Stick left/right", 0, 1, 1, 0, "", 0)                               \
-  X(UI, STICK_INVERT_Y, "S8", "Stick fwd/back", 0, 1, 1, 0, "", 0)                                 \
-  X(UI, STICK_SWAP, "S9", "Stick axes", 0, 1, 1, 0, "", 0)                                         \
-  X(UI, SOUNDS, "S10", "Sounds", 0, 1, 1, 0, "", 1)                                                \
+  X(DISPLAY, BRIGHTNESS, "D1", "Brightness", 5, 100, 5, 0, "%", 75)                                \
+  X(DISPLAY, THEME, "D2", "Theme", 0, 1, 1, 0, "", 0)                                              \
+  X(DISPLAY, MENU_SLIDE, "D3", "Menu slide", 0, 1, 1, 0, "", 0)                                    \
+  X(DISPLAY, FLIP, "D4", "Flip screen", 0, 1, 1, 0, "", 0)                                         \
+  X(STICK, STICK_SENSITIVITY, "J1", "Stick sensitivity", 1, 10, 1, 0, "", 9)                       \
+  X(STICK, DRIVE_SPEED, "J2", "Speed sensitivity", 1, 10, 1, 1, "x", 10)                           \
+  X(STICK, STICK_INVERT_X, "J3", "Stick left/right", 0, 1, 1, 0, "", 0)                            \
+  X(STICK, STICK_INVERT_Y, "J4", "Stick fwd/back", 0, 1, 1, 0, "", 0)                              \
+  X(STICK, STICK_SWAP, "J5", "Stick axes", 0, 1, 1, 0, "", 0)                                      \
+  X(DISPLAY, SOUNDS, "D5", "Sounds", 0, 1, 1, 0, "", 1)                                            \
   X(NET, NETWORK, "N1", "Connection", 0, 1, 1, 0, "", 1)
 
 /* SETTINGS_PAGE_SCREEN_BRIGHTNESS, ..., SETTINGS_PAGE_COUNT */
