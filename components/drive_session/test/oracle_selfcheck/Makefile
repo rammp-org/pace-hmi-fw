@@ -11,12 +11,15 @@ UNITY_DIR ?= /mnt/c/esp/v6.0/esp-idf/components/unity/unity/src
 
 HEADER    := $(REPO)/components/drive_session/include/drive_session_table.hpp
 SRC       := $(HERE)/test_table_selfcheck.cpp
+# The shared host main: runs the TEST_CASEs registered through tests/host/test_case.hpp.
+HOST_DIR  := $(REPO)/tests/host
+MAIN_SRC  := $(HOST_DIR)/test_main.cpp
 
 CXX       ?= g++
 CC        ?= gcc
 WARN      := -Wall -Wextra -Werror -Wshadow -Wconversion -Wsign-conversion
 SAN       := -fsanitize=address,undefined -fno-omit-frame-pointer
-CXXFLAGS  := -std=gnu++23 -O0 -g $(WARN) $(SAN) -I$(REPO)/components/drive_session/include -I$(UNITY_DIR)
+CXXFLAGS  := -std=gnu++23 -O0 -g $(WARN) $(SAN) -I$(REPO)/components/drive_session/include -I$(HOST_DIR) -I$(UNITY_DIR)
 CFLAGS    := -O0 -g $(SAN) -I$(UNITY_DIR)
 
 .PHONY: test coverage header clean
@@ -32,8 +35,8 @@ $(BUILD_DIR)/unity.o: $(UNITY_DIR)/unity.c
 	@mkdir -p $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/$(NAME): $(SRC) $(HEADER) $(BUILD_DIR)/unity.o
-	$(CXX) $(CXXFLAGS) $(EXTRA) $(SRC) $(BUILD_DIR)/unity.o -o $@
+$(BUILD_DIR)/$(NAME): $(SRC) $(MAIN_SRC) $(HEADER) $(BUILD_DIR)/unity.o
+	$(CXX) $(CXXFLAGS) $(EXTRA) $(SRC) $(MAIN_SRC) $(BUILD_DIR)/unity.o -o $@
 
 test: header
 	$(MAKE) -f $(HERE)/Makefile $(BUILD_DIR)/$(NAME)

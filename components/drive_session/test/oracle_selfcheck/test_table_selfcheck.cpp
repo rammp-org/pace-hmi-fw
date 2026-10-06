@@ -9,9 +9,7 @@
 #include <cstdint>
 #include <string_view>
 
-extern "C" {
-#include "unity.h"
-}
+#include "test_case.hpp"
 
 namespace ds = hmi::drive_session;
 using ds::Env;
@@ -91,10 +89,9 @@ template <typename F> void for_each_valid(F &&f) {
 
 } // namespace
 
-void setUp() {}
-void tearDown() {}
-
-static void test_counts() {
+// The cases register through tests/host/test_case.hpp and run from tests/host/test_main.cpp
+// (host L1 contract, TS-UNIT-02), which also defines setUp/tearDown.
+TEST_CASE("DSO-001 the tables have their declared sizes", "[drive_session_table]") {
   TEST_ASSERT_EQUAL_size_t(41, ds::TRANSITIONS.size());
   TEST_ASSERT_EQUAL_size_t(ds::kTransitionCount, ds::TRANSITIONS.size());
   TEST_ASSERT_EQUAL_size_t(11, ds::HOLD_TRANSITIONS.size());
@@ -105,7 +102,7 @@ static void test_counts() {
   TEST_ASSERT_EQUAL_size_t(5, ds::GATE_TRIGGERS.size());
 }
 
-static void test_at_most_one_row() {
+TEST_CASE("DSO-002 no valid combination matches two rows", "[drive_session_table]") {
   unsigned long combos = 0;
   unsigned long over = 0;
   for_each_valid([&](Phase p, GuardMask, Input in, GuardMask guards) {
@@ -124,7 +121,7 @@ static void test_at_most_one_row() {
   TEST_ASSERT_EQUAL_UINT32(0, over);
 }
 
-static void test_every_row_reachable() {
+TEST_CASE("DSO-003 every row matches some valid combination", "[drive_session_table]") {
   std::array<bool, ds::kTransitionCount> hit{};
   for_each_valid([&](Phase p, GuardMask, Input in, GuardMask guards) {
     const std::size_t r = ds::find_row(p, in, guards);
@@ -137,7 +134,7 @@ static void test_every_row_reachable() {
   }
 }
 
-static void test_rows_keep_invariants() {
+TEST_CASE("DSO-004 every row lands in a valid target state", "[drive_session_table]") {
   unsigned long bad = 0;
   for_each_valid([&](Phase p, GuardMask hidden, Input in, GuardMask guards) {
     const std::size_t r = ds::find_row(p, in, guards);
@@ -152,7 +149,7 @@ static void test_rows_keep_invariants() {
   TEST_ASSERT_EQUAL_UINT32(0, bad);
 }
 
-static void test_every_action_and_input_used() {
+TEST_CASE("DSO-005 every Action and Input is used", "[drive_session_table]") {
   std::array<bool, ds::kActionCount> act{};
   std::array<bool, ds::kInputCount> inp{};
   for (const auto &t : ds::TRANSITIONS) {
@@ -176,7 +173,7 @@ static void test_every_action_and_input_used() {
   }
 }
 
-static void test_way_out() {
+TEST_CASE("DSO-006 every non-safe phase has a way out or a known gap", "[drive_session_table]") {
   for (std::size_t pi = 0; pi < ds::kPhaseCount; ++pi) {
     const auto p = static_cast<Phase>(pi);
     if (p == ds::kSafePhase) {
@@ -186,14 +183,14 @@ static void test_way_out() {
   }
 }
 
-static void test_tick_sequence() {
+TEST_CASE("DSO-007 a tick runs follow-state before the deadlines", "[drive_session_table]") {
   TEST_ASSERT_TRUE(ds::TICK_SEQUENCE[0] == Input::TICK_FOLLOW);
   TEST_ASSERT_TRUE(ds::TICK_SEQUENCE[1] == Input::TICK_EXIT_DUE);
   TEST_ASSERT_TRUE(ds::TICK_SEQUENCE[2] == Input::TICK_WARN_DUE);
   TEST_ASSERT_TRUE(ds::TICK_SEQUENCE[3] == Input::TICK_GIVEUP_DUE);
 }
 
-static void test_hold_poll_complete() {
+TEST_CASE("DSO-008 every hold poll combination has one row", "[drive_session_table]") {
   using ds::HoldInput;
   using ds::HoldState;
   for (HoldState s : {HoldState::IDLE, HoldState::FILLING}) {
@@ -210,7 +207,7 @@ static void test_hold_poll_complete() {
   }
 }
 
-static void test_stick_gate() {
+TEST_CASE("DSO-009 the stick gate opens in exactly one case", "[drive_session_table]") {
   int open = 0;
   for (bool locked : {false, true}) {
     for (Screen s : kScreens) {
@@ -226,7 +223,7 @@ static void test_stick_gate() {
   TEST_ASSERT_EQUAL_FLOAT(0.5f, ds::stick_scale(false, true, 0.5f));
 }
 
-static void test_rows_cite_code() {
+TEST_CASE("DSO-010 every row cites its code", "[drive_session_table]") {
   for (const auto &t : ds::TRANSITIONS) {
     TEST_ASSERT_TRUE(t.code.find("frag_") != std::string_view::npos);
     TEST_ASSERT_TRUE(t.code.find("orig ") != std::string_view::npos);
@@ -239,35 +236,11 @@ static void test_rows_cite_code() {
   }
 }
 
-static void test_phase_of() {
+TEST_CASE("DSO-011 phase_of maps the code variables", "[drive_session_table]") {
   TEST_ASSERT_TRUE(ds::phase_of({true, false, false, false, false}) == Phase::LOCKED);
   TEST_ASSERT_TRUE(ds::phase_of({true, true, false, false, false}) == Phase::ASKING);
   TEST_ASSERT_TRUE(ds::phase_of({false, false, true, false, false}) == Phase::UNLOCKING);
   TEST_ASSERT_TRUE(ds::phase_of({false, false, false, false, false}) == Phase::DRIVING);
   TEST_ASSERT_TRUE(ds::phase_of({false, false, true, true, true}) == Phase::EXITING);
   TEST_ASSERT_TRUE(ds::phase_of({false, false, false, false, true}) == Phase::EXIT_REFUSED);
-}
-
-int main() {
-  UNITY_BEGIN();
-  UnityDefaultTestRun(test_counts, "DSO-001 the tables have their declared sizes", __LINE__);
-  UnityDefaultTestRun(test_at_most_one_row, "DSO-002 no valid combination matches two rows",
-                      __LINE__);
-  UnityDefaultTestRun(test_every_row_reachable, "DSO-003 every row matches some valid combination",
-                      __LINE__);
-  UnityDefaultTestRun(test_rows_keep_invariants, "DSO-004 every row lands in a valid target state",
-                      __LINE__);
-  UnityDefaultTestRun(test_every_action_and_input_used, "DSO-005 every Action and Input is used",
-                      __LINE__);
-  UnityDefaultTestRun(test_way_out, "DSO-006 every non-safe phase has a way out or a known gap",
-                      __LINE__);
-  UnityDefaultTestRun(test_tick_sequence, "DSO-007 a tick runs follow-state before the deadlines",
-                      __LINE__);
-  UnityDefaultTestRun(test_hold_poll_complete, "DSO-008 every hold poll combination has one row",
-                      __LINE__);
-  UnityDefaultTestRun(test_stick_gate, "DSO-009 the stick gate opens in exactly one case",
-                      __LINE__);
-  UnityDefaultTestRun(test_rows_cite_code, "DSO-010 every row cites its code", __LINE__);
-  UnityDefaultTestRun(test_phase_of, "DSO-011 phase_of maps the code variables", __LINE__);
-  return UNITY_END();
 }
