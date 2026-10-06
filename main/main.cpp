@@ -38,8 +38,6 @@
 #include "components/ui_comp_errorbanner.h"
 #include "components/ui_comp_topbar.h"
 
-#include "sample_ui_home.h"
-
 #include "button.hpp"
 #include "continuous_adc.hpp"
 #include "joystick.hpp"
@@ -503,12 +501,6 @@ extern "C" void app_main(void) {
   if (kFpsInstrument) {
     lv_screen_load(ui_DriveScreen);
   }
-
-  // Sample wheelchair dashboard mockup (static, no sensor wiring): builds its
-  // own screen and swaps it in. Comment out to see the real telemetry UI
-  // again; RTPS/ADC binding below is unaffected either way.
-  // sample_ui_home_init();
-  // lv_screen_load(sample_ui_home_screen);
 
   // Saved settings (settings.cpp). The theme goes on before anything is drawn
   // (the boot overdraw pass further down runs after it, as it must: a theme
