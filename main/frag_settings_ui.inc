@@ -55,25 +55,8 @@ struct SettingPageText {
   const char *instructions;
 };
 
-static constexpr SettingPageText kSettingPageText[] = {
-#define SETTINGS_PAGE_ROW(name_, title_, text_) {title_, text_},
-    SETTINGS_PAGE_TABLE(SETTINGS_PAGE_ROW)
-#undef SETTINGS_PAGE_ROW
-};
 static constexpr SettingPageText kActuatorsPageText{"DEBUG ACTUATORS",
                                                     "Up/down to pick, left/right or -/+ to move."};
-
-struct SettingParam {
-  int page; // SETTINGS_PAGE_*
-  StepperSpec spec;
-};
-
-static constexpr SettingParam kSettingParams[] = {
-#define SETTINGS_PARAM_ROW(page_, name_, short_, label_, min_, max_, step_, dec_, unit_, dflt_)    \
-  {SETTINGS_PAGE_##page_, {short_, label_, min_, max_, step_, dec_, unit_}},
-    SETTINGS_PARAM_TABLE(SETTINGS_PARAM_ROW)
-#undef SETTINGS_PARAM_ROW
-};
 
 // The subject each settings parameter steps, in SETTINGS_PARAM_* order. Each
 // one's observer applies and saves it.
@@ -597,8 +580,11 @@ static void setting_row_add(const StepperSpec &spec, lv_subject_t *value, bool a
 static void setting_page_open(int32_t page) {
   settings_screen_ensure(); // built on demand: see "Screens built on demand"
   setting_rows_clear();
-  const SettingPageText &text =
-      page == kActuatorsPage ? kActuatorsPageText : kSettingPageText[page];
+  const SettingPageText text =
+      page == kActuatorsPage
+          ? kActuatorsPageText
+          : SettingPageText{SETTINGS_PAGES[static_cast<size_t>(page)].title,
+                            SETTINGS_PAGES[static_cast<size_t>(page)].instructions};
   lv_label_set_text(ui_SettingsTitle, text.title);
   // text.instructions has nowhere to go yet: the spec-V2 body is a title and
   // the rows, with no line between them. Phase 5 adds one when it lays this
@@ -612,8 +598,10 @@ static void setting_page_open(int32_t page) {
     }
   } else {
     for (int i = 0; i < SETTINGS_PARAM_COUNT; i++) {
-      if (kSettingParams[i].page == page) {
-        StepperSpec spec = kSettingParams[i].spec;
+      const SettingsParamSpec &param = SETTINGS_PARAMS[static_cast<size_t>(i)];
+      if (param.page == page) {
+        StepperSpec spec{param.short_name, param.label, param.min_value, param.max_value,
+                         param.step,       param.decimals, param.unit};
         spec.names = kSettingParamNames[i];
         // Remapping the stick changes which way a push drives the chair, and
         // the speed how far, so neither is done mid-drive.

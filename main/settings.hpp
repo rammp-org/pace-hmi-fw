@@ -4,12 +4,14 @@
  * @file settings.hpp
  * @brief User settings that survive a reboot, in /storage/settings.txt.
  *
- * One "key value" line each, a key per settings_spec.h parameter (lowercase:
- * "brightness", "theme", "stick_sensitivity"...). A missing file or key keeps
- * the table's default; unknown keys are ignored, so a file from an older or
- * newer firmware still loads. It sits beside joystick_cal.txt on the same
- * LittleFS partition. Any task; a setter writes the file only when the value
- * changed.
+ * One "key value" line each, in SETTINGS_PARAMS order, under each row's `key`
+ * ("brightness", "theme", "stick_sensitivity"...). A missing file or key keeps
+ * the value in RAM (the table's default at boot); an unknown key followed by a
+ * number is skipped, so a file from an older or newer firmware still loads.
+ * Today the first token that is not a number stops the load, silently, and an
+ * out-of-range value is clamped without a report (pinned by tests/host/settings,
+ * SET-036, SET-043). It sits beside joystick_cal.txt on the same LittleFS
+ * partition. Any task; a setter writes the file only when the value changed.
  */
 
 #include <cstdint>
