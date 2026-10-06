@@ -1,8 +1,8 @@
 # Overnight report: pace-hmi-fw refactor, 2026-10-06 01:46–07:00 (unattended)
 
-**Status:** done, with open items: `dev_refactor` carries 12 merged steps, 6 board-verified milestones and 7 host test apps; six safety and topology drafts are pushed, unmerged, for review. CI is green on the last firmware change (a9a040f).
+**Status:** done, with open items: `dev_refactor` carries 18 merged changes, 6 board-verified milestones and 7 host test apps (205 cases); six safety and topology drafts are pushed, unmerged, for review. CI is green on the last firmware change (a9a040f).
 **Summary:**
-- `main.cpp` is split into 27 one-TU fragments (binary-guarded). Seven new components hold host-tested logic: `fw_core`, `hmi_format`, `hmi_models`, `ota_parse`, plus the joystick, self-test and RTPS characterisation suites. L0 tooling: ratchet, `.clang-tidy`, CI gates, diagrams.
+- `main.cpp` is split into 27 one-TU fragments (binary-guarded). Four new host-tested components (`fw_core`, `hmi_format`, `hmi_models`, `ota_parse`), plus characterisation suites for the joystick, the self-test table and the RTPS spec. L0 tooling: ratchet, `.clang-tidy`, CI gates, diagrams.
 - No safety behaviour changed. Hazards H1–H16, plus new ones found tonight (open-circuit stick = full forward, RTPS decode of NaN and unknown enums, a battery-read data race), are pinned by tests or listed for your decision.
 - Board 2 passed B0–B5 at every merged milestone. The board checks are weaker than the plan claimed (see "Not verified"), and a 4.4 V battery read appeared on 3 draft runs out of 20.
 
@@ -118,7 +118,7 @@ Drafts, pushed and **not merged** (each needs two human approvals):
 ## Next
 
 1. Remove the temporary allowlists: `pace-hmi-fw-refactor/.claude/settings.local.json` and `ui_squareline/.claude/settings.local.json` (plus its `.git/info/exclude` line). Delete the `sdkconfig.wifi.local` line from `pace-hmi-fw/.git/info/exclude` if you don't want it.
-2. Review the drafts, drive_session first (table → implementation → bench), then stick, settings, cal, topology. The drafts still call fw_core's old member API (`ch.writer()`); merging needs `fw::writer(ch)`.
+2. Review the drafts, drive_session first (table → implementation → bench), then stick, settings, cal, topology. The topology draft still calls fw_core's old member API (`topology_espp.hpp:169-188`, `.writer()` etc.); it needs `fw::writer(ch)` before it can merge. The other drafts don't use it.
 3. Answer P1–P8.
 4. Open the PR `dev_refactor` → `dev` (CS-GIT-02: one change per PR; split it per step if you prefer).
 5. Wire `idf.py clang-check` into the ratchet; add stick injection to the bench (test-only Kconfig) so B5 can see the gate.
