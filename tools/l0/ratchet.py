@@ -35,6 +35,10 @@ Rules
   non-const `static`/`thread_local` variables at block scope (function-local
   statics, in lambdas too) and static data members at class scope. Namespace-scope
   statics are mutable_globals, not this.
+- app_main_lines (CS-LAY-01: app_main <= 300 lines): non-blank code lines (comments
+  stripped, as `lines`) of the function named app_main, in whichever unit holds it.
+  Like `lines`: a path in the baseline must not grow; any other path must stay
+  within 300. The baseline holds only paths over the limit.
 
 Heuristics (regex and brace depth), not a compiler: they count the same way every
 time, which is all a ratchet needs. Stdlib only, Python 3.12+.
@@ -61,6 +65,8 @@ LIMIT_HEADER = 800
 LIMIT_SOURCE = 1000
 LIMIT_FUNCTION = 120
 SHOULD_FUNCTION = 60
+LIMIT_APP_MAIN = 300  # CS-LAY-01
+APP_MAIN = "app_main"
 
 EXCLUDED_COMPONENTS = {"ui", "m5stack-tab5"}
 EXCLUDED_DIRS = {"test", "generated"}
@@ -114,9 +120,9 @@ INCLUDE_LINE_RE = re.compile(r"^[ \t]*#[ \t]*include\b.*$", re.M)
 METRICS = sorted(
     list(REGEX_METRICS)
     + ["lines", "fn_over_120", "fn_over_60", "lv_outside_ui", "c_cast", "if_config", "mutable_globals",
-       "static_state"]
+       "static_state", "app_main_lines"]
 )
-LIMIT_METRICS = {"lines", "fn_over_60"}  # everything else is forbidden on new paths
+LIMIT_METRICS = {"lines", "fn_over_60", "app_main_lines"}  # everything else is forbidden on new paths
 
 
 # --- lexing ------------------------------------------------------------------
@@ -455,6 +461,11 @@ def measure(path: str, text: str) -> dict[str, int]:
     m["fn_over_60"] = sum(1 for n in st.lengths if n > SHOULD_FUNCTION)
     m["mutable_globals"] = st.globals_
     m["static_state"] = len(st.static_lines)
+    lines = code.split("\n")
+    m["app_main_lines"] = max(
+        (sum(1 for ln in lines[a - 1 : b] if ln.strip()) for name, a, b in st.functions if name == APP_MAIN),
+        default=0,
+    )
     return m
 
 
@@ -528,15 +539,22 @@ def line_limit(path: str) -> int:
     return LIMIT_HEADER if pathlib.PurePosixPath(path).suffix in HEADER_EXT else LIMIT_SOURCE
 
 
+def hard_limit(name: str, path: str) -> int | None:
+    """The limit of a limit metric (the baseline holds only paths over it); None if forbidden."""
+    if name == "lines":
+        return line_limit(path)
+    if name == "app_main_lines":
+        return LIMIT_APP_MAIN
+    return None
+
+
 def make_baseline(current: dict[str, dict[str, int]]) -> dict[str, dict[str, int]]:
     out: dict[str, dict[str, int]] = {name: {} for name in METRICS}
     for path, m in current.items():
         for name in METRICS:
             n = m[name]
-            if name == "lines":
-                if n > line_limit(path):
-                    out[name][path] = n
-            elif n > 0:
+            limit = hard_limit(name, path)
+            if n > (0 if limit is None else limit):
                 out[name][path] = n
     return out
 
@@ -599,6 +617,9 @@ def violations(base: dict[str, dict[str, int]], current: dict[str, dict[str, int
             elif name == "lines":
                 if n > line_limit(path):
                     bad.append(f"lines {path}: {n} > hard limit {line_limit(path)} (CS-FIL-01)")
+            elif name == "app_main_lines":
+                if n > LIMIT_APP_MAIN:
+                    bad.append(f"app_main_lines {path}: {n} > hard limit {LIMIT_APP_MAIN} (CS-LAY-01)")
             elif name == "fn_over_60":
                 if component_of(path) in strict and n > 0:
                     bad.append(f"fn_over_60 {path}: {n} > 0 ({component_of(path)}/.clang-tidy sets "
@@ -618,8 +639,8 @@ def lowered(base: dict[str, dict[str, int]], current: dict[str, dict[str, int]])
         for path, old in base.get(name, {}).items():
             n = current.get(path, {}).get(name, 0)
             new = min(old, n)
-            keep = new > line_limit(path) if name == "lines" else new > 0
-            if keep:
+            limit = hard_limit(name, path)
+            if new > (0 if limit is None else limit):
                 out[name][path] = new
     return out
 
@@ -818,6 +839,42 @@ def _selftest_strict_functions(expect: Expect) -> None:
             expect("check: 60-line function in a 60-line component", cmd_check(root, bl), 0)
 
 
+def _selftest_app_main(expect: Expect) -> None:
+    """app_main_lines: non-blank code lines of app_main; 300 hard limit; legacy may only fall."""
+    zero = dict.fromkeys(METRICS, 0)
+    body = "  x();\n" * 5 + "\n  // a comment line\n  /* block\n     comment */\n\n" + "  y();\n" * 3
+    unit = (
+        "void app_main_helper() {\n" + "  z();\n" * 400 + "}\n"
+        'extern "C" void app_main(void) {\n' + body + "}\n"
+        "struct Foo { void app_main_like() {\n" + "  z();\n" * 50 + "} };\n"
+    )
+    expect("app_main_lines counts non-blank code lines of app_main only",
+           measure(UNIT, unit)["app_main_lines"], 10)  # head + 8 statements + closing brace
+    expect("no app_main: 0", measure("main/x.cpp", "void f() {\n}\n")["app_main_lines"], 0)
+    expect("app_main_lines measured in any unit",
+           measure("main/app.cpp", "extern \"C\" void app_main(void) {\n" + "  x();\n" * 400 + "}\n")["app_main_lines"],
+           402)
+    expect("app_main within 300 on a new path",
+           violations({}, {UNIT: {**zero, "app_main_lines": 300}}), [])
+    expect("app_main over 300 on a new path",
+           violations({}, {UNIT: {**zero, "app_main_lines": 301}}),
+           [f"app_main_lines {UNIT}: 301 > hard limit 300 (CS-LAY-01)"])
+    expect("app_main moved to another file is still limited",
+           len(violations({"app_main_lines": {UNIT: 1007}}, {"main/app.cpp": {**zero, "app_main_lines": 400}})), 1)
+    legacy = {"app_main_lines": {UNIT: 1007}}
+    expect("legacy app_main may fall", violations(legacy, {UNIT: {**zero, "app_main_lines": 1006}}), [])
+    expect("legacy app_main may not grow",
+           violations(legacy, {UNIT: {**zero, "app_main_lines": 1008}}),
+           [f"app_main_lines {UNIT}: 1008 > baseline 1007"])
+    expect("baseline holds only app_main over 300",
+           make_baseline({UNIT: {**zero, "app_main_lines": 301}, "main/a.cpp": {**zero, "app_main_lines": 300}})
+           ["app_main_lines"], {UNIT: 301})
+    expect("update lowers app_main", lowered(legacy, {UNIT: {**zero, "app_main_lines": 900}})["app_main_lines"],
+           {UNIT: 900})
+    expect("update drops app_main at the limit",
+           lowered(legacy, {UNIT: {**zero, "app_main_lines": 300}})["app_main_lines"], {})
+
+
 def selftest() -> int:
     failures: list[str] = []
 
@@ -960,6 +1017,7 @@ def selftest() -> int:
            len(violations({}, {"components/x/src/x.cpp": {**zero, "if_config": 1}})), 1)
 
     _selftest_strict_functions(expect)
+    _selftest_app_main(expect)
 
     for f in failures:
         print(f"selftest FAIL {f}")
