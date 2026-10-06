@@ -37,6 +37,15 @@ jobs:
         python3 tools/gen_diagrams/gen_diagrams.py selftest
         python3 tools/gen_diagrams/gen_diagrams.py check
 
+    # tools/guards (docs/plans/app-main-shrink.md §5): parsers and rules on inline samples.
+    # The checks against a build (init_order, exports) run after the builds below.
+    - name: Guard self tests (G2 exports, G4 init_order, G10 task_dump, G11 observer_census)
+      run: |
+        python3 tools/guards/init_order.py selftest
+        python3 tools/guards/exports.py selftest
+        python3 tools/guards/task_dump.py selftest
+        python3 tools/guards/observer_census.py selftest
+
     - name: Test manifest (TS-DEF-02)
       run: |
         python3 -m pip install --quiet pyyaml
@@ -75,7 +84,8 @@ jobs:
 
   bench-build:
     # The bench variant: the remote UI debug channel on (ci/sdkconfig.bench). Its own
-    # build dir and sdkconfig, so the overlay is not shadowed by another config.
+    # build dir and sdkconfig, so the overlay is not shadowed by another config. Then guards
+    # G4 and G2 on its objects, inside the IDF image (they need its readelf/objdump/nm).
     runs-on: ubuntu-latest
     steps:
     - name: Checkout repo
@@ -93,3 +103,5 @@ jobs:
           idf.py -B build_bench -D SDKCONFIG=build_bench/sdkconfig
           -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;ci/sdkconfig.bench" build
           && grep -q "^#define CONFIG_HMI_REMOTE_UI 1" build_bench/config/sdkconfig.h
+          && python3 tools/guards/init_order.py check --build build_bench --variant bench
+          && python3 tools/guards/exports.py check --build build_bench

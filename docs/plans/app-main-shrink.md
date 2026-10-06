@@ -222,3 +222,4 @@ adapters 0.5); view-init moves inside S4-S6. Total ≈ 14 agent-days, plus one b
 | DA7280 | The boot-time functional test moves behind a bench-only Kconfig (default off), in its own behaviour commit |
 | [FPS] | Behind a debug Kconfig, default off, logged through espp Logger at debug level |
 | Theme | Board 2 stays on Night (theme 0); the bench re-baselines B2's settings line and B4's static screens, with old and new shown side by side |
+| G10 dump (orchestrator, within V11) | The task dump comes through the bench remote UI's `TASKS` verb, not inside the RTPS self-test JSON: that JSON cannot carry a variable-length list without an interface change, and `selftest.cpp` cannot grow under the ratchet. `task_dump.py fetch --into` merges it into the self-test JSON file on the PC |
