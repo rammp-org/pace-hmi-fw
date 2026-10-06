@@ -132,6 +132,7 @@ shared file: B1 merges before B2's boot hook.
 | D2 | Firmware-only for H3: detect the high rail, NaN and failed reads; the low-rail open circuit (0 mV) is a documented residual hazard |
 | D3 | Pending: the owner asks the MCB team about the XYTwist timeout and DISABLE semantics; C3 sign-off waits for the answer |
 | Phase A | Approved to start on the draft branches (incl. the table-type move with a fingerprint, and the CLEAR_MENU_ON_ARRIVAL table correction as its own commit for review) |
+| 9b8574f | Table correction approved by the owner (2026-10-06): CLEAR_MENU_ON_ARRIVAL on relock rows 3-6, 8, 9, replacing the side flag; behaviour unchanged (goldens GLD-001..004 pass); fingerprint 0xF7D77ACEBF184D80 -> 0xD8AAB0E61BE44A91. The drive branch merges once the drive-tick CPU timing settles the B3 rtt_p50 question (owner's choice) |
 
 ## 8. Findings during Phase A
 
