@@ -19,6 +19,10 @@ below show.
 | REQ-FMT-07 | The TopBar link reads `BT · WI-FI` on WiFi and `BT · ETH` on anything else. | FMT-013, FMT-020 |
 | REQ-FMT-08 | The diagnostics rate reads `N.N Hz - Live` from tenths of a Hz. N and the digit after the point are the integer quotient and remainder by 10, so -15 reads `-1.-5`. | FMT-014, FMT-019 |
 | REQ-FMT-09 | Each text is byte for byte what the code drew before the move, when it printed with LVGL's own `lv_snprintf`. | FMT-001..FMT-020 |
+| REQ-FMT-10 | About. A version names a release tag when it starts with `v`, has no `-dirty`, and nothing after its last `-g` is lower-case hex (an empty rest is not hex). A SHA-256 line is the four groups of 8 characters from its offset (0 or 32), joined by one space. The device MAC reads six upper-case hex pairs joined by `:`. | FMT-101..FMT-103 |
+| REQ-FMT-11 | Firmware update. A date reads `D Mon Y` when `sscanf("%d-%d-%d")` takes three numbers and the month is 1..12, and reads the input unchanged otherwise. A size reads `N.N MB`: bytes / 1e6 as a double, rounded to one decimal, ties to even. The list status reads `N releases. Pick one to install it.`. The install percentage is `done * 100 / total` in `size_t`, 0 while total is 0. The progress reads `<done> of <total>  (P%)`. | FMT-104..FMT-108 |
+| REQ-FMT-12 | Internet. The signal reads `N dBm`, or `--` with no RSSI. A network row's signal reads `N dBm`, with `open  ` in front when the network has no password. | FMT-109, FMT-110 |
+| REQ-FMT-13 | Each REQ-FMT-10..12 text is byte for byte what the code drew before the move, when it printed with fmt (espp's `format.hpp`). | FMT-101..FMT-110 |
 
 Preconditions, the same as before the move. The old code has undefined behaviour outside them,
 and no caller goes there:
@@ -71,6 +75,12 @@ flowchart LR
   (`CONFIG_LV_USE_BUILTIN_SPRINTF=1` in the firmware), so the goldens hold LVGL's bytes, not
   glibc's.
 - FMT-015..FMT-020 compare the component with those copies over wide sweeps.
+- The About, Firmware update and Internet helpers have the same three parts:
+  `goldens_screens.hpp` (frozen), `legacy_screens.cpp` (the verbatim pre-move copies, printing
+  with fmt from espp's `format.hpp` as `main/` did), and `test_screens.cpp` (FMT-101..) through
+  the seam `subject_screens.hpp`. The goldens keep to the domain where host and target agree:
+  `day`'s numbers fit an `int` (an overflowing `sscanf` is the C library's own, and glibc and
+  newlib differ), and `done * 100` fits the target's 32-bit `size_t`.
 
 ## Hardware findings
 
