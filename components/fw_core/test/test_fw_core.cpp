@@ -19,6 +19,7 @@
 
 #include "fw_core/fw_core.hpp"
 
+#include "test_case.hpp"
 #include "unity.h"
 
 namespace fw = hmi::fw;
@@ -120,7 +121,7 @@ public:
 // ---------------------------------------------------------------------------------------------
 // Mailbox
 
-void fwc_001() {
+TEST_CASE("FWC-001 a mailbox returns the newest value", "[fw_core]") {
   fw::Mailbox<SpeedMsg> mailbox({.initial = {0, 0}, .reader_checker = RECORDING});
   mailbox.write({100, 1});
   mailbox.write({200, 2});
@@ -131,7 +132,7 @@ void fwc_001() {
   TEST_ASSERT_EQUAL_UINT(3, out.seq);
 }
 
-void fwc_002() {
+TEST_CASE("FWC-002 a mailbox reports changed once per write", "[fw_core]") {
   fw::Mailbox<SpeedMsg> mailbox({.initial = {0, 0}, .reader_checker = RECORDING});
   SpeedMsg out{};
   mailbox.write({10, 1});
@@ -146,14 +147,15 @@ void fwc_002() {
   TEST_ASSERT_EQUAL_INT(30, out.speed_mm_s);
 }
 
-void fwc_003() {
+TEST_CASE("FWC-003 a mailbox read before any write returns the initial value, unchanged",
+          "[fw_core]") {
   fw::Mailbox<SpeedMsg> mailbox({.initial = {7, 0}, .reader_checker = RECORDING});
   SpeedMsg out{};
   TEST_ASSERT_EQUAL(fw::ReadStatus::UNCHANGED, mailbox.read(out));
   TEST_ASSERT_EQUAL_INT(7, out.speed_mm_s);
 }
 
-void fwc_004() {
+TEST_CASE("FWC-004 a mailbox writer never blocks, from a task or an ISR", "[fw_core]") {
   // No reader ever drains the mailbox: 10,000 writes from a task and from an "ISR" must all
   // return at once. A blocking write would hang here (and the runner's timeout would fail it).
   constexpr unsigned WRITES = 10000;
@@ -175,7 +177,7 @@ void fwc_004() {
   TEST_ASSERT_EQUAL_UINT(WRITES + 1, out.seq);
 }
 
-void fwc_005() {
+TEST_CASE("FWC-005 a mailbox read off the reader's task fails and consumes nothing", "[fw_core]") {
   g_failure = {};
   fw::Mailbox<SpeedMsg> mailbox({.initial = {1, 0}, .reader_checker = RECORDING});
   SpeedMsg out{};
@@ -199,7 +201,7 @@ using DropQueue = fw::Queue<EventMsg, 4, fw::FullPolicy::DROP_NEWEST_COUNT>;
 using BlockQueue = fw::Queue<EventMsg, 2, fw::FullPolicy::BLOCK_TIMEOUT>;
 using FaultQueue = fw::Queue<EventMsg, 2, fw::FullPolicy::RAISE_FAULT>;
 
-void fwc_006() {
+TEST_CASE("FWC-006 a queue keeps order", "[fw_core]") {
   DropQueue queue({.name = "order", .receiver_checker = RECORDING});
   std::error_code ec;
   for (int i = 1; i <= 4; ++i) {
@@ -217,7 +219,7 @@ void fwc_006() {
   TEST_ASSERT_EQUAL_INT(-1, out.id);
 }
 
-void fwc_007() {
+TEST_CASE("FWC-007 a DROP_NEWEST_COUNT queue drops the newest message and counts it", "[fw_core]") {
   DropQueue queue({.name = "drop", .receiver_checker = RECORDING});
   std::error_code ec;
   for (int i = 1; i <= 4; ++i) {
@@ -237,7 +239,7 @@ void fwc_007() {
   TEST_ASSERT_EQUAL_INT(4, seen[3]); // the newest (5, 6) were dropped, the oldest kept
 }
 
-void fwc_008() {
+TEST_CASE("FWC-008 a BLOCK_TIMEOUT queue returns SEND_TIMEOUT after its timeout", "[fw_core]") {
   BlockQueue queue({.name = "block", .send_timeout = 50ms, .receiver_checker = RECORDING});
   std::error_code ec;
   TEST_ASSERT_TRUE(queue.send({1}, ec));
@@ -253,7 +255,7 @@ void fwc_008() {
   TEST_ASSERT_EQUAL_size_t(2, queue.size());
 }
 
-void fwc_009() {
+TEST_CASE("FWC-009 a BLOCK_TIMEOUT send completes when the receiver makes room", "[fw_core]") {
   BlockQueue queue({.name = "block", .send_timeout = 2000ms, .receiver_checker = RECORDING});
   std::error_code ec;
   TEST_ASSERT_TRUE(queue.send({1}, ec));
@@ -275,7 +277,8 @@ void fwc_009() {
   TEST_ASSERT_EQUAL_INT(3, out.id);
 }
 
-void fwc_010() {
+TEST_CASE("FWC-010 a RAISE_FAULT queue sets its fault flag, logs once and keeps order",
+          "[fw_core]") {
   FaultQueue queue({.name = "intents", .receiver_checker = RECORDING});
   std::error_code ec;
   TEST_ASSERT_TRUE(queue.send({1}, ec));
@@ -298,7 +301,7 @@ void fwc_010() {
   TEST_ASSERT_EQUAL_INT(1, out.id); // order kept, nothing overwritten
 }
 
-void fwc_011() {
+TEST_CASE("FWC-011 send_from_isr never waits and applies each full policy", "[fw_core]") {
   DropQueue drop({.name = "isr_drop", .receiver_checker = RECORDING});
   BlockQueue block({.name = "isr_block", .send_timeout = 5000ms, .receiver_checker = RECORDING});
   FaultQueue fault({.name = "isr_fault", .receiver_checker = RECORDING});
@@ -326,7 +329,7 @@ void fwc_011() {
   TEST_ASSERT_TRUE(drop_tx.send({9}, ec) == false && ec == fw::Error::QUEUE_FULL);
 }
 
-void fwc_012() {
+TEST_CASE("FWC-012 drain hands over the waiting messages in order", "[fw_core]") {
   fw::Queue<EventMsg, 3, fw::FullPolicy::DROP_NEWEST_COUNT> queue(
       {.name = "drain", .receiver_checker = RECORDING});
   std::error_code ec;
@@ -343,7 +346,8 @@ void fwc_012() {
   TEST_ASSERT_EQUAL_UINT32(0, receiver.dropped());
 }
 
-void fwc_013() {
+TEST_CASE("FWC-013 a queue receive off the receiver's task fails and consumes nothing",
+          "[fw_core]") {
   g_failure = {};
   DropQueue queue({.name = "owned_rx", .receiver_checker = RECORDING});
   EventMsg out{-1};
@@ -368,7 +372,7 @@ void fwc_013() {
 // ---------------------------------------------------------------------------------------------
 // Atomic value
 
-void fwc_014() {
+TEST_CASE("FWC-014 an atomic value returns the last write through narrow handles", "[fw_core]") {
   static_assert(std::atomic<Verdict>::is_always_lock_free);
   fw::AtomicValue<Verdict> verdict({.initial = Verdict::UNKNOWN});
   auto writer = verdict.writer();
@@ -385,7 +389,7 @@ void fwc_014() {
 // ---------------------------------------------------------------------------------------------
 // ThreadChecker
 
-void fwc_015() {
+TEST_CASE("FWC-015 a ThreadChecker passes on its owner", "[fw_core]") {
   g_failure = {};
   fw::ThreadChecker checker(RECORDING);
   TEST_ASSERT_FALSE(checker.is_bound());
@@ -396,14 +400,19 @@ void fwc_015() {
   TEST_ASSERT_EQUAL_INT(0, g_failure.count);
 }
 
-void fwc_016() {
+TEST_CASE("FWC-016 a ThreadChecker fails on another task, naming both tasks and the call",
+          "[fw_core]") {
   g_failure = {};
+  std::array<char, 16> original_name{};
+  pthread_getname_np(pthread_self(), original_name.data(), original_name.size());
   pthread_setname_np(pthread_self(), "owner_task");
   fw::ThreadChecker checker(RECORDING);
   TEST_ASSERT_TRUE(checker.check());
   bool result = true;
   unsigned expected_line = 0;
+  std::string expected_function;
   run_on_thread("other_task", [&] {
+    expected_function = std::source_location::current().function_name();
     expected_line = std::source_location::current().line() + 1;
     result = checker.check();
   });
@@ -414,12 +423,12 @@ void fwc_016() {
   TEST_ASSERT_FALSE(g_failure.in_isr);
   TEST_ASSERT_EQUAL_UINT(expected_line, g_failure.line);
   TEST_ASSERT_TRUE(contains(g_failure.file, "test_fw_core.cpp"));
-  TEST_ASSERT_TRUE(contains(g_failure.function, "fwc_016"));
+  TEST_ASSERT_EQUAL_STRING(expected_function.c_str(), g_failure.function.c_str());
   TEST_ASSERT_TRUE(checker.check()); // the owner still passes
-  pthread_setname_np(pthread_self(), "test_fw_core");
+  pthread_setname_np(pthread_self(), original_name.data());
 }
 
-void fwc_017() {
+TEST_CASE("FWC-017 a ThreadChecker fails in an ISR", "[fw_core]") {
   g_failure = {};
   fw::ThreadChecker checker(RECORDING);
   bool result = true;
@@ -438,7 +447,7 @@ void fwc_017() {
   TEST_ASSERT_EQUAL_INT(2, g_failure.count);
 }
 
-void fwc_018() {
+TEST_CASE("FWC-018 a ThreadChecker bound explicitly fails on every other task", "[fw_core]") {
   g_failure = {};
   fw::ThreadChecker checker(RECORDING);
   bool bound = false;
@@ -451,7 +460,7 @@ void fwc_018() {
   TEST_ASSERT_EQUAL_STRING("island", g_failure.owner.c_str());
 }
 
-void fwc_019() {
+TEST_CASE("FWC-019 a failed ownership check aborts in a test build", "[fw_core]") {
   // Test builds abort on a failed ownership check (OWNERSHIP_CHECKS_ABORT, set by the Makefile).
   static_assert(fw::OWNERSHIP_CHECKS_ABORT, "the L1 build must use the test-build behaviour");
   std::fflush(stdout);
@@ -470,8 +479,12 @@ void fwc_019() {
   TEST_ASSERT_EQUAL_INT(SIGABRT, WTERMSIG(status));
 }
 
-void fwc_020() {
+TEST_CASE("FWC-020 a failed ownership check logs and returns false in a release build",
+          "[fw_core]") {
   // Release builds log and return false (the release instantiation of the default handler).
+  std::array<char, 16> original_name{};
+  pthread_getname_np(pthread_self(), original_name.data(), original_name.size());
+  pthread_setname_np(pthread_self(), "test_fw_core");
   fw::ThreadChecker checker({.on_failure = &fw::default_failure_handler<false>});
   TEST_ASSERT_TRUE(checker.check());
   bool result = true;
@@ -483,6 +496,7 @@ void fwc_020() {
   TEST_ASSERT_TRUE(contains(log, "test_fw_core.cpp:"));
   TEST_ASSERT_TRUE(contains(log, "caller task 'ISR' (ISR)"));
   TEST_ASSERT_TRUE(contains(log, "owner task 'test_fw_core'"));
+  pthread_setname_np(pthread_self(), original_name.data());
   // A null handler falls back to the default one.
   fw::ThreadChecker fallback({.on_failure = nullptr});
   TEST_ASSERT_TRUE(fallback.check());
@@ -497,7 +511,7 @@ struct Counter {
   int value;
 };
 
-void fwc_021() {
+TEST_CASE("FWC-021 Owned runs the access on its owner only", "[fw_core]") {
   g_failure = {};
   fw::Owned<Counter> counter({.checker = RECORDING}, 40);
   const fw::Owned<Counter> &view = counter;
@@ -526,7 +540,7 @@ void fwc_021() {
 // ---------------------------------------------------------------------------------------------
 // check()
 
-void fwc_022() {
+TEST_CASE("FWC-022 check returns false and logs what failed and where", "[fw_core]") {
   StderrCapture capture;
   const bool passed = fw::check(true, "never logged");
   const unsigned line = std::source_location::current().line() + 1;
@@ -545,7 +559,7 @@ void fwc_022() {
 // ---------------------------------------------------------------------------------------------
 // Errors, names, compile-time rules, host port
 
-void fwc_023() {
+TEST_CASE("FWC-023 errors and enums have names for logs", "[fw_core]") {
   const std::error_code ec = fw::Error::QUEUE_FULL;
   TEST_ASSERT_EQUAL_STRING("fw_core", ec.category().name());
   TEST_ASSERT_EQUAL_STRING("QUEUE_FULL", ec.message().c_str());
@@ -574,7 +588,7 @@ struct Holder {
   std::string text;
 };
 
-void fwc_024() {
+TEST_CASE("FWC-024 messages and context tokens obey their compile-time rules", "[fw_core]") {
   // The rules the must-not-compile tests prove from the other side (TS-UNIT-06).
   static_assert(fw::Message<SpeedMsg>);
   static_assert(!fw::Message<Unmarked>);
@@ -590,7 +604,7 @@ void fwc_024() {
   TEST_PASS();
 }
 
-void fwc_025() {
+TEST_CASE("FWC-025 the host port names tasks and cuts long names to fit", "[fw_core]") {
   // Unity's assertions must run on the test's own thread, so the worker only records.
   std::array<char, 4> small{'x', 'x', 'x', 'x'};
   std::array<char, 1> none{'x'};
@@ -610,49 +624,3 @@ void fwc_025() {
 }
 
 } // namespace
-
-// ---------------------------------------------------------------------------------------------
-
-void setUp() {}
-void tearDown() {}
-
-int main() {
-  pthread_setname_np(pthread_self(), "test_fw_core");
-  UNITY_BEGIN();
-  struct Case {
-    void (*fn)();
-    const char *name;
-  };
-  static constexpr std::array CASES{
-      Case{fwc_001, "FWC-001 a mailbox returns the newest value"},
-      Case{fwc_002, "FWC-002 a mailbox reports changed once per write"},
-      Case{fwc_003, "FWC-003 a mailbox read before any write returns the initial value, unchanged"},
-      Case{fwc_004, "FWC-004 a mailbox writer never blocks, from a task or an ISR"},
-      Case{fwc_005, "FWC-005 a mailbox read off the reader's task fails and consumes nothing"},
-      Case{fwc_006, "FWC-006 a queue keeps order"},
-      Case{fwc_007, "FWC-007 a DROP_NEWEST_COUNT queue drops the newest message and counts it"},
-      Case{fwc_008, "FWC-008 a BLOCK_TIMEOUT queue returns SEND_TIMEOUT after its timeout"},
-      Case{fwc_009, "FWC-009 a BLOCK_TIMEOUT send completes when the receiver makes room"},
-      Case{fwc_010, "FWC-010 a RAISE_FAULT queue sets its fault flag, logs once and keeps order"},
-      Case{fwc_011, "FWC-011 send_from_isr never waits and applies each full policy"},
-      Case{fwc_012, "FWC-012 drain hands over the waiting messages in order"},
-      Case{fwc_013, "FWC-013 a queue receive off the receiver's task fails and consumes nothing"},
-      Case{fwc_014, "FWC-014 an atomic value returns the last write through narrow handles"},
-      Case{fwc_015, "FWC-015 a ThreadChecker passes on its owner"},
-      Case{fwc_016,
-           "FWC-016 a ThreadChecker fails on another task, naming both tasks and the call"},
-      Case{fwc_017, "FWC-017 a ThreadChecker fails in an ISR"},
-      Case{fwc_018, "FWC-018 a ThreadChecker bound explicitly fails on every other task"},
-      Case{fwc_019, "FWC-019 a failed ownership check aborts in a test build"},
-      Case{fwc_020, "FWC-020 a failed ownership check logs and returns false in a release build"},
-      Case{fwc_021, "FWC-021 Owned runs the access on its owner only"},
-      Case{fwc_022, "FWC-022 check returns false and logs what failed and where"},
-      Case{fwc_023, "FWC-023 errors and enums have names for logs"},
-      Case{fwc_024, "FWC-024 messages and context tokens obey their compile-time rules"},
-      Case{fwc_025, "FWC-025 the host port names tasks and cuts long names to fit"},
-  };
-  for (const Case &c : CASES) {
-    UnityDefaultTestRun(c.fn, c.name, __LINE__);
-  }
-  return UNITY_END();
-}
