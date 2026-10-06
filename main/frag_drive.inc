@@ -347,6 +347,7 @@ static void drive_exit_due_while_locked(int64_t now_us) {
 // The 250 ms tick, from rtps_poll_cb: follow the MIB's state first, then the
 // three deadlines in order (TICK_SEQUENCE). `now` is read after follow-state has
 // run, once for the three, as it always was; follow-state reads no deadline.
+// So a tick has two Envs (drive_session README "Model", pinned by DRV-022).
 static void drive_wait_poll() {
   using hmi::drive_session::Input;
   (void)drive_session_apply(Input::TICK_FOLLOW, drive_env(esp_timer_get_time()));

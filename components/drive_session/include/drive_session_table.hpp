@@ -26,8 +26,13 @@
 //          input: drive_wait_poll() runs drive_screen_follow_state() first and
 //          then three deadline checks in sequence, each seeing the state the
 //          previous one left. So a TICK is the four sub-inputs of
-//          TICK_SEQUENCE, applied in that order with the same Env (link, MIB
-//          state and `now` are sampled once per tick). There is no
+//          TICK_SEQUENCE, applied in that order, with TWO Envs: follow-state
+//          reads the subjects, screen and menu as they are when the tick
+//          starts; the three deadline checks share one Env sampled after
+//          follow-state's actions ran (`now` is read once, then). A deadline
+//          that passes between the two samples is acted on in the same tick
+//          (DRV-022). The deadline rows read only *_ELAPSED and hidden bits,
+//          so the second sample differs from the first only in time. There is no
 //          MIB_UPDATE event: a MibStatus only writes subjects; the session
 //          looks at them on the next tick or the next user input.
 //

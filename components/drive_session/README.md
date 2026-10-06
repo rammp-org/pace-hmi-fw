@@ -15,7 +15,7 @@ behaviour change and needs two human approvals and a new table (CS-SAF-05).
 | The code: `DriveSession`, the hand-written transition function | `include/drive_session.hpp`, `src/drive_session.cpp` |
 | The table's fingerprint: one 64-bit number over every row, pinned by a `static_assert` | `include/drive_session_fingerprint.hpp` |
 | The table's own invariants (DSO-001..013) | `test/oracle_selfcheck` |
-| The oracle: the code against the table (DRV-001..021, TS-UNIT-08) | `test/oracle` |
+| The oracle: the code against the table (DRV-001..022, TS-UNIT-08) | `test/oracle` |
 
 The header `drive_session_table.hpp` is a declaration: it is never edited to make a check pass.
 Its data has a fingerprint (`TABLE_FINGERPRINT`, checked wherever the session is built): moving
@@ -32,7 +32,11 @@ order, and the caller performs each with the LVGL and RTPS calls it stands for. 
 no timestamps and calls nothing: it is deterministic (CS-HAL-03) and allocates nothing (CS-SAF-04).
 
 One 250 ms tick is the four inputs of `TICK_SEQUENCE` (TICK_FOLLOW, TICK_EXIT_DUE, TICK_WARN_DUE,
-TICK_GIVEUP_DUE), applied in that order with one Env.
+TICK_GIVEUP_DUE), applied in that order with **two** Envs, as `drive_wait_poll` always did:
+TICK_FOLLOW gets the Env sampled when the tick starts; its actions are performed; then one more Env
+is sampled (`now` read once) and the three deadline checks share it. A deadline that passes between
+the two samples is acted on in the same tick. The deadline rows read only the `*_ELAPSED` guards and
+hidden bits, so in practice the second Env differs from the first only in time (DRV-022).
 
 D4, the state diagram: [TABLE.md §5](TABLE.md#5-d4-state-diagram-drawn-by-hand-from-2).
 
@@ -65,6 +69,7 @@ and action list, or change nothing where no row matches.
 | REQ-DRV-18 | A corrupted phase or input sends the session to the safe state (LOCKED; DISABLE sent; waits, exit latch, menu flag, menu-on-arrival flag and advance timer cleared; ring at rest; Locked screen; gate updated) and `step` returns false so the caller reports it | – | DRV-016, DRV-017, DRV-018 |
 | REQ-DRV-19 | The stick drives only when unlocked, on the Drive screen, with no menu open (`stick_drives`) | §4 | DRV-019 |
 | REQ-DRV-20 | The stick scale is 0 while calibrating or gated, else the speed; a NaN speed passes an open gate (pinned as-is) | §4 | DRV-020 |
+| REQ-DRV-21 | A tick decides TICK_FOLLOW on the Env sampled at its start and the three deadline checks on one Env sampled after follow-state's actions: a deadline that passes in between is acted on in the same tick, and an ENABLED that arrives in between is seen by follow-state only on the next tick | `TICK_SEQUENCE` | DRV-022 |
 
 The table excludes some (phase, input) pairs from its contract (TABLE.md §2.2). The session
 follows the row guards literally, so for those it changes nothing. One of them differs from the
@@ -93,9 +98,13 @@ namespace ds = hmi::drive_session;
 
 ds::DriveSession session;
 ds::Actions actions{};
-const ds::Env env = sample_env();                  // the 250 ms tick: one Env for all four
-for (ds::Input in : ds::TICK_SEQUENCE) {
+// The 250 ms tick: follow-state on the Env at the start ...
+if (!session.step(ds::Input::TICK_FOLLOW, sample_env(), actions)) { /* report: corrupted */ }
+for (ds::Action a : actions) { perform(a); }       // LVGL and RTPS calls, in order
+// ... then the three deadline checks on one Env sampled after those actions.
+const ds::Env env = sample_env();
+for (ds::Input in : {ds::Input::TICK_EXIT_DUE, ds::Input::TICK_WARN_DUE, ds::Input::TICK_GIVEUP_DUE}) {
   if (!session.step(in, env, actions)) { /* report: corrupted state */ }
-  for (ds::Action a : actions) { perform(a); }     // LVGL and RTPS calls, in order
+  for (ds::Action a : actions) { perform(a); }
 }
 ```

@@ -33,7 +33,9 @@ public:
   ///          is all `NONE`. A phase or input outside its enum (a corrupted value) sends the
   ///          session to the safe state: LOCKED, DISABLE sent, no menu on arrival, gate
   ///          update requested.
-  /// @param in The input. A tick is the four inputs of `TICK_SEQUENCE`, in order, one Env.
+  /// @param in The input. A tick is the four inputs of `TICK_SEQUENCE`, in order: TICK_FOLLOW
+  ///           on the Env at the tick's start, the three deadline checks on one Env sampled
+  ///           after TICK_FOLLOW's actions were performed (README, "Model").
   /// @param env The environment sampled when the input arrived.
   /// @param out The actions for the caller to perform, in order.
   /// @return false only when a corrupted value forced the safe state; the caller logs it.

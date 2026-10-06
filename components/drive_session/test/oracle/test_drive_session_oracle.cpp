@@ -157,14 +157,19 @@ Env make_env(bool link, MibState mib, Screen screen) {
   return Env{link, mib, screen, false, false, false, false};
 }
 
-// One rtps_poll_cb tick: TICK_SEQUENCE in order with one Env; returns the actions of each step.
-std::array<Actions, 4> tick(DriveSession &s, const Env &env) {
+// One rtps_poll_cb tick as drive_wait_poll runs it: TICK_FOLLOW on the Env sampled when the tick
+// starts, then the three deadline checks on one Env sampled after follow-state's actions ran.
+// Returns the actions of each step.
+std::array<Actions, 4> tick(DriveSession &s, const Env &at_start, const Env &after_follow) {
   std::array<Actions, 4> out{};
   for (std::size_t i = 0; i < ds::TICK_SEQUENCE.size(); ++i) {
-    TEST_ASSERT_TRUE(s.step(ds::TICK_SEQUENCE[i], env, out[i]));
+    TEST_ASSERT_TRUE(s.step(ds::TICK_SEQUENCE[i], i == 0 ? at_start : after_follow, out[i]));
   }
   return out;
 }
+
+// A tick in which nothing changed between the two samples.
+std::array<Actions, 4> tick(DriveSession &s, const Env &env) { return tick(s, env, env); }
 
 bool contains(const Actions &a, Action x) {
   for (const Action y : a) {
@@ -445,4 +450,39 @@ TEST_CASE("DRV-021 a new session is LOCKED, asks nothing and has nothing armed",
   TEST_ASSERT_TRUE(s.locked());
   TEST_ASSERT_FALSE(s.request_enable());
   TEST_ASSERT_EQUAL_HEX32(0, s.hidden());
+}
+
+// ---- The tick's two Envs (README "Model", TABLE.md section 1) --------------------------------
+
+TEST_CASE("DRV-022 a tick decides follow-state on the Env at its start and the three deadline "
+          "checks on one Env sampled after follow-state",
+          "[drive][safety]") {
+  const Env at_start = make_env(true, MibState::IDLE, Screen::LOCKED);
+  Actions out{};
+  // A warn deadline that passes between the two samples: NOT_GRANTED in the same tick.
+  DriveSession s;
+  TEST_ASSERT_TRUE(s.step(Input::UNLOCK_HOLD_DONE, at_start, out));
+  TEST_ASSERT_EQUAL(Phase::ASKING, s.phase());
+  Env warn_passed = at_start;
+  warn_passed.warn_elapsed = true;
+  auto steps = tick(s, at_start, warn_passed);
+  TEST_ASSERT_EQUAL(Phase::ASKING, s.phase()); // follow-state saw the warn still running
+  TEST_ASSERT_TRUE(contains(steps[2], Action::SHOW_NOT_GRANTED));
+  // With one Env (the start sample) for the whole tick, the warn would wait a tick.
+  DriveSession one;
+  TEST_ASSERT_TRUE(one.step(Input::UNLOCK_HOLD_DONE, at_start, out));
+  steps = tick(one, at_start);
+  TEST_ASSERT_FALSE(contains(steps[2], Action::SHOW_NOT_GRANTED));
+  // An ENABLED that arrives between the samples is not seen by follow-state until the next
+  // tick: the deadline rows do not read the link or the MIB.
+  DriveSession late;
+  TEST_ASSERT_TRUE(late.step(Input::UNLOCK_HOLD_DONE, at_start, out));
+  const Env enabled = make_env(true, MibState::ENABLED, Screen::LOCKED);
+  steps = tick(late, at_start, enabled);
+  TEST_ASSERT_EQUAL(Phase::ASKING, late.phase());
+  for (const Actions &a : steps) {
+    TEST_ASSERT_FALSE(contains(a, Action::SET_UNLOCKED));
+  }
+  (void)tick(late, enabled);
+  TEST_ASSERT_EQUAL(Phase::UNLOCKING, late.phase());
 }
