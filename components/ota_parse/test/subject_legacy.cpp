@@ -1,8 +1,10 @@
 // The "legacy" subject: the verbatim pre-move parsers (legacy_ota_parse.cpp).
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <iterator>
 #include <unistd.h>
 
 #include "describe.hpp"
@@ -17,9 +19,9 @@ std::string legacy_releases(const std::string &json) {
   const std::vector<GithubRelease> rs = legacy::parse_releases(json, error);
   std::vector<ReleaseView> views;
   views.reserve(rs.size());
-  for (const GithubRelease &r : rs) {
-    views.push_back({r.tag, r.prerelease, r.published, r.notes, r.url, r.size, r.sha256});
-  }
+  std::transform(rs.begin(), rs.end(), std::back_inserter(views), [](const GithubRelease &r) {
+    return ReleaseView{r.tag, r.prerelease, r.published, r.notes, r.url, r.size, r.sha256};
+  });
   return describe_releases(views, error);
 }
 

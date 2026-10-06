@@ -1,7 +1,9 @@
 // The "component" subject: components/ota_parse, called as main/github_ota.cpp and
 // main/fw_info.cpp call it.
 
+#include <algorithm>
 #include <fstream>
+#include <iterator>
 #include <sstream>
 
 #include "describe.hpp"
@@ -19,9 +21,9 @@ std::string component_releases(const std::string &json) {
   const std::vector<hmi::ota::Release> rs = hmi::ota::parse_releases(json, kAssetName, error);
   std::vector<ReleaseView> views;
   views.reserve(rs.size());
-  for (const hmi::ota::Release &r : rs) {
-    views.push_back({r.tag, r.prerelease, r.published, r.notes, r.url, r.size, r.sha256});
-  }
+  std::transform(rs.begin(), rs.end(), std::back_inserter(views), [](const hmi::ota::Release &r) {
+    return ReleaseView{r.tag, r.prerelease, r.published, r.notes, r.url, r.size, r.sha256};
+  });
   return describe_releases(views, error);
 }
 

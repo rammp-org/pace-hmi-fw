@@ -6,6 +6,8 @@
 // failing row is a behaviour change in the code under test, never a reason to edit this file
 // (CORE never-list).
 
+#include <algorithm>
+#include <iterator>
 #include <string_view>
 
 namespace ota_test {
@@ -110,12 +112,9 @@ inline constexpr Golden GOLDENS[] = {
 };
 
 inline const std::string_view *find_golden(std::string_view key) {
-  for (const Golden &g : GOLDENS) {
-    if (g.key == key) {
-      return &g.value;
-    }
-  }
-  return nullptr;
+  const auto it = std::find_if(std::begin(GOLDENS), std::end(GOLDENS),
+                               [key](const Golden &g) { return g.key == key; });
+  return it == std::end(GOLDENS) ? nullptr : &it->value;
 }
 
 } // namespace ota_test
