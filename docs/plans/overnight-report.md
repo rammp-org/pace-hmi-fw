@@ -1,4 +1,4 @@
-# Overnight report: pace-hmi-fw refactor, 2026-10-06 01:46–07:00 (unattended)
+# Overnight report: pace-hmi-fw refactor, 2026-10-06 01:46–04:50 (unattended; stopped early: everything left is review-gated or parked, AI-UNA-04)
 
 **Status:** done, with open items: `dev_refactor` carries 18 merged changes, 6 board-verified milestones and 7 host test apps (205 cases); six safety and topology drafts are pushed, unmerged, for review. CI is green on the last firmware change (a9a040f).
 **Summary:**
@@ -87,7 +87,7 @@ Drafts, pushed and **not merged** (each needs two human approvals):
 | Bench calibration: B3 `floor80` for low-water marks, B4 masks on scrolling Settings rows | tools/bench |
 | OTA-H1: on an unterminated 32-byte project name the new code reads within the field. Also differs for multibyte UTF-8 names (log and refusal text only, not accept/refuse) | 0231103 |
 | uitext date parsing assumes newlib behaviour; the target uses picolibc (10+ digit date parts may differ; unreachable from GitHub dates) | 0a9ad37 |
-| Allowlist in both repos' `.claude/settings.local.json`; one line in the shared `pace-hmi-fw/.git/info/exclude` (`sdkconfig.wifi.local`) | remove: see Next |
+| Allowlist in both repos' `.claude/settings.local.json` (removed at 04:50); one line in the shared `pace-hmi-fw/.git/info/exclude` (`sdkconfig.wifi.local`) | see Next |
 
 ## Parked questions (yours)
 
@@ -117,7 +117,7 @@ Drafts, pushed and **not merged** (each needs two human approvals):
 
 ## Next
 
-1. Remove the temporary allowlists: `pace-hmi-fw-refactor/.claude/settings.local.json` and `ui_squareline/.claude/settings.local.json` (plus its `.git/info/exclude` line). Delete the `sdkconfig.wifi.local` line from `pace-hmi-fw/.git/info/exclude` if you don't want it.
+1. Done at 04:50: the temporary allowlists (`pace-hmi-fw-refactor/.claude/settings.local.json`, `ui_squareline/.claude/settings.local.json` and its `.git/info/exclude` line) were removed at the end of the run. The `sdkconfig.wifi.local` line in `pace-hmi-fw/.git/info/exclude` stays, as you asked; agent worktrees `C:/w/*` and build dirs `C:/b/*` are left for your review (delete them when done; `git worktree prune` after).
 2. Review the drafts, drive_session first (table → implementation → bench), then stick, settings, cal, topology. The topology draft still calls fw_core's old member API (`topology_espp.hpp:169-188`, `.writer()` etc.); it needs `fw::writer(ch)` before it can merge. The other drafts don't use it.
 3. Answer P1–P8.
 4. Open the PR `dev_refactor` → `dev` (CS-GIT-02: one change per PR; split it per step if you prefer).
