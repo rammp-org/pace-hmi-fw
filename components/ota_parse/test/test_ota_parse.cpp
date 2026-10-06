@@ -14,6 +14,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <iterator>
 #include <optional>
 #include <random>
 #include <string>
@@ -577,9 +578,7 @@ TEST_CASE("OTA-066 seeded random first blocks are refused without a crash",
     std::string all;
     for (int i = 0; i < 3000; i++) {
       std::vector<std::uint8_t> b(rng.next(kDescEnd + 64));
-      for (std::uint8_t &v : b) {
-        v = rng.byte();
-      }
+      std::generate(b.begin(), b.end(), [&rng] { return rng.byte(); });
       // Every fourth block gets both magics and the chip, so the name check is reached.
       if (i % 4 == 0 && b.size() >= kDescEnd) {
         const std::vector<std::uint8_t> good = image_block(kDescEnd, "");
@@ -734,9 +733,8 @@ TEST_CASE("OTA-101 the marker split across two chunks at any point is found", "[
 
 TEST_CASE("OTA-102 the marker one byte per chunk is found", "[ota][marker]") {
   std::vector<std::string> chunks;
-  for (char c : kMarker) {
-    chunks.emplace_back(1, c);
-  }
+  std::transform(kMarker.begin(), kMarker.end(), std::back_inserter(chunks),
+                 [](char c) { return std::string(1, c); });
   for (const Subject &s : subjects()) {
     TEST_ASSERT_TRUE(s.marker(chunks));
   }
