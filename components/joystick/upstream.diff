@@ -1,0 +1,431 @@
+diff --git a/components/joystick/include/joystick.hpp b/components/joystick/include/joystick.hpp
+index 3271314..e1a813e 100644
+--- a/components/joystick/include/joystick.hpp
++++ b/components/joystick/include/joystick.hpp
+@@ -1,6 +1,7 @@
+ #pragma once
+ 
+ #include <functional>
++#include <optional>
+ 
+ #include "base_component.hpp"
+ #include "range_mapper.hpp"
+@@ -8,12 +9,21 @@
+ 
+ namespace espp {
+ /**
+- *  @brief 2-axis Joystick with axis mapping / calibration.
++ *  @brief 2-axis Joystick with axis mapping / calibration, plus an optional
++ *         independent third (Z) axis.
+  *
+  * \section joystick_ex1 Basic Circular and Rectangular Joystick Example
+  * \snippet joystick_example.cpp circular joystick example
+  * \section joystick_ex2 ADC Joystick Example
+  * \snippet joystick_example.cpp adc joystick example
++ *
++ * @note The optional Z axis (twist / throttle / rudder) is mapped by its own
++ *       RangeMapper and is deliberately *not* part of the X/Y gimbal: the
++ *       Type::CIRCULAR deadzone and magnitude clamping apply to the X/Y vector
++ *       only. Physically a twist pot is a separate potentiometer, not a third
++ *       dimension of the stick's tilt, so a spherical deadzone across all three
++ *       would be wrong. Z therefore takes its center / range deadbands from its
++ *       own FloatRangeMapper::Config.
+  */
+ class Joystick : public BaseComponent {
+ public:
+@@ -44,12 +54,29 @@ public:
+    */
+   typedef std::function<bool(float *x, float *y)> get_values_fn;
+ 
++  /**
++   * @brief function for getting x/y/z values for a joystick which has a third
++   *        (twist / throttle) axis.
++   * @param x Pointer to the x value. Function should fill this variable
++   *          with the latest reading.
++   * @param y Pointer to the y value. Function should fill this variable
++   *          with the latest reading.
++   * @param z Pointer to the z value. Function should fill this variable
++   *          with the latest reading.
++   * @return True if the values were able to be retrieved, false otherwise.
++   */
++  typedef std::function<bool(float *x, float *y, float *z)> get_values_3d_fn;
++
+   /**
+    *  @brief Configuration structure for the joystick.
+    */
+   struct Config {
+     espp::FloatRangeMapper::Config x_calibration; /**< Configuration for the x axis. */
+     espp::FloatRangeMapper::Config y_calibration; /**< Configuration for the y axis. */
++    std::optional<espp::FloatRangeMapper::Config> z_calibration{
++        std::nullopt}; /**< Optional configuration for an independent third axis
++                          (twist / throttle). When unset the joystick is a plain
++                          2-axis joystick and z() always returns 0. */
+     espp::Joystick::Type type{espp::Joystick::Type::RECTANGULAR}; /**< The type of the joystick. See
+                                                  Type enum for more information. */
+     float center_deadzone_radius{
+@@ -60,11 +87,15 @@ public:
+                           that the output appears to have magnitude 1 (meaning it appears to be on
+                           the edge of the unit circle) when the joystick value magnitude is within
+                           the range [1-range_deadzone, 1]. */
+-    espp::Joystick::get_values_fn get_values{nullptr}; /**< Function to retrieve the latest
+-                                          unmapped joystick values. Required if
+-                                          you want to use update(), unused if
+-                                          you call update(float raw_x, float
+-                                          raw_y). */
++    espp::Joystick::get_values_fn get_values{nullptr};       /**< Function to retrieve the latest
++                                                unmapped joystick values. Required if
++                                                you want to use update(), unused if
++                                                you call update(float raw_x, float
++                                                raw_y). */
++    espp::Joystick::get_values_3d_fn get_values_3d{nullptr}; /**< Function to retrieve the latest
++                                          unmapped x/y/z values. Takes precedence over get_values
++                                          when set. Unused if you call update(float raw_x, float
++                                          raw_y, float raw_z). */
+     espp::Logger::Verbosity log_level{
+         espp::Logger::Verbosity::WARN}; /**< Verbosity for the Joystick logger_. */
+   };
+@@ -95,6 +126,8 @@ public:
+    *        and range values, so that center and range deadzones are actually
+    *        applied on the vector value instead of on the individual axes
+    *        independently.
++   *  @note The Z axis calibration is never modified by this function - Z is
++   *        independent of the X/Y gimbal type.
+    *  @sa set_center_deadzone_radius
+    *  @sa set_range_deadzone
+    *  @sa set_calibration
+@@ -156,8 +189,8 @@ public:
+    *         edge of the unit circle) if the magnitude of the mapped position
+    *         vector is greater than 1-range_deadzone. Example: if the range
+    *         deadzone is 0.1, then the output will be scaled so that the
+-   *         magnitude of the output is 1 if the magnitude of the mapped
+-   *         position vector is greater than 0.9.
++   *         magnitude of the output is 1 if the magnitude of the mapped position
++   *         vector is greater than 0.9.
+    * @note If the Joystick is Type::CIRCULAR, the actual calibrations that are
+    *       saved into the joystick will have 0 deadzone around the center and range values,
+    *       so that center and range deadzones are actually applied on the vector value.
+@@ -168,10 +201,27 @@ public:
+                        const espp::FloatRangeMapper::Config &y_calibration,
+                        float center_deadzone_radius = 0, float range_deadzone = 0);
+ 
++  /**
++   * @brief Update the z axis mapping.
++   * @param z_calibration New z-axis range mapping configuration to use. Enables
++   *        the z axis if it was not previously configured.
++   * @note Unlike the x/y calibrations, the z calibration's deadbands are used
++   *       as-is regardless of the joystick Type, since z is independent of the
++   *       X/Y gimbal.
++   */
++  void set_z_calibration(const espp::FloatRangeMapper::Config &z_calibration);
++
++  /**
++   * @brief Whether this joystick was configured with a third (z) axis.
++   * @return True if a z calibration has been provided.
++   */
++  bool has_z() const;
++
+   /**
+    * @brief Read the raw values and use the calibration data to update the
+    *        position.
+-   * @note Requires that the get_values_ function is set.
++   * @note Requires that the get_values_ or get_values_3d_ function is set.
++   *       get_values_3d_ takes precedence when both are set.
+    */
+   void update();
+ 
+@@ -182,9 +232,20 @@ public:
+    * @param raw_y The raw y-axis value.
+    * @note This function is useful when you have the raw values and don't want
+    *       to use the get_values_ function.
++   * @note Leaves any configured z axis at its previous value.
+    */
+   void update(float raw_x, float raw_y);
+ 
++  /**
++   * @brief Update the joystick's position using the provided raw x, y and z
++   *        values.
++   * @param raw_x The raw x-axis value.
++   * @param raw_y The raw y-axis value.
++   * @param raw_z The raw z-axis value. Ignored if no z calibration was
++   *        configured.
++   */
++  void update(float raw_x, float raw_y, float raw_z);
++
+   /**
+    * @brief Get the most recently updated x axis calibrated position.
+    * @return The most recent x-axis position (from when update() was last
+@@ -199,10 +260,18 @@ public:
+    */
+   float y() const;
+ 
++  /**
++   * @brief Get the most recently updated z axis calibrated position.
++   * @return The most recent z-axis position (from when update() was last
++   *         called), or 0 if no z axis was configured.
++   */
++  float z() const;
++
+   /**
+    * @brief Get the most recently updated calibrated position.
+    * @return The most recent position (from when update() was last called).
+    * @note The returned reference is valid as long as the Joystick object is alive.
++   * @note Covers the X/Y gimbal only; use z() for the third axis.
+    */
+   const espp::Vector2f &position() const;
+ 
+@@ -217,20 +286,42 @@ public:
+    */
+   const espp::Vector2f &raw() const;
+ 
++  /**
++   * @brief Get the most recently updated raw / uncalibrated z reading.
++   * @return The most recent raw z measurement (from when update() was last
++   *         called), or 0 if no z axis was configured.
++   */
++  float raw_z() const;
++
+   friend struct fmt::formatter<Joystick>;
+ 
+ protected:
+-  void recalculate(float raw_x, float raw_y);
++  void recalculate(float raw_x, float raw_y, std::optional<float> raw_z);
+ 
+   Vector2f raw_{};
+   Vector2f position_{};
+   FloatRangeMapper x_mapper_{};
+   FloatRangeMapper y_mapper_{};
++  FloatRangeMapper z_mapper_{};
+   Type type_{Type::RECTANGULAR};
+   float center_deadzone_radius_{0};
+   float range_deadzone_{0};
+   get_values_fn get_values_{nullptr};
++  get_values_3d_fn get_values_3d_{nullptr};
++  bool has_z_{false};
++  float raw_z_{0};
++  float z_{0};
+ };
++
++/**
++ * @brief Self-check for the Joystick mapping math. Aborts (assert) on failure.
++ * @note Cheap enough to call once at boot; it constructs a couple of joysticks
++ *       and exercises center / range / deadzone / circular-clamp behaviour plus
++ *       the independence of the z axis from the X/Y gimbal.
++ * @return True if all checks passed.
++ */
++bool joystick_selftest();
++
+ } // namespace espp
+ 
+ #include "joystick_formatters.hpp"
+diff --git a/components/joystick/include/joystick_formatters.hpp b/components/joystick/include/joystick_formatters.hpp
+index aeeb7da..96feb29 100644
+--- a/components/joystick/include/joystick_formatters.hpp
++++ b/components/joystick/include/joystick_formatters.hpp
+@@ -23,13 +23,19 @@ template <> struct fmt::formatter<espp::Joystick> {
+   }
+ 
+   template <typename FormatContext> auto format(espp::Joystick const &j, FormatContext &ctx) const {
++    // the z axis is only shown when the joystick was configured with one, so
++    // that 2-axis joysticks format exactly as they always have
+     switch (presentation) {
+     case 'v':
+-      return fmt::format_to(ctx.out(), "{}", j.position_);
++      return j.has_z_ ? fmt::format_to(ctx.out(), "{}, {}", j.position_, j.z_)
++                      : fmt::format_to(ctx.out(), "{}", j.position_);
+     case 'r':
+-      return fmt::format_to(ctx.out(), "{}", j.raw_);
++      return j.has_z_ ? fmt::format_to(ctx.out(), "{}, {}", j.raw_, j.raw_z_)
++                      : fmt::format_to(ctx.out(), "{}", j.raw_);
+     case 'b':
+-      return fmt::format_to(ctx.out(), "({} -> {})", j.raw_, j.position_);
++      return j.has_z_ ? fmt::format_to(ctx.out(), "({}, {} -> {}, {})", j.raw_, j.raw_z_,
++                                       j.position_, j.z_)
++                      : fmt::format_to(ctx.out(), "({} -> {})", j.raw_, j.position_);
+     default:
+       // shouldn't get here!
+       return fmt::format_to(ctx.out(), "{}", j.position_);
+diff --git a/components/joystick/src/joystick.cpp b/components/joystick/src/joystick.cpp
+index 42ba060..7342878 100644
+--- a/components/joystick/src/joystick.cpp
++++ b/components/joystick/src/joystick.cpp
+@@ -1,5 +1,8 @@
+ #include "joystick.hpp"
+ 
++#include <cassert>
++#include <cmath>
++
+ using namespace espp;
+ 
+ espp::Joystick::Joystick(const espp::Joystick::Config &config)
+@@ -9,7 +12,13 @@ espp::Joystick::Joystick(const espp::Joystick::Config &config)
+     , type_(config.type)
+     , center_deadzone_radius_(config.center_deadzone_radius)
+     , range_deadzone_(config.range_deadzone)
+-    , get_values_(config.get_values) {}
++    , get_values_(config.get_values)
++    , get_values_3d_(config.get_values_3d)
++    , has_z_(config.z_calibration.has_value()) {
++  if (has_z_) {
++    z_mapper_.configure(config.z_calibration.value());
++  }
++}
+ 
+ void espp::Joystick::set_type(espp::Joystick::Type type, float radius, float range_deadzone) {
+   type_ = type;
+@@ -19,6 +28,8 @@ void espp::Joystick::set_type(espp::Joystick::Type type, float radius, float ran
+     x_mapper_.set_range_deadband(0);
+     y_mapper_.set_range_deadband(0);
+   }
++  // NOTE: z_mapper_ is intentionally left alone - the circular deadzone is a
++  // property of the x/y gimbal, not of the independent third axis.
+   set_center_deadzone_radius(radius);
+   set_range_deadzone(range_deadzone);
+ }
+@@ -52,7 +63,26 @@ void espp::Joystick::set_calibration(const espp::FloatRangeMapper::Config &x_cal
+   set_range_deadzone(range_deadzone);
+ }
+ 
++void espp::Joystick::set_z_calibration(const espp::FloatRangeMapper::Config &z_calibration) {
++  z_mapper_.configure(z_calibration);
++  has_z_ = true;
++}
++
++bool espp::Joystick::has_z() const { return has_z_; }
++
+ void espp::Joystick::update() {
++  if (get_values_3d_) {
++    float _x, _y, _z;
++    logger_.info("Getting x,y,z values");
++    bool success = get_values_3d_(&_x, &_y, &_z);
++    if (!success) {
++      logger_.error("Could not get values!");
++      return;
++    }
++    logger_.debug("Got x,y,z values: ({}, {}, {})", _x, _y, _z);
++    recalculate(_x, _y, _z);
++    return;
++  }
+   if (!get_values_) {
+     logger_.error("No function provided with which to get values!");
+     return;
+@@ -65,20 +95,28 @@ void espp::Joystick::update() {
+     return;
+   }
+   logger_.debug("Got x,y values: ({}, {})", _x, _y);
+-  recalculate(_x, _y);
++  recalculate(_x, _y, std::nullopt);
+ }
+ 
+-void espp::Joystick::update(float raw_x, float raw_y) { recalculate(raw_x, raw_y); }
++void espp::Joystick::update(float raw_x, float raw_y) { recalculate(raw_x, raw_y, std::nullopt); }
++
++void espp::Joystick::update(float raw_x, float raw_y, float raw_z) {
++  recalculate(raw_x, raw_y, raw_z);
++}
+ 
+ float espp::Joystick::x() const { return position_.x(); }
+ 
+ float espp::Joystick::y() const { return position_.y(); }
+ 
++float espp::Joystick::z() const { return z_; }
++
+ const espp::Vector2f &espp::Joystick::position() const { return position_; }
+ 
+ const espp::Vector2f &espp::Joystick::raw() const { return raw_; }
+ 
+-void espp::Joystick::recalculate(float raw_x, float raw_y) {
++float espp::Joystick::raw_z() const { return raw_z_; }
++
++void espp::Joystick::recalculate(float raw_x, float raw_y, std::optional<float> raw_z) {
+   raw_.x(raw_x);
+   raw_.y(raw_y);
+   position_.x(x_mapper_.map(raw_x));
+@@ -96,4 +134,88 @@ void espp::Joystick::recalculate(float raw_x, float raw_y) {
+       position_ = position_.normalized() * new_magnitude;
+     }
+   }
++  // the third axis is mapped independently: its deadbands come from its own
++  // range mapper and it is never touched by the x/y circular clamping above
++  if (has_z_ && raw_z.has_value()) {
++    raw_z_ = raw_z.value();
++    z_ = z_mapper_.map(raw_z_);
++  }
++}
++
++bool espp::joystick_selftest() {
++  static constexpr float kEps = 1e-3f;
++  auto close = [](float a, float b) { return std::abs(a - b) < kEps; };
++  (void)close; // asserts compile out under NDEBUG
++
++  // a 0-3300 mV pot centered at 1650 mV, no deadbands
++  const espp::FloatRangeMapper::Config linear{
++      .center = 1650.0f, .center_deadband = 0.0f, .minimum = 0.0f, .maximum = 3300.0f};
++  // same pot, but with center and range deadbands
++  const espp::FloatRangeMapper::Config deadbanded{.center = 1650.0f,
++                                                  .center_deadband = 60.0f,
++                                                  .minimum = 0.0f,
++                                                  .maximum = 3300.0f,
++                                                  .range_deadband = 40.0f};
++
++  // --- rectangular, 2 axes: the classic behaviour must be unchanged ---
++  espp::Joystick rect({.x_calibration = linear,
++                       .y_calibration = linear,
++                       .type = espp::Joystick::Type::RECTANGULAR});
++  assert(!rect.has_z());
++  rect.update(1650.0f, 1650.0f);
++  assert(close(rect.x(), 0.0f) && close(rect.y(), 0.0f));
++  rect.update(3300.0f, 0.0f);
++  assert(close(rect.x(), 1.0f) && close(rect.y(), -1.0f));
++  rect.update(2475.0f, 1650.0f);
++  assert(close(rect.x(), 0.5f));
++  // z() is 0 and stays 0 on a joystick with no z axis
++  rect.update(2475.0f, 1650.0f, 3300.0f);
++  assert(close(rect.z(), 0.0f));
++
++  // --- circular, 3 axes ---
++  espp::Joystick stick({.x_calibration = linear,
++                        .y_calibration = linear,
++                        .z_calibration = deadbanded,
++                        .type = espp::Joystick::Type::CIRCULAR,
++                        .center_deadzone_radius = 0.1f,
++                        .range_deadzone = 0.05f});
++  assert(stick.has_z());
++
++  // full diagonal deflection is clamped to the unit circle
++  stick.update(3300.0f, 3300.0f, 1650.0f);
++  assert(close(stick.position().magnitude(), 1.0f));
++  assert(close(stick.x(), stick.y()));
++
++  // inside the circular center deadzone -> exactly zero
++  stick.update(1650.0f + 82.5f, 1650.0f, 1650.0f); // x maps to 0.05, radius 0.05 < 0.1
++  assert(close(stick.x(), 0.0f) && close(stick.y(), 0.0f));
++
++  // outside the deadzone the magnitude is rescaled across the live band
++  stick.update(1650.0f + 330.0f, 1650.0f, 1650.0f); // x maps to 0.2
++  assert(close(stick.x(), (0.2f - 0.1f) / (1.0f - 0.1f - 0.05f)));
++
++  // z uses its own deadbands: center -> 0, full -> 1, and the range deadband
++  // means it saturates just short of the rail
++  assert(close(stick.z(), 0.0f));
++  stick.update(1650.0f, 1650.0f, 1700.0f); // within the 60 mV center deadband
++  assert(close(stick.z(), 0.0f));
++  stick.update(1650.0f, 1650.0f, 3270.0f); // within the 40 mV range deadband
++  assert(close(stick.z(), 1.0f));
++  stick.update(1650.0f, 1650.0f, 0.0f);
++  assert(close(stick.z(), -1.0f));
++
++  // THE point of the 3-axis design: z is independent of the x/y gimbal. Full
++  // twist survives the x/y center deadzone, and centered twist survives the
++  // x/y magnitude clamp.
++  stick.update(1650.0f, 1650.0f, 3300.0f);
++  assert(close(stick.x(), 0.0f) && close(stick.y(), 0.0f) && close(stick.z(), 1.0f));
++  stick.update(3300.0f, 3300.0f, 1650.0f);
++  assert(close(stick.position().magnitude(), 1.0f) && close(stick.z(), 0.0f));
++
++  // the 2-axis update() overload leaves z where it was
++  stick.update(1650.0f, 1650.0f, 3300.0f);
++  stick.update(3300.0f, 1650.0f);
++  assert(close(stick.z(), 1.0f));
++
++  return true;
+ }

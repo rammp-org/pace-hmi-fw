@@ -1,0 +1,14 @@
+# L1 host app for components/joystick (cases JOY-001..JOY-018 in test_joystick.cpp).
+# spec-deviation(TS-UNIT-01): host-native g++ in WSL, not the IDF linux target (owner, 2026-10-06).
+- id: L1-JOY
+  title: joystick mapping, circular deadzone and independent z axis (port of joystick_selftest)
+  level: L1
+  path: components/joystick/test
+  requirements: []
+  resources: [host]
+  timeout_s: 300
+  expected_s: 60
+  repeat: 1
+  pass_threshold: 1
+  safety: false
+  artifact: test

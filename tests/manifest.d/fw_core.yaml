@@ -1,0 +1,15 @@
+# fw_core host L1 app (TS-DEF-01). One entry for the app: its cases FWC-001..025 run together.
+# The must-not-compile cases (`make mnc`, TS-UNIT-06) are L0 and are not listed here.
+- id: FWC-L1
+  title: fw_core channel helpers, ThreadChecker, Owned, check() and context tokens (TS-UNIT-05)
+  level: L1
+  path: components/fw_core/test
+  requirements: [REQ-FWC-01, REQ-FWC-02, REQ-FWC-03, REQ-FWC-04, REQ-FWC-05, REQ-FWC-06,
+                 REQ-FWC-07, REQ-FWC-08, REQ-FWC-09, REQ-FWC-10, REQ-FWC-11, REQ-FWC-12]
+  resources: [host]
+  timeout_s: 120
+  expected_s: 10
+  repeat: 1
+  pass_threshold: 1
+  safety: true
+  artifact: test

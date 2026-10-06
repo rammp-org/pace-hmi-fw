@@ -1,5 +1,6 @@
 #include "update_ui.hpp"
 
+#include <array>
 #include <memory>
 #include <string>
 #include <thread>
@@ -13,6 +14,7 @@
 #include "format.hpp"
 #include "fw_info.hpp"
 #include "github_ota.hpp"
+#include "hmi_format/update.hpp"
 #include "logger.hpp"
 #include "ui.h"
 
@@ -43,16 +45,10 @@ constexpr size_t kWorkerStackBytes = 12 * 1024; // TLS with certificate checks
 ///////////////////////////////////////////////////////////////////////////////
 // Words
 
-const char *kMonths[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                         "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
-
-// "2026-09-30" -> "30 Sep 2026"
+// "2026-09-30" -> "30 Sep 2026"; the text itself when it is not a date
 std::string day(const std::string &iso) {
-  int y = 0, m = 0, d = 0;
-  if (std::sscanf(iso.c_str(), "%d-%d-%d", &y, &m, &d) != 3 || m < 1 || m > 12) {
-    return iso;
-  }
-  return fmt::format("{} {} {}", d, kMonths[m - 1], y);
+  std::array<char, hmi::format::DAY_TEXT_SIZE> text{};
+  return hmi::format::day_text(iso, text) ? std::string(text.data()) : iso;
 }
 
 bool is_installed(const GithubRelease &r) {
@@ -61,7 +57,11 @@ bool is_installed(const GithubRelease &r) {
          (info.release && info.release->tag == r.tag);
 }
 
-std::string megabytes(size_t bytes) { return fmt::format("{:.1f} MB", bytes / 1e6); }
+std::string megabytes(size_t bytes) {
+  std::array<char, hmi::format::MEGABYTES_TEXT_SIZE> text{};
+  hmi::format::megabytes_text(bytes, text);
+  return text.data();
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // Pages
@@ -151,9 +151,9 @@ void list_status(const GithubReleases &result) {
   } else if (result.releases.empty()) {
     lv_label_set_text(ui_UpdateStatus, "No releases published yet.");
   } else {
-    lv_label_set_text(
-        ui_UpdateStatus,
-        fmt::format("{} releases. Pick one to install it.", result.releases.size()).c_str());
+    std::array<char, hmi::format::RELEASE_COUNT_TEXT_SIZE> text{};
+    hmi::format::release_count_text(result.releases.size(), text);
+    lv_label_set_text(ui_UpdateStatus, text.data());
   }
 }
 
@@ -265,13 +265,13 @@ void run_refresh() {
   }
   lv_label_set_text(ui_UpdateRunStatus, message.c_str());
 
-  const int32_t pct = s.total > 0 ? static_cast<int32_t>(s.done * 100 / s.total) : 0;
+  const int32_t pct = hmi::format::progress_pct(s.done, s.total);
   lv_bar_set_value(ui_UpdateProgressBar, done ? 100 : pct, LV_ANIM_OFF);
-  lv_label_set_text(ui_UpdateProgressLabel, s.total > 0
-                                                ? fmt::format("{} of {}  ({}%)", megabytes(s.done),
-                                                              megabytes(s.total), done ? 100 : pct)
-                                                      .c_str()
-                                                : "");
+  std::array<char, hmi::format::PROGRESS_TEXT_SIZE> progress{}; // "" while total is 0
+  if (s.total > 0) {
+    hmi::format::progress_text(s.done, s.total, done ? 100 : pct, progress);
+  }
+  lv_label_set_text(ui_UpdateProgressLabel, progress.data());
   if (s.log != lv_label_get_text(ui_UpdateRunLog)) {
     lv_label_set_text(ui_UpdateRunLog, s.log.c_str());
     lv_obj_update_layout(ui_UpdateLogBox);

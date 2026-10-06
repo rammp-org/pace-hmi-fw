@@ -1,0 +1,6 @@
+# CI-only overlay for the bench variant (CS-LAY-09: every build variant is built in L0).
+# Used as SDKCONFIG_DEFAULTS="sdkconfig.defaults;ci/sdkconfig.bench" by .github/workflows/l0.yml.
+# The remote UI debug channel (TCP 3333) is what the bench runner drives. It never ships:
+# release builds come from sdkconfig.defaults alone. No WiFi SSID or password here, ever:
+# those live only in an uncommitted sdkconfig*.local.
+CONFIG_HMI_REMOTE_UI=y

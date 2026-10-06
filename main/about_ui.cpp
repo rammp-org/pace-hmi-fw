@@ -9,6 +9,7 @@
 #include "esp_mac.h"
 #include "format.hpp"
 #include "fw_info.hpp"
+#include "hmi_format/about.hpp"
 #include "lvgl.h"
 #include "rtps_comms.hpp"
 #include "ui.h"
@@ -26,22 +27,6 @@ constexpr uint32_t kRefreshMs = 1000;
 // each call registers the label with the theme again.
 enum class Mark { NONE, RELEASE, NOT_RELEASE };
 Mark shown_mark = Mark::NONE;
-
-bool is_hex(std::string_view s) {
-  return !s.empty() && s.find_first_not_of("0123456789abcdef") == std::string_view::npos;
-}
-
-// The version is `git describe --tags --dirty` at build time: "v4.0.0-alpha"
-// on a tag, "v4.0.0-alpha-3-ga4c1d47" after one, "-dirty" with uncommitted
-// changes, or a bare hash where no tag was fetched. Only the first names a
-// release.
-bool names_a_tag(std::string_view version) {
-  if (version.empty() || version[0] != 'v' || version.find("-dirty") != std::string_view::npos) {
-    return false;
-  }
-  const size_t g = version.rfind("-g");
-  return g == std::string_view::npos || !is_hex(version.substr(g + 2));
-}
 
 void set_mark(Mark mark) {
   if (mark == shown_mark) {
@@ -90,7 +75,7 @@ void show_verdict(const FwInfo &info) {
   // A build that calls itself a release but has no matching line was either
   // never checked against GitHub (flashed without fw_verify.py) or is not the
   // published binary; one that does not is simply not a release.
-  lv_label_set_text(ui_AboutVerdict, names_a_tag(esp_app_get_description()->version)
+  lv_label_set_text(ui_AboutVerdict, hmi::format::names_a_tag(esp_app_get_description()->version)
                                          ? "Not verified against GitHub"
                                          : "Not a published release");
 }
@@ -106,11 +91,9 @@ void show_sha(const FwInfo &info) {
   const std::string &hex = *info.sha256;
   for (auto [label, from] :
        {std::pair{ui_AboutSha1, size_t{0}}, std::pair{ui_AboutSha2, size_t{32}}}) {
-    std::string line;
-    for (size_t i = 0; i < 32; i += 8) {
-      line += (i ? " " : "") + hex.substr(from + i, 8);
-    }
-    lv_label_set_text(label, line.c_str());
+    std::array<char, hmi::format::SHA_LINE_TEXT_SIZE> line{};
+    hmi::format::sha_line_text(hex, from, line);
+    lv_label_set_text(label, line.data());
   }
 }
 
@@ -150,10 +133,9 @@ void fill_static() {
   // and a port in Device Manager can be matched up.
   std::array<uint8_t, 6> mac{};
   if (esp_efuse_mac_get_default(mac.data()) == ESP_OK) {
-    lv_label_set_text(ui_AboutDeviceValue,
-                      fmt::format("{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}", mac[0], mac[1],
-                                  mac[2], mac[3], mac[4], mac[5])
-                          .c_str());
+    std::array<char, hmi::format::MAC_TEXT_SIZE> text{};
+    hmi::format::mac_text(mac, text);
+    lv_label_set_text(ui_AboutDeviceValue, text.data());
   }
   lv_label_set_text(ui_AboutHostValue, rtps_comms_hostname());
 }

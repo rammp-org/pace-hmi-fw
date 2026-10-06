@@ -46,3 +46,9 @@ __pycache__/
 
 # Claude Code project files
 .claude/
+
+# test runner output (tests/run.py)
+results/
+
+# tests/manifest.d/ holds the test manifest; the *.d rule above is for compiler dependency files.
+!tests/manifest.d/
