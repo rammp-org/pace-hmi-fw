@@ -10,6 +10,10 @@
         "espp__logger"
       ]
     },
+    "hmi_format": {
+      "reqs": [],
+      "priv_reqs": []
+    },
     "main": {
       "reqs": [],
       "priv_reqs": [
@@ -64,6 +68,7 @@
         "espressif__usb",
         "espressif__w5500",
         "fw_core",
+        "hmi_format",
         "joystick",
         "lvgl__lvgl",
         "lwip",

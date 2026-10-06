@@ -95,6 +95,7 @@ First-party components (`main` and `components/*` except `joystick`, `m5stack-ta
 ```mermaid
 flowchart LR
   c_fw_core["fw_core"]
+  c_hmi_format["hmi_format"]
   c_joystick["joystick (vendored)"]:::safety
   c_m5stack_tab5["m5stack-tab5 (vendored)"]
   c_main["main"]:::safety
@@ -107,6 +108,7 @@ flowchart LR
   c_fw_core -.-> g_ESP_IDF
   c_fw_core -.-> g_espp
   c_main -.-> c_fw_core
+  c_main -.-> c_hmi_format
   c_main -.-> c_joystick
   c_main -.-> c_m5stack_tab5
   c_main -.-> c_rammp_rtps_messages
