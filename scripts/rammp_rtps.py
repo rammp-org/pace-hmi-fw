@@ -396,6 +396,49 @@ SELFTEST_RESULT_NAMES = _group("SELFTEST_RESULT_")
 INT32_MIN = -(2 ** 31)
 INT32_MAX = 2 ** 31 - 1
 
+#: the self test's check table: every check, its limits and why (beside HEADER_PATH)
+SELFTEST_SPEC_PATH = os.path.join(os.path.dirname(HEADER_PATH), "selftest_spec.h")
+# X(ID, "name", "unit", lo, hi, need, "what it proves")
+_SELFTEST_ROW_RE = re.compile(
+    r'^\s*X\(\s*([A-Z0-9_]+)\s*,\s*"([^"]*)"\s*,\s*"([^"]*)"\s*,\s*([^,]+?)\s*,\s*([^,]+?)\s*,'
+    r'\s*(ST_[A-Z]+)\s*,\s*"([^"]*)"\s*\)', re.M)
+_SELFTEST_NEEDS = {"ST_REQUIRED": "required", "ST_OPTIONAL": "optional", "ST_REMOTE": "remote"}
+
+
+class SelfTestSpecRow(NamedTuple):
+    """One check of main/selftest_spec.h. lo/hi are INT32_MIN/INT32_MAX for "no limit"."""
+
+    id: str    # SYS_RESET
+    name: str  # "sys.clean_reset"
+    unit: str
+    lo: int
+    hi: int
+    need: str  # "required", "optional" or "remote"
+    desc: str  # what the check proves
+
+
+def parse_selftest_spec(text: str) -> list[SelfTestSpecRow]:
+    """The check table in `text` (selftest_spec.h), in table order."""
+    rows = []
+    for check_id, name, unit, lo, hi, need, desc in _SELFTEST_ROW_RE.findall(text):
+        if need not in _SELFTEST_NEEDS:
+            raise ValueError(f"selftest_spec.h: {name}: unknown need {need}")
+        rows.append(SelfTestSpecRow(
+            check_id, name, unit,
+            INT32_MIN if lo.startswith("ST_ANY") else int(lo, 0),
+            INT32_MAX if hi.startswith("ST_ANY") else int(hi, 0),
+            _SELFTEST_NEEDS[need], desc))
+    return rows
+
+
+def load_selftest_spec(path: str = SELFTEST_SPEC_PATH) -> dict[str, SelfTestSpecRow]:
+    """This checkout's selftest_spec.h, keyed by check name (in table order)."""
+    with open(path, encoding="utf-8") as handle:
+        rows = parse_selftest_spec(handle.read())
+    if not rows:
+        raise RuntimeError(f"{path}: SELFTEST_TABLE parsed to nothing")
+    return {row.name: row for row in rows}
+
 
 class SelfTestResult(NamedTuple):
     """One rammp::SelfTestReport: a check, or a run's start/summary."""
