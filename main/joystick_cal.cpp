@@ -5,12 +5,12 @@
 #include <cmath>
 #include <cstdio>
 #include <fstream>
-#include <limits>
 #include <mutex>
 #include <numeric>
 #include <string>
 #include <utility>
 
+#include "cal_record.hpp"
 #include "logger.hpp"
 #include "storage.hpp"
 
@@ -18,9 +18,11 @@ namespace {
 
 espp::Logger logger({.tag = "joy_cal", .level = espp::Logger::Verbosity::INFO});
 
-constexpr int kFileVersion = 1;
-constexpr const char *kFileName = "joystick_cal.txt";
-constexpr const char *kAxisNames[3] = {"horizontal", "vertical", "twist"};
+// The record, its file and its check: components/joystick_cal (cal_record.hpp).
+using hmi::cal::describe;
+using hmi::cal::kFileName;
+using hmi::cal::kFullTravelMv;
+using hmi::cal::plausible;
 
 // The run ticks at the ADC task's 33 ms, so every tick sees a fresh sample.
 constexpr uint32_t kTickMs = 33;
@@ -32,11 +34,11 @@ constexpr int kSettleTicks = kTicksPerSecond * 3 / 2;
 constexpr int kHoldTicks = kTicksPerSecond;
 // ...moving no more than this, peak to peak. Twist is the noisy pot.
 constexpr std::array<float, 3> kSteadyMv = {30.0f, 30.0f, 60.0f};
-// How far past rest counts as pushed "fully". The bench stick travels ~1470 mV
-// each way from rest, so this needs a clear push to the gate - a stick held
-// half-way is not taken for the end - while leaving room for a unit with a
-// shorter throw. Also the least travel a saved calibration may claim.
-constexpr float kFullTravelMv = 1000.0f;
+// How far past rest counts as pushed "fully" is kFullTravelMv (cal_record.hpp).
+// The bench stick travels ~1470 mV each way from rest, so this needs a clear
+// push to the gate - a stick held half-way is not taken for the end - while
+// leaving room for a unit with a shorter throw. Also the least travel a saved
+// calibration may claim.
 // Within this of rest counts as let go, for the last step.
 constexpr float kReleasedMv = 150.0f;
 constexpr int kStepTimeoutTicks = kTicksPerSecond * 20;
@@ -69,64 +71,21 @@ std::optional<JoystickCal> pending; // a finished run, for the ADC task to apply
 std::atomic<bool> running{false};
 std::atomic<float> latest_mv[3];
 
-std::string describe(const JoystickCal &cal) {
-  std::string out;
-  for (int i = 0; i < 3; ++i) {
-    out += fmt::format("{}{} {:.0f}/{:.0f}/{:.0f}", i ? ", " : "", kAxisNames[i], cal[i].min_mv,
-                       cal[i].center_mv, cal[i].max_mv);
-  }
-  return out + " mV";
-}
-
-bool plausible(const JoystickCal &cal) {
-  return std::all_of(cal.begin(), cal.end(), [](const JoystickAxisCal &a) {
-    return a.center_mv - a.min_mv >= kFullTravelMv && a.max_mv - a.center_mv >= kFullTravelMv;
-  });
-}
-
-// The next word that is not part of a # comment.
-bool next_word(std::istream &in, std::string &word) {
-  while (in >> word) {
-    if (word[0] != '#') {
-      return true;
-    }
-    in.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-  }
-  return false;
-}
-
 std::optional<JoystickCal> read_file(const std::string &path) {
   std::ifstream in(path);
   if (!in) {
     return std::nullopt;
   }
-  std::string word;
-  int version = 0;
-  if (!next_word(in, word) || word != "version" || !(in >> version) || version != kFileVersion) {
-    logger.warn("{}: not a version {} calibration file", path, kFileVersion);
-    return std::nullopt;
-  }
   JoystickCal cal{};
-  for (int i = 0; i < 3; ++i) {
-    if (!next_word(in, word) || word != kAxisNames[i] ||
-        !(in >> cal[i].min_mv >> cal[i].center_mv >> cal[i].max_mv)) {
-      logger.warn("{}: expected a '{} min center max' line", path, kAxisNames[i]);
-      return std::nullopt;
-    }
+  std::error_code ec;
+  if (!hmi::cal::decode(in, cal, ec)) {
+    logger.warn("{}: {}", path, ec.message());
+    return std::nullopt;
   }
   return cal;
 }
 
-bool write_file(const JoystickCal &cal) {
-  std::string text = fmt::format("# joystick calibration, raw ADC mV: min center max\n"
-                                 "version {}\n",
-                                 kFileVersion);
-  for (int i = 0; i < 3; ++i) {
-    text += fmt::format("{} {:.1f} {:.1f} {:.1f}\n", kAxisNames[i], cal[i].min_mv, cal[i].center_mv,
-                        cal[i].max_mv);
-  }
-  return storage_write(kFileName, text);
-}
+bool write_file(const JoystickCal &cal) { return storage_write(kFileName, hmi::cal::encode(cal)); }
 
 /////////////////////////////////////////////////////////////////////////////
 // The run. Everything below is the LVGL task's: the timer, the button and the
@@ -138,27 +97,28 @@ enum class Phase { IDLE, REST, DIRECTION, RELEASE, RESULT };
 // The last kHoldTicks samples of all three axes.
 struct Window {
   std::array<std::array<float, 3>, kHoldTicks> samples{};
-  int count = 0;
-  int next = 0;
+  std::size_t count = 0;
+  std::size_t next = 0;
 
   void clear() { count = next = 0; }
   void push(const std::array<float, 3> &mv) {
     samples[next] = mv;
     next = (next + 1) % kHoldTicks;
-    count = std::min(count + 1, kHoldTicks);
+    count = std::min<std::size_t>(count + 1, kHoldTicks);
   }
   bool full() const { return count == kHoldTicks; }
-  float spread(int axis) const {
+  float spread(std::size_t axis) const {
     float lo = samples[0][axis], hi = lo;
-    for (int i = 1; i < count; ++i) {
+    for (std::size_t i = 1; i < count; ++i) {
       lo = std::min(lo, samples[i][axis]);
       hi = std::max(hi, samples[i][axis]);
     }
     return hi - lo;
   }
-  float mean(int axis) const {
-    const float sum = std::accumulate(std::begin(samples), std::begin(samples) + count, 0.0f,
-                                      [axis](float acc, const auto &s) { return acc + s[axis]; });
+  float mean(std::size_t axis) const {
+    const float sum = std::accumulate(
+        std::begin(samples), std::begin(samples) + static_cast<std::ptrdiff_t>(count), 0.0f,
+        [axis](float acc, const auto &s) { return acc + s[axis]; });
     return sum / static_cast<float>(count);
   }
 };
@@ -255,12 +215,12 @@ void tick_rest(const std::array<float, 3> &mv) {
   if (!run.window.full()) {
     return;
   }
-  for (int axis = 0; axis < 3; ++axis) {
+  for (std::size_t axis = 0; axis < 3; ++axis) {
     if (run.window.spread(axis) > kSteadyMv[axis]) {
       return; // still being touched; the window slides on
     }
   }
-  for (int axis = 0; axis < 3; ++axis) {
+  for (std::size_t axis = 0; axis < 3; ++axis) {
     run.cal[axis].center_mv = run.window.mean(axis);
   }
   feedback();
@@ -288,7 +248,7 @@ void tick_direction(const std::array<float, 3> &mv) {
 }
 
 void tick_release(const std::array<float, 3> &mv) {
-  for (int axis = 0; axis < 3; ++axis) {
+  for (std::size_t axis = 0; axis < 3; ++axis) {
     if (std::fabs(mv[axis] - run.cal[axis].center_mv) > kReleasedMv) {
       run.window.clear();
       return;
