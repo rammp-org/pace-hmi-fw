@@ -60,7 +60,7 @@ EXCLUDED_DIRS = {"test", "generated"}
 EXCLUDED_FILES = {"main/boot_logo.c", "main/boot_logo.h"}
 UNIT = "main/main.cpp"
 FRAG_RE = re.compile(r"^main/frag_[A-Za-z0-9_]+\.inc$")
-FRAG_INCLUDE_RE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*"(frag_[A-Za-z0-9_]+\.inc)"[ \t]*$')
+FRAG_INCLUDE_RE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*"(frag_[A-Za-z0-9_]+\.inc)"[ \t]*(//.*)?$')
 
 # UI files may call lv_* (CS-UI: only the UI task touches LVGL).
 UI_FILE_RES = [
@@ -263,6 +263,9 @@ def scan_structure(code: str) -> tuple[list[int], int]:
             if decl:
                 head.append(" ")
         elif ch == "{":
+            if decl and "".join(head).count("(") > "".join(head).count(")"):
+                stack.append(("init", line))  # e.g. `f(int x = {})`: still inside the head
+                continue
             if decl:
                 text = "".join(head)
                 kind = _classify(text)
@@ -414,6 +417,16 @@ def make_baseline(current: dict[str, dict[str, int]]) -> dict[str, dict[str, int
     return out
 
 
+# Placements a rule prescribes, so they are not legacy debt:
+#   locks in the channel helpers (CS-OWN-08: "Mutexes and semaphores appear only in the
+#   channel helpers ..."); `#ifdef CONFIG_` in a component's config header (CS-TYP-05:
+#   "Each Kconfig option becomes a constexpr value, once, in the component's config header").
+RULE_PLACEMENTS: dict[str, re.Pattern[str]] = {
+    "locks": re.compile(r"^components/fw_core/"),
+    "if_config": re.compile(r"^components/[^/]+/include/(.+/)?config\.hpp$"),
+}
+
+
 def violations(base: dict[str, dict[str, int]], current: dict[str, dict[str, int]]) -> list[str]:
     bad: list[str] = []
     for path in sorted(current):
@@ -428,6 +441,8 @@ def violations(base: dict[str, dict[str, int]], current: dict[str, dict[str, int
                     bad.append(f"lines {path}: {n} > hard limit {line_limit(path)} (CS-FIL-01)")
             elif name == "fn_over_60":
                 pass  # SHOULD only; fn_over_120 is the hard limit
+            elif name in RULE_PLACEMENTS and RULE_PLACEMENTS[name].match(path):
+                pass  # the rule puts it here
             elif n > 0:
                 bad.append(f"{name} {path}: {n} > 0 (not in baseline: must be clean)")
     return bad
@@ -675,6 +690,21 @@ def selftest() -> int:
 
     for f in failures:
         print(f"selftest FAIL {f}")
+    # Fixes found while integrating (2026-10-06).
+    zero = {k: 0 for k in METRICS}
+    unit = splice_unit('#include "frag_a.inc" // split_main.py\nint z;', {"main/frag_a.inc": "// hdr\nstatic int q;"})
+    expect("fragment include with a trailing comment is spliced in place", unit.startswith("// hdr"), True)
+    expect("brace-init default argument is not a global",
+           measure("x.hpp", "inline bool f(bool c, int x = {}) noexcept { return c; }\n")["mutable_globals"], 0)
+    expect("a real braced global still counts", measure("x.cpp", "int g{3};\n")["mutable_globals"], 1)
+    expect("locks allowed in the channel helpers",
+           violations({}, {"components/fw_core/src/q.cpp": {**zero, "locks": 2}}), [])
+    expect("locks still forbidden elsewhere",
+           len(violations({}, {"components/x/src/q.cpp": {**zero, "locks": 2}})), 1)
+    expect("CONFIG_ allowed in a component config header",
+           violations({}, {"components/x/include/x/config.hpp": {**zero, "if_config": 1}}), [])
+    expect("CONFIG_ still forbidden elsewhere",
+           len(violations({}, {"components/x/src/x.cpp": {**zero, "if_config": 1}})), 1)
     print(f"ratchet selftest: {'FAIL' if failures else 'PASS'} ({len(failures)} failures)")
     return 1 if failures else 0
 
