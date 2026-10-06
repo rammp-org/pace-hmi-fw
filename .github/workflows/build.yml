@@ -2,11 +2,10 @@ name: Build
 
 # TODO: update if you want to allow from forked repositories
 #
-# `push` is here as well as `pull_request` because pull_request events on this
-# repo record but never create runs (verified: workflow_dispatch green, three
-# pull_request events across two PRs, zero runs). Until that is sorted at the
-# org level, the push trigger is what actually gets a branch built. `main` is
-# excluded because package_main.yml already covers it.
+# `push` is here as well as `pull_request` so a branch is built before it has a
+# PR. pull_request events do create runs now (seen in `gh run list` since
+# 2026-09-30), so a branch with an open PR is built twice. `main` is excluded
+# because package_main.yml already covers it.
 on:
   pull_request:
   push:

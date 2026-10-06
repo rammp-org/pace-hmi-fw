@@ -1,0 +1,54 @@
+name: L0
+
+# L0 static checks that need no toolchain, plus the bench build variant
+# (TESTING_SPEC TS-LVL: L0 on every PR; CS-LAY-09: every build variant built).
+# push as well as pull_request so a branch is checked before it has a PR (see build.yml).
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+
+permissions:
+  contents: read
+
+env:
+  IDF_TARGET: 'esp32p4'
+  IDF_VERSION: 'v6.0'
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v7
+
+    # ubuntu-latest (24.04) ships Python 3.12; both scripts are stdlib only.
+    - name: Ratchet self test
+      run: python3 tools/l0/ratchet.py selftest
+
+    - name: Ratchet check (legacy counts may only fall; new files start clean)
+      run: python3 tools/l0/ratchet.py check
+
+    - name: UI contract (SquareLine export vs what main.cpp assumes)
+      run: python3 scripts/ui_contract.py
+
+  bench-build:
+    # The bench variant: the remote UI debug channel on (ci/sdkconfig.bench). Its own
+    # build dir and sdkconfig, so the overlay is not shadowed by another config.
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v7
+      with:
+        submodules: recursive
+
+    - name: Build bench variant
+      uses: espressif/esp-idf-ci-action@v1
+      with:
+        esp_idf_version: ${{ env.IDF_VERSION }}
+        path: "."
+        target: ${{ env.IDF_TARGET }}
+        command: >-
+          idf.py -B build_bench -D SDKCONFIG=build_bench/sdkconfig
+          -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;ci/sdkconfig.bench" build
+          && grep -q "^#define CONFIG_HMI_REMOTE_UI 1" build_bench/config/sdkconfig.h

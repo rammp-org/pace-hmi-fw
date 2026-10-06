@@ -1,7 +1,7 @@
 name: Static analysis
 
-# push is here as well as pull_request: see the note in build.yml --
-# pull_request events on this repo do not currently create runs.
+# push is here as well as pull_request so a branch is checked before it has a PR
+# (see build.yml).
 on:
   pull_request:
   push:
@@ -18,7 +18,10 @@ jobs:
         submodules: recursive
 
     - name: Run static analysis
-      uses: esp-cpp/StaticAnalysis@master
+      # Pinned to a commit (master on 2026-10-06), not a moving branch. Its Dockerfile
+      # runs FROM jdomagala/static_analysis:latest, so the cppcheck inside is not pinned
+      # by this SHA.
+      uses: esp-cpp/StaticAnalysis@36a11b0254834d560700eafd3d11f9f9b31bca7c
       with:
         # Do not build the project and do not use cmake to generate compile_commands.json
         use_cmake: false
@@ -28,5 +31,7 @@ jobs:
         # keeps the report pointed at hand-written code.
         exclude_dir: components/ui
 
-        # (Optional) cppcheck args
-        cppcheck_args: --check-level=exhaustive --force --enable=all --inline-suppr --inconclusive --platform=mips32 --std=c++17 --suppressions-list=$GITHUB_WORKSPACE/suppressions.txt
+        # (Optional) cppcheck args. --std=c++20 per the refactor plan (4.2). CS-FMT-02
+        # asks for the newest the action's cppcheck supports (at least c++20): raise it
+        # once that cppcheck version is pinned and known.
+        cppcheck_args: --check-level=exhaustive --force --enable=all --inline-suppr --inconclusive --platform=mips32 --std=c++20 --suppressions-list=$GITHUB_WORKSPACE/suppressions.txt
