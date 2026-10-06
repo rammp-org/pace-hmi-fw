@@ -174,14 +174,6 @@ public:
   /// @return A snapshot; it may change as soon as the call returns.
   [[nodiscard]] std::size_t size() const noexcept { return items_.size(); }
 
-  /// @brief The send end, for a producer's Config.
-  /// @return A handle that can only send.
-  [[nodiscard]] Sender<Queue> sender() noexcept { return Sender<Queue>{*this}; }
-
-  /// @brief The receive end, for the consumer's Config.
-  /// @return A handle that can only receive.
-  [[nodiscard]] Receiver<Queue> receiver() noexcept { return Receiver<Queue>{*this}; }
-
 private:
   void on_full(std::error_code &ec) noexcept {
     if constexpr (POLICY == FullPolicy::DROP_NEWEST_COUNT) {
@@ -281,5 +273,27 @@ public:
 private:
   Channel *queue_;
 };
+
+/// @brief The send end of @p queue, for a producer's Config.
+/// @details A free function taking the channel by non-const reference, not a member: only
+///          code that can mutate the channel hands out its ends, and a const channel
+///          cannot give away a write end (CS-OWN-06).
+/// @param queue The channel; it must outlive the handle.
+/// @return A handle that can only send.
+template <class T, std::size_t DEPTH, FullPolicy POLICY>
+[[nodiscard]] Sender<Queue<T, DEPTH, POLICY>> sender(Queue<T, DEPTH, POLICY> &queue) noexcept {
+  return Sender<Queue<T, DEPTH, POLICY>>{queue};
+}
+
+/// @brief The receive end of @p queue, for the consumer's Config.
+/// @details A free function taking the channel by non-const reference, not a member: only
+///          code that can mutate the channel hands out its ends, and a const channel
+///          cannot give away a write end (CS-OWN-06).
+/// @param queue The channel; it must outlive the handle.
+/// @return A handle that can only receive.
+template <class T, std::size_t DEPTH, FullPolicy POLICY>
+[[nodiscard]] Receiver<Queue<T, DEPTH, POLICY>> receiver(Queue<T, DEPTH, POLICY> &queue) noexcept {
+  return Receiver<Queue<T, DEPTH, POLICY>>{queue};
+}
 
 } // namespace hmi::fw
