@@ -6250,10 +6250,6 @@ extern "C" void app_main(void) {
                               .log_level = espp::Logger::Verbosity::INFO});
   adc_task.start();
 
-  // The firmware's SHA-256 for the About screen: ~4 MB of flash read on a
-  // low-priority thread, so it waits behind everything above.
-  fw_info_start();
-
   // bring up W5500 Ethernet + RTPS last so a missing cable / module can't
   // delay the HMI; on failure the UI keeps running without comms
   logger.info("Starting RTPS comms...");
@@ -6300,6 +6296,11 @@ extern "C" void app_main(void) {
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
     lv_subject_copy_string(&link_subject, link_text(rtps_comms_net_link()));
   }
+  // The firmware's SHA-256 for the About screen: ~4 MB of flash read on a
+  // low-priority thread. Only once rtps_comms_start has set the W5500 up: run
+  // across that, it left the chip with no TX buffer on most boots (no
+  // link, or no DHCP lease).
+  fw_info_start();
 
   // The remote UI debug channel (CONFIG_HMI_REMOTE_UI, off by default). Last,
   // because it drives everything above it: input goes into the same latches the
