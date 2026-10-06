@@ -12,6 +12,10 @@
 
 #include "drive_session.hpp"
 
+// The table's fingerprint is checked wherever the session is built (the firmware and the
+// oracle): a table that differs from the reviewed one does not compile.
+#include "drive_session_fingerprint.hpp"
+
 namespace hmi::drive_session {
 
 namespace {

@@ -12,10 +12,14 @@ behaviour change and needs two human approvals and a new table (CS-SAF-05).
 | --- | --- |
 | The spec: transition table, invariants, hold gestures, stick gate (`constexpr`, CS-SAF-02) | `include/drive_session_table.hpp`, read as [TABLE.md](TABLE.md) |
 | The code: `DriveSession`, the hand-written transition function | `include/drive_session.hpp`, `src/drive_session.cpp` |
-| The table's own invariants (DSO-001..011) | `test/oracle_selfcheck` |
+| The table's fingerprint: one 64-bit number over every row, pinned by a `static_assert` | `include/drive_session_fingerprint.hpp` |
+| The table's own invariants (DSO-001..012) | `test/oracle_selfcheck` |
 | The oracle: the code against the table (DRV-001..021, TS-UNIT-08) | `test/oracle` |
 
 The header `drive_session_table.hpp` is a declaration: it is never edited to make a check pass.
+Its data has a fingerprint (`TABLE_FINGERPRINT`, checked wherever the session is built): moving
+declarations keeps the value, and a row change needs the owner's approval and the new value in
+the same commit.
 
 ## Model
 

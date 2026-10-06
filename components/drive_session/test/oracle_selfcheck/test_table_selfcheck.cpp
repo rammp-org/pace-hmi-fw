@@ -7,8 +7,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <string_view>
 
+#include "drive_session_fingerprint.hpp"
 #include "test_case.hpp"
 
 namespace ds = hmi::drive_session;
@@ -243,4 +245,10 @@ TEST_CASE("DSO-011 phase_of maps the code variables", "[drive_session_table]") {
   TEST_ASSERT_TRUE(ds::phase_of({false, false, false, false, false}) == Phase::DRIVING);
   TEST_ASSERT_TRUE(ds::phase_of({false, false, true, true, true}) == Phase::EXITING);
   TEST_ASSERT_TRUE(ds::phase_of({false, false, false, false, true}) == Phase::EXIT_REFUSED);
+}
+
+TEST_CASE("DSO-012 the table's data has the reviewed fingerprint", "[drive_session_table]") {
+  // Also a static_assert in drive_session_fingerprint.hpp; printed here for the report.
+  std::printf("FINGERPRINT 0x%016llX\n", static_cast<unsigned long long>(ds::table_fingerprint()));
+  TEST_ASSERT_TRUE(ds::table_fingerprint() == ds::TABLE_FINGERPRINT);
 }

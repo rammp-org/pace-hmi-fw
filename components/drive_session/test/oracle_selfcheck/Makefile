@@ -10,6 +10,7 @@ BUILD_DIR ?= $(HOME)/hmi-build/$(NAME)
 UNITY_DIR ?= /mnt/c/esp/v6.0/esp-idf/components/unity/unity/src
 
 HEADER    := $(REPO)/components/drive_session/include/drive_session_table.hpp
+FPRINT    := $(REPO)/components/drive_session/include/drive_session_fingerprint.hpp
 SRC       := $(HERE)/test_table_selfcheck.cpp
 # The shared host main: runs the TEST_CASEs registered through tests/host/test_case.hpp.
 HOST_DIR  := $(REPO)/tests/host
@@ -30,12 +31,15 @@ header:
 	printf '#include "drive_session_table.hpp"\n' > $(BUILD_DIR)/header_only.cpp
 	$(CXX) -std=gnu++23 -Wall -Wextra -Werror -Wconversion -Wsign-conversion -Wshadow \
 	  -I$(REPO)/components/drive_session/include -fsyntax-only $(BUILD_DIR)/header_only.cpp
+	printf '#include "drive_session_fingerprint.hpp"\n' > $(BUILD_DIR)/fingerprint_only.cpp
+	$(CXX) -std=gnu++23 -Wall -Wextra -Werror -Wconversion -Wsign-conversion -Wshadow \
+	  -I$(REPO)/components/drive_session/include -fsyntax-only $(BUILD_DIR)/fingerprint_only.cpp
 
 $(BUILD_DIR)/unity.o: $(UNITY_DIR)/unity.c
 	@mkdir -p $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/$(NAME): $(SRC) $(MAIN_SRC) $(HEADER) $(BUILD_DIR)/unity.o
+$(BUILD_DIR)/$(NAME): $(SRC) $(MAIN_SRC) $(HEADER) $(FPRINT) $(BUILD_DIR)/unity.o
 	$(CXX) $(CXXFLAGS) $(EXTRA) $(SRC) $(MAIN_SRC) $(BUILD_DIR)/unity.o -o $@
 
 test: header
@@ -58,12 +62,15 @@ coverage: header
 clean:
 	rm -rf $(BUILD_DIR)
 
-# Must-not-compile (TS-UNIT-06): three one-line mutations of the header, each of
-# which must trip its own static_assert text. The unmutated twin is `make header`.
+# Must-not-compile (TS-UNIT-06): one-line mutations of the header, each of which must trip
+# its own static_assert text. The unmutated twin is `make header`. The fingerprint header is
+# compiled with every mutation; `fingerprint` changes only a code citation, which no other
+# check reads, so only the fingerprint can catch it.
 MNC := \
   'overlap|0,/when({Guard::LINK_CONNECTED}, {Guard::DRIVING_OK}), Phase::LOCKED, kF2LockStopped/s//when({}, {Guard::DRIVING_OK}), Phase::LOCKED, kF2LockStopped/|can both match' \
   'ringrest|s/acts({Action::UNLOCK_TIMER_DONE, Action::GO_DRIVE_SCREEN})/acts({Action::UNLOCK_TIMER_DONE, Action::GO_DRIVE_SCREEN, Action::RING_REST})/|contradicts the row' \
-  'thenmenu|s/acts({Action::CLEAR_EXIT_DEADLINE, Action::CLEAR_THEN_MENU, Action::SHOW_EXIT_REFUSED})/acts({Action::CLEAR_EXIT_DEADLINE, Action::SHOW_EXIT_REFUSED})/|breaks a phase invariant'
+  'thenmenu|s/acts({Action::CLEAR_EXIT_DEADLINE, Action::CLEAR_THEN_MENU, Action::SHOW_EXIT_REFUSED})/acts({Action::CLEAR_EXIT_DEADLINE, Action::SHOW_EXIT_REFUSED})/|breaks a phase invariant' \
+  'fingerprint|0,/"frag_lock.inc:14-18 (orig 1079-1083)"}/s//"frag_lock.inc:14-18 (orig 1079-1084)"}/|data changed'
 
 .PHONY: mnc
 mnc: header
@@ -73,7 +80,8 @@ mnc: header
 	  d=$(BUILD_DIR)/mnc/$$name; mkdir -p $$d; \
 	  sed "$$expr" $(HEADER) > $$d/drive_session_table.hpp; \
 	  if cmp -s $(HEADER) $$d/drive_session_table.hpp; then echo "MNC $$name: mutation did not apply"; fail=1; continue; fi; \
-	  printf '#include "drive_session_table.hpp"\n' > $$d/t.cpp; \
+	  cp $(FPRINT) $$d/; \
+	  printf '#include "drive_session_table.hpp"\n#include "drive_session_fingerprint.hpp"\n' > $$d/t.cpp; \
 	  if $(CXX) -std=gnu++23 -fsyntax-only -I$$d $$d/t.cpp > $$d/log.txt 2>&1; then \
 	    echo "MNC $$name: compiled (FAIL)"; fail=1; \
 	  elif grep -q "$$want" $$d/log.txt; then echo "MNC $$name: rejected as expected"; \

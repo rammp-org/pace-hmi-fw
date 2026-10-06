@@ -10,6 +10,11 @@ over this page. This page is the same table for reading, plus a D4 diagram, the 
 questions left open. The agent that writes the extraction never edits the header (CORE never-list:
 declarations).
 
+`include/drive_session_fingerprint.hpp` pins the data with one number, `TABLE_FINGERPRINT` (FNV-1a
+over every field of every row, the invariants, the action effects, the input preconditions, the
+sequences and the hold `applies()`). A refactor keeps it; a reviewed row change updates it in the
+same commit.
+
 Line references are written `frag_X.inc:L (orig N)`. N is the line in `main.cpp` at e2047a4:
 N = (the first original line in the fragment's header) + L − 2, because line 1 of every fragment
 is the `split_main.py` header. Example: `frag_lock.inc` covers 1067–1192, so its line 2 is
