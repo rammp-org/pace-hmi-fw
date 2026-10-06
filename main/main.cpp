@@ -820,9 +820,21 @@ static void clock_poll_cb(lv_timer_t *) {
   }
 }
 
-static void bind_clock_label(lv_obj_t *bar) {
+// The TopBar's link label: what RTPS runs over. The design's "BT · WI-FI" is only
+// a placeholder; it is set from the setting before rtps_comms_start, then from the
+// link it brought up (WiFi with no network known runs Ethernet).
+static lv_subject_t link_subject;
+static char link_buf[16];
+static char link_prev_buf[16];
+
+static const char *link_text(NetLink link) {
+  return link == NetLink::WIFI ? "BT · WI-FI" : "BT · ETH";
+}
+
+static void bind_topbar_labels(lv_obj_t *bar) {
   if (bar != nullptr) {
     lv_label_bind_text(ui_comp_get_child(bar, UI_COMP_TOPBAR_CLOCK), &clock_subject, nullptr);
+    lv_label_bind_text(ui_comp_get_child(bar, UI_COMP_TOPBAR_LINK), &link_subject, nullptr);
   }
 }
 
@@ -4144,7 +4156,7 @@ static void settings_screen_ensure() {
   ui_Parameter1 = nullptr;
   bind_status_panel(ui_DriveBand7);
   bind_rtps_label(ui_TopBar8);
-  bind_clock_label(ui_TopBar8);
+  bind_topbar_labels(ui_TopBar8);
   nav_attach_chrome(ui_MenuKey7, ui_MenuOverlay7, ui_DriveBand7);
   bind_to_drive_blocked_cause(ui_ErrorBanner6, setting_warning_observer);
   lv_subject_add_observer_obj(&setting_page_subject, setting_warning_observer, ui_ErrorBanner6,
@@ -4173,7 +4185,7 @@ static void actions_screen_ensure() {
   }
   bind_status_panel(ui_DriveBand8);
   bind_rtps_label(ui_TopBar9);
-  bind_clock_label(ui_TopBar9);
+  bind_topbar_labels(ui_TopBar9);
   nav_attach_chrome(ui_MenuKey8, ui_MenuOverlay8, ui_DriveBand8);
   // Its ErrorBanner stays down: an action that needs the MCB greys out
   // instead (action_ready_observer), which keeps the local ones reachable.
@@ -4208,7 +4220,7 @@ static void diagnostics_screen_ensure() {
   }
   bind_status_panel(ui_DriveBand9);
   bind_rtps_label(ui_TopBar10);
-  bind_clock_label(ui_TopBar10);
+  bind_topbar_labels(ui_TopBar10);
   nav_attach_chrome(ui_MenuKey9, ui_MenuOverlay9, ui_DriveBand9);
   // The red, blinking readings are this screen's warning: the ErrorBanner
   // would cover exactly what someone opened the screen to look at.
@@ -5209,6 +5221,8 @@ extern "C" void app_main(void) {
   // chrome do not all get bound shows a frozen readout, and lining the three
   // calls up separately is how one gets forgotten.
   lv_subject_init_string(&clock_subject, clock_buf, clock_prev_buf, sizeof(clock_buf), "--:--");
+  lv_subject_init_string(&link_subject, link_buf, link_prev_buf, sizeof(link_buf),
+                         link_text(static_cast<NetLink>(settings_get(SETTINGS_PARAM_NETWORK))));
   struct ScreenChrome {
     lv_obj_t *bar;
     lv_obj_t *band;
@@ -5234,7 +5248,7 @@ extern "C" void app_main(void) {
   for (const ScreenChrome &c : kChrome) {
     bind_status_panel(c.band);
     bind_rtps_label(c.bar);
-    bind_clock_label(c.bar);
+    bind_topbar_labels(c.bar);
     nav_attach_chrome(c.key, c.overlay, c.band_goes_home ? c.band : nullptr);
   }
   // The menu stays reachable while locked: Log, Diagnostics, Settings and
@@ -6236,10 +6250,6 @@ extern "C" void app_main(void) {
                               .log_level = espp::Logger::Verbosity::INFO});
   adc_task.start();
 
-  // The firmware's SHA-256 for the About screen: ~4 MB of flash read on a
-  // low-priority thread, so it waits behind everything above.
-  fw_info_start();
-
   // bring up W5500 Ethernet + RTPS last so a missing cable / module can't
   // delay the HMI; on failure the UI keeps running without comms
   logger.info("Starting RTPS comms...");
@@ -6282,6 +6292,15 @@ extern "C" void app_main(void) {
   if (!rtps_comms_start(static_cast<NetLink>(settings_get(SETTINGS_PARAM_NETWORK)))) {
     logger.warn("RTPS comms not started (network bring-up failed)");
   }
+  {
+    std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
+    lv_subject_copy_string(&link_subject, link_text(rtps_comms_net_link()));
+  }
+  // The firmware's SHA-256 for the About screen: ~4 MB of flash read on a
+  // low-priority thread. Only once rtps_comms_start has set the W5500 up: run
+  // across that, it left the chip with no TX buffer on most boots (no
+  // link, or no DHCP lease).
+  fw_info_start();
 
   // The remote UI debug channel (CONFIG_HMI_REMOTE_UI, off by default). Last,
   // because it drives everything above it: input goes into the same latches the
