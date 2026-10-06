@@ -1,0 +1,125 @@
+# Plan: fix the safety hazards (H1, H2, H3/H9, H5/H6, then the rest)
+
+Status: **v2, for approval** (2026-10-06 morning). v1 was rewritten after two adversarial
+reviews (R-A safety, R-B feasibility), which found v1 would not close H5/H6, H3 or H2 as
+written. Hazard IDs: `docs/plans/refactor.md` §1. Every fix is a **behaviour change on safety
+code**: spec first, two human approvals (CS-SAF-05), then code by a different agent, tests
+that never regenerate goldens from the new code.
+
+## 0. Summary
+
+- **H1 must be fixed together with H5/H6.** Row 1 of the drive table (LOCKED + MIB ENABLED → unlock) runs first on
+  every tick, so no re-send or POST gate can work while it exists (R-A 2, 3; R-B R2).
+- **Firmware alone cannot fully close H3.** Board 2's stick calibrates to 6–11 mV at the low end,
+  so an open pot (0 mV) can't be told from full travel. It needs an EE decision: end-stop
+  resistors or a wiper bias keeping travel off both rails (R-A 1, R-B R1).
+- **The UI task decides every gate today.** H4 (the ADC task checks link, MIB state and a UI heartbeat
+  itself) and H11 (task watchdog) are prerequisites, not later items (R-A 13, R-B R13).
+- **Order:** owner decisions → land the two drafts after about 1.5 days of fixes → test tooling
+  (bench stick injection, quick POST evaluator, oracle restructure, requirement matrix) → the
+  fixes as stacked table changes. Critical path ≈ 6–7 agent-days plus five two-approval reviews.
+
+## 1. Owner decisions needed first
+
+| # | Decision | Why |
+| --- | --- | --- |
+| D1 | A second reviewer for safety changes; CODEOWNERS for `components/drive_session`, `components/stick`, the tables and goldens; protect the integration branch | CS-SAF-05, CS-OWN-13; nothing safety-relevant can merge without it |
+| D2 | EE: keep the stick's electrical travel off both rails (end-stop resistors or a bias), then measure real open- and short-circuit readings | H3's low-rail case |
+| D3 | MCB team: does the MIB time out XYTwist on its own (how long)? What exactly does DISABLE do, and does it latch? | After an HMI reset mid-drive, only the MCB can stop the last deflected command (R-A 21) |
+| D4 | Values: plausibility rail limits, fault window, recovery time, re-send rates, POST budget | proposed below |
+
+## 2. Phase A: land the drafts (refactor only), about 1.5 days
+
+| Draft | Work before it can merge |
+| --- | --- |
+| stick | per-component `.clang-tidy` (60-line functions); create the logger at start-up (no lazy allocation on a fault path); bench rerun incl. `mem.stk_adc` |
+| drive_session | split `drive_perform` (115 lines) into ≤60-line action families; fold the ~10 `drive_*` globals into one struct; move the types out of the 915-line header (owner-approved; a constexpr fingerprint proves TRANSITIONS unchanged); table correction: `CLEAR_MENU_ON_ARRIVAL` on rows 3–9 instead of the side flag; document and pin the two-Env tick; U3 stays as-is |
+| both | D1 in place; CI green (incl. cppcheck); bench B0–B5 rerun |
+
+## 3. Phase B: test tooling (parallel lanes)
+
+| Item | Design |
+| --- | --- |
+| B1 stick injection | `CONFIG_HMI_BENCH_STICK_INJECT` (`depends on HMI_REMOTE_UI`, default n; `#error` otherwise). The remote UI is only an adapter: it sends `StickInjectMsg{x,y,twist mV, fail_mask, seq}` through an fw_core Mailbox. The ADC task drains it at the `RawReadsMv` passed to `cycle()`, in an `if constexpr` block. Injection expires after 300 ms without a refresh. An on-screen "STICK INJECTED" marker shows while it is active. `fail_mask` simulates failed reads (H9). The bench preflight asserts the sim is the only RTPS participant; consider a bench-only DDS domain. Release guard: grep the symbol, assert release `sdkconfig.h` lacks it, tag bench images |
+| B2 quick POST | a new pure evaluator over a table subset (host L1). The ADC task accumulates about 1 s of rest statistics and sends them in a message. `std::atomic<uint8_t> post_state` is read by the UI task. No lv_* off the UI task; the 1,281-line selftest is not touched |
+| B3 oracle restructure | enumerate only the guards each input reads, so new hidden bits don't multiply the 1.35M combinations past the 30 s budget (TS-UNIT-09) |
+| B4 requirement matrix | `run.py report` maps REQ → tests (TS-COV-01); superseded REQs are retired by ID, never reused |
+| B5 sim modes | `rtps_mcb_sim.py`: ignore or drop N DISABLEs, stay ENABLED across an HMI reset, timestamped log of every DriveCommand and XYTwist |
+
+## 4. Phase C: the fixes (each: spec commit → 2 approvals → code commit by another agent)
+
+### C1 = H1 + H5 + H6 (drive table)
+
+| Rule | Rows |
+| --- | --- |
+| LOCKED/ASKING + driving_ok with no outstanding ENABLE, or with `DISABLE_PENDING` → stay LOCKED, send DISABLE, show "MIB enabled without a request" | 1, 2 |
+| Every transition into LOCKED sends DISABLE and sets `DISABLE_PENDING`; `drive_request := DISABLE` | 3–9, 12–13 (listed one by one in the spec commit) |
+| `DISABLE_PENDING` clears only on a **fresh** (CONNECTED, < 2 s) MibStatus that is not ENABLED; it stays set through link loss | new TICK sub-step, named with its place in TICK_SEQUENCE |
+| Re-send every 250 ms; after 5 s a persistent fault "MIB did not stop" and re-send at 1 Hz for as long as the MIB reports ENABLED. Never stop | new |
+| EXITING/EXIT_REFUSED: the exit DISABLE also sets `DISABLE_PENDING`; EXIT_REFUSED gets a timeout row (persistent fault) | 21–28 |
+| ENABLE (row 18) requires `!DISABLE_PENDING`; publish results are checked and failures counted | 18 |
+| U3 path removed | — |
+
+### C3 = H2 (drive table + POST)
+
+| Rule |
+| --- |
+| New phases `POST_PENDING` and `POST_FAILED`. No row leaves them except POST pass AND link CONNECTED (row 1 included). An oracle case covers "ENABLED during POST" |
+| Boot: `DISABLE_PENDING` is set at start (C1's mechanism), so the first fresh link sends and re-sends DISABLE |
+| Latched POST checks are hardware only: ADC valid, `joy.cal_saved`, an expected-device I2C list, reset reason (shown, H12), image, memory and stack headroom |
+| Stick at rest is a **live** guard, not a latch: `*_cal_off` inside the dead band and `joy.button_idle`. A stick bumped at power-on only delays; it doesn't lock the user out |
+| A persistent fault indicator, separate from the transient refusal banner slot, shows the failing check |
+
+### C2 = H3 + H9 (stick table), after D2
+
+| Rule |
+| --- |
+| A state machine OK / SUSPECT(n) / FAULT / RECOVERING with its own table, oracle and 100 % branches |
+| Plausibility on the **raw** reads (before averaging and lowpass): absolute rail limits (TBD after D2) plus the calibration band; NaN and failed reads count as implausible; N-of-M window, not N consecutive |
+| SUSPECT and FAULT: output literal 0 (not ×0), keys and flicks 0, button bit defined in the spec; neutral XYTwist keeps flowing (plus a fault flag in XYTwist if the MCB team agrees, D3) |
+| A fault while DRIVING → LOCKED + DISABLE via C1 (new drive-table guard `STICK_OK`, C2b). Clearing the fault never resumes driving: a new unlock hold is needed |
+| Way out of a latched fault: recalibration, reachable by touch; detection is suspended (output 0) while calibrating; the cal is validated at load (min < centre < max, minimum span) |
+| H10: the gate opens, and ENABLE is sent, only after ≥300 ms in the dead band |
+
+### C4 = H4 interim and H11
+
+| Rule |
+| --- |
+| ADC task forces scale 0 when the UI heartbeat atomic is older than 200 ms, MibStatus is stale, or the last MIB state is not ENABLED (the full fix waits for the islands work) |
+| Task watchdog on the ADC, UI and net tasks; ADC task priority above UI, pinned, stack from the stress test |
+
+### Seat path (H8, H10 seat, H6 seat), after C1
+
+| Rule |
+| --- |
+| Seat presses gated by POST_OK, STICK_OK and `seat_ready` (from Bench → Actuators and Skunk Works too); MIB seat values validated (non-finite or out of range → unknown, R2's RTPS findings); SeatCommand delivery gets the same check-and-count |
+
+## 5. Bench B5'' (with injection and sim modes; verdicts by script)
+
+| Step | Check |
+| --- | --- |
+| Gate | injected full forward: XYTwist 0 while LOCKED, on a menu, on another screen, while calibrating; > 0 on Drive |
+| C2 | 6 mV (must still drive full) vs 0 mV vs rail; alternating bad/good; failed read; fault while DRIVING → relock + DISABLE; release → no auto-resume; keys silent; fault indicator persists |
+| C1 | sim ignores N DISABLEs: re-send at 250 ms, fault at 5 s, never stops; exit refused; link pulled while DRIVING, restored with the sim ENABLED → stays LOCKED; profile click after relock → sim logs DISABLE |
+| C3 | stick deflected ~25 % at boot → waits, names the check; release → passes; sim ENABLED at boot → no unlock, XYTwist never ≠ 0 before POST pass; seat press refused before POST; reset reason shown |
+| Not bench-testable | H4 (UI stall): host fault-injection test |
+
+## 6. Lanes (agents) and effort (AI time; reviews on top)
+
+| Step | Lane | Effort |
+| --- | --- | --- |
+| A1 stick draft fixes + merge | S | 0.5 d |
+| A2 drive draft fixes + merge | D | 1–1.5 d + table review |
+| B1 injection (after A1) | S | 1–1.5 d |
+| B2 quick POST evaluator | P | 1.5–2 d |
+| B3 + B4 oracle restructure, REQ matrix | T | 1 d |
+| B5 sim modes | T | 0.5 d |
+| C1 (after A2) | D | 1.5 d + approvals |
+| C3 (after C1, B2) | D | 1 d + approvals |
+| C2a stick fault table (after B1, D2) | S | 2 d + approvals |
+| C2b STICK_OK guard (after C3) | D | 0.5 d |
+| C4 heartbeat + watchdog | S | 0.5–1 d |
+| Seat path (after C1) | D | 1 d |
+
+The drive table is serialised (lane D); the other lanes run in parallel. `app_main` is the only
+shared file: B1 merges before B2's boot hook.
