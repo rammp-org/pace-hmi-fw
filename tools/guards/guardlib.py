@@ -132,10 +132,13 @@ class Build:
         if not build.elf.is_file():
             build.elf = bd / Path(str(desc["app_elf"])).name
         managed = project + "managed_components/"
+        # a build folder inside the project (CI: build/, build_bench/) holds generated
+        # sources (embedded files, the cert bundle, IPA config): not first-party code
+        generated = norm(desc.get("build_dir") or bd).rstrip("/") + "/"
         seen: set[str] = set()
         for e in json.loads(cc_file.read_text(encoding="utf-8")):
             src = norm(e["file"])
-            if not src.startswith(project) or src.startswith(managed):
+            if not src.startswith(project) or src.startswith((managed, generated)):
                 continue
             rel = e.get("output") or _output_of(e.get("command", ""))
             if not rel:

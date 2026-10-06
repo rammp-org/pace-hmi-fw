@@ -259,6 +259,29 @@ def t_tokens() -> None:
         gl.expect(".inc is not a header", "only_in_inc" in toks, False)
 
 
+def t_build_inside_project() -> None:
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "proj"
+        bd = root / "build_bench"
+        objdir = bd / "esp-idf" / "main" / "CMakeFiles" / "__idf_main.dir"
+        (objdir / "__" / "__").mkdir(parents=True)
+        (root / "managed_components" / "x").mkdir(parents=True)
+        entries = []
+        for src, obj in ((root / "main" / "a.cpp", "a.cpp.obj"),
+                         (bd / "click.wav.S", "__/__/click.wav.S.obj"),
+                         (root / "managed_components" / "x" / "m.c", "m.c.obj")):
+            (objdir / obj).write_bytes(b"")
+            entries.append({"directory": str(bd), "file": str(src),
+                            "output": f"esp-idf/main/CMakeFiles/__idf_main.dir/{obj}"})
+        (bd / "compile_commands.json").write_text(json.dumps(entries), encoding="utf-8")
+        (bd / "project_description.json").write_text(json.dumps(
+            {"project_path": str(root), "build_dir": str(bd), "app_elf": "app.elf"}),
+            encoding="utf-8")
+        keys = [o.key for o in gl.Build.load(bd).objects]
+        gl.expect("only first-party sources", keys, ["main/a.cpp.obj"])
+
+
 def cmd_selftest(_args) -> int:
     return gl.run_cases("tools/guards/exports.py", [
         ("EXP-001 nm -A output parses into rows per object key", t_parse_nm),
@@ -266,6 +289,7 @@ def cmd_selftest(_args) -> int:
         ("EXP-003 a demangled symbol reduces to the identifier its header declares", t_leaf),
         ("EXP-004 allow entries excuse only with a reason and stale ones are reported", t_allow),
         ("EXP-005 header tokens skip test folders and fragments", t_tokens),
+        ("EXP-006 a build folder inside the project contributes no generated sources", t_build_inside_project),
     ])
 
 
