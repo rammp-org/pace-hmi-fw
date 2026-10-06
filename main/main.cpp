@@ -234,13 +234,12 @@ extern "C" void app_main(void) {
   // run the LVGL refresh timer at 60 fps — the espp lv_conf.h compiles in a
   // 33 ms (30 fps) default period; the lv_task loop below already calls
   // lv_task_handler every 16 ms so it can keep up
-  lv_timer_set_period(lv_display_get_refr_timer(lv_display_get_default()), 16);
+  lv_display_t *const display = lv_display_get_default();
+  lv_timer_set_period(lv_display_get_refr_timer(display), 16);
 
   if constexpr (kFpsInstrument) {
-    lv_display_add_event_cb(lv_display_get_default(), fps_render_start_cb, LV_EVENT_RENDER_START,
-                            nullptr);
-    lv_display_add_event_cb(lv_display_get_default(), fps_render_ready_cb, LV_EVENT_RENDER_READY,
-                            nullptr);
+    lv_display_add_event_cb(display, fps_render_start_cb, LV_EVENT_RENDER_START, nullptr);
+    lv_display_add_event_cb(display, fps_render_ready_cb, LV_EVENT_RENDER_READY, nullptr);
     logger.info("FPS instrumentation enabled (stress={})", kFpsStress);
   }
 
@@ -1200,10 +1199,11 @@ extern "C" void app_main(void) {
            lv_task_handler();
          }
          if constexpr (kFpsInstrument) {
-           static espp::Logger fps_log({.tag = "fps", .level = espp::Logger::Verbosity::DEBUG});
            static int64_t last_report_us = esp_timer_get_time();
            const int64_t now_us = esp_timer_get_time();
            if (now_us - last_report_us >= 1000000) {
+             // Made per report rather than kept in a static: debug build, once a second.
+             const espp::Logger fps_log({.tag = "fps", .level = espp::Logger::Verbosity::DEBUG});
              const uint32_t frames = fps_frames.exchange(0);
              const uint64_t total_us = fps_render_us_total.exchange(0);
              const uint32_t max_us = fps_render_us_max.exchange(0);
