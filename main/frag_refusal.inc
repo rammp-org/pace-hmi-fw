@@ -269,6 +269,8 @@ static void entry_refused_timer_cb(lv_timer_t *) { entry_refused_clear(); }
 
 // Defined below, with the drive gestures that raise most of these.
 static void entry_refused_show(int32_t which, uint32_t show_ms);
+// The drive session's input, defined in frag_drive.inc.
+static bool drive_session_input(hmi::drive_session::Input input);
 
 // Runs from hold_poll_cb, on the same input and cadence as the gesture it
 // shadows.
@@ -294,14 +296,13 @@ static void entry_refusal_poll() {
                        lv_subject_get_int(&locked_subject) != 0;
   const int32_t page = attempt ? kRefusedDrive : kRefusedNone;
   const int32_t refused = lv_subject_get_int(&entry_refused_subject);
-  if (pushed && page != kRefusedNone && !mcb_ready()) {
-    // Through the helper, so this always gets its own dwell back after a refusal
-    // that asked for a shorter one.
+  // A push is decided by the drive session (rows 38-39: locked, on the Locked
+  // screen, no menu, MCB not ready): the refusal goes through entry_refused_show,
+  // so it always gets its own dwell back after a refusal that asked for a shorter
+  // one, with refusal_feedback -- distinct from the STRONG_CLICK a completed hold
+  // gives, so a refusal can be felt as well as read.
+  if (pushed && drive_session_input(hmi::drive_session::Input::ENTRY_PUSH)) {
     refused_this_press = true;
-    entry_refused_show(page, kDriveRefusedShowMs);
-    // Distinct from the STRONG_CLICK a completed hold gives, so a refusal can
-    // be felt as well as read.
-    refusal_feedback();
   } else if ((refused == kRefusedDrive && (refused != page || mcb_ready())) ||
              ((refused == kRefusedSeat || refused == kRefusedDriveLost ||
                refused == kRefusedDriveMenu) &&

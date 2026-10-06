@@ -47,6 +47,7 @@
 #include "about_ui.hpp"
 #include "actions_spec.h"
 #include "boot_logo.h"
+#include "drive_session.hpp"
 #include "fw_info.hpp"
 #include "github_ota.hpp"
 #include "internet_ui.hpp"
