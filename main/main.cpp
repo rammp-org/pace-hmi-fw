@@ -157,11 +157,12 @@ extern "C" void app_main(void) {
   // settings row plays (the button is wired up after ui_init() below).
   init_haptic(logger, i2c);
 
-  // DA7280 haptic driver bring-up test (raw register read, no driver yet)
-  test_da7280(logger, i2c, found_addresses);
-
-  // DA7280 driver functional test (Da7280 driver class, DRO mode)
-  test_da7280_functional(logger, i2c);
+  // DA7280 bring-up test (raw register read) and driver functional test (Da7280
+  // driver class, DRO mode): bench only, CONFIG_HMI_BENCH_DA7280_TEST.
+  if constexpr (kBenchDa7280Test) {
+    test_da7280(logger, i2c, found_addresses);
+    test_da7280_functional(logger, i2c);
+  }
 
   // Initialize the IO expanders
   logger.info("Initializing IO expanders...");
