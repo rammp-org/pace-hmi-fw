@@ -65,8 +65,12 @@ the move by regenerating the baseline in that step's PR.
   name in 2+ objects. Today's build has 33, all GCC clones (`.isra`, `.part`) of fmt/std
   templates, so the rule would be noise.
 - **task_dump**: T1 a `boot` task is missing; T2 prio/core differ, or stack outside
-  [declared-16 B, declared]; T3 a running task is undeclared; T4 the list was cut. Names
-  compare on 15 characters (`configMAX_TASK_NAME_LEN` 16). Low `stack_free` is a note (G8 owns it).
+  [declared-16 B, declared]; T3 a running task is undeclared; T4 the list was cut; T5
+  `stack_free` under a declared `stack_free_min` floor (none yet: CS-MEM-04 margins wait for the
+  stress test; a fixed `stack_free` is never compared). Names compare on 15 characters
+  (`configMAX_TASK_NAME_LEN` 16). An unpinned task that reports a core passes only with
+  `coproc: true` (ESP-IDF pins a task to the core of its first FPU/PIE/HWLP use). The table
+  holds effective values: espp/pthread priority 0 runs at 5 (`pthread.c:336`).
 - **observer_census**: O1 missing subject, O2 count differs, O3 new subject, O4 list cut.
 
 ## Host app wrappers
@@ -100,8 +104,13 @@ the plan). `TASKS` answers one JSON line, and `task_dump.py fetch --into selftes
 it into the self-test JSON file on the PC. `take_tasks`/`send_tasks` in `main/remote_ui.cpp`
 (compiled only with `CONFIG_HMI_REMOTE_UI`) walk the task list with `uxTaskGetSnapshotAll`
 under `vTaskSuspendAll` (the usage `freertos_debug.h` documents; the trace facility stays off),
-then read name, priority, core (`xTaskGetCoreID`), the created stack size
-(`pxEndOfStack - xTaskGetStackStart`) and the high-water mark. The scheduler is suspended on one
+then read name, priority, core (`xTaskGetCoreID`), the created stack size and the high-water
+mark. The stack size is `pxEndOfStack` minus the start the task was created with: once a task
+has used a coprocessor, IDF 6.0's RISC-V port carves the save area (132 B for the FPU) from the
+bottom of the stack and moves the TCB's `pxStack` past it (`port.c:787-815`). So
+`xTaskGetStackStart` alone reads 132-147 B short, as the first board dump did. The original
+start is in the coprocessor save area at the stack top (`sa_tcbstack`), which also gives the
+`coproc` flag. The scheduler is suspended on one
 core for roughly a millisecond (the high-water scans). Nothing runs unless the PC sends `TASKS`.
 
 First use on the bench: `task_dump.py fetch`, then `task_dump.py baseline --dump` (review the

@@ -8,13 +8,23 @@
 
 Spec: docs/plans/app-main-shrink.md §5 G10, V11 ("a runtime task dump (name, prio, core,
 stack) in the self-test JSON, compared with topology TASKS"), §6 (copy each task config
-literally; "Read ADC" runs on espp defaults: prio 0, unpinned).
+literally).
 
 The dump: the bench build's remote UI answers `TASKS` with one JSON line,
-`OK {"tasks":[{"name","prio","core","stack_bytes","stack_free"}...],"complete":true}`
-(core -1 = unpinned; stack_bytes = the created size to within 16 B of alignment;
-stack_free = the high-water mark). That verb is in main/remote_ui.cpp (bench builds,
-CONFIG_HMI_REMOTE_UI; see README). `fetch` reads
+`OK {"tasks":[{"name","prio","core","stack_bytes","stack_free","coproc"}...],"complete":true}`
+(core -1 = unpinned; stack_bytes = the created size less 0-15 B of the port's 16 B alignment
+of the stack end; stack_free = the high-water mark; coproc = the task has used the FPU/PIE/
+HWLP). That verb is in main/remote_ui.cpp (bench builds, CONFIG_HMI_REMOTE_UI; see README).
+
+Two ESP-IDF 6.0 behaviours the table has to reflect (both measured on the board 2026-10-06):
+- espp::Task (and std::thread) run on IDF pthreads, and pthread_create takes priority 0 to mean
+  "use CONFIG_PTHREAD_TASK_PRIO_DEFAULT" (components/pthread/pthread.c:336), so an espp task
+  configured with priority 0 runs at 5. The table holds the effective priority.
+- The RISC-V port pins a task to the core it is running on the first time it uses a
+  coprocessor (FreeRTOS-Kernel/portable/riscv/portasm.S:99, vPortTaskPinToCore). An
+  unpinned (-1) task that uses the FPU therefore reports core 0 or 1, whichever it first ran
+  FP code on. That is not a configuration, so it is a note, not a T2.
+`fetch` reads
 it and, with --into, adds it to the self-test JSON as "tasks". `check --dump` takes that
 JSON, a fetch output, or a text log holding the `OK {"tasks":...}` line.
 
@@ -25,10 +35,14 @@ Rules (exit 0 PASS, 1 FAIL, 2 bad input):
      compared (and is listed as a note);
   T3 a running task the table does not list fails (a new task is an architecture change,
      CORE ask-first);
-  T4 `complete` false (the firmware's list was cut) fails.
+  T4 `complete` false (the firmware's list was cut) fails;
+  T5 stack_free below a task's `stack_free_min` (a floor, set only once the stress test gives
+     CS-MEM-04 margins; none yet) fails.
+A task declared core -1 that reports another core passes T2 only when it reports
+`coproc: true` (see above); a dump without the `coproc` field (firmware before it) cannot
+tell, so the core must match.
 Names compare on their first `name_max` characters (FreeRTOS keeps configMAX_TASK_NAME_LEN-1).
-stack_free below `stack_free_floor_pct` of the table's (when the table has one) is a note:
-stack headroom is G8's verdict, not this one's.
+stack_free is never compared with a fixed value: the high-water mark depends on what ran.
 
 --topology reads `TaskRow{...}` / `ForeignTaskRow{...}` from topology.hpp
 (dev_ai_refactor_topology) as the table instead of the baseline JSON: names, stack, prio,
@@ -114,8 +128,7 @@ def table_from_topology(text: str, name_max: int = 15) -> dict:
                       "source": "topology.hpp FOREIGN_TASKS"})
     if not tasks:
         raise gl.GuardError("no TaskRow{...} found in the topology file")
-    return {"name_max": name_max, "stack_tolerance_bytes": 16, "stack_free_floor_pct": 80,
-            "tasks": tasks}
+    return {"name_max": name_max, "stack_tolerance_bytes": 16, "tasks": tasks}
 
 
 def load_table(args) -> dict:
@@ -132,7 +145,6 @@ def load_table(args) -> dict:
 def compare(dump: dict, table: dict) -> tuple[list[str], list[str]]:
     n = int(table.get("name_max", 15))
     tol = int(table.get("stack_tolerance_bytes", 16))
-    floor = float(table.get("stack_free_floor_pct", 80))
     fails: list[str] = []
     notes: list[str] = []
     running: dict[str, dict] = {}
@@ -160,11 +172,17 @@ def compare(dump: dict, table: dict) -> tuple[list[str], list[str]]:
             elif fld == "stack_bytes":
                 if got is None or not want - tol <= int(got) <= want:
                     fails.append(f"T2 '{key}': stack {got} B, declared {want} B (-{tol} B allowed)")
+            elif fld == "core" and want == -1 and got in (0, 1) and t.get("coproc") is True:
+                notes.append(f"'{key}': unpinned, pinned to core {got} by the port at its first "
+                             "coprocessor use (portasm.S:99)")
             elif got != want:
                 fails.append(f"T2 '{key}': {fld} {got}, declared {want}")
-        base_free, free = d.get("stack_free"), t.get("stack_free")
-        if base_free and free is not None and free < floor / 100 * base_free:
-            notes.append(f"'{key}': stack_free {free} B is under {floor:g}% of {base_free} B (G8)")
+        floor, free = d.get("stack_free_min"), t.get("stack_free")
+        if floor is not None and (free is None or free < floor):
+            fails.append(f"T5 '{key}': stack_free {free} B, floor {floor} B")
+    if dump["tasks"] and all("coproc" not in t for t in dump["tasks"]):
+        notes.append("the dump has no 'coproc' field (firmware before it): stack_bytes of a task "
+                     "that used the FPU reads 132+ B short and its core cannot be explained")
     for key, t in running.items():
         if key not in declared:
             fails.append(f"T3 '{key}' is running (prio {t.get('prio')}, core {t.get('core')}, "
@@ -183,13 +201,18 @@ def merge(dump: dict, table: dict) -> tuple[dict, list[str]]:
         key = str(t.get("name", ""))[:n]
         d = by_key.get(key)
         if d is None:
-            row = {"name": key, **{f: t.get(f) for f in FIELDS}, "stack_free": t.get("stack_free"),
-                   "start": "boot", "source": "observed"}
+            row = {"name": key, **{f: t.get(f) for f in FIELDS}, "start": "boot",
+                   "source": "observed, not declared in source"}
+            if t.get("coproc") is True and t.get("core") in (0, 1):
+                row["core"] = None  # pinned by FPU use, not configured: fill in from the source
+                changes.append(f"'{key}': core left null (pinned by coprocessor use)")
             out["tasks"].append(row)
             by_key[key] = row
             changes.append(f"added '{key}' (observed)")
             continue
-        for fld in (*FIELDS, "stack_free"):
+        for fld in FIELDS:
+            if fld == "core" and t.get("coproc") is True:
+                continue  # a core picked by FPU use is not a configuration
             if d.get(fld) is None and t.get(fld) is not None:
                 d[fld] = t[fld]
                 changes.append(f"'{key}': {fld} = {t[fld]} (observed)")
@@ -239,8 +262,7 @@ def cmd_check(args) -> int:
 def cmd_baseline(args) -> int:
     f = Path(args.baseline)
     table = json.loads(f.read_text(encoding="utf-8")) if f.is_file() else {
-        "schema": 1, "name_max": 15, "stack_tolerance_bytes": 16, "stack_free_floor_pct": 80,
-        "tasks": []}
+        "schema": 1, "name_max": 15, "stack_tolerance_bytes": 16, "tasks": []}
     out, changes = merge(read_dump(args.dump), table)
     for c in changes:
         print(c)
@@ -252,20 +274,24 @@ def cmd_baseline(args) -> int:
 # ---------------------------------------------------------------- selftest
 
 SAMPLE_TABLE = {
-    "name_max": 15, "stack_tolerance_bytes": 16, "stack_free_floor_pct": 80,
+    "name_max": 15, "stack_tolerance_bytes": 16,
     "tasks": [
-        {"name": "lv_task", "prio": 20, "core": 1, "stack_bytes": 16384, "stack_free": 5000,
+        {"name": "lv_task", "prio": 20, "core": 1, "stack_bytes": 16384, "stack_free_min": 4000,
          "start": "boot", "source": "main.cpp"},
         {"name": "Data Display Task", "prio": 10, "core": 1, "stack_bytes": 6144, "start": "boot"},
-        {"name": "Read ADC", "prio": 0, "core": -1, "stack_bytes": 4096, "start": "boot"},
+        {"name": "Read ADC", "prio": 5, "core": -1, "stack_bytes": 4096, "start": "boot"},
         {"name": "selftest", "prio": 3, "core": 0, "stack_bytes": 12288, "start": "on_demand"},
         {"name": "IDLE0", "prio": None, "core": None, "stack_bytes": None, "start": "boot"},
     ]}
 SAMPLE_LINE = ('I (1234) remote_ui: whatever\nOK {"tasks":['
-               '{"name":"lv_task","prio":20,"core":1,"stack_bytes":16384,"stack_free":4900},'
-               '{"name":"Data Display Ta","prio":10,"core":1,"stack_bytes":6136,"stack_free":900},'
-               '{"name":"Read ADC","prio":0,"core":-1,"stack_bytes":4096,"stack_free":1200},'
-               '{"name":"IDLE0","prio":0,"core":0,"stack_bytes":1536,"stack_free":800}'
+               '{"name":"lv_task","prio":20,"core":1,"stack_bytes":16377,"stack_free":4900,'
+               '"coproc":false},'
+               '{"name":"Data Display Ta","prio":10,"core":1,"stack_bytes":6129,"stack_free":900,'
+               '"coproc":true},'
+               '{"name":"Read ADC","prio":5,"core":0,"stack_bytes":4089,"stack_free":1200,'
+               '"coproc":true},'
+               '{"name":"IDLE0","prio":0,"core":0,"stack_bytes":1521,"stack_free":800,'
+               '"coproc":false}'
                '],"complete":true}\n')
 SAMPLE_TOPOLOGY = """
 inline constexpr std::array TASKS{
@@ -293,6 +319,24 @@ def t_pass() -> None:
     fails, notes = compare(parse_dump(SAMPLE_LINE), SAMPLE_TABLE)
     gl.expect("fails", fails, [])
     gl.expect("IDLE0 fields noted", sum("IDLE0" in n for n in notes), 3)
+    gl.expect("FPU pinning noted", sum("first coprocessor use" in n for n in notes), 1)
+
+
+def t_core_needs_coproc() -> None:
+    d = parse_dump(SAMPLE_LINE)
+    d["tasks"][2]["coproc"] = False      # unpinned, on core 0, no coprocessor: a real mismatch
+    fails, _ = compare(d, SAMPLE_TABLE)
+    gl.expect("core fails", [f for f in fails if "core" in f], ["T2 'Read ADC': core 0, declared -1"])
+    for t in d["tasks"]:
+        t.pop("coproc")                  # an old dump: cannot tell, so strict, and said so
+    fails, notes = compare(d, SAMPLE_TABLE)
+    gl.expect("old dump strict", any("Read ADC': core" in f for f in fails), True)
+    gl.expect("old dump noted", any("no 'coproc' field" in n for n in notes), True)
+    d = parse_dump(SAMPLE_LINE)
+    d["tasks"][0]["core"] = 0            # a pinned task never moves, coprocessor or not
+    d["tasks"][0]["coproc"] = True
+    fails, _ = compare(d, SAMPLE_TABLE)
+    gl.expect("pinned task moved", fails, ["T2 'lv_task': core 0, declared 1"])
 
 
 def t_rules_fail() -> None:
@@ -312,12 +356,14 @@ def t_on_demand_absent_ok() -> None:
     gl.expect("selftest absent is fine", any("selftest" in f for f in fails), False)
 
 
-def t_stack_free_is_note() -> None:
+def t_stack_free_floor() -> None:
     d = parse_dump(SAMPLE_LINE)
-    d["tasks"][0]["stack_free"] = 100
-    fails, notes = compare(d, SAMPLE_TABLE)
-    gl.expect("no failure", fails, [])
-    gl.expect("note", any("G8" in n for n in notes), True)
+    d["tasks"][1]["stack_free"] = 10     # no floor declared for it: never compared
+    fails, _ = compare(d, SAMPLE_TABLE)
+    gl.expect("no floor, no verdict", fails, [])
+    d["tasks"][0]["stack_free"] = 3999   # lv_task's floor is 4000
+    fails, _ = compare(d, SAMPLE_TABLE)
+    gl.expect("under the floor", fails, ["T5 'lv_task': stack_free 3999 B, floor 4000 B"])
 
 
 def t_topology() -> None:
@@ -331,16 +377,21 @@ def t_topology() -> None:
 
 def t_merge() -> None:
     d = parse_dump(SAMPLE_LINE)
-    d["tasks"].append({"name": "tiT", "prio": 18, "core": -1, "stack_bytes": 3072, "stack_free": 1000})
+    d["tasks"].append({"name": "tiT", "prio": 18, "core": -1, "stack_bytes": 3069,
+                       "stack_free": 1000, "coproc": False})
+    d["tasks"].append({"name": "fpu_user", "prio": 5, "core": 1, "stack_bytes": 4089,
+                       "stack_free": 1000, "coproc": True})
     d["tasks"][0]["prio"] = 1  # a declared mismatch is never overwritten
     out, changes = merge(d, SAMPLE_TABLE)
     by = {x["name"]: x for x in out["tasks"]}
-    gl.expect("added", by["tiT"]["source"], "observed")
-    gl.expect("filled", by["IDLE0"]["stack_bytes"], 1536)
+    gl.expect("added", by["tiT"]["source"], "observed, not declared in source")
+    gl.expect("filled", by["IDLE0"]["stack_bytes"], 1521)
     gl.expect("declared kept", by["lv_task"]["prio"], 20)
+    gl.expect("FPU-pinned core not recorded", by["fpu_user"]["core"], None)
+    gl.expect("no stack_free recorded", any("stack_free" in x for x in out["tasks"]), False)
     gl.expect("input untouched", SAMPLE_TABLE["tasks"][4]["stack_bytes"], None)
-    # tiT added; IDLE0 prio, core, stack_bytes, stack_free; stack_free of Data Display and Read ADC
-    gl.expect("changes", len(changes), 7)
+    # tiT and fpu_user added, fpu_user's core left null; IDLE0 prio, core, stack_bytes
+    gl.expect("changes", len(changes), 6)
 
 
 def t_committed_baseline_valid() -> None:
@@ -350,6 +401,7 @@ def t_committed_baseline_valid() -> None:
     for t in table["tasks"]:
         gl.expect(f"{t['name']} start", t["start"] in ("boot", "on_demand"), True)
         gl.expect(f"{t['name']} source", bool(t.get("source")), True)
+        gl.expect(f"{t['name']} has no fixed stack_free", "stack_free" in t, False)
 
 
 def cmd_selftest(_args) -> int:
@@ -358,10 +410,11 @@ def cmd_selftest(_args) -> int:
         ("TSK-002 a dump that matches the table passes and unset fields are notes", t_pass),
         ("TSK-003 missing, mismatched, undeclared and cut-short tasks each fail", t_rules_fail),
         ("TSK-004 an on-demand task may be absent", t_on_demand_absent_ok),
-        ("TSK-005 low stack headroom is a note for G8, not a failure", t_stack_free_is_note),
+        ("TSK-005 stack_free is only compared with a declared floor", t_stack_free_floor),
         ("TSK-006 topology TaskRow and ForeignTaskRow lines become the table", t_topology),
         ("TSK-007 merge adds observed tasks and never overwrites a declared value", t_merge),
         ("TSK-008 the committed baseline has unique names, a start and a source each", t_committed_baseline_valid),
+        ("TSK-009 an unpinned task may report a core only when it used a coprocessor", t_core_needs_coproc),
     ])
 
 
