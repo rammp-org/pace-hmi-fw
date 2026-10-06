@@ -216,10 +216,11 @@ struct PipelineRunner {
     io.out = StickOutputs{};
     io.flick = 0;
     io.trace = Trace{};
-    const std::optional<float> vert = v.vert_ok ? std::optional<float>{v.vert_mv} : std::nullopt;
-    const std::optional<float> horiz = v.horiz_ok ? std::optional<float>{v.horiz_mv} : std::nullopt;
-    const std::optional<float> twist = v.twist_ok ? std::optional<float>{v.twist_mv} : std::nullopt;
-    const bool published = pipeline->cycle(io, vert, horiz, twist);
+    const hmi::stick::RawReadsMv raw{
+        .horizontal_mv = v.horiz_ok ? std::optional<float>{v.horiz_mv} : std::nullopt,
+        .vertical_mv = v.vert_ok ? std::optional<float>{v.vert_mv} : std::nullopt,
+        .twist_mv = v.twist_ok ? std::optional<float>{v.twist_mv} : std::nullopt};
+    const bool published = pipeline->cycle(io, raw);
     StickOutputs out = io.out;
     out.published = out.published && published;
     out.joy_key = io.key;

@@ -55,6 +55,15 @@ struct Position {
   float twist;
 };
 
+/// One cycle's three ADC reads, raw millivolts; empty when that read failed. Named fields, so a
+/// call site says which channel is which (`.horizontal_mv = ...`): X and Y swapped would map the
+/// stick onto the wrong axes and the compiler cannot see it in two same-typed parameters.
+struct RawReadsMv {
+  std::optional<float> horizontal_mv; ///< ADC1_CH1 (GPIO17)
+  std::optional<float> vertical_mv;   ///< ADC1_CH0 (GPIO16)
+  std::optional<float> twist_mv;      ///< ADC2_CH3 (GPIO52), oversampled and averaged
+};
+
 /// What the MCB is sent: the mounted position times the drive scale (0 when gated).
 struct Command {
   float x;
@@ -143,9 +152,7 @@ public:
 
   /// One ADC cycle. Returns whether XYTwist was published. An invalid cycle (any read
   /// missing) calls nothing on `io` and publishes nothing (H9).
-  template <typename Io>
-  [[nodiscard]] bool cycle(Io &io, std::optional<float> vertical_mv,
-                           std::optional<float> horizontal_mv, std::optional<float> twist_mv);
+  template <typename Io> [[nodiscard]] bool cycle(Io &io, const RawReadsMv &raw);
 
   /// The key trigger's state (for tests).
   [[nodiscard]] bool key_engaged_state() const { return key_engaged_; }
@@ -158,21 +165,22 @@ private:
   bool key_engaged_ = false;
 };
 
-template <typename Io>
-bool StickPipeline::cycle(Io &io, std::optional<float> vertical_mv,
-                          std::optional<float> horizontal_mv, std::optional<float> twist_mv) {
-  if (!(vertical_mv && horizontal_mv && twist_mv)) {
+template <typename Io> bool StickPipeline::cycle(Io &io, const RawReadsMv &raw) {
+  if (!(raw.vertical_mv && raw.horizontal_mv && raw.twist_mv)) {
     return false;
   }
+  const float horizontal_mv = *raw.horizontal_mv;
+  const float vertical_mv = *raw.vertical_mv;
+  const float twist_mv = *raw.twist_mv;
   // A calibration run just finished: switch to it here, between two samples.
   if (auto cal = io.take_new_calibration()) {
     apply_calibration(*cal);
   }
-  const float twist_smoothed_mv = io.smooth_twist_mv(*twist_mv);
-  io.note_raw_mv(*horizontal_mv, *vertical_mv, twist_smoothed_mv);
+  const float twist_smoothed_mv = io.smooth_twist_mv(twist_mv);
+  io.note_raw_mv(horizontal_mv, vertical_mv, twist_smoothed_mv);
   // While a calibration run owns the stick nothing downstream may act on it.
   const bool calibrating = io.calibrating();
-  const Position mapped = map(*horizontal_mv, *vertical_mv, twist_smoothed_mv);
+  const Position mapped = map(horizontal_mv, vertical_mv, twist_smoothed_mv);
   const bool swap = io.swap();
   const bool invert_x = io.invert_x();
   const bool invert_y = io.invert_y();
