@@ -11,6 +11,7 @@ UNITY_DIR ?= /mnt/c/esp/v6.0/esp-idf/components/unity/unity/src
 
 HEADER    := $(REPO)/components/drive_session/include/drive_session_table.hpp
 FPRINT    := $(REPO)/components/drive_session/include/drive_session_fingerprint.hpp
+TYPES     := $(REPO)/components/drive_session/include/drive_session_types.hpp
 SRC       := $(HERE)/test_table_selfcheck.cpp
 # The shared host main: runs the TEST_CASEs registered through tests/host/test_case.hpp.
 HOST_DIR  := $(REPO)/tests/host
@@ -39,7 +40,7 @@ $(BUILD_DIR)/unity.o: $(UNITY_DIR)/unity.c
 	@mkdir -p $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/$(NAME): $(SRC) $(MAIN_SRC) $(HEADER) $(FPRINT) $(BUILD_DIR)/unity.o
+$(BUILD_DIR)/$(NAME): $(SRC) $(MAIN_SRC) $(HEADER) $(TYPES) $(FPRINT) $(BUILD_DIR)/unity.o
 	$(CXX) $(CXXFLAGS) $(EXTRA) $(SRC) $(MAIN_SRC) $(BUILD_DIR)/unity.o -o $@
 
 test: header
@@ -63,7 +64,8 @@ clean:
 	rm -rf $(BUILD_DIR)
 
 # Must-not-compile (TS-UNIT-06): one-line mutations of the header, each of which must trip
-# its own static_assert text. The unmutated twin is `make header`. The fingerprint header is
+# its own static_assert text. The mutated copy goes first on the include path; the types
+# header comes from the component. The unmutated twin is `make header`. The fingerprint header is
 # compiled with every mutation; `fingerprint` changes only a code citation, which no other
 # check reads, so only the fingerprint can catch it.
 MNC := \
@@ -82,7 +84,7 @@ mnc: header
 	  if cmp -s $(HEADER) $$d/drive_session_table.hpp; then echo "MNC $$name: mutation did not apply"; fail=1; continue; fi; \
 	  cp $(FPRINT) $$d/; \
 	  printf '#include "drive_session_table.hpp"\n#include "drive_session_fingerprint.hpp"\n' > $$d/t.cpp; \
-	  if $(CXX) -std=gnu++23 -fsyntax-only -I$$d $$d/t.cpp > $$d/log.txt 2>&1; then \
+	  if $(CXX) -std=gnu++23 -fsyntax-only -I$$d -I$(REPO)/components/drive_session/include $$d/t.cpp > $$d/log.txt 2>&1; then \
 	    echo "MNC $$name: compiled (FAIL)"; fail=1; \
 	  elif grep -q "$$want" $$d/log.txt; then echo "MNC $$name: rejected as expected"; \
 	  else echo "MNC $$name: rejected for another reason (FAIL)"; fail=1; fi; \

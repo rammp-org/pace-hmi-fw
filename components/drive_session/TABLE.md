@@ -5,7 +5,8 @@ Status: **AI-derived, unreviewed** (2026-10-06, agent O). Characterises the code
 behaviour, hazards included. It is not a design. Fixing a row is a behaviour change: it needs two
 human approvals (CS-SAF-05) and a new table.
 
-The data is `include/drive_session_table.hpp`, namespace `hmi::drive_session`. That header wins
+The data is `include/drive_session_table.hpp`, namespace `hmi::drive_session`; its enums and row
+structs are in `include/drive_session_types.hpp`. Those headers win
 over this page. This page is the same table for reading, plus a D4 diagram, the hazards, and the
 questions left open. The agent that writes the extraction never edits the header (CORE never-list:
 declarations).
