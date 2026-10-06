@@ -9,6 +9,9 @@ CS-MEM-01, CS-NAM-01, CS-TYP-04/05, CS-CMP-03, CS-ERR-04).
   python tools/l0/ratchet.py update     lower the baseline to today's counts; never raises
   python tools/l0/ratchet.py update --init   write the first baseline (only if none exists)
   python tools/l0/ratchet.py selftest   exercise the parser on inline samples
+  python tools/l0/ratchet.py transfer <dest> --from main/main.cpp --base <sha>
+                                        move per-line grants for debt moved verbatim
+                                        (see "transfer" below and tools/l0/README.md)
 
 Scope: main/** and components/** except components/ui (generated),
 components/m5stack-tab5 (vendored), any test/ or generated/ folder, and
@@ -37,6 +40,10 @@ Rules
   statics are mutable_globals, not this.
 - locks: the espp Task callback's own mutex and condition variable are not locks
   (CS-OWN-08), in the exact idiom only: see TASK_PARAMS_RE. Any other mutex counts.
+- transfer grants (baseline "transfers"): a new path's violations of a forbidden
+  metric pass only if each matches a grant 1:1 (sha1 of the stripped,
+  whitespace-normalised line). Grants come only from `transfer`; check
+  re-verifies them against git history (fetch-depth: 0 in CI).
 - app_main_lines (CS-LAY-01: app_main <= 300 lines): non-blank code lines (comments
   stripped, as `lines`) of the function named app_main, in whichever unit holds it.
   Like `lines`: a path in the baseline must not grow; any other path must stay
@@ -49,14 +56,20 @@ time, which is all a ratchet needs. Stdlib only, Python 3.12+.
 from __future__ import annotations
 
 import argparse
+import bisect
+import collections
 import contextlib
+import hashlib
 import io
 import json
+import os
 import pathlib
 import re
+import subprocess
 import sys
 import tempfile
 from collections.abc import Callable
+from typing import NamedTuple
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 BASELINE = pathlib.Path(__file__).resolve().parent / "baseline.json"
@@ -440,8 +453,8 @@ def is_ui_file(path: str) -> bool:
     return any(r.search(path) for r in UI_FILE_RES)
 
 
-def count_casts(code: str) -> int:
-    count = 0
+def cast_positions(code: str) -> list[int]:
+    out: list[int] = []
     for m in CAST_RE.finditer(code):
         before = code[: m.start()]
         if before and (before[-1].isalnum() or before[-1] == "_"):
@@ -449,8 +462,12 @@ def count_casts(code: str) -> int:
         word = re.search(r"(\w+)\s*$", before)
         if word and word.group(1) in CAST_SKIP_WORDS:
             continue
-        count += 1
-    return count
+        out.append(m.start())
+    return out
+
+
+def count_casts(code: str) -> int:
+    return len(cast_positions(code))
 
 
 # The espp Task callback's own mutex and condition variable (CS-OWN-08 allows exactly these).
@@ -530,27 +547,47 @@ def lock_matches(code: str) -> list[re.Match[str]]:
     return [m for m in REGEX_METRICS["locks"].finditer(code) if not any(a <= m.start() < b for a, b in spans)]
 
 
-def measure(path: str, text: str) -> dict[str, int]:
-    """Every metric for one unit of source text."""
+class Analysis(NamedTuple):
+    counts: dict[str, int]  # every metric
+    hits: dict[str, list[int]]  # per-line metrics: the line (1-based) of each violation
+    code_lines: list[str]  # the unit, stripped of comments and literals, split into lines
+
+
+def _line_of(text: str) -> Callable[[int], int]:
+    newlines = [i for i, c in enumerate(text) if c == "\n"]
+    return lambda pos: bisect.bisect_left(newlines, pos) + 1
+
+
+def analyse(path: str, text: str) -> Analysis:
+    """Every metric for one unit of source text, and where each per-line violation is."""
     code = strip_code(text)
-    no_inc = INCLUDE_LINE_RE.sub("", code)
-    m: dict[str, int] = {name: len(rx.findall(no_inc)) for name, rx in REGEX_METRICS.items()}
-    m["locks"] = len(lock_matches(no_inc))
-    m["lines"] = sum(1 for ln in code.split("\n") if ln.strip())
-    m["if_config"] = len(IF_CONFIG_RE.findall(code))
-    m["lv_outside_ui"] = 0 if is_ui_file(path) else len(LV_RE.findall(no_inc))
-    m["c_cast"] = count_casts(no_inc)
+    no_inc = INCLUDE_LINE_RE.sub("", code)  # same line count as `code`
+    line_code, line_inc = _line_of(code), _line_of(no_inc)
+    hits: dict[str, list[int]] = {}
+    for name, rx in REGEX_METRICS.items():
+        found = lock_matches(no_inc) if name == "locks" else list(rx.finditer(no_inc))
+        hits[name] = [line_inc(m.start()) for m in found]
+    hits["if_config"] = [line_code(m.start()) for m in IF_CONFIG_RE.finditer(code)]
+    hits["lv_outside_ui"] = [] if is_ui_file(path) else [line_inc(m.start()) for m in LV_RE.finditer(no_inc)]
+    hits["c_cast"] = [line_inc(p) for p in cast_positions(no_inc)]
     st = scan(blank_preprocessor(code))
+    hits["mutable_globals"] = st.global_lines
+    hits["static_state"] = st.static_lines
+    m = {name: len(v) for name, v in hits.items()}
+    lines = code.split("\n")
+    m["lines"] = sum(1 for ln in lines if ln.strip())
     m["fn_over_120"] = sum(1 for n in st.lengths if n > LIMIT_FUNCTION)
     m["fn_over_60"] = sum(1 for n in st.lengths if n > SHOULD_FUNCTION)
-    m["mutable_globals"] = st.globals_
-    m["static_state"] = len(st.static_lines)
-    lines = code.split("\n")
     m["app_main_lines"] = max(
         (sum(1 for ln in lines[a - 1 : b] if ln.strip()) for name, a, b in st.functions if name == APP_MAIN),
         default=0,
     )
-    return m
+    return Analysis(m, hits, lines)
+
+
+def measure(path: str, text: str) -> dict[str, int]:
+    """Every metric for one unit of source text."""
+    return analyse(path, text).counts
 
 
 # --- file set ----------------------------------------------------------------
@@ -687,10 +724,20 @@ def strict_components(root: pathlib.Path) -> frozenset[str]:
     return frozenset(out)
 
 
+LineKeys = dict[str, dict[str, list[tuple[str, str]]]]  # path -> metric -> [(sha1, line text)]
+Grants = dict[str, dict[str, "collections.Counter[str]"]]  # dest -> metric -> multiset of sha1
+
+
 def violations(base: dict[str, dict[str, int]], current: dict[str, dict[str, int]],
-               strict: frozenset[str] = frozenset()) -> list[str]:
-    """FAIL lines. `strict`: components where fn_over_60 is a hard limit (strict_components)."""
+               strict: frozenset[str] = frozenset(), grants: Grants | None = None,
+               keys: LineKeys | None = None) -> list[str]:
+    """FAIL lines. `strict`: components where fn_over_60 is a hard limit (strict_components).
+
+    `grants` (from transfers) and `keys` (line_keys of each path that holds grants): on a
+    path outside the baseline, a forbidden metric's violations must each match a grant 1:1.
+    """
     bad: list[str] = []
+    grants = grants or {}
     for path in sorted(current):
         for name in METRICS:
             n = current[path][name]
@@ -711,6 +758,13 @@ def violations(base: dict[str, dict[str, int]], current: dict[str, dict[str, int
                 # elsewhere SHOULD only; fn_over_120 is the hard limit
             elif name in RULE_PLACEMENTS and RULE_PLACEMENTS[name].match(path):
                 pass  # the rule puts it here
+            elif n > 0 and name in grants.get(path, {}):
+                have = (keys or {}).get(path, {}).get(name, [])
+                unmatched = collections.Counter(k for k, _ in have) - grants[path][name]
+                if unmatched or len(have) != n:
+                    texts = sorted({t for k, t in have if k in unmatched})
+                    bad.append(f"{name} {path}: {sum(unmatched.values())} violating line(s) match no transfer "
+                               f"grant (edited or new): {' | '.join(texts[:3])}")
             elif n > 0:
                 bad.append(f"{name} {path}: {n} > 0 (not in baseline: must be clean)")
     return bad
@@ -729,61 +783,361 @@ def lowered(base: dict[str, dict[str, int]], current: dict[str, dict[str, int]])
     return out
 
 
-def dump(base: dict[str, dict[str, int]]) -> str:
-    doc = {"version": 1, "metrics": {k: dict(sorted(base[k].items())) for k in sorted(base)}}
+# Transfers: transfers[dest][metric][origin] = sorted list of sha1, origin = "<source>@<base sha>".
+Transfers = dict[str, dict[str, dict[str, list[str]]]]
+
+
+def dump(base: dict[str, dict[str, int]], transfers: Transfers | None = None) -> str:
+    doc: dict[str, object] = {"version": 1, "metrics": {k: dict(sorted(base[k].items())) for k in sorted(base)}}
+    if transfers:
+        doc["transfers"] = {
+            dest: {name: {o: sorted(ks) for o, ks in sorted(by_o.items()) if ks}
+                   for name, by_o in sorted(by_m.items()) if any(by_o.values())}
+            for dest, by_m in sorted(transfers.items()) if any(any(v.values()) for v in by_m.values())
+        }
     return json.dumps(doc, indent=2, sort_keys=True) + "\n"
 
 
-def load(path: pathlib.Path) -> dict[str, dict[str, int]]:
-    doc = json.loads(path.read_text(encoding="utf-8"))
+def load_doc(path: pathlib.Path) -> tuple[dict[str, dict[str, int]], Transfers]:
+    return parse_doc(path.read_text(encoding="utf-8"), str(path))
+
+
+def parse_doc(text: str, where: str) -> tuple[dict[str, dict[str, int]], Transfers]:
+    doc = json.loads(text)
     if doc.get("version") != 1:
-        raise SystemExit(f"ratchet: {path}: unknown baseline version {doc.get('version')}")
-    return doc["metrics"]
+        raise SystemExit(f"ratchet: {where}: unknown baseline version {doc.get('version')}")
+    return doc["metrics"], doc.get("transfers", {})
+
+
+def load(path: pathlib.Path) -> dict[str, dict[str, int]]:
+    return load_doc(path)[0]
 
 
 def totals(base: dict[str, dict[str, int]]) -> dict[str, int]:
     return {name: sum(base.get(name, {}).values()) for name in METRICS}
 
 
+# --- transfer: per-line grants that move legacy debt to a new path -----------
+#
+# app-main-shrink V2 (owner-approved 2026-10-06): code is cleaned, then moved verbatim. Debt
+# that cannot be cleaned first moves with `transfer`: each violating line of the destination
+# becomes a grant, the sha1 of the line (comments and literals stripped, whitespace
+# normalised). A grant is valid only if that line was a violation in the source at <base> and
+# the source has lost it since (multiset); the source's baseline drops by the same count in
+# the same commit, so totals never rise. `check` matches the destination's violations 1:1
+# against its grants, so an edited or new violating line fails; it re-verifies every grant
+# against git history (CI needs fetch-depth: 0). `update` drops grants no longer used.
+
+TRANSFERABLE = frozenset(REGEX_METRICS) | {"lv_outside_ui", "c_cast", "if_config", "mutable_globals",
+                                           "static_state"}
+# Never transferable: fn_over_60 and fn_over_120 (V2), and the limit metrics lines and
+# app_main_lines (nothing per line to move; a new file is simply held to the limit).
+NO_GRANT_COMPONENTS = ("components/fw_core",)  # plus every strict (60-line) component
+
+
+def line_key(text: str) -> str:
+    """sha1 of one stripped source line, whitespace normalised."""
+    return hashlib.sha1(" ".join(text.split()).encode("utf-8")).hexdigest()
+
+
+def line_keys(path: str, text: str) -> dict[str, list[tuple[str, str]]]:
+    """For each transferable metric: (sha1, normalised text) of the line of each violation."""
+    a = analyse(path, text)
+    out: dict[str, list[tuple[str, str]]] = {}
+    for name in sorted(TRANSFERABLE):
+        out[name] = [(line_key(a.code_lines[ln - 1]), " ".join(a.code_lines[ln - 1].split())) for ln in a.hits[name]]
+    return out
+
+
+def key_counter(keys: dict[str, list[tuple[str, str]]], name: str) -> collections.Counter[str]:
+    return collections.Counter(k for k, _ in keys.get(name, []))
+
+
+class Git:
+    """The few read-only git queries transfer needs."""
+
+    def __init__(self, root: pathlib.Path, env: dict[str, str] | None = None) -> None:
+        self.root = root
+        self.env = env
+
+    def _run(self, *args: str) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.run(["git", "-C", str(self.root), *args], capture_output=True, env=self.env, check=False)
+
+    def resolve(self, rev: str) -> str | None:
+        r = self._run("rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}")
+        return r.stdout.decode().strip() if r.returncode == 0 else None
+
+    def is_ancestor(self, sha: str) -> bool:
+        return self._run("merge-base", "--is-ancestor", sha, "HEAD").returncode == 0
+
+    def show(self, sha: str, path: str) -> str | None:
+        r = self._run("show", f"{sha}:{path}")
+        return r.stdout.decode("utf-8", errors="replace").replace("\r\n", "\n") if r.returncode == 0 else None
+
+    def ls(self, sha: str, folder: str) -> list[str]:
+        r = self._run("ls-tree", "--name-only", sha, f"{folder}/")
+        return r.stdout.decode().split() if r.returncode == 0 else []
+
+
+def unit_at(git: Git, sha: str, path: str) -> str | None:
+    """A unit's text at a commit; the main unit is main.cpp with its fragments spliced in."""
+    if path != UNIT:
+        return git.show(sha, path)
+    frags = {p: git.show(sha, p) or "" for p in git.ls(sha, "main") if FRAG_RE.match(p)}
+    main = git.show(sha, UNIT)
+    if main is None and not frags:
+        return None
+    return splice_unit(main or "", frags)
+
+
+def grant_forbidden(dest: str, strict: frozenset[str]) -> str | None:
+    """Why `dest` may not receive grants, or None."""
+    comp = component_of(dest)
+    if comp in NO_GRANT_COMPONENTS:
+        return f"{comp} cannot receive transfer grants"
+    if comp in strict:
+        return f"{comp} sets LineThreshold {SHOULD_FUNCTION} (safety code) and cannot receive transfer grants"
+    return None
+
+
+def merged_grants(transfers: Transfers) -> Grants:
+    out: Grants = {}
+    for dest, by_m in transfers.items():
+        for name, by_o in by_m.items():
+            c = out.setdefault(dest, {}).setdefault(name, collections.Counter())
+            for ks in by_o.values():
+                c.update(ks)
+    return out
+
+
+def grant_totals(transfers: Transfers) -> dict[str, int]:
+    out: dict[str, int] = collections.Counter()
+    for by_m in transfers.values():
+        for name, by_o in by_m.items():
+            out[name] += sum(len(ks) for ks in by_o.values())
+    return dict(out)
+
+
+def baseline_rel(root: pathlib.Path, baseline: pathlib.Path) -> str | None:
+    try:
+        return baseline.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return None
+
+
+def transfer_problems(root: pathlib.Path, baseline: pathlib.Path, base: dict[str, dict[str, int]],
+                      transfers: Transfers, units: dict[str, str], git: Git) -> list[str]:
+    """Re-verify every grant against history: FAIL lines (empty when all hold)."""
+    bad: list[str] = []
+    strict = strict_components(root)
+    by_origin: dict[str, dict[str, collections.Counter[str]]] = {}
+    for dest, by_m in sorted(transfers.items()):
+        why = grant_forbidden(dest, strict)
+        if why:
+            bad.append(f"transfer {dest}: {why}")
+        if not in_scope(dest) or FRAG_RE.match(dest):
+            bad.append(f"transfer {dest}: not a unit in the ratchet's scope")
+        for name, by_o in sorted(by_m.items()):
+            if name not in TRANSFERABLE:
+                bad.append(f"transfer {dest}: {name} is not transferable")
+            if dest in base.get(name, {}):
+                bad.append(f"transfer {dest}: {name} has a baseline entry there (a legacy path cannot receive grants)")
+            for origin, ks in by_o.items():
+                by_origin.setdefault(origin, {}).setdefault(name, collections.Counter()).update(ks)
+    rel = baseline_rel(root, baseline)
+    for origin, need in sorted(by_origin.items()):
+        src, _, sha = origin.rpartition("@")
+        if not src or git.resolve(sha) != sha or not git.is_ancestor(sha):
+            bad.append(f"transfer origin {origin}: base is not a commit in HEAD's history "
+                       "(a shallow clone? the checkout needs fetch-depth: 0)")
+            continue
+        then = unit_at(git, sha, src)
+        if then is None:
+            bad.append(f"transfer origin {origin}: {src} does not exist at the base")
+            continue
+        keys_then, keys_now = line_keys(src, then), line_keys(src, units.get(src, ""))
+        for name, c in sorted(need.items()):
+            lost = key_counter(keys_then, name) - key_counter(keys_now, name)
+            short = c - lost
+            if short:
+                bad.append(f"transfer origin {origin}: {sum(short.values())} {name} grant(s) are not lines the source "
+                           "has lost since the base")
+        old_doc = git.show(sha, rel) if rel else None
+        if old_doc is None:
+            bad.append(f"transfer origin {origin}: no baseline at the base to compare totals with")
+            continue
+        old_metrics, old_transfers = parse_doc(old_doc, f"{sha}:{rel}")
+        now_t, then_t = totals(base), totals(old_metrics)
+        now_g, then_g = grant_totals(transfers), grant_totals(old_transfers)
+        for name in sorted(set(old_metrics) & set(METRICS)):
+            now_sum, then_sum = now_t[name] + now_g.get(name, 0), then_t[name] + then_g.get(name, 0)
+            if now_sum > then_sum:
+                bad.append(f"transfer origin {origin}: {name} total (baseline + grants) {now_sum} > {then_sum} "
+                           "at the base: totals never rise")
+    return bad
+
+
+def pruned(transfers: Transfers, keys: LineKeys) -> Transfers:
+    """Grants still used by a violation of their destination (update drops spent ones)."""
+    out: Transfers = {}
+    for dest, by_m in sorted(transfers.items()):
+        for name, by_o in sorted(by_m.items()):
+            want = key_counter(keys.get(dest, {}), name)
+            for origin, ks in sorted(by_o.items()):
+                kept: list[str] = []
+                for k in sorted(ks):
+                    if want[k] > 0:
+                        want[k] -= 1
+                        kept.append(k)
+                if kept:
+                    out.setdefault(dest, {}).setdefault(name, {})[origin] = kept
+    return out
+
+
+def cmd_transfer(root: pathlib.Path, baseline: pathlib.Path, dest: str, src: str, base_rev: str,
+                 git: Git | None = None) -> int:
+    """Grant the destination's violating lines from what the source lost since <base>."""
+    git = git or Git(root)
+    dest, src = dest.replace("\\", "/").removeprefix("./"), src.replace("\\", "/").removeprefix("./")
+    strict = strict_components(root)
+    fail: list[str] = []
+    why = grant_forbidden(dest, strict)
+    if why:
+        fail.append(why)
+    if not in_scope(dest) or FRAG_RE.match(dest) or dest == src:
+        fail.append(f"{dest} is not a unit in the ratchet's scope (or is the source)")
+    sha = git.resolve(base_rev)
+    if sha is None or not git.is_ancestor(sha):
+        fail.append(f"--base {base_rev} is not a commit in HEAD's history")
+    if fail:
+        for f in fail:
+            print(f"FAIL transfer: {f}")
+        return 1
+    assert sha is not None
+    base, transfers = load_doc(baseline)
+    units = collect(root)
+    if dest not in units:
+        print(f"FAIL transfer: {dest} does not exist")
+        return 1
+    then = unit_at(git, sha, src)
+    if then is None:
+        print(f"FAIL transfer: {src} does not exist at {sha[:12]}")
+        return 1
+    origin = f"{src}@{sha}"
+    keys_dest = line_keys(dest, units[dest])
+    keys_then, keys_now = line_keys(src, then), line_keys(src, units.get(src, ""))
+    held = merged_grants(transfers).get(dest, {})
+    claimed: dict[str, collections.Counter[str]] = {}  # what other grants of this origin already took
+    for by_m in transfers.values():
+        for name, by_o in by_m.items():
+            claimed.setdefault(name, collections.Counter()).update(by_o.get(origin, []))
+    counts_dest = measure(dest, units[dest])
+    fail += [f"{v} (not transferable)" for v in violations(base, {dest: counts_dest}, strict)
+             if v.split()[0] not in TRANSFERABLE]
+    new: dict[str, list[str]] = {}
+    for name in sorted(TRANSFERABLE):
+        if counts_dest[name] == 0 or (name in RULE_PLACEMENTS and RULE_PLACEMENTS[name].match(dest)):
+            continue
+        if dest in base.get(name, {}):
+            fail.append(f"{name}: {dest} has a baseline entry (a legacy path cannot receive grants)")
+            continue
+        need = key_counter(keys_dest, name) - held.get(name, collections.Counter())
+        if not need:
+            continue
+        lost = key_counter(keys_then, name) - key_counter(keys_now, name) - claimed.get(name, collections.Counter())
+        short = need - lost
+        if short:
+            texts = sorted({t for k, t in keys_dest[name] if k in short})
+            fail.append(f"{name}: {sum(short.values())} line(s) of {dest} are not violations {src} had at "
+                        f"{sha[:12]} and has lost since: {' | '.join(texts[:3])}")
+            continue
+        have = base.get(name, {}).get(src, 0)
+        k = sum(need.values())
+        if have < k:
+            fail.append(f"{name}: {src} has baseline {have}, cannot give {k} (totals never rise)")
+            continue
+        new[name] = sorted(need.elements())
+    if fail:
+        for f in fail:
+            print(f"FAIL transfer: {f}")
+        print("ratchet: transfer wrote nothing")
+        return 1
+    report: list[str] = []
+    for name, ks in new.items():
+        transfers.setdefault(dest, {}).setdefault(name, {}).setdefault(origin, []).extend(ks)
+        left = base[name][src] - len(ks)
+        if left > 0:
+            base[name][src] = left
+        else:
+            del base[name][src]
+        report.append(f"transfer {name}: {len(ks)} line(s) {src} -> {dest}; {src} baseline {left + len(ks)} -> {left}")
+    rest = violations(base, {dest: counts_dest}, strict, merged_grants(transfers), {dest: keys_dest})
+    if rest:
+        for f in rest:
+            print(f"FAIL {f}")
+        print("ratchet: transfer wrote nothing (the destination fails on metrics a transfer cannot carry)")
+        return 1
+    for line in report:
+        print(line)
+    baseline.write_bytes(dump(base, transfers).encode("utf-8"))
+    print(f"ratchet: wrote {baseline} ({sum(len(v) for v in new.values())} grants from {origin})")
+    return 0
+
+
 # --- commands ----------------------------------------------------------------
 
 
-def cmd_check(root: pathlib.Path, baseline: pathlib.Path) -> int:
-    base = load(baseline)
-    current = measure_tree(root)
-    bad = violations(base, current, strict_components(root))
+def _grant_keys(transfers: Transfers, units: dict[str, str]) -> LineKeys:
+    return {dest: line_keys(dest, units[dest]) for dest in transfers if dest in units}
+
+
+def cmd_check(root: pathlib.Path, baseline: pathlib.Path, git: Git | None = None) -> int:
+    base, transfers = load_doc(baseline)
+    units = collect(root)
+    current = {path: measure(path, text) for path, text in units.items()}
+    keys = _grant_keys(transfers, units)
+    bad = violations(base, current, strict_components(root), merged_grants(transfers), keys)
+    if transfers:
+        bad += transfer_problems(root, baseline, base, transfers, units, git or Git(root))
     for line in bad:
         print(f"FAIL {line}")
     stale = sum(1 for name, paths in base.items() for p, old in paths.items()
                 if current.get(p, {}).get(name, 0) < old)
-    if stale:
-        print(f"note: {stale} baseline entries can be lowered: run `ratchet.py update`")
+    spent = sum(grant_totals(transfers).values()) - sum(grant_totals(pruned(transfers, keys)).values())
+    if stale or spent:
+        print(f"note: {stale} baseline entries and {spent} transfer grants can be lowered: run `ratchet.py update`")
     verdict = "FAIL" if bad else "PASS"
     print(f"ratchet: {verdict} ({len(current)} units, {len(bad)} violations)")
     return 1 if bad else 0
 
 
-def cmd_update(root: pathlib.Path, baseline: pathlib.Path, init: bool) -> int:
-    current = measure_tree(root)
+def cmd_update(root: pathlib.Path, baseline: pathlib.Path, init: bool, git: Git | None = None) -> int:
+    units = collect(root)
+    current = {path: measure(path, text) for path, text in units.items()}
+    transfers: Transfers = {}
     if init:
         if baseline.exists():
             print(f"ratchet: {baseline} exists; --init only writes the first baseline")
             return 1
         new = make_baseline(current)
     else:
-        base = load(baseline)
-        bad = violations(base, current, strict_components(root))
+        base, transfers = load_doc(baseline)
+        keys = _grant_keys(transfers, units)
+        bad = violations(base, current, strict_components(root), merged_grants(transfers), keys)
+        if transfers:
+            bad += transfer_problems(root, baseline, base, transfers, units, git or Git(root))
         if bad:
             for line in bad:
                 print(f"FAIL {line}")
             print("ratchet: update refuses to raise the baseline; fix the code instead")
             return 1
         new = lowered(base, current)
+        transfers = pruned(transfers, keys)
     baseline.parent.mkdir(parents=True, exist_ok=True)
-    baseline.write_bytes(dump(new).encode("utf-8"))
+    baseline.write_bytes(dump(new, transfers).encode("utf-8"))
     for name, n in totals(new).items():
         print(f"{name:18} {n}")
-    print(f"ratchet: wrote {baseline}")
+    print(f"ratchet: wrote {baseline} ({sum(grant_totals(transfers).values())} transfer grants)")
     return 0
 
 
@@ -1043,6 +1397,178 @@ def _selftest_ui_paths(expect: Expect) -> None:
                "lv_outside_ui"]}}}), ["lv_outside_ui main/foo_ui.cpp: 2 > 0 (not in baseline: must be clean)"])
 
 
+def _selftest_transfer(expect: Expect) -> None:
+    """transfer in a synthetic git repo: valid move, edited line, total rise, metric, destination."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp) / "repo"
+        root.mkdir()
+        (pathlib.Path(tmp) / "empty.gitconfig").write_text("", encoding="utf-8")
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env.update(GIT_CONFIG_GLOBAL=str(pathlib.Path(tmp) / "empty.gitconfig"), GIT_CONFIG_NOSYSTEM="1",
+                   GIT_AUTHOR_NAME="ratchet selftest", GIT_AUTHOR_EMAIL="selftest@example.invalid",
+                   GIT_COMMITTER_NAME="ratchet selftest", GIT_COMMITTER_EMAIL="selftest@example.invalid",
+                   GIT_TERMINAL_PROMPT="0")
+        git = Git(root, env)
+
+        def run(*args: str) -> None:
+            r = subprocess.run(["git", "-C", str(root), *args], capture_output=True, env=env, check=False)
+            if r.returncode:
+                raise SystemExit(f"selftest: git {' '.join(args)} failed: {r.stderr.decode(errors='replace')}")
+
+        def commit(msg: str) -> str:
+            run("add", "-A")
+            run("commit", "-q", "-m", msg)
+            sha = git.resolve("HEAD")
+            assert sha
+            return sha
+
+        def write(rel: str, text: str) -> None:
+            (root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (root / rel).write_text(text, encoding="utf-8", newline="\n")
+
+        def quiet(fn: Callable[[], int]) -> tuple[int, str]:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                rc = fn()
+            return rc, out.getvalue()
+
+        bl = root / "tools" / "l0" / "baseline.json"
+
+        def check() -> tuple[int, str]:
+            return quiet(lambda: cmd_check(root, bl, git))
+
+        def transfer(dest: str, base: str) -> tuple[int, str]:
+            return quiet(lambda: cmd_transfer(root, bl, dest, UNIT, base, git))
+
+        run("init", "-q")
+        frag = ("namespace {\nstd::mutex work_mu;\nint work_count = 0;\n}  // namespace\n"
+                "void work() {\n  std::lock_guard<std::mutex> g(work_mu);\n  printf(\"work %d\", work_count);\n}\n")
+        write("main/main.cpp", "#include \"frag_work.inc\"\nnamespace {\nint counter = 0;\n}  // namespace\n"
+              "void keep() {\n  std::lock_guard<std::mutex> g(other_mu);\n}\n" + _long_fn("big", 125))
+        write("main/frag_work.inc", frag)
+        bl.parent.mkdir(parents=True)
+        bl.write_text(dump(make_baseline(measure_tree(root))), encoding="utf-8", newline="\n")
+        before = load(bl)
+        expect("transfer setup: unit counts", (before["locks"], before["mutable_globals"], before["log_direct"]),
+               ({UNIT: 5}, {UNIT: 3}, {UNIT: 1}))
+        a = commit("A: legacy unit")
+
+        # Valid move: the fragment goes verbatim (re-indented) into a new component.
+        (root / "main" / "frag_work.inc").unlink()
+        write("main/main.cpp", (root / "main" / "main.cpp").read_text(encoding="utf-8").split("\n", 1)[1])
+        dest = "components/work/src/work.cpp"
+        write(dest, "#include <mutex>\n" + frag.replace("std::mutex work_mu;", "  std::mutex   work_mu;"))
+        rc, out = check()
+        expect("before the transfer the new path is dirty", rc, 1)
+        rc, out = transfer(dest, "HEAD")
+        expect("valid move: transfer passes", (rc, out.count("transfer ")), (0, 3))
+        after_metrics, grants = load_doc(bl)
+        expect("valid move: source baseline drops by the granted count",
+               (after_metrics["locks"], after_metrics["mutable_globals"], after_metrics["log_direct"]),
+               ({UNIT: 2}, {UNIT: 1}, {}))
+        expect("valid move: grants recorded per metric and origin",
+               {n: len(v[f"{UNIT}@{a}"]) for n, v in grants[dest].items()},
+               {"locks": 3, "log_direct": 1, "mutable_globals": 2})
+        expect("valid move: totals (baseline + grants) unchanged",
+               {n: totals(after_metrics)[n] + grant_totals(grants).get(n, 0) for n in ("locks", "mutable_globals")},
+               {"locks": 5, "mutable_globals": 3})
+        expect("valid move: check passes", check()[0], 0)
+        b = commit("B: move work to a component")
+        expect("valid move: check passes after the commit (base is history)", check()[0], 0)
+        good_doc = bl.read_text(encoding="utf-8")
+        good_dest = (root / dest).read_text(encoding="utf-8")
+
+        # Edited or new violating lines fail.
+        write(dest, good_dest.replace("g(work_mu)", "guard(work_mu)"))
+        rc, out = check()
+        expect("edited violating line fails", (rc, "match no transfer grant" in out), (1, True))
+        write(dest, good_dest + "std::mutex extra_mu;\n")
+        expect("new violating line fails", check()[0], 1)
+        write(dest, good_dest.replace("namespace {\n", "namespace {\nstd::mutex work_mu;\n", 1))
+        expect("a granted line duplicated fails (1:1)", check()[0], 1)
+
+        # update drops spent grants; the spent line cannot come back.
+        write(dest, good_dest.replace("  printf(\"work %d\", work_count);\n", ""))
+        rc, out = check()
+        expect("removed line: check passes with a note", (rc, "1 transfer grants can be lowered" in out), (0, True))
+        expect("update", quiet(lambda: cmd_update(root, bl, init=False, git=git))[0], 0)
+        expect("update drops the spent grant", sorted(load_doc(bl)[1][dest]), ["locks", "mutable_globals"])
+        write(dest, good_dest)
+        expect("a spent grant's line cannot return", check()[0], 1)
+        bl.write_text(good_doc, encoding="utf-8", newline="\n")
+        expect("restored", check()[0], 0)
+
+        # Totals never rise: grants kept but the source baseline restored by hand.
+        doc = json.loads(good_doc)
+        doc["metrics"]["locks"][UNIT] = 5
+        bl.write_text(json.dumps(doc), encoding="utf-8", newline="\n")
+        rc, out = check()
+        expect("total-rise attempt fails", (rc, "totals never rise" in out), (1, True))
+        # A hand-made grant for a line the source still has.
+        doc = json.loads(good_doc)
+        doc["transfers"][dest]["mutable_globals"][f"{UNIT}@{a}"].append(line_key("int counter = 0;"))
+        doc["metrics"]["mutable_globals"][UNIT] = 0
+        bl.write_text(json.dumps(doc), encoding="utf-8", newline="\n")
+        rc, out = check()
+        expect("grant for a line the source still has fails", (rc, "has lost since the base" in out), (1, True))
+        # A base that is not in history (e.g. a shallow clone).
+        doc = json.loads(good_doc)
+        doc["transfers"][dest]["locks"] = {f"{UNIT}@{'0' * 40}": doc["transfers"][dest]["locks"][f"{UNIT}@{a}"]}
+        bl.write_text(json.dumps(doc), encoding="utf-8", newline="\n")
+        rc, out = check()
+        expect("unknown base fails", (rc, "fetch-depth: 0" in out), (1, True))
+        bl.write_text(good_doc, encoding="utf-8", newline="\n")
+
+        # Non-transferable metric: moving the 125-line function cannot carry fn_over_120.
+        unit_b = (root / "main" / "main.cpp").read_text(encoding="utf-8")
+        write("main/main.cpp", unit_b.replace(_long_fn("big", 125), ""))
+        write("components/big/src/big.cpp", "namespace {\nint big_state = 0;\n}\n" + _long_fn("big", 125))
+        rc, out = transfer("components/big/src/big.cpp", "HEAD")
+        expect("non-transferable metric: transfer refuses", (rc, "fn_over_120" in out), (1, True))
+        expect("non-transferable metric: nothing written", bl.read_text(encoding="utf-8"), good_doc)
+        write("components/big/src/big.cpp", _long_fn("big", 125))
+        doc = json.loads(good_doc)
+        doc["transfers"]["components/big/src/big.cpp"] = {
+            "fn_over_120": {f"{UNIT}@{b}": [line_key("void big() {")]}}
+        doc["metrics"]["fn_over_120"] = {}
+        bl.write_text(json.dumps(doc), encoding="utf-8", newline="\n")
+        rc, out = check()
+        expect("hand-made fn_over_120 grant fails", (rc, "fn_over_120 is not transferable" in out), (1, True))
+        bl.write_text(good_doc, encoding="utf-8", newline="\n")
+        write("main/main.cpp", unit_b)
+        (root / "components" / "big" / "src" / "big.cpp").unlink()
+
+        # Forbidden destinations: fw_core and a 60-line (safety) component.
+        moved = "namespace {\nint counter = 0;\n}  // namespace\n"
+        write("main/main.cpp", unit_b.replace(moved, ""))
+        write("components/safe/.clang-tidy", "CheckOptions:\n"
+              "  - { key: readability-function-size.LineThreshold, value: 60 }\n")
+        for forbidden in ("components/fw_core/src/x.cpp", "components/safe/src/x.cpp"):
+            write(forbidden, moved)
+            rc, out = transfer(forbidden, "HEAD")
+            expect(f"forbidden destination {forbidden}", (rc, "cannot receive transfer grants" in out), (1, True))
+            expect(f"forbidden destination {forbidden}: nothing written", bl.read_text(encoding="utf-8"), good_doc)
+            (root / forbidden).unlink()
+        doc = json.loads(good_doc)
+        doc["transfers"]["components/fw_core/src/x.cpp"] = doc["transfers"].pop(dest)
+        bl.write_text(json.dumps(doc), encoding="utf-8", newline="\n")
+        expect("hand-moved grants to fw_core fail", "fw_core cannot receive" in check()[1], True)
+        bl.write_text(good_doc, encoding="utf-8", newline="\n")
+
+        # A permitted second move of the same kind of line works, then cannot be claimed twice.
+        write("components/two/src/two.cpp", moved)
+        expect("second valid move", transfer("components/two/src/two.cpp", "HEAD")[0], 0)
+        expect("second valid move: check passes", check()[0], 0)
+        write("components/three/src/three.cpp", moved)
+        rc, out = transfer("components/three/src/three.cpp", "HEAD")
+        expect("the same lost line cannot be granted twice", (rc, "has lost since" in out), (1, True))
+        (root / "components" / "three" / "src" / "three.cpp").unlink()
+        # Lines the source never had, and a base outside history.
+        write("components/four/src/four.cpp", "std::mutex fresh_mu;\n")
+        expect("a line the source never had", transfer("components/four/src/four.cpp", "HEAD")[0], 1)
+        expect("an unknown base", transfer("components/four/src/four.cpp", "0" * 40)[0], 1)
+
+
 def selftest() -> int:
     failures: list[str] = []
 
@@ -1188,6 +1714,7 @@ def selftest() -> int:
     _selftest_app_main(expect)
     _selftest_task_idiom(expect)
     _selftest_ui_paths(expect)
+    _selftest_transfer(expect)
 
     for f in failures:
         print(f"selftest FAIL {f}")
@@ -1197,11 +1724,20 @@ def selftest() -> int:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
-    ap.add_argument("command", choices=["check", "update", "selftest"])
+    ap.add_argument("command", choices=["check", "update", "selftest", "transfer"])
+    ap.add_argument("dest", nargs="?", help="transfer: the destination unit, e.g. components/x/src/x.cpp")
     ap.add_argument("--root", type=pathlib.Path, default=ROOT)
     ap.add_argument("--baseline", type=pathlib.Path, default=BASELINE)
     ap.add_argument("--init", action="store_true", help="update: write the first baseline")
+    ap.add_argument("--from", dest="source", help="transfer: the source unit, e.g. main/main.cpp")
+    ap.add_argument("--base", help="transfer: the commit before the move (the source still has the lines)")
     args = ap.parse_args(argv)
+    if args.command == "transfer":
+        if not (args.dest and args.source and args.base):
+            ap.error("transfer needs <dest> --from <source> --base <sha>")
+        return cmd_transfer(args.root, args.baseline, args.dest, args.source, args.base)
+    if args.dest:
+        ap.error(f"{args.command} takes no destination")
     if args.command == "selftest":
         return selftest()
     if args.command == "check":
