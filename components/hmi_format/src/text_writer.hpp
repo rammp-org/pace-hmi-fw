@@ -50,8 +50,19 @@ public:
     }
   }
 
+  /// @brief Appends an unsigned integer in decimal (fmt's "{}" of a size_t).
+  /// @param value the integer
+  void put_unsigned(uint64_t value) noexcept {
+    std::array<char, UNSIGNED_TEXT_SIZE> digits{};
+    const auto [end, ec] = std::to_chars(digits.data(), digits.data() + digits.size(), value);
+    if (ec == std::errc{}) { // cannot fail: UNSIGNED_TEXT_SIZE holds 2^64 - 1
+      put_text(std::string_view(digits.data(), static_cast<std::size_t>(end - digits.data())));
+    }
+  }
+
 private:
-  static constexpr std::size_t INT_TEXT_SIZE = 12; // "-2147483648"
+  static constexpr std::size_t INT_TEXT_SIZE = 12;      // "-2147483648"
+  static constexpr std::size_t UNSIGNED_TEXT_SIZE = 20; // "18446744073709551615"
 
   void terminate() noexcept {
     if (!out_.empty()) {

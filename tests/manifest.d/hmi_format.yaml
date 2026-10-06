@@ -1,13 +1,15 @@
-# L1 host app for components/hmi_format (cases FMT-001..FMT-020 in test_hmi_format.cpp): the
-# screen text formatters against golden tables recorded from the pre-move code, and against
-# that code itself (linked with LVGL's own lv_snprintf) over wide sweeps.
+# L1 host app for components/hmi_format (cases FMT-001..FMT-020 in test_hmi_format.cpp, FMT-1xx
+# in test_screens.cpp): the screen text formatters against golden tables recorded from the
+# pre-move code, and against that code itself (linked with LVGL's own lv_snprintf, or fmt for
+# the About, Firmware update and Internet helpers) over wide sweeps.
 # spec-deviation(TS-UNIT-01): host-native g++ in WSL, not the IDF linux target (owner, 2026-10-06).
 - id: L1-FMT
-  title: screen text formatters (speed, steppers, seat, clock, link, diagnostics) against goldens
+  title: screen text formatters (drive, settings, clock, diagnostics, About, update, Internet) vs goldens
   level: L1
   path: components/hmi_format/test
   requirements: [REQ-FMT-01, REQ-FMT-02, REQ-FMT-03, REQ-FMT-04, REQ-FMT-05, REQ-FMT-06,
-                 REQ-FMT-07, REQ-FMT-08, REQ-FMT-09]
+                 REQ-FMT-07, REQ-FMT-08, REQ-FMT-09, REQ-FMT-10, REQ-FMT-11, REQ-FMT-12,
+                 REQ-FMT-13]
   resources: [host]
   timeout_s: 300
   expected_s: 60
