@@ -5,6 +5,7 @@
 
 #include "drive_session_table.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -109,12 +110,9 @@ TEST_CASE("DSO-002 no valid combination matches two rows", "[drive_session_table
   unsigned long over = 0;
   for_each_valid([&](Phase p, GuardMask, Input in, GuardMask guards) {
     ++combos;
-    int hits = 0;
-    for (const auto &t : ds::TRANSITIONS) {
-      if (t.from == p && t.input == in && ds::matches(t.guard, guards)) {
-        ++hits;
-      }
-    }
+    const auto hits = std::ranges::count_if(ds::TRANSITIONS, [&](const auto &t) {
+      return t.from == p && t.input == in && ds::matches(t.guard, guards);
+    });
     if (hits > 1) {
       ++over;
     }
@@ -197,14 +195,11 @@ TEST_CASE("DSO-008 every hold poll combination has one row", "[drive_session_tab
   using ds::HoldState;
   for (HoldState s : {HoldState::IDLE, HoldState::FILLING}) {
     for (unsigned m = 0; m < 16; ++m) {
-      int hits = 0;
-      for (const auto &t : ds::HOLD_TRANSITIONS) {
-        if (t.from == s && t.input == HoldInput::POLL &&
-            (m & t.guard.need_true) == t.guard.need_true && (m & t.guard.need_false) == 0) {
-          ++hits;
-        }
-      }
-      TEST_ASSERT_EQUAL_INT(1, hits);
+      const auto hits = std::ranges::count_if(ds::HOLD_TRANSITIONS, [&](const auto &t) {
+        return t.from == s && t.input == HoldInput::POLL &&
+               (m & t.guard.need_true) == t.guard.need_true && (m & t.guard.need_false) == 0;
+      });
+      TEST_ASSERT_EQUAL_INT(1, static_cast<int>(hits));
     }
   }
 }

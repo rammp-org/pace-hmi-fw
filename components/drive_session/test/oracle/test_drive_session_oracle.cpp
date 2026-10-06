@@ -12,6 +12,7 @@
 
 #include "drive_session.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -171,14 +172,7 @@ std::array<Actions, 4> tick(DriveSession &s, const Env &at_start, const Env &aft
 // A tick in which nothing changed between the two samples.
 std::array<Actions, 4> tick(DriveSession &s, const Env &env) { return tick(s, env, env); }
 
-bool contains(const Actions &a, Action x) {
-  for (const Action y : a) {
-    if (y == x) {
-      return true;
-    }
-  }
-  return false;
-}
+bool contains(const Actions &a, Action x) { return std::ranges::find(a, x) != a.end(); }
 
 std::uint64_t splitmix64(std::uint64_t &state) {
   state += 0x9E3779B97F4A7C15ULL;

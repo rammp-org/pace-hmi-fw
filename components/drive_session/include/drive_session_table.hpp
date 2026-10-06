@@ -63,11 +63,13 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
+#include <numeric>
 #include <string_view>
 
 // The enums, helpers and row structs (moved there unchanged, owner-approved 2026-10-06).
@@ -429,21 +431,19 @@ constexpr bool is_error_or_timeout_exit(const Transition &t) noexcept {
 }
 
 constexpr bool has_way_out(Phase p) noexcept {
-  for (const Transition &t : TRANSITIONS) {
-    if (t.from == p && is_error_or_timeout_exit(t)) {
-      return true;
-    }
-  }
-  return false;
+  return std::ranges::any_of(
+      TRANSITIONS, [p](const Transition &t) { return t.from == p && is_error_or_timeout_exit(t); });
 }
 
+// While KNOWN_GAPS is empty no phase is a gap; the lookup is compiled only once a gap is
+// recorded (then the array's size is no longer 0).
 constexpr bool is_known_gap(Phase p) noexcept {
-  for (const KnownGap &g : KNOWN_GAPS) {
-    if (g.phase == p) {
-      return true;
-    }
+  if constexpr (KNOWN_GAPS.empty()) {
+    static_cast<void>(p);
+    return false;
+  } else {
+    return std::ranges::any_of(KNOWN_GAPS, [p](const KnownGap &g) { return g.phase == p; });
   }
-  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -465,48 +465,57 @@ constexpr bool rows_exclusive() noexcept {
 }
 
 constexpr bool guards_not_contradictory() noexcept {
-  for (const Transition &t : TRANSITIONS) {
-    if ((t.guard.need_true & t.guard.need_false) != 0) {
-      return false;
+  return std::ranges::none_of(TRANSITIONS, [](const Transition &t) {
+    return (t.guard.need_true & t.guard.need_false) != 0;
+  });
+}
+
+// One row: NONE only as padding (nothing but NONE after the first NONE), no action twice.
+constexpr bool row_actions_packed(const Transition &t) noexcept {
+  const auto first_none = std::ranges::find(t.actions, Action::NONE);
+  if (!std::all_of(first_none, t.actions.end(), [](Action a) { return a == Action::NONE; })) {
+    return false;
+  }
+  for (std::size_t i = 0; i < kMaxActions; ++i) {
+    for (std::size_t j = i + 1; j < kMaxActions; ++j) {
+      if (t.actions[i] != Action::NONE && t.actions[i] == t.actions[j]) {
+        return false;
+      }
     }
   }
   return true;
 }
 
 constexpr bool actions_packed() noexcept {
-  for (const Transition &t : TRANSITIONS) {
-    bool ended = false;
-    for (Action a : t.actions) {
-      if (a == Action::NONE) {
-        ended = true;
-      } else if (ended) {
-        return false;
-      }
-    }
-    for (std::size_t i = 0; i < kMaxActions; ++i) {
-      for (std::size_t j = i + 1; j < kMaxActions; ++j) {
-        if (t.actions[i] != Action::NONE && t.actions[i] == t.actions[j]) {
-          return false;
-        }
-      }
-    }
+  return std::ranges::all_of(TRANSITIONS, row_actions_packed);
+}
+
+constexpr bool row_within_precondition(const Transition &t) noexcept {
+  const InputPrecondition &pre = INPUT_PRECONDITIONS[static_cast<std::size_t>(t.input)];
+  if (pre.input != t.input || !in(pre.phases, t.from)) {
+    return false;
   }
-  return true;
+  // A row's guard must not contradict the input's own precondition.
+  return ((t.guard.need_true & pre.guard.need_false) |
+          (t.guard.need_false & pre.guard.need_true)) == 0;
 }
 
 constexpr bool rows_within_preconditions() noexcept {
-  for (const Transition &t : TRANSITIONS) {
-    const InputPrecondition &pre = INPUT_PRECONDITIONS[static_cast<std::size_t>(t.input)];
-    if (pre.input != t.input || !in(pre.phases, t.from)) {
-      return false;
+  return std::ranges::all_of(TRANSITIONS, row_within_precondition);
+}
+
+// One hidden bit `v`: run the actions from each value of it the source phase and the guard
+// allow (both, when neither fixes it); the bit must land where `dst` allows.
+constexpr bool bit_lands_valid(const Actions &actions, GuardMask v, GuardMask fixed_true,
+                               GuardMask fixed_false, const PhaseInvariant &dst) noexcept {
+  const std::array<GuardMask, 2> starts{GuardMask{0}, v};
+  return std::ranges::all_of(starts, [&](GuardMask start) {
+    if (((v & fixed_true) != 0 && start == 0) || ((v & fixed_false) != 0 && start != 0)) {
+      return true; // not a value this row can start from
     }
-    // A row's guard must not contradict the input's own precondition.
-    if (((t.guard.need_true & pre.guard.need_false) | (t.guard.need_false & pre.guard.need_true)) !=
-        0) {
-      return false;
-    }
-  }
-  return true;
+    const GuardMask after = apply(actions, start) & v;
+    return !((dst.must_true & v) != 0 && after == 0) && !((dst.must_false & v) != 0 && after != 0);
+  });
 }
 
 // From any hidden mask valid in `from` that the guard admits, the actions must
@@ -524,30 +533,15 @@ constexpr bool row_keeps_invariants(const Transition &t) noexcept {
     if ((v & kHiddenGuards) == 0) {
       continue;
     }
-    // Run the actions on both values of an unconstrained bit.
-    for (GuardMask start : {GuardMask{0}, v}) {
-      if (((v & fixed_true) != 0 && start == 0) || ((v & fixed_false) != 0 && start != 0)) {
-        continue;
-      }
-      const GuardMask after = apply(t.actions, start) & v;
-      if ((dst.must_true & v) != 0 && after == 0) {
-        return false;
-      }
-      if ((dst.must_false & v) != 0 && after != 0) {
-        return false;
-      }
+    if (!bit_lands_valid(t.actions, v, fixed_true, fixed_false, dst)) {
+      return false;
     }
   }
   return true;
 }
 
 constexpr bool all_rows_keep_invariants() noexcept {
-  for (const Transition &t : TRANSITIONS) {
-    if (!row_keeps_invariants(t)) {
-      return false;
-    }
-  }
-  return true;
+  return std::ranges::all_of(TRANSITIONS, row_keeps_invariants);
 }
 
 constexpr bool every_action_used() noexcept {
@@ -606,67 +600,61 @@ constexpr bool tables_indexed() noexcept {
 }
 
 constexpr bool has(const Actions &a, Action x) noexcept {
-  for (Action y : a) {
-    if (y == x) {
-      return true;
-    }
-  }
-  return false;
+  return std::ranges::find(a, x) != a.end();
 }
 
 // The phase-changing actions agree with `to`, and lockedness changes only
 // through SET_LOCKED / SET_UNLOCKED.
-constexpr bool actions_agree_with_phase() noexcept {
-  for (const Transition &t : TRANSITIONS) {
-    const Actions &a = t.actions;
-    if (has(a, Action::SET_LOCKED) && t.to != Phase::LOCKED) {
-      return false;
-    }
-    if (has(a, Action::SET_UNLOCKED) && t.to != Phase::UNLOCKING) {
-      return false;
-    }
-    if (!has(a, Action::SET_LOCKED) && !has(a, Action::SET_UNLOCKED) &&
-        is_locked_phase(t.from) != is_locked_phase(t.to)) {
-      return false;
-    }
-    if (has(a, Action::RING_WAIT) && t.to != Phase::ASKING) {
-      return false;
-    }
-    if (has(a, Action::RING_REST) && t.to != Phase::LOCKED) {
-      return false;
-    }
-    if (has(a, Action::ARM_EXIT_DEADLINE) && t.to != Phase::EXITING) {
-      return false;
-    }
-    if (has(a, Action::SET_EXIT_REQUESTED) != has(a, Action::ARM_EXIT_DEADLINE)) {
-      return false;
-    }
-    if (has(a, Action::START_UNLOCK_TIMER) != has(a, Action::SET_UNLOCKED)) {
-      return false;
-    }
-    // Leaving an exit phase for an unlocked one other than via the deadline.
-    if ((t.from == Phase::EXITING) && t.to == Phase::EXIT_REFUSED &&
-        !has(a, Action::CLEAR_EXIT_DEADLINE)) {
-      return false;
-    }
-    // A phase change with no action that explains it.
-    if (t.from != t.to && !has(a, Action::SET_LOCKED) && !has(a, Action::SET_UNLOCKED) &&
-        !has(a, Action::RING_WAIT) && !has(a, Action::RING_REST) &&
-        !has(a, Action::ARM_EXIT_DEADLINE) && !has(a, Action::CLEAR_EXIT_DEADLINE) &&
-        !has(a, Action::UNLOCK_TIMER_DONE)) {
-      return false;
-    }
+constexpr bool row_actions_agree_with_phase(const Transition &t) noexcept {
+  const Actions &a = t.actions;
+  if (has(a, Action::SET_LOCKED) && t.to != Phase::LOCKED) {
+    return false;
+  }
+  if (has(a, Action::SET_UNLOCKED) && t.to != Phase::UNLOCKING) {
+    return false;
+  }
+  if (!has(a, Action::SET_LOCKED) && !has(a, Action::SET_UNLOCKED) &&
+      is_locked_phase(t.from) != is_locked_phase(t.to)) {
+    return false;
+  }
+  if (has(a, Action::RING_WAIT) && t.to != Phase::ASKING) {
+    return false;
+  }
+  if (has(a, Action::RING_REST) && t.to != Phase::LOCKED) {
+    return false;
+  }
+  if (has(a, Action::ARM_EXIT_DEADLINE) && t.to != Phase::EXITING) {
+    return false;
+  }
+  if (has(a, Action::SET_EXIT_REQUESTED) != has(a, Action::ARM_EXIT_DEADLINE)) {
+    return false;
+  }
+  if (has(a, Action::START_UNLOCK_TIMER) != has(a, Action::SET_UNLOCKED)) {
+    return false;
+  }
+  // Leaving an exit phase for an unlocked one other than via the deadline.
+  if ((t.from == Phase::EXITING) && t.to == Phase::EXIT_REFUSED &&
+      !has(a, Action::CLEAR_EXIT_DEADLINE)) {
+    return false;
+  }
+  // A phase change with no action that explains it.
+  if (t.from != t.to && !has(a, Action::SET_LOCKED) && !has(a, Action::SET_UNLOCKED) &&
+      !has(a, Action::RING_WAIT) && !has(a, Action::RING_REST) &&
+      !has(a, Action::ARM_EXIT_DEADLINE) && !has(a, Action::CLEAR_EXIT_DEADLINE) &&
+      !has(a, Action::UNLOCK_TIMER_DONE)) {
+    return false;
   }
   return true;
 }
 
+constexpr bool actions_agree_with_phase() noexcept {
+  return std::ranges::all_of(TRANSITIONS, row_actions_agree_with_phase);
+}
+
 constexpr bool effects_hidden_only() noexcept {
-  for (const ActionEffect &e : ACTION_EFFECTS) {
-    if (((e.sets | e.clears) & ~kHiddenGuards) != 0 || (e.sets & e.clears) != 0) {
-      return false;
-    }
-  }
-  return true;
+  return std::ranges::none_of(ACTION_EFFECTS, [](const ActionEffect &e) {
+    return ((e.sets | e.clears) & ~kHiddenGuards) != 0 || (e.sets & e.clears) != 0;
+  });
 }
 
 } // namespace detail
@@ -722,10 +710,8 @@ constexpr HoldMask hbit(HoldGuard g) noexcept {
   return static_cast<HoldMask>(1u << static_cast<unsigned>(g));
 }
 constexpr HoldMask hmask(std::initializer_list<HoldGuard> gs) noexcept {
-  unsigned m = 0;
-  for (HoldGuard g : gs) {
-    m |= hbit(g);
-  }
+  const unsigned m = std::accumulate(gs.begin(), gs.end(), 0U,
+                                     [](unsigned acc, HoldGuard g) { return acc | hbit(g); });
   return static_cast<HoldMask>(m);
 }
 struct HoldGuardExpr {
@@ -867,23 +853,25 @@ constexpr bool hold_rows_exclusive() noexcept {
   }
   return true;
 }
-// Every (state, POLL, guard combination) is covered by exactly one row.
-constexpr bool hold_poll_complete() noexcept {
-  for (HoldState s : {HoldState::IDLE, HoldState::FILLING}) {
-    for (unsigned m = 0; m < 16; ++m) {
-      int hits = 0;
-      for (const HoldTransition &t : HOLD_TRANSITIONS) {
-        if (t.from == s && t.input == HoldInput::POLL &&
-            (m & t.guard.need_true) == t.guard.need_true && (m & t.guard.need_false) == 0) {
-          ++hits;
-        }
-      }
-      if (hits != 1) {
-        return false;
-      }
+// The POLL rows of state `s` that match guard combination `m`.
+constexpr std::ptrdiff_t hold_poll_hits(HoldState s, unsigned m) noexcept {
+  return std::ranges::count_if(HOLD_TRANSITIONS, [s, m](const HoldTransition &t) {
+    return t.from == s && t.input == HoldInput::POLL &&
+           (m & t.guard.need_true) == t.guard.need_true && (m & t.guard.need_false) == 0;
+  });
+}
+constexpr bool hold_state_poll_complete(HoldState s) noexcept {
+  for (unsigned m = 0; m < 16; ++m) {
+    if (hold_poll_hits(s, m) != 1) {
+      return false;
     }
   }
   return true;
+}
+// Every (state, POLL, guard combination) is covered by exactly one row.
+constexpr bool hold_poll_complete() noexcept {
+  constexpr std::array<HoldState, 2> kStates{HoldState::IDLE, HoldState::FILLING};
+  return std::ranges::all_of(kStates, hold_state_poll_complete);
 }
 } // namespace detail
 static_assert(detail::hold_rows_exclusive(), "two hold rows can both match");

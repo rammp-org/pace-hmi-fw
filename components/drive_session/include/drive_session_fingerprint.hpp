@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
@@ -43,16 +44,11 @@ public:
   template <typename T> constexpr void value(T v) noexcept { word(static_cast<std::uint32_t>(v)); }
   constexpr void text(std::string_view s) noexcept {
     value(s.size());
-    for (const char c : s) {
-      byte(static_cast<std::uint8_t>(c));
-    }
+    std::ranges::for_each(s, [this](char c) { byte(static_cast<std::uint8_t>(c)); });
   }
   template <typename A, typename E> constexpr void list(const A &actions, E none) noexcept {
-    std::uint32_t n = 0;
-    for (const E a : actions) {
-      n += a == none ? 0U : 1U;
-    }
-    word(n);
+    word(static_cast<std::uint32_t>(
+        std::ranges::count_if(actions, [none](E a) { return a != none; })));
     for (const E a : actions) {
       if (a != none) {
         value(a);
@@ -117,8 +113,8 @@ constexpr void add_invariants_and_effects(Fnv1a &f) noexcept {
 
 constexpr void add_sequences_and_applies(Fnv1a &f) noexcept {
   f.value(TICK_SEQUENCE.size());
-  for (const Input in : TICK_SEQUENCE) {
-    f.value(in);
+  for (const Input input : TICK_SEQUENCE) {
+    f.value(input);
   }
   f.value(HOLD_POLL_SEQUENCE.size());
   for (const HoldPollStep s : HOLD_POLL_SEQUENCE) {

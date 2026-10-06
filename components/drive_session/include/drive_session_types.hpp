@@ -20,6 +20,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
+#include <numeric>
 #include <string_view>
 
 namespace hmi::drive_session {
@@ -124,11 +125,8 @@ inline constexpr std::size_t kGuardCount = 15;
 using GuardMask = std::uint32_t;
 constexpr GuardMask bit(Guard g) noexcept { return GuardMask{1} << static_cast<unsigned>(g); }
 constexpr GuardMask mask(std::initializer_list<Guard> gs) noexcept {
-  GuardMask m = 0;
-  for (Guard g : gs) {
-    m |= bit(g);
-  }
-  return m;
+  return std::accumulate(gs.begin(), gs.end(), GuardMask{0},
+                         [](GuardMask m, Guard g) { return m | bit(g); });
 }
 
 inline constexpr GuardMask kEnvGuards =
@@ -296,10 +294,9 @@ struct PhaseInvariant {
 // ---------------------------------------------------------------------------
 using PhaseSet = std::uint8_t;
 constexpr PhaseSet pset(std::initializer_list<Phase> ps) noexcept {
-  unsigned m = 0;
-  for (Phase p : ps) {
-    m |= 1u << static_cast<unsigned>(p);
-  }
+  const unsigned m = std::accumulate(ps.begin(), ps.end(), 0U, [](unsigned acc, Phase p) {
+    return acc | (1u << static_cast<unsigned>(p));
+  });
   return static_cast<PhaseSet>(m);
 }
 inline constexpr PhaseSet kAllPhases = pset({Phase::LOCKED, Phase::ASKING, Phase::UNLOCKING,
