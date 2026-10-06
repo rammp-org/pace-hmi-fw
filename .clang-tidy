@@ -1,0 +1,82 @@
+# Copied from fw-standards (github.com/Alaining/fw-standards) at commit a132375: .clang-tidy.
+# The only local change is ExcludeHeaderFilterRegex below; each addition says why.
+# Starter clang-tidy config for CODING_SPEC CS-FMT-04 and the naming table (CS-NAM-01).
+# Draft: tuned during the first project pilot. Every disabled check says why.
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  clang-analyzer-*,
+  concurrency-*,
+  cppcoreguidelines-*,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-avoid-c-arrays,
+  -cppcoreguidelines-avoid-do-while,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-type-union-access,
+  -cppcoreguidelines-pro-type-vararg,
+  misc-*,
+  -misc-include-cleaner,
+  -misc-non-private-member-variables-in-classes,
+  modernize-*,
+  -modernize-use-trailing-return-type,
+  performance-*,
+  readability-*,
+  -readability-magic-numbers,
+  -readability-identifier-length,
+  -readability-uppercase-literal-suffix,
+  -performance-enum-size
+# Why the exclusions:
+#   easily-swappable-parameters: fires on most (x, y) APIs; strong types (CS-TYP-02) are the fix.
+#   magic-numbers: hardware constants are clearer inline with a comment than renamed.
+#   avoid-c-arrays (cppcoreguidelines): duplicate of modernize-avoid-c-arrays, which stays on.
+#   avoid-do-while, pointer-arithmetic, union-access, vararg: IDF and LVGL macros and APIs.
+#   include-cleaner: noisy across clang-tidy versions.
+#   non-private-member-variables (misc): Config and value structs are public by design.
+#   trailing-return-type, identifier-length, uppercase-literal-suffix: style we don't use.
+#   performance-enum-size: fires on every enum; the size of an enum is not our bottleneck.
+WarningsAsErrors: '*'
+HeaderFilterRegex: '.*/(main|components/[^/]+/(include|src))/.*'
+# Add vendored copies kept in components/ (CS-LAY-05), listed in the profile.
+# Added in this repo (the first two are the fw-standards defaults):
+#   components/ui/            SquareLine export, regenerated wholesale on every import (CS-LAY-04)
+#   components/m5stack-tab5/  vendored Tab5 BSP (CS-LAY-05)
+#   components/joystick/      vendored from espp (CS-LAY-05)
+#   external/                 the rammp-rtps submodule: shared spec, owned by its own repo
+#   main/boot_logo.[ch]       generated image data (a pixel array), not hand-written code.
+#                             This regex covers only the header; the clang-check run must
+#                             also skip main/boot_logo.c as a source.
+ExcludeHeaderFilterRegex: '.*/(generated|managed_components|external|components/(ui|m5stack-tab5|joystick))/.*|.*/main/boot_logo\.[ch]$'
+CheckOptions:
+  - { key: readability-identifier-naming.NamespaceCase,          value: lower_case }
+  - { key: readability-identifier-naming.ClassCase,              value: CamelCase }
+  - { key: readability-identifier-naming.StructCase,             value: CamelCase }
+  - { key: readability-identifier-naming.EnumCase,               value: CamelCase }
+  - { key: readability-identifier-naming.TypeAliasCase,          value: CamelCase }
+  - { key: readability-identifier-naming.TypeAliasIgnoredRegexp, value: '^[a-z][a-z0-9_]*_fn$' }
+  - { key: readability-identifier-naming.FunctionCase,           value: lower_case }
+  - { key: readability-identifier-naming.MethodCase,             value: lower_case }
+  - { key: readability-identifier-naming.VariableCase,           value: lower_case }
+  - { key: readability-identifier-naming.ParameterCase,          value: lower_case }
+  - { key: readability-identifier-naming.LocalConstantCase,      value: lower_case }
+  - { key: readability-identifier-naming.PublicMemberCase,       value: lower_case }
+  - { key: readability-identifier-naming.PrivateMemberCase,      value: lower_case }
+  - { key: readability-identifier-naming.PrivateMemberSuffix,    value: '_' }
+  - { key: readability-identifier-naming.ProtectedMemberCase,    value: lower_case }
+  - { key: readability-identifier-naming.ProtectedMemberSuffix,  value: '_' }
+  - { key: readability-identifier-naming.ConstexprVariableCase,  value: UPPER_CASE }
+  - { key: readability-identifier-naming.GlobalConstantCase,     value: UPPER_CASE }
+  - { key: readability-identifier-naming.ClassConstantCase,      value: UPPER_CASE }
+  - { key: readability-identifier-naming.EnumConstantCase,       value: UPPER_CASE }
+  - { key: readability-function-cognitive-complexity.Threshold,  value: 25 }
+  # CS-FIL-01: 120 lines. Safety-relevant components add their own .clang-tidy with
+  # 'InheritParentConfig: true' and LineThreshold 60. Without it, the root config is replaced.
+  - { key: readability-function-size.LineThreshold,              value: 120 }
+  # CS-ERR-02: esp_err_t is a typedef of int, so return types can't catch it; list the APIs.
+  # The first part is clang-tidy's default list (esp-clang 20.1.1); keep it when editing.
+  - { key: bugprone-unused-return-value.CheckedFunctions,        value: '^::std::async$;^::std::launder$;^::std::remove$;^::std::remove_if$;^::std::unique$;^::std::unique_ptr::release$;^::std::basic_string::empty$;^::std::vector::empty$;^::std::back_inserter$;^::std::distance$;^::std::find$;^::std::find_if$;^::std::inserter$;^::std::lower_bound$;^::std::make_pair$;^::std::map::count$;^::std::map::find$;^::std::map::lower_bound$;^::std::multimap::equal_range$;^::std::multimap::upper_bound$;^::std::set::count$;^::std::set::find$;^::std::setfill$;^::std::setprecision$;^::std::setw$;^::std::upper_bound$;^::std::vector::at$;^::bsearch$;^::ferror$;^::feof$;^::isalnum$;^::isalpha$;^::isblank$;^::iscntrl$;^::isdigit$;^::isgraph$;^::islower$;^::isprint$;^::ispunct$;^::isspace$;^::isupper$;^::iswalnum$;^::iswprint$;^::iswspace$;^::isxdigit$;^::memchr$;^::memcmp$;^::strcmp$;^::strcoll$;^::strncmp$;^::strpbrk$;^::strrchr$;^::strspn$;^::strstr$;^::wcscmp$;^::access$;^::bind$;^::connect$;^::difftime$;^::dlsym$;^::fnmatch$;^::getaddrinfo$;^::getopt$;^::htonl$;^::htons$;^::iconv_open$;^::inet_addr$;^::isascii$;^::isatty$;^::mmap$;^::newlocale$;^::openat$;^::pathconf$;^::pthread_equal$;^::pthread_getspecific$;^::pthread_mutex_trylock$;^::readdir$;^::readlink$;^::recvmsg$;^::regexec$;^::scandir$;^::semget$;^::setjmp$;^::shm_open$;^::shmget$;^::sigismember$;^::strcasecmp$;^::strsignal$;^::ttyname$;^::esp_.*;^::nvs_.*' }
+  - { key: bugprone-unused-return-value.AllowCastToVoid,         value: true }
+  # CS-MEM-01: heap_caps_* is raw allocation too.
+  - { key: cppcoreguidelines-no-malloc.Allocations,              value: '::malloc;::calloc;::heap_caps_malloc;::heap_caps_calloc;::heap_caps_aligned_alloc' }
+  - { key: cppcoreguidelines-no-malloc.Reallocations,            value: '::realloc;::heap_caps_realloc' }
+  - { key: cppcoreguidelines-no-malloc.Deallocations,            value: '::free;::heap_caps_free' }
