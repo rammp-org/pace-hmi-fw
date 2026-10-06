@@ -11,10 +11,13 @@ stack) in the self-test JSON, compared with topology TASKS"), §6 (copy each tas
 literally).
 
 The dump: the bench build's remote UI answers `TASKS` with one JSON line,
-`OK {"tasks":[{"name","prio","core","stack_bytes","stack_free","coproc"}...],"complete":true}`
-(core -1 = unpinned; stack_bytes = the created size less 0-15 B of the port's 16 B alignment
-of the stack end; stack_free = the high-water mark; coproc = the task has used the FPU/PIE/
-HWLP). That verb is in main/remote_ui.cpp (bench builds, CONFIG_HMI_REMOTE_UI; see README).
+`OK {"tasks":[{"name","prio","core","stack_bytes","stack_free","coproc_pinned"}...],
+"complete":true}` (core -1 = unpinned; stack_bytes = the created size less 0-15 B of the
+port's 16 B alignment of the stack end; stack_free = the high-water mark; coproc_pinned = the
+port's enable bit for the FPU or PIE is set, i.e. the task has used one and the port pinned
+it). That verb is in main/remote_ui.cpp (bench builds, CONFIG_HMI_REMOTE_UI; see README).
+A dump's older "coproc" field (a837c08 firmware: "the save area was ever touched", true for
+every task that ran) means nothing and is ignored.
 
 Two ESP-IDF 6.0 behaviours the table has to reflect (both measured on the board 2026-10-06):
 - espp::Task (and std::thread) run on IDF pthreads, and pthread_create takes priority 0 to mean
@@ -22,8 +25,10 @@ Two ESP-IDF 6.0 behaviours the table has to reflect (both measured on the board 
   configured with priority 0 runs at 5. The table holds the effective priority.
 - The RISC-V port pins a task to the core it is running on the first time it uses a
   coprocessor (FreeRTOS-Kernel/portable/riscv/portasm.S:99, vPortTaskPinToCore). An
-  unpinned (-1) task that uses the FPU therefore reports core 0 or 1, whichever it first ran
-  FP code on. That is not a configuration, so it is a note, not a T2.
+  unpinned task that uses the FPU therefore reports core 0 or 1, whichever it first ran FP
+  code on, and that differs from boot to boot (ContinuousAdc: core 1 on cb9226e, 0 on
+  a837c08). The table declares such a task's core as "fpu": any core, provided the dump says
+  coproc_pinned.
 `fetch` reads
 it and, with --into, adds it to the self-test JSON as "tasks". `check --dump` takes that
 JSON, a fetch output, or a text log holding the `OK {"tasks":...}` line.
@@ -38,9 +43,11 @@ Rules (exit 0 PASS, 1 FAIL, 2 bad input):
   T4 `complete` false (the firmware's list was cut) fails;
   T5 stack_free below a task's `stack_free_min` (a floor, set only once the stress test gives
      CS-MEM-04 margins; none yet) fails.
-A task declared core -1 that reports another core passes T2 only when it reports
-`coproc: true` (see above); a dump without the `coproc` field (firmware before it) cannot
-tell, so the core must match.
+Core (T2): a number must match exactly. "fpu" accepts -1 (no FPU use yet), or 0/1 only with
+coproc_pinned true. A task declared -1 that reports a core fails either way: without
+coproc_pinned something pinned it, and with it the task newly uses the FPU, so its core
+became boot-dependent and the table must say "fpu". A dump without coproc_pinned (firmware
+before it) cannot vouch for an "fpu" task on a core, so that fails too, with a note.
 Names compare on their first `name_max` characters (FreeRTOS keeps configMAX_TASK_NAME_LEN-1).
 stack_free is never compared with a fixed value: the high-water mark depends on what ran.
 
@@ -172,22 +179,36 @@ def compare(dump: dict, table: dict) -> tuple[list[str], list[str]]:
             elif fld == "stack_bytes":
                 if got is None or not want - tol <= int(got) <= want:
                     fails.append(f"T2 '{key}': stack {got} B, declared {want} B (-{tol} B allowed)")
-            elif fld == "core" and want == -1 and got in (0, 1) and t.get("coproc") is True:
-                notes.append(f"'{key}': unpinned, pinned to core {got} by the port at its first "
-                             "coprocessor use (portasm.S:99)")
+            elif fld == "core" and want == "fpu":
+                fails.extend(fpu_core(key, got, t.get("coproc_pinned"), notes))
+            elif fld == "core" and want == -1 and got in (0, 1) and t.get("coproc_pinned") is True:
+                fails.append(f"T2 '{key}': core {got}, declared -1; it now uses the FPU, which "
+                             "pinned it (boot-dependent core): declare core \"fpu\"")
             elif got != want:
                 fails.append(f"T2 '{key}': {fld} {got}, declared {want}")
         floor, free = d.get("stack_free_min"), t.get("stack_free")
         if floor is not None and (free is None or free < floor):
             fails.append(f"T5 '{key}': stack_free {free} B, floor {floor} B")
-    if dump["tasks"] and all("coproc" not in t for t in dump["tasks"]):
-        notes.append("the dump has no 'coproc' field (firmware before it): stack_bytes of a task "
-                     "that used the FPU reads 132+ B short and its core cannot be explained")
+    if dump["tasks"] and all("coproc_pinned" not in t for t in dump["tasks"]):
+        notes.append("the dump has no 'coproc_pinned' field (firmware before it): an \"fpu\" "
+                     "task on a core cannot be vouched for")
     for key, t in running.items():
         if key not in declared:
             fails.append(f"T3 '{key}' is running (prio {t.get('prio')}, core {t.get('core')}, "
                          f"stack {t.get('stack_bytes')} B) but not declared")
     return fails, notes
+
+
+def fpu_core(key: str, got: object, pinned: object, notes: list[str]) -> list[str]:
+    """T2 for a task declared core "fpu": unpinned, pinned by the port at its first FPU use."""
+    if got == -1:
+        notes.append(f"'{key}': unpinned, no FPU use yet")
+        return []
+    if got in (0, 1) and pinned is True:
+        notes.append(f"'{key}': pinned to core {got} by its first FPU use (portasm.S:99)")
+        return []
+    why = "no coproc_pinned in the dump" if pinned is None else f"coproc_pinned {pinned}"
+    return [f"T2 '{key}': core {got}, declared \"fpu\" ({why})"]
 
 
 def merge(dump: dict, table: dict) -> tuple[dict, list[str]]:
@@ -203,15 +224,15 @@ def merge(dump: dict, table: dict) -> tuple[dict, list[str]]:
         if d is None:
             row = {"name": key, **{f: t.get(f) for f in FIELDS}, "start": "boot",
                    "source": "observed, not declared in source"}
-            if t.get("coproc") is True and t.get("core") in (0, 1):
-                row["core"] = None  # pinned by FPU use, not configured: fill in from the source
-                changes.append(f"'{key}': core left null (pinned by coprocessor use)")
+            if t.get("coproc_pinned") is True and t.get("core") in (0, 1):
+                row["core"] = None  # FPU-pinned or configured? only the source can say
+                changes.append(f"'{key}': core left null (FPU user: \"fpu\" or its configured core)")
             out["tasks"].append(row)
             by_key[key] = row
             changes.append(f"added '{key}' (observed)")
             continue
         for fld in FIELDS:
-            if fld == "core" and t.get("coproc") is True:
+            if fld == "core" and t.get("coproc_pinned") is True:
                 continue  # a core picked by FPU use is not a configuration
             if d.get(fld) is None and t.get(fld) is not None:
                 d[fld] = t[fld]
@@ -279,19 +300,22 @@ SAMPLE_TABLE = {
         {"name": "lv_task", "prio": 20, "core": 1, "stack_bytes": 16384, "stack_free_min": 4000,
          "start": "boot", "source": "main.cpp"},
         {"name": "Data Display Task", "prio": 10, "core": 1, "stack_bytes": 6144, "start": "boot"},
-        {"name": "Read ADC", "prio": 5, "core": -1, "stack_bytes": 4096, "start": "boot"},
+        {"name": "Read ADC", "prio": 5, "core": "fpu", "stack_bytes": 4096, "start": "boot"},
+        {"name": "Button", "prio": 5, "core": -1, "stack_bytes": 4096, "start": "boot"},
         {"name": "selftest", "prio": 3, "core": 0, "stack_bytes": 12288, "start": "on_demand"},
         {"name": "IDLE0", "prio": None, "core": None, "stack_bytes": None, "start": "boot"},
     ]}
 SAMPLE_LINE = ('I (1234) remote_ui: whatever\nOK {"tasks":['
                '{"name":"lv_task","prio":20,"core":1,"stack_bytes":16377,"stack_free":4900,'
-               '"coproc":false},'
+               '"coproc_pinned":false},'
                '{"name":"Data Display Ta","prio":10,"core":1,"stack_bytes":6129,"stack_free":900,'
-               '"coproc":true},'
+               '"coproc_pinned":true},'
                '{"name":"Read ADC","prio":5,"core":0,"stack_bytes":4089,"stack_free":1200,'
-               '"coproc":true},'
+               '"coproc_pinned":true},'
+               '{"name":"Button","prio":5,"core":-1,"stack_bytes":4089,"stack_free":3480,'
+               '"coproc_pinned":false},'
                '{"name":"IDLE0","prio":0,"core":0,"stack_bytes":1521,"stack_free":800,'
-               '"coproc":false}'
+               '"coproc_pinned":false}'
                '],"complete":true}\n')
 SAMPLE_TOPOLOGY = """
 inline constexpr std::array TASKS{
@@ -309,7 +333,7 @@ inline constexpr std::array FOREIGN_TASKS{
 
 def t_parse() -> None:
     d = parse_dump(SAMPLE_LINE)
-    gl.expect("tasks", len(d["tasks"]), 4)
+    gl.expect("tasks", len(d["tasks"]), 5)
     gl.expect("complete", d["complete"], True)
     j = parse_dump(json.dumps({"tasks": [{"name": "x"}], "complete": False}))
     gl.expect("json form", j, {"tasks": [{"name": "x"}], "complete": False})
@@ -319,24 +343,40 @@ def t_pass() -> None:
     fails, notes = compare(parse_dump(SAMPLE_LINE), SAMPLE_TABLE)
     gl.expect("fails", fails, [])
     gl.expect("IDLE0 fields noted", sum("IDLE0" in n for n in notes), 3)
-    gl.expect("FPU pinning noted", sum("first coprocessor use" in n for n in notes), 1)
+    gl.expect("FPU pinning noted", sum("first FPU use" in n for n in notes), 1)
 
 
 def t_core_needs_coproc() -> None:
+    def fails_of(edit) -> list[str]:
+        d = parse_dump(SAMPLE_LINE)
+        edit({t["name"]: t for t in d["tasks"]})
+        return compare(d, SAMPLE_TABLE)[0]
+
+    def set_(name, **kw):
+        return lambda by: by[name].update(kw)
+
+    # an unpinned task with coproc_pinned false reporting a core: something pinned it
+    gl.expect("unpinned, not FPU, on a core", fails_of(set_("Button", core=1)),
+              ["T2 'Button': core 1, declared -1"])
+    # an unpinned task that now uses the FPU: its core became boot-dependent
+    got = fails_of(set_("Button", core=0, coproc_pinned=True))
+    gl.expect("unpinned, newly FPU", len(got) == 1 and "declare core" in got[0], True)
+    # "fpu": any core with coproc_pinned, -1 without FPU use, a core without the flag fails
+    gl.expect("fpu on core 1", fails_of(set_("Read ADC", core=1)), [])
+    gl.expect("fpu not used yet", fails_of(set_("Read ADC", core=-1, coproc_pinned=False)), [])
+    gl.expect("fpu on a core, flag false", fails_of(set_("Read ADC", coproc_pinned=False)),
+              ["T2 'Read ADC': core 0, declared \"fpu\" (coproc_pinned False)"])
+    # a dump from firmware before the flag: an "fpu" task on a core cannot be vouched for
     d = parse_dump(SAMPLE_LINE)
-    d["tasks"][2]["coproc"] = False      # unpinned, on core 0, no coprocessor: a real mismatch
-    fails, _ = compare(d, SAMPLE_TABLE)
-    gl.expect("core fails", [f for f in fails if "core" in f], ["T2 'Read ADC': core 0, declared -1"])
     for t in d["tasks"]:
-        t.pop("coproc")                  # an old dump: cannot tell, so strict, and said so
+        t.pop("coproc_pinned")
+        t["coproc"] = True               # a837c08's field: meaningless, ignored
     fails, notes = compare(d, SAMPLE_TABLE)
-    gl.expect("old dump strict", any("Read ADC': core" in f for f in fails), True)
-    gl.expect("old dump noted", any("no 'coproc' field" in n for n in notes), True)
-    d = parse_dump(SAMPLE_LINE)
-    d["tasks"][0]["core"] = 0            # a pinned task never moves, coprocessor or not
-    d["tasks"][0]["coproc"] = True
-    fails, _ = compare(d, SAMPLE_TABLE)
-    gl.expect("pinned task moved", fails, ["T2 'lv_task': core 0, declared 1"])
+    gl.expect("old dump strict", fails, ["T2 'Read ADC': core 0, declared \"fpu\" (no coproc_pinned in the dump)"])
+    gl.expect("old dump noted", any("no 'coproc_pinned' field" in n for n in notes), True)
+    # a configured core never moves, FPU or not
+    gl.expect("pinned task moved", fails_of(set_("lv_task", core=0, coproc_pinned=True)),
+              ["T2 'lv_task': core 0, declared 1"])
 
 
 def t_rules_fail() -> None:
@@ -378,9 +418,9 @@ def t_topology() -> None:
 def t_merge() -> None:
     d = parse_dump(SAMPLE_LINE)
     d["tasks"].append({"name": "tiT", "prio": 18, "core": -1, "stack_bytes": 3069,
-                       "stack_free": 1000, "coproc": False})
+                       "stack_free": 1000, "coproc_pinned": False})
     d["tasks"].append({"name": "fpu_user", "prio": 5, "core": 1, "stack_bytes": 4089,
-                       "stack_free": 1000, "coproc": True})
+                       "stack_free": 1000, "coproc_pinned": True})
     d["tasks"][0]["prio"] = 1  # a declared mismatch is never overwritten
     out, changes = merge(d, SAMPLE_TABLE)
     by = {x["name"]: x for x in out["tasks"]}
@@ -389,7 +429,7 @@ def t_merge() -> None:
     gl.expect("declared kept", by["lv_task"]["prio"], 20)
     gl.expect("FPU-pinned core not recorded", by["fpu_user"]["core"], None)
     gl.expect("no stack_free recorded", any("stack_free" in x for x in out["tasks"]), False)
-    gl.expect("input untouched", SAMPLE_TABLE["tasks"][4]["stack_bytes"], None)
+    gl.expect("input untouched", SAMPLE_TABLE["tasks"][5]["stack_bytes"], None)
     # tiT and fpu_user added, fpu_user's core left null; IDLE0 prio, core, stack_bytes
     gl.expect("changes", len(changes), 6)
 
@@ -402,6 +442,7 @@ def t_committed_baseline_valid() -> None:
         gl.expect(f"{t['name']} start", t["start"] in ("boot", "on_demand"), True)
         gl.expect(f"{t['name']} source", bool(t.get("source")), True)
         gl.expect(f"{t['name']} has no fixed stack_free", "stack_free" in t, False)
+        gl.expect(f"{t['name']} core", t["core"] in (-1, 0, 1, "fpu"), True)
 
 
 def cmd_selftest(_args) -> int:
@@ -414,7 +455,7 @@ def cmd_selftest(_args) -> int:
         ("TSK-006 topology TaskRow and ForeignTaskRow lines become the table", t_topology),
         ("TSK-007 merge adds observed tasks and never overwrites a declared value", t_merge),
         ("TSK-008 the committed baseline has unique names, a start and a source each", t_committed_baseline_valid),
-        ("TSK-009 an unpinned task may report a core only when it used a coprocessor", t_core_needs_coproc),
+        ("TSK-009 a core off the table fails unless declared fpu and pinned by FPU use", t_core_needs_coproc),
     ])
 
 

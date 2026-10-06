@@ -68,9 +68,10 @@ the move by regenerating the baseline in that step's PR.
   [declared-16 B, declared]; T3 a running task is undeclared; T4 the list was cut; T5
   `stack_free` under a declared `stack_free_min` floor (none yet: CS-MEM-04 margins wait for the
   stress test; a fixed `stack_free` is never compared). Names compare on 15 characters
-  (`configMAX_TASK_NAME_LEN` 16). An unpinned task that reports a core passes only with
-  `coproc: true` (ESP-IDF pins a task to the core of its first FPU/PIE/HWLP use). The table
-  holds effective values: espp/pthread priority 0 runs at 5 (`pthread.c:336`).
+  (`configMAX_TASK_NAME_LEN` 16). ESP-IDF pins an unpinned task to the core of its first FPU
+  or PIE use, which differs between boots, so such tasks declare core `"fpu"`: any core with
+  `coproc_pinned: true`, or -1 before the first use. A task declared -1 that reports a core
+  fails. The table holds effective values: espp/pthread priority 0 runs at 5 (`pthread.c:336`).
 - **observer_census**: O1 missing subject, O2 count differs, O3 new subject, O4 list cut.
 
 ## Host app wrappers
@@ -109,8 +110,11 @@ mark. The stack size is `pxEndOfStack` minus the start the task was created with
 has used a coprocessor, IDF 6.0's RISC-V port carves the save area (132 B for the FPU) from the
 bottom of the stack and moves the TCB's `pxStack` past it (`port.c:787-815`). So
 `xTaskGetStackStart` alone reads 132-147 B short, as the first board dump did. The original
-start is in the coprocessor save area at the stack top (`sa_tcbstack`), which also gives the
-`coproc` flag. The scheduler is suspended on one
+start is in the coprocessor save area at the stack top (`sa_tcbstack`). `coproc_pinned` is
+that area's enable mask (`sa_enable`), bit FPU or PIE. The trap on a task's first use of either
+sets the bit and pins the task (`portasm.S:99,111-114`). `sa_allocator` is no use as a flag:
+the HWLP check on every switch-in sets it for every task that has run. The scheduler is
+suspended on one
 core for roughly a millisecond (the high-water scans). Nothing runs unless the PC sends `TASKS`.
 
 First use on the bench: `task_dump.py fetch`, then `task_dump.py baseline --dump` (review the
