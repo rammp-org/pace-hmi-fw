@@ -29,6 +29,10 @@ Rules
   paths are not limited by it.
 - every other metric is forbidden: count <= baseline, and a path absent from the
   baseline must have 0.
+- static_state (CS-CMP-03 [review] "no mutable function-local static"; CS-OWN):
+  non-const `static`/`thread_local` variables at block scope (function-local
+  statics, in lambdas too) and static data members at class scope. Namespace-scope
+  statics are mutable_globals, not this.
 
 Heuristics (regex and brace depth), not a compiler: they count the same way every
 time, which is all a ratchet needs. Stdlib only, Python 3.12+.
@@ -106,7 +110,8 @@ INCLUDE_LINE_RE = re.compile(r"^[ \t]*#[ \t]*include\b.*$", re.M)
 
 METRICS = sorted(
     list(REGEX_METRICS)
-    + ["lines", "fn_over_120", "fn_over_60", "lv_outside_ui", "c_cast", "if_config", "mutable_globals"]
+    + ["lines", "fn_over_120", "fn_over_60", "lv_outside_ui", "c_cast", "if_config", "mutable_globals",
+       "static_state"]
 )
 LIMIT_METRICS = {"lines", "fn_over_60"}  # everything else is forbidden on new paths
 
@@ -244,58 +249,173 @@ def _is_mutable_var(head: str, at_brace: bool) -> bool:
     return not _paren_before_eq(h)
 
 
-def scan_structure(code: str) -> tuple[list[int], int]:
-    """Return (function body lengths in lines, mutable namespace-scope variable count).
+ACCESS_RE = re.compile(r"^\s*(?:(?:public|private|protected)\s*:(?!:)\s*)+")
+ATTRIBUTE_RE = re.compile(r"\[\[.*?\]\]\s*")
+STORAGE_WORDS = {"static", "thread_local", "inline", "constinit", "volatile", "constexpr", "const", "mutable"}
+STATIC_WORD_RE = re.compile(r"\b(?:static|thread_local)\b")
+
+
+def _strip_angles(h: str) -> str:
+    """Remove `<...>` template argument lists (nested), so `std::function<void()> f` reads as a variable."""
+    out: list[str] = []
+    depth = 0
+    for i, c in enumerate(h):
+        if c == "<" and (depth or (i > 0 and (h[i - 1].isalnum() or h[i - 1] in "_ "))):
+            depth += 1
+            continue
+        if c == ">" and depth:
+            depth -= 1
+            continue
+        if not depth:
+            out.append(c)
+    return "".join(out)
+
+
+def _static_offset(head: str, scope: str) -> int | None:
+    """Offset of `static`/`thread_local` if `head` declares a non-const static-storage variable.
+
+    scope "class": a static data member (a head with `(` before `=` is a member function);
+    scope "block": a function-local static (a block-scope `static` is always a variable).
+    """
+    h = ACCESS_RE.sub(lambda m: " " * len(m.group(0)), head) if scope == "class" else head
+    h = ATTRIBUTE_RE.sub(lambda m: " " * len(m.group(0)), h)
+    pos = len(h) - len(h.lstrip())
+    leading: list[str] = []
+    for w in re.finditer(r"\w+|\S", h[pos:]):
+        if w.group(0) not in STORAGE_WORDS:
+            break
+        leading.append(w.group(0))
+    if "static" not in leading and "thread_local" not in leading:
+        return None
+    flat = " ".join(h.split())
+    if CONST_RE.search(flat):
+        return None
+    if scope == "class" and "(" in _strip_angles(_drop_template_params(flat)).split("=", 1)[0]:
+        return None  # a static member function
+    m = STATIC_WORD_RE.search(h, pos)
+    return m.start() if m else None
+
+
+class Structure:
+    """What one brace-depth pass over a unit finds."""
+
+    def __init__(self) -> None:
+        self.lengths: list[int] = []  # function body lengths in lines
+        self.functions: list[tuple[str, int, int]] = []  # (name, first line, last line)
+        self.global_lines: list[int] = []  # mutable namespace-scope variables (line of the head)
+        self.static_lines: list[int] = []  # non-const function-local statics and static data members
+
+    @property
+    def globals_(self) -> int:
+        return len(self.global_lines)
+
+
+def _function_name(head: str) -> str:
+    h = OPERATOR_RE.sub("operator", _drop_template_params(" ".join(head.split())))
+    p = h.find("(")
+    m = re.search(r"([~\w:]+)\s*$", h[:p] if p >= 0 else h)
+    return m.group(1) if m else ""
+
+
+def scan(code: str) -> Structure:
+    """Functions, mutable namespace-scope variables and non-const statics of one unit.
 
     `code` is stripped and preprocessor-blanked. Functions are brace blocks opened
-    at namespace or class scope by a head with `(` before any `=`.
+    at namespace or class scope by a head with `(` before any `=`. Every other block
+    (a function body, a lambda, a braced initialiser) is block scope.
     """
-    stack: list[tuple[str, int]] = []
-    head: list[str] = []
-    lengths: list[int] = []
-    globals_ = 0
+    st = Structure()
+    stack: list[tuple[str, int, str]] = []
+    head: list[str] = []  # declaration text since the last `;`, `{` or `}` (namespace and class scope)
+    head_ln: list[int] = []  # the line of each character in `head`
+    stmt: list[str] = []  # statement text since the last `;`, `{` or `}` (block scope)
+    stmt_ln: list[int] = []
     line = 1
+
+    def first_line(lns: list[int], text: str) -> int:
+        k = len(text) - len(text.lstrip())
+        return lns[k] if k < len(lns) else line
+
+    def block_static() -> None:
+        text = "".join(stmt)
+        k = _static_offset(text, "block")
+        if k is not None:
+            st.static_lines.append(stmt_ln[k])
+
     for ch in code:
         decl = not stack or stack[-1][0] in ("ns", "class")
-        all_ns = all(k == "ns" for k, _ in stack)
+        in_class = bool(stack) and stack[-1][0] == "class"
+        all_ns = all(k == "ns" for k, _, _ in stack)
         if ch == "\n":
             line += 1
             if decl:
                 head.append(" ")
+                head_ln.append(line)
+            else:
+                stmt.append(" ")
+                stmt_ln.append(line)
         elif ch == "{":
             if decl and "".join(head).count("(") > "".join(head).count(")"):
-                stack.append(("init", line))  # e.g. `f(int x = {})`: still inside the head
+                stack.append(("init", line, ""))  # e.g. `f(int x = {})`: still inside the head
                 continue
             if decl:
                 text = "".join(head)
                 kind = _classify(text)
                 if kind == "init":
-                    stack.append(("init", line))
+                    stack.append(("init", line, ""))
                     continue
                 if kind == "var" and all_ns and _is_mutable_var(text, at_brace=True):
-                    globals_ += 1
-                stack.append((kind if kind in ("ns", "class", "func") else "other", line))
-                head = []
+                    st.global_lines.append(first_line(head_ln, text))
+                if kind == "var" and in_class:
+                    k = _static_offset(text, "class")
+                    if k is not None:
+                        st.static_lines.append(head_ln[k])
+                name = _function_name(text) if kind == "func" else ""
+                stack.append((kind if kind in ("ns", "class", "func") else "other", line, name))
+                head, head_ln = [], []
             else:
-                stack.append(("other", line))
+                block_static()
+                stack.append(("other", line, ""))
+            stmt, stmt_ln = [], []
         elif ch == "}":
+            stmt, stmt_ln = [], []
             if not stack:
                 continue  # unbalanced (e.g. braces split across #if arms): stay at top level
-            kind, start = stack.pop()
+            kind, start, name = stack.pop()
             if kind == "func":
-                lengths.append(line - start + 1)
+                st.lengths.append(line - start + 1)
+                st.functions.append((name, start, line))
             if kind == "init":
                 head.append("{}")
+                head_ln.extend((line, line))
             elif not stack or stack[-1][0] in ("ns", "class"):
-                head = []
+                head, head_ln = [], []
         elif decl:
             if ch == ";":
-                if all_ns and _is_mutable_var("".join(head), at_brace=False):
-                    globals_ += 1
-                head = []
+                text = "".join(head)
+                if all_ns and _is_mutable_var(text, at_brace=False):
+                    st.global_lines.append(first_line(head_ln, text))
+                if in_class:
+                    k = _static_offset(text, "class")
+                    if k is not None:
+                        st.static_lines.append(head_ln[k])
+                head, head_ln = [], []
             else:
                 head.append(ch)
-    return lengths, globals_
+                head_ln.append(line)
+        elif ch == ";":
+            block_static()
+            stmt, stmt_ln = [], []
+        else:
+            stmt.append(ch)
+            stmt_ln.append(line)
+    return st
+
+
+def scan_structure(code: str) -> tuple[list[int], int]:
+    """Return (function body lengths in lines, mutable namespace-scope variable count)."""
+    st = scan(code)
+    return st.lengths, st.globals_
 
 
 # --- per-file metrics --------------------------------------------------------
@@ -327,10 +447,11 @@ def measure(path: str, text: str) -> dict[str, int]:
     m["if_config"] = len(IF_CONFIG_RE.findall(code))
     m["lv_outside_ui"] = 0 if is_ui_file(path) else len(LV_RE.findall(no_inc))
     m["c_cast"] = count_casts(no_inc)
-    lengths, globals_ = scan_structure(blank_preprocessor(code))
-    m["fn_over_120"] = sum(1 for n in lengths if n > LIMIT_FUNCTION)
-    m["fn_over_60"] = sum(1 for n in lengths if n > SHOULD_FUNCTION)
-    m["mutable_globals"] = globals_
+    st = scan(blank_preprocessor(code))
+    m["fn_over_120"] = sum(1 for n in st.lengths if n > LIMIT_FUNCTION)
+    m["fn_over_60"] = sum(1 for n in st.lengths if n > SHOULD_FUNCTION)
+    m["mutable_globals"] = st.globals_
+    m["static_state"] = len(st.static_lines)
     return m
 
 
@@ -594,6 +715,7 @@ SAMPLE_EXPECT = {
     "c_cast": 1,
     "if_config": 2,
     "mutable_globals": 3,  # counter, screen, table
+    "static_state": 1,  # Config::shared
     "fn_over_60": 0,
     "fn_over_120": 0,
 }
@@ -631,6 +753,7 @@ def selftest() -> int:
     )
     lengths, globals_ = scan_structure(blank_preprocessor(strip_code(code)))
     expect("fn lengths", lengths, [61, 121, 72, 3, 63])
+    expect("static_state none in plain functions", scan(blank_preprocessor(strip_code(code))).static_lines, [])
     expect("lambda global", globals_, 1)
 
     # Casts: real casts counted, calls/sizeof/void/declarations not.
@@ -687,6 +810,43 @@ def selftest() -> int:
             expect("baseline untouched", bl.read_text(encoding="utf-8"), dump(base))
             expect("check fails", cmd_check(root, bl), 1)
             expect("init refuses existing", cmd_update(root, bl, init=True), 1)
+
+    # static_state: non-const statics at block and class scope; namespace scope is mutable_globals.
+    statics = (
+        "static int ns_static = 0;\n"  # namespace scope: a mutable global, not static_state
+        "namespace {\nstatic int anon = 0;\n}\n"
+        "void f(int y) {\n"
+        "  static int n = 0;\n"  # 1
+        "  static const int k = 1;\n  static constexpr int c = 2;\n  static_assert(true);\n"
+        "  int x = static_cast<int>(y);\n"
+        "  [[maybe_unused]] static bool seen = false;\n"  # 2
+        "  static Foo brace{1, 2};\n"  # 3
+        "  static int arr[] = {1, 2};\n"  # 4
+        "  thread_local int t = 0;\n"  # 5
+        "  auto g = [] { static int in_lambda = 0; };\n"  # 6
+        "  for (int i = 0; i < 3; ++i) {\n    static\n    int split_line;\n  }\n"  # 7
+        "}\n"
+        "struct S {\n"
+        "  static int shared;\n"  # 8
+        "  static void helper();\n  static S &get() { return s_; }\n"
+        "  static constexpr int LIMIT = 3;\n  static const char *const NAME;\n"
+        "public:\n  static std::function<void()> cb_;\n"  # 9
+        "  static inline std::atomic<int> count_{0};\n"  # 10
+        "  int member_ = 0;\n"
+        "};\n"
+        "auto lam = [] { static int in_ns_lambda = 0; };\n"  # 11
+    )
+    st = scan(blank_preprocessor(strip_code(statics)))
+    expect("static_state lines", st.static_lines, [6, 11, 12, 13, 14, 15, 17, 22, 28, 29, 32])
+    expect("namespace-scope statics stay mutable_globals", st.globals_, 3)  # ns_static, anon, lam
+    expect("static_state counted by measure", measure("components/x/src/x.cpp", statics)["static_state"], 11)
+    expect("static_state forbidden in a new path",
+           violations({}, {"components/x/src/x.cpp": {**dict.fromkeys(METRICS, 0), "static_state": 1}}),
+           ["static_state components/x/src/x.cpp: 1 > 0 (not in baseline: must be clean)"])
+    expect("static_state legacy may not grow",
+           len(violations({"static_state": {UNIT: 2}}, {UNIT: {**dict.fromkeys(METRICS, 0), "static_state": 3}})), 1)
+    expect("static_state legacy may fall",
+           violations({"static_state": {UNIT: 2}}, {UNIT: {**dict.fromkeys(METRICS, 0), "static_state": 1}}), [])
 
     for f in failures:
         print(f"selftest FAIL {f}")

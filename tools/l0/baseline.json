@@ -92,6 +92,12 @@
       "main/remote_ui.cpp": 5,
       "main/rtps_comms.cpp": 5
     },
+    "static_state": {
+      "main/github_ota.cpp": 1,
+      "main/main.cpp": 40,
+      "main/remote_ui.cpp": 2,
+      "main/rtps_comms.cpp": 5
+    },
     "std_thread": {
       "main/fw_info.cpp": 1,
       "main/github_ota.cpp": 1,
