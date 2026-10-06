@@ -63,11 +63,8 @@ bool legacy_marker(const std::vector<std::string> &chunks) {
 
 } // namespace
 
-const std::vector<Subject> &subjects() {
-  static const std::vector<Subject> all = {
-      {"legacy", legacy_releases, legacy_notes, legacy_header, legacy_fwinfo, legacy_marker},
-  };
-  return all;
+Subject legacy_subject() {
+  return {"legacy", legacy_releases, legacy_notes, legacy_header, legacy_fwinfo, legacy_marker};
 }
 
 } // namespace ota_test

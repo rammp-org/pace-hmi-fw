@@ -19,6 +19,7 @@
 #include "esp_timer.h"
 #include "format.hpp"
 #include "logger.hpp"
+#include "ota_parse/ota_parse.hpp"
 #include "psa/crypto.h"
 #include "storage.hpp"
 
@@ -90,25 +91,15 @@ std::optional<std::string> hash_running_image() {
   return hex;
 }
 
-// This image's line in fwinfo.txt, if the PC ever recorded one.
+// This image's line in fwinfo.txt, if the PC ever recorded one. The line format
+// is read by components/ota_parse.
 std::optional<FwRelease> find_release(const std::string &sha256) {
   std::ifstream in(storage_path(kReleasesFile));
-  std::string line;
-  while (std::getline(in, line)) {
-    if (line.empty() || line[0] == '#') {
-      continue;
-    }
-    std::istringstream fields(line);
-    std::string hash;
-    std::string tag;
-    std::string kind;
-    if (fields >> hash >> tag >> kind && hash == sha256) {
-      std::string checked;
-      fields >> checked;
-      return FwRelease{tag, kind == "prerelease", checked};
-    }
+  std::optional<hmi::ota::FwRecord> found = hmi::ota::find_fw_record(in, sha256);
+  if (!found) {
+    return std::nullopt;
   }
-  return std::nullopt;
+  return FwRelease{std::move(found->tag), found->prerelease, std::move(found->checked)};
 }
 
 } // namespace

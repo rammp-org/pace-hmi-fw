@@ -22,10 +22,17 @@
 #include "describe.hpp"
 #include "fixtures.hpp"
 #include "goldens.hpp"
+#include "ota_parse/ota_parse.hpp"
 #include "subject.hpp"
 #include "test_case.hpp"
 
 namespace ota_test {
+
+const std::vector<Subject> &subjects() {
+  static const std::vector<Subject> all = {legacy_subject(), component_subject()};
+  return all;
+}
+
 namespace {
 
 constexpr std::string_view kMarker = "RAMMP-HMI:confirms-its-boot:v1"; // github_ota.cpp:33
@@ -575,6 +582,39 @@ TEST_CASE("OTA-066 seeded random first blocks are refused without a crash",
     }
     expect_golden(s, "OTA-066", digest(all));
   }
+}
+
+TEST_CASE("OTA-067 an accepted first block reports the image's project, version, date and time",
+          "[ota][header]") {
+  std::vector<std::uint8_t> b = image_block(kDescEnd, "rammp-hmi-p4");
+  hmi::ota::AppDesc desc;
+  TEST_ASSERT_EQUAL_STRING("",
+                           hmi::ota::check_first_block(b, 0x0012, "rammp-hmi-p4", desc).c_str());
+  TEST_ASSERT_EQUAL_STRING("rammp-hmi-p4", desc.project_name.c_str());
+  TEST_ASSERT_EQUAL_STRING("v4.1.0", desc.version.c_str());
+  TEST_ASSERT_EQUAL_STRING("Sep 30 2026", desc.date.c_str());
+  TEST_ASSERT_EQUAL_STRING("18:02:11", desc.time.c_str());
+}
+
+TEST_CASE("OTA-068 a description with no NUL from the name to its end is read only within its "
+          "fields",
+          "[ota][header][hostile]") {
+  // The legacy copy is not run here: fmt's "{:.32s}" on a char array takes strlen first and
+  // reads past the description (README hazard OTA-H1). The component bounds every field.
+  std::vector<std::uint8_t> b = image_block(kDescEnd, "");
+  for (std::size_t i = kDesc + 16; i < kDescEnd; i++) {
+    b[i] = 'N';
+  }
+  hmi::ota::AppDesc desc;
+  const std::string err = hmi::ota::check_first_block(b, 0x0012, "rammp-hmi-p4", desc);
+  TEST_ASSERT_EQUAL_STRING(
+      ("The file is '" + std::string(32, 'N') + "', not this HMI's firmware").c_str(), err.c_str());
+  desc = {};
+  const std::string ok = hmi::ota::check_first_block(b, 0x0012, std::string(32, 'N'), desc);
+  TEST_ASSERT_EQUAL_STRING("", ok.c_str());
+  TEST_ASSERT_EQUAL(32, desc.version.size());
+  TEST_ASSERT_EQUAL(16, desc.date.size());
+  TEST_ASSERT_EQUAL(16, desc.time.size());
 }
 
 // ---- fwinfo.txt ------------------------------------------------------------------------------

@@ -1,7 +1,8 @@
 #pragma once
 // The code under test, behind one interface: every golden case runs against each subject in
 // SUBJECTS, and each answer is turned into one canonical text (describe.hpp) before it is
-// compared. "legacy" is the verbatim pre-move copy (legacy_ota_parse.cpp).
+// compared. "legacy" is the verbatim pre-move copy (legacy_ota_parse.cpp); "component" is
+// components/ota_parse, called the way main/ calls it (subject_component.cpp).
 
 #include <cstdint>
 #include <optional>
@@ -26,6 +27,10 @@ struct Subject {
   bool (*marker)(const std::vector<std::string> &chunks);
 };
 
+Subject legacy_subject();
+Subject component_subject();
+
+/// Every subject, legacy first.
 const std::vector<Subject> &subjects();
 
 } // namespace ota_test
