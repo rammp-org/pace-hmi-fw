@@ -8,9 +8,7 @@
       "main/da7280.hpp": 42,
       "main/hmi_rtps_spec.hpp": 28,
       "main/lv_mem_psram.c": 1,
-      "main/main.cpp": 1,
-      "main/sample_ui_home.c": 2,
-      "main/sample_ui_seat_adjustment.c": 3
+      "main/main.cpp": 1
     },
     "esp_error_check": {},
     "esp_timer_create": {},
@@ -25,7 +23,6 @@
       "main/main.cpp": 4,
       "main/remote_ui.cpp": 1,
       "main/rtps_comms.cpp": 4,
-      "main/sample_ui_navigation.c": 1,
       "main/selftest.cpp": 2
     },
     "heap_raw": {
@@ -45,7 +42,7 @@
       "main/remote_ui.cpp": 1
     },
     "lines": {
-      "main/main.cpp": 4024,
+      "main/main.cpp": 4023,
       "main/selftest.cpp": 1045
     },
     "locks": {
@@ -77,26 +74,19 @@
     },
     "mutable_globals": {
       "main/about_ui.cpp": 1,
-      "main/fw_info.cpp": 3,
-      "main/github_ota.cpp": 4,
-      "main/hmi_rtps_spec.hpp": 6,
-      "main/internet_ui.cpp": 12,
-      "main/joystick_cal.cpp": 17,
+      "main/fw_info.cpp": 2,
+      "main/github_ota.cpp": 3,
+      "main/hmi_rtps_spec.hpp": 5,
+      "main/internet_ui.cpp": 11,
+      "main/joystick_cal.cpp": 16,
       "main/log_capture.cpp": 8,
       "main/log_view.cpp": 7,
-      "main/main.cpp": 147,
+      "main/main.cpp": 144,
       "main/remote_ui.cpp": 6,
-      "main/rtps_comms.cpp": 33,
-      "main/sample_ui_drive_mode.c": 2,
-      "main/sample_ui_home.c": 2,
-      "main/sample_ui_navigation.c": 1,
-      "main/sample_ui_seat_adjustment.c": 1,
-      "main/sample_ui_settings.c": 1,
-      "main/sample_ui_wellness.c": 1,
-      "main/selftest.cpp": 26,
-      "main/settings.cpp": 3,
-      "main/storage.cpp": 1,
-      "main/update_ui.cpp": 10
+      "main/rtps_comms.cpp": 32,
+      "main/selftest.cpp": 25,
+      "main/settings.cpp": 2,
+      "main/update_ui.cpp": 9
     },
     "sleep_this_thread": {
       "main/main.cpp": 13,
