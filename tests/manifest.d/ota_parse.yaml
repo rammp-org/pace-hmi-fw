@@ -1,0 +1,17 @@
+# L1 host app for the OTA and firmware-info parsers (cases OTA-001..OTA-104 in
+# components/ota_parse/test/test_ota_parse.cpp): the GitHub release list, the release notes,
+# the first-block image header check, fwinfo.txt records and the confirms-its-boot marker,
+# against goldens recorded from the pre-move code, with TS-UNIT-07 hostile inputs.
+# spec-deviation(TS-UNIT-01): host-native g++ in WSL, not the IDF linux target (owner, 2026-10-06).
+- id: L1-OTA
+  title: OTA and firmware-info parsers (release list, notes, image header, fwinfo.txt, marker) against goldens and hostile inputs
+  level: L1
+  path: components/ota_parse/test
+  requirements: []
+  resources: [host]
+  timeout_s: 300
+  expected_s: 60
+  repeat: 1
+  pass_threshold: 1
+  safety: false
+  artifact: test
