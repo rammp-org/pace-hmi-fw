@@ -1,0 +1,203 @@
+I (96) boot:  5 storage          Unknown data     01 83 00c20000I (380) esp_image: segment 1: paddr=0023a2d4 vaddr=30100000 size=00068h (   104) load
+I (382) esp_image: segment 2: paddr=0023a344 vaddr=4ff00000 size=05cd4h ( 23764) load
+I (388) esp_image: segment 3: paddr=00240020 vaddr=40000020 size=1f3c38h (2047032) map
+I (632) esp_image: segment 4: paddr=00433c60 vaddr=4ff05cd4 size=12d0ch ( 77068) load
+I (645) esp_image: segment 5: paddr=00446974 vaddr=50108080 size=00024h (    36) load
+I (651) boot: Loaded app from partition at offset 0x10000
+I (651) boot: Disabling RNG early entropy source...
+I (664) hex_psram: vendor id    : 0x0d (AP)
+I (664) hex_psram: Latency      : 0x01 (Fixed)
+I (665) hex_psram: DriveStr.    : 0x00 (25 Ohm)
+I (665) hex_psram: dev id       : 0x03 (generation 4)
+I (670) hex_psram: density      : 0x07 (256 Mbit)
+I (674) hex_psram: good-die     : 0x06 (Pass)
+I (678) hex_psram: SRF          : 0x02 (Slow Refresh)
+I (683) hex_psram: BurstType    : 0x00 ( Wrap)
+I (687) hex_psram: BurstLen     : 0x03 (2048 Byte)
+I (692) hex_psram: BitMode      : 0x01 (X16 Mode)
+I (696) hex_psram: Readlatency  : 0x04 (14 cycles@Fixed)
+I (701) hex_psram: DriveStrength: 0x00 (1/1)
+I (705) MSPI Timing: Enter psram timing tuning
+I (879) esp_psram: Found 32MB PSRAM device
+I (879) esp_psram: Speed: 200MHz
+I (882) hex_psram: psram CS IO is dedicated
+I (883) cpu_start: Multicore app
+I (1359) esp_psram: SPI SRAM memory test OK
+I (1369) cpu_start: GPIO 38 and 37 are used as console UART I/O pins
+I (1370) cpu_start: Pro cpu start user code
+I (1370) cpu_start: cpu freq: 360000000 Hz
+I (1372) app_init: Application information:
+I (1376) app_init: Project name:     rammp-hmi-p4
+I (1380) app_init: App version:      v3.0.0-alpha-31-gb13b103
+I (1386) app_init: Compile time:     Oct  5 2026 19:24:11
+I (1391) app_init: ELF file SHA256:  ed962c98e...
+I (1395) app_init: ESP-IDF:          v6.0
+I (1399) efuse_init: Min chip rev:     v1.0
+I (1403) efuse_init: Max chip rev:     v1.99 
+I (1407) efuse_init: Chip rev:         v1.3
+I (1411) heap_init: Initializing. RAM available for dynamic allocation:
+I (1417) heap_init: At 4FF1FB20 len 0001B4A0 (109 KiB): RETENT_RAM
+I (1423) heap_init: At 4FF3AFC0 len 00004BF0 (18 KiB): RAM
+I (1428) heap_init: At 4FF40000 len 00040000 (256 KiB): RAM
+I (1434) heap_init: At 501080A4 len 00007F5C (31 KiB): RTCRAM
+I (1439) heap_init: At 30100068 len 00001F98 (7 KiB): TCM
+I (1444) esp_psram: Adding pool of 32768K of PSRAM memory to heap allocator
+I (1451) spi_flash: detected chip: generic
+I (1455) spi_flash: flash io: qio
+I (1477) sleep_gpio: Configure to isolate all GPIO pins in sleep state
+I (1481) sleep_gpio: Enable automatic switching of GPIO sleep configuration
+I (1488) H_SDIO_DRV: sdio_data_to_rx_buf_task started
+I (1493) main_task: Started on CPU0
+I (1496) esp_psram: Reserving pool of 64K of internal memory for DMA/internal allocations
+I (1504) main_task: Calling app_main()
+[M5Stack Tab5 Example/I][1.508]: Starting example!
+[github_ota/I][1.520]: Running from ota_0: confirmed
+[M5Stack Tab5 Example/I][1.521]: Running on M5Stack Tab5
+[M5Stack Tab5 Example/I][1.522]: Probing internal I2C bus...
+[M5Stack Tab5 Example/I][1.550]: Found devices at addresses: [0x10, 0x28, 0x32, 0x36, 0x40, 0x41, 0x43, 0x44, 0x55, 0x5a, 0x68]
+[M5Stack Tab5 Example/I][1.552]: DRV2605 ready: HAPTIC TEST plays a 2000 ms buzz
+[M5Stack Tab5 Example/W][1.552]: DA7280 not found at 0x4a — check wiring
+[Da7280/I][1.562]: Initializing DA7280
+[I2cMasterDevice/E][1.562]: WriteRead failed: ESP_ERR_INVALID_RESPONSE
+[Da7280/E][1.573]: Failed to initialize: I/O error
+[Da7280/I][1.573]: Initializing DA7280
+[I2cMasterDevice/E][1.585]: WriteRead failed: ESP_ERR_INVALID_RESPONSE
+[M5Stack Tab5 Example/E][1.585]: DA7280 functional test: initialization failed: I/O error
+[M5Stack Tab5 Example/I][1.596]: Initializing IO expanders...
+[M5Stack Tab5 Example/I][1.619]: EXT_5V_EN: enabled
+[M5Stack Tab5 Example/I][1.619]: Initializing lcd...
+[M5Stack Tab5 Example/I][1.987]: ST7123
+[M5Stack Tab5 Example/I][1.987]: Initializing display...
+[Display/W][1.988]: No rotation callback provided, resolution changed event will not automatically update the display hardware rotation.
+[M5Stack Tab5 Example/I][2.004]: LVGL rendering directly into the DSI frame buffers (DIRECT mode)
+[M5Stack Tab5 Example/I][2.004]: Initializing IMU...
+E (2824) sdmmc_common: sdmmc_init_ocr: send_op_cond (1) returned 0x107
+E (2824) vfs_fat_sdmmc: sdmmc_card_init failed (0x107).
+E (2825) SD_HOST: sd_host_del_sdmmc_controller(353): host controller with slot registered
+E (2836) vfs_fat_sdmmc: esp_vfs_fat_sdmmc_sdcard_init failed (0x107).
+[M5StackTab5/W][2.836]: Failed to initialize the card (ESP_ERR_TIMEOUT). Make sure SD card is present and lines have pull-up resistors in place.
+[M5Stack Tab5 Example/W][2.856]: Failed to initialize uSD card, there may not be a uSD card inserted!
+[M5Stack Tab5 Example/I][2.856]: Initializing RTC...
+[M5Stack Tab5 Example/I][2.997]: RTC time 2026-10-06 01:16:37
+[M5Stack Tab5 Example/I][2.997]: Initializing battery management...
+[M5Stack Tab5 Example/I][3.003]: Initializing sound...
+I (3018) ES8388_DRIVER: init,out:02, in:00
+I (3027) ES7210: ES7210 in Slave mode
+I (3034) ES7210: Enable ES7210_INPUT_MIC1
+I (3036) ES7210: Enable ES7210_INPUT_MIC2
+I (3038) ES7210: Enable ES7210_INPUT_MIC3
+I (3040) ES7210: Enable ES7210_INPUT_MIC4
+I (3054) ES7210: The ES7210_CLOCK_OFF_REG01 value before stop is 0
+I (3060) ES7210: Enable ES7210_INPUT_MIC1
+I (3062) ES7210: Enable ES7210_INPUT_MIC2
+I (3068) ES7210: Enable ES7210_INPUT_MIC3
+I (3070) ES7210: Enable ES7210_INPUT_MIC4
+[M5Stack Tab5 Example/I][3.073]: Initializing button...
+[M5Stack Tab5 Example/I][3.077]: Setting up LVGL UI...
+[M5Stack Tab5 Example/I][3.079]: Loading SquareLine UI...
+[settings/I][7.872]: loaded: brightness 80, theme 1, menu_slide 0, flip 0, stick_sensitivity 9, drive_speed 10, stick_invert_x 0, stick_invert_y 0, stick_swap 0, sounds 1, network 1
+[M5Stack Tab5 Example/I][7.982]: Initializing GPIO48 test button...
+[Interrupt/W][7.982]: ISR service already instE (8073) task_wdt: Task watchdog got triggered. The following tasks/users did not reset the watchdog in time:
+E (8073) task_wdt:  - IDLE0 (CPU 0)
+E (8073) task_wdt: Tasks currently running:
+E (8073) task_wdt: CPU 0: main
+E (8073) task_wdt: CPU 1: IDLE1
+E (8073) task_wdt: Print CPU 0 (current core) registers
+Core  0 register dump:
+MEPC    : 0x400df2ee  RA      : 0x400df2e8  SP      : 0x4ff2c2c0  GP      : 0x4ff15400  
+TP      : 0x4ff2ccf0  T0      : 0x4fc1a058  T1      : 0x00000002  T2      : 0x00ff0000  
+S0/FP   : 0x4ff2c33c  S1      : 0x403cc0d8  A0      : 0x00000001  A1      : 0x00000020  
+A2      : 0x00000000  A3      : 0x00000000  A4      : 0x403cccb1  A5      : 0x0000002d  
+A6      : 0x0000004f  A7      : 0x00000000  S2      : 0x403cc0f0  S3      : 0x00000020  
+S4      : 0x0000006e  S5      : 0x403cc0b4  S6      : 0x00000020  S7      : 0x00000000  
+S8      : 0x4ff1afac  S9      : 0x4ff1f000  S10     : 0x00000001  S11     : 0x00000001  
+T3      : 0x00000004  T4      : 0x00000000  T5      : 0x00000000  T6      : 0x04000000  
+MSTATUS : 0x00001888  MTVEC   : 0x4ff00003  MCAUSE  : 0xdeadc0de  MTVAL   : 0xdeadc0de  
+MHARTID : 0x00000000  
+Please enable CONFIG_ESP_SYSTEM_USE_FRAME_POINTER option to have a full backtrace.
+alled, not installing again
+[M5Stack Tab5 Example/I][7.983]: Adding joystick keypad input device...
+[overdraw/I][8.248]: cleared 29 redundant background fills
+[selftest/I][8.249]: ready: 54 checks (selftest_spec.h)
+[M5Stack Tab5 Example/I][8.286]: Initializing touch...
+[M5Stack Tab5 Example/I][8.360]: Starting LVGL task...
+[rtps_link/I][8.361]: LINK_DOWN (no Ethernet link: cable unplugged?)
+[M5Stack Tab5 Example/I][8.362]: Loaded 35875 bytes of audio
+[M5Stack Tab5 Example/I][8.373]: Setting audio sample rate to 44100 Hz
+[M5Stack Tab5 Example/I][8.379]: Starting data display task...
+[M5Stack Tab5 Example/I][8.385]: Starting continuous adc...
+[joy_cal/I][8.393]: loaded /storage/joystick_cal.txt: horizontal 11/1507/2971, vertical 6/1510/2962, twist 10/1477/2960 mV
+[M5Stack Tab5 Example/I][8.407]: Starting RTPS comms...
+[rtps_comms/I][8.408]: WiFi network: 'AlainH' (built in)
+[rtps_comms/I][8.416]: Network: WiFi
+I (8418) transport: Attempt connection with slave: retry[0]
+W (8418) H_SDIO_DRV: Reset slave using GPIO[15]
+I (8427) os_wrapper_esp: GPIO [15] configured
+W (8480) remote_ui: remote UI listening on 3333 -- DEBUG ONLY, it can press anything on screen
+[fw_info/I][8.996]: Firmware SHA-256 7770204a7f7f3c99a8d842bf02679ec0a7881a1f400bb9ed74c803ec7769ddb3 (4417984 bytes, 540 ms)
+[fw_info/I][9.002]: Not a published release: no line for this image in fwinfo.txt
+I (9948) sdio_wrapper: SDIO master: Slot 1, Data-Lines: 4-bit Freq(KHz)[40000 KHz]
+I (9948) sdio_wrapper: GPIOs: CLK[12] CMD[13] D0[11] D1[10] D2[9] D3[8] Slave_Reset[15]
+I (9959) sdio_wrapper: Queues: Tx[20] Rx[20] SDIO-Rx-Mode[1]
+I (9995) sdio_wrapper: Function 0 Blocksize: 512
+I (9995) sdio_wrapper: Function 1 Blocksize: 512
+I (10095) H_SDIO_DRV: Card init success, TRANSPORT_RX_ACTIVE
+I (10095) transport: set_transport_state: 1
+I (10095) transport: Waiting for esp_hosted slave to be ready
+I (10173) H_SDIO_DRV: SDIO Host operating in STREAMING MODE
+I (10173) H_SDIO_DRV: Open data path at slave
+I (10173) H_SDIO_DRV: Starting SDIO process rx task
+I (10183) H_SDIO_DRV: Received ESP_PRIV_IF type message
+I (10184) transport: Received INIT event from ESP32 peripheral
+I (10184) transport: EVENT: 12
+I (10196) transport: Identified slave [esp32c6]
+I (10196) transport: EVENT: 11
+I (10196) transport: capabilities: 0xd
+I (10196) transport: Features supported are:
+I (10207) transport: 	 * WLAN
+I (10207) transport: 	   - HCI over SDIO
+I (10207) transport: 	   - BLE only
+I (10218) transport: EVENT: 13
+W (10218) transport: Version mismatch: Host [2.12.0] > Co-proc [0.0.0] ==> Upgrade co-proc to avoid RPC timeouts
+I (10230) transport: ESP board type is : 13 
+
+I (10230) transport: Base transport is set-up, TRANSPORT_TX_ACTIVE
+I (10241) H_API: Transport active
+I (10241) transport: Slave chip Id[12]
+I (10241) transport: raw_tp_dir[-], flow_ctrl: low[60] high[80]
+I (10252) transport: transport_delayed_init
+I (10252) esp_cli: Registering command: crash
+I (10252) esp_cli: Registering command: reboot
+I (10264) esp_cli: Registering command: mem-dump
+I (10264) esp_cli: Registering command: task-dump
+I (10275) esp_cli: Registering command: cpu-dump
+I (10275) esp_cli: Registering command: heap-trace
+I (10275) esp_cli: Registering command: sock-dump
+I (10286) esp_cli: Registering command: host-power-save
+I (10286) hci_stub_drv: Host BT Support: Disabled
+I (10298) H_SDIO_DRV: Received INIT event
+I (10298) H_SDIO_DRV: Event type: 0x22
+I (10298) H_SDIO_DRV: Write thread started
+I (10488) RPC_WRAP: Coprocessor Boot-up
+[rtps_comms/I][10.606]: ESP32-C6 runs esp_hosted 1.4.1
+I (10741) RPC_WRAP: ESP Event: wifi station started
+[rtps_comms/I][10.751]: WiFi up, joining 'AlainH' (power save 0)
+I (10764) H_API: esp_wifi_remote_connect
+I (14525) RPC_WRAP: ESP Event: Station mode: Disconnected
+[rtps_comms/W][14.526]: WiFi: not connected to 'AlainH' (reason 2), retrying
+I (14526) H_API: esp_wifi_remote_connect
+I (16946) RPC_WRAP: ESP Event: Station mode: Disconnected
+[rtps_comms/W][16.947]: WiFi: not connected to 'AlainH' (reason 205), retrying
+I (16947) H_API: esp_wifi_remote_connect
+I (20384) RPC_WRAP: ESP Event: Station mode: Disconnected
+[rtps_comms/W][20.384]: WiFi: not connected to 'AlainH' (reason 2), retrying
+I (20385) H_API: esp_wifi_remote_connect
+I (22805) RPC_WRAP: ESP Event: Station mode: Disconnected
+[rtps_comms/W][22.805]: WiFi: not connected to 'AlainH' (reason 205), retrying
+I (22806) H_API: esp_wifi_remote_connect
+I (25539) RPC_WRAP: ESP Event: Station mode: Connected
+I (25539) esp_wifi_remote: esp_wifi_internal_reg_rxcb: sta: 0x401824b2
+[rtps_comms/I][25.576]: WiFi joined 'AlainH' on channel 11 (-31 dBm)
+[rtps_link/I][25.739]: LINK_DOWN -> NO_IP (link up, but no DHCP lease)
+I (27158) esp_netif_handlers: sta ip: 192.168.137.180, mask: 255.255.255.0, gw: 192.168.137.2
+[rtps_comms/I][27.158]: Got IP 192.168.137.180 (gateway 192.168.137.2)

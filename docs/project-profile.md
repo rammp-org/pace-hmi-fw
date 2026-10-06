@@ -1,0 +1,123 @@
+# Project profile: pace-hmi-fw
+
+The project's facts that are not in code. Wiring will live in
+`components/topology/include/topology.hpp` (not yet written; draft in `docs/plans/refactor.md`);
+link to it, don't copy it. Filled 2026-10-06 from facts verified that day; "unknown" means not
+yet measured or decided, and "none" means checked and absent.
+
+## Identity and toolchain
+- Project: `rammp-hmi-p4` (repo rammp-org/pace-hmi-fw), the joystick HMI of a powered wheelchair.
+  It talks RTPS to the MIB/MCB.
+- Namespace: none yet for application code (CS-NAM-02 gap). The shared RTPS spec uses `rammp::`.
+- Target: ESP32-P4, chip rev v1.3 (board 2 boot log), on the M5Stack Tab5. Wi-Fi comes from the
+  Tab5's ESP32-C6 over SDIO (esp_hosted 2.12; the C6 reports esp_hosted 1.4.1). Ethernet is an
+  optional W5500 on SPI.
+- Boards (told apart by the USB serial number = MAC):
+
+  | Board | MAC | Features | Notes |
+  | --- | --- | --- | --- |
+  | 1 | 30:ED:A0:EA:BB:F5 | none (no joystick, no haptic answering) | |
+  | 2 | 80:F1:B2:D1:51:A6 | `board:joystick`, `board:drv2605` | DA7280 not fitted. Verified 2026-10-06 on COM9 |
+  | 3 | 80:F1:B2:D1:42:DB | `board:joystick` | |
+
+- ESP-IDF v6.0 (`C:\esp\v6.0\esp-idf`; CI `IDF_VERSION: v6.0`) · espp 1.3.2, every `espp/*` pinned
+  `==1.3.2` in `main/idf_component.yml` · LVGL 9.5.0 · clang-format 14.0.6 (not installed locally;
+  pre-commit fetches it) · esp-clang 20.1.1 (from ESP-IDF 6.0) · cppcheck from
+  `esp-cpp/StaticAnalysis@master` in CI (version unknown; not installed locally).
+- C++ standard: IDF 6.0 builds `-std=gnu++26`. `CMAKE_CXX_STANDARD 20` in `CMakeLists.txt` has no
+  effect (CS-LNG-02).
+- Build variants (CS-LAY-09):
+
+  | Variant | How | Differences |
+  | --- | --- | --- |
+  | default / release | `sdkconfig.defaults` | Ethernet is the default network setting; remote UI off |
+  | bench test | `-D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.wifi.local"` (untracked) | `CONFIG_HMI_REMOTE_UI=y`, Wi-Fi SSID and password |
+
+  CI builds only the default variant today.
+- Branch protection on `main` and `dev`: not recorded (CS-GIT-05). Until then approvals are by
+  review only.
+
+## Components
+| Component | Concern (one sentence) | Safety-relevant | Builds for linux | D4 diagram |
+| --- | --- | --- | --- | --- |
+| `main` | everything not listed below (to be split, see `docs/plans/refactor.md`) | yes | no | none |
+| `components/joystick` | espp joystick plus a twist axis (a modified espp copy, no README) | yes | builds natively with host g++ (verified by the test audit) | none |
+| `components/m5stack-tab5` | vendored espp Tab5 BSP 1.2.0 (sha 615b8df), modified | no | no | none |
+| `components/ui` | SquareLine export, generated | no | n/a | none |
+| `rammp_rtps_messages` (submodule `external/rammp-rtps`) | shared RTPS message and topic spec | yes (wire format of motion commands) | header-only | none |
+
+## Tasks and islands
+- Topology: not written yet. Today's tasks are inventoried in `docs/plans/refactor.md`.
+- Free stack at the end of a self-test run, board 2, 2026-10-06 (`rtps_selftest.py`; the self test
+  reports free bytes, not a stress-test high-water mark): LVGL 11060 B, ADC 1496 B, RTPS 6112 B.
+  The stress test (TS-TGT-03) has not been run, so CS-MEM-04 margins are unknown.
+- Watchdog: the task watchdog fired on `main` (CPU 0) at about 8 s into boot (board 2,
+  2026-10-06, firmware b13b103). Which safety tasks the TWDT covers is unknown (CS-SAF-06).
+- Islands, context types, cycle periods: none yet.
+- Components allowed to hold locks (CS-OWN-08): none declared. Today `main` uses a global
+  recursive `lvgl_mutex` (47 mentions in 10 files).
+- Ownership checks in release builds: not implemented.
+- Fan-out cap for scheduled agent runs: 8 (set by the user for the 2026-10-06 overnight run).
+
+## Budgets and interfaces
+- Flash: two 6 MiB OTA slots (`partitions.csv`). App binary at e2047a4: 4,398,912 B (measured from
+  `build/rammp-hmi-p4.bin`), about 70% of a slot.
+- RAM: PSRAM free at the end of a self test is 28,146 KB (board 2). Internal and DMA budgets:
+  unknown; POST does not exist yet.
+- External interfaces (CS-CFG-03; none is versioned yet unless stated):
+
+  | Interface | Where documented |
+  | --- | --- |
+  | RTPS topics and messages | `external/rammp-rtps`, `main/hmi_rtps_spec.hpp` |
+  | Remote UI debug channel, TCP 3333 | `main/remote_ui.hpp`, `scripts/hmi_ui.py` |
+  | Self-test report lines and the `SelfTestReport` message | `main/selftest_spec.h`, `scripts/rammp_rtps.py` |
+  | `/storage/joystick_cal.txt` | `main/joystick_cal.cpp` (`version 1`) |
+  | `/storage/settings.txt`, `fwinfo.txt`, `wifi.txt` | their `.cpp` files (unversioned) |
+  | SquareLine widget names (UI contract) | `scripts/ui_contract.py` |
+
+- Non-espp dependencies: LVGL 9.5.0, espressif/w5500, esp_wifi_remote, esp_hosted ~2.12, cjson,
+  esp-dsp, littlefs (via espp file_system). The espp alternatives considered: not recorded.
+- Vendored copies in `components/`: `m5stack-tab5`, `joystick`. Neither has a README listing its
+  upstream version and changes (CS-LAY-05).
+
+## Bench
+- PC: Windows 11 laptop. ESP-IDF via `C:\Espressif\tools\Microsoft.v6.0.PowerShell_profile.ps1`;
+  pyserial only in `C:\Espressif\tools\python\v6.0\venv\Scripts\python.exe`.
+- Serial: the board's USB CDC port (board 2 was COM9). Opening it resets the board unless `dtr` and
+  `rts` are set False before `open()`.
+- Network: the Windows Mobile Hotspot on 192.168.137.0/24, PC = 192.168.137.2. VMware VMnet8 also
+  holds 192.168.137.1, so RTPS scripts take `--bind-address 192.168.137.2`. Board 2 got
+  192.168.137.180 on 2026-10-06. The hotspot's peerless timeout is off.
+- Power switching: none.
+- Nightly window and board lease file: not set up yet.
+- Reset to known state: no regions are erased by any runner. Flashing a build with a different
+  partition table reformats `/storage` and loses the joystick calibration. The preflight compares
+  `read_flash 0x8000 0xc00` with the build's table.
+- Environment traps and their preflight checks (TS-DET-06):
+
+  | Trap | Preflight |
+  | --- | --- |
+  | Port open resets the board | open with dtr/rts False |
+  | Partition table differs → storage lost | compare the 0x8000 table before flashing |
+  | Ethernet is the default network; with no W5500 link the board is unreachable | boot log says `Network: WiFi`; the stored network setting must be 1 |
+  | Hotspot joins but gives no DHCP lease ("LINK_DOWN -> NO_IP" > 60 s) | restart tethering (WinRT NetworkOperatorTetheringManager) |
+  | Wi-Fi join takes several tries (4 failures, about 27 s, seen 2026-10-06) | wait for `Got IP` in the boot log, with a timeout |
+  | VMnet8 on the same subnet | `--bind-address 192.168.137.2` |
+  | Component manager dies silently on long paths in a new worktree | copy `managed_components/` from the main checkout |
+  | `rtps_selftest.py` and `rtps_mcb_sim.py` both publish MibStatus | never run them together (two publishers fail `rtps.mcb_period` and `rtps.mcb_loss`) |
+
+- Peer simulators: `scripts/rtps_mcb_sim.py --peer <ip> --bind-address 192.168.137.2`, with stdin
+  commands `e`, `ok`, `x`, `s`. `scripts/rtps_selftest.py` acts as the MCB during a self-test run.
+- Debug channel: `scripts/hmi_ui.py` on TCP 3333 (screenshots, taps, keys, walk). Test builds
+  enable it with `CONFIG_HMI_REMOTE_UI=y`.
+
+## Test parameters (defaults in brackets)
+- POST time budget: none (no boot POST exists) · nightly boot count [20] · extended self-test runs [5]
+- Statistical tests: Wi-Fi link up is judged over at least 5 boots (bench experience).
+- Stress test duration [10 min] · Soak: not set.
+- Release smoke list and manual checklist: none yet.
+
+## Deviations
+| Rule ID | Location | Reason | Owner | Review date |
+| --- | --- | --- | --- | --- |
+| none recorded yet | | | | |

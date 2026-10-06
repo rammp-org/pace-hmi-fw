@@ -1,0 +1,521 @@
+{
+  "run_id": 148,
+  "firmware": "v3.0.0-alpha-31-gb13b103",
+  "verdict": "PASS",
+  "hmi_run_time": "11511 ms",
+  "results": [
+    {
+      "name": "sys.clean_reset",
+      "result": "PASS",
+      "value": 1,
+      "unit": "",
+      "lo": 1,
+      "hi": 1,
+      "detail": "reset reason: USB"
+    },
+    {
+      "name": "sys.cpu_mhz",
+      "result": "PASS",
+      "value": 360,
+      "unit": "MHz",
+      "lo": 360,
+      "hi": 360,
+      "detail": ""
+    },
+    {
+      "name": "sys.uptime",
+      "result": "PASS",
+      "value": 500,
+      "unit": "s",
+      "lo": 0,
+      "hi": null,
+      "detail": ""
+    },
+    {
+      "name": "log.capture",
+      "result": "PASS",
+      "value": 1,
+      "unit": "",
+      "lo": 1,
+      "hi": 1,
+      "detail": "462 lines since boot, 6 this run"
+    },
+    {
+      "name": "net.link",
+      "result": "PASS",
+      "value": 1,
+      "unit": "",
+      "lo": 1,
+      "hi": 1,
+      "detail": ""
+    },
+    {
+      "name": "net.ip",
+      "result": "PASS",
+      "value": 1,
+      "unit": "",
+      "lo": 1,
+      "hi": 1,
+      "detail": ""
+    },
+    {
+      "name": "net.wifi_rssi",
+      "result": "PASS",
+      "value": -31,
+      "unit": "dBm",
+      "lo": -75,
+      "hi": null,
+      "detail": ""
+    },
+    {
+      "name": "rtps.mcb_link",
+      "result": "PASS",
+      "value": 1,
+      "unit": "",
+      "lo": 1,
+      "hi": 1,
+      "detail": ""
+    },
+    {
+      "name": "rtps.mcb_period",
+      "result": "PASS",
+      "value": 512,
+      "unit": "ms",
+      "lo": 400,
+      "hi": 600,
+      "detail": "12 samples"
+    },
+    {
+      "name": "rtps.mcb_gap",
+      "result": "PASS",
+      "value": 517,
+      "unit": "ms",
+      "lo": 0,
+      "hi": 1000,
+      "detail": ""
+    },
+    {
+      "name": "rtps.mcb_loss",
+      "result": "PASS",
+      "value": 0,
+      "unit": "0.1%",
+      "lo": 0,
+      "hi": 100,
+      "detail": "0 lost of 12"
+    },
+    {
+      "name": "rtps.adc_hz",
+      "result": "PASS",
+      "value": 28,
+      "unit": "Hz",
+      "lo": 25,
+      "hi": 32,
+      "detail": "171 samples in 6000 ms"
+    },
+    {
+      "name": "rtps.rtt_p50",
+      "result": "PASS",
+      "value": 5400,
+      "unit": "us",
+      "lo": 0,
+      "hi": 20000,
+      "detail": "min 1802 us, max 53224 us"
+    },
+    {
+      "name": "rtps.rtt_p99",
+      "result": "PASS",
+      "value": 49486,
+      "unit": "us",
+      "lo": 0,
+      "hi": 250000,
+      "detail": ""
+    },
+    {
+      "name": "rtps.ping_loss",
+      "result": "PASS",
+      "value": 0,
+      "unit": "0.1%",
+      "lo": 0,
+      "hi": 20,
+      "detail": "150 sent, 0 lost out, 0 lost back"
+    },
+    {
+      "name": "mem.int_free",
+      "result": "PASS",
+      "value": 143,
+      "unit": "KB",
+      "lo": 16,
+      "hi": null,
+      "detail": ""
+    },
+    {
+      "name": "mem.int_min",
+      "result": "PASS",
+      "value": 117,
+      "unit": "KB",
+      "lo": 12,
+      "hi": null,
+      "detail": "117 KB before this run"
+    },
+    {
+      "name": "mem.int_block",
+      "result": "PASS",
+      "value": 62,
+      "unit": "KB",
+      "lo": 12,
+      "hi": null,
+      "detail": ""
+    },
+    {
+      "name": "mem.dma_free",
+      "result": "PASS",
+      "value": 105,
+      "unit": "KB",
+      "lo": 2,
+      "hi": null,
+      "detail": ""
+    },
+    {
+      "name": "mem.dma_min",
+      "result": "PASS",
+      "value": 80491,
+      "unit": "B",
+      "lo": 1536,
+      "hi": null,
+      "detail": "80491 B before this run"
+    },
+    {
+      "name": "mem.dma_block",
+      "result": "PASS",
+      "value": 63488,
+      "unit": "B",
+      "lo": 1536,
+      "hi": null,
+      "detail": ""
+    },
+    {
+      "name": "mem.psram_free",
+      "result": "PASS",
+      "value": 26313,
+      "unit": "KB",
+      "lo": 8192,
+      "hi": null,
+      "detail": ""
+    },
+    {
+      "name": "mem.heap_ok",
+      "result": "PASS",
+      "value": 1,
+      "unit": "",
+      "lo": 1,
+      "hi": 1,
+      "detail": ""
+    },
+    {
+      "name": "mem.stk_lvgl",
+      "result": "PASS",
+      "value": 7860,
+      "unit": "B",
+      "lo": 2048,
+      "hi": null,
+      "detail": ""
+    },
+    {
+      "name": "mem.stk_adc",
+      "result": "PASS",
+      "value": 1368,
+      "unit": "B",
+      "lo": 1024,
+      "hi": null,
+      "detail": ""
+    },
+    {
+      "name": "mem.stk_rtps",
+      "result": "PASS",
+      "value": 6100,
+      "unit": "B",
+      "lo": 1024,
+      "hi": null,
+      "detail": ""
+    },
+    {
+      "name": "i2c.missing",
+      "result": "PASS",
+      "value": 0,
+      "unit": "",
+      "lo": 0,
+      "hi": 0,
+      "detail": ""
+    },
+    {
+      "name": "i2c.devices",
+      "result": "PASS",
+      "value": 11,
+      "unit": "",
+      "lo": 11,
+      "hi": null,
+      "detail": "at 10 28 32 36 40 41 43 44 55 5a 68"
+    },
+    {
+      "name": "imu.accel",
+      "result": "PASS",
+      "value": 982,
+      "unit": "mg",
+      "lo": 850,
+      "hi": 1150,
+      "detail": ""
+    },
+    {
+      "name": "rtc.tick",
+      "result": "PASS",
+      "value": 6,
+      "unit": "s",
+      "lo": 4,
+      "hi": 8,
+      "detail": "over a 6000 ms window"
+    },
+    {
+      "name": "pwr.vbat",
+      "result": "PASS",
+      "value": 8410,
+      "unit": "mV",
+      "lo": 6000,
+      "hi": 8700,
+      "detail": ""
+    },
+    {
+      "name": "hap.drv_id",
+      "result": "PASS",
+      "value": 7,
+      "unit": "",
+      "lo": 3,
+      "hi": 7,
+      "detail": ""
+    },
+    {
+      "name": "hap.drv_fault",
+      "result": "PASS",
+      "value": 1,
+      "unit": "",
+      "lo": 1,
+      "hi": 1,
+      "detail": "STATUS 0xe0"
+    },
+    {
+      "name": "hap.drv_play",
+      "result": "PASS",
+      "value": 1,
+      "unit": "",
+      "lo": 1,
+      "hi": 1,
+      "detail": "finished in ~66 ms"
+    },
+    {
+      "name": "hap.da7280",
+      "result": "SKIP",
+      "value": null,
+      "unit": "",
+      "lo": 1,
+      "hi": 1,
+      "detail": "not fitted (no ACK at 0x4a at boot)"
+    },
+    {
+      "name": "disp.direct",
+      "result": "PASS",
+      "value": 1,
+      "unit": "",
+      "lo": 1,
+      "hi": 1,
+      "detail": ""
+    },
+    {
+      "name": "disp.backlight",
+      "result": "PASS",
+      "value": 80,
+      "unit": "%",
+      "lo": 5,
+      "hi": 100,
+      "detail": ""
+    },
+    {
+      "name": "time.render_avg",
+      "result": "PASS",
+      "value": 51373,
+      "unit": "us",
+      "lo": 0,
+      "hi": 180000,
+      "detail": "30 of 30 frames"
+    },
+    {
+      "name": "time.render_max",
+      "result": "PASS",
+      "value": 53718,
+      "unit": "us",
+      "lo": 0,
+      "hi": 180000,
+      "detail": ""
+    },
+    {
+      "name": "time.ui_stall",
+      "result": "PASS",
+      "value": 18325,
+      "unit": "us",
+      "lo": 0,
+      "hi": 120000,
+      "detail": ""
+    },
+    {
+      "name": "time.adc_avg",
+      "result": "PASS",
+      "value": 35071,
+      "unit": "us",
+      "lo": 30000,
+      "hi": 40000,
+      "detail": "171 cycles"
+    },
+    {
+      "name": "time.adc_max",
+      "result": "PASS",
+      "value": 36878,
+      "unit": "us",
+      "lo": 0,
+      "hi": 70000,
+      "detail": ""
+    },
+    {
+      "name": "joy.valid",
+      "result": "PASS",
+      "value": 100,
+      "unit": "%",
+      "lo": 99,
+      "hi": 100,
+      "detail": "171 of 171 cycles"
+    },
+    {
+      "name": "joy.x_rest",
+      "result": "PASS",
+      "value": 1498,
+      "unit": "mV",
+      "lo": 1350,
+      "hi": 1950,
+      "detail": "1497..1500 mV"
+    },
+    {
+      "name": "joy.y_rest",
+      "result": "PASS",
+      "value": 1507,
+      "unit": "mV",
+      "lo": 1350,
+      "hi": 1950,
+      "detail": "1507..1509 mV"
+    },
+    {
+      "name": "joy.twist_rest",
+      "result": "PASS",
+      "value": 1474,
+      "unit": "mV",
+      "lo": 1350,
+      "hi": 1950,
+      "detail": "1459..1491 mV"
+    },
+    {
+      "name": "joy.x_noise",
+      "result": "PASS",
+      "value": 3,
+      "unit": "mV",
+      "lo": 0,
+      "hi": 30,
+      "detail": ""
+    },
+    {
+      "name": "joy.y_noise",
+      "result": "PASS",
+      "value": 2,
+      "unit": "mV",
+      "lo": 0,
+      "hi": 30,
+      "detail": ""
+    },
+    {
+      "name": "joy.twist_noise",
+      "result": "PASS",
+      "value": 32,
+      "unit": "mV",
+      "lo": 0,
+      "hi": 120,
+      "detail": ""
+    },
+    {
+      "name": "joy.cal_saved",
+      "result": "PASS",
+      "value": 1,
+      "unit": "",
+      "lo": 1,
+      "hi": 1,
+      "detail": ""
+    },
+    {
+      "name": "joy.x_cal_off",
+      "result": "PASS",
+      "value": 9,
+      "unit": "mV",
+      "lo": 0,
+      "hi": 40,
+      "detail": "rest 1498, calibrated 1507 mV"
+    },
+    {
+      "name": "joy.y_cal_off",
+      "result": "PASS",
+      "value": 2,
+      "unit": "mV",
+      "lo": 0,
+      "hi": 40,
+      "detail": "rest 1508, calibrated 1510 mV"
+    },
+    {
+      "name": "joy.twist_cal_off",
+      "result": "PASS",
+      "value": 2,
+      "unit": "mV",
+      "lo": 0,
+      "hi": 50,
+      "detail": "rest 1475, calibrated 1477 mV"
+    },
+    {
+      "name": "joy.button_idle",
+      "result": "PASS",
+      "value": 1,
+      "unit": "",
+      "lo": 1,
+      "hi": 1,
+      "detail": ""
+    },
+    {
+      "name": "pc.report_complete",
+      "result": "PASS",
+      "value": 54,
+      "unit": "",
+      "lo": 54,
+      "hi": 54,
+      "detail": ""
+    },
+    {
+      "name": "pc.spec_match",
+      "result": "PASS",
+      "value": 1,
+      "unit": "",
+      "lo": 1,
+      "hi": 1,
+      "detail": ""
+    },
+    {
+      "name": "pc.adc_rx_hz",
+      "result": "PASS",
+      "value": 28,
+      "unit": "Hz",
+      "lo": 25,
+      "hi": 32,
+      "detail": "85 joystick samples in 3.0 s before the run"
+    }
+  ]
+}
