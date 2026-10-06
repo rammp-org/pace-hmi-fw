@@ -54,7 +54,13 @@ idf_build_set_property(COMPILE_DEFINITIONS "LV_USE_STDLIB_MALLOC=LV_STDLIB_CUSTO
 
 project(rammp-hmi-p4)
 
-set(CMAKE_CXX_STANDARD 20)
+# fw-standards (CS-LNG-02). The language standard is not set here:
+# CMAKE_CXX_STANDARD has no effect after project(), where every component target
+# already exists. First-party components call fw_component_options() themselves;
+# everything else gets SYSTEM headers (cmake/hmi_first_party.cmake says which).
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/fw_standards.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/hmi_first_party.cmake)
+hmi_mark_third_party_system()
 
 # picolibc's pthread.h uses `__noreturn` in trailing position (`void f(void)
 # __noreturn;`). In C++ that macro expands to `[[noreturn]]`, which then
