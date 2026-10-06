@@ -1,0 +1,11 @@
+{
+  "note": "Owner-approved overrides of values in boot-board2.log (TS-DET-05: old and new side by side). boot-board2.log stays the unedited capture.",
+  "overrides": {
+    "settings_loaded": {
+      "value": "loaded: brightness 80, theme 0, menu_slide 0, flip 0, stick_sensitivity 9, drive_speed 10, stick_invert_x 0, stick_invert_y 0, stick_swap 0, sounds 1, network 1",
+      "was": "loaded: brightness 80, theme 1, menu_slide 0, flip 0, stick_sensitivity 9, drive_speed 10, stick_invert_x 0, stick_invert_y 0, stick_swap 0, sounds 1, network 1",
+      "why": "The owner set the Night theme (theme 0) on board 2 on 2026-10-06 and it stays; read on final-a9a040f at 11:36.",
+      "approved": "owner, 2026-10-06, relayed by the orchestrator"
+    }
+  }
+}

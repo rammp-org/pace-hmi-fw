@@ -8,7 +8,8 @@ from `Got IP`.
 Required markers, each taken from the baseline log with its text, and required
 in the order they appear there (the plan lists them in a different order; the
 log's own order is what the firmware does):
-- `settings/I ... loaded: <values>`              same values as the baseline
+- `settings/I ... loaded: <values>`              same values as the baseline, or as
+  boot-expected.json beside it (owner-approved: Night theme, theme 0, since 2026-10-06)
 - `Adding joystick keypad input device...`        the joystick input is up
 - `selftest/I ... ready: <n> checks (...)`        same text as the baseline
   (the baseline has no "joystick self test passed" line; these two are the
@@ -47,6 +48,13 @@ MARKERS = [  # (name, regex, compare the captured group with the baseline's?)
 ]
 FORBIDDEN = [("guru", r"Guru Meditation"), ("abort", r"abort\(\)")]
 SECOND_BOOT = [("rom_banner", r"ESP-ROM:"), ("app_main", r"Calling app_main\(\)")]
+# Owner-approved replacements for values in the baseline log, kept beside it with
+# the old value (boot-expected.json); the log itself stays the unedited capture.
+try:
+    OVERRIDES = json.loads((common.BASELINE_DIR / "boot-expected.json").read_text(
+        encoding="utf-8"))["overrides"]
+except FileNotFoundError:
+    OVERRIDES = {}
 WDT_TRIP = re.compile(r"task_wdt: Task watchdog got triggered")
 WDT_TASK = re.compile(r"task_wdt:\s+- (\S+)|task_wdt: CPU (\d): (\S+)")
 
@@ -81,7 +89,8 @@ def analyse(capture: str, baseline: str) -> dict:
         hits = find(base, regex)
         if not hits:
             raise SystemExit(f"baseline has no {name} line: the baseline is not usable")
-        expected.append((hits[0][0], name, regex, compare, hits[0][1]))
+        value = OVERRIDES.get(name, {}).get("value", hits[0][1])
+        expected.append((hits[0][0], name, regex, compare, value))
     expected.sort()
 
     last_index, ip = -1, None
