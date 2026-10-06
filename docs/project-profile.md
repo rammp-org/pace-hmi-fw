@@ -40,21 +40,26 @@ yet measured or decided, and "none" means checked and absent.
 ## Components
 | Component | Concern (one sentence) | Safety-relevant | Builds for linux | D4 diagram |
 | --- | --- | --- | --- | --- |
-| `main` | everything not listed below (to be split, see `docs/plans/refactor.md`) | yes | no | none |
-| `components/joystick` | espp joystick plus a twist axis (a modified espp copy, no README) | yes | builds natively with host g++ (verified by the test audit) | none |
-| `components/m5stack-tab5` | vendored espp Tab5 BSP 1.2.0 (sha 615b8df), modified | no | no | none |
+| `main` | everything not listed below; `main.cpp` #includes 27 `frag_*.inc` (one TU, `tools/split_main.py`) | yes | no | none |
+| `components/fw_core` | the channel helpers, ThreadChecker, `Owned<T>`, `check()`, context tokens (not used by the firmware yet) | used by safety | host L1 (FWC-L1) | none |
+| `components/hmi_format` | pure screen-text formatting (speed, steppers, seat, clock, diagnostics) | no | host L1 (L1-FMT) | README |
+| `components/hmi_models` | pure UI models: the button-grid cursor walk and the bench PIN entry | no | host L1 (L1-MOD) | README |
+| `components/joystick` | espp joystick plus a twist axis (vendored espp 1.2.0, sha 615b8df; README + upstream.diff) | yes | host L1 (L1-JOY) | none |
+| `components/m5stack-tab5` | vendored espp Tab5 BSP 1.2.0 (sha 615b8df), modified (VENDORED.md + upstream.diff) | no | no | none |
 | `components/ui` | SquareLine export, generated | no | n/a | none |
 | `rammp_rtps_messages` (submodule `external/rammp-rtps`) | shared RTPS message and topic spec | yes (wire format of motion commands) | header-only | none |
 
 ## Tasks and islands
-- Topology: not written yet. Today's tasks are inventoried in `docs/plans/refactor.md`.
+- Topology: a draft exists on `dev_ai_refactor_topology` (not merged, for review). Today's tasks are
+  inventoried in `docs/plans/refactor.md`.
 - Free stack at the end of a self-test run, board 2, 2026-10-06 (`rtps_selftest.py`; the self test
   reports free bytes, not a stress-test high-water mark): LVGL 11060 B, ADC 1496 B, RTPS 6112 B.
   The stress test (TS-TGT-03) has not been run, so CS-MEM-04 margins are unknown.
 - Watchdog: the task watchdog fired on `main` (CPU 0) at about 8 s into boot (board 2,
   2026-10-06, firmware b13b103). Which safety tasks the TWDT covers is unknown (CS-SAF-06).
 - Islands, context types, cycle periods: none yet.
-- Components allowed to hold locks (CS-OWN-08): none declared. Today `main` uses a global
+- Components allowed to hold locks (CS-OWN-08): `fw_core` (the channel helpers; the ratchet's
+  RULE_PLACEMENTS). Today `main` uses a global
   recursive `lvgl_mutex` (47 mentions in 10 files).
 - Ownership checks in release builds: not implemented.
 - Fan-out cap for scheduled agent runs: 8 (set by the user for the 2026-10-06 overnight run).
@@ -106,6 +111,10 @@ yet measured or decided, and "none" means checked and absent.
   | Component manager dies silently on long paths in a new worktree | copy `managed_components/` from the main checkout |
   | `rtps_selftest.py` and `rtps_mcb_sim.py` both publish MibStatus | never run them together (two publishers fail `rtps.mcb_period` and `rtps.mcb_loss`) |
 
+- Board runner: `tools/bench/run_bench.py` (B0-B5; lease file `C:/Users/halai/Offline_Documents/ATDev/rammp/.board-lease`;
+  last-good images in `C:/b/bench/good/`; results in `C:/b/bench/results/`). Flakiness seen on
+  2026-10-06: `time.render_max` outside its 20 % band in 1 of 6 runs on m3; `pwr.vbat` read about
+  4.4 V (taken as "no pack") in 2 of 5 runs on the drive-session draft only.
 - Peer simulators: `scripts/rtps_mcb_sim.py --peer <ip> --bind-address 192.168.137.2`, with stdin
   commands `e`, `ok`, `x`, `s`. `scripts/rtps_selftest.py` acts as the MCB during a self-test run.
 - Debug channel: `scripts/hmi_ui.py` on TCP 3333 (screenshots, taps, keys, walk). Test builds
@@ -120,4 +129,7 @@ yet measured or decided, and "none" means checked and absent.
 ## Deviations
 | Rule ID | Location | Reason | Owner | Review date |
 | --- | --- | --- | --- | --- |
-| none recorded yet | | | | |
+| TS-UNIT-01, CS-HAL-04 | `tests/` (all L1 apps) | L1 runs as host-native g++ 13 in WSL with IDF's Unity sources, not the IDF `linux` target (not installed; no sudo in WSL) | owner | approved 2026-10-06 (Q6) |
+| CS-LAY (layout) | `main/frag_*.inc` | one-TU fragments of `main.cpp`, so the split cannot change static-init order, linkage or inlining; each fragment becomes a component later | owner | temporary |
+| AI-UNA-02 "never merge" | `dev_refactor` | the owner authorised merges into `dev_refactor` for the 2026-10-06 run (AI-DIS-01) | owner | per run |
+| CS-LNG-02 | `main` | `main` keeps IDF's gnu++26 and default warnings until its legacy counts are in the ratchet; new components use `fw_component_options` | owner | open |
