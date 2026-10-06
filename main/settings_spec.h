@@ -25,8 +25,8 @@
    and starts at `default` until it has been.
    DRIVE_SPEED scales the stick on its way to the MCB, in tenths: 10 = the stick as it
    is, 1 = as if it moved a tenth as far. The UI keys and the bars do not see it.
-   NETWORK is what RTPS runs over, 0 = Ethernet (the W5500), 1 = WiFi (the ESP32-C6;
-   Ethernet anyway while no WiFi network is known). It is on a page of its own because the
+   NETWORK is what RTPS runs over, 0 = Ethernet (the W5500, the default), 1 = WiFi (the
+   ESP32-C6; Ethernet anyway while no WiFi network is known). It is on a page of its own because the
    InternetScreen draws it as two choice buttons (internet_ui.cpp), not as a -/+ row. Read
    at boot, so a change takes a restart, which that screen offers. */
 #define SETTINGS_PARAM_TABLE(X)                                                                    \
@@ -40,7 +40,7 @@
   X(STICK, STICK_INVERT_Y, "J4", "Stick fwd/back", 0, 1, 1, 0, "", 0)                              \
   X(STICK, STICK_SWAP, "J5", "Stick axes", 0, 1, 1, 0, "", 0)                                      \
   X(DISPLAY, SOUNDS, "D5", "Sounds", 0, 1, 1, 0, "", 1)                                            \
-  X(NET, NETWORK, "N1", "Connection", 0, 1, 1, 0, "", 1)
+  X(NET, NETWORK, "N1", "Connection", 0, 1, 1, 0, "", 0)
 
 /* SETTINGS_PAGE_SCREEN_BRIGHTNESS, ..., SETTINGS_PAGE_COUNT */
 enum {

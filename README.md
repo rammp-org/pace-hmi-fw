@@ -107,10 +107,12 @@ It looks the `.bin`'s SHA-256 up among the releases and, when one matches, adds 
 
 RTPS runs over one link, chosen in **Settings → Internet** and brought up at boot:
 
-- **WiFi** (the default): the Tab5's ESP32-C6, over SDIO through esp_hosted, 2.4 GHz only.
-- **Ethernet**: the W5500 on the M5-Bus header.
+- **Ethernet** (the default): the W5500 on the M5-Bus header.
+- **WiFi**: the Tab5's ESP32-C6, over SDIO through esp_hosted, 2.4 GHz only.
 
 Changing the choice is saved at once and takes effect on the next boot: **Restart to apply** appears while the link in use is not the one chosen.
+
+The top bar shows the link in use on every screen: `BT · ETH` or `BT · WI-FI`.
 
 **Joining a WiFi network**, on the Tab5 itself: Settings → Internet → the WiFi network row scans and lists what it hears, strongest first. Pick one, type its password (shown as typed) and press OK. The HMI tries it first, and saves it (`/storage/wifi.txt`) only once it has joined; a wrong password says so and the old network stays. This works on either link: on Ethernet the C6 joins only to prove the password, then lets go, and takes no address.
 
