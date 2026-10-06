@@ -40,6 +40,8 @@ constexpr char kReleasesUrl[] =
     "https://api.github.com/repos/rammp-org/pace-hmi-fw/releases?per_page=30";
 constexpr char kAssetName[] = "rammp-hmi-p4.bin";
 constexpr char kUserAgent[] = "pace-hmi-fw";
+// One more image to offer before it is published (Kconfig HMI_OTA_TEST_URL). "" = none.
+constexpr char kTestUrl[] = CONFIG_HMI_OTA_TEST_URL;
 constexpr int kHttpTimeoutMs = 20000;
 constexpr int kMaxRedirects = 5;
 constexpr size_t kChunkBytes = 16 * 1024;
@@ -529,13 +531,12 @@ GithubReleases github_releases_fetch() {
   }
   out.releases = parse_releases(json, out.error);
   out.ok = out.error.empty();
-  if (sizeof(CONFIG_HMI_OTA_TEST_URL) > 1) {
-    // An image to try before it is published (Kconfig HMI_OTA_TEST_URL).
+  if (kTestUrl[0] != '\0') {
     GithubRelease test{};
     test.tag = "Test image";
     test.prerelease = true;
-    test.notes = "Not a release: whatever " CONFIG_HMI_OTA_TEST_URL " serves.";
-    test.url = CONFIG_HMI_OTA_TEST_URL;
+    test.notes = fmt::format("Not a release: whatever {} serves.", kTestUrl);
+    test.url = kTestUrl;
     out.releases.insert(out.releases.begin(), std::move(test));
   }
   logger.info("Release list: {} releases ({} bytes of JSON)", out.releases.size(), json.size());
