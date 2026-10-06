@@ -78,8 +78,12 @@ FRAG_RE = re.compile(r"^main/frag_[A-Za-z0-9_]+\.inc$")
 FRAG_INCLUDE_RE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*"(frag_[A-Za-z0-9_]+\.inc)"[ \t]*(//.*)?$')
 
 # UI files may call lv_* (CS-UI: only the UI task touches LVGL).
+# main/*_ui.* is frozen to the files that existed on 2026-10-06 (app-main-shrink V3): new UI
+# code goes to components/hmi_ui/ (CS-UI-02), not to a new main/foo_ui.cpp.
+MAIN_UI_FILES = ("about_ui", "internet_ui", "remote_ui", "update_ui")
 UI_FILE_RES = [
-    re.compile(r"^main/[A-Za-z0-9_]+_ui\.(?:cpp|hpp|h)$"),
+    re.compile(r"^main/(?:" + "|".join(MAIN_UI_FILES) + r")\.(?:cpp|hpp)$"),
+    re.compile(r"^components/hmi_ui/"),
     re.compile(r"^main/log_view\.(?:cpp|hpp|h)$"),
     re.compile(r"^main/joystick_cal\.(?:cpp|hpp|h)$"),
     re.compile(r"^main/main\.cpp$"),
@@ -1022,6 +1026,23 @@ def _selftest_task_idiom(expect: Expect) -> None:
             "baseline: must be clean)"])
 
 
+def _selftest_ui_paths(expect: Expect) -> None:
+    """lv_* allowed in components/hmi_ui/ and today's main/*_ui files; a new main/foo_ui.cpp is not UI."""
+    code = "void f() {\n  lv_obj_t *o = lv_obj_create(nullptr);\n}\n"
+    for path in ("main/about_ui.cpp", "main/about_ui.hpp", "main/internet_ui.cpp", "main/remote_ui.cpp",
+                 "main/update_ui.hpp", "main/log_view.cpp", "main/joystick_cal.cpp", UNIT,
+                 "components/hmi_ui/src/drive_view.cpp", "components/hmi_ui/include/hmi_ui/drive_view.hpp"):
+        expect(f"UI path may call lv_: {path}", measure(path, code)["lv_outside_ui"], 0)
+    for path in ("main/foo_ui.cpp", "main/foo_ui.hpp", "main/about_ui.h", "main/settings_ui.cpp",
+                 "main/xabout_ui.cpp", "components/hmi_ui_extra/src/x.cpp", "components/other/src/x_ui.cpp",
+                 "components/other/hmi_ui/x.cpp", "main/hmi_ui/x.cpp"):
+        expect(f"not a UI path, lv_ still forbidden: {path}", measure(path, code)["lv_outside_ui"], 2)
+    zero = dict.fromkeys(METRICS, 0)
+    expect("a new main/foo_ui.cpp with lv_ fails",
+           violations({}, {"main/foo_ui.cpp": {**zero, **{"lv_outside_ui": measure("main/foo_ui.cpp", code)[
+               "lv_outside_ui"]}}}), ["lv_outside_ui main/foo_ui.cpp: 2 > 0 (not in baseline: must be clean)"])
+
+
 def selftest() -> int:
     failures: list[str] = []
 
@@ -1166,6 +1187,7 @@ def selftest() -> int:
     _selftest_strict_functions(expect)
     _selftest_app_main(expect)
     _selftest_task_idiom(expect)
+    _selftest_ui_paths(expect)
 
     for f in failures:
         print(f"selftest FAIL {f}")
