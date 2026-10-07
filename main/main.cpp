@@ -1197,7 +1197,7 @@ extern "C" void app_main(void) {
            if constexpr (kFpsStress) {
              lv_obj_invalidate(lv_screen_active());
            }
-           lv_task_handler();
+           drive_timed(TimedPath::LVGL_CYCLE, lv_task_handler); // timed: drive_timing.hpp
          }
          if constexpr (kFpsInstrument) {
            static espp::Logger fps_log({.tag = "fps", .level = espp::Logger::Verbosity::DEBUG});

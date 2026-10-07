@@ -490,7 +490,7 @@ static void nav_key_cb(lv_event_t *e) {
   // the MIB keeps driving, the Drive screen stays and its banner says so.
   if (lv_screen_active() == ui_DriveScreen && lv_subject_get_int(&locked_subject) == 0) {
     if (drive_exit_until_us == 0) {
-      drive_exit_ask(true);
+      drive_timed(TimedPath::MENU_KEY, drive_exit_ask, true);
     }
     return;
   }

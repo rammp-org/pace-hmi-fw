@@ -21,7 +21,7 @@ static void drive_profile_click_cb(lv_event_t *e) {
   // from MibStatus.activeProfile. Setting it here would highlight a button the chair
   // may refuse, which is the one thing these three must not do.
   drive_profile_published.store(*mode);
-  drive_publish();
+  drive_timed(TimedPath::PROFILE_CLICK, drive_publish);
 }
 
 // Highlights the button whose mode the MIB reports: CHECKED, which the design

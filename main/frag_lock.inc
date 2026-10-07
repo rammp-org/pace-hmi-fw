@@ -13,8 +13,8 @@ static int32_t shackle_rest_h = 0;
 // The Drive screen, dissolving in one second after the unlock landed.
 static void unlock_advance_cb(lv_timer_t *) {
   unlock_advance_timer = nullptr; // repeat_count 1: LVGL deletes it after this
-  _ui_screen_change(&ui_DriveScreen, LV_SCREEN_LOAD_ANIM_FADE_ON, kUnlockDissolveMs, 0,
-                    &ui_DriveScreen_screen_init);
+  drive_timed(TimedPath::UNLOCK_TIMER, _ui_screen_change, &ui_DriveScreen,
+              LV_SCREEN_LOAD_ANIM_FADE_ON, kUnlockDissolveMs, 0, &ui_DriveScreen_screen_init);
 }
 
 static void ring_spin_cb(void *ring, int32_t angle) {
@@ -96,7 +96,7 @@ static HoldGesture unlock_gesture{
           return lv_subject_get_int(&locked_subject) != 0 && !lock_waiting &&
                  lv_screen_active() == ui_LockedScreen && nav_menu_open == nullptr && mcb_ready();
         },
-    .completed = [] { activate_drive(); },
+    .completed = [] { drive_timed(TimedPath::UNLOCK_HOLD, activate_drive); },
     // The button doubles as select (a tap opens the menu from the key), so a
     // tap must not tick the ring.
     .grace_ms = kBarGraceMs,

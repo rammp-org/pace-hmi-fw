@@ -195,7 +195,7 @@ static HoldGesture drive_exit_gesture{
     // Ask only. drive_screen_follow_state closes the screen once the MIB actually
     // stops driving, so a MIB that does not stop cannot leave someone looking at the
     // main screen while the chair is still moving.
-    .completed = [] { drive_exit_ask(false); },
+    .completed = [] { drive_timed(TimedPath::EXIT_HOLD, drive_exit_ask, false); },
     // The button doubles as select, so a tap would visibly tick the bar and
     // snap back without this.
     .grace_ms = kBarGraceMs,

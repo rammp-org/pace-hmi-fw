@@ -40,6 +40,8 @@ yet measured or decided, and "none" means checked and absent.
   `l0.yml` fails if `sdkconfig.defaults` turns on any of the debug or bench options above. The
   debug FPS variant is not built in CI: its code is in `if constexpr` arms, compiled in every
   build.
+  Nor is debug drive timing; its timing arm is type-checked in every build instead (the
+  `static_assert`s at the end of `main/drive_timing.hpp`).
 - Branch protection on `main` and `dev`: not recorded (CS-GIT-05). Until then approvals are by
   review only.
 

@@ -46,6 +46,10 @@
 #include <functional>
 #include <mutex>
 
+// The drive timing (CONFIG_HMI_DEBUG_DRIVE_TIMING): the DRIVETIME verb reports it, and
+// main.cpp's drive call sites take drive_timed() from here.
+#include "drive_timing.hpp"
+
 /// The port the server listens on. Well clear of RTPS's 7400-7411.
 inline constexpr uint16_t kRemoteUiPort = 3333;
 

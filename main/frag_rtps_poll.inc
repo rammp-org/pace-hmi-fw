@@ -41,8 +41,9 @@ static void rtps_poll_cb(lv_timer_t *) {
   static uint32_t ticks = 0;
   // flip every other tick: a 500 ms half-period, i.e. a 1 Hz blink
   lv_subject_set_int(&rtps_blink_subject, static_cast<int32_t>((++ticks / 2) & 1u));
-  diag_poll();       // diagnostics staleness rides the same 250 ms tick
-  drive_wait_poll(); // and so does the wait for the MCB to enable driving
+  diag_poll(); // diagnostics staleness rides the same 250 ms tick
+  // and so does the wait for the MCB to enable driving (timed: drive_timing.hpp)
+  drive_timed(TimedPath::TICK, drive_wait_poll);
 
   // Defensive: if the RTPS label's text colour/opacity are registered as
   // themeable in the SquareLine project, ui_theme_set() re-applies the theme's
