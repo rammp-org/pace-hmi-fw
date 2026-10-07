@@ -25,7 +25,7 @@
 
 #include "drv2605.hpp"
 #include "feedback/da7280_bench.hpp"
-#include "feedback/haptics.hpp"
+#include "feedback/feedback.hpp"
 
 #include "kalman_filter.hpp"
 #include "madgwick_filter.hpp"
