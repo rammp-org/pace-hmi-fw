@@ -5,9 +5,7 @@ idf_component_register(
   SRCS "src/post.cpp"
   INCLUDE_DIRS "include")
 
-if(COMMAND fw_component_options)
-  fw_component_options(${COMPONENT_LIB})
-endif()
+fw_component_options(${COMPONENT_LIB})
 
 # Safety code: a switch over an enum names every enumerator, and its default goes to the
 # safe state (CS-TYP-06).
