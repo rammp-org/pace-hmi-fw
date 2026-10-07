@@ -21,6 +21,7 @@ behaviour.
 | `include/hmi_ui/rtps_label_view.hpp`, `src/rtps_label_view.cpp` | `RtpsLabelView`: the TopBar's RTPS label (from `main/frag_rtps_label.inc`) |
 | `include/hmi_ui/seat_view.hpp`, `src/seat_view.cpp` | `SeatView`: the SeatScreen's function buttons and adjustment page, and the seat numbers on them (from `main/frag_seat.inc`, the seat parts of `frag_settings_ui.inc` and app_main's wiring). The seat command path (`seat_step`, `seat_request`, `seat_apply_state`) stays in main |
 | `include/hmi_ui/status_band_view.hpp`, `src/status_band_view.cpp` | `StatusBandView`: the DriveBand's DRIVE and STATE cells, on every resident and on-demand screen (from `main/frag_status_band.inc`) |
+| `include/hmi_ui/widget_tree.hpp`, `src/widget_tree.cpp` | `for_each_descendant` (iterative, pre-order, bounded), `set_focused_recursive`, `clear_click_focusable_recursive`: helpers for rows and buttons whose look spans their children (from `main/frag_settings_ui.inc`) |
 | `include/hmi_ui/topbar_view.hpp`, `src/topbar_view.cpp` | `TopBarView`: the TopBar's clock and link labels (from `main/frag_clock.inc`). Setting the clock from the MCB is not UI and stays in main |
 
 ## Rules for code here

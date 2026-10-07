@@ -5,7 +5,7 @@
 using hmi::ui::ButtonGrid;
 using hmi::ui::grid_key_cb;
 using hmi::ui::grid_sync_cursor;
-// The subtree helpers, defined with the settings rows (frag_settings_ui).
+// The subtree helpers (components/hmi_ui).
 #include "hmi_ui/widget_tree.hpp"
 using hmi::ui::clear_click_focusable_recursive;
 using hmi::ui::set_focused_recursive;
