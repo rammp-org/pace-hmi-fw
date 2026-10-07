@@ -34,37 +34,63 @@ static void log_link_change(RtpsLinkState state) {
 static void diag_poll();       // DiagnosticsScreen, further down
 static void drive_wait_poll(); // DriveScreen entry, further down
 
-static void rtps_poll_cb(lv_timer_t *) {
-  const RtpsLinkState state = rtps_comms_link_state();
-  log_link_change(state);
-  lv_subject_set_int(&rtps_link_subject, static_cast<int32_t>(state));
-  static uint32_t ticks = 0;
-  // flip every other tick: a 500 ms half-period, i.e. a 1 Hz blink
-  lv_subject_set_int(&rtps_blink_subject, static_cast<int32_t>((++ticks / 2) & 1u));
-  diag_poll();       // diagnostics staleness rides the same 250 ms tick
-  drive_wait_poll(); // and so does the wait for the MCB to enable driving
+#include "hmi_ui/ui_poll.hpp"
+// The poll is the drive session's tick (drive_session_table.hpp kTickPeriod).
+static_assert(std::chrono::milliseconds{hmi::ui::UiPoll::PERIOD_MS} ==
+              hmi::drive_session::kTickPeriod);
+static constexpr uint32_t kRtpsPollMs = hmi::ui::UiPoll::PERIOD_MS;
 
-  // Defensive: if the RTPS label's text colour/opacity are registered as
-  // themeable in the SquareLine project, ui_theme_set() re-applies the theme's
-  // values over whatever this indicator last painted, and since the subject has
-  // not changed nothing would repaint it — a solid state would keep the theme's
-  // colour indefinitely (a blinking one would self-heal within 500 ms, which is
-  // what makes the bug read as intermittent). Re-notifying on a theme change
-  // takes the label back either way, so this stays correct whichever way the
-  // export sets those two properties.
-  static uint8_t last_theme = ui_theme_idx;
-  if (ui_theme_idx != last_theme) {
-    last_theme = ui_theme_idx;
-    lv_subject_notify(&rtps_link_subject);
-    // Same reason, different property: the theme switch restored the redundant
-    // background fills, so take them out again.
-    strip_all_overdraw();
-    // The switch itself is the Settings Theme row (or a CALL FUNCTION
-    // event reaching ui_events.cpp's theme_toggle, or the remote UI); this is
-    // where firmware first sees the result, so it is saved from here, and the
-    // row is brought into step with a switch it did not make.
-    settings_set_theme(ui_theme_idx);
-    lv_subject_set_int(&theme_subject, ui_theme_idx == UI_THEME_DAY ? 1 : 0);
+// The one instance; app_main starts its timer.
+static constinit hmi::ui::UiPoll ui_poll{{
+    .shared = &ui_shared_subjects,
+    .theme = &theme_subject,
+    .link_state = [] { return static_cast<hmi::ui::LinkState>(rtps_comms_link_state()); },
+    .link_seen = [](hmi::ui::LinkState state) { log_link_change(static_cast<RtpsLinkState>(state)); },
+    .diag_poll = [] { diag_poll(); },               // diagnostics staleness rides the same tick
+    .drive_tick = [] { drive_wait_poll(); },        // and so does the wait for the MCB to drive
+    // The theme switch restored the redundant background fills, so take them out again. The
+    // switch itself is the Settings Theme row (or a CALL FUNCTION event reaching
+    // ui_events.cpp's theme_toggle, or the remote UI); this is where firmware first sees the
+    // result, so it is saved from here.
+    .theme_switched =
+        [](uint8_t theme) {
+          strip_all_overdraw();
+          settings_set_theme(theme);
+        },
+}};
+
+static void rtps_poll_cb(lv_timer_t *) { ui_poll.poll(); }
+
+void hmi::ui::UiPoll::poll() {
+  const LinkState state = config_.link_state();
+  config_.link_seen(state);
+  lv_subject_set_int(config_.shared->rtps_link, static_cast<int32_t>(state));
+  // flip every other tick: a 500 ms half-period, i.e. a 1 Hz blink
+  lv_subject_set_int(config_.shared->rtps_blink, static_cast<int32_t>((++ticks_ / 2) & 1u));
+  config_.diag_poll();
+  config_.drive_tick();
+  check_theme();
+}
+
+// Defensive: if the RTPS label's text colour/opacity are registered as
+// themeable in the SquareLine project, ui_theme_set() re-applies the theme's
+// values over whatever this indicator last painted, and since the subject has
+// not changed nothing would repaint it — a solid state would keep the theme's
+// colour indefinitely (a blinking one would self-heal within 500 ms, which is
+// what makes the bug read as intermittent). Re-notifying on a theme change
+// takes the label back either way, so this stays correct whichever way the
+// export sets those two properties.
+void hmi::ui::UiPoll::check_theme() {
+  if (!theme_seen_) { // the theme at the first tick is the one to compare with
+    theme_seen_ = true;
+    last_theme_ = ui_theme_idx;
+  }
+  if (ui_theme_idx != last_theme_) {
+    last_theme_ = ui_theme_idx;
+    lv_subject_notify(config_.shared->rtps_link);
+    config_.theme_switched(ui_theme_idx);
+    // The row is brought into step with a switch it did not make.
+    lv_subject_set_int(config_.theme, ui_theme_idx == UI_THEME_DAY ? 1 : 0);
   }
 }
 
