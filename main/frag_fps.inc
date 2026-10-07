@@ -1,4 +1,5 @@
 // split_main.py fragment of main.cpp (frag_fps: original lines 78-107); one TU, see main.cpp.
+#include "hmi_ui/fps_meter.hpp"
 // ---------------------------------------------------------------------------
 // Frame-rate instrumentation: a debug feature, off unless CONFIG_HMI_DEBUG_FPS
 // (CS-LAY-09), and never in sdkconfig.defaults, which ships.
@@ -15,21 +16,10 @@
 //
 // The once-a-second report goes through its own espp::Logger at debug level,
 // tag "fps" (CS-LOG-01/03): developer detail, and only in this debug build.
+// The counters are hmi::ui::FpsMeter's members.
 // ---------------------------------------------------------------------------
 static constexpr bool kFpsInstrument = CONFIG_HMI_DEBUG_FPS_AS_INT != 0;
 static constexpr bool kFpsStress = CONFIG_HMI_DEBUG_FPS_STRESS_AS_INT != 0;
-static std::atomic<uint32_t> fps_frames{0};
-static std::atomic<uint64_t> fps_render_us_total{0};
-static std::atomic<uint32_t> fps_render_us_max{0};
-static int64_t fps_render_start_us = 0;
 
-static void fps_render_start_cb(lv_event_t *) { fps_render_start_us = esp_timer_get_time(); }
-
-static void fps_render_ready_cb(lv_event_t *) {
-  const uint32_t us = static_cast<uint32_t>(esp_timer_get_time() - fps_render_start_us);
-  fps_frames.fetch_add(1, std::memory_order_relaxed);
-  fps_render_us_total.fetch_add(us, std::memory_order_relaxed);
-  uint32_t prev = fps_render_us_max.load(std::memory_order_relaxed);
-  while (us > prev && !fps_render_us_max.compare_exchange_weak(prev, us)) {
-  }
-}
+// The one meter. Attached and reported only when kFpsInstrument.
+static constinit hmi::ui::FpsMeter fps_meter;

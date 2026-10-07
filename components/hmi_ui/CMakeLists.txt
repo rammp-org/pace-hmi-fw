@@ -3,15 +3,22 @@
 idf_component_register(SRCS "src/bench_pin_view.cpp"
                             "src/brightness_view.cpp"
                             "src/button_grid.cpp"
+                            "src/display_flip.cpp"
+                            "src/fps_meter.cpp"
+                            "src/overdraw.cpp"
                             "src/rtps_label_view.cpp"
                             "src/seat_view.cpp"
                             "src/status_band_view.cpp"
                             "src/topbar_view.cpp"
                        INCLUDE_DIRS "include"
-                       REQUIRES hmi_format
+                       REQUIRES esp_driver_ppa
+                                hmi_format
                                 hmi_models
+                                logger
                                 lvgl
                                 rammp_rtps_messages
-                       PRIV_REQUIRES ui)
+                       PRIV_REQUIRES esp_mm
+                                     esp_timer
+                                     ui)
 
 fw_component_options(${COMPONENT_LIB})

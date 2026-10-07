@@ -40,20 +40,6 @@ static void play_click(espp::M5StackTab5 &tab5);
 static void play_refusal(bool warning = false);
 static void refusal_feedback();
 
-// DRV2605 haptic driver: brings the motor on the PCB's JST connector up and
-// selects its effect library. The waveform slots are armed per play, by
-// haptic_play().
-static void init_haptic(espp::Logger &logger, espp::I2c &i2c);
-
-// DA7280 haptic driver bring-up test (raw register read, no driver class yet)
-static void test_da7280(espp::Logger &logger, espp::I2c &i2c,
-                        const std::vector<uint8_t> &found_addresses);
-
-// DA7280 driver functional test: exercises vibrate()/stop(), the
-// acceleration/rapid-stop/frequency-tracking toggles, and a fault-status
-// register peek, all with the Da7280 driver class (DRO mode).
-static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c);
-
 /////////////////////////////////////////////////////////////////////////////
 // Push-and-hold gestures
 //
