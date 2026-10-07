@@ -9,6 +9,4 @@ idf_component_register(SRCS "src/about.cpp"
                        INCLUDE_DIRS "include"
                        PRIV_INCLUDE_DIRS "src")
 
-if(COMMAND fw_component_options)
-  fw_component_options(${COMPONENT_LIB})
-endif()
+fw_component_options(${COMPONENT_LIB})

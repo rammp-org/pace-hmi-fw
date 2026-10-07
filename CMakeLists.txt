@@ -59,9 +59,11 @@ idf_build_set_property(COMPILE_DEFINITIONS "LV_USE_STDLIB_MALLOC=LV_STDLIB_CUSTO
 # ESP-IDF's project() macro is where every component's CMakeLists.txt runs for real
 # (add_subdirectory, tools/cmake/build.cmake idf_build_process); a function defined
 # after it is not there yet, and each component's `if(COMMAND fw_component_options)`
-# guard skipped it silently, so no component got the flags. The guard stays: the
-# requirements pass (tools/cmake/scripts/component_get_requirements.cmake) runs each
-# CMakeLists.txt in a separate `cmake -P`, where the function never exists.
+# guard skipped it silently, so no component got the flags. Components now call it
+# without a guard. The earlier requirements pass (tools/cmake/scripts/
+# component_get_requirements.cmake) never reaches the call: there idf_component_register
+# is a stub that ends in return(). hmi_check_fw_options() below fails the configure if a
+# component's call is missing or did nothing.
 # The language standard is not set with CMAKE_CXX_STANDARD (no effect on IDF's
 # component targets); fw_component_options() passes -std after IDF's own.
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/fw_standards.cmake)
