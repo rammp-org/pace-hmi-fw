@@ -2,6 +2,7 @@
 // (TS-UNIT-08), the table's own invariants, and the model driven directly. The same run seen
 // through main's LVGL view is pinned by the characterisation cases in test_joystick_cal.cpp.
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <limits>
@@ -38,11 +39,10 @@ constexpr std::array<Sample, 6> kEnds{{{11.0f, 1510.0f, 1477.0f},
                                        {1507.0f, 1510.0f, 10.0f}}};
 
 int count_rows(Phase from, Input input, Guard guard) {
-  int n = 0;
-  for (const auto &t : kTransitions) {
-    n += (t.from == from && t.input == input && t.guard == guard) ? 1 : 0;
-  }
-  return n;
+  return static_cast<int>(
+      std::count_if(kTransitions.begin(), kTransitions.end(), [&](const auto &t) {
+        return t.from == from && t.input == input && t.guard == guard;
+      }));
 }
 
 // `n` ticks at `mv`; returns the last action and counts the non-NONE ones in `acted`.

@@ -32,10 +32,6 @@ lv_observer_t *add_observer(lv_subject_t *subject, lv_observer_cb_t cb, lv_obj_t
   return &o;
 }
 
-void label_follow_subject(lv_observer_t *observer, lv_subject_t *subject) {
-  observer->target->text = subject->text;
-}
-
 } // namespace
 
 void lv_subject_init_string(lv_subject_t *subject, char * /*buf*/, char * /*prev_buf*/,
@@ -59,18 +55,24 @@ void lv_subject_set_int(lv_subject_t *subject, int32_t value) {
   notify(subject);
 }
 
-int32_t lv_subject_get_int(lv_subject_t *subject) { return subject->value; }
+int32_t lv_subject_get_int(const lv_subject_t *subject) { return subject->value; }
 
 lv_observer_t *lv_subject_add_observer_obj(lv_subject_t *subject, lv_observer_cb_t cb,
                                            lv_obj_t *obj, void * /*user_data*/) {
   return add_observer(subject, cb, obj);
 }
 
-lv_obj_t *lv_observer_get_target_obj(lv_observer_t *observer) { return observer->target; }
+lv_obj_t *lv_observer_get_target_obj(const lv_observer_t *observer) { return observer->target; }
 
 lv_observer_t *lv_label_bind_text(lv_obj_t *obj, lv_subject_t *subject, const char * /*fmt*/) {
   obj->bound = subject;
-  return add_observer(subject, label_follow_subject, obj);
+  // The label follows the subject's text (a captureless lambda converts to lv_observer_cb_t).
+  return add_observer(
+      subject,
+      [](lv_observer_t *observer, lv_subject_t *followed) {
+        observer->target->text = followed->text;
+      },
+      obj);
 }
 
 char *lv_label_get_text(const lv_obj_t *obj) { return const_cast<char *>(obj->text.c_str()); }

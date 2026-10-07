@@ -13,6 +13,7 @@
 
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <limits>
@@ -63,12 +64,9 @@ bool same(const JoystickCal &a, const JoystickCal &b) {
 }
 
 bool travel_at_least_1000(const JoystickCal &c) {
-  for (const JoystickAxisCal &a : c) {
-    if (!(a.center_mv - a.min_mv >= 1000.0f && a.max_mv - a.center_mv >= 1000.0f)) {
-      return false;
-    }
-  }
-  return true;
+  return std::all_of(c.begin(), c.end(), [](const JoystickAxisCal &a) {
+    return a.center_mv - a.min_mv >= 1000.0f && a.max_mv - a.center_mv >= 1000.0f;
+  });
 }
 
 bool starts_with(const std::string &s, std::string_view prefix) { return s.rfind(prefix, 0) == 0; }
@@ -488,9 +486,7 @@ TEST_CASE("CAL-015 seeded random bytes load as the defaults or a plausible recor
   StdoutCapture quiet; // 500 warnings
   for (int i = 0; i < 500; ++i) {
     std::string text(static_cast<std::size_t>(len_dist(rng)), '\0');
-    for (char &ch : text) {
-      ch = static_cast<char>(byte_dist(rng));
-    }
+    std::generate(text.begin(), text.end(), [&] { return static_cast<char>(byte_dist(rng)); });
     const JoystickCal cal = load_text(text);
     TEST_ASSERT_TRUE(joystick_cal_saved() ? travel_at_least_1000(cal) : same(cal, kDefaults));
   }

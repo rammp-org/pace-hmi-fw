@@ -2,6 +2,7 @@
 // called directly (cal_record.hpp). The same behaviour seen through main is pinned by the
 // characterisation cases in test_joystick_cal.cpp; these hold the component to it on its own.
 
+#include <algorithm>
 #include <array>
 #include <limits>
 #include <random>
@@ -136,9 +137,8 @@ TEST_CASE("CAL-108 encode then decode keeps a record to 0.1 mV and is stable aft
   std::uniform_real_distribution<float> mv(0.0f, 3300.0f);
   for (int i = 0; i < 1000; ++i) {
     Record r{};
-    for (AxisCal &a : r) {
-      a = {mv(rng), mv(rng), mv(rng)};
-    }
+    // Braced initialisers evaluate left to right: min, center, max, as before.
+    std::generate(r.begin(), r.end(), [&] { return AxisCal{mv(rng), mv(rng), mv(rng)}; });
     const std::string once = hmi::cal::encode(r);
     Record back{};
     std::error_code ec;
@@ -170,9 +170,7 @@ TEST_CASE("CAL-110 seeded random bytes are rejected with a decode error or read 
   std::uniform_int_distribution<int> byte_dist(0, 255);
   for (int i = 0; i < 2000; ++i) {
     std::string text(static_cast<std::size_t>(len_dist(rng)), '\0');
-    for (char &ch : text) {
-      ch = static_cast<char>(byte_dist(rng));
-    }
+    std::generate(text.begin(), text.end(), [&] { return static_cast<char>(byte_dist(rng)); });
     if (i % 2 == 0) {
       text = "version 1\nhorizontal " + text; // get past the header half the time
     }
