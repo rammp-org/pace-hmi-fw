@@ -4,6 +4,7 @@ idf_component_register(SRC_DIRS "."
                          adc
                          button
                          drv2605
+                         feedback
                          file_system
                          filters
                          hmi_format

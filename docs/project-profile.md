@@ -51,6 +51,7 @@ yet measured or decided, and "none" means checked and absent.
 | Component | Concern (one sentence) | Safety-relevant | Builds for linux | D4 diagram |
 | --- | --- | --- | --- | --- |
 | `main` | everything not listed below; `main.cpp` #includes 27 `frag_*.inc` (one TU, `tools/split_main.py`) | yes | no | none |
+| `components/feedback` | plays the user's haptic and sound cues: the DRV2605 motor, the click and refusal sounds, the bench-only DA7280 test | no (cues only; what is shown about a fault is decided by its callers, and a cue failing changes nothing else) | no (board drivers; bench B3 hap.*) | README |
 | `components/fw_core` | the channel helpers, ThreadChecker, `Owned<T>`, `check()`, context tokens (not used by the firmware yet) | used by safety | host L1 (FWC-L1) | none |
 | `components/hmi_format` | pure screen-text formatting (speed, steppers, seat, clock, diagnostics) | no | host L1 (L1-FMT) | README |
 | `components/hmi_models` | pure UI models: the button-grid cursor walk and the bench PIN entry | no | host L1 (L1-MOD) | README |

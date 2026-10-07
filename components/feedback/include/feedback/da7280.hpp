@@ -381,7 +381,8 @@ public:
     // LRA period = 1 / (freq_hz * 1333.32ns), split MSB (bits[14:7]) / LSB
     // (bits[6:0], bit[7] reserved) across two registers
     uint16_t period = static_cast<uint16_t>(1.0f / (freq_hz * LRA_PERIOD_SCALE) + 0.5f);
-    write_u8_to_register((uint8_t)Register::FRQ_LRA_PER_H, (period >> 7) & 0xFF, ec);
+    write_u8_to_register(static_cast<uint8_t>(Register::FRQ_LRA_PER_H),
+                         static_cast<uint8_t>((period >> 7) & 0xFF), ec);
     if (ec)
       return false;
     static constexpr uint8_t FRQ_LRA_PER_L_MASK = 0x7F; // bits 0-6, bit 7 reserved
@@ -587,10 +588,12 @@ protected:
     // Motor impedance calibration factor: V2I_FACTOR = impedance * (IMAX_reg + 4) / 1.6104
     uint16_t v2i_factor =
         static_cast<uint16_t>(c.impedance_ohms * (imax_reg + 4) / V2I_FACTOR_SCALE + 0.5f);
-    write_u8_to_register((uint8_t)Register::CALIB_V2I_H, (v2i_factor >> 8) & 0xFF, ec);
+    write_u8_to_register(static_cast<uint8_t>(Register::CALIB_V2I_H),
+                         static_cast<uint8_t>((v2i_factor >> 8) & 0xFF), ec);
     if (ec)
       return false;
-    write_u8_to_register((uint8_t)Register::CALIB_V2I_L, v2i_factor & 0xFF, ec);
+    write_u8_to_register(static_cast<uint8_t>(Register::CALIB_V2I_L),
+                         static_cast<uint8_t>(v2i_factor & 0xFF), ec);
     if (ec)
       return false;
 
