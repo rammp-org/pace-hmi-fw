@@ -8,54 +8,48 @@
 // roll on into the Drive screen's exit hold, which watches the same button.
 static bool joy_button_armed = true;
 
-// progress and holding carry default member initializers rather than being
-// spelled out at each definition below: the three gestures differ only in the
-// four fields that follow, and -Wmissing-field-initializers is happy with a
-// defaulted member but not with an omitted one.
-struct HoldGesture {
-  lv_subject_t progress{}; // 0..kHoldMax; the arc/bar is bound to this
-  bool *armed;             // the input's "released since the last completion"
-  bool (*is_held)();       // is the input held right now (sampled on LVGL task)
-  bool (*applies)();       // is this gesture live on the current screen/page
-  void (*completed)();     // what a full hold does
-  uint32_t grace_ms = 0;   // dead time before the widget starts filling
-  bool holding = false;    // edge detector for is_held && applies
-};
+// The gestures and the engine that runs them (hmi::ui::HoldGesture, HoldEngine).
+using hmi::ui::HoldGesture;
 
-static void hold_anim_exec_cb(void *var, int32_t value) {
+// The one engine. Its confirmation is the same for all three gestures. Both calls are
+// non-blocking - one short I2C burst, and one xStreamBufferSend with a zero timeout - so
+// neither holds the LVGL task for the duration of the effect it starts.
+static constinit hmi::ui::HoldEngine hold_engine{{
+    .confirm =
+        [] {
+          haptic_play(espp::Drv2605::Waveform::STRONG_CLICK, 1);
+          play_click(espp::M5StackTab5::get());
+        },
+}};
+
+void hmi::ui::HoldEngine::anim_exec_cb(void *var, int32_t value) {
   lv_subject_set_int(&static_cast<HoldGesture *>(var)->progress, value);
 }
 
-// Cancels any in-flight fill and empties the widget. The gesture doubles as the
-// animation's `var`, so it is also the handle lv_anim_delete matches on.
-static void hold_reset(HoldGesture *g) {
-  lv_anim_delete(g, hold_anim_exec_cb);
+void hmi::ui::HoldEngine::reset(HoldGesture *g) {
+  lv_anim_delete(g, anim_exec_cb);
   lv_subject_set_int(&g->progress, 0);
 }
 
-static void hold_anim_completed_cb(lv_anim_t *a) {
+void hmi::ui::HoldEngine::anim_completed_cb(lv_anim_t *a) {
   auto *g = static_cast<HoldGesture *>(lv_anim_get_user_data(a));
   // Disarm before running the action: `completed` navigates, and the input is
   // still held at this instant, so whatever gesture watches that input on the
   // far side must not read the same unbroken hold as a fresh one.
   *g->armed = false;
   g->holding = false;
-  // Deleting the animation from inside its own completed_cb (via hold_reset) is
+  // Deleting the animation from inside its own completed_cb (via reset) is
   // safe and expected: lv_anim.c removes it from the list before calling us,
   // and anim_timer explicitly re-reads the list afterwards.
-  hold_reset(g);
-  // Confirmation feedback, the same for all three. Both calls are non-blocking
-  // - one short I2C burst, and one xStreamBufferSend with a zero timeout - so
-  // neither holds the LVGL task for the duration of the effect it starts.
-  haptic_play(espp::Drv2605::Waveform::STRONG_CLICK, 1);
-  play_click(espp::M5StackTab5::get());
+  reset(g);
+  g->engine->config_.confirm();
   g->completed();
 }
 
 // Runs on the LVGL task rather than the ADC/button tasks that produce the
 // inputs: everything here is LVGL state, and this way each animation is created
 // and destroyed on the task that runs it.
-static void hold_poll(HoldGesture *g) {
+void hmi::ui::HoldEngine::poll(HoldGesture *g) const {
   const bool held = g->is_held();
   if (!held) {
     *g->armed = true;
@@ -66,23 +60,27 @@ static void hold_poll(HoldGesture *g) {
   }
   g->holding = hold;
   if (!hold) {
-    hold_reset(g);
+    reset(g);
     return;
   }
+  g->engine = this;
   lv_anim_t a;
   lv_anim_init(&a);
   lv_anim_set_var(&a, g);
   lv_anim_set_user_data(&a, g);
-  lv_anim_set_exec_cb(&a, hold_anim_exec_cb);
-  lv_anim_set_values(&a, 0, kHoldMax);
-  lv_anim_set_duration(&a, kHoldMs);
+  lv_anim_set_exec_cb(&a, anim_exec_cb);
+  lv_anim_set_values(&a, 0, HOLD_MAX);
+  lv_anim_set_duration(&a, HOLD_MS);
   // The delay holds act_time negative, so the exec callback does not run and the
   // widget stays empty until it elapses. Completion lands at grace + duration,
   // which is what a gesture with a grace period costs in total.
   lv_anim_set_delay(&a, g->grace_ms);
-  lv_anim_set_completed_cb(&a, hold_anim_completed_cb);
+  lv_anim_set_completed_cb(&a, anim_completed_cb);
   lv_anim_start(&a);
 }
+
+static void hold_poll(HoldGesture *g) { hold_engine.poll(g); }
+static void hold_reset(HoldGesture *g) { hmi::ui::HoldEngine::reset(g); }
 
 // The stick's own button. Reads the level the button callback mirrors out, not
 // the edge-latched select_key: a hold gesture needs to know the button is still

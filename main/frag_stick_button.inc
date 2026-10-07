@@ -86,12 +86,13 @@ static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c);
 // nothing moves: the stick only drives from Drive (stick_drives).
 /////////////////////////////////////////////////////////////////////////////
 
-static constexpr uint32_t kHoldMs = 1000; // hold time to fill a gesture widget
+#include "hmi_ui/hold_gesture.hpp"
+static constexpr uint32_t kHoldMs = hmi::ui::HOLD_MS; // hold time to fill a gesture widget
 // Dead time before a hold starts filling. The stick button doubles as select,
 // and a select is a press shorter than this (kSelectMaxUs), so a tap never
 // ticks a fill up and snaps it back.
 static constexpr uint32_t kBarGraceMs = 500;
-static constexpr int32_t kHoldMax = 100; // arc/bar range (LVGL's default)
+static constexpr int32_t kHoldMax = hmi::ui::HOLD_MAX; // arc/bar range (LVGL's default)
 // Beat between the unlock landing and the Drive screen dissolving in, so the
 // unlocked padlock is legible rather than a flash.
 static constexpr uint32_t kUnlockAdvanceMs = 1000;
