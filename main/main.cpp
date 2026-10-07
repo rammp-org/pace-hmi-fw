@@ -651,13 +651,7 @@ extern "C" void app_main(void) {
   bind_entry_refused_panel(ui_ErrorBanner13); // AboutScreen
   // Diagnostics readings, and whether they are live: before the poll timer
   // that keeps the latter current, and before any RTPS sample can land.
-  for (auto &item : diag_value) {
-    for (auto &reading : item) {
-      lv_subject_init_int(&reading, kValueUnknown);
-    }
-  }
-  lv_subject_init_int(&diag_stale_subject, 1);
-  lv_subject_init_int(&diag_rate_subject, 0);
+  diag_view.init_subjects();
   lv_timer_create(rtps_poll_cb, kRtpsPollMs, nullptr);
 
   // Calibration on the JoystickScreen: holding Calibrate or the stick button
@@ -980,7 +974,7 @@ extern "C" void app_main(void) {
   // (diagnostics_screen_ensure). The menu row goes through diagnostics_open
   // rather than a SquareLine screen-change action, which would build the
   // screen without any of that.
-  diag_group = lv_group_create();
+  diag_group = diag_view.init();
 
   // The overlay hardcodes LVGL's 14 px default font (lv_sysmon_create sets no
   // font at all), which is unreadable on a 1280x720 panel at arm's length.
