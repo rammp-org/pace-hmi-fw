@@ -3,7 +3,9 @@
 // The InternetView's one instance and what it does through main: the network (rtps_comms), the
 // worker thread the scan and the join run on, the hand-back to the LVGL task, the restart.
 
+#include <algorithm>
 #include <functional>
+#include <iterator>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -56,9 +58,11 @@ std::optional<std::vector<hmi::ui::WifiNetwork>> scan() {
   }
   std::vector<hmi::ui::WifiNetwork> networks;
   networks.reserve(found->size());
-  for (WifiNetworkFound &n : *found) {
-    networks.push_back({.ssid = std::move(n.ssid), .rssi = n.rssi, .secured = n.secured});
-  }
+  std::transform(found->begin(), found->end(), std::back_inserter(networks),
+                 [](WifiNetworkFound &n) {
+                   return hmi::ui::WifiNetwork{
+                       .ssid = std::move(n.ssid), .rssi = n.rssi, .secured = n.secured};
+                 });
   return networks;
 }
 

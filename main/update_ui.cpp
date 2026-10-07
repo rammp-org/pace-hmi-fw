@@ -4,7 +4,9 @@
 // (github_ota), the firmware info, the worker thread, the hand-back to the LVGL task, and the
 // restart once an install is done (never under a driving chair: cfg.may_restart).
 
+#include <algorithm>
 #include <functional>
+#include <iterator>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -68,9 +70,8 @@ hmi::ui::ReleaseList fetch() {
   GithubReleases found = github_releases_fetch();
   hmi::ui::ReleaseList list{.ok = found.ok, .error = std::move(found.error), .releases = {}};
   list.releases.reserve(found.releases.size());
-  for (GithubRelease &r : found.releases) {
-    list.releases.push_back(to_view(std::move(r)));
-  }
+  std::transform(found.releases.begin(), found.releases.end(), std::back_inserter(list.releases),
+                 [](GithubRelease &r) { return to_view(std::move(r)); });
   return list;
 }
 
