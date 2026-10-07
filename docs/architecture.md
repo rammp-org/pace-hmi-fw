@@ -105,6 +105,7 @@ flowchart LR
   c_m5stack_tab5["m5stack-tab5 (vendored)"]
   c_main["main"]:::safety
   c_ota_parse["ota_parse"]
+  c_post["post"]:::safety
   c_rammp_rtps_messages["rammp_rtps_messages (submodule)"]:::safety
   c_ui["ui"]:::gen
   g_ESP_IDF["ESP-IDF · 13"]
