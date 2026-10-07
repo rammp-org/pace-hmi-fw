@@ -89,7 +89,7 @@
       "main/update_ui.cpp": 9
     },
     "sleep_this_thread": {
-      "main/main.cpp": 2,
+      "main/main.cpp": 1,
       "main/remote_ui.cpp": 5,
       "main/rtps_comms.cpp": 5
     },
@@ -202,6 +202,13 @@
           "8979a34a53c73fbe026ba7fbb700814cd7046ca1",
           "8979a34a53c73fbe026ba7fbb700814cd7046ca1",
           "f54b5c9531c154cf0c96813767bc692888ff1c59"
+        ]
+      }
+    },
+    "components/feedback/src/haptics.cpp": {
+      "sleep_this_thread": {
+        "main/main.cpp@fea0ceb4e1459da744a95a8ee41fcc9430c8cac6": [
+          "3c30b477fff3fdf4933bb42884869c32c8587518"
         ]
       }
     }
