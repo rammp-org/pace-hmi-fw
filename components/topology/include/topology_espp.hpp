@@ -105,13 +105,14 @@ inline void task_config_without_task_row() noexcept {}
 } // namespace broken_rule
 
 /// @brief A task id that has a TASKS row, checked at compile time.
-/// @details The constructor is consteval and implicit, so `task_config(Task::X)` reads as the
-///          spec writes it (CS-CON-02) and an id without a row does not compile.
+/// @details The constructor is consteval, so an id without a row, or an id that is not a
+///          constant, does not compile. It is explicit: callers write
+///          `task_config(TaskId{Task::X})` (README, REQ-TOP-07).
 class TaskId {
 public:
   /// @brief Looks up @p id's TASKS row; a compile error if it has none.
   /// @param id The task.
-  consteval TaskId(Task id) noexcept // NOLINT(google-explicit-constructor): reads as the spec
+  consteval explicit TaskId(Task id) noexcept
       : index_(task_index(id)) {
     if (index_ >= TASKS.size()) {
       broken_rule::task_config_without_task_row();
@@ -190,7 +191,8 @@ public:
   }
 
   /// @brief A task's settings, from its TASKS row only (CS-CON-02).
-  /// @param id The task; it must have a TASKS row (checked at compile time).
+  /// @param id The task, as `TaskId{Task::X}`; it must have a TASKS row (checked at compile
+  ///           time).
   /// @return The espp task settings.
   [[nodiscard]] static espp::Task::BaseConfig task_config(TaskId id) {
     const TaskRow &row = id.row();

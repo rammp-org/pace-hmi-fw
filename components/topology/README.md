@@ -19,9 +19,16 @@ never edits a row to make a check pass.
 | REQ-TOP-04 | A channel's message type matches its row's `message` column, and satisfies fw_core's `Message` concept (an atomic's type: lock-free) | mnc_channel_message_mismatch, static_assert in `test_topology.cpp` |
 | REQ-TOP-05 | Channel storage is created only by the `Topology`, from the row: kind, depth, full policy, name, send timeout | TOP-010, TOP-011, TOP-012 |
 | REQ-TOP-06 | `topo.writer<XCh>(ctx)` compiles only for the row's producer, `topo.reader<XCh>(ctx)` only for its consumer (CS-OWN-06) | mnc_writer_not_producer, mnc_reader_not_consumer, TOP-010..012 |
-| REQ-TOP-07 | `topo.task_config(Task::X)` returns the TASKS row's settings; a task with no TASKS row does not compile (CS-CON-02) | TOP-013, mnc_task_config_without_row |
+| REQ-TOP-07 | `topo.task_config(TaskId{Task::X})` returns the TASKS row's settings; a task with no TASKS row, a bare `Task`, or an id that is not a constant does not compile (CS-CON-02) | TOP-013, mnc_task_config_without_row, mnc_task_config_bare_task, mnc_task_config_runtime_id |
 
 Test IDs `TOP-0nn` are in `test/test_topology.cpp`; `mnc_*` are in `test/mnc/`.
+
+REQ-TOP-07's call is spelled `task_config(TaskId{Task::X})`, not CS-CON-02's
+`task_config(Task::X)`: cppcheck rejects the implicit constructor that the short form needs
+(noExplicitConstructor), and `espp::Task::BaseConfig` holds a `std::string`, so it cannot be
+returned from a `consteval task_config(Task)`. The guarantee is unchanged: the settings come
+only from a TASKS row, and a missing row fails at compile time (`TaskId`'s constructor is
+consteval).
 
 ## What the tables mean
 
@@ -89,7 +96,8 @@ public:
   }
 };
 
-espp::Task task({.callback = ..., .task_config = topo::Topology::task_config(topo::Task::CONTROL)});
+espp::Task task({.callback = ...,
+                  .task_config = topo::Topology::task_config(topo::TaskId{topo::Task::CONTROL})});
 ```
 
 ## D2: islands and channels

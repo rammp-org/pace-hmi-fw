@@ -336,15 +336,15 @@ TEST_CASE("TOP-012 an atomic from the Topology carries the stick button and the 
 
 TEST_CASE("TOP-013 task_config() returns the TASKS row's name, stack, priority and core",
           "[topology]") {
-  const auto control = Topology::task_config(Task::CONTROL);
+  const auto control = Topology::task_config(TaskId{Task::CONTROL});
   TEST_ASSERT_EQUAL_STRING("control", control.name.c_str());
   TEST_ASSERT_EQUAL_UINT(6144U, control.stack_size_bytes);
   TEST_ASSERT_EQUAL_UINT(22U, control.priority);
   TEST_ASSERT_EQUAL_INT(0, control.core_id);
-  const auto ui = Topology::task_config(Task::UI);
+  const auto ui = Topology::task_config(TaskId{Task::UI});
   TEST_ASSERT_EQUAL_STRING("ui", ui.name.c_str());
   TEST_ASSERT_EQUAL_INT(1, ui.core_id);
-  const auto button = Topology::task_config(Task::STICK_BUTTON);
+  const auto button = Topology::task_config(TaskId{Task::STICK_BUTTON});
   TEST_ASSERT_EQUAL_STRING("Button", button.name.c_str());
   TEST_ASSERT_EQUAL_INT(-1, button.core_id);
 }

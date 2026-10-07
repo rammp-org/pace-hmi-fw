@@ -11,5 +11,5 @@ inline constexpr Task TASK = Task::RTPS_RX; // runs on espp's rtps_worker
 #else
 inline constexpr Task TASK = Task::CONTROL;
 #endif
-espp::Task::BaseConfig config() { return Topology::task_config(TASK); }
+espp::Task::BaseConfig config() { return Topology::task_config(TaskId{TASK}); }
 } // namespace mnc
