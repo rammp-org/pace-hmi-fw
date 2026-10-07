@@ -153,9 +153,11 @@ extern "C" void app_main(void) {
   }
   logger.info("Found devices at addresses: {::#02x}", found_addresses);
 
-  // DRV2605 haptic motor driver, armed with the 1 s waveform the HAPTIC TEST
-  // settings row plays (the button is wired up after ui_init() below).
-  init_haptic(logger, i2c);
+  // DRV2605 haptic motor driver (the HAPTIC TEST slot, the unlock and hold
+  // clicks, a refusal). Lives as long as app_main, which never returns once the
+  // UI runs; haptic_play reaches it through `haptics`.
+  hmi::feedback::Haptics haptic_motor({.i2c = i2c, .boot_log = logger});
+  haptics = &haptic_motor;
 
   // DA7280 bring-up test (raw register read) and driver functional test (Da7280
   // driver class, DRO mode): bench only, CONFIG_HMI_BENCH_DA7280_TEST.
@@ -1051,8 +1053,8 @@ extern "C" void app_main(void) {
             return espp::M5StackTab5::get().internal_i2c().probe_device(address);
           },
       .boot_i2c_devices = found_addresses,
-      .drv2605_status = drv2605_status,
-      .drv2605_play = drv2605_play_click,
+      .drv2605_status = [] { return haptics->status(); },
+      .drv2605_play = [](std::string &detail) { return haptics->play_click(detail); },
       .da7280_found = std::find(found_addresses.begin(), found_addresses.end(), kDa7280Address) !=
                       found_addresses.end(),
       .direct_render = direct_render,
