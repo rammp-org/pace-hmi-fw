@@ -29,6 +29,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common  # noqa: E402
 import peers  # noqa: E402
+import ui_client  # noqa: E402
 
 HOLD_MS = 2000
 DRIVE_WITHIN_S = 6.0
@@ -64,9 +65,8 @@ def scenario(ip: str, out: pathlib.Path, tree: pathlib.Path) -> dict:
 
     with peers.SimChild(ip, tree, out / "sim.log") as sim:
         if not sim.wait_ready():
-            return {"verdict": "FAIL", "problems": ["the simulated MCB got no XYTwist in 45 s"],
-                    "steps": steps}
-        with hmi_ui.Hmi(ip) as hmi:
+            return {"verdict": "FAIL", "problems": [sim.not_ready_reason()], "steps": steps}
+        with ui_client.open_hmi(hmi_ui, ip, out / "remote-ui.jsonl") as hmi:
             # 1. ok -> hold -> Drive
             sim.command("ok")
             hmi.home()
@@ -124,8 +124,9 @@ def scenario(ip: str, out: pathlib.Path, tree: pathlib.Path) -> dict:
             hmi_ui.capture(hmi, out / "4-after-refused-hold.png", False)
             sim.command("x")  # stop refusing: leave the sim as found
             sim.command("ok")
+            remote_ui = hmi.stats()
     return {"verdict": "PASS" if not problems else "FAIL", "steps": steps,
-            "problems": problems, "not_verified": not_verified}
+            "problems": problems, "not_verified": not_verified, "remote_ui": remote_ui}
 
 
 def main() -> int:
