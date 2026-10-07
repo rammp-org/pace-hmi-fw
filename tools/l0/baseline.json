@@ -1,7 +1,7 @@
 {
   "metrics": {
     "app_main_lines": {
-      "main/main.cpp": 809
+      "main/main.cpp": 776
     },
     "assert": {
       "components/joystick/src/joystick.cpp": 17,
@@ -15,13 +15,12 @@
     "esp_timer_create": {},
     "fn_over_120": {
       "main/github_ota.cpp": 1,
-      "main/main.cpp": 2
+      "main/main.cpp": 1
     },
     "fn_over_60": {
       "components/joystick/src/joystick.cpp": 1,
-      "main/da7280.hpp": 3,
       "main/github_ota.cpp": 1,
-      "main/main.cpp": 4,
+      "main/main.cpp": 3,
       "main/remote_ui.cpp": 1,
       "main/rtps_comms.cpp": 4,
       "main/selftest.cpp": 2
@@ -42,7 +41,7 @@
       "main/remote_ui.cpp": 1
     },
     "lines": {
-      "main/main.cpp": 3497,
+      "main/main.cpp": 3057,
       "main/selftest.cpp": 1030
     },
     "locks": {
@@ -63,7 +62,6 @@
       "main/update_ui.hpp": 1
     },
     "log_direct": {
-      "main/main.cpp": 5,
       "main/remote_ui.cpp": 5,
       "main/selftest.cpp": 5
     },
@@ -80,7 +78,7 @@
       "main/joystick_cal.cpp": 16,
       "main/log_capture.cpp": 8,
       "main/log_view.cpp": 7,
-      "main/main.cpp": 122,
+      "main/main.cpp": 110,
       "main/remote_ui.cpp": 6,
       "main/rtps_comms.cpp": 32,
       "main/selftest.cpp": 25,
@@ -94,7 +92,7 @@
     },
     "static_state": {
       "main/github_ota.cpp": 1,
-      "main/main.cpp": 39,
+      "main/main.cpp": 33,
       "main/remote_ui.cpp": 2,
       "main/rtps_comms.cpp": 5
     },
@@ -138,7 +136,6 @@
           "51b4ae856041969d5b1b8676057643d833d74d0b",
           "58643dcab705dcec53d3e9ff9e465d5de281dabd",
           "69934c1b261bd790ebba467573e1967241acc473",
-          "7a6abc062aa874b2d62a507490eb116266c1cb15",
           "7d29a1ef687f045d58efaae40e9de9e6f5c42f05",
           "895f696801964dce3d3fa90fa574ea3d4ad2759b",
           "979b91e9a32a0f29deaabe7d586f655e6ceef05a",
@@ -147,7 +144,6 @@
           "bf4db2b16ee82da68ad5c4ae37c7e98adfe4d198",
           "bf6264b6ccfe4c57e7df7698cf18a8575edf8687",
           "c07517621b927282ef25124e1096673ad676c2c2",
-          "c90a6267d32d51840842a97867a75aeac16c3eaf",
           "ca8e9d9d6176a9929b1ef0169c239cbf8fb81f4d",
           "cb1591c116af7cd9bddeede8a94daae686c5ff07",
           "cca9a19e9fdf00050822a99a79facbeb69785381",
@@ -157,7 +153,6 @@
           "d2d44d4160d48c5c8a1beb19aa03353b6f426909",
           "d4687f44ffeda1e264e4cae345f5e7d27268e14a",
           "d780cb5dc03fef08a57530ea220bd7ef945805c3",
-          "db90e7381e0048d7b78aef2285f7550fd3b76a12",
           "e4219597a509478924c87a79664b3fd289abc71d",
           "e9101cb8fbd7029a50086b2c1a42663e1aeb04c6",
           "ea58eb8daa108cabb4cb3c23608395a2a9bb1c08",
