@@ -1,5 +1,4 @@
-// split_main.py fragment of main.cpp (frag_status_band: original lines 322-479); one TU, see
-// main.cpp.
+// split_main.py fragment of main.cpp (frag_status_band: original lines 322-479); one TU, see main.cpp.
 #include "hmi_ui/status_band_view.hpp"
 // The "FPS counter" Skunk Works slot -> LVGL's built-in perf overlay
 // (lv_sysmon), which already renders FPS/CPU on the sys layer above every
@@ -63,3 +62,4 @@ static constexpr float kStickRangeDeadzone = 0.05f;
 // Twist is a separate pot on its own axis, so it carries its own deadbands.
 static constexpr float kTwistCenterDeadbandMv = 60.0f;
 static constexpr float kTwistRangeDeadbandMv = 40.0f;
+
