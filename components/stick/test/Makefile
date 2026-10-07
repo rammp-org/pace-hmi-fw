@@ -25,7 +25,8 @@ SYS_INCLUDES    := $(REPO)/components/joystick/include \
                    $(MC)/espp__format/detail/fmt/include \
                    $(MC)/espp__math/include
 HEADER          := $(REPO)/components/stick/include/stick/stick_pipeline.hpp
-COVER_SRCS      := $(SRCS_UNDER_TEST) $(HEADER)
+INJECT_HEADER   := $(REPO)/components/stick/include/stick/bench_inject.hpp
+COVER_SRCS      := $(SRCS_UNDER_TEST) $(HEADER) $(INJECT_HEADER)
 
 include $(REPO)/tests/host/common.mk
 
@@ -35,19 +36,22 @@ include $(REPO)/tests/host/common.mk
 # -Werror). The extracted code builds with the full set.
 $(call obj_of,$(HERE)/legacy_adc_cycle.cpp): CXX_WARN := $(WARN_FLAGS) -Wno-conversion
 
-# Coverage of the header: cycle() and update_keys() are templates, so their counters live in
-# test_stick.cpp's object. gcov_summary.py (common.mk's `coverage`) reads <obj dir>/<source>.o
-# and the .gcno/.gcda beside it; these links give the header that name, so it is reported
-# with the rest. The links are remade on every coverage run (`coverage` deletes *.gcda).
+# Coverage of the headers: cycle() and update_keys() are templates, and bench_inject.hpp is
+# header-only, so their counters live in test_stick.cpp's object. gcov_summary.py (common.mk's
+# `coverage`) reads <obj dir>/<source>.o and the .gcno/.gcda beside it; these links give each
+# header that name, so it is reported with the rest. The links are remade on every coverage
+# run (`coverage` deletes *.gcda).
 ifeq ($(COVERAGE),1)
-HEADER_OBJ := $(call obj_of,$(HEADER))
-TEST_OBJ   := $(call obj_of,$(HERE)/test_stick.cpp)
+HEADER_OBJS := $(call obj_of,$(HEADER) $(INJECT_HEADER))
+TEST_OBJ    := $(call obj_of,$(HERE)/test_stick.cpp)
 .PHONY: header-cov-links
 header-cov-links: $(TEST_OBJ)
-	@mkdir -p $(dir $(HEADER_OBJ))
-	@ln -sf $(TEST_OBJ) $(HEADER_OBJ)
-	@ln -sf $(TEST_OBJ:.o=.gcno) $(HEADER_OBJ:.o=.gcno)
-	@ln -sf $(TEST_OBJ:.o=.gcda) $(HEADER_OBJ:.o=.gcda)
+	@for obj in $(HEADER_OBJS); do \
+	  mkdir -p $$(dirname $$obj) && \
+	  ln -sf $(TEST_OBJ) $$obj && \
+	  ln -sf $(TEST_OBJ:.o=.gcno) $${obj%.o}.gcno && \
+	  ln -sf $(TEST_OBJ:.o=.gcda) $${obj%.o}.gcda; \
+	done
 test: header-cov-links
 endif
 

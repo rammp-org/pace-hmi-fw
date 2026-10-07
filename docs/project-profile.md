@@ -45,11 +45,14 @@ yet measured or decided, and "none" means checked and absent.
   | --- | --- | --- |
   | default / release | `sdkconfig.defaults` | Ethernet is the default network setting; remote UI, DA7280 boot test and FPS report off |
   | bench (CI) | `-D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;ci/sdkconfig.bench"` | `CONFIG_HMI_REMOTE_UI=y`, `CONFIG_HMI_BENCH_DA7280_TEST=y` (the DA7280 tests run at boot) |
+  | bench inject (CI) | `-D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;ci/sdkconfig.bench;ci/sdkconfig.stick_inject"` | the bench (CI) variant plus `CONFIG_HMI_BENCH_STICK_INJECT=y`: the remote UI's `STICK` verb replaces the raw stick reads (hazard-fixes B1). It commands motion: simulated MCB only. The plain bench variant keeps the release ADC path, so `mem.stk_adc` is measured there |
   | bench test (board) | `-D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.wifi.local"` (untracked) | `CONFIG_HMI_REMOTE_UI=y`, Wi-Fi SSID and password; DA7280 boot test off unless that file sets it |
   | debug FPS | a local sdkconfig with `CONFIG_HMI_DEBUG_FPS=y` (and optionally `CONFIG_HMI_DEBUG_FPS_STRESS=y`) | per-second `[FPS]` report at debug level (tag `fps`); DriveScreen loaded at boot; stress invalidates the whole screen every LVGL cycle |
 
-  CI (`.github/workflows/build.yml`, `l0.yml`) builds the default and the bench (CI) variants;
-  `l0.yml` fails if `sdkconfig.defaults` turns on any of the debug or bench options above. The
+  CI (`.github/workflows/build.yml`, `l0.yml`) builds the default, the bench (CI) and the bench
+  inject (CI) variants; `l0.yml` fails if `sdkconfig.defaults` turns on any of the debug or bench
+  options above, and `build.yml` fails if the default build's ELF has a stick-injection symbol
+  (`nm`, `/stick_?inject/i`; l0's bench_inject job checks the pattern matches there). The
   debug FPS variant is not built in CI: its code is in `if constexpr` arms, compiled in every
   build.
 - Branch protection on `main` and `dev`: not recorded (CS-GIT-05). Until then approvals are by
@@ -63,7 +66,7 @@ yet measured or decided, and "none" means checked and absent.
 | `components/fw_core` | the channel helpers, ThreadChecker, `Owned<T>`, `check()`, context tokens (not used by the firmware yet) | used by safety | host L1 (FWC-L1) | none |
 | `components/hmi_format` | pure screen-text formatting (speed, steppers, seat, clock, diagnostics) | no | host L1 (L1-FMT) | README |
 | `components/hmi_models` | pure UI models: the button-grid cursor walk and the bench PIN entry | no | host L1 (L1-MOD) | README |
-| `components/hmi_ui` | the UI island: every LVGL view the UI task draws (so far the TopBar clock, link and RTPS label, the DriveBand status cells, the backlight) | no (shows the chair's state and faults, commands nothing) | no (LVGL-bound; bench B4) | README |
+| `components/hmi_ui` | the UI island: every LVGL view the UI task draws (so far the TopBar clock, link and RTPS label, the DriveBand status cells, the backlight, the bench PIN, seat, settings rows, Skunk Works tiles and diagnostics) | no (shows the chair's state and faults, commands nothing) | no (LVGL-bound; bench B4) | README |
 | `components/joystick` | espp joystick plus a twist axis (vendored espp 1.2.0, sha 615b8df; README + upstream.diff) | yes | host L1 (L1-JOY) | none |
 | `components/post` | the quick POST evaluator: boot facts in, a verdict per check and an overall state out (not wired yet; hazard-fixes C3) | yes (gates motion once C3 wires it) | host L1 (L1-POST) | README |
 | `components/m5stack-tab5` | vendored espp Tab5 BSP 1.2.0 (sha 615b8df), modified (VENDORED.md + upstream.diff) | no | no | none |
@@ -146,7 +149,10 @@ yet measured or decided, and "none" means checked and absent.
   decision logic is `scripts/mcb_sim_logic.py` (`rtps_mcb_sim.py selftest`, cases SIM-001.., in
   L0). `scripts/rtps_selftest.py` acts as the MCB during a self-test run.
 - Debug channel: `scripts/hmi_ui.py` on TCP 3333 (screenshots, taps, keys, walk). Test builds
-  enable it with `CONFIG_HMI_REMOTE_UI=y`.
+  enable it with `CONFIG_HMI_REMOTE_UI=y`. A bench inject build adds `hmi_ui.py stick` (hold,
+  sweep, fail): raw stick mV refreshed every 100 ms, expiring 300 ms after the last; a red
+  "STICK INJECTED" label shows while it holds. It reaches XYTwist through the real gate, so it
+  runs only against `rtps_mcb_sim.py`.
 
 ## Test parameters (defaults in brackets)
 - POST time budget: none (no boot POST exists) · nightly boot count [20] · extended self-test runs [5]

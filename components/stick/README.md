@@ -20,6 +20,18 @@ extraction (`test/golden_stick.inc`, frozen). They are not a reviewed specificat
 | REQ-STK-05 | A cycle with any of the three reads missing publishes nothing and calls nothing else. | STK-005, STK-015 |
 | REQ-STK-06 | A cycle calls its `Io` in the order of the original code. | STK-003, STK-004 |
 
+## Bench stick injection (`stick/bench_inject.hpp`, hazard-fixes.md §3 B1)
+
+Bench only: the firmware uses it only behind `CONFIG_HMI_BENCH_STICK_INJECT` (which depends on
+`CONFIG_HMI_REMOTE_UI`), selected at compile time (`StickSlot`), so a release build compiles none of it. The
+remote UI's `STICK` verb parses a `StickInjectMsg` and writes it to an `fw_core` mailbox; the ADC
+task drains it and swaps its three raw reads for the injected ones before `StickPipeline::cycle`
+(`main/stick_inject.hpp`). Everything after the reads is the real code.
+
+| ID | Requirement | Tests |
+| --- | --- | --- |
+| REQ-STK-07 | `STICK <h_mv> <v_mv> <twist_mv> <fail_mask> <seq>` is accepted only as five unsigned decimals, mV 0..3300, mask 0..7, seq 0..2^32-1; anything else is rejected. An injection replaces all three raw reads, failed real reads included, until 300 ms after its last message (a refresh restarts the 300 ms; a clock earlier than the message ends it); then the real reads pass unchanged. Each `fail_mask` bit (1 horizontal, 2 vertical, 4 twist) makes that read fail. Injected reads go through the real pipeline, gate and H9 behaviour included. | STK-040..049 |
+
 ## Known hazards, pinned as they are (refactor.md §1; fixes parked in §3.3)
 
 - H3: a pot outside its calibration is clamped to full deflection, so an open-circuit pot
