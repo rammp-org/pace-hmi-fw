@@ -1,6 +1,7 @@
 # hmi_ui: the UI island, everything the UI task draws (CS-UI-02, CS-UI-04). README.md has the
 # concern, the file map and the requirements.
-idf_component_register(SRCS "src/bench_pin_view.cpp"
+idf_component_register(SRCS "src/about_view.cpp"
+                            "src/bench_pin_view.cpp"
                             "src/brightness_view.cpp"
                             "src/button_grid.cpp"
                             "src/rtps_label_view.cpp"
