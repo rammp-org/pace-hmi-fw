@@ -537,18 +537,8 @@ extern "C" void app_main(void) {
   }
   brightness_view.start_save_timer(kBrightnessSaveDelayMs);
 
-  // Bind the Settings-screen axis bars to the ADC subjects (observer pattern).
-  // Bars show the calibrated joystick position as a percentage: -100..+100,
-  // centered at 0; RTPS carries the same values as -1..+1 (see the ADC task).
-  lv_subject_init_int(&adc_x_subject, 0);
-  lv_subject_init_int(&adc_y_subject, 0);
-  lv_subject_init_int(&adc_twist_subject, 0);
-  lv_bar_set_range(ui_XAxisBar, -100, 100);
-  lv_bar_set_range(ui_YAxisBar, -100, 100);
-  lv_bar_set_range(ui_TwistBar, -100, 100);
-  lv_bar_bind_value(ui_XAxisBar, &adc_x_subject);
-  lv_bar_bind_value(ui_YAxisBar, &adc_y_subject);
-  lv_bar_bind_value(ui_TwistBar, &adc_twist_subject);
+  // The Joystick screen's axis bars, bound to the ADC task's percentages (JoystickView).
+  joystick_view.init_bars();
 
   // MCB status labels. The joystick is a slave: until the MCB says otherwise
   // the chair is not accepting drive commands, so INACTIVE/OK is the honest
@@ -654,14 +644,8 @@ extern "C" void app_main(void) {
                           play_click(espp::M5StackTab5::get());
                         }});
 
-  // GPIO48 test button. The count has a built-in binding; the tint the press
-  // used to show went with the panel behind it, so the observer paints the
-  // count's own text colour instead (torn down with the object).
-  lv_subject_init_int(&button_count_subject, 0);
-  lv_subject_init_int(&button_pressed_subject, 0);
-  lv_label_bind_text(ui_ButtonCounter, &button_count_subject, "%d");
-  lv_subject_add_observer_obj(&button_pressed_subject, gpio48_panel_observer, ui_ButtonCounter,
-                              nullptr);
+  // GPIO48 test button: the count and its colour (JoystickView).
+  joystick_view.init_button();
 
   // GPIO48, pulled up and shorted to ground on press (board-wide convention),
   // so active LOW. Constructed after the subjects are initialized, because the

@@ -1,9 +1,7 @@
 // split_main.py fragment of main.cpp (frag_state: original lines 108-263); one TU, see main.cpp.
-// Subjects (observer pattern) feeding the Settings-screen axis bars; static
-// lifetime because the bound observers keep pointers to them
-static lv_subject_t adc_x_subject;
-static lv_subject_t adc_y_subject;
-static lv_subject_t adc_twist_subject;
+// The Joystick test screen's readouts (axis bars, button count) own their subjects.
+#include "hmi_ui/joystick_view.hpp"
+static constinit hmi::ui::JoystickView joystick_view;
 // The MIB's state, as reported over RTPS. The joystick is a slave here: this holds
 // whatever the MIB last said, and every DriveBand on every screen follows it. One
 // subject, because MibSystemState answers both of a panel's labels - where the message
@@ -28,10 +26,6 @@ static lv_subject_t rtps_link_subject;
 // 0/1 blink phase for the indicator, flipped by the same poll timer
 static lv_subject_t rtps_blink_subject;
 
-// GPIO48 test button: press count (bound to the ButtonCounter label) and
-// current pressed state (drives the ButtonPanel background via an observer)
-static lv_subject_t button_count_subject;
-static lv_subject_t button_pressed_subject;
 
 // Lock state. Declared up here with the other subjects because the unlock
 // gesture and the nav layer both read it; the rest of the lock/unlock machinery
