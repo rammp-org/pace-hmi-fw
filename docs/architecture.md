@@ -162,11 +162,15 @@ First-party components (`main` and `components/*` except `joystick`, `m5stack-ta
 
 ```mermaid
 flowchart LR
+  c_drive_adapter["drive_adapter"]
+  c_drive_session["drive_session"]
+  c_feedback["feedback"]
   c_fw_core["fw_core"]
   c_hmi_format["hmi_format"]
   c_hmi_models["hmi_models"]
   c_hmi_ui["hmi_ui"]
   c_joystick["joystick (vendored)"]:::safety
+  c_joystick_cal["joystick_cal"]
   c_m5stack_tab5["m5stack-tab5 (vendored)"]
   c_main["main"]:::safety
   c_ota_parse["ota_parse"]
@@ -174,21 +178,34 @@ flowchart LR
   c_rammp_rtps_messages["rammp_rtps_messages (submodule)"]:::safety
   c_stick["stick"]
   c_ui["ui"]:::gen
-  g_ESP_IDF["ESP-IDF · 13"]
+  g_ESP_IDF["ESP-IDF · 15"]
   g_espp["espp · 33"]
   g_Espressif_registry["Espressif registry · 7"]
   g_LVGL["LVGL · 1"]
+  c_drive_adapter -.-> c_drive_session
+  c_drive_adapter -.-> g_espp
+  c_feedback -.-> g_ESP_IDF
+  c_feedback -.-> g_espp
   c_fw_core -.-> g_ESP_IDF
   c_fw_core -.-> g_espp
   c_hmi_ui -.-> c_hmi_format
+  c_hmi_ui -.-> c_hmi_models
+  c_hmi_ui -.-> c_ota_parse
   c_hmi_ui -.-> c_rammp_rtps_messages
   c_hmi_ui -.-> c_ui
+  c_hmi_ui -.-> g_ESP_IDF
+  c_hmi_ui -.-> g_espp
   c_hmi_ui -.-> g_LVGL
+  c_joystick_cal -.-> g_espp
+  c_main -.-> c_drive_adapter
+  c_main -.-> c_drive_session
+  c_main -.-> c_feedback
   c_main -.-> c_fw_core
   c_main -.-> c_hmi_format
   c_main -.-> c_hmi_models
   c_main -.-> c_hmi_ui
   c_main -.-> c_joystick
+  c_main -.-> c_joystick_cal
   c_main -.-> c_m5stack_tab5
   c_main -.-> c_ota_parse
   c_main -.-> c_rammp_rtps_messages
@@ -207,7 +224,7 @@ flowchart LR
 
 <details><summary>Folded dependencies</summary>
 
-- **ESP-IDF**: `app_update`, `bootloader_support`, `esp_app_format`, `esp_driver_ppa`, `esp_eth`, `esp_event`, `esp_http_client`, `esp_netif`, `esp_partition`, `esp_wifi`, `freertos`, `lwip`, `mbedtls`
+- **ESP-IDF**: `app_update`, `bootloader_support`, `esp_app_format`, `esp_driver_ppa`, `esp_eth`, `esp_event`, `esp_http_client`, `esp_mm`, `esp_netif`, `esp_partition`, `esp_timer`, `esp_wifi`, `freertos`, `lwip`, `mbedtls`
 - **espp**: `espp__adc`, `espp__base_component`, `espp__base_peripheral`, `espp__bmi270`, `espp__button`, `espp__cdr`, `espp__cli`, `espp__codec`, `espp__display`, `espp__display_drivers`, `espp__drv2605`, `espp__file_system`, `espp__filters`, `espp__format`, `espp__gt911`, `espp__i2c`, `espp__ina226`, `espp__input_drivers`, `espp__interrupt`, `espp__led`, `espp__logger`, `espp__math`, `espp__pi4ioe5v`, `espp__reflect_cpp`, `espp__rtps`, `espp__rx8130ce`, `espp__socket`, `espp__spi`, `espp__st7123touch`, `espp__task`, `espp__thread_pool`, `espp__timer`, `espp__touch`
 - **Espressif registry**: `espressif__cjson`, `espressif__esp-dsp`, `espressif__esp_hosted`, `espressif__esp_sccb_intf`, `espressif__esp_wifi_remote`, `espressif__usb`, `espressif__w5500`
 - **LVGL**: `lvgl__lvgl`
