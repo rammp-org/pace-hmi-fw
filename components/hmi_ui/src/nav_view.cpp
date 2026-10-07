@@ -158,7 +158,7 @@ void hmi::ui::NavView::use_group(lv_group_t *g, const lv_obj_t *screen) {
     lv_group_add_obj(g, c->key); // removes it from wherever it was first
   }
   screen_group_ = g;
-  lv_indev_set_group(*config_.indev, g);
+  lv_indev_set_group(indev_, g);
 }
 
 void hmi::ui::NavView::to_key() const {
@@ -235,7 +235,7 @@ void hmi::ui::NavView::close_menu() {
   }
   key_open_look(lv_screen_active(), false);
   menu_slide(overlay, lv_obj_get_y(overlay), MENU_HIDDEN_Y, true);
-  lv_group_remove_all_objs(*config_.menu_group);
+  lv_group_remove_all_objs(menu_group_);
   if (screen_group_ != nullptr) {
     use_group(screen_group_, lv_screen_active());
     to_key();
@@ -252,7 +252,7 @@ void hmi::ui::NavView::menu_level(lv_obj_t *overlay, bool sub, lv_obj_t *focus) 
   // The rows belong to whichever overlay is up, so the group is rebuilt rather
   // than filled once: every screen has its own instance of all of them. The
   // key goes last, so down from the bottom row reaches it and a press closes.
-  lv_group_t *menu_group = *config_.menu_group;
+  lv_group_t *menu_group = menu_group_;
   lv_group_remove_all_objs(menu_group);
   // The menu wraps: down from the burger key is the top row again, up from
   // the top row is the key. It is the one list short enough that going round
@@ -267,7 +267,7 @@ void hmi::ui::NavView::menu_level(lv_obj_t *overlay, bool sub, lv_obj_t *focus) 
   if (Chrome *c = chrome_of(lv_screen_active())) {
     lv_group_add_obj(menu_group, c->key);
   }
-  lv_indev_set_group(*config_.indev, menu_group);
+  lv_indev_set_group(indev_, menu_group);
   lv_group_focus_obj(focus);
 }
 
@@ -311,7 +311,7 @@ void hmi::ui::NavView::go(NavDest dest) {
       lv_obj_remove_state(ui_comp_get_child(open, id), LV_STATE_CHECKED);
     }
     key_open_look(lv_screen_active(), false);
-    lv_group_remove_all_objs(*config_.menu_group);
+    lv_group_remove_all_objs(menu_group_);
     *config_.menu_open = nullptr;
     menu_sub_ = false;
     drop_row_ = dest;
@@ -695,4 +695,11 @@ void hmi::ui::NavView::arrive(const lv_obj_t *screen) {
   }
   config_.gate_update();
   config_.arrived(screen);
+}
+
+void hmi::ui::NavView::init_groups(lv_indev_t *indev) {
+  indev_ = indev;
+  fallback_group_ = lv_group_create();
+  menu_group_ = lv_group_create();
+  lv_indev_set_group(indev_, fallback_group_);
 }

@@ -718,22 +718,15 @@ extern "C" void app_main(void) {
           play_click(espp::M5StackTab5::get());
         }
       }});
-  joystick_indev = joystick_keypad.get_input_device();
-  // The fallback group, for the screens whose content nothing focuses: Drive,
-  // Update and Boot. It holds nothing, so the stick's LVGL half is idle there
-  // while hold_poll still reads the same latch for the exit hold.
-  joystick_group = lv_group_create();
-  // The burger menu's rows. Filled per overlay when the menu opens, because
-  // every screen carries its own instance of all seven.
-  menu_group = lv_group_create();
-  lv_indev_set_group(joystick_indev, joystick_group);
+  // The joystick's indev, nav's fallback group and the burger menu's rows (NavView).
+  nav_view.init_groups(joystick_keypad.get_input_device());
   // A backstop for the stick losing its cursor: if its group ever has nothing
   // focused while the screen has settled, hand it back to the screen that is
   // up, as a fresh arrival would. Logged, because it means some path left the
   // group behind and that path wants fixing too.
   lv_timer_create(
       [](lv_timer_t *) {
-        lv_group_t *g = lv_indev_get_group(joystick_indev);
+        lv_group_t *g = lv_indev_get_group(nav_view.indev());
         static int lost = 0;
         if (g != nullptr && lv_group_get_focused(g) != nullptr) {
           lost = 0;
@@ -934,7 +927,7 @@ extern "C" void app_main(void) {
   });
 
   // BenchGateScreen: the PIN pad, its four dots and the line above them.
-  rd_group = bench_pin_view.init();
+  (void)bench_pin_view.init();
 
   // SettingsScreen: what outlives the screen, which is built on demand
   // (settings_screen_ensure). The seat values it steps are initialised further

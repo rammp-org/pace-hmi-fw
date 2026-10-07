@@ -81,10 +81,6 @@ static std::atomic<uint32_t> joy_flick{0};
 static constexpr lv_obj_flag_t kOverlayFlag = hmi::ui::OVERLAY_FLAG;
 using hmi::ui::keep_overlay_fill;
 
-static lv_indev_t *joystick_indev = nullptr;
-static lv_group_t *joystick_group = nullptr;
-static lv_group_t *menu_group = nullptr;        // the menu overlay's rows
-static lv_group_t *rd_group = nullptr;          // the bench gate's PIN keypad
 
 // The Settings rows; brightness has its own brightness_subject. Up here because
 // rtps_poll_cb keeps the theme row in step and the menu reads the slide. Each

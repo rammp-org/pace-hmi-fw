@@ -48,6 +48,8 @@ public:
   /// @return the pad's group, for the joystick
   /// app_main, before lv_task starts.
   lv_group_t *init();
+  /// The pad's group (null before init).
+  [[nodiscard]] lv_group_t *group() const { return group_; }
   /// @brief Empties the entry and puts the prompt back (every visit to the screen).
   /// UI task.
   void reset();
@@ -67,6 +69,7 @@ private:
   void draw_empty();
 
   Config config_;
+  lv_group_t *group_ = nullptr; ///< the pad's group, made by init
   ButtonGrid grid_;
   PinModel pin_;
   lv_subject_t len_subject_{};     ///< int: digits typed; the dots are bound to it
