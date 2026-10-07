@@ -58,3 +58,21 @@ void hmi::ui::HoldEngine::poll(HoldGesture *g) const {
   lv_anim_set_completed_cb(&a, anim_completed_cb);
   lv_anim_start(&a);
 }
+
+// Cancel anything mid-fill rather than let it complete - and navigate - behind the
+// overlay.
+void hmi::ui::HoldEngine::poll_all(std::span<HoldGesture *const> gestures) const {
+  if (config_.overlay_up()) {
+    for (HoldGesture *g : gestures) {
+      if (g->holding) {
+        g->holding = false;
+        reset(g);
+      }
+    }
+    return;
+  }
+  config_.before_poll();
+  for (HoldGesture *g : gestures) {
+    poll(g);
+  }
+}

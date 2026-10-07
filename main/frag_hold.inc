@@ -28,25 +28,6 @@ static constinit hmi::ui::HoldEngine hold_engine{{
     .before_poll = [] { entry_refusal_poll(); },
 }};
 
-// Cancel anything mid-fill rather than let it complete - and navigate - behind the
-// overlay.
-void hmi::ui::HoldEngine::poll_all(std::span<HoldGesture *const> gestures) const {
-  if (config_.overlay_up()) {
-    for (HoldGesture *g : gestures) {
-      if (g->holding) {
-        g->holding = false;
-        reset(g);
-      }
-    }
-    return;
-  }
-  config_.before_poll();
-  for (HoldGesture *g : gestures) {
-    poll(g);
-  }
-}
-
-
 // The stick's own button. Reads the level the button callback mirrors out, not
 // the edge-latched select_key: a hold gesture needs to know the button is still
 // down, and select_key is consumed by the first indev read after the press.
