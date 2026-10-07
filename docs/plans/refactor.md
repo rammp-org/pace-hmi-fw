@@ -436,8 +436,9 @@ A refactor and a behaviour change are never in one commit.
   2. The `.text`, `.rodata`, `.data` and `.bss` sizes equal the baseline.
   3. The `nm -C` symbol set is equal.
   4. The only `.rodata` differences are `__LINE__`/`__FILE__` strings and the app descriptor.
-- **Deviation.** `.inc` fragments are not a CS-LAY layout. They are temporary: each fragment
-  becomes a real component in its own step, and each later step owns one fragment.
+- **Deviation.** `.inc` fragments are not a CS-LAY layout. They are temporary: the fragments
+  are dissolved into components grouped by concern (CS-LAY-02), not one component per fragment;
+  the target map is in [app-main-shrink.md](app-main-shrink.md), revision V15 (owner, 2026-10-06).
 
 ### 4.2 Step 1: tooling
 
@@ -512,7 +513,7 @@ HEAD at 06:30. Scripts decide every verdict (TS-PRI-02).
 | AI-UNA-02 "Never merge" | You authorised merges into `dev_refactor` | Your decision stands (AI-DIS-01); logged |
 | AI-UNA-02 / CS-SAF-05 (two approvals per safety change, refactors included) | Safety extractions would merge with none | Q4 default: drafts only |
 | TS-UNIT-01, CS-HAL-04 (IDF `linux` target) | Not installed; WSL has no sudo, cmake or IDF | Q6: host-native g++ in WSL with IDF's Unity source |
-| CS-LAY (layout) | Step 3's `.inc` fragments | Temporary; each becomes a component |
+| CS-LAY (layout) | Step 3's `.inc` fragments | Temporary; dissolved into components by concern (app-main-shrink.md V15) |
 | CS-LNG-02 gnu++23 | IDF 6.0 defaults to gnu++26 | New components use gnu++23; `main` switches in its own commit, only if it builds clean |
 | CS-NAM-01 UPPER_CASE | 217 `kCamelCase` constexprs | New code UPPER_CASE; legacy counted in the ratchet |
 | AI-SES-01 | The external `@` import isn't loaded until approved | Q2; agents also get CORE.md pasted into their prompts |
