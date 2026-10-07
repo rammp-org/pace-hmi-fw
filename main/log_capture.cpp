@@ -1,11 +1,7 @@
-// funopen() is a BSD extension in picolibc's stdio.h
-#ifndef _DEFAULT_SOURCE
-#define _DEFAULT_SOURCE 1
-#endif
-
 #include "log_capture.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
@@ -24,7 +20,6 @@ static_assert(kLogCaptureLineLen <= UINT8_MAX, "Line::len is a uint8_t");
 Line *ring = nullptr; // kLogCaptureLines of them, in PSRAM
 uint32_t count = 0;   // lines committed since boot; the newest is ring[(count - 1) % size]
 std::mutex ring_mutex;
-FILE *console = nullptr; // the original stdout: the serial console
 
 // The line being assembled: a write can end mid-line, and a line can arrive in
 // several writes.
@@ -108,21 +103,81 @@ void feed(char c) {
   // '\r' and the other control characters are dropped
 }
 
-// The classic BSD funopen() write signature, which is the declaration the
-// build sees (not the _ssize_t/size_t variant further down picolibc's stdio.h).
-int tee_write(void *, const char *buf, int n) {
-  if (n <= 0) {
-    return 0;
+// The stream stdout and stderr point at. A plain picolibc stream: stdio hands
+// it one character at a time through put() and keeps no buffer of its own.
+//
+// It used to be a funopen() stream, whose 128-byte buffer is the last 128 bytes
+// of its 208-byte heap block. picolibc's fwrite can leave that buffer exactly
+// full without flushing it, and its __bufio_put stores the next character
+// before it checks for room: one byte past the buffer, into the size word of
+// the next heap block (the stream's own lock). An espp line (one fwrite) that
+// filled the buffer to the byte, then an IDF line (vprintf), wrote its 'E'
+// there; the next heap walk (spi_flash's bounce buffer, at fw_info's first
+// read) took 0x45 for a free block of 0x44 and faulted (final-a9a040f, boot
+// panic of 2026-10-06). Here the only buffer is `line`, and put() never writes
+// past it.
+int tee_put(char c, FILE *);
+int tee_flush(FILE *);
+
+constexpr size_t kTeeLineBytes = 256; // a longer line goes out in pieces
+
+struct Tee {
+  FILE file;
+  FILE *console; // the original stdout: the serial console
+  std::array<char, kTeeLineBytes> line;
+  size_t used;
+};
+// picolibc's FDEV_SETUP_STREAM, spelled out: in C++ every member needs its
+// initializer (-Wmissing-field-initializers). The lock starts empty and stdio
+// creates it on first use (__flockfile_init).
+Tee tee{.file = {.unget = 0,
+                 .flags = _FDEV_SETUP_WRITE,
+                 .put = tee_put,
+                 .get = nullptr,
+                 .flush = tee_flush,
+                 .lock = {}},
+        .console = nullptr,
+        .line = {},
+        .used = 0};
+
+// The line so far to the console, unchanged, then into the ring. A print made
+// from inside this one (same task: the stream's lock is recursive) can cut the
+// line short; it cannot write outside `line`.
+void write_line() {
+  const size_t n = std::min(tee.used, tee.line.size());
+  if (n == 0) {
+    return;
   }
-  // The console first, unchanged, and outside the ring's lock: a slow UART
-  // must never hold up the LogScreen reading the ring, nor the reverse.
-  std::fwrite(buf, 1, static_cast<size_t>(n), console);
-  std::fflush(console);
-  std::lock_guard<std::mutex> lock(ring_mutex);
-  for (int i = 0; i < n; ++i) {
-    feed(buf[i]);
+  // The console first, and outside the ring's lock: a slow UART must never
+  // hold up the LogScreen reading the ring, nor the reverse.
+  std::fwrite(tee.line.data(), 1, n, tee.console);
+  std::fflush(tee.console);
+  {
+    std::lock_guard<std::mutex> lock(ring_mutex);
+    for (size_t i = 0; i < n; ++i) {
+      feed(tee.line[i]);
+    }
   }
-  return n;
+  tee.used = 0;
+}
+
+// Every character any task prints. stdio calls it under the stream's lock
+// (picolibc __STDIO_LOCKING), so one task at a time.
+int tee_put(char c, FILE *) {
+  const size_t used = tee.used;
+  if (used < tee.line.size()) {
+    tee.line[used] = c;
+    tee.used = used + 1;
+  }
+  if (c == '\n' || tee.used >= tee.line.size()) {
+    write_line();
+  }
+  return static_cast<unsigned char>(c);
+}
+
+int tee_flush(FILE *) {
+  write_line();
+  return 0;
 }
 
 } // namespace
@@ -135,24 +190,18 @@ void log_capture_start() {
   if (ring == nullptr) {
     return;
   }
-  FILE *tee = funopen(nullptr, nullptr, tee_write, nullptr, nullptr);
-  if (tee == nullptr) {
-    heap_caps_free(ring);
-    ring = nullptr;
-    return;
-  }
-  // line-buffered, like the console it stands in front of
-  setvbuf(tee, nullptr, _IOLBF, 256);
   std::fflush(stdout);
-  console = stdout;
+  tee.console = stdout;
   // In IDF's picolibc these are plain globals shared by every task
   // (esp_libc/src/picolibc/picolibc_init.c), so this reaches tasks that are
   // already running as well as the ones started later.
-  stdout = tee;
-  stderr = tee;
+  stdout = &tee.file;
+  stderr = &tee.file;
 }
 
-bool log_capture_active() { return ring != nullptr && console != nullptr && stdout != console; }
+bool log_capture_active() {
+  return ring != nullptr && tee.console != nullptr && stdout == &tee.file;
+}
 
 uint32_t log_capture_count() {
   std::lock_guard<std::mutex> lock(ring_mutex);
