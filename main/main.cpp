@@ -612,9 +612,7 @@ extern "C" void app_main(void) {
       {ui_TopBar13, ui_DriveBand13, ui_MenuKey13, ui_MenuOverlay13, true}, // AboutScreen
   };
   for (const ScreenChrome &c : kChrome) {
-    bind_status_panel(c.band);
-    bind_rtps_label(c.bar);
-    bind_topbar_labels(c.bar);
+    bind_chrome_views(c.band, c.bar);
     nav_attach_chrome(c.key, c.overlay, c.band_goes_home ? c.band : nullptr);
   }
   // The menu stays reachable while locked: Log, Diagnostics, Settings and

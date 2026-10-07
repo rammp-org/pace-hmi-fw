@@ -67,6 +67,15 @@ static const char *link_text(NetLink link) {
 static constinit hmi::ui::TopBarView topbar_view{{.clock_valid = &clock_valid}};
 static void bind_topbar_labels(lv_obj_t *bar) { topbar_view.bind(bar); }
 
+// The hmi_ui chrome views of one screen, in the order app_main has always bound them: the
+// DriveBand's status cells, then the TopBar's RTPS label, then its clock and link. The screens
+// built on demand bind the same three in their *_ensure().
+static void bind_chrome_views(lv_obj_t *band, lv_obj_t *bar) {
+  bind_status_panel(band);
+  bind_rtps_label(bar);
+  bind_topbar_labels(bar);
+}
+
 // One edge of the stick button, from the GPIO or from the remote UI channel --
 // one path, so what a script presses is the real handling. Touches subjects,
 // never widgets directly. Any task.
