@@ -88,7 +88,72 @@ Sources for D1: `main/rtps_comms.cpp` (Wi-Fi or W5500, one link), `main/hmi_rtps
 
 ## D2 Islands
 <!-- BEGIN GENERATED D2 (tools/gen_diagrams): do not edit -->
-D2 is generated once `topology.hpp` lands (draft on `dev_ai_refactor_topology`). Until then the target sketch is in [the plan, §2.5](plans/refactor.md#25-diagrams).
+Islands (subgraphs), adapters (stadiums) and channels from `components/topology/include/topology.hpp`. Components inside an island are those its COMPONENTS rows assign to the island's task.
+
+```mermaid
+flowchart LR
+  subgraph i_CONTROL["Control island · control"]
+    c_drive_session["drive_session"]:::safety
+    c_stick["stick"]:::safety
+  end
+  subgraph i_FW_HASH["Fw hash island · fw_hash"]
+    c_fw_hash["fw_hash"]
+  end
+  subgraph i_HOUSEKEEPING["Housekeeping island · housekeeping"]
+    c_housekeeping["housekeeping"]
+  end
+  subgraph i_NET["Net island · net"]
+    c_net_link["net_link"]:::safety
+  end
+  subgraph i_OTA["Ota island · ota"]
+    c_github_ota["github_ota"]
+  end
+  subgraph i_SELFTEST["Selftest island · selftest"]
+    c_selftest["selftest"]:::safety
+  end
+  subgraph i_UI["UI island · ui"]
+    c_hmi_ui["hmi_ui"]
+    c_log_capture["log_capture"]
+    c_settings["settings"]
+  end
+  subgraph i_WIFI_SCAN["Wifi scan island · wifi_scan"]
+    c_wifi_scan["wifi_scan"]
+  end
+  a_LOG_HOOK(["log_hook"])
+  a_REMOTE_UI(["remote_ui"])
+  a_RTPS_RX(["rtps_rx"]):::safety
+  a_SIDE_BUTTON(["side_button"])
+  a_STICK_BUTTON(["Button"]):::safety
+  a_TOUCH(["touch"])
+  a_RTPS_RX -->|Mailbox#lt;BrightnessMsg#gt; · on change| i_UI
+  a_STICK_BUTTON ==>|Queue#lt;ButtonEdgeMsg#gt; · BUTTON_DEPTH| i_UI
+  a_RTPS_RX -->|Mailbox#lt;DiagMsg#gt; · DIAG_HZ| i_UI
+  i_UI ==>|Queue#lt;DriveIntentMsg#gt; · DRIVE_INTENT_DEPTH| i_CONTROL
+  i_CONTROL -->|Mailbox#lt;DriveViewMsg#gt; · CONTROL_HZ| i_UI
+  a_RTPS_RX ==>|Queue#lt;HmiCommandMsg#gt; · HMI_COMMAND_DEPTH| i_UI
+  i_NET -->|Mailbox#lt;LinkMsg#gt; · NET_TICK_HZ| i_CONTROL
+  i_NET -->|Mailbox#lt;LinkMsg#gt; · NET_TICK_HZ| i_UI
+  a_LOG_HOOK ==>|Queue#lt;LogChunkMsg#gt; · LOG_DEPTH| i_UI
+  a_RTPS_RX -->|Mailbox#lt;McbStatusMsg#gt; · MIB_STATUS_HZ| i_CONTROL
+  a_RTPS_RX -->|Mailbox#lt;McbStatusMsg#gt; · MIB_STATUS_HZ| i_UI
+  i_CONTROL ==>|Queue#lt;NavKeyMsg#gt; · NAV_KEY_DEPTH| i_UI
+  i_OTA ==>|Queue#lt;OtaEventMsg#gt; · OTA_DEPTH| i_UI
+  i_SELFTEST -->|atomic PostVerdict| i_CONTROL
+  i_UI ==>|Queue#lt;RemoteUiRepMsg#gt; · REMOTE_DEPTH| a_REMOTE_UI
+  a_REMOTE_UI ==>|Queue#lt;RemoteUiReqMsg#gt; · REMOTE_DEPTH| i_UI
+  i_UI ==>|Queue#lt;SeatRequestMsg#gt; · SEAT_REQUEST_DEPTH| i_CONTROL
+  i_SELFTEST ==>|Queue#lt;SelfTestEventMsg#gt; · SELFTEST_DEPTH| i_UI
+  i_UI ==>|Queue#lt;SelfTestReqMsg#gt; · SELFTEST_REQ_DEPTH| i_SELFTEST
+  a_STICK_BUTTON -->|atomic bool| i_CONTROL
+  i_UI -->|Mailbox#lt;StickSettingsMsg#gt; · on change| i_CONTROL
+  i_CONTROL -->|Mailbox#lt;StickViewMsg#gt; · CONTROL_HZ| i_UI
+  i_UI -->|Mailbox#lt;UiContextMsg#gt; · UI_FRAME_HZ| i_CONTROL
+  a_SIDE_BUTTON ==>|Queue#lt;UiInputMsg#gt; · UI_INPUT_DEPTH| i_UI
+  i_WIFI_SCAN ==>|Queue#lt;WifiEventMsg#gt; · WIFI_DEPTH| i_UI
+  classDef hw fill:#d9dde3,stroke:#7a8590,color:#111
+  classDef safety stroke:#c0392b,stroke-width:3px
+  classDef gen stroke-dasharray:5 4
+```
 <!-- END GENERATED D2 -->
 
 ## D3 Components
