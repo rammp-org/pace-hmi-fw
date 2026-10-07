@@ -570,9 +570,10 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
         self.step_speed(min(now - self._last_speed_step, 0.5))
         self._last_speed_step = now
         writer = self.local_writers[0]
+        sent_state = self.system_state
         payload = self.build_data_message(
             writer,
-            spec.pack_mib_status(self.system_state, self.profile, self.seat_units(),
+            spec.pack_mib_status(sent_state, self.profile, self.seat_units(),
                                  self.seq, self.speed_mps, self.status_text,
                                  self.error_message, self.error_footer,
                                  clock=datetime.datetime.now()),  # sets the HMI's clock
@@ -583,12 +584,18 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
         self.seq = (self.seq + 1) & 0xFF
         # Every state change actually put on the wire, once. A sample with no
         # subscriber yet went nowhere, so it is not a change the HMI could see.
-        if targets and self.system_state != self._last_sent_state:
-            self.events.write("mib_state", state=sim_logic.state_name(self.system_state),
-                              previous=(None if self._last_sent_state is None
-                                        else sim_logic.state_name(self._last_sent_state)),
+        # Under the lock: the network thread and the stdin loop both publish (seen
+        # on the board: the first IDLE logged twice).
+        previous = sent_state
+        if targets:
+            with self._modes_lock:
+                previous = self._last_sent_state
+                self._last_sent_state = sent_state
+        if sent_state != previous:
+            self.events.write("mib_state", state=sim_logic.state_name(sent_state),
+                              previous=(None if previous is None
+                                        else sim_logic.state_name(previous)),
                               seq=(self.seq - 1) & 0xFF, targets=len(targets))
-            self._last_sent_state = self.system_state
 
         # Log only when the number of reachable subscribers changes: silence
         # here means discovery never matched, which is the failure worth

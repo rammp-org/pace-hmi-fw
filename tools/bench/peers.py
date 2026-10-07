@@ -132,6 +132,17 @@ class SimChild:
                 return None
             time.sleep(0.1)  # poll period of the log file, bounded by the deadline
 
+    def not_ready_reason(self, timeout: float = 45.0) -> str:
+        """Why wait_ready() gave up: the sim's own last words if it exited (e.g. it
+        could not find a board that was still booting), else the plain timeout."""
+        code = self.proc.poll()
+        if code is None:
+            return f"the simulated MCB got no XYTwist in {timeout:.0f} s"
+        with self._cv:
+            tail = [line for _, line in self.lines if line.strip()][-2:]
+        return (f"the simulated MCB exited (code {code}) before any XYTwist: "
+                + " | ".join(tail))
+
     def stop(self) -> None:
         try:
             self.send("q")

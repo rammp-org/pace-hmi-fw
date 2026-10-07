@@ -7,7 +7,9 @@
 What B5 does not cover (docs/plans/hazard-fixes.md §3 B5, §5 C1). Each step runs
 its own simulated MCB (sim_child.py around rtps_mcb_sim.py, with --event-log), so
 it starts from IDLE, and drives the board over ONE remote-UI connection with the
-existing verbs only (SCREEN, TAP, BTN, SHOT). Nothing here moves a stick: XYTwist
+existing verbs only (SCREEN, TAP, BTN, SHOT), through ui_client.py (a timeout per
+command, one retry for idempotent verbs, every command logged to <step>/remote-ui.jsonl
+and summed up in the step's `remote_ui`). Nothing here moves a stick: XYTwist
 is only observed, and no chair exists. The sim's JSONL event log is the evidence:
 each UI action is preceded by a mark in it, and only what follows the mark counts.
 
@@ -64,6 +66,7 @@ from typing import Callable, NamedTuple
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common  # noqa: E402
 import peers  # noqa: E402
+import ui_client  # noqa: E402
 
 STEPS = ["B5a", "B5b", "B5c", "B5d", "B5e"]
 
@@ -385,11 +388,13 @@ def run_step(name: str, ip: str, out: pathlib.Path, tree: pathlib.Path) -> dict:
     st = Step(name, out)
     with peers.SimChild(ip, tree, out / "sim.log", event_log=out / "sim-events.jsonl") as sim:
         if not sim.wait_ready():
-            st.check("set-up: sim ready", False, "the simulated MCB got no XYTwist in 45 s")
+            st.check("set-up: sim ready", False, sim.not_ready_reason())
             return st.result()
-        with hmi_ui.Hmi(ip) as hmi:
+        with ui_client.open_hmi(hmi_ui, ip, out / "remote-ui.jsonl") as hmi:
             ctx = Ctx(spec=spec, shot=lambda path: hmi_ui.capture(hmi, path, False))
-            return RUNNERS[name](st, sim, hmi, ctx)
+            result = RUNNERS[name](st, sim, hmi, ctx)
+            result["remote_ui"] = hmi.stats()
+            return result
 
 
 def scenario(ip: str, out: pathlib.Path, tree: pathlib.Path, steps: list[str]) -> dict:

@@ -42,6 +42,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common  # noqa: E402
 import peers  # noqa: E402
+import ui_client  # noqa: E402
 import walk_check  # noqa: E402
 
 PACE_S = 0.25        # between injected keys: one keypad read each (LVGL reads every 33 ms)
@@ -183,11 +184,12 @@ def check(ip: str, out: pathlib.Path, tree: pathlib.Path) -> dict:
     c = Checks()
     with peers.SimChild(ip, tree, out / "sim.log") as sim:
         if not sim.wait_ready():
-            return {"verdict": "FAIL", "problems": ["the simulated MCB got no XYTwist in 45 s"]}
+            return {"verdict": "FAIL", "problems": [sim.not_ready_reason()]}
         sim.command("ok")  # IDLE: Seat Functions is open to a live, idle MCB
-        with hmi_ui.Hmi(ip) as hmi:
+        with ui_client.open_hmi(hmi_ui, ip, out / "remote-ui.jsonl") as hmi:
             pin_checks(hmi, hmi_ui, out, c)
             seat_checks(hmi, hmi_ui, out, c)
+            remote_ui = hmi.stats()
         seat_cmds = sim.wait_for(r"\[seat\]", 0.5)
     if seat_cmds:
         c.add("no seat command published", False, seat_cmds.string)
@@ -195,7 +197,8 @@ def check(ip: str, out: pathlib.Path, tree: pathlib.Path) -> dict:
     expected = 6
     if len(c.rows) < expected:
         problems.append(f"only {len(c.rows)} of {expected} checks ran")
-    return {"verdict": "PASS" if not problems else "FAIL", "checks": c.rows, "problems": problems}
+    return {"verdict": "PASS" if not problems else "FAIL", "checks": c.rows, "problems": problems,
+            "remote_ui": remote_ui}
 
 
 def main() -> int:
