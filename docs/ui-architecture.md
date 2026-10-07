@@ -189,9 +189,9 @@ with the screen's burger key appended last, so "down past the bottom" reaches th
 | `seat_group`, `seat_adjust_group` | Seat: the function buttons; the adjustment page |
 | `rd_group` | BenchGate: the PIN pad |
 | `setting_group`, `actions_group`, `diag_group` | Settings, Skunk Works, Diagnostics |
-| `log_view_group()` (`main/log_view.cpp`) | Log |
-| `main_group`, `networks_group`, `password_group` (`main/internet_ui.cpp`) | Internet: the main page, the network list, the keyboard |
-| `list_group`, `pick_group`, `run_group` (`main/update_ui.cpp`) | Firmware update: the releases, one release, the install |
+| `LogView::group()` (`components/hmi_ui/src/log_view.cpp`, through `log_view_group()`) | Log |
+| `InternetView`'s main, networks and password groups (`components/hmi_ui/src/internet_view.cpp`) | Internet: the main page, the network list, the keyboard |
+| `UpdateView`'s list, pick and run groups (`components/hmi_ui/src/update_view.cpp`) | Firmware update: the releases, one release, the install |
 | `joystick_group` | everything else: Locked, Drive, Joystick |
 
 `nav_arrive` runs whenever a screen comes up (SCREEN_LOADED, or by hand when a row picks
@@ -262,18 +262,18 @@ flowchart LR
   setting is a table line, its names in `kSettingParamNames`, its subject in
   `kSettingParamValue`, and a `case` in `setting_store_observer` if it needs applying.
 - **Skunk Works** tiles come from `main/actions_spec.h`, one line each.
-- **About** is `main/about_ui.cpp`, fed by `main/fw_info.cpp`: a low-priority thread hashes
+- **About** is `hmi_ui`'s `AboutView` (main's side: `main/about_ui.cpp`), fed by `main/fw_info.cpp`: a low-priority thread hashes
   the running image at boot (~0.5 s for 4 MB) and looks that hash up in
   `/storage/fwinfo.txt`, which only `scripts/fw_verify.py` on the PC writes, and only for a
   `.bin` whose digest is a GitHub release's. A line there can only match the image it was
   written for, so the file is never wrong about the running firmware.
-- **Firmware update** is `main/update_ui.cpp` over `main/github_ota.cpp`, laid out like
+- **Firmware update** is `hmi_ui`'s `UpdateView` (main's side, with the restart: `main/update_ui.cpp`) over `main/github_ota.cpp`, laid out like
   Internet: the release list is the screen's body, and one release and the install running
   are two panels over it. The list comes from GitHub's REST API on a worker thread each time
   the screen opens; the rows are `ReleaseRow`s made into `UpdateList`. An install runs on a
   thread of its own and outlives the screen: a timer on the LVGL task follows it, and
   restarts the HMI when it is done and the chair is not driving.
-- **Internet** lives in `main/internet_ui.cpp`, not in the settings rows. Its three
+- **Internet** is `hmi_ui`'s `InternetView` (main's side, with the worker: `main/internet_ui.cpp`), not in the settings rows. Its three
   pages share one screen: the main page (Ethernet or WiFi, the network, the status) and two
   panels drawn over it, the network list and the password keyboard. The choice is the
   `network` setting (on a page of its own in `settings_spec.h`), read at boot. The WiFi scan
