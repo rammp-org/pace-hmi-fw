@@ -211,11 +211,15 @@ task posts to a channel.
 | `tab5_audio` (BSP audio task) | none | open point: the audio stream buffer has three writers (H16) |
 | vprintf log hook (any task) | `log_hook`, hosted on `ANY_TASK` | |
 
-## Open points (for review)
+## Decided
 
 - **Changed from plan §2.2** (validate() rejects the draft as written): `SEAT_REQUEST` and
   `SELFTEST_REQ` were `DROP_NEWEST_COUNT` into `control` and `selftest`, both safety tasks. They
-  are `RAISE_FAULT` here. The alternative is to narrow the rule.
+  are `RAISE_FAULT` here, and the rule stays as it is: owner decision P6, 2026-10-06
+  (`docs/plans/overnight-report.md`, "Owner decisions").
+
+## Open points (for review)
+
 - **Added from plan §2.1**: the `housekeeping` island (today's Data Display Task), which the §2.2
   table left out. It has no channels yet: battery, IMU and RTC to the UI need a mailbox.
 - `touch` has a TASKS row but no channel: `UI_INPUT` has one producer (`side_button`). Either
