@@ -1,0 +1,4 @@
+# hmi_ui: the repo's config, unchanged. Not a 60-line safety component (CS-FIL-01): the views
+# show the chair's state and faults but command nothing (docs/plans/refactor.md §2.3, hmi_ui
+# row). Inheriting rather than copying keeps the naming and the 120-line limit in one place.
+InheritParentConfig: true
