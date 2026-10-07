@@ -114,12 +114,12 @@ def fake_bench(fake: FakeBoard, backup_made: bool = False):
                 setattr(obj, name, value)
 
 
-def bench(fake: FakeBoard, steps: str, ip: str | None = IP, sim_mode: bool = False,
+def bench(fake: FakeBoard, steps: str, ip: str | None = IP,
           backup_made: bool = False) -> tuple[dict, list[str]]:
     with fake_bench(fake, backup_made):
         a = argparse.Namespace(label="selftest", build_dir=pathlib.Path("."), flash=False,
                                tree=common.REPO, no_save=True, ip=ip)
-        sequence, wanted = run_bench.plan_steps(steps, sim_mode)
+        sequence, wanted = run_bench.plan_steps(steps)
         run = run_bench.Run(a)
         run.ip = ip
         run_bench.run_steps(run, sequence, wanted)
@@ -167,7 +167,7 @@ def t_b1_backup_then_app_steps() -> None:
 
 
 def t_never_back() -> None:
-    summary, log = bench(FakeBoard(comes_back=False), "B0,B5,B5a", sim_mode=True)
+    summary, log = bench(FakeBoard(comes_back=False), "B0,B5,B5a")
     v = verdicts(summary)
     expect("verdicts", v, {"B0": "PASS", "B5": "NOT_RUN", "B5a": "NOT_RUN"})
     expect("reason", "did not come back" in summary["steps"]["B5"]["reason"], True)
@@ -190,7 +190,7 @@ def t_new_ip_from_boot_log() -> None:
 
 
 def t_ip_from_the_wait() -> None:
-    summary, log = bench(FakeBoard(), "B0,B5,B5a", ip=None, sim_mode=True)
+    summary, log = bench(FakeBoard(), "B0,B5,B5a", ip=None)
     expect("verdicts", verdicts(summary), {"B0": "PASS", "B5": "PASS", "B5a": "PASS"})
     expect("the IP is the boot log's", (summary["board_ip"], summary["board_back"][0]["got_ip"]),
            (IP, IP))
@@ -205,22 +205,21 @@ def t_no_ip_anywhere() -> None:
 
 
 def t_no_reset_no_wait() -> None:
-    summary, log = bench(FakeBoard(), "B5,B5c", sim_mode=True)
+    summary, log = bench(FakeBoard(), "B5,B5c")
     expect("verdicts", verdicts(summary), {"B5": "PASS", "B5c": "PASS"})
     expect("nothing but the steps", log, ["B5:up", "B5c:up"])
 
 
 def t_plan() -> None:
     try:
-        run_bench.plan_steps("B0,B5a", False)
+        run_bench.plan_steps("B0,B6")
     except ValueError:
         pass
     else:
-        raise AssertionError("B5a accepted without --sim-mode-steps")
-    expect("default", run_bench.plan_steps(None, False)[1], run_bench.ALL_STEPS)
-    expect("default with the flag", run_bench.plan_steps(None, True)[1],
-           run_bench.ALL_STEPS + run_bench.SIM_MODE_STEPS)
-    expect("case-insensitive", run_bench.plan_steps("b0,b4B,b5E", True)[1], ["B0", "B4b", "B5e"])
+        raise AssertionError("an unknown step was accepted")
+    expect("the default list ends with B5 then B5a..B5e", run_bench.plan_steps(None)[1],
+           ["B0", "B1", "B2", "B3", "B4", "B4b", "B5", "B5a", "B5b", "B5c", "B5d", "B5e"])
+    expect("case-insensitive", run_bench.plan_steps("b0,b4B,b5E")[1], ["B0", "B4b", "B5e"])
 
 
 CASES = [
@@ -234,7 +233,8 @@ CASES = [
      t_never_back),
     ("BENCH-005 a different Got IP after the reset replaces --ip", t_new_ip_from_boot_log),
     ("BENCH-006 no reset, no wait: --steps B5,B5c --ip runs the steps alone", t_no_reset_no_wait),
-    ("BENCH-007 the step plan: defaults, the opt-in rule, names in any case", t_plan),
+    ("BENCH-007 the step plan: B5a..B5e in the default list, unknown names refused, any case",
+     t_plan),
     ("BENCH-008 B0 then app steps with no --ip and no B2: the wait's Got IP gives the IP",
      t_ip_from_the_wait),
     ("BENCH-009 no reset and no --ip: the app steps are NOT_RUN, no IP", t_no_ip_anywhere),

@@ -1,8 +1,8 @@
-"""B5a..B5e: the drive path against the simulated MCB's fault modes. Opt-in, no motors.
+"""B5a..B5e: the drive path against the simulated MCB's fault modes. No motors.
 
     python scenario_hazards.py --ip 192.168.137.218 --out C:\\b\\bench\\results\\x\\hazards
     python scenario_hazards.py --ip ... --steps B5c,B5e
-    run_bench.py ... --sim-mode-steps            (adds them after B5; see run_bench.py)
+    run_bench.py ...                             (they run after B5 by default)
 
 What B5 does not cover (docs/plans/hazard-fixes.md §3 B5, §5 C1). Each step runs
 its own simulated MCB (sim_child.py around rtps_mcb_sim.py, with --event-log), so

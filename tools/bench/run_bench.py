@@ -39,12 +39,13 @@ Board resets between steps: B0's partition-table read and B1's storage backup an
     optional when B0 or B1 runs first), then the remote UI's PING is polled
     (PING_WITHIN_S). Back = `Got IP` seen or PING answered; otherwise every later
     step is NOT_RUN with the reason. Each wait is in summary.json's `board_back`.
-B5a..B5e (only with --sim-mode-steps; opt-in until they have run on the board
-    once): scenario_hazards.py, the drive path against the sim's fault modes
-    (exit hold, burger-key exit, relock on link loss, profile click after relock,
-    ignored/dropped DISABLE). B5e is a characterisation: RECORD, not PASS/FAIL.
+B5a..B5e scenario_hazards.py, the drive path against the sim's fault modes (exit
+    hold, burger-key exit, relock on link loss, profile click after relock,
+    ignored/dropped DISABLE). In the default list since their first board runs
+    (2026-10-06, final-a9a040f). B5e is a characterisation: RECORD, not PASS/FAIL.
     RECORD counts as passing for the run's verdict and exit code, but a run with
-    a RECORD step never saves last-good (that needs every step PASS).
+    a RECORD step never saves last-good (that needs every step PASS): a default
+    --flash run therefore saves last-good only with B5e left out of --steps.
 """
 
 from __future__ import annotations
@@ -74,9 +75,9 @@ import ui_client  # noqa: E402
 import ui_models_check  # noqa: E402
 import walk_check  # noqa: E402
 
-ALL_STEPS = ["B0", "B1", "B2", "B3", "B4", "B4b", "B5"]
-# Opt-in (--sim-mode-steps) until they have run on the board once; then they join ALL_STEPS.
+# The sim-mode steps (scenario_hazards.py) were opt-in until their first board runs.
 SIM_MODE_STEPS = list(scenario_hazards.STEPS)
+ALL_STEPS = ["B0", "B1", "B2", "B3", "B4", "B4b", "B5", *SIM_MODE_STEPS]
 BOOT_CAPTURE_S = 90.0
 NO_IP_AFTER_JOIN_S = 60.0
 PING_WITHIN_S = 30.0
@@ -331,16 +332,17 @@ def only_ip_missing(report: dict) -> bool:
     return all("got_ip" in p for p in report["problems"])
 
 
-def plan_steps(steps_arg: str | None, sim_mode_steps: bool) -> tuple[list[str], list[str]]:
-    """(sequence, steps): the order steps run in, and the ones asked for. ValueError
-    on a request the flags do not allow."""
-    sequence = ALL_STEPS + (SIM_MODE_STEPS if sim_mode_steps else [])
+def plan_steps(steps_arg: str | None) -> tuple[list[str], list[str]]:
+    """(sequence, steps): the order steps run in, and the ones asked for (names in any
+    case). ValueError on a name that is not a step."""
+    sequence = list(ALL_STEPS)
     if steps_arg is None:
         steps_arg = ",".join(sequence)
-    by_upper = {s.upper(): s for s in ALL_STEPS + SIM_MODE_STEPS}
+    by_upper = {s.upper(): s for s in ALL_STEPS}
     steps = [by_upper.get(s.strip().upper(), s.strip()) for s in steps_arg.split(",") if s.strip()]
-    if not sim_mode_steps and any(s in SIM_MODE_STEPS for s in steps):
-        raise ValueError(f"{','.join(SIM_MODE_STEPS)} run only with --sim-mode-steps")
+    unknown = [s for s in steps if s not in ALL_STEPS]
+    if unknown:
+        raise ValueError(f"unknown steps {unknown}; known: {','.join(ALL_STEPS)}")
     return sequence, steps
 
 
@@ -390,8 +392,7 @@ def main() -> int:
     p.add_argument("--label", required=True)
     p.add_argument("--flash", action="store_true")
     p.add_argument("--steps", default=None,
-                   help=f"comma-separated (default {','.join(ALL_STEPS)}, plus the sim-mode "
-                        "steps with --sim-mode-steps)")
+                   help=f"comma-separated (default {','.join(ALL_STEPS)})")
     p.add_argument("--no-save", action="store_true",
                    help="never save this build as last-good (drafts that must not stay on the board)")
     p.add_argument("--tree", type=pathlib.Path, default=common.REPO,
@@ -400,11 +401,11 @@ def main() -> int:
                    help="board IP when B2 is not in --steps; optional when B0 or B1 runs: "
                         "their reset's boot log gives it")
     p.add_argument("--sim-mode-steps", action="store_true",
-                   help=f"also run {','.join(SIM_MODE_STEPS)} after B5 (scenario_hazards.py: "
-                        "the sim's fault modes; not in the default list until run on the board)")
+                   help=f"no effect: {','.join(SIM_MODE_STEPS)} are in the default list now "
+                        "(kept so older command lines still run)")
     a = p.parse_args()
     try:
-        sequence, steps = plan_steps(a.steps, a.sim_mode_steps)
+        sequence, steps = plan_steps(a.steps)
     except ValueError as e:
         p.error(str(e))
     if "B0" not in steps and (a.flash or "B1" in steps):
@@ -434,7 +435,7 @@ def main() -> int:
                                   "INVALID" if "INVALID" in verdicts else
                                   "INCOMPLETE" if "NOT_RUN" in verdicts else "PASS")
         # RECORD (a characterisation step, B5e) passes the run but is not PASS.
-        # Last-good only when every step passed (B0..B5 all run and PASS).
+        # Last-good only when every step that ran passed (all PASS; RECORD is not PASS).
         if a.flash and not a.no_save and verdicts and all(v == "PASS" for v in verdicts):
             run.summary["saved_last_good"] = str(flash.save(a.build_dir, a.label, "B0-B5 PASS"))
         run.save()
