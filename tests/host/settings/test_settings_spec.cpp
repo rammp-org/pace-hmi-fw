@@ -3,6 +3,7 @@
 // held (plan step 8, the refactor commit). The golden rows below are the old
 // SETTINGS_PAGE_TABLE / SETTINGS_PARAM_TABLE lines (dev_refactor fa3f13a), copied as data.
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -58,11 +59,9 @@ constexpr std::array<OldParam, 11> OLD_PARAMS{{
 
 std::string lower(std::string_view s) {
   std::string out(s);
-  for (char &c : out) {
-    if (c >= 'A' && c <= 'Z') {
-      c = static_cast<char>(c - 'A' + 'a');
-    }
-  }
+  std::transform(out.begin(), out.end(), out.begin(), [](char c) {
+    return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+  });
   return out;
 }
 

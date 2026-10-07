@@ -11,6 +11,7 @@
 // one process-wide table, so every case starts from reset_to_defaults() (TS-DET-03), and the
 // values before any load are captured during static initialisation (SET-003).
 
+#include <algorithm>
 #include <array>
 #include <climits>
 #include <cstdint>
@@ -112,7 +113,10 @@ void remove_file() { (void)std::remove(file_path().c_str()); } // absent already
 template <typename Fn> std::string capture_stdout(Fn &&fn) {
   TEST_ASSERT_EQUAL_INT(0, std::fflush(stdout));
   std::FILE *tmp = std::tmpfile();
-  TEST_ASSERT_NOT_NULL(tmp);
+  if (tmp == nullptr) {
+    TEST_FAIL_MESSAGE("tmpfile() failed");
+    return {};
+  }
   const int saved = dup(STDOUT_FILENO);
   TEST_ASSERT_TRUE(saved >= 0);
   TEST_ASSERT_TRUE(dup2(fileno(tmp), STDOUT_FILENO) >= 0);
@@ -649,9 +653,7 @@ TEST_CASE("SET-053 seeded random bytes never crash or leave a value out of range
     reset_to_defaults();
     const std::size_t len = rng() % 513u;
     std::string text(len, '\0');
-    for (char &c : text) {
-      c = static_cast<char>(rng() & 0xFFu);
-    }
+    std::generate(text.begin(), text.end(), [&rng] { return static_cast<char>(rng() & 0xFFu); });
     (void)load(text);
     const Values v = current();
     assert_in_range(v);

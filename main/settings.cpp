@@ -17,15 +17,18 @@ espp::Logger logger({.tag = "settings", .level = espp::Logger::Verbosity::INFO})
 constexpr const char *kFileName = "settings.txt";
 
 std::mutex mutex;
-// Each setting's value, in SETTINGS_PARAMS order; starts as the table's default.
-// constinit: ready before any dynamic initialiser could call a getter.
-constinit std::array<int, SETTINGS_PARAM_COUNT> values = [] {
+// The table's defaults, in SETTINGS_PARAMS order.
+constexpr std::array<int, SETTINGS_PARAM_COUNT> default_values() {
   std::array<int, SETTINGS_PARAM_COUNT> out{};
   for (std::size_t i = 0; i < out.size(); i++) {
     out[i] = SETTINGS_PARAMS[i].default_value;
   }
   return out;
-}();
+}
+
+// Each setting's value, in SETTINGS_PARAMS order; starts as the table's default.
+// constinit: ready before any dynamic initialiser could call a getter.
+constinit std::array<int, SETTINGS_PARAM_COUNT> values = default_values();
 
 std::string describe_locked() {
   std::string out;

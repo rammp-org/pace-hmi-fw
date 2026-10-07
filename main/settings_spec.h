@@ -15,6 +15,7 @@
  * C++ only (constexpr std::array); every includer is C++.
  */
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -131,13 +132,9 @@ constexpr bool is_valid_key(std::string_view key) {
   if (key.empty()) {
     return false;
   }
-  for (const char c : key) {
-    const bool ok = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
-    if (!ok) {
-      return false;
-    }
-  }
-  return true;
+  return std::all_of(key.begin(), key.end(), [](char c) {
+    return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
+  });
 }
 
 /// Each row's id is its index, so SETTINGS_PARAMS[SETTINGS_PARAM_X] is X's row.
@@ -157,22 +154,16 @@ constexpr bool rows_in_order() {
 
 /// Every row names a page that exists.
 constexpr bool pages_valid() {
-  for (const SettingsParamSpec &p : SETTINGS_PARAMS) {
-    if (p.page < 0 || p.page >= SETTINGS_PAGE_COUNT) {
-      return false;
-    }
-  }
-  return true;
+  return std::all_of(
+      SETTINGS_PARAMS.begin(), SETTINGS_PARAMS.end(),
+      [](const SettingsParamSpec &p) { return p.page >= 0 && p.page < SETTINGS_PAGE_COUNT; });
 }
 
 /// Every key is a valid settings.txt key.
 constexpr bool keys_valid() {
-  for (const SettingsParamSpec &p : SETTINGS_PARAMS) {
-    if (p.key == nullptr || !is_valid_key(p.key)) {
-      return false;
-    }
-  }
-  return true;
+  return std::all_of(
+      SETTINGS_PARAMS.begin(), SETTINGS_PARAMS.end(),
+      [](const SettingsParamSpec &p) { return p.key != nullptr && is_valid_key(p.key); });
 }
 
 /// No two rows share a key (the codec would load one value into both).
@@ -202,27 +193,22 @@ constexpr bool short_names_unique() {
 
 /// min <= default <= max and step > 0 on every row.
 constexpr bool ranges_valid() {
-  for (const SettingsParamSpec &p : SETTINGS_PARAMS) {
-    if (!(p.min_value <= p.default_value && p.default_value <= p.max_value) || p.step <= 0) {
-      return false;
-    }
-  }
-  return true;
+  return std::all_of(
+      SETTINGS_PARAMS.begin(), SETTINGS_PARAMS.end(), [](const SettingsParamSpec &p) {
+        return p.min_value <= p.default_value && p.default_value <= p.max_value && p.step > 0;
+      });
 }
 
 /// Every text field is set ("" is allowed, nullptr is not).
 constexpr bool texts_present() {
-  for (const SettingsPageSpec &g : SETTINGS_PAGES) {
-    if (g.title == nullptr || g.instructions == nullptr) {
-      return false;
-    }
-  }
-  for (const SettingsParamSpec &p : SETTINGS_PARAMS) {
-    if (p.short_name == nullptr || p.label == nullptr || p.unit == nullptr) {
-      return false;
-    }
-  }
-  return true;
+  return std::all_of(SETTINGS_PAGES.begin(), SETTINGS_PAGES.end(),
+                     [](const SettingsPageSpec &g) {
+                       return g.title != nullptr && g.instructions != nullptr;
+                     }) &&
+         std::all_of(SETTINGS_PARAMS.begin(), SETTINGS_PARAMS.end(),
+                     [](const SettingsParamSpec &p) {
+                       return p.short_name != nullptr && p.label != nullptr && p.unit != nullptr;
+                     });
 }
 
 } // namespace settings_spec_detail
