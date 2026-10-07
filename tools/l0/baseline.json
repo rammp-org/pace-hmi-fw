@@ -1,7 +1,7 @@
 {
   "metrics": {
     "app_main_lines": {
-      "main/main.cpp": 937
+      "main/main.cpp": 930
     },
     "assert": {
       "components/joystick/src/joystick.cpp": 17,
@@ -44,7 +44,7 @@
       "main/remote_ui.cpp": 1
     },
     "lines": {
-      "main/main.cpp": 3879,
+      "main/main.cpp": 3842,
       "main/selftest.cpp": 1030
     },
     "locks": {
@@ -83,7 +83,7 @@
       "main/joystick_cal.cpp": 16,
       "main/log_capture.cpp": 8,
       "main/log_view.cpp": 7,
-      "main/main.cpp": 143,
+      "main/main.cpp": 138,
       "main/remote_ui.cpp": 6,
       "main/rtps_comms.cpp": 32,
       "main/selftest.cpp": 25,
