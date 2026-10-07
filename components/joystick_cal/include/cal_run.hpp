@@ -167,7 +167,8 @@ public:
     int result_ticks = kResultTicks;
   };
 
-  explicit CalibrationRun(const Config &config)
+  /// constexpr, so a namespace-scope run is constant-initialised (no start-up constructor).
+  constexpr explicit CalibrationRun(const Config &config)
       : config_(config) {}
 
   /// Takes one input (a TICK with the latest sample), moves the run, and says what the view

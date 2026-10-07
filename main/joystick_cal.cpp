@@ -58,7 +58,7 @@ bool write_file(const JoystickCal &cal) { return storage_write(kFileName, hmi::c
 // called with.
 /////////////////////////////////////////////////////////////////////////////
 
-hmi::cal::CalibrationRun run(hmi::cal::CalibrationRun::Config{});
+constinit hmi::cal::CalibrationRun run(hmi::cal::CalibrationRun::Config{});
 
 JoystickCalUi ui;
 lv_timer_t *timer = nullptr;
