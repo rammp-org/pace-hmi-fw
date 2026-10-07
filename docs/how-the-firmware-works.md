@@ -66,6 +66,7 @@ hardware, a red outline is safety-relevant, and a dashed outline is generated co
 | `components/fw_core` | Channels (`Mailbox`, `Queue`, `AtomicValue`), `ThreadChecker`, `Owned<T>`, `check()`, context tokens. **Linked but unused** | for later | host L1 (FWC-L1) |
 | `components/hmi_format` | Pure text formatting: speed, steppers, clock, diagnostics, about, update, network | no | host L1 (L1-FMT) |
 | `components/hmi_models` | Pure UI models: the button-grid cursor walk and the bench PIN | no | host L1 (L1-MOD) |
+| `components/hmi_ui` | The UI island's views: TopBar clock, link and RTPS label, DriveBand status cells, backlight (more move in, app-main-shrink S4-S6) | no | bench B4 |
 | `components/ota_parse` | Pure OTA parsing: release list, image header check, fwinfo, boot-confirm marker search | no | host L1 (L1-OTA) |
 | `components/joystick` | espp's joystick, vendored, plus a twist (Z) axis | yes | host L1 (L1-JOY) |
 | `components/m5stack-tab5` | espp's Tab5 board support, vendored and modified (two frame buffers, vsync present) | no | none |
@@ -580,7 +581,7 @@ subject before anything binds to it.
 | `seat_axis_value[4]` | RTPS receive | seat buttons, angle text, Actuators rows |
 | `entry_refused_subject` | LVGL | refusal banners |
 | `diag_value[n][3]`, `diag_stale`, `diag_rate` | RTPS receive; LVGL `diag_poll` | Diagnostics rows |
-| `clock_subject`, `link_subject` | LVGL; `app_main` | TopBar |
+| `TopBarView`'s clock and link subjects (`hmi_ui`) | LVGL; `app_main` (link, under the lock) | TopBar |
 | hold `progress` ×3 | LVGL | padlock ring, calibrate bar |
 
 ### 10.4 The SquareLine contract
@@ -675,13 +676,13 @@ during boot).
 | `frag_fps` | frame-rate debug, `CONFIG_HMI_DEBUG_FPS` only | `kFpsInstrument`, render start/ready callbacks | LVGL |
 | `frag_state` | the shared state: subjects, atomics, groups, forward declarations | `stick_drives`, `joy_*`, settings atomics, `locked_subject`, `nav_menu_open` | all |
 | `frag_haptics` | DRV2605 play helper | `haptic_play` | LVGL, self-test |
-| `frag_status_band` | DriveBand labels (DRIVE ACTIVE/LOCKED, STATE) | `mcb_status_label_observer`, `bind_status_panel`; also FPS toggle and stick dead-zone constants | LVGL, RTPS rx |
+| `frag_status_band` | the `StatusBandView` instance (code in `hmi_ui`); FPS toggle, GPIO48 counter colour, stick dead-zone constants | `bind_status_panel` | LVGL, RTPS rx |
 | `frag_stick_config` | joystick axis configs and calibration apply | `stick_*_config`, `stick_apply_cal`, `kRtpsPollMs` | Read ADC |
-| `frag_rtps_label` | TopBar RTPS indicator | `rtps_label_observer` | LVGL |
+| `frag_rtps_label` | the `RtpsLabelView` instance (code in `hmi_ui`) | `bind_rtps_label` | LVGL |
 | `frag_drive_band` | Drive-screen profile buttons and speed | `drive_profile_click_cb`, `drive_mode_publish_observer` | LVGL, RTPS rx |
 | `frag_rtps_poll` | the 250 ms poll: link, blink, diagnostics, **drive tick**, theme | `rtps_poll_cb` | LVGL |
-| `frag_brightness` | backlight subject and save; setters for other tasks | `brightness_set` (RTPS), `brightness_step` (side button) | several, under the lock |
-| `frag_clock` | TopBar clock and link text; MCB time sync | `clock_poll_cb`, `clock_note_mcb_time` (RTPS rx) | LVGL, RTPS rx |
+| `frag_brightness` | `brightness_subject`, the `BrightnessView` instance (code in `hmi_ui`); setters for other tasks | `brightness_set` (RTPS), `brightness_step` (side button), each taking `lvgl_mutex` | several, under the lock |
+| `frag_clock` | MCB time sync; the `TopBarView` instance (code in `hmi_ui`) | `clock_note_mcb_time` (RTPS rx), `bind_topbar_labels`, `bind_chrome_views` | LVGL, RTPS rx |
 | `frag_stick_button` | GPIO48 edges; hold constants; forward declarations | `stick_button_edge` | Button, remote UI |
 | `frag_hold` | the hold engine | `HoldGesture`, `hold_poll` | LVGL |
 | `frag_lock` | padlock visuals, `set_locked`, unlock gesture | `set_locked`, `unlock_gesture`, `lock_visual_*` | LVGL |
@@ -775,7 +776,6 @@ Found while writing this; none is a hazard on its own.
 | menu constants | `frag_diag` | `frag_nav` |
 | `kOtaConfirmAfterMs` | `frag_nav` | the OTA code |
 | `logger_nav` | `frag_display_flip` | `frag_nav` |
-| clock constants | `frag_brightness` | `frag_clock` |
 | `kSelectMaxUs` | `frag_clock` | `frag_stick_button` |
 | stick dead-zone constants | `frag_status_band` | `frag_stick_config` |
 | the `direct_flush_cb` doc | `frag_overdraw` | `frag_display_flip` |

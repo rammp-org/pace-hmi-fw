@@ -18,6 +18,16 @@
       "reqs": [],
       "priv_reqs": []
     },
+    "hmi_ui": {
+      "reqs": [
+        "lvgl__lvgl"
+      ],
+      "priv_reqs": [
+        "hmi_format",
+        "rammp_rtps_messages",
+        "ui"
+      ]
+    },
     "main": {
       "reqs": [],
       "priv_reqs": [
@@ -74,6 +84,7 @@
         "fw_core",
         "hmi_format",
         "hmi_models",
+        "hmi_ui",
         "joystick",
         "lvgl__lvgl",
         "lwip",

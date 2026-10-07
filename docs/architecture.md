@@ -100,6 +100,7 @@ flowchart LR
   c_fw_core["fw_core"]
   c_hmi_format["hmi_format"]
   c_hmi_models["hmi_models"]
+  c_hmi_ui["hmi_ui"]
   c_joystick["joystick (vendored)"]:::safety
   c_m5stack_tab5["m5stack-tab5 (vendored)"]
   c_main["main"]:::safety
@@ -112,9 +113,14 @@ flowchart LR
   g_LVGL["LVGL · 1"]
   c_fw_core -.-> g_ESP_IDF
   c_fw_core -.-> g_espp
+  c_hmi_ui -.-> c_hmi_format
+  c_hmi_ui -.-> c_rammp_rtps_messages
+  c_hmi_ui -.-> c_ui
+  c_hmi_ui -.-> g_LVGL
   c_main -.-> c_fw_core
   c_main -.-> c_hmi_format
   c_main -.-> c_hmi_models
+  c_main -.-> c_hmi_ui
   c_main -.-> c_joystick
   c_main -.-> c_m5stack_tab5
   c_main -.-> c_ota_parse
