@@ -68,7 +68,7 @@ struct Copy {
   if (row != nullptr) {
     return row->safety;
   }
-  const auto *foreign =
+  const auto foreign =
       std::find_if(FOREIGN_TASKS.begin(), FOREIGN_TASKS.end(),
                    [id](const ForeignTaskRow &r) { return r.hosts.has_value() && *r.hosts == id; });
   return foreign != FOREIGN_TASKS.end() && foreign->safety;

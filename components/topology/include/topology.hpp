@@ -10,6 +10,7 @@
 ///          Source: docs/plans/refactor.md §2.1 (islands and adapters) and §2.2 (this draft).
 ///          Where this file differs from §2.2, the comment on the row says why.
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -109,11 +110,9 @@ static_assert(validate(TASKS, FOREIGN_TASKS, COMPONENTS, CHANNELS));
 
 /// @brief The number of adapters that run on a foreign task.
 [[nodiscard]] consteval std::size_t hosted_count() noexcept {
-  std::size_t n = 0;
-  for (const ForeignTaskRow &row : FOREIGN_TASKS) {
-    n += row.hosts.has_value() ? 1U : 0U;
-  }
-  return n;
+  return static_cast<std::size_t>(
+      std::count_if(FOREIGN_TASKS.begin(), FOREIGN_TASKS.end(),
+                    [](const ForeignTaskRow &row) { return row.hosts.has_value(); }));
 }
 // With validate()'s unique ids, these make every id have exactly one row.
 static_assert(TASKS.size() + hosted_count() == static_cast<std::size_t>(Task::COUNT_),

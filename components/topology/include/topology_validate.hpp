@@ -14,6 +14,7 @@
 ///          Limit (CS-OWN-12): this proves what is declared, not what runs. The task census
 ///          (TS-DET-09) and the ThreadCheckers (CS-OWN-11) cover what runs.
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -105,41 +106,34 @@ namespace detail {
 
 /// @brief How many rows, in TASKS and in foreign hosts, declare @p id.
 [[nodiscard]] constexpr std::size_t task_rows(const Tables &t, Task id) noexcept {
-  std::size_t n = 0;
-  for (const TaskRow &row : t.tasks) {
-    n += row.id == id ? 1U : 0U;
-  }
-  for (const ForeignTaskRow &row : t.foreign) {
-    n += (row.hosts.has_value() && *row.hosts == id) ? 1U : 0U;
-  }
-  return n;
+  const auto own = std::count_if(t.tasks.begin(), t.tasks.end(),
+                                 [id](const TaskRow &row) { return row.id == id; });
+  const auto hosted =
+      std::count_if(t.foreign.begin(), t.foreign.end(), [id](const ForeignTaskRow &row) {
+        return row.hosts.has_value() && *row.hosts == id;
+      });
+  return static_cast<std::size_t>(own) + static_cast<std::size_t>(hosted);
 }
 
 /// @brief Whether @p id is a safety task (TASKS) or a safety adapter on a foreign task.
 [[nodiscard]] constexpr bool is_safety(const Tables &t, Task id) noexcept {
-  for (const TaskRow &row : t.tasks) {
-    if (row.id == id) {
-      return row.safety;
-    }
+  const auto own = std::find_if(t.tasks.begin(), t.tasks.end(),
+                                [id](const TaskRow &row) { return row.id == id; });
+  if (own != t.tasks.end()) {
+    return own->safety;
   }
-  for (const ForeignTaskRow &row : t.foreign) {
-    if (row.hosts.has_value() && *row.hosts == id) {
-      return row.safety;
-    }
-  }
-  return false;
+  const auto hosted =
+      std::find_if(t.foreign.begin(), t.foreign.end(), [id](const ForeignTaskRow &row) {
+        return row.hosts.has_value() && *row.hosts == id;
+      });
+  return hosted != t.foreign.end() && hosted->safety;
 }
 
 /// @brief How many TASKS and FOREIGN_TASKS rows are named @p name.
 [[nodiscard]] constexpr std::size_t name_rows(const Tables &t, std::string_view name) noexcept {
-  std::size_t n = 0;
-  for (const TaskRow &row : t.tasks) {
-    n += row.name == name ? 1U : 0U;
-  }
-  for (const ForeignTaskRow &row : t.foreign) {
-    n += row.name == name ? 1U : 0U;
-  }
-  return n;
+  const auto same_name = [name](const auto &row) { return row.name == name; };
+  return static_cast<std::size_t>(std::count_if(t.tasks.begin(), t.tasks.end(), same_name)) +
+         static_cast<std::size_t>(std::count_if(t.foreign.begin(), t.foreign.end(), same_name));
 }
 
 [[nodiscard]] constexpr bool name_length_ok(std::string_view name) noexcept {
@@ -242,11 +236,10 @@ namespace detail {
     if (task_rows(t, row.task) == 0U) {
       return {Rule::COMPONENT_UNKNOWN_TASK, i};
     }
-    std::size_t names = 0;
-    for (const ComponentRow &other : t.components) {
-      names += other.name == row.name ? 1U : 0U;
-    }
-    if (names != 1U) {
+    const auto names =
+        std::count_if(t.components.begin(), t.components.end(),
+                      [&row](const ComponentRow &other) { return other.name == row.name; });
+    if (names != 1) {
       return {Rule::COMPONENT_DUPLICATE_NAME, i};
     }
   }
