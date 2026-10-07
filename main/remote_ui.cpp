@@ -200,6 +200,21 @@ int arg(const std::vector<std::string> &words, size_t index, int fallback = 0) {
   return std::atoi(words[index].c_str());
 }
 
+// DRIVETIME [RESET] (drive_timing.hpp, CONFIG_HMI_DEBUG_DRIVE_TIMING): the drive code's timing
+// on the LVGL task as one JSON line. RESET answers the same, then starts the counts again from
+// the LVGL task's next sample. The read takes no lock: the counters are atomics under a seqlock.
+bool send_drivetime(int sock, const std::vector<std::string> &words) {
+  if constexpr (!kDriveTiming) {
+    return send_line(sock, "ERR drive timing is not in this image (CONFIG_HMI_DEBUG_DRIVE_TIMING)");
+  } else {
+    std::string out = "OK " + DriveTiming::json();
+    if (words.size() > 1 && words[1] == "RESET") {
+      DriveTiming::request_reset();
+    }
+    return send_line(sock, out);
+  }
+}
+
 bool handle(int sock, const std::string &line) {
   const std::vector<std::string> words = split(line);
   if (words.empty()) {
@@ -209,6 +224,9 @@ bool handle(int sock, const std::string &line) {
 
   if (verb == "PING") {
     return send_line(sock, "OK");
+  }
+  if (verb == "DRIVETIME") {
+    return send_drivetime(sock, words);
   }
   if (verb == "SHOT") {
     const int step = arg(words, 1, 1) == 2 ? 2 : 1;
