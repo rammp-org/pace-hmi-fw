@@ -7,6 +7,7 @@
 // through every rule on mutated copies of the real tables, and exercise the Topology's storage,
 // handles and task settings on fw_core's host port.
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -57,12 +58,9 @@ struct Copy {
   if (find_task(id) != nullptr) {
     return true;
   }
-  for (const ForeignTaskRow &row : FOREIGN_TASKS) {
-    if (row.hosts.has_value() && *row.hosts == id) {
-      return true;
-    }
-  }
-  return false;
+  return std::any_of(FOREIGN_TASKS.begin(), FOREIGN_TASKS.end(), [id](const ForeignTaskRow &row) {
+    return row.hosts.has_value() && *row.hosts == id;
+  });
 }
 
 [[nodiscard]] bool safety(Task id) {
@@ -70,12 +68,10 @@ struct Copy {
   if (row != nullptr) {
     return row->safety;
   }
-  for (const ForeignTaskRow &r : FOREIGN_TASKS) {
-    if (r.hosts.has_value() && *r.hosts == id) {
-      return r.safety;
-    }
-  }
-  return false;
+  const auto *foreign =
+      std::find_if(FOREIGN_TASKS.begin(), FOREIGN_TASKS.end(),
+                   [id](const ForeignTaskRow &r) { return r.hosts.has_value() && *r.hosts == id; });
+  return foreign != FOREIGN_TASKS.end() && foreign->safety;
 }
 
 /// An island or adapter for the handle tests: the token comes from its own member function.
@@ -100,10 +96,12 @@ TEST_CASE("TOP-002 every Task id has exactly one row and every TASKS row has a r
           "[topology]") {
   for (std::size_t i = 0; i < static_cast<std::size_t>(Task::COUNT_); ++i) {
     const auto id = static_cast<Task>(i);
-    std::size_t rows = find_task(id) != nullptr ? 1U : 0U;
-    for (const ForeignTaskRow &row : FOREIGN_TASKS) {
-      rows += (row.hosts.has_value() && *row.hosts == id) ? 1U : 0U;
-    }
+    const auto foreign_rows =
+        std::count_if(FOREIGN_TASKS.begin(), FOREIGN_TASKS.end(), [id](const ForeignTaskRow &row) {
+          return row.hosts.has_value() && *row.hosts == id;
+        });
+    const std::size_t rows =
+        (find_task(id) != nullptr ? 1U : 0U) + static_cast<std::size_t>(foreign_rows);
     TEST_ASSERT_EQUAL_UINT(1U, rows);
   }
   for (const TaskRow &row : TASKS) {
@@ -116,13 +114,11 @@ TEST_CASE("TOP-002 every Task id has exactly one row and every TASKS row has a r
 TEST_CASE("TOP-003 task names are unique and fit FreeRTOS's 15 characters", "[topology]") {
   for (const TaskRow &row : TASKS) {
     TEST_ASSERT_TRUE(!row.name.empty() && row.name.size() <= MAX_TASK_NAME);
-    std::size_t same = 0;
-    for (const TaskRow &other : TASKS) {
-      same += other.name == row.name ? 1U : 0U;
-    }
-    for (const ForeignTaskRow &other : FOREIGN_TASKS) {
-      same += other.name == row.name ? 1U : 0U;
-    }
+    const auto same_name = [&row](const auto &other) { return other.name == row.name; };
+    const std::size_t same =
+        static_cast<std::size_t>(std::count_if(TASKS.begin(), TASKS.end(), same_name)) +
+        static_cast<std::size_t>(
+            std::count_if(FOREIGN_TASKS.begin(), FOREIGN_TASKS.end(), same_name));
     TEST_ASSERT_EQUAL_UINT(1U, same);
   }
   for (const ForeignTaskRow &row : FOREIGN_TASKS) {
@@ -172,11 +168,10 @@ TEST_CASE("TOP-006 mailboxes and atomics overwrite; queues have depth 1..64 and 
 TEST_CASE("TOP-007 every component runs on a declared task and has one row", "[topology]") {
   for (const ComponentRow &row : COMPONENTS) {
     TEST_ASSERT_TRUE(declared(row.task));
-    std::size_t same = 0;
-    for (const ComponentRow &other : COMPONENTS) {
-      same += other.name == row.name ? 1U : 0U;
-    }
-    TEST_ASSERT_EQUAL_UINT(1U, same);
+    const auto same =
+        std::count_if(COMPONENTS.begin(), COMPONENTS.end(),
+                      [&row](const ComponentRow &other) { return other.name == row.name; });
+    TEST_ASSERT_EQUAL_UINT(1U, static_cast<std::size_t>(same));
   }
 }
 
