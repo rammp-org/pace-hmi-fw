@@ -69,8 +69,6 @@
 
 using namespace std::chrono_literals;
 
-static std::vector<uint8_t> audio_bytes;
-
 static std::recursive_mutex lvgl_mutex;
 
 #include "frag_fps.inc" // split_main.py
@@ -153,11 +151,12 @@ extern "C" void app_main(void) {
   }
   logger.info("Found devices at addresses: {::#02x}", found_addresses);
 
-  // DRV2605 haptic motor driver (the HAPTIC TEST slot, the unlock and hold
-  // clicks, a refusal). Lives as long as app_main, which never returns once the
-  // UI runs; haptic_play reaches it through `haptics`.
-  hmi::feedback::Haptics haptic_motor({.i2c = i2c, .boot_log = logger});
-  haptics = &haptic_motor;
+  // The haptic and sound cues: the DRV2605 comes up here (the HAPTIC TEST slot,
+  // the unlock and hold clicks, a refusal); the click's samples load after the
+  // LVGL task starts. Lives as long as app_main, which never returns once the UI
+  // runs; the unit reaches it through `feedback`.
+  hmi::feedback::Feedback cues(feedback_config(logger, i2c));
+  feedback = &cues;
 
   // DA7280 bring-up test (raw register read) and driver functional test (Da7280
   // driver class, DRO mode): bench only, CONFIG_HMI_BENCH_DA7280_TEST.
@@ -1053,8 +1052,8 @@ extern "C" void app_main(void) {
             return espp::M5StackTab5::get().internal_i2c().probe_device(address);
           },
       .boot_i2c_devices = found_addresses,
-      .drv2605_status = [] { return haptics->status(); },
-      .drv2605_play = [](std::string &detail) { return haptics->play_click(detail); },
+      .drv2605_status = [] { return feedback->haptics().status(); },
+      .drv2605_play = [](std::string &detail) { return feedback->haptics().play_click(detail); },
       .da7280_found = std::find(found_addresses.begin(), found_addresses.end(), kDa7280Address) !=
                       found_addresses.end(),
       .direct_render = direct_render,
