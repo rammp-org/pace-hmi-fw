@@ -1199,7 +1199,7 @@ extern "C" void app_main(void) {
            if (kFpsStress) {
              lv_obj_invalidate(lv_screen_active());
            }
-           lv_task_handler();
+           drive_timed(TimedPath::LVGL_CYCLE, lv_task_handler); // timed: drive_timing.hpp
          }
          if (kFpsInstrument) {
            static int64_t last_report_us = 0;

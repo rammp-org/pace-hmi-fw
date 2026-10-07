@@ -25,7 +25,8 @@ static void drive_profile_click_cb(lv_event_t *e) {
   // may refuse, which is the one thing these three must not do.
   drive_profile_published.store(*mode);
   // PUBLISH_DRIVE: the drive request as it stands, with the new profile (rows 29-34).
-  (void)drive_session_input(hmi::drive_session::Input::PROFILE_CLICK);
+  (void)drive_timed(TimedPath::PROFILE_CLICK, drive_session_input,
+                    hmi::drive_session::Input::PROFILE_CLICK);
 }
 
 // Highlights the button whose mode the MIB reports: CHECKED, which the design

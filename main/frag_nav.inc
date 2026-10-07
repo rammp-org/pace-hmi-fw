@@ -491,7 +491,8 @@ static void nav_key_cb(lv_event_t *e) {
   // the MIB keeps driving, the Drive screen stays and its banner says so. While
   // a stop is already being waited for, the key does nothing (rows 25-28).
   if (lv_screen_active() == ui_DriveScreen && lv_subject_get_int(&locked_subject) == 0) {
-    (void)drive_session_input(hmi::drive_session::Input::MENU_KEY_DRIVE);
+    (void)drive_timed(TimedPath::MENU_KEY, drive_session_input,
+                      hmi::drive_session::Input::MENU_KEY_DRIVE);
     return;
   }
   nav_open_menu(overlay);

@@ -166,7 +166,7 @@ static HoldGesture drive_exit_gesture{
     // Ask only. The session's relock (TICK_FOLLOW) closes the screen once the MIB actually
     // stops driving, so a MIB that does not stop cannot leave someone looking at the
     // main screen while the chair is still moving.
-    .completed = [] { drive_adapter.exit_hold_done(); },
+    .completed = [] { drive_timed(TimedPath::EXIT_HOLD, [] { drive_adapter.exit_hold_done(); }); },
     // The button doubles as select, so a tap would visibly tick the bar and
     // snap back without this.
     .grace_ms = kBarGraceMs,

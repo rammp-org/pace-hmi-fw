@@ -28,6 +28,7 @@
 #include <cstdint>
 #include <format>
 #include <string>
+#include <utility>
 
 #include "drive_session.hpp"
 #include "logger.hpp"
@@ -362,3 +363,9 @@ struct HoldGesture {
 };
 inline bool joy_button_armed = true;
 inline bool joy_button_held() { return false; }
+
+// main/drive_timing.hpp's call wrapper, as the firmware has it with CONFIG_HMI_DEBUG_DRIVE_TIMING
+// off (the default): the plain call. drive_exit_gesture's action is wrapped in it; the goldens
+// record that action's calls, never the bench timing.
+enum class TimedPath : std::uint8_t { EXIT_HOLD };
+template <class F> void drive_timed(TimedPath, F &&fn) { std::forward<F>(fn)(); }

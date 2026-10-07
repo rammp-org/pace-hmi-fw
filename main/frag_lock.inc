@@ -17,7 +17,8 @@ static void drive_unlock_hold_done();
 // The Drive screen, dissolving in one second after the unlock landed: the
 // session's UNLOCK_TIMER (UNLOCK_TIMER_DONE forgets the timer, GO_DRIVE_SCREEN).
 static void unlock_advance_cb(lv_timer_t *) {
-  (void)drive_session_input(hmi::drive_session::Input::UNLOCK_TIMER);
+  (void)drive_timed(TimedPath::UNLOCK_TIMER, drive_session_input,
+                    hmi::drive_session::Input::UNLOCK_TIMER);
   // repeat_count 1: LVGL deletes the timer after this. UNLOCK_TIMER_DONE has
   // already forgotten it; this only keeps the pointer from dangling if a session
   // ever let it fire without a row (it cannot: the timer is armed only in the
@@ -108,7 +109,7 @@ static HoldGesture unlock_gesture{
           return lv_subject_get_int(&locked_subject) != 0 && !lock_waiting &&
                  lv_screen_active() == ui_LockedScreen && nav_menu_open == nullptr && mcb_ready();
         },
-    .completed = [] { drive_unlock_hold_done(); },
+    .completed = [] { drive_timed(TimedPath::UNLOCK_HOLD, drive_unlock_hold_done); },
     // The button doubles as select (a tap opens the menu from the key), so a
     // tap must not tick the ring.
     .grace_ms = kBarGraceMs,

@@ -75,7 +75,7 @@ static void hold_poll_cb(lv_timer_t *) {
     }
     return;
   }
-  entry_refusal_poll();
+  drive_timed(TimedPath::ENTRY_POLL, entry_refusal_poll); // timed: drive_timing.hpp
   for (HoldGesture *g : kHoldGestures) {
     hold_poll(g);
   }
