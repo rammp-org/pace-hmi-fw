@@ -57,12 +57,9 @@ behaviour.
   `StepperSpec`), `hmi_models` (`grid.hpp`, `pin.hpp`), `rammp_rtps_messages`
   (`MIB::MibSystemState`, the seat axis table). Private: `ui` (the export: widgets, component
   children, theme colours). `main` requires the component (`PRIV_REQUIRES hmi_ui`).
-- Build: `fw_component_options` really applies here (C++23 and the warning set as errors).
-  Today the top-level CMakeLists includes `cmake/fw_standards.cmake` only after `project()`,
-  so the function does not exist yet when component CMakeLists run, and the
-  `if(COMMAND ...)` guard the other components use skips it silently. CMakeLists.txt
-  includes the file itself while the function is missing; once the repo-wide fix
-  (`dev_ai_refactor_fwopts`) defines it first, that block does nothing and can be dropped.
+- Build: `fw_component_options(${COMPONENT_LIB})` (C++23 and the fw warning set as errors),
+  called unguarded like every first-party component; the top-level CMakeLists defines it
+  before the components are evaluated and fails the configure if a component leaves it out.
 
 ## Tests
 

@@ -14,12 +14,4 @@ idf_component_register(SRCS "src/bench_pin_view.cpp"
                                 rammp_rtps_messages
                        PRIV_REQUIRES ui)
 
-# CS-LNG-02. Today the top-level CMakeLists includes fw_standards.cmake only after project(),
-# while this file runs inside project(), so fw_component_options does not exist yet here and
-# the `if(COMMAND ...)` guard the other components use skips it silently. Until the repo-wide
-# fix (branch dev_ai_refactor_fwopts) defines it before the components are processed, include
-# it here. Once it is defined this block does nothing and the include can be dropped.
-if(NOT COMMAND fw_component_options)
-  include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/fw_standards.cmake)
-endif()
 fw_component_options(${COMPONENT_LIB})

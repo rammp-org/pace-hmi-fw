@@ -24,8 +24,13 @@ yet measured or decided, and "none" means checked and absent.
   `==1.3.2` in `main/idf_component.yml` · LVGL 9.5.0 · clang-format 14.0.6 (not installed locally;
   pre-commit fetches it) · esp-clang 20.1.1 (from ESP-IDF 6.0) · cppcheck from
   `esp-cpp/StaticAnalysis@master` in CI (version unknown; not installed locally).
-- C++ standard: IDF 6.0 builds `-std=gnu++26`. `CMAKE_CXX_STANDARD 20` in `CMakeLists.txt` has no
-  effect (CS-LNG-02).
+- C++ standard: IDF 6.0 builds `-std=gnu++26`; that is what `main` and every third-party component
+  get. First-party components get `-std=gnu++23` and the CS-LNG-02 warning set as errors
+  from `fw_component_options()` (`cmake/fw_standards.cmake`), placed after IDF's flags so they
+  win. That has applied only since `dev_ai_refactor_fwopts`. Before it, the function was
+  defined after `project()`, where IDF has already run every component's `CMakeLists.txt`, so
+  the call was skipped and every first-party component built with IDF's defaults.
+  `CMAKE_CXX_STANDARD` has no effect on IDF component targets.
 - Build variants (CS-LAY-09):
 
   | Variant | How | Differences |
