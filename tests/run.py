@@ -4,7 +4,9 @@
     run.py list
     run.py check                                   manifest check (TS-DEF-02), an L0 check
     run.py run <ID>... | --all [--seed N] [--shard i/N] [-j N] [--coverage] [--artifact A]
-    run.py report <run-id> | latest
+    run.py report [<run-id> | latest] [--out DIR]   requirement matrix (TS-COV-01), with a
+                                                   run's verdicts when a run is named
+    run.py selftest [--matrix]                     the runner's own checks
 
 Tests are declared in tests/manifest.d/*.yaml (TS-DEF-01). An L1 entry's `path` is a host
 test app with a Makefile (AGENT_BRIEF "host L1 app contract"): `make test` builds and runs it,
@@ -18,9 +20,11 @@ Verdicts (TS-PRI-02): PASS / FAIL from the app; INVALID only when the preflight 
 any test runs; SKIP only when the manifest declares it. A failure is never retried
 (TS-DET-04); `repeat` and `pass_threshold` are declared, not retries.
 
-Each run writes results/<run-id>/: run.json, summary.json, junit.xml, report.txt (by
-`report`) and one folder per test with its log. Exit code: 0 all PASS or SKIP, 1 a FAIL,
-2 usage or manifest error, 3 INVALID.
+Each run writes results/<run-id>/: run.json, summary.json, junit.xml, report.txt and
+requirements.{md,json} (by `report`) and one folder per test with its log. `report` alone
+writes the matrix to results/requirements/ (tests/reqmatrix.py has the rules: the gaps it
+lists are informational; `check` fails retired or reused requirement IDs). Exit code: 0 all
+PASS or SKIP, 1 a FAIL, 2 usage or manifest error, 3 INVALID.
 """
 
 from __future__ import annotations
@@ -45,6 +49,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
+import reqmatrix
 
 REPO = Path(__file__).resolve().parents[1]
 MANIFEST_DIR = REPO / "tests" / "manifest.d"
@@ -208,10 +214,14 @@ def case_names(app_dir: Path) -> list[tuple[str, Path]]:
     return names
 
 
-def requirement_ids() -> str:
-    """The text of every component README, where requirements live (TS-COV-01)."""
-    return "\n".join(p.read_text(encoding="utf-8", errors="replace")
-                     for p in sorted((REPO / "components").glob("*/README.md")))
+def matrix_refs(entries: list[Entry]) -> list[reqmatrix.ManifestRef]:
+    """The manifest as the requirement matrix sees it (entries with a usable id)."""
+    path = lambda e: e.data["path"] if isinstance(e.data.get("path"), str) else ""  # noqa: E731
+    return [reqmatrix.ManifestRef(e.id, str(e.data.get("level")), path(e),
+                                  list(e.data.get("requirements") or []),
+                                  bool(e.data.get("safety")), e.source.name)
+            for e in entries if isinstance(e.data.get("id"), str)
+            and isinstance(e.data.get("requirements") or [], list)]
 
 
 def check_entries(entries: list[Entry]) -> list[str]:
@@ -220,7 +230,6 @@ def check_entries(entries: list[Entry]) -> list[str]:
     # Case IDs are unique across ALL entries: select() resolves a case ID to one entry, and a
     # duplicate would silently run the later one (final review finding 16).
     case_owner: dict[str, str] = {}
-    readmes: str | None = None
     for e in entries:
         where = f"{e.source.name}:{e.data.get('id', '?')}"
         for key, typ in REQUIRED.items():
@@ -279,10 +288,9 @@ def check_entries(entries: list[Entry]) -> list[str]:
                     else:
                         case_ids.add(m.group("id"))
                         case_owner[m.group("id")] = e.id
-        for req in d.get("requirements", []) or []:
-            readmes = requirement_ids() if readmes is None else readmes
-            if not isinstance(req, str) or not re.search(rf"\b{re.escape(req)}\b", readmes):
-                errors.append(f"{where}: requirement {req!r} is not in any component README")
+    # Requirement IDs (TS-DEF-02, TS-COV-01): a cited ID is declared in a README requirement
+    # table and not retired; no ID is declared twice or deleted from its series.
+    errors += reqmatrix.check(REPO, matrix_refs(entries))
     return errors
 
 
@@ -593,7 +601,32 @@ def cmd_check(_: argparse.Namespace) -> int:
     return 1 if errors else 0
 
 
+def write_matrix(entries: list[Entry], out_dir: Path, header: list[str],
+                 verdicts: dict[str, str] | None = None, run_id: str = "") -> dict[str, Any]:
+    """Builds the requirement matrix from the tree as it is now and writes requirements.md and
+    requirements.json to `out_dir` (TS-COV-01). Gaps are listed, never failed here."""
+    commit, branch = head_commit()
+    m = reqmatrix.build(REPO, matrix_refs(entries), verdicts, run_id)
+    m.update(commit=commit, branch=branch,
+             generated=dt.datetime.now().astimezone().isoformat(timespec="seconds"))
+    _md_path, json_path, md = reqmatrix.write(
+        m, [f"Tree: commit {commit} ({branch}). Generated {m['generated']}.", *header], out_dir)
+    print(md, end="")
+    print(f"report: requirement matrix -> {out_dir / 'requirements.md'} and {json_path.name}")
+    return m
+
+
 def cmd_report(args: argparse.Namespace) -> int:
+    """`report`: the requirement matrix of the tree. `report <run-id>`: the run's report, plus
+    the matrix with that run's case verdicts."""
+    entries, errors = load_manifest()
+    if errors:
+        print("\n".join(errors) + "\nrun.py: the manifest has errors; run `run.py check`")
+        return 2
+    if args.run_id is None:
+        write_matrix(entries, Path(args.out) if args.out else RESULTS_DIR / "requirements",
+                     ["No run named: every case shows as not run."])
+        return 0
     if args.run_id == "latest":
         runs = sorted(p for p in RESULTS_DIR.glob("*") if (p / "summary.json").is_file())
         if not runs:
@@ -622,14 +655,23 @@ def cmd_report(args: argparse.Namespace) -> int:
         lines += ["", "Coverage (TS-COV-02: logic >= 80% lines, >= 70% branches):"]
         lines += [f"  {k}: COVERAGE {c['file']} lines {c['lines_pct']} branches {c['branches_pct']}"
                   for k, c in cov]
-    entries, _ = load_manifest()
-    matrix: dict[str, list[str]] = {}
     verdicts = {t["entry_id"]: t["verdict"] for t in summary["tests"]}
-    for e in entries:
-        for r in e.data.get("requirements", []) or []:
-            matrix.setdefault(r, []).append(f"{e.id}={verdicts.get(e.id, 'not run')}")
-    lines += ["", "Requirement -> tests (TS-COV-01):"]
-    lines += [f"  {r}: {', '.join(ts)}" for r, ts in sorted(matrix.items())] or ["  (no requirement is cited yet)"]
+    for t in summary["tests"]:
+        for c in t["cases"]:
+            m = CASE_NAME_RE.match(c["name"])
+            if m:
+                verdicts[m.group("id")] = c["result"]
+    commit, _ = head_commit()
+    note = ([] if commit == info["commit"] else
+            [f"The run is of commit {info['commit']}; the matrix is of the tree now."])
+    matrix = write_matrix(entries, Path(args.out) if args.out else run_dir,
+                          [f"Run {info['run_id']}: verdict {summary['verdict']}.", *note],
+                          verdicts, info["run_id"])
+    n = matrix["counts"]
+    lines += ["", f"Requirements (TS-COV-01): {n['active']} active, {n['covered']} covered by a "
+              f"case, {n['app_level_only']} by a manifest entry only, {n['uncovered']} with no "
+              f"test; {n['cases_without_requirement']} of {n['cases']} cases cite none. "
+              f"Matrix: requirements.md, requirements.json."]
     text = "\n".join(lines) + "\n"
     (run_dir / "report.txt").write_text(text, encoding="utf-8")
     print(text, end="")
@@ -648,8 +690,13 @@ SELFTEST_EXPECT = [
 ]
 
 
-def cmd_selftest(_: argparse.Namespace) -> int:
-    """Checks the runner's verdict paths against a fixture app (not a manifest test)."""
+def cmd_selftest(args: argparse.Namespace) -> int:
+    """The requirement matrix's rules on inline samples (stdlib only, no host needed); then,
+    unless --matrix, the runner's verdict paths against a fixture app (not a manifest test)."""
+    if reqmatrix.selftest() != 0:
+        return 1
+    if args.matrix:
+        return 0
     ok, checks, _tools = preflight()
     if not ok:
         print("INVALID: preflight failed: " + ", ".join(c["check"] for c in checks if not c["ok"]))
@@ -686,9 +733,15 @@ def main() -> int:
     r.add_argument("--coverage", action="store_true", help="`make coverage` instead of `make test`")
     r.add_argument("--artifact", default="test", choices=["test", "release"])
     r.add_argument("--keep-build", action="store_true", help="keep $HOME/hmi-build/run/<run-id>")
-    p = sub.add_parser("report", help="print and save the report of a run")
-    p.add_argument("run_id")
-    sub.add_parser("selftest", help="check the runner's verdict paths on a fixture app")
+    p = sub.add_parser("report", help="the requirement matrix (TS-COV-01); with a run ID, "
+                                      "also that run's report and verdicts")
+    p.add_argument("run_id", nargs="?", default=None, help="a run in results/, or latest")
+    p.add_argument("--out", default=None, help="where requirements.{md,json} go (default: "
+                                               "the run's folder, or results/requirements)")
+    st = sub.add_parser("selftest", help="check the matrix rules, then the runner's verdict "
+                                         "paths on a fixture app")
+    st.add_argument("--matrix", action="store_true",
+                    help="only the matrix rules (no WSL or g++ needed; CI L0)")
     args = ap.parse_args()
     return {"list": cmd_list, "check": cmd_check, "run": cmd_run, "report": cmd_report,
             "selftest": cmd_selftest}[args.cmd](args)

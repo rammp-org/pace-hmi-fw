@@ -114,8 +114,10 @@ What this means in practice:
   (`tools/split_main.py:12-13`).
 - **The binary did not change.** `tools/split_guard.py` compared the firmware before and
   after the split; only an assert's `__LINE__` moved.
-- **It is temporary.** Each fragment is meant to become a component as the refactor goes
-  on ([plans/app-main-shrink.md](plans/app-main-shrink.md)).
+- **It is temporary.** The fragments are being dissolved into components grouped by concern,
+  not one component each: the UI views into `hmi_ui`, haptics and sound into `feedback`, the stick
+  parts into `stick`, the drive logic into `drive_session`/`drive_adapter`
+  ([plans/app-main-shrink.md](plans/app-main-shrink.md), revision V15).
 
 ### 2.3 The other files in `main/`
 

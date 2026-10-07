@@ -2,7 +2,7 @@
 
 Status: draft for the owner. Measured on `dev_refactor` 33f8d53 and the draft `dev_ai_refactor_drive`
 6c431e4 (`C:\w\drive`). Targets (owner): `app_main` ≤300 lines (CS-LAY-01), `main.cpp` ≤1000
-(CS-FIL-01), fragments become components; first, the drive adapter leaves the `main.cpp` unit
+(CS-FIL-01), the fragments dissolve into components grouped by concern (V15); first, the drive adapter leaves the `main.cpp` unit
 so `tools/l0/ratchet.py` passes. Today on the drive branch: `FAIL lines main/main.cpp: 4135 > 3984`.
 
 Map script: `%TEMP%\claude\appmain-deps\deps.py <repo> [--detail --pairs --kinds --json f]`.
@@ -213,6 +213,7 @@ adapters 0.5); view-init moves inside S4-S6. Total ≈ 14 agent-days, plus one b
 | V12 | **Sequencing:** only S2 (DRV2605 part) and S3 run beside the hazard work. Merge topology (with the `fw::writer` fix) before lifting tasks; lift after C4 (task configs come from `TASKS`, CS-CON-02). S4 → S5 one PR per fragment (lane D) → S6 one PR per fragment, nav last. Only the orchestrator runs `ratchet.py update`, after merges; new hazard UI goes into new view files | feasibility 4, 5, 6, 13 |
 | V13 | **Effort:** ~22–26 agent-days plus reviews (not 14) | feasibility 14 |
 | V14 | **Open for the owner:** the ratchet package (V2, V3); the da7280 functional test that runs at every boot (keep, bench-only Kconfig, or delete); the per-second `[FPS]` print (Kconfig debug, or delete) | feasibility 8 |
+| V15 | **Components by concern, not one per fragment** (owner, 2026-10-06). A fragment's code goes to the component that owns its concern (CS-LAY-02: its job in one sentence), new or existing; tightly coupled UI fragments stay together in the UI island as one file per view (CS-UI-02/04) instead of exporting their shared state across components. Target map below; it overrides §2's per-fragment wording and S0-S7's "leaves" naming | owner instruction; avoids exporting ~112 cross-unit mutable variables between per-fragment components (§1) |
 
 ## Owner decisions (2026-10-06)
 
@@ -223,3 +224,17 @@ adapters 0.5); view-init moves inside S4-S6. Total ≈ 14 agent-days, plus one b
 | [FPS] | Behind a debug Kconfig, default off, logged through espp Logger at debug level |
 | Theme | Board 2 stays on Night (theme 0); the bench re-baselines B2's settings line and B4's static screens, with old and new shown side by side |
 | G10 dump (orchestrator, within V11) | The task dump comes through the bench remote UI's `TASKS` verb, not inside the RTPS self-test JSON: that JSON cannot carry a variable-length list without an interface change, and `selftest.cpp` cannot grow under the ratchet. `task_dump.py fetch --into` merges it into the self-test JSON file on the PC |
+
+## Target components (V15)
+
+| Component | Owns (one sentence) | Receives |
+| --- | --- | --- |
+| `main` | Board bring-up and wiring: `app_main` builds the components from their `Config`s and starts them (CS-LAY-01) | what is left after the moves |
+| `hmi_ui` (new) | Everything the UI island draws, one view class or file per screen or concern (CS-UI-02/04) | chrome (TopBar clock and link labels, RTPS label, status band, drive band, brightness view), the lock, hold, refusal and drive views, seat, bench PIN, settings, actions, diagnostics, nav, on-demand screens, overdraw, display flip and FPS; later the `main/*_ui.cpp` screens and `log_view` |
+| `feedback` (new) | The user's haptic and sound cues | `frag_haptics`, `frag_da7280` (+ `da7280.hpp`, bench-only test), `frag_audio`; a single audio writer (H16) becomes easy here |
+| `stick` (draft) | Reading the joystick: axes, calibration applied, button | the ADC pipeline (draft), `frag_stick_config`, the GPIO48 edge adapter (the UI half of `frag_stick_button` goes to `hmi_ui`) |
+| `drive_session`, `drive_adapter` (drive branch) | The drive decision logic and its port | the lv-free core of `frag_drive` (S1, done on the branch) |
+| `post`, `hmi_format`, `hmi_models`, `ota_parse`, `fw_core` (exist) | as their READMEs say | more pure models and formatting as views move (CS-UI-03) |
+| stays in `main` for now | | `clock_note_mcb_time` (time sync from the MCB, RTPS receive task) and the board backlight call, until the housekeeping island exists (task lifts, §3) |
+| dissolved | | `frag_state`: each subject or atomic goes to the component that owns it (S7) |
+
