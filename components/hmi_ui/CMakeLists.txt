@@ -5,6 +5,7 @@ idf_component_register(SRCS "src/brightness_view.cpp"
                             "src/rtps_label_view.cpp"
                             "src/status_band_view.cpp"
                             "src/topbar_view.cpp"
+                            "src/ui_poll.cpp"
                        INCLUDE_DIRS "include"
                        REQUIRES lvgl
                        PRIV_REQUIRES hmi_format
