@@ -67,8 +67,8 @@ needs a serial reset; it belongs with C3's boot steps).
 - Every esptool call ends with `--after hard-reset`, so B0's table read and B1's backup and
   flash reboot the board. When B2 does not boot it before the next app step (B3 onwards), the
   runner waits first: a serial capture without a reset until `Got IP` (90 s, saved as
-  `boot-after-b0.log` / `-b1.log`; a different IP there replaces `--ip`), then the remote UI's
-  PING (30 s). Back = either; otherwise the later steps are NOT_RUN with the reason. Each wait
+  `boot-after-b0.log` / `-b1.log`; that IP replaces `--ip`, or supplies it, so `--ip` is
+  optional when B0 or B1 runs first), then the remote UI's PING (30 s). Back = either; otherwise the later steps are NOT_RUN with the reason. Each wait
   is in `summary.json` → `board_back`. Seen 2026-10-06: `--steps B0,B5,...` started B5's sim
   while the board was booting ("Could not find the board").
 - Remote UI from the steps (B4b, B5, B5a..e) goes through `ui_client.py`: a 5 s timeout per

@@ -189,6 +189,21 @@ def t_new_ip_from_boot_log() -> None:
            ("192.168.137.77", True))
 
 
+def t_ip_from_the_wait() -> None:
+    summary, log = bench(FakeBoard(), "B0,B5,B5a", ip=None, sim_mode=True)
+    expect("verdicts", verdicts(summary), {"B0": "PASS", "B5": "PASS", "B5a": "PASS"})
+    expect("the IP is the boot log's", (summary["board_ip"], summary["board_back"][0]["got_ip"]),
+           (IP, IP))
+    expect("one wait, then the steps", log, ["reset:B0", "capture:reset=False", "ping:True",
+                                             "B5:up", "B5a:up"])
+
+
+def t_no_ip_anywhere() -> None:
+    summary, _ = bench(FakeBoard(), "B5", ip=None)
+    expect("no reset, no --ip: NOT_RUN", verdicts(summary), {"B5": "NOT_RUN"})
+    expect("reason", "no board IP" in summary["steps"]["B5"]["reason"], True)
+
+
 def t_no_reset_no_wait() -> None:
     summary, log = bench(FakeBoard(), "B5,B5c", sim_mode=True)
     expect("verdicts", verdicts(summary), {"B5": "PASS", "B5c": "PASS"})
@@ -220,6 +235,9 @@ CASES = [
     ("BENCH-005 a different Got IP after the reset replaces --ip", t_new_ip_from_boot_log),
     ("BENCH-006 no reset, no wait: --steps B5,B5c --ip runs the steps alone", t_no_reset_no_wait),
     ("BENCH-007 the step plan: defaults, the opt-in rule, names in any case", t_plan),
+    ("BENCH-008 B0 then app steps with no --ip and no B2: the wait's Got IP gives the IP",
+     t_ip_from_the_wait),
+    ("BENCH-009 no reset and no --ip: the app steps are NOT_RUN, no IP", t_no_ip_anywhere),
 ]
 
 

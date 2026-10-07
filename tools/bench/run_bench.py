@@ -34,8 +34,9 @@ Board resets between steps: B0's partition-table read and B1's storage backup an
     flash run esptool with `--after hard-reset`, so the board reboots. When B2 does
     not run before the next step that needs the app (B3 onwards), the runner waits
     for it first: the boot is captured from the serial port without a reset until
-    `Got IP` (BOOT_CAPTURE_S, saved as boot-after-<step>.log; a different IP there
-    replaces --ip, as B2's log would), then the remote UI's PING is polled
+    `Got IP` (BOOT_CAPTURE_S, saved as boot-after-<step>.log; that IP replaces or,
+    without --ip, supplies the board's address, as B2's log would; so --ip is
+    optional when B0 or B1 runs first), then the remote UI's PING is polled
     (PING_WITHIN_S). Back = `Got IP` seen or PING answered; otherwise every later
     step is NOT_RUN with the reason. Each wait is in summary.json's `board_back`.
 B5a..B5e (only with --sim-mode-steps; opt-in until they have run on the board
@@ -359,15 +360,18 @@ def run_steps(run: Run, sequence: list[str], steps: list[str]) -> None:
             continue
         if step in ("B1", "B2") and run.port is None:
             run.port = board.find_port()
-        if step in APP_STEPS and not run.ip:
-            run.record(step, "NOT_RUN", reason="no board IP (B2 did not pass)")
-            continue
         try:
+            # The wait first: its boot capture is where the IP comes from when neither
+            # B2 nor --ip gave one (B0 or B1 reset the board).
             if step in APP_STEPS and run.reset_pending:
                 stop_reason = run.wait_board_back(step)
                 if stop_reason:
                     run.record(step, "NOT_RUN", reason=stop_reason)
                     continue
+            if step in APP_STEPS and not run.ip:
+                run.record(step, "NOT_RUN", reason="no board IP (no --ip, no Got IP from B2 "
+                                                   "or from a boot after B0/B1)")
+                continue
             verdict = order[step]()
         except Exception as e:  # a crash in the runner is not a verdict on the firmware
             run.record(step, "NOT_RUN", reason=f"runner error: {e}",
@@ -392,7 +396,9 @@ def main() -> int:
                    help="never save this build as last-good (drafts that must not stay on the board)")
     p.add_argument("--tree", type=pathlib.Path, default=common.REPO,
                    help="where scripts/ (selftest, sim, hmi_ui) are run from")
-    p.add_argument("--ip", default=None, help="board IP when B2 is not in --steps")
+    p.add_argument("--ip", default=None,
+                   help="board IP when B2 is not in --steps; optional when B0 or B1 runs: "
+                        "their reset's boot log gives it")
     p.add_argument("--sim-mode-steps", action="store_true",
                    help=f"also run {','.join(SIM_MODE_STEPS)} after B5 (scenario_hazards.py: "
                         "the sim's fault modes; not in the default list until run on the board)")
