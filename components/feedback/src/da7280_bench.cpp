@@ -3,6 +3,7 @@
 #include "feedback/da7280_bench.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <system_error>
 #include <thread>
@@ -210,7 +211,7 @@ static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c) {
   // disabled.)
   print_step_header("[DA7280 2/6] Magnitude sweep");
   std::this_thread::sleep_for(kDa7280StepPause);
-  for (uint8_t magnitude : {32, 64, 96, 127}) {
+  for (uint8_t magnitude : std::array<uint8_t, 4>{32, 64, 96, 127}) {
     run_test("Magnitude sweep", magnitude);
   }
 
@@ -234,7 +235,7 @@ static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c) {
   std::this_thread::sleep_for(kDa7280StepPause);
   da7280.set_acceleration_enabled(false, ec);
   std::this_thread::sleep_for(kDa7280PauseDuration);
-  for (uint8_t magnitude : {200, 255}) {
+  for (uint8_t magnitude : std::array<uint8_t, 2>{200, 255}) {
     run_test("Accel disabled", magnitude);
   }
   da7280.set_acceleration_enabled(true, ec); // restore default
