@@ -968,7 +968,7 @@ extern "C" void app_main(void) {
 
   // SkunkWorksScreen: what outlives the screen, which is built on demand
   // (actions_screen_ensure).
-  actions_group = lv_group_create();
+  actions_group = actions_view.init();
 
   // DiagnosticsScreen: what outlives the screen, which is built on demand
   // (diagnostics_screen_ensure). The menu row goes through diagnostics_open
