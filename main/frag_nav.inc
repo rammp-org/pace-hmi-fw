@@ -75,7 +75,7 @@ static constexpr lv_state_t kMirroredStates = static_cast<lv_state_t>(
 
 static void nav_mirror_to(lv_obj_t *obj, lv_state_t on) {
   for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
-    lv_obj_t *child = lv_obj_get_child(obj, i);
+    lv_obj_t *child = lv_obj_get_child(obj, static_cast<int32_t>(i));
     lv_obj_remove_state(child, static_cast<lv_state_t>(kMirroredStates & ~on));
     lv_obj_add_state(child, on);
     nav_mirror_to(child, on);
@@ -545,7 +545,7 @@ void hmi::ui::NavView::band_cb(lv_event_t *e) {
 // middle, which is the whole of it anyone aims at.
 static void nav_clear_clickable(lv_obj_t *obj) {
   for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
-    lv_obj_t *child = lv_obj_get_child(obj, i);
+    lv_obj_t *child = lv_obj_get_child(obj, static_cast<int32_t>(i));
     lv_obj_remove_flag(child, LV_OBJ_FLAG_CLICKABLE);
     nav_clear_clickable(child);
   }
