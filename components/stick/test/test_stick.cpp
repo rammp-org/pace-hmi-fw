@@ -483,3 +483,21 @@ TEST_CASE("STK-035 the command is a multiply: a NaN passes a closed gate as NaN"
   TEST_ASSERT_EQUAL_HEX32(bits(-0.0f), bits(c.y));
   TEST_ASSERT_EQUAL_HEX32(bits(0.0f), bits(c.twist));
 }
+
+TEST_CASE("STK-037 the HMI's pipeline config carries the dead zones main always passed",
+          "[stick][config]") {
+  const hmi::stick::KeyCodes keys{.up = stick_test::KEY_UP,
+                                  .down = stick_test::KEY_DOWN,
+                                  .right = stick_test::KEY_RIGHT,
+                                  .left = stick_test::KEY_LEFT};
+  const StickPipeline::Config got = hmi::stick::pipeline_config(CAL_BOARD2_MV, keys);
+  const StickPipeline::Config want = pipeline_config(stick_test::CAL_BOARD2);
+  TEST_ASSERT_EQUAL_HEX32(bits(want.center_deadzone_radius), bits(got.center_deadzone_radius));
+  TEST_ASSERT_EQUAL_HEX32(bits(want.range_deadzone), bits(got.range_deadzone));
+  TEST_ASSERT_EQUAL_HEX32(bits(want.twist_center_deadband_mv), bits(got.twist_center_deadband_mv));
+  TEST_ASSERT_EQUAL_HEX32(bits(want.twist_range_deadband_mv), bits(got.twist_range_deadband_mv));
+  TEST_ASSERT_EQUAL_HEX32(bits(want.calibration.vertical.center_mv),
+                          bits(got.calibration.vertical.center_mv));
+  TEST_ASSERT_EQUAL_UINT32(want.keys.up, got.keys.up);
+  TEST_ASSERT_EQUAL_UINT32(want.keys.left, got.keys.left);
+}
