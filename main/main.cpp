@@ -23,8 +23,8 @@
 
 #include "m5stack-tab5.hpp"
 
-#include "da7280.hpp"
 #include "drv2605.hpp"
+#include "feedback/da7280_bench.hpp"
 
 #include "kalman_filter.hpp"
 #include "madgwick_filter.hpp"
@@ -120,8 +120,6 @@ static std::recursive_mutex lvgl_mutex;
 #include "frag_screens_on_demand.inc" // split_main.py
 // --
 #include "frag_display_flip.inc" // split_main.py
-// --
-#include "frag_da7280.inc" // split_main.py
 // --
 extern "C" void app_main(void) {
   // First, so the LogScreen has everything printed from here on - including

@@ -1,16 +1,22 @@
-// split_main.py fragment of main.cpp (frag_da7280: original lines 4419-4751); one TU, see main.cpp.
+// The DA7280 bench run (CONFIG_HMI_BENCH_DA7280_TEST): a register probe, then the
+// Da7280 driver's functional test. Moved from main.cpp's frag_da7280.inc.
+#include "feedback/da7280_bench.hpp"
+
+#include <algorithm>
+#include <chrono>
+#include <system_error>
+#include <thread>
+
+#include "feedback/config.hpp"
+#include "feedback/da7280.hpp"
+
+using namespace std::chrono_literals;
+
 namespace hmi::feedback {
 
 // DA7280 haptic driver bring-up test: read-only register probe, no driver
-// class yet. Datasheet 7-bit slave address is 0x4A (its 0x94/0x95 values are
-// the pre-shifted 8-bit write/read forms) — espp::I2c shifts internally, so
-// the raw 7-bit address is passed here.
-static constexpr uint8_t kDa7280Address = 0x4A;
+// class yet. kDa7280Address is in da7280_bench.hpp.
 static constexpr uint8_t kDa7280RegChipRev = 0x00;
-
-// Whether app_main runs test_da7280 and test_da7280_functional at boot: a bench
-// feature, off unless CONFIG_HMI_BENCH_DA7280_TEST (CS-LAY-09, CS-TYP-05).
-static constexpr bool kBenchDa7280Test = CONFIG_HMI_BENCH_DA7280_TEST_AS_INT != 0;
 
 static void test_da7280(espp::Logger &logger, espp::I2c &i2c,
                         const std::vector<uint8_t> &found_addresses) {
@@ -241,8 +247,8 @@ static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c) {
 
 // The DA7280 bench run at boot: test_da7280, then test_da7280_functional. Only
 // with CONFIG_HMI_BENCH_DA7280_TEST (kBenchDa7280Test); otherwise nothing.
-static void run_da7280_bench(espp::Logger &logger, espp::I2c &i2c,
-                             const std::vector<uint8_t> &found_addresses) {
+void run_da7280_bench(espp::Logger &logger, espp::I2c &i2c,
+                      const std::vector<uint8_t> &found_addresses) {
   if constexpr (kBenchDa7280Test) {
     test_da7280(logger, i2c, found_addresses);
     test_da7280_functional(logger, i2c);
@@ -250,6 +256,3 @@ static void run_da7280_bench(espp::Logger &logger, espp::I2c &i2c,
 }
 
 } // namespace hmi::feedback
-
-// The self test reports whether the DA7280 answered the boot scan.
-using hmi::feedback::kDa7280Address;

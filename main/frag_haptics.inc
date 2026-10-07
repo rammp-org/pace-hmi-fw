@@ -366,6 +366,8 @@ void Feedback::refusal() {
 // play_refusal and refusal_feedback (after app_main, with load_audio).
 static hmi::feedback::Feedback *feedback = nullptr;
 using hmi::feedback::kHapticBuzzSlots;
+// The self test reports whether the DA7280 answered the boot scan.
+using hmi::feedback::kDa7280Address;
 
 // HAPTIC TEST settings row -> kHapticBuzzDuration of vibration; the unlock and
 // hold clicks; a refusal's double click. Returns false (having logged) if there
