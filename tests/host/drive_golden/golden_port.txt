@@ -1,0 +1,4051 @@
+# unlock, ask, drive, profile, exit (rows 18, 2, 35, 32, 22, 8)
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> link 1
+  = t=1000000 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib IDLE
+  = t=1000000 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000000
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  now_us -> 1000001
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  = t=1000002 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> unlock_hold_done
+  now_us -> 1000002
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  ring_wait
+  now_us -> 1000003
+  publish(ENABLE)
+  = t=1000004 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> advance 250000
+  = t=1250004 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1250004
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  now_us -> 1250005
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  = t=1250006 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> mib ENABLED
+  = t=1250006 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> advance 250000
+  = t=1500006 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1500006
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  lock_open_visual
+  unlock_timer_cancel
+  unlock_timer_start
+  set_locked(0)
+  gate_update -> gate=0
+  now_us -> 1500007
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  = t=1500008 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> advance 1000000
+  = t=2500008 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> timer_fires
+  now_us -> 2500008
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  unlock_timer_forget
+  go_drive_screen
+  -> 1
+  = t=2500009 link=1 mib=ENABLED screen=LOCKED->DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=0 banner=0/0
+> frame
+  = t=2500009 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> tick
+  now_us -> 2500009
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  now_us -> 2500010
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  = t=2500011 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> profile HIGH
+  now_us -> 2500011
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  publish(ENABLE)
+  -> 1
+  = t=2500012 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> exit_hold_done
+  now_us -> 2500012
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  publish(DISABLE)
+  now_us -> 2500013
+  = t=2500014 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> advance 250000
+  = t=2750014 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> tick
+  now_us -> 2750014
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  now_us -> 2750015
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  = t=2750016 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> mib IDLE
+  = t=2750016 link=1 mib=IDLE screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> advance 250000
+  = t=3000016 link=1 mib=IDLE screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> tick
+  now_us -> 3000016
+  sample -> link=1 mib=IDLE screen=DRIVE menu=0
+  menu_on_arrival(0)
+  unlock_timer_cancel
+  ring_rest
+  go_locked_screen
+  set_locked(1)
+  gate_update -> gate=0
+  now_us -> 3000017
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  = t=3000018 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> frame
+  = t=3000018 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 3000018
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  now_us -> 3000019
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  = t=3000020 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+# the MIB enables unasked, then the link goes (rows 1, 4)
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> link 1
+  = t=1000000 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib ENABLED
+  = t=1000000 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000000
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  lock_open_visual
+  unlock_timer_cancel
+  unlock_timer_start
+  set_locked(0)
+  gate_update -> gate=0
+  now_us -> 1000001
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  = t=1000002 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> advance 250000
+  = t=1250002 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> link 0
+  = t=1250002 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> tick
+  now_us -> 1250002
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  menu_on_arrival(0)
+  unlock_timer_cancel
+  ring_rest
+  go_locked_screen
+  set_locked(1)
+  gate_update -> gate=0
+  show_banner(DRIVE_LOST)
+  now_us -> 1250003
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  = t=1250004 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=6/3000
+> frame
+  = t=1250004 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=6/3000
+> tick
+  now_us -> 1250004
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  now_us -> 1250005
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  = t=1250006 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=6/3000
+# stopped while unlocking (row 3), then while driving (row 5)
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> link 1
+  = t=1000000 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib ENABLED
+  = t=1000000 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000000
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  lock_open_visual
+  unlock_timer_cancel
+  unlock_timer_start
+  set_locked(0)
+  gate_update -> gate=0
+  now_us -> 1000001
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  = t=1000002 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> mib IDLE
+  = t=1000002 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> tick
+  now_us -> 1000002
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  menu_on_arrival(0)
+  unlock_timer_cancel
+  ring_rest
+  go_locked_screen
+  set_locked(1)
+  gate_update -> gate=0
+  show_banner(DRIVE_STOPPED)
+  now_us -> 1000003
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  = t=1000004 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=4/3000
+> mib ENABLED
+  = t=1000004 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=4/3000
+> tick
+  now_us -> 1000004
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  lock_open_visual
+  unlock_timer_cancel
+  unlock_timer_start
+  set_locked(0)
+  gate_update -> gate=0
+  now_us -> 1000005
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  = t=1000006 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=4/3000
+> advance 1000000
+  = t=2000006 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=4/3000
+> timer_fires
+  now_us -> 2000006
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  unlock_timer_forget
+  go_drive_screen
+  -> 1
+  = t=2000007 link=1 mib=ENABLED screen=LOCKED->DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=0 banner=4/3000
+> frame
+  = t=2000007 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=4/3000
+> tick
+  now_us -> 2000007
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  now_us -> 2000008
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  = t=2000009 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=4/3000
+> mib ERROR
+  = t=2000009 link=1 mib=ERROR screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=4/3000
+> tick
+  now_us -> 2000009
+  sample -> link=1 mib=ERROR screen=DRIVE menu=0
+  menu_on_arrival(0)
+  unlock_timer_cancel
+  ring_rest
+  go_locked_screen
+  set_locked(1)
+  gate_update -> gate=0
+  show_banner(DRIVE_STOPPED)
+  now_us -> 2000010
+  sample -> link=1 mib=ERROR screen=LOCKED menu=0
+  = t=2000011 link=1 mib=ERROR screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=4/3000
+# the link lost while driving (row 6)
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> link 1
+  = t=1000000 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib ENABLED
+  = t=1000000 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000000
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  lock_open_visual
+  unlock_timer_cancel
+  unlock_timer_start
+  set_locked(0)
+  gate_update -> gate=0
+  now_us -> 1000001
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  = t=1000002 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> advance 1000000
+  = t=2000002 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> timer_fires
+  now_us -> 2000002
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  unlock_timer_forget
+  go_drive_screen
+  -> 1
+  = t=2000003 link=1 mib=ENABLED screen=LOCKED->DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=0 banner=0/0
+> frame
+  = t=2000003 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> tick
+  now_us -> 2000003
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  now_us -> 2000004
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  = t=2000005 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> link 0
+  = t=2000005 link=0 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> tick
+  now_us -> 2000005
+  sample -> link=0 mib=ENABLED screen=DRIVE menu=0
+  menu_on_arrival(0)
+  unlock_timer_cancel
+  ring_rest
+  go_locked_screen
+  set_locked(1)
+  gate_update -> gate=0
+  show_banner(DRIVE_LOST)
+  now_us -> 2000006
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  = t=2000007 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=6/3000
+# the burger key on Drive: stop, then the menu over Locked (rows 26, 27, 7)
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> link 1
+  = t=1000000 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib ENABLED
+  = t=1000000 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000000
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  lock_open_visual
+  unlock_timer_cancel
+  unlock_timer_start
+  set_locked(0)
+  gate_update -> gate=0
+  now_us -> 1000001
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  = t=1000002 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> advance 1000000
+  = t=2000002 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> timer_fires
+  now_us -> 2000002
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  unlock_timer_forget
+  go_drive_screen
+  -> 1
+  = t=2000003 link=1 mib=ENABLED screen=LOCKED->DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=0 banner=0/0
+> frame
+  = t=2000003 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> tick
+  now_us -> 2000003
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  now_us -> 2000004
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  = t=2000005 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> input MENU_KEY_DRIVE
+  now_us -> 2000005
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  publish(DISABLE)
+  now_us -> 2000006
+  -> 1
+  = t=2000007 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> input MENU_KEY_DRIVE
+  now_us -> 2000007
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  -> 0
+  = t=2000008 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> advance 250000
+  = t=2250008 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> tick
+  now_us -> 2250008
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  now_us -> 2250009
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  = t=2250010 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> mib IDLE
+  = t=2250010 link=1 mib=IDLE screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> tick
+  now_us -> 2250010
+  sample -> link=1 mib=IDLE screen=DRIVE menu=0
+  menu_on_arrival(1)
+  unlock_timer_cancel
+  ring_rest
+  go_locked_screen
+  set_locked(1)
+  gate_update -> gate=0
+  now_us -> 2250011
+  sample -> link=1 mib=IDLE screen=LOCKED menu=1
+  = t=2250012 link=1 mib=IDLE screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 2250012
+  sample -> link=1 mib=IDLE screen=LOCKED menu=1
+  now_us -> 2250013
+  sample -> link=1 mib=IDLE screen=LOCKED menu=1
+  = t=2250014 link=1 mib=IDLE screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+# exit refused, asked again, then granted (rows 22, 33, 14, 34, 24, 23, 28, 9)
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> link 1
+  = t=1000000 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib ENABLED
+  = t=1000000 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000000
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  lock_open_visual
+  unlock_timer_cancel
+  unlock_timer_start
+  set_locked(0)
+  gate_update -> gate=0
+  now_us -> 1000001
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  = t=1000002 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> advance 1000000
+  = t=2000002 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> timer_fires
+  now_us -> 2000002
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  unlock_timer_forget
+  go_drive_screen
+  -> 1
+  = t=2000003 link=1 mib=ENABLED screen=LOCKED->DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=0 banner=0/0
+> frame
+  = t=2000003 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> tick
+  now_us -> 2000003
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  now_us -> 2000004
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  = t=2000005 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> exit_hold_done
+  now_us -> 2000005
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  publish(DISABLE)
+  now_us -> 2000006
+  = t=2000007 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> profile LOW
+  now_us -> 2000007
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  publish(DISABLE)
+  -> 1
+  = t=2000008 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> advance 500000
+  = t=2500008 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> tick
+  now_us -> 2500008
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  now_us -> 2500009
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  = t=2500010 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> clock_to exit+0
+  = t=2750006 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> tick
+  now_us -> 2750006
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  now_us -> 2750007
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  show_banner(EXIT_REFUSED)
+  = t=2750008 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=5/2000
+> profile NORMAL
+  now_us -> 2750008
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  publish(DISABLE)
+  -> 1
+  = t=2750009 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=5/2000
+> exit_hold_done
+  now_us -> 2750009
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  publish(DISABLE)
+  now_us -> 2750010
+  = t=2750011 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=5/2000
+> exit_hold_done
+  now_us -> 2750011
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  publish(DISABLE)
+  now_us -> 2750012
+  = t=2750013 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=5/2000
+> clock_to exit+0
+  = t=3500012 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=5/2000
+> tick
+  now_us -> 3500012
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  now_us -> 3500013
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  show_banner(EXIT_REFUSED)
+  = t=3500014 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=5/2000
+> input MENU_KEY_DRIVE
+  now_us -> 3500014
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  publish(DISABLE)
+  now_us -> 3500015
+  -> 1
+  = t=3500016 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=5/2000
+> clock_to exit+0
+  = t=4250015 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=5/2000
+> tick
+  now_us -> 4250015
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  now_us -> 4250016
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  show_banner(EXIT_REFUSED)
+  = t=4250017 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=5/2000
+> mib IDLE
+  = t=4250017 link=1 mib=IDLE screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=5/2000
+> tick
+  now_us -> 4250017
+  sample -> link=1 mib=IDLE screen=DRIVE menu=0
+  menu_on_arrival(0)
+  unlock_timer_cancel
+  ring_rest
+  go_locked_screen
+  set_locked(1)
+  gate_update -> gate=0
+  now_us -> 4250018
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  = t=4250019 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> frame
+  = t=4250019 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> tick
+  now_us -> 4250019
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  now_us -> 4250020
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  = t=4250021 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+# while the unlock timer is armed: profile, exit hold, advance (rows 31, 21, 36)
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> link 1
+  = t=1000000 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib ENABLED
+  = t=1000000 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000000
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  lock_open_visual
+  unlock_timer_cancel
+  unlock_timer_start
+  set_locked(0)
+  gate_update -> gate=0
+  now_us -> 1000001
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  = t=1000002 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> profile HIGH
+  now_us -> 1000002
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  publish(DISABLE)
+  -> 1
+  = t=1000003 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> exit_hold_done
+  now_us -> 1000003
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  publish(DISABLE)
+  now_us -> 1000004
+  = t=1000005 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> timer_fires
+  now_us -> 1000005
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  unlock_timer_forget
+  go_drive_screen
+  -> 1
+  = t=1000006 link=1 mib=ENABLED screen=LOCKED->DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=0 banner=0/0
+> frame
+  = t=1000006 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> tick
+  now_us -> 1000006
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  now_us -> 1000007
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  = t=1000008 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+# an exit refused while the unlock timer is armed, then it fires (rows 21, 14, 37)
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> link 1
+  = t=1000000 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib ENABLED
+  = t=1000000 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000000
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  lock_open_visual
+  unlock_timer_cancel
+  unlock_timer_start
+  set_locked(0)
+  gate_update -> gate=0
+  now_us -> 1000001
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  = t=1000002 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> exit_hold_done
+  now_us -> 1000002
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  publish(DISABLE)
+  now_us -> 1000003
+  = t=1000004 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> clock_to exit+0
+  = t=1750003 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> tick
+  now_us -> 1750003
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  now_us -> 1750004
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  show_banner(EXIT_REFUSED)
+  = t=1750005 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=5/2000
+> timer_fires
+  now_us -> 1750005
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  unlock_timer_forget
+  go_drive_screen
+  -> 1
+  = t=1750006 link=1 mib=ENABLED screen=LOCKED->DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=0 banner=5/2000
+> frame
+  = t=1750006 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=5/2000
+> tick
+  now_us -> 1750006
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  now_us -> 1750007
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  = t=1750008 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=5/2000
+# the burger key while the unlock timer is armed (row 25)
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> link 1
+  = t=1000000 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib ENABLED
+  = t=1000000 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000000
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  lock_open_visual
+  unlock_timer_cancel
+  unlock_timer_start
+  set_locked(0)
+  gate_update -> gate=0
+  now_us -> 1000001
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  = t=1000002 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> input MENU_KEY_DRIVE
+  now_us -> 1000002
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  publish(DISABLE)
+  now_us -> 1000003
+  -> 1
+  = t=1000004 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> timer_fires
+  now_us -> 1000004
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  unlock_timer_forget
+  go_drive_screen
+  -> 1
+  = t=1000005 link=1 mib=ENABLED screen=LOCKED->DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=0 banner=0/0
+> frame
+  = t=1000005 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> tick
+  now_us -> 1000005
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  now_us -> 1000006
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  = t=1000007 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> mib IDLE
+  = t=1000007 link=1 mib=IDLE screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> tick
+  now_us -> 1000007
+  sample -> link=1 mib=IDLE screen=DRIVE menu=0
+  menu_on_arrival(1)
+  unlock_timer_cancel
+  ring_rest
+  go_locked_screen
+  set_locked(1)
+  gate_update -> gate=0
+  now_us -> 1000008
+  sample -> link=1 mib=IDLE screen=LOCKED menu=1
+  = t=1000009 link=1 mib=IDLE screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+# on the Seat screen without the MCB, locked (row 10) and asking (row 11)
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> screen SEAT
+  = t=1000000 link=0 mib=INITIALIZING screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000000
+  sample -> link=0 mib=INITIALIZING screen=SEAT menu=0
+  nav_home
+  show_banner(REFUSED_SEAT)
+  now_us -> 1000001
+  sample -> link=0 mib=INITIALIZING screen=SEAT menu=0
+  = t=1000002 link=0 mib=INITIALIZING screen=SEAT->LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=2/3000
+> frame
+  = t=1000002 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=2/3000
+> link 1
+  = t=1000002 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=2/3000
+> mib IDLE
+  = t=1000002 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=2/3000
+> unlock_hold_done
+  now_us -> 1000002
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  ring_wait
+  now_us -> 1000003
+  publish(ENABLE)
+  = t=1000004 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=2/3000
+> screen SEAT
+  = t=1000004 link=1 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=2/3000
+> link 0
+  = t=1000004 link=0 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=2/3000
+> tick
+  now_us -> 1000004
+  sample -> link=0 mib=IDLE screen=SEAT menu=0
+  nav_home
+  show_banner(REFUSED_SEAT)
+  now_us -> 1000005
+  sample -> link=0 mib=IDLE screen=SEAT menu=0
+  = t=1000006 link=0 mib=IDLE screen=SEAT->LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=2/3000
+> tick
+  now_us -> 1000006
+  sample -> link=0 mib=IDLE screen=SEAT menu=0
+  nav_home
+  show_banner(REFUSED_SEAT)
+  now_us -> 1000007
+  sample -> link=0 mib=IDLE screen=SEAT menu=0
+  = t=1000008 link=0 mib=IDLE screen=SEAT->LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=2/3000
+> frame
+  = t=1000008 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=2/3000
+> clock_to warn+0
+  = t=1750003 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=2/3000
+> tick
+  now_us -> 1750003
+  sample -> link=0 mib=IDLE screen=LOCKED menu=0
+  now_us -> 1750004
+  sample -> link=0 mib=IDLE screen=LOCKED menu=0
+  show_banner(NOT_GRANTED)
+  = t=1750005 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=3/3000
+> tick
+  now_us -> 1750005
+  sample -> link=0 mib=IDLE screen=LOCKED menu=0
+  ring_rest
+  now_us -> 1750006
+  sample -> link=0 mib=IDLE screen=LOCKED menu=0
+  = t=1750007 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=3/3000
+# asked, not granted, given up (rows 15, 12, 16, 29)
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> link 1
+  = t=1000000 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib IDLE
+  = t=1000000 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000000
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  now_us -> 1000001
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  = t=1000002 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> unlock_hold_done
+  now_us -> 1000002
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  ring_wait
+  now_us -> 1000003
+  publish(ENABLE)
+  = t=1000004 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> clock_to warn+0
+  = t=1750003 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1750003
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  now_us -> 1750004
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  show_banner(NOT_GRANTED)
+  = t=1750005 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=3/3000
+> advance 250000
+  = t=2000005 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=3/3000
+> tick
+  now_us -> 2000005
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  ring_rest
+  now_us -> 2000006
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  = t=2000007 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=3/3000
+> clock_to giveup+0
+  = t=3000003 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=3/3000
+> tick
+  now_us -> 3000003
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  now_us -> 3000004
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  publish(DISABLE)
+  = t=3000005 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=3/3000
+> profile LOW
+  now_us -> 3000005
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  publish(DISABLE)
+  -> 1
+  = t=3000006 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=3/3000
+> tick
+  now_us -> 3000006
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  now_us -> 3000007
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  = t=3000008 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=3/3000
+# asking on the Seat screen with the MCB ready (row 13)
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> link 1
+  = t=1000000 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib IDLE
+  = t=1000000 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000000
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  now_us -> 1000001
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  = t=1000002 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> unlock_hold_done
+  now_us -> 1000002
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  ring_wait
+  now_us -> 1000003
+  publish(ENABLE)
+  = t=1000004 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> screen SEAT
+  = t=1000004 link=1 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> clock_to warn+0
+  = t=1750003 link=1 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1750003
+  sample -> link=1 mib=IDLE screen=SEAT menu=0
+  now_us -> 1750004
+  sample -> link=1 mib=IDLE screen=SEAT menu=0
+  show_banner(NOT_GRANTED)
+  = t=1750005 link=1 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=3/3000
+> tick
+  now_us -> 1750005
+  sample -> link=1 mib=IDLE screen=SEAT menu=0
+  ring_rest
+  now_us -> 1750006
+  sample -> link=1 mib=IDLE screen=SEAT menu=0
+  = t=1750007 link=1 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=3/3000
+> tick
+  now_us -> 1750007
+  sample -> link=1 mib=IDLE screen=SEAT menu=0
+  now_us -> 1750008
+  sample -> link=1 mib=IDLE screen=SEAT menu=0
+  = t=1750009 link=1 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=3/3000
+# given up while still asking (rows 30, 15, 17)
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> link 1
+  = t=1000000 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib IDLE
+  = t=1000000 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000000
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  now_us -> 1000001
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  = t=1000002 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> unlock_hold_done
+  now_us -> 1000002
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  ring_wait
+  now_us -> 1000003
+  publish(ENABLE)
+  = t=1000004 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> profile LOW
+  now_us -> 1000004
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  publish(ENABLE)
+  -> 1
+  = t=1000005 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> clock_to giveup+0
+  = t=3000003 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 3000003
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  now_us -> 3000004
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  show_banner(NOT_GRANTED)
+  publish(DISABLE)
+  = t=3000005 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=3/3000
+> tick
+  now_us -> 3000005
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  ring_rest
+  now_us -> 3000006
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  = t=3000007 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=3/3000
+# DRV-022: a deadline passing between the tick's two clock reads (warn)
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> link 1
+  = t=1000000 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib IDLE
+  = t=1000000 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000000
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  now_us -> 1000001
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  = t=1000002 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> unlock_hold_done
+  now_us -> 1000002
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  ring_wait
+  now_us -> 1000003
+  publish(ENABLE)
+  = t=1000004 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> clock_to warn-2
+  = t=1750001 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1750001
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  now_us -> 1750002
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  = t=1750003 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> clock_to warn-1
+  = t=1750002 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1750002
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  now_us -> 1750003
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  show_banner(NOT_GRANTED)
+  = t=1750004 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=3/3000
+# DRV-022: a deadline passing between the tick's two clock reads (give-up)
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> link 1
+  = t=1000000 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib IDLE
+  = t=1000000 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000000
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  now_us -> 1000001
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  = t=1000002 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> unlock_hold_done
+  now_us -> 1000002
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  ring_wait
+  now_us -> 1000003
+  publish(ENABLE)
+  = t=1000004 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> screen SEAT
+  = t=1000004 link=1 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> link 0
+  = t=1000004 link=0 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> clock_to giveup-1
+  = t=3000002 link=0 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 3000002
+  sample -> link=0 mib=IDLE screen=SEAT menu=0
+  nav_home
+  show_banner(REFUSED_SEAT)
+  now_us -> 3000003
+  sample -> link=0 mib=IDLE screen=SEAT menu=0
+  show_banner(NOT_GRANTED)
+  publish(DISABLE)
+  = t=3000004 link=0 mib=IDLE screen=SEAT->LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=3/3000
+# DRV-022: a deadline passing between the tick's two clock reads (exit)
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> link 1
+  = t=1000000 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib ENABLED
+  = t=1000000 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000000
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  lock_open_visual
+  unlock_timer_cancel
+  unlock_timer_start
+  set_locked(0)
+  gate_update -> gate=0
+  now_us -> 1000001
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  = t=1000002 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> advance 1000000
+  = t=2000002 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> timer_fires
+  now_us -> 2000002
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  unlock_timer_forget
+  go_drive_screen
+  -> 1
+  = t=2000003 link=1 mib=ENABLED screen=LOCKED->DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=0 banner=0/0
+> frame
+  = t=2000003 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> tick
+  now_us -> 2000003
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  now_us -> 2000004
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  = t=2000005 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> exit_hold_done
+  now_us -> 2000005
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  publish(DISABLE)
+  now_us -> 2000006
+  = t=2000007 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> clock_to exit-2
+  = t=2750004 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> tick
+  now_us -> 2750004
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  now_us -> 2750005
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  = t=2750006 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> clock_to exit-1
+  = t=2750005 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> tick
+  now_us -> 2750005
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  now_us -> 2750006
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  show_banner(EXIT_REFUSED)
+  = t=2750007 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=5/2000
+# the unlock hold refused, then asked twice (rows 19, 18, 20)
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000000
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 1000001
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  = t=1000002 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> unlock_hold_done
+  now_us -> 1000002
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=1000003 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> link 1
+  = t=1000003 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> mib IDLE
+  = t=1000003 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> unlock_hold_done
+  now_us -> 1000003
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  ring_wait
+  now_us -> 1000004
+  publish(ENABLE)
+  = t=1000005 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=1/3000
+> unlock_hold_done
+  now_us -> 1000005
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  = t=1000006 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 1000006
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  now_us -> 1000007
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  = t=1000008 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=1/3000
+# push and the DRIVE row without the MCB (rows 38, 40, 39, 41)
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> input ENTRY_PUSH
+  now_us -> 1000000
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  -> 1
+  = t=1000001 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input MENU_ROW_DRIVE
+  now_us -> 1000001
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  refusal_feedback
+  show_banner(REFUSED_DRIVE_MENU)
+  -> 1
+  = t=1000002 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> link 1
+  = t=1000002 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> mib IDLE
+  = t=1000002 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> tick
+  now_us -> 1000002
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  now_us -> 1000003
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  = t=1000004 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> unlock_hold_done
+  now_us -> 1000004
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  ring_wait
+  now_us -> 1000005
+  publish(ENABLE)
+  = t=1000006 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=7/3000
+> link 0
+  = t=1000006 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=7/3000
+> input ENTRY_PUSH
+  now_us -> 1000006
+  sample -> link=0 mib=IDLE screen=LOCKED menu=0
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  -> 1
+  = t=1000007 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=1/3000
+> input MENU_ROW_DRIVE
+  now_us -> 1000007
+  sample -> link=0 mib=IDLE screen=LOCKED menu=0
+  refusal_feedback
+  show_banner(REFUSED_DRIVE_MENU)
+  -> 1
+  = t=1000008 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=7/3000
+> menu 1
+  = t=1000008 link=0 mib=IDLE screen=LOCKED menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=7/3000
+> input ENTRY_PUSH
+  now_us -> 1000008
+  sample -> link=0 mib=IDLE screen=LOCKED menu=1
+  -> 0
+  = t=1000009 link=0 mib=IDLE screen=LOCKED menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=7/3000
+> menu 0
+  = t=1000009 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=7/3000
+> screen JOYSTICK
+  = t=1000009 link=0 mib=IDLE screen=JOYSTICK menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=7/3000
+> input ENTRY_PUSH
+  now_us -> 1000009
+  sample -> link=0 mib=IDLE screen=JOYSTICK menu=0
+  -> 0
+  = t=1000010 link=0 mib=IDLE screen=JOYSTICK menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=7/3000
+> input MENU_ROW_DRIVE
+  now_us -> 1000010
+  sample -> link=0 mib=IDLE screen=JOYSTICK menu=0
+  refusal_feedback
+  show_banner(REFUSED_DRIVE_MENU)
+  -> 1
+  = t=1000011 link=0 mib=IDLE screen=JOYSTICK menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=7/3000
+# U3: the exit hold completing while locked, and its deadline
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> link 1
+  = t=1000000 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib IDLE
+  = t=1000000 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> exit_hold_done
+  publish(DISABLE)
+  now_us -> 1000000
+  = t=1000001 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> advance 250000
+  = t=1250001 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1250001
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  now_us -> 1250002
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  = t=1250003 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> clock_to exit+0
+  = t=1750000 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1750000
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  now_us -> 1750001
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  show_banner(EXIT_REFUSED)
+  = t=1750002 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> tick
+  now_us -> 1750002
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  now_us -> 1750003
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  = t=1750004 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> mib ENABLED
+  = t=1750004 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> tick
+  now_us -> 1750004
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  lock_open_visual
+  unlock_timer_cancel
+  unlock_timer_start
+  set_locked(0)
+  gate_update -> gate=0
+  now_us -> 1750005
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  = t=1750006 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=5/2000
+# U3 while asking, its deadline between the tick's clock reads
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> link 1
+  = t=1000000 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib IDLE
+  = t=1000000 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000000
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  now_us -> 1000001
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  = t=1000002 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> unlock_hold_done
+  now_us -> 1000002
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  ring_wait
+  now_us -> 1000003
+  publish(ENABLE)
+  = t=1000004 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> exit_hold_done
+  publish(DISABLE)
+  now_us -> 1000004
+  = t=1000005 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> clock_to exit-1
+  = t=1750003 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1750003
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  now_us -> 1750004
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  show_banner(EXIT_REFUSED)
+  show_banner(NOT_GRANTED)
+  = t=1750005 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=3/3000
+> tick
+  now_us -> 1750005
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  ring_rest
+  now_us -> 1750006
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  = t=1750007 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=3/3000
+# U3 then the burger key's exit: the latch carries over
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> link 1
+  = t=1000000 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib IDLE
+  = t=1000000 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> exit_hold_done
+  publish(DISABLE)
+  now_us -> 1000000
+  = t=1000001 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib ENABLED
+  = t=1000001 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000001
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  lock_open_visual
+  unlock_timer_cancel
+  unlock_timer_start
+  set_locked(0)
+  gate_update -> gate=0
+  now_us -> 1000002
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  = t=1000003 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> input MENU_KEY_DRIVE
+  now_us -> 1000003
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  publish(DISABLE)
+  now_us -> 1000004
+  -> 1
+  = t=1000005 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> timer_fires
+  now_us -> 1000005
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  unlock_timer_forget
+  go_drive_screen
+  -> 1
+  = t=1000006 link=1 mib=ENABLED screen=LOCKED->DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=0 banner=0/0
+> frame
+  = t=1000006 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> mib IDLE
+  = t=1000006 link=1 mib=IDLE screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> tick
+  now_us -> 1000006
+  sample -> link=1 mib=IDLE screen=DRIVE menu=0
+  menu_on_arrival(1)
+  unlock_timer_cancel
+  ring_rest
+  go_locked_screen
+  set_locked(1)
+  gate_update -> gate=0
+  now_us -> 1000007
+  sample -> link=1 mib=IDLE screen=LOCKED menu=1
+  = t=1000008 link=1 mib=IDLE screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+# the safe state: a corrupted input while driving
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> link 1
+  = t=1000000 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib ENABLED
+  = t=1000000 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000000
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  lock_open_visual
+  unlock_timer_cancel
+  unlock_timer_start
+  set_locked(0)
+  gate_update -> gate=0
+  now_us -> 1000001
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  = t=1000002 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> advance 1000000
+  = t=2000002 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> timer_fires
+  now_us -> 2000002
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  unlock_timer_forget
+  go_drive_screen
+  -> 1
+  = t=2000003 link=1 mib=ENABLED screen=LOCKED->DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=0 banner=0/0
+> frame
+  = t=2000003 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> tick
+  now_us -> 2000003
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  now_us -> 2000004
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  = t=2000005 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> input CORRUPTED
+  now_us -> 2000005
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  log.error[drive] corrupted drive session state, safe state entered (input 99)
+  publish(DISABLE)
+  menu_on_arrival(0)
+  unlock_timer_cancel
+  ring_rest
+  go_locked_screen
+  set_locked(1)
+  gate_update -> gate=0
+  -> 1
+  = t=2000006 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 2000006
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  lock_open_visual
+  unlock_timer_cancel
+  unlock_timer_start
+  set_locked(0)
+  gate_update -> gate=0
+  now_us -> 2000007
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  = t=2000008 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> frame
+  = t=2000008 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> tick
+  now_us -> 2000008
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  now_us -> 2000009
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  = t=2000010 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+# the safe state: a corrupted input while asking
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> link 1
+  = t=1000000 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib IDLE
+  = t=1000000 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000000
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  now_us -> 1000001
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  = t=1000002 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> unlock_hold_done
+  now_us -> 1000002
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  ring_wait
+  now_us -> 1000003
+  publish(ENABLE)
+  = t=1000004 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> input CORRUPTED
+  now_us -> 1000004
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  log.error[drive] corrupted drive session state, safe state entered (input 11)
+  publish(DISABLE)
+  menu_on_arrival(0)
+  unlock_timer_cancel
+  ring_rest
+  go_locked_screen
+  set_locked(1)
+  gate_update -> gate=0
+  -> 1
+  = t=1000005 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000005
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  now_us -> 1000006
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  = t=1000007 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+# every input while locked with no link (no row but U3 and refusals)
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> input TICK_FOLLOW
+  now_us -> 1000000
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  -> 0
+  = t=1000001 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> input TICK_EXIT_DUE
+  now_us -> 1000001
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  -> 0
+  = t=1000002 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> input TICK_WARN_DUE
+  now_us -> 1000002
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  -> 0
+  = t=1000003 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> input TICK_GIVEUP_DUE
+  now_us -> 1000003
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  -> 0
+  = t=1000004 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> input UNLOCK_HOLD_DONE
+  now_us -> 1000004
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  -> 1
+  = t=1000005 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input EXIT_HOLD_DONE
+  now_us -> 1000005
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  -> 0
+  = t=1000006 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input MENU_KEY_DRIVE
+  now_us -> 1000006
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  -> 0
+  = t=1000007 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input PROFILE_CLICK
+  now_us -> 1000007
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  publish(DISABLE)
+  -> 1
+  = t=1000008 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input UNLOCK_TIMER
+  now_us -> 1000008
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  -> 0
+  = t=1000009 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input ENTRY_PUSH
+  now_us -> 1000009
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  -> 1
+  = t=1000010 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input MENU_ROW_DRIVE
+  now_us -> 1000010
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  refusal_feedback
+  show_banner(REFUSED_DRIVE_MENU)
+  -> 1
+  = t=1000011 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+# every input while driving
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> link 1
+  = t=1000000 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib ENABLED
+  = t=1000000 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000000
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  lock_open_visual
+  unlock_timer_cancel
+  unlock_timer_start
+  set_locked(0)
+  gate_update -> gate=0
+  now_us -> 1000001
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  = t=1000002 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> advance 1000000
+  = t=2000002 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> timer_fires
+  now_us -> 2000002
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  unlock_timer_forget
+  go_drive_screen
+  -> 1
+  = t=2000003 link=1 mib=ENABLED screen=LOCKED->DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=0 banner=0/0
+> frame
+  = t=2000003 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> tick
+  now_us -> 2000003
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  now_us -> 2000004
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  = t=2000005 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> input TICK_FOLLOW
+  now_us -> 2000005
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  -> 0
+  = t=2000006 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> input TICK_EXIT_DUE
+  now_us -> 2000006
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  -> 0
+  = t=2000007 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> input TICK_WARN_DUE
+  now_us -> 2000007
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  -> 0
+  = t=2000008 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> input TICK_GIVEUP_DUE
+  now_us -> 2000008
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  -> 0
+  = t=2000009 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> input UNLOCK_HOLD_DONE
+  now_us -> 2000009
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  -> 0
+  = t=2000010 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> input PROFILE_CLICK
+  now_us -> 2000010
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  publish(DISABLE)
+  -> 1
+  = t=2000011 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> input UNLOCK_TIMER
+  now_us -> 2000011
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  -> 0
+  = t=2000012 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> input ENTRY_PUSH
+  now_us -> 2000012
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  -> 0
+  = t=2000013 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> input MENU_ROW_DRIVE
+  now_us -> 2000013
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  -> 0
+  = t=2000014 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> input EXIT_HOLD_DONE
+  now_us -> 2000014
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  publish(DISABLE)
+  now_us -> 2000015
+  -> 1
+  = t=2000016 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> input MENU_KEY_DRIVE
+  now_us -> 2000016
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=0
+  -> 0
+  = t=2000017 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+# from the Boot screen, the menu over Drive, an unknown MIB state
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> screen BOOT
+  = t=1000000 link=0 mib=INITIALIZING screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> link 1
+  = t=1000000 link=1 mib=INITIALIZING screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib ENABLED
+  = t=1000000 link=1 mib=ENABLED screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000000
+  sample -> link=1 mib=ENABLED screen=BOOT menu=0
+  lock_open_visual
+  unlock_timer_cancel
+  unlock_timer_start
+  set_locked(0)
+  gate_update -> gate=0
+  now_us -> 1000001
+  sample -> link=1 mib=ENABLED screen=BOOT menu=0
+  = t=1000002 link=1 mib=ENABLED screen=BOOT menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=0/0
+> timer_fires
+  now_us -> 1000002
+  sample -> link=1 mib=ENABLED screen=BOOT menu=0
+  unlock_timer_forget
+  go_drive_screen
+  -> 1
+  = t=1000003 link=1 mib=ENABLED screen=BOOT->DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=0 banner=0/0
+> frame
+  = t=1000003 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> menu 1
+  = t=1000003 link=1 mib=ENABLED screen=DRIVE menu=1 moa=0 locked=0 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000003
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=1
+  now_us -> 1000004
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=1
+  = t=1000005 link=1 mib=ENABLED screen=DRIVE menu=1 moa=0 locked=0 wait=0 timer=0 gate=0 banner=0/0
+> input MENU_KEY_DRIVE
+  now_us -> 1000005
+  sample -> link=1 mib=ENABLED screen=DRIVE menu=1
+  publish(DISABLE)
+  now_us -> 1000006
+  -> 1
+  = t=1000007 link=1 mib=ENABLED screen=DRIVE menu=1 moa=0 locked=0 wait=0 timer=0 gate=0 banner=0/0
+> menu 0
+  = t=1000007 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> mib BOGUS
+  = t=1000007 link=1 mib=BOGUS screen=DRIVE menu=0 moa=0 locked=0 wait=0 timer=0 gate=1 banner=0/0
+> tick
+  now_us -> 1000007
+  sample -> link=1 mib=BOGUS screen=DRIVE menu=0
+  menu_on_arrival(1)
+  unlock_timer_cancel
+  ring_rest
+  go_locked_screen
+  set_locked(1)
+  gate_update -> gate=0
+  now_us -> 1000008
+  sample -> link=1 mib=BOGUS screen=LOCKED menu=1
+  = t=1000009 link=1 mib=BOGUS screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> frame
+  = t=1000009 link=1 mib=BOGUS screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000009
+  sample -> link=1 mib=BOGUS screen=LOCKED menu=1
+  now_us -> 1000010
+  sample -> link=1 mib=BOGUS screen=LOCKED menu=1
+  = t=1000011 link=1 mib=BOGUS screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+# random walk 0
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> menu 0
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000000
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 1000001
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  = t=1000002 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> frame
+  = t=1000002 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib INITIALIZING
+  = t=1000002 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> unlock_hold_done
+  now_us -> 1000002
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=1000003 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> clock_to warn+0 (not armed)
+  = t=1000003 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input MENU_KEY_DRIVE
+  now_us -> 1000003
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  -> 0
+  = t=1000004 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input ENTRY_PUSH
+  now_us -> 1000004
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  -> 1
+  = t=1000005 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> unlock_hold_done
+  now_us -> 1000005
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=1000006 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 50000
+  = t=1050006 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> mib INITIALIZING
+  = t=1050006 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> profile HIGH
+  now_us -> 1050006
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  publish(DISABLE)
+  -> 1
+  = t=1050007 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> profile HIGH
+  now_us -> 1050007
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  publish(DISABLE)
+  -> 1
+  = t=1050008 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input MENU_KEY_DRIVE
+  now_us -> 1050008
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  -> 0
+  = t=1050009 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 1050009
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 1050010
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  = t=1050011 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> clock_to exit+1 (not armed)
+  = t=1050011 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> screen JOYSTICK
+  = t=1050011 link=0 mib=INITIALIZING screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> mib IDLE
+  = t=1050011 link=0 mib=IDLE screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> unlock_hold_done
+  now_us -> 1050011
+  sample -> link=0 mib=IDLE screen=JOYSTICK menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=1050012 link=0 mib=IDLE screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 500000
+  = t=1550012 link=0 mib=IDLE screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input ENTRY_PUSH
+  now_us -> 1550012
+  sample -> link=0 mib=IDLE screen=JOYSTICK menu=0
+  -> 0
+  = t=1550013 link=0 mib=IDLE screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> mib ENABLED
+  = t=1550013 link=0 mib=ENABLED screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=1550013 link=0 mib=ENABLED screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> mib ENABLED
+  = t=1550013 link=0 mib=ENABLED screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> mib ERROR
+  = t=1550013 link=0 mib=ERROR screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input ENTRY_PUSH
+  now_us -> 1550013
+  sample -> link=0 mib=ERROR screen=JOYSTICK menu=0
+  -> 0
+  = t=1550014 link=0 mib=ERROR screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 1550014
+  sample -> link=0 mib=ERROR screen=JOYSTICK menu=0
+  now_us -> 1550015
+  sample -> link=0 mib=ERROR screen=JOYSTICK menu=0
+  = t=1550016 link=0 mib=ERROR screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> mib BOGUS
+  = t=1550016 link=0 mib=BOGUS screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input MENU_ROW_DRIVE
+  now_us -> 1550016
+  sample -> link=0 mib=BOGUS screen=JOYSTICK menu=0
+  refusal_feedback
+  show_banner(REFUSED_DRIVE_MENU)
+  -> 1
+  = t=1550017 link=0 mib=BOGUS screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> tick
+  now_us -> 1550017
+  sample -> link=0 mib=BOGUS screen=JOYSTICK menu=0
+  now_us -> 1550018
+  sample -> link=0 mib=BOGUS screen=JOYSTICK menu=0
+  = t=1550019 link=0 mib=BOGUS screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> exit_hold_done
+  publish(DISABLE)
+  now_us -> 1550019
+  = t=1550020 link=0 mib=BOGUS screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> advance 5000000
+  = t=6550020 link=0 mib=BOGUS screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> screen SEAT
+  = t=6550020 link=0 mib=BOGUS screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> link 0
+  = t=6550020 link=0 mib=BOGUS screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> input MENU_ROW_DRIVE
+  now_us -> 6550020
+  sample -> link=0 mib=BOGUS screen=SEAT menu=0
+  refusal_feedback
+  show_banner(REFUSED_DRIVE_MENU)
+  -> 1
+  = t=6550021 link=0 mib=BOGUS screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> frame
+  = t=6550021 link=0 mib=BOGUS screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> tick
+  now_us -> 6550021
+  sample -> link=0 mib=BOGUS screen=SEAT menu=0
+  nav_home
+  show_banner(REFUSED_SEAT)
+  now_us -> 6550022
+  sample -> link=0 mib=BOGUS screen=SEAT menu=0
+  show_banner(EXIT_REFUSED)
+  = t=6550023 link=0 mib=BOGUS screen=SEAT->LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> frame
+  = t=6550023 link=0 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> menu 0
+  = t=6550023 link=0 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> screen LOCKED
+  = t=6550023 link=0 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+# random walk 1
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000000
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 1000001
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  = t=1000002 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000002
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 1000003
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  = t=1000004 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> clock_to exit+0 (not armed)
+  = t=1000004 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> timer_fires (not armed)
+  = t=1000004 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> input ENTRY_PUSH
+  now_us -> 1000004
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  -> 1
+  = t=1000005 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> exit_hold_done
+  publish(DISABLE)
+  now_us -> 1000005
+  = t=1000006 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 1000006
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 1000007
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  = t=1000008 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=1000008 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=1000008 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 1000008
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 1000009
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  = t=1000010 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input MENU_ROW_DRIVE
+  now_us -> 1000010
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  refusal_feedback
+  show_banner(REFUSED_DRIVE_MENU)
+  -> 1
+  = t=1000011 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> timer_fires (not armed)
+  = t=1000011 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> unlock_hold_done
+  now_us -> 1000011
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=1000012 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> menu 0
+  = t=1000012 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> exit_hold_done
+  publish(DISABLE)
+  now_us -> 1000012
+  = t=1000013 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> unlock_hold_done
+  now_us -> 1000013
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=1000014 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> profile LOW
+  now_us -> 1000014
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  publish(DISABLE)
+  -> 1
+  = t=1000015 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> clock_to giveup+1 (not armed)
+  = t=1000015 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 1000015
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 1000016
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  = t=1000017 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> menu 0
+  = t=1000017 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> profile NORMAL
+  now_us -> 1000017
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  publish(DISABLE)
+  -> 1
+  = t=1000018 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> link 1
+  = t=1000018 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=1000018 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> unlock_hold_done
+  now_us -> 1000018
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=1000019 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> timer_fires (not armed)
+  = t=1000019 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> unlock_hold_done
+  now_us -> 1000019
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=1000020 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 2100000
+  = t=3100020 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> mib ENABLED
+  = t=3100020 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 3100020
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  lock_open_visual
+  unlock_timer_cancel
+  unlock_timer_start
+  set_locked(0)
+  gate_update -> gate=0
+  now_us -> 3100021
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  = t=3100022 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=1/3000
+> mib BOGUS
+  = t=3100022 link=1 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=1/3000
+> link 1
+  = t=3100022 link=1 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=1/3000
+> unlock_hold_done
+  now_us -> 3100022
+  sample -> link=1 mib=BOGUS screen=LOCKED menu=0
+  = t=3100023 link=1 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=1/3000
+> tick
+  now_us -> 3100023
+  sample -> link=1 mib=BOGUS screen=LOCKED menu=0
+  menu_on_arrival(0)
+  unlock_timer_cancel
+  ring_rest
+  go_locked_screen
+  set_locked(1)
+  gate_update -> gate=0
+  show_banner(DRIVE_STOPPED)
+  now_us -> 3100024
+  sample -> link=1 mib=BOGUS screen=LOCKED menu=0
+  = t=3100025 link=1 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=4/3000
+> link 1
+  = t=3100025 link=1 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=4/3000
+> clock_to warn+1 (not armed)
+  = t=3100025 link=1 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=4/3000
+> link 1
+  = t=3100025 link=1 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=4/3000
+> mib ENABLED
+  = t=3100025 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=4/3000
+> advance 2100000
+  = t=5200025 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=4/3000
+> clock_to warn-1 (not armed)
+  = t=5200025 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=4/3000
+> unlock_hold_done
+  now_us -> 5200025
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  ring_wait
+  now_us -> 5200026
+  publish(ENABLE)
+  = t=5200027 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=4/3000
+# random walk 2
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib IDLE
+  = t=1000000 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> input MENU_ROW_DRIVE
+  now_us -> 1000000
+  sample -> link=0 mib=IDLE screen=LOCKED menu=0
+  refusal_feedback
+  show_banner(REFUSED_DRIVE_MENU)
+  -> 1
+  = t=1000001 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> frame
+  = t=1000001 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> advance 2100000
+  = t=3100001 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> input MENU_ROW_DRIVE
+  now_us -> 3100001
+  sample -> link=0 mib=IDLE screen=LOCKED menu=0
+  refusal_feedback
+  show_banner(REFUSED_DRIVE_MENU)
+  -> 1
+  = t=3100002 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> clock_to giveup-1 (not armed)
+  = t=3100002 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> link 0
+  = t=3100002 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> unlock_hold_done
+  now_us -> 3100002
+  sample -> link=0 mib=IDLE screen=LOCKED menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=3100003 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=3100003 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 50000
+  = t=3150003 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> unlock_hold_done
+  now_us -> 3150003
+  sample -> link=0 mib=IDLE screen=LOCKED menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=3150004 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 250000
+  = t=3400004 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=3400004 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input MENU_ROW_DRIVE
+  now_us -> 3400004
+  sample -> link=0 mib=IDLE screen=LOCKED menu=0
+  refusal_feedback
+  show_banner(REFUSED_DRIVE_MENU)
+  -> 1
+  = t=3400005 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> tick
+  now_us -> 3400005
+  sample -> link=0 mib=IDLE screen=LOCKED menu=0
+  now_us -> 3400006
+  sample -> link=0 mib=IDLE screen=LOCKED menu=0
+  = t=3400007 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> profile HIGH
+  now_us -> 3400007
+  sample -> link=0 mib=IDLE screen=LOCKED menu=0
+  publish(DISABLE)
+  -> 1
+  = t=3400008 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> tick
+  now_us -> 3400008
+  sample -> link=0 mib=IDLE screen=LOCKED menu=0
+  now_us -> 3400009
+  sample -> link=0 mib=IDLE screen=LOCKED menu=0
+  = t=3400010 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> frame
+  = t=3400010 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> tick
+  now_us -> 3400010
+  sample -> link=0 mib=IDLE screen=LOCKED menu=0
+  now_us -> 3400011
+  sample -> link=0 mib=IDLE screen=LOCKED menu=0
+  = t=3400012 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> link 1
+  = t=3400012 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> menu 1
+  = t=3400012 link=1 mib=IDLE screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> mib INITIALIZING
+  = t=3400012 link=1 mib=INITIALIZING screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> screen SEAT
+  = t=3400012 link=1 mib=INITIALIZING screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> frame
+  = t=3400012 link=1 mib=INITIALIZING screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> tick
+  now_us -> 3400012
+  sample -> link=1 mib=INITIALIZING screen=SEAT menu=0
+  nav_home
+  show_banner(REFUSED_SEAT)
+  now_us -> 3400013
+  sample -> link=1 mib=INITIALIZING screen=SEAT menu=0
+  = t=3400014 link=1 mib=INITIALIZING screen=SEAT->LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=2/3000
+> advance 250000
+  = t=3650014 link=1 mib=INITIALIZING screen=SEAT->LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=2/3000
+> input ENTRY_PUSH
+  now_us -> 3650014
+  sample -> link=1 mib=INITIALIZING screen=SEAT menu=0
+  -> 0
+  = t=3650015 link=1 mib=INITIALIZING screen=SEAT->LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=2/3000
+> unlock_hold_done
+  now_us -> 3650015
+  sample -> link=1 mib=INITIALIZING screen=SEAT menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=3650016 link=1 mib=INITIALIZING screen=SEAT->LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 3650016
+  sample -> link=1 mib=INITIALIZING screen=SEAT menu=0
+  nav_home
+  show_banner(REFUSED_SEAT)
+  now_us -> 3650017
+  sample -> link=1 mib=INITIALIZING screen=SEAT menu=0
+  = t=3650018 link=1 mib=INITIALIZING screen=SEAT->LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=2/3000
+> frame
+  = t=3650018 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=2/3000
+> clock_to warn-1 (not armed)
+  = t=3650018 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=2/3000
+> link 1
+  = t=3650018 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=2/3000
+> unlock_hold_done
+  now_us -> 3650018
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=3650019 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> unlock_hold_done
+  now_us -> 3650019
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=3650020 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> link 1
+  = t=3650020 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 3650020
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 3650021
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=0
+  = t=3650022 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> clock_to giveup+0 (not armed)
+  = t=3650022 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> screen SEAT
+  = t=3650022 link=1 mib=INITIALIZING screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 3650022
+  sample -> link=1 mib=INITIALIZING screen=SEAT menu=0
+  nav_home
+  show_banner(REFUSED_SEAT)
+  now_us -> 3650023
+  sample -> link=1 mib=INITIALIZING screen=SEAT menu=0
+  = t=3650024 link=1 mib=INITIALIZING screen=SEAT->LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=2/3000
+> unlock_hold_done
+  now_us -> 3650024
+  sample -> link=1 mib=INITIALIZING screen=SEAT menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=3650025 link=1 mib=INITIALIZING screen=SEAT->LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+# random walk 3
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000000
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 1000001
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  = t=1000002 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> menu 0
+  = t=1000002 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib BOGUS
+  = t=1000002 link=0 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> frame
+  = t=1000002 link=0 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> menu 0
+  = t=1000002 link=0 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> unlock_hold_done
+  now_us -> 1000002
+  sample -> link=0 mib=BOGUS screen=LOCKED menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=1000003 link=0 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 1000003
+  sample -> link=0 mib=BOGUS screen=LOCKED menu=0
+  now_us -> 1000004
+  sample -> link=0 mib=BOGUS screen=LOCKED menu=0
+  = t=1000005 link=0 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> unlock_hold_done
+  now_us -> 1000005
+  sample -> link=0 mib=BOGUS screen=LOCKED menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=1000006 link=0 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> mib ERROR
+  = t=1000006 link=0 mib=ERROR screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 1000000
+  = t=2000006 link=0 mib=ERROR screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> exit_hold_done
+  publish(DISABLE)
+  now_us -> 2000006
+  = t=2000007 link=0 mib=ERROR screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> menu 0
+  = t=2000007 link=0 mib=ERROR screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=2000007 link=0 mib=ERROR screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 5000000
+  = t=7000007 link=0 mib=ERROR screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> unlock_hold_done
+  now_us -> 7000007
+  sample -> link=0 mib=ERROR screen=LOCKED menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=7000008 link=0 mib=ERROR screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> exit_hold_done
+  publish(DISABLE)
+  now_us -> 7000008
+  = t=7000009 link=0 mib=ERROR screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input ENTRY_PUSH
+  now_us -> 7000009
+  sample -> link=0 mib=ERROR screen=LOCKED menu=0
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  -> 1
+  = t=7000010 link=0 mib=ERROR screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 2100000
+  = t=9100010 link=0 mib=ERROR screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 9100010
+  sample -> link=0 mib=ERROR screen=LOCKED menu=0
+  now_us -> 9100011
+  sample -> link=0 mib=ERROR screen=LOCKED menu=0
+  show_banner(EXIT_REFUSED)
+  = t=9100012 link=0 mib=ERROR screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> advance 500000
+  = t=9600012 link=0 mib=ERROR screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> menu 0
+  = t=9600012 link=0 mib=ERROR screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> mib ENABLED
+  = t=9600012 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> input MENU_KEY_DRIVE
+  now_us -> 9600012
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  -> 0
+  = t=9600013 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> tick
+  now_us -> 9600013
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  now_us -> 9600014
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  = t=9600015 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> link 0
+  = t=9600015 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> clock_to giveup-1 (not armed)
+  = t=9600015 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> input MENU_KEY_DRIVE
+  now_us -> 9600015
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  -> 0
+  = t=9600016 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> profile LOW
+  now_us -> 9600016
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  publish(DISABLE)
+  -> 1
+  = t=9600017 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> unlock_hold_done
+  now_us -> 9600017
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=9600018 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 9600018
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  now_us -> 9600019
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  = t=9600020 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 2100000
+  = t=11700020 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> link 0
+  = t=11700020 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input ENTRY_PUSH
+  now_us -> 11700020
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  -> 1
+  = t=11700021 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> screen LOCKED
+  = t=11700021 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> unlock_hold_done
+  now_us -> 11700021
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=11700022 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> timer_fires (not armed)
+  = t=11700022 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 11700022
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  now_us -> 11700023
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  = t=11700024 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 11700024
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  now_us -> 11700025
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  = t=11700026 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input MENU_KEY_DRIVE
+  now_us -> 11700026
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  -> 0
+  = t=11700027 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> screen LOCKED
+  = t=11700027 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+# random walk 4
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> link 1
+  = t=1000000 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> input ENTRY_PUSH
+  now_us -> 1000000
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=0
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  -> 1
+  = t=1000001 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> screen BOOT
+  = t=1000001 link=1 mib=INITIALIZING screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 1000001
+  sample -> link=1 mib=INITIALIZING screen=BOOT menu=0
+  now_us -> 1000002
+  sample -> link=1 mib=INITIALIZING screen=BOOT menu=0
+  = t=1000003 link=1 mib=INITIALIZING screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> exit_hold_done
+  publish(DISABLE)
+  now_us -> 1000003
+  = t=1000004 link=1 mib=INITIALIZING screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 50000
+  = t=1050004 link=1 mib=INITIALIZING screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=1050004 link=1 mib=INITIALIZING screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 1050004
+  sample -> link=1 mib=INITIALIZING screen=BOOT menu=0
+  now_us -> 1050005
+  sample -> link=1 mib=INITIALIZING screen=BOOT menu=0
+  = t=1050006 link=1 mib=INITIALIZING screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 1050006
+  sample -> link=1 mib=INITIALIZING screen=BOOT menu=0
+  now_us -> 1050007
+  sample -> link=1 mib=INITIALIZING screen=BOOT menu=0
+  = t=1050008 link=1 mib=INITIALIZING screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> screen JOYSTICK
+  = t=1050008 link=1 mib=INITIALIZING screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> mib ERROR
+  = t=1050008 link=1 mib=ERROR screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 1000000
+  = t=2050008 link=1 mib=ERROR screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 2050008
+  sample -> link=1 mib=ERROR screen=JOYSTICK menu=0
+  now_us -> 2050009
+  sample -> link=1 mib=ERROR screen=JOYSTICK menu=0
+  show_banner(EXIT_REFUSED)
+  = t=2050010 link=1 mib=ERROR screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> profile HIGH
+  now_us -> 2050010
+  sample -> link=1 mib=ERROR screen=JOYSTICK menu=0
+  publish(DISABLE)
+  -> 1
+  = t=2050011 link=1 mib=ERROR screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> input MENU_KEY_DRIVE
+  now_us -> 2050011
+  sample -> link=1 mib=ERROR screen=JOYSTICK menu=0
+  -> 0
+  = t=2050012 link=1 mib=ERROR screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> tick
+  now_us -> 2050012
+  sample -> link=1 mib=ERROR screen=JOYSTICK menu=0
+  now_us -> 2050013
+  sample -> link=1 mib=ERROR screen=JOYSTICK menu=0
+  = t=2050014 link=1 mib=ERROR screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> link 0
+  = t=2050014 link=0 mib=ERROR screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> unlock_hold_done
+  now_us -> 2050014
+  sample -> link=0 mib=ERROR screen=JOYSTICK menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=2050015 link=0 mib=ERROR screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input MENU_KEY_DRIVE
+  now_us -> 2050015
+  sample -> link=0 mib=ERROR screen=JOYSTICK menu=0
+  -> 0
+  = t=2050016 link=0 mib=ERROR screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 500000
+  = t=2550016 link=0 mib=ERROR screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=2550016 link=0 mib=ERROR screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 5000000
+  = t=7550016 link=0 mib=ERROR screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> screen DRIVE
+  = t=7550016 link=0 mib=ERROR screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=7550016 link=0 mib=ERROR screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> mib IDLE
+  = t=7550016 link=0 mib=IDLE screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> link 1
+  = t=7550016 link=1 mib=IDLE screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input ENTRY_PUSH
+  now_us -> 7550016
+  sample -> link=1 mib=IDLE screen=DRIVE menu=0
+  -> 0
+  = t=7550017 link=1 mib=IDLE screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> timer_fires (not armed)
+  = t=7550017 link=1 mib=IDLE screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 7550017
+  sample -> link=1 mib=IDLE screen=DRIVE menu=0
+  now_us -> 7550018
+  sample -> link=1 mib=IDLE screen=DRIVE menu=0
+  = t=7550019 link=1 mib=IDLE screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> clock_to exit-1 (not armed)
+  = t=7550019 link=1 mib=IDLE screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> mib ERROR
+  = t=7550019 link=1 mib=ERROR screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=7550019 link=1 mib=ERROR screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> link 0
+  = t=7550019 link=0 mib=ERROR screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> exit_hold_done
+  publish(DISABLE)
+  now_us -> 7550019
+  = t=7550020 link=0 mib=ERROR screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> clock_to warn+0 (not armed)
+  = t=7550020 link=0 mib=ERROR screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> mib ERROR
+  = t=7550020 link=0 mib=ERROR screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 7550020
+  sample -> link=0 mib=ERROR screen=DRIVE menu=0
+  now_us -> 7550021
+  sample -> link=0 mib=ERROR screen=DRIVE menu=0
+  = t=7550022 link=0 mib=ERROR screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 7550022
+  sample -> link=0 mib=ERROR screen=DRIVE menu=0
+  now_us -> 7550023
+  sample -> link=0 mib=ERROR screen=DRIVE menu=0
+  = t=7550024 link=0 mib=ERROR screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 7550024
+  sample -> link=0 mib=ERROR screen=DRIVE menu=0
+  now_us -> 7550025
+  sample -> link=0 mib=ERROR screen=DRIVE menu=0
+  = t=7550026 link=0 mib=ERROR screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> screen LOCKED
+  = t=7550026 link=0 mib=ERROR screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+# random walk 5
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000000
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 1000001
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  = t=1000002 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> input MENU_KEY_DRIVE
+  now_us -> 1000002
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  -> 0
+  = t=1000003 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000003
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 1000004
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  = t=1000005 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> advance 1000000
+  = t=2000005 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib ENABLED
+  = t=2000005 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 2000005
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  now_us -> 2000006
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  = t=2000007 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> screen LOCKED
+  = t=2000007 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> frame
+  = t=2000007 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> input ENTRY_PUSH
+  now_us -> 2000007
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  -> 1
+  = t=2000008 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> timer_fires (not armed)
+  = t=2000008 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=2000008 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=2000008 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> link 0
+  = t=2000008 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> timer_fires (not armed)
+  = t=2000008 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=2000008 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input ENTRY_PUSH
+  now_us -> 2000008
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  -> 1
+  = t=2000009 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 2000009
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  now_us -> 2000010
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  = t=2000011 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 2000011
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  now_us -> 2000012
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  = t=2000013 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> mib BOGUS
+  = t=2000013 link=0 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> profile LOW
+  now_us -> 2000013
+  sample -> link=0 mib=BOGUS screen=LOCKED menu=0
+  publish(DISABLE)
+  -> 1
+  = t=2000014 link=0 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input MENU_ROW_DRIVE
+  now_us -> 2000014
+  sample -> link=0 mib=BOGUS screen=LOCKED menu=0
+  refusal_feedback
+  show_banner(REFUSED_DRIVE_MENU)
+  -> 1
+  = t=2000015 link=0 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> frame
+  = t=2000015 link=0 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> input ENTRY_PUSH
+  now_us -> 2000015
+  sample -> link=0 mib=BOGUS screen=LOCKED menu=0
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  -> 1
+  = t=2000016 link=0 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> clock_to exit-1 (not armed)
+  = t=2000016 link=0 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 2000016
+  sample -> link=0 mib=BOGUS screen=LOCKED menu=0
+  now_us -> 2000017
+  sample -> link=0 mib=BOGUS screen=LOCKED menu=0
+  = t=2000018 link=0 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 2000018
+  sample -> link=0 mib=BOGUS screen=LOCKED menu=0
+  now_us -> 2000019
+  sample -> link=0 mib=BOGUS screen=LOCKED menu=0
+  = t=2000020 link=0 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 2000020
+  sample -> link=0 mib=BOGUS screen=LOCKED menu=0
+  now_us -> 2000021
+  sample -> link=0 mib=BOGUS screen=LOCKED menu=0
+  = t=2000022 link=0 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> mib INITIALIZING
+  = t=2000022 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> clock_to giveup+1 (not armed)
+  = t=2000022 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> exit_hold_done
+  publish(DISABLE)
+  now_us -> 2000022
+  = t=2000023 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> profile LOW
+  now_us -> 2000023
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  publish(DISABLE)
+  -> 1
+  = t=2000024 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 2000024
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 2000025
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  = t=2000026 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> mib BOGUS
+  = t=2000026 link=0 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> screen BOOT
+  = t=2000026 link=0 mib=BOGUS screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 2000026
+  sample -> link=0 mib=BOGUS screen=BOOT menu=0
+  now_us -> 2000027
+  sample -> link=0 mib=BOGUS screen=BOOT menu=0
+  = t=2000028 link=0 mib=BOGUS screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> timer_fires (not armed)
+  = t=2000028 link=0 mib=BOGUS screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 2000028
+  sample -> link=0 mib=BOGUS screen=BOOT menu=0
+  now_us -> 2000029
+  sample -> link=0 mib=BOGUS screen=BOOT menu=0
+  = t=2000030 link=0 mib=BOGUS screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> mib ERROR
+  = t=2000030 link=0 mib=ERROR screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> mib ENABLED
+  = t=2000030 link=0 mib=ENABLED screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 2000030
+  sample -> link=0 mib=ENABLED screen=BOOT menu=0
+  now_us -> 2000031
+  sample -> link=0 mib=ENABLED screen=BOOT menu=0
+  = t=2000032 link=0 mib=ENABLED screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+# random walk 6
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000000
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 1000001
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  = t=1000002 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib ENABLED
+  = t=1000002 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> advance 760000
+  = t=1760002 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> input ENTRY_PUSH
+  now_us -> 1760002
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  -> 1
+  = t=1760003 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input ENTRY_PUSH
+  now_us -> 1760003
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  -> 1
+  = t=1760004 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=1760004 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 1760004
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  now_us -> 1760005
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  = t=1760006 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> menu 1
+  = t=1760006 link=0 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> exit_hold_done
+  publish(DISABLE)
+  now_us -> 1760006
+  = t=1760007 link=0 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input ENTRY_PUSH
+  now_us -> 1760007
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=1
+  -> 0
+  = t=1760008 link=0 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input ENTRY_PUSH
+  now_us -> 1760008
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=1
+  -> 0
+  = t=1760009 link=0 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> exit_hold_done
+  publish(DISABLE)
+  now_us -> 1760009
+  = t=1760010 link=0 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> mib ERROR
+  = t=1760010 link=0 mib=ERROR screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> profile LOW
+  now_us -> 1760010
+  sample -> link=0 mib=ERROR screen=LOCKED menu=1
+  publish(DISABLE)
+  -> 1
+  = t=1760011 link=0 mib=ERROR screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 500000
+  = t=2260011 link=0 mib=ERROR screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> mib IDLE
+  = t=2260011 link=0 mib=IDLE screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> mib ENABLED
+  = t=2260011 link=0 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> unlock_hold_done
+  now_us -> 2260011
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=1
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=2260012 link=0 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 1000000
+  = t=3260012 link=0 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=3260012 link=0 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=3260012 link=0 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 50000
+  = t=3310012 link=0 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 3310012
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=1
+  now_us -> 3310013
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=1
+  show_banner(EXIT_REFUSED)
+  = t=3310014 link=0 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> tick
+  now_us -> 3310014
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=1
+  now_us -> 3310015
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=1
+  = t=3310016 link=0 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> profile HIGH
+  now_us -> 3310016
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=1
+  publish(DISABLE)
+  -> 1
+  = t=3310017 link=0 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> input ENTRY_PUSH
+  now_us -> 3310017
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=1
+  -> 0
+  = t=3310018 link=0 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> frame
+  = t=3310018 link=0 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> unlock_hold_done
+  now_us -> 3310018
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=1
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=3310019 link=0 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 1000000
+  = t=4310019 link=0 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 250000
+  = t=4560019 link=0 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> mib ENABLED
+  = t=4560019 link=0 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> link 1
+  = t=4560019 link=1 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> timer_fires (not armed)
+  = t=4560019 link=1 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> exit_hold_done
+  publish(DISABLE)
+  now_us -> 4560019
+  = t=4560020 link=1 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=4560020 link=1 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 4560020
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=1
+  lock_open_visual
+  unlock_timer_cancel
+  unlock_timer_start
+  set_locked(0)
+  gate_update -> gate=0
+  now_us -> 4560021
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=1
+  = t=4560022 link=1 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=0 wait=0 timer=1 gate=0 banner=1/3000
+> mib ERROR
+  = t=4560022 link=1 mib=ERROR screen=LOCKED menu=1 moa=0 locked=0 wait=0 timer=1 gate=0 banner=1/3000
+> frame
+  = t=4560022 link=1 mib=ERROR screen=LOCKED menu=1 moa=0 locked=0 wait=0 timer=1 gate=0 banner=1/3000
+> screen LOCKED
+  = t=4560022 link=1 mib=ERROR screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=1/3000
+> frame
+  = t=4560022 link=1 mib=ERROR screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=1/3000
+# random walk 7
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> clock_to exit+1 (not armed)
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000000
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 1000001
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  = t=1000002 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000002
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 1000003
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  = t=1000004 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000004
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 1000005
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  = t=1000006 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> frame
+  = t=1000006 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> screen SEAT
+  = t=1000006 link=0 mib=INITIALIZING screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> frame
+  = t=1000006 link=0 mib=INITIALIZING screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> link 1
+  = t=1000006 link=1 mib=INITIALIZING screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> profile LOW
+  now_us -> 1000006
+  sample -> link=1 mib=INITIALIZING screen=SEAT menu=0
+  publish(DISABLE)
+  -> 1
+  = t=1000007 link=1 mib=INITIALIZING screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> clock_to exit-1 (not armed)
+  = t=1000007 link=1 mib=INITIALIZING screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib IDLE
+  = t=1000007 link=1 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000007
+  sample -> link=1 mib=IDLE screen=SEAT menu=0
+  now_us -> 1000008
+  sample -> link=1 mib=IDLE screen=SEAT menu=0
+  = t=1000009 link=1 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> link 1
+  = t=1000009 link=1 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000009
+  sample -> link=1 mib=IDLE screen=SEAT menu=0
+  now_us -> 1000010
+  sample -> link=1 mib=IDLE screen=SEAT menu=0
+  = t=1000011 link=1 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> frame
+  = t=1000011 link=1 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> input MENU_KEY_DRIVE
+  now_us -> 1000011
+  sample -> link=1 mib=IDLE screen=SEAT menu=0
+  -> 0
+  = t=1000012 link=1 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> exit_hold_done
+  publish(DISABLE)
+  now_us -> 1000012
+  = t=1000013 link=1 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> link 1
+  = t=1000013 link=1 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> clock_to warn+1 (not armed)
+  = t=1000013 link=1 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> menu 0
+  = t=1000013 link=1 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000013
+  sample -> link=1 mib=IDLE screen=SEAT menu=0
+  now_us -> 1000014
+  sample -> link=1 mib=IDLE screen=SEAT menu=0
+  = t=1000015 link=1 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> menu 1
+  = t=1000015 link=1 mib=IDLE screen=SEAT menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000015
+  sample -> link=1 mib=IDLE screen=SEAT menu=1
+  now_us -> 1000016
+  sample -> link=1 mib=IDLE screen=SEAT menu=1
+  = t=1000017 link=1 mib=IDLE screen=SEAT menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> unlock_hold_done
+  now_us -> 1000017
+  sample -> link=1 mib=IDLE screen=SEAT menu=1
+  ring_wait
+  now_us -> 1000018
+  publish(ENABLE)
+  = t=1000019 link=1 mib=IDLE screen=SEAT menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> input MENU_ROW_DRIVE
+  now_us -> 1000019
+  sample -> link=1 mib=IDLE screen=SEAT menu=1
+  -> 0
+  = t=1000020 link=1 mib=IDLE screen=SEAT menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> unlock_hold_done
+  now_us -> 1000020
+  sample -> link=1 mib=IDLE screen=SEAT menu=1
+  = t=1000021 link=1 mib=IDLE screen=SEAT menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> advance 500000
+  = t=1500021 link=1 mib=IDLE screen=SEAT menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> unlock_hold_done
+  now_us -> 1500021
+  sample -> link=1 mib=IDLE screen=SEAT menu=1
+  = t=1500022 link=1 mib=IDLE screen=SEAT menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> input MENU_KEY_DRIVE
+  now_us -> 1500022
+  sample -> link=1 mib=IDLE screen=SEAT menu=1
+  -> 0
+  = t=1500023 link=1 mib=IDLE screen=SEAT menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> profile HIGH
+  now_us -> 1500023
+  sample -> link=1 mib=IDLE screen=SEAT menu=1
+  publish(ENABLE)
+  -> 1
+  = t=1500024 link=1 mib=IDLE screen=SEAT menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> unlock_hold_done
+  now_us -> 1500024
+  sample -> link=1 mib=IDLE screen=SEAT menu=1
+  = t=1500025 link=1 mib=IDLE screen=SEAT menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> exit_hold_done
+  publish(DISABLE)
+  now_us -> 1500025
+  = t=1500026 link=1 mib=IDLE screen=SEAT menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> exit_hold_done
+  publish(DISABLE)
+  now_us -> 1500026
+  = t=1500027 link=1 mib=IDLE screen=SEAT menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1500027
+  sample -> link=1 mib=IDLE screen=SEAT menu=1
+  now_us -> 1500028
+  sample -> link=1 mib=IDLE screen=SEAT menu=1
+  = t=1500029 link=1 mib=IDLE screen=SEAT menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1500029
+  sample -> link=1 mib=IDLE screen=SEAT menu=1
+  now_us -> 1500030
+  sample -> link=1 mib=IDLE screen=SEAT menu=1
+  = t=1500031 link=1 mib=IDLE screen=SEAT menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> screen LOCKED
+  = t=1500031 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> timer_fires (not armed)
+  = t=1500031 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> mib ERROR
+  = t=1500031 link=1 mib=ERROR screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1500031
+  sample -> link=1 mib=ERROR screen=LOCKED menu=0
+  now_us -> 1500032
+  sample -> link=1 mib=ERROR screen=LOCKED menu=0
+  = t=1500033 link=1 mib=ERROR screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+> advance 5000000
+  = t=6500033 link=1 mib=ERROR screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=0/0
+# random walk 8
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> timer_fires (not armed)
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> input MENU_KEY_DRIVE
+  now_us -> 1000000
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  -> 0
+  = t=1000001 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> unlock_hold_done
+  now_us -> 1000001
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=1000002 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> unlock_hold_done
+  now_us -> 1000002
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=1000003 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> timer_fires (not armed)
+  = t=1000003 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 1000003
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 1000004
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  = t=1000005 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> profile LOW
+  now_us -> 1000005
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  publish(DISABLE)
+  -> 1
+  = t=1000006 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input MENU_ROW_DRIVE
+  now_us -> 1000006
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  refusal_feedback
+  show_banner(REFUSED_DRIVE_MENU)
+  -> 1
+  = t=1000007 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> exit_hold_done
+  publish(DISABLE)
+  now_us -> 1000007
+  = t=1000008 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> menu 1
+  = t=1000008 link=0 mib=INITIALIZING screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> input MENU_KEY_DRIVE
+  now_us -> 1000008
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=1
+  -> 0
+  = t=1000009 link=0 mib=INITIALIZING screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> profile NORMAL
+  now_us -> 1000009
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=1
+  publish(DISABLE)
+  -> 1
+  = t=1000010 link=0 mib=INITIALIZING screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> link 1
+  = t=1000010 link=1 mib=INITIALIZING screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> advance 1000000
+  = t=2000010 link=1 mib=INITIALIZING screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> frame
+  = t=2000010 link=1 mib=INITIALIZING screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> unlock_hold_done
+  now_us -> 2000010
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=1
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=2000011 link=1 mib=INITIALIZING screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> profile HIGH
+  now_us -> 2000011
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=1
+  publish(DISABLE)
+  -> 1
+  = t=2000012 link=1 mib=INITIALIZING screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=2000012 link=1 mib=INITIALIZING screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 2000012
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=1
+  now_us -> 2000013
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=1
+  show_banner(EXIT_REFUSED)
+  = t=2000014 link=1 mib=INITIALIZING screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> clock_to exit-1 (not armed)
+  = t=2000014 link=1 mib=INITIALIZING screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> tick
+  now_us -> 2000014
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=1
+  now_us -> 2000015
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=1
+  = t=2000016 link=1 mib=INITIALIZING screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> unlock_hold_done
+  now_us -> 2000016
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=1
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=2000017 link=1 mib=INITIALIZING screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> clock_to warn+1 (not armed)
+  = t=2000017 link=1 mib=INITIALIZING screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> unlock_hold_done
+  now_us -> 2000017
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=1
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=2000018 link=1 mib=INITIALIZING screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=2000018 link=1 mib=INITIALIZING screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=2000018 link=1 mib=INITIALIZING screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> exit_hold_done
+  publish(DISABLE)
+  now_us -> 2000018
+  = t=2000019 link=1 mib=INITIALIZING screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input MENU_KEY_DRIVE
+  now_us -> 2000019
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=1
+  -> 0
+  = t=2000020 link=1 mib=INITIALIZING screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 2000020
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=1
+  now_us -> 2000021
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=1
+  = t=2000022 link=1 mib=INITIALIZING screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> profile LOW
+  now_us -> 2000022
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=1
+  publish(DISABLE)
+  -> 1
+  = t=2000023 link=1 mib=INITIALIZING screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> clock_to exit+0
+  = t=2750018 link=1 mib=INITIALIZING screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> menu 0
+  = t=2750018 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=2750018 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 2750018
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 2750019
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=0
+  show_banner(EXIT_REFUSED)
+  = t=2750020 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> input ENTRY_PUSH
+  now_us -> 2750020
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=0
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  -> 1
+  = t=2750021 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> mib ENABLED
+  = t=2750021 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> unlock_hold_done
+  now_us -> 2750021
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  ring_wait
+  now_us -> 2750022
+  publish(ENABLE)
+  = t=2750023 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=1/3000
+> frame
+  = t=2750023 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=1/3000
+> mib ENABLED
+  = t=2750023 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 2750023
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  lock_open_visual
+  unlock_timer_cancel
+  unlock_timer_start
+  set_locked(0)
+  gate_update -> gate=0
+  now_us -> 2750024
+  sample -> link=1 mib=ENABLED screen=LOCKED menu=0
+  = t=2750025 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=0 wait=0 timer=1 gate=0 banner=1/3000
+# random walk 9
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> input MENU_ROW_DRIVE
+  now_us -> 1000000
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  refusal_feedback
+  show_banner(REFUSED_DRIVE_MENU)
+  -> 1
+  = t=1000001 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> clock_to warn+1 (not armed)
+  = t=1000001 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> input ENTRY_PUSH
+  now_us -> 1000001
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  -> 1
+  = t=1000002 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> unlock_hold_done
+  now_us -> 1000002
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=1000003 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 250000
+  = t=1250003 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input MENU_KEY_DRIVE
+  now_us -> 1250003
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  -> 0
+  = t=1250004 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> link 1
+  = t=1250004 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> clock_to warn-1 (not armed)
+  = t=1250004 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 50000
+  = t=1300004 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 1300004
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 1300005
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=0
+  = t=1300006 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 1300006
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 1300007
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=0
+  = t=1300008 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 1300008
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 1300009
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=0
+  = t=1300010 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=1300010 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> clock_to warn-1 (not armed)
+  = t=1300010 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input ENTRY_PUSH
+  now_us -> 1300010
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=0
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  -> 1
+  = t=1300011 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 1000000
+  = t=2300011 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input MENU_KEY_DRIVE
+  now_us -> 2300011
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=0
+  -> 0
+  = t=2300012 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 250000
+  = t=2550012 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 2550012
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 2550013
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=0
+  = t=2550014 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=2550014 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 2550014
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 2550015
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=0
+  = t=2550016 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 760000
+  = t=3310016 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 3310016
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 3310017
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=0
+  = t=3310018 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> timer_fires (not armed)
+  = t=3310018 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=3310018 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input MENU_ROW_DRIVE
+  now_us -> 3310018
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=0
+  refusal_feedback
+  show_banner(REFUSED_DRIVE_MENU)
+  -> 1
+  = t=3310019 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> advance 250000
+  = t=3560019 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> unlock_hold_done
+  now_us -> 3560019
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=3560020 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=3560020 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 760000
+  = t=4320020 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=4320020 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> timer_fires (not armed)
+  = t=4320020 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 1000000
+  = t=5320020 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 5320020
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 5320021
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=0
+  = t=5320022 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> menu 1
+  = t=5320022 link=1 mib=INITIALIZING screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> mib INITIALIZING
+  = t=5320022 link=1 mib=INITIALIZING screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> unlock_hold_done
+  now_us -> 5320022
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=1
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=5320023 link=1 mib=INITIALIZING screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> mib IDLE
+  = t=5320023 link=1 mib=IDLE screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> screen JOYSTICK
+  = t=5320023 link=1 mib=IDLE screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 5320023
+  sample -> link=1 mib=IDLE screen=JOYSTICK menu=0
+  now_us -> 5320024
+  sample -> link=1 mib=IDLE screen=JOYSTICK menu=0
+  = t=5320025 link=1 mib=IDLE screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+# random walk 10
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> input MENU_ROW_DRIVE
+  now_us -> 1000000
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  refusal_feedback
+  show_banner(REFUSED_DRIVE_MENU)
+  -> 1
+  = t=1000001 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> link 1
+  = t=1000001 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> advance 1000000
+  = t=2000001 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> link 1
+  = t=2000001 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> link 1
+  = t=2000001 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> input ENTRY_PUSH
+  now_us -> 2000001
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=0
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  -> 1
+  = t=2000002 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> link 1
+  = t=2000002 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> exit_hold_done
+  publish(DISABLE)
+  now_us -> 2000002
+  = t=2000003 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=2000003 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> mib BOGUS
+  = t=2000003 link=1 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> unlock_hold_done
+  now_us -> 2000003
+  sample -> link=1 mib=BOGUS screen=LOCKED menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=2000004 link=1 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 2000004
+  sample -> link=1 mib=BOGUS screen=LOCKED menu=0
+  now_us -> 2000005
+  sample -> link=1 mib=BOGUS screen=LOCKED menu=0
+  = t=2000006 link=1 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input MENU_KEY_DRIVE
+  now_us -> 2000006
+  sample -> link=1 mib=BOGUS screen=LOCKED menu=0
+  -> 0
+  = t=2000007 link=1 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> clock_to exit-1
+  = t=2750001 link=1 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=2750001 link=1 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> clock_to giveup+0 (not armed)
+  = t=2750001 link=1 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=2750001 link=1 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> clock_to exit+1
+  = t=2750003 link=1 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> profile HIGH
+  now_us -> 2750003
+  sample -> link=1 mib=BOGUS screen=LOCKED menu=0
+  publish(DISABLE)
+  -> 1
+  = t=2750004 link=1 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 5000000
+  = t=7750004 link=1 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> profile HIGH
+  now_us -> 7750004
+  sample -> link=1 mib=BOGUS screen=LOCKED menu=0
+  publish(DISABLE)
+  -> 1
+  = t=7750005 link=1 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> mib BOGUS
+  = t=7750005 link=1 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 50000
+  = t=7800005 link=1 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 760000
+  = t=8560005 link=1 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input MENU_KEY_DRIVE
+  now_us -> 8560005
+  sample -> link=1 mib=BOGUS screen=LOCKED menu=0
+  -> 0
+  = t=8560006 link=1 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input MENU_ROW_DRIVE
+  now_us -> 8560006
+  sample -> link=1 mib=BOGUS screen=LOCKED menu=0
+  refusal_feedback
+  show_banner(REFUSED_DRIVE_MENU)
+  -> 1
+  = t=8560007 link=1 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> unlock_hold_done
+  now_us -> 8560007
+  sample -> link=1 mib=BOGUS screen=LOCKED menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=8560008 link=1 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 2100000
+  = t=10660008 link=1 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 10660008
+  sample -> link=1 mib=BOGUS screen=LOCKED menu=0
+  now_us -> 10660009
+  sample -> link=1 mib=BOGUS screen=LOCKED menu=0
+  show_banner(EXIT_REFUSED)
+  = t=10660010 link=1 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> menu 0
+  = t=10660010 link=1 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> input MENU_KEY_DRIVE
+  now_us -> 10660010
+  sample -> link=1 mib=BOGUS screen=LOCKED menu=0
+  -> 0
+  = t=10660011 link=1 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> mib ENABLED
+  = t=10660011 link=1 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> mib ERROR
+  = t=10660011 link=1 mib=ERROR screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> input MENU_ROW_DRIVE
+  now_us -> 10660011
+  sample -> link=1 mib=ERROR screen=LOCKED menu=0
+  refusal_feedback
+  show_banner(REFUSED_DRIVE_MENU)
+  -> 1
+  = t=10660012 link=1 mib=ERROR screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> input ENTRY_PUSH
+  now_us -> 10660012
+  sample -> link=1 mib=ERROR screen=LOCKED menu=0
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  -> 1
+  = t=10660013 link=1 mib=ERROR screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> exit_hold_done
+  publish(DISABLE)
+  now_us -> 10660013
+  = t=10660014 link=1 mib=ERROR screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> link 1
+  = t=10660014 link=1 mib=ERROR screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> link 1
+  = t=10660014 link=1 mib=ERROR screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> exit_hold_done
+  publish(DISABLE)
+  now_us -> 10660014
+  = t=10660015 link=1 mib=ERROR screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input ENTRY_PUSH
+  now_us -> 10660015
+  sample -> link=1 mib=ERROR screen=LOCKED menu=0
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  -> 1
+  = t=10660016 link=1 mib=ERROR screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+# random walk 11
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> frame
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> screen SEAT
+  = t=1000000 link=0 mib=INITIALIZING screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> frame
+  = t=1000000 link=0 mib=INITIALIZING screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> frame
+  = t=1000000 link=0 mib=INITIALIZING screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> screen BOOT
+  = t=1000000 link=0 mib=INITIALIZING screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> advance 760000
+  = t=1760000 link=0 mib=INITIALIZING screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib IDLE
+  = t=1760000 link=0 mib=IDLE screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> frame
+  = t=1760000 link=0 mib=IDLE screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> clock_to exit-1 (not armed)
+  = t=1760000 link=0 mib=IDLE screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1760000
+  sample -> link=0 mib=IDLE screen=BOOT menu=0
+  now_us -> 1760001
+  sample -> link=0 mib=IDLE screen=BOOT menu=0
+  = t=1760002 link=0 mib=IDLE screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> unlock_hold_done
+  now_us -> 1760002
+  sample -> link=0 mib=IDLE screen=BOOT menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=1760003 link=0 mib=IDLE screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> link 0
+  = t=1760003 link=0 mib=IDLE screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 1760003
+  sample -> link=0 mib=IDLE screen=BOOT menu=0
+  now_us -> 1760004
+  sample -> link=0 mib=IDLE screen=BOOT menu=0
+  = t=1760005 link=0 mib=IDLE screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> unlock_hold_done
+  now_us -> 1760005
+  sample -> link=0 mib=IDLE screen=BOOT menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=1760006 link=0 mib=IDLE screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=1760006 link=0 mib=IDLE screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 2100000
+  = t=3860006 link=0 mib=IDLE screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> unlock_hold_done
+  now_us -> 3860006
+  sample -> link=0 mib=IDLE screen=BOOT menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=3860007 link=0 mib=IDLE screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 3860007
+  sample -> link=0 mib=IDLE screen=BOOT menu=0
+  now_us -> 3860008
+  sample -> link=0 mib=IDLE screen=BOOT menu=0
+  = t=3860009 link=0 mib=IDLE screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> menu 0
+  = t=3860009 link=0 mib=IDLE screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> screen LOCKED
+  = t=3860009 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input MENU_KEY_DRIVE
+  now_us -> 3860009
+  sample -> link=0 mib=IDLE screen=LOCKED menu=0
+  -> 0
+  = t=3860010 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input MENU_KEY_DRIVE
+  now_us -> 3860010
+  sample -> link=0 mib=IDLE screen=LOCKED menu=0
+  -> 0
+  = t=3860011 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> screen SEAT
+  = t=3860011 link=0 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> menu 0
+  = t=3860011 link=0 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=3860011 link=0 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 3860011
+  sample -> link=0 mib=IDLE screen=SEAT menu=0
+  nav_home
+  show_banner(REFUSED_SEAT)
+  now_us -> 3860012
+  sample -> link=0 mib=IDLE screen=SEAT menu=0
+  = t=3860013 link=0 mib=IDLE screen=SEAT->LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=2/3000
+> screen BOOT
+  = t=3860013 link=0 mib=IDLE screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=2/3000
+> screen DRIVE
+  = t=3860013 link=0 mib=IDLE screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=2/3000
+> advance 5000000
+  = t=8860013 link=0 mib=IDLE screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=2/3000
+> tick
+  now_us -> 8860013
+  sample -> link=0 mib=IDLE screen=DRIVE menu=0
+  now_us -> 8860014
+  sample -> link=0 mib=IDLE screen=DRIVE menu=0
+  = t=8860015 link=0 mib=IDLE screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=2/3000
+> tick
+  now_us -> 8860015
+  sample -> link=0 mib=IDLE screen=DRIVE menu=0
+  now_us -> 8860016
+  sample -> link=0 mib=IDLE screen=DRIVE menu=0
+  = t=8860017 link=0 mib=IDLE screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=2/3000
+> timer_fires (not armed)
+  = t=8860017 link=0 mib=IDLE screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=2/3000
+> tick
+  now_us -> 8860017
+  sample -> link=0 mib=IDLE screen=DRIVE menu=0
+  now_us -> 8860018
+  sample -> link=0 mib=IDLE screen=DRIVE menu=0
+  = t=8860019 link=0 mib=IDLE screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=2/3000
+> mib INITIALIZING
+  = t=8860019 link=0 mib=INITIALIZING screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=2/3000
+> mib ERROR
+  = t=8860019 link=0 mib=ERROR screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=2/3000
+> tick
+  now_us -> 8860019
+  sample -> link=0 mib=ERROR screen=DRIVE menu=0
+  now_us -> 8860020
+  sample -> link=0 mib=ERROR screen=DRIVE menu=0
+  = t=8860021 link=0 mib=ERROR screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=2/3000
+> advance 760000
+  = t=9620021 link=0 mib=ERROR screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=2/3000
+> tick
+  now_us -> 9620021
+  sample -> link=0 mib=ERROR screen=DRIVE menu=0
+  now_us -> 9620022
+  sample -> link=0 mib=ERROR screen=DRIVE menu=0
+  = t=9620023 link=0 mib=ERROR screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=2/3000
+> menu 0
+  = t=9620023 link=0 mib=ERROR screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=2/3000
+> timer_fires (not armed)
+  = t=9620023 link=0 mib=ERROR screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=2/3000
+# random walk 12
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib IDLE
+  = t=1000000 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> input ENTRY_PUSH
+  now_us -> 1000000
+  sample -> link=0 mib=IDLE screen=LOCKED menu=0
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  -> 1
+  = t=1000001 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=1000001 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 1000001
+  sample -> link=0 mib=IDLE screen=LOCKED menu=0
+  now_us -> 1000002
+  sample -> link=0 mib=IDLE screen=LOCKED menu=0
+  = t=1000003 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> unlock_hold_done
+  now_us -> 1000003
+  sample -> link=0 mib=IDLE screen=LOCKED menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=1000004 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> link 1
+  = t=1000004 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 250000
+  = t=1250004 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input ENTRY_PUSH
+  now_us -> 1250004
+  sample -> link=1 mib=IDLE screen=LOCKED menu=0
+  -> 0
+  = t=1250005 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=1250005 link=1 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> menu 1
+  = t=1250005 link=1 mib=IDLE screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input MENU_ROW_DRIVE
+  now_us -> 1250005
+  sample -> link=1 mib=IDLE screen=LOCKED menu=1
+  -> 0
+  = t=1250006 link=1 mib=IDLE screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> clock_to giveup+1 (not armed)
+  = t=1250006 link=1 mib=IDLE screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> unlock_hold_done
+  now_us -> 1250006
+  sample -> link=1 mib=IDLE screen=LOCKED menu=1
+  ring_wait
+  now_us -> 1250007
+  publish(ENABLE)
+  = t=1250008 link=1 mib=IDLE screen=LOCKED menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 1250008
+  sample -> link=1 mib=IDLE screen=LOCKED menu=1
+  now_us -> 1250009
+  sample -> link=1 mib=IDLE screen=LOCKED menu=1
+  = t=1250010 link=1 mib=IDLE screen=LOCKED menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 1250010
+  sample -> link=1 mib=IDLE screen=LOCKED menu=1
+  now_us -> 1250011
+  sample -> link=1 mib=IDLE screen=LOCKED menu=1
+  = t=1250012 link=1 mib=IDLE screen=LOCKED menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=1/3000
+> mib ERROR
+  = t=1250012 link=1 mib=ERROR screen=LOCKED menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=1/3000
+> screen JOYSTICK
+  = t=1250012 link=1 mib=ERROR screen=JOYSTICK menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=1/3000
+> timer_fires (not armed)
+  = t=1250012 link=1 mib=ERROR screen=JOYSTICK menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=1/3000
+> timer_fires (not armed)
+  = t=1250012 link=1 mib=ERROR screen=JOYSTICK menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=1/3000
+> menu 1
+  = t=1250012 link=1 mib=ERROR screen=JOYSTICK menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=1/3000
+> link 1
+  = t=1250012 link=1 mib=ERROR screen=JOYSTICK menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=1/3000
+> input ENTRY_PUSH
+  now_us -> 1250012
+  sample -> link=1 mib=ERROR screen=JOYSTICK menu=1
+  -> 0
+  = t=1250013 link=1 mib=ERROR screen=JOYSTICK menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 1250013
+  sample -> link=1 mib=ERROR screen=JOYSTICK menu=1
+  now_us -> 1250014
+  sample -> link=1 mib=ERROR screen=JOYSTICK menu=1
+  = t=1250015 link=1 mib=ERROR screen=JOYSTICK menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=1/3000
+> input ENTRY_PUSH
+  now_us -> 1250015
+  sample -> link=1 mib=ERROR screen=JOYSTICK menu=1
+  -> 0
+  = t=1250016 link=1 mib=ERROR screen=JOYSTICK menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=1/3000
+> exit_hold_done
+  publish(DISABLE)
+  now_us -> 1250016
+  = t=1250017 link=1 mib=ERROR screen=JOYSTICK menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 1250017
+  sample -> link=1 mib=ERROR screen=JOYSTICK menu=1
+  now_us -> 1250018
+  sample -> link=1 mib=ERROR screen=JOYSTICK menu=1
+  = t=1250019 link=1 mib=ERROR screen=JOYSTICK menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=1/3000
+> frame
+  = t=1250019 link=1 mib=ERROR screen=JOYSTICK menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 1250019
+  sample -> link=1 mib=ERROR screen=JOYSTICK menu=1
+  now_us -> 1250020
+  sample -> link=1 mib=ERROR screen=JOYSTICK menu=1
+  = t=1250021 link=1 mib=ERROR screen=JOYSTICK menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=1/3000
+> input MENU_KEY_DRIVE
+  now_us -> 1250021
+  sample -> link=1 mib=ERROR screen=JOYSTICK menu=1
+  -> 0
+  = t=1250022 link=1 mib=ERROR screen=JOYSTICK menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=1/3000
+> frame
+  = t=1250022 link=1 mib=ERROR screen=JOYSTICK menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=1/3000
+> frame
+  = t=1250022 link=1 mib=ERROR screen=JOYSTICK menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=1/3000
+> input MENU_ROW_DRIVE
+  now_us -> 1250022
+  sample -> link=1 mib=ERROR screen=JOYSTICK menu=1
+  refusal_feedback
+  show_banner(REFUSED_DRIVE_MENU)
+  -> 1
+  = t=1250023 link=1 mib=ERROR screen=JOYSTICK menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=7/3000
+> tick
+  now_us -> 1250023
+  sample -> link=1 mib=ERROR screen=JOYSTICK menu=1
+  now_us -> 1250024
+  sample -> link=1 mib=ERROR screen=JOYSTICK menu=1
+  = t=1250025 link=1 mib=ERROR screen=JOYSTICK menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=7/3000
+> clock_to exit+0
+  = t=2000016 link=1 mib=ERROR screen=JOYSTICK menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=7/3000
+> profile LOW
+  now_us -> 2000016
+  sample -> link=1 mib=ERROR screen=JOYSTICK menu=1
+  publish(DISABLE)
+  -> 1
+  = t=2000017 link=1 mib=ERROR screen=JOYSTICK menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=7/3000
+> tick
+  now_us -> 2000017
+  sample -> link=1 mib=ERROR screen=JOYSTICK menu=1
+  now_us -> 2000018
+  sample -> link=1 mib=ERROR screen=JOYSTICK menu=1
+  show_banner(EXIT_REFUSED)
+  show_banner(NOT_GRANTED)
+  = t=2000019 link=1 mib=ERROR screen=JOYSTICK menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=3/3000
+> advance 50000
+  = t=2050019 link=1 mib=ERROR screen=JOYSTICK menu=1 moa=0 locked=1 wait=1 timer=0 gate=0 banner=3/3000
+> screen SEAT
+  = t=2050019 link=1 mib=ERROR screen=SEAT menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=3/3000
+> tick
+  now_us -> 2050019
+  sample -> link=1 mib=ERROR screen=SEAT menu=0
+  nav_home
+  show_banner(REFUSED_SEAT)
+  now_us -> 2050020
+  sample -> link=1 mib=ERROR screen=SEAT menu=0
+  = t=2050021 link=1 mib=ERROR screen=SEAT->LOCKED menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=2/3000
+> screen SEAT
+  = t=2050021 link=1 mib=ERROR screen=SEAT menu=0 moa=0 locked=1 wait=1 timer=0 gate=0 banner=2/3000
+# random walk 13
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000000
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 1000001
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  = t=1000002 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> advance 1000000
+  = t=2000002 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> advance 2100000
+  = t=4100002 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> profile NORMAL
+  now_us -> 4100002
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  publish(DISABLE)
+  -> 1
+  = t=4100003 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 4100003
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 4100004
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  = t=4100005 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 4100005
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 4100006
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  = t=4100007 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 4100007
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 4100008
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  = t=4100009 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> advance 250000
+  = t=4350009 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 4350009
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 4350010
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  = t=4350011 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> input ENTRY_PUSH
+  now_us -> 4350011
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  -> 1
+  = t=4350012 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 1000000
+  = t=5350012 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> mib ENABLED
+  = t=5350012 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 1000000
+  = t=6350012 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 6350012
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  now_us -> 6350013
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  = t=6350014 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 250000
+  = t=6600014 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=6600014 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> exit_hold_done
+  publish(DISABLE)
+  now_us -> 6600014
+  = t=6600015 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> profile LOW
+  now_us -> 6600015
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=0
+  publish(DISABLE)
+  -> 1
+  = t=6600016 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> menu 1
+  = t=6600016 link=0 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> profile LOW
+  now_us -> 6600016
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=1
+  publish(DISABLE)
+  -> 1
+  = t=6600017 link=0 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 6600017
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=1
+  now_us -> 6600018
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=1
+  = t=6600019 link=0 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 6600019
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=1
+  now_us -> 6600020
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=1
+  = t=6600021 link=0 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> clock_to giveup-1 (not armed)
+  = t=6600021 link=0 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input MENU_ROW_DRIVE
+  now_us -> 6600021
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=1
+  refusal_feedback
+  show_banner(REFUSED_DRIVE_MENU)
+  -> 1
+  = t=6600022 link=0 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> tick
+  now_us -> 6600022
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=1
+  now_us -> 6600023
+  sample -> link=0 mib=ENABLED screen=LOCKED menu=1
+  = t=6600024 link=0 mib=ENABLED screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> mib BOGUS
+  = t=6600024 link=0 mib=BOGUS screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> tick
+  now_us -> 6600024
+  sample -> link=0 mib=BOGUS screen=LOCKED menu=1
+  now_us -> 6600025
+  sample -> link=0 mib=BOGUS screen=LOCKED menu=1
+  = t=6600026 link=0 mib=BOGUS screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> frame
+  = t=6600026 link=0 mib=BOGUS screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> advance 250000
+  = t=6850026 link=0 mib=BOGUS screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> advance 50000
+  = t=6900026 link=0 mib=BOGUS screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> input MENU_KEY_DRIVE
+  now_us -> 6900026
+  sample -> link=0 mib=BOGUS screen=LOCKED menu=1
+  -> 0
+  = t=6900027 link=0 mib=BOGUS screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> frame
+  = t=6900027 link=0 mib=BOGUS screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> exit_hold_done
+  publish(DISABLE)
+  now_us -> 6900027
+  = t=6900028 link=0 mib=BOGUS screen=LOCKED menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> menu 0
+  = t=6900028 link=0 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> frame
+  = t=6900028 link=0 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> advance 2100000
+  = t=9000028 link=0 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> profile LOW
+  now_us -> 9000028
+  sample -> link=0 mib=BOGUS screen=LOCKED menu=0
+  publish(DISABLE)
+  -> 1
+  = t=9000029 link=0 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> tick
+  now_us -> 9000029
+  sample -> link=0 mib=BOGUS screen=LOCKED menu=0
+  now_us -> 9000030
+  sample -> link=0 mib=BOGUS screen=LOCKED menu=0
+  show_banner(EXIT_REFUSED)
+  = t=9000031 link=0 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> tick
+  now_us -> 9000031
+  sample -> link=0 mib=BOGUS screen=LOCKED menu=0
+  now_us -> 9000032
+  sample -> link=0 mib=BOGUS screen=LOCKED menu=0
+  = t=9000033 link=0 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> input MENU_ROW_DRIVE
+  now_us -> 9000033
+  sample -> link=0 mib=BOGUS screen=LOCKED menu=0
+  refusal_feedback
+  show_banner(REFUSED_DRIVE_MENU)
+  -> 1
+  = t=9000034 link=0 mib=BOGUS screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+# random walk 14
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> frame
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> link 0
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> tick
+  now_us -> 1000000
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 1000001
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  = t=1000002 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> clock_to giveup+1 (not armed)
+  = t=1000002 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> input ENTRY_PUSH
+  now_us -> 1000002
+  sample -> link=0 mib=INITIALIZING screen=LOCKED menu=0
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  -> 1
+  = t=1000003 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> link 1
+  = t=1000003 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 1000003
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=0
+  now_us -> 1000004
+  sample -> link=1 mib=INITIALIZING screen=LOCKED menu=0
+  = t=1000005 link=1 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> screen BOOT
+  = t=1000005 link=1 mib=INITIALIZING screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 1000005
+  sample -> link=1 mib=INITIALIZING screen=BOOT menu=0
+  now_us -> 1000006
+  sample -> link=1 mib=INITIALIZING screen=BOOT menu=0
+  = t=1000007 link=1 mib=INITIALIZING screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> link 1
+  = t=1000007 link=1 mib=INITIALIZING screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> clock_to giveup+1 (not armed)
+  = t=1000007 link=1 mib=INITIALIZING screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 1000007
+  sample -> link=1 mib=INITIALIZING screen=BOOT menu=0
+  now_us -> 1000008
+  sample -> link=1 mib=INITIALIZING screen=BOOT menu=0
+  = t=1000009 link=1 mib=INITIALIZING screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> clock_to giveup-1 (not armed)
+  = t=1000009 link=1 mib=INITIALIZING screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> unlock_hold_done
+  now_us -> 1000009
+  sample -> link=1 mib=INITIALIZING screen=BOOT menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=1000010 link=1 mib=INITIALIZING screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input ENTRY_PUSH
+  now_us -> 1000010
+  sample -> link=1 mib=INITIALIZING screen=BOOT menu=0
+  -> 0
+  = t=1000011 link=1 mib=INITIALIZING screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> menu 1
+  = t=1000011 link=1 mib=INITIALIZING screen=BOOT menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> mib ERROR
+  = t=1000011 link=1 mib=ERROR screen=BOOT menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 1000011
+  sample -> link=1 mib=ERROR screen=BOOT menu=1
+  now_us -> 1000012
+  sample -> link=1 mib=ERROR screen=BOOT menu=1
+  = t=1000013 link=1 mib=ERROR screen=BOOT menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> screen DRIVE
+  = t=1000013 link=1 mib=ERROR screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 1000013
+  sample -> link=1 mib=ERROR screen=DRIVE menu=0
+  now_us -> 1000014
+  sample -> link=1 mib=ERROR screen=DRIVE menu=0
+  = t=1000015 link=1 mib=ERROR screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> unlock_hold_done
+  now_us -> 1000015
+  sample -> link=1 mib=ERROR screen=DRIVE menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=1000016 link=1 mib=ERROR screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> frame
+  = t=1000016 link=1 mib=ERROR screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 5000000
+  = t=6000016 link=1 mib=ERROR screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 6000016
+  sample -> link=1 mib=ERROR screen=DRIVE menu=0
+  now_us -> 6000017
+  sample -> link=1 mib=ERROR screen=DRIVE menu=0
+  = t=6000018 link=1 mib=ERROR screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> unlock_hold_done
+  now_us -> 6000018
+  sample -> link=1 mib=ERROR screen=DRIVE menu=0
+  ring_rest
+  show_banner(REFUSED_DRIVE)
+  refusal_feedback
+  = t=6000019 link=1 mib=ERROR screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> mib ENABLED
+  = t=6000019 link=1 mib=ENABLED screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> mib IDLE
+  = t=6000019 link=1 mib=IDLE screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input MENU_KEY_DRIVE
+  now_us -> 6000019
+  sample -> link=1 mib=IDLE screen=DRIVE menu=0
+  -> 0
+  = t=6000020 link=1 mib=IDLE screen=DRIVE menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> screen SEAT
+  = t=6000020 link=1 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> timer_fires (not armed)
+  = t=6000020 link=1 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 1000000
+  = t=7000020 link=1 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 7000020
+  sample -> link=1 mib=IDLE screen=SEAT menu=0
+  now_us -> 7000021
+  sample -> link=1 mib=IDLE screen=SEAT menu=0
+  = t=7000022 link=1 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> clock_to warn+1 (not armed)
+  = t=7000022 link=1 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> advance 1000000
+  = t=8000022 link=1 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input MENU_KEY_DRIVE
+  now_us -> 8000022
+  sample -> link=1 mib=IDLE screen=SEAT menu=0
+  -> 0
+  = t=8000023 link=1 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> menu 1
+  = t=8000023 link=1 mib=IDLE screen=SEAT menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> input MENU_KEY_DRIVE
+  now_us -> 8000023
+  sample -> link=1 mib=IDLE screen=SEAT menu=1
+  -> 0
+  = t=8000024 link=1 mib=IDLE screen=SEAT menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> tick
+  now_us -> 8000024
+  sample -> link=1 mib=IDLE screen=SEAT menu=1
+  now_us -> 8000025
+  sample -> link=1 mib=IDLE screen=SEAT menu=1
+  = t=8000026 link=1 mib=IDLE screen=SEAT menu=1 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> menu 0
+  = t=8000026 link=1 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+> timer_fires (not armed)
+  = t=8000026 link=1 mib=IDLE screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=1/3000
+# random walk 15
+  = t=1000000 link=0 mib=INITIALIZING screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> mib IDLE
+  = t=1000000 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> timer_fires (not armed)
+  = t=1000000 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> clock_to exit-1 (not armed)
+  = t=1000000 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=0/0
+> input MENU_ROW_DRIVE
+  now_us -> 1000000
+  sample -> link=0 mib=IDLE screen=LOCKED menu=0
+  refusal_feedback
+  show_banner(REFUSED_DRIVE_MENU)
+  -> 1
+  = t=1000001 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> clock_to giveup+0 (not armed)
+  = t=1000001 link=0 mib=IDLE screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> mib ENABLED
+  = t=1000001 link=0 mib=ENABLED screen=LOCKED menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> screen SEAT
+  = t=1000001 link=0 mib=ENABLED screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> exit_hold_done
+  publish(DISABLE)
+  now_us -> 1000001
+  = t=1000002 link=0 mib=ENABLED screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> advance 500000
+  = t=1500002 link=0 mib=ENABLED screen=SEAT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> screen BOOT
+  = t=1500002 link=0 mib=ENABLED screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> tick
+  now_us -> 1500002
+  sample -> link=0 mib=ENABLED screen=BOOT menu=0
+  now_us -> 1500003
+  sample -> link=0 mib=ENABLED screen=BOOT menu=0
+  = t=1500004 link=0 mib=ENABLED screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> clock_to warn+0 (not armed)
+  = t=1500004 link=0 mib=ENABLED screen=BOOT menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> screen JOYSTICK
+  = t=1500004 link=0 mib=ENABLED screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> frame
+  = t=1500004 link=0 mib=ENABLED screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> frame
+  = t=1500004 link=0 mib=ENABLED screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> tick
+  now_us -> 1500004
+  sample -> link=0 mib=ENABLED screen=JOYSTICK menu=0
+  now_us -> 1500005
+  sample -> link=0 mib=ENABLED screen=JOYSTICK menu=0
+  = t=1500006 link=0 mib=ENABLED screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> input MENU_KEY_DRIVE
+  now_us -> 1500006
+  sample -> link=0 mib=ENABLED screen=JOYSTICK menu=0
+  -> 0
+  = t=1500007 link=0 mib=ENABLED screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> tick
+  now_us -> 1500007
+  sample -> link=0 mib=ENABLED screen=JOYSTICK menu=0
+  now_us -> 1500008
+  sample -> link=0 mib=ENABLED screen=JOYSTICK menu=0
+  = t=1500009 link=0 mib=ENABLED screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> mib ENABLED
+  = t=1500009 link=0 mib=ENABLED screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> input ENTRY_PUSH
+  now_us -> 1500009
+  sample -> link=0 mib=ENABLED screen=JOYSTICK menu=0
+  -> 0
+  = t=1500010 link=0 mib=ENABLED screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> menu 0
+  = t=1500010 link=0 mib=ENABLED screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> frame
+  = t=1500010 link=0 mib=ENABLED screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> advance 500000
+  = t=2000010 link=0 mib=ENABLED screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> advance 500000
+  = t=2500010 link=0 mib=ENABLED screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> advance 1000000
+  = t=3500010 link=0 mib=ENABLED screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> link 0
+  = t=3500010 link=0 mib=ENABLED screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> input MENU_ROW_DRIVE
+  now_us -> 3500010
+  sample -> link=0 mib=ENABLED screen=JOYSTICK menu=0
+  refusal_feedback
+  show_banner(REFUSED_DRIVE_MENU)
+  -> 1
+  = t=3500011 link=0 mib=ENABLED screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> input ENTRY_PUSH
+  now_us -> 3500011
+  sample -> link=0 mib=ENABLED screen=JOYSTICK menu=0
+  -> 0
+  = t=3500012 link=0 mib=ENABLED screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=7/3000
+> tick
+  now_us -> 3500012
+  sample -> link=0 mib=ENABLED screen=JOYSTICK menu=0
+  now_us -> 3500013
+  sample -> link=0 mib=ENABLED screen=JOYSTICK menu=0
+  show_banner(EXIT_REFUSED)
+  = t=3500014 link=0 mib=ENABLED screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> frame
+  = t=3500014 link=0 mib=ENABLED screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> frame
+  = t=3500014 link=0 mib=ENABLED screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> frame
+  = t=3500014 link=0 mib=ENABLED screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> input ENTRY_PUSH
+  now_us -> 3500014
+  sample -> link=0 mib=ENABLED screen=JOYSTICK menu=0
+  -> 0
+  = t=3500015 link=0 mib=ENABLED screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> frame
+  = t=3500015 link=0 mib=ENABLED screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> exit_hold_done
+  publish(DISABLE)
+  now_us -> 3500015
+  = t=3500016 link=0 mib=ENABLED screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> tick
+  now_us -> 3500016
+  sample -> link=0 mib=ENABLED screen=JOYSTICK menu=0
+  now_us -> 3500017
+  sample -> link=0 mib=ENABLED screen=JOYSTICK menu=0
+  = t=3500018 link=0 mib=ENABLED screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> timer_fires (not armed)
+  = t=3500018 link=0 mib=ENABLED screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> input MENU_KEY_DRIVE
+  now_us -> 3500018
+  sample -> link=0 mib=ENABLED screen=JOYSTICK menu=0
+  -> 0
+  = t=3500019 link=0 mib=ENABLED screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> timer_fires (not armed)
+  = t=3500019 link=0 mib=ENABLED screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000
+> tick
+  now_us -> 3500019
+  sample -> link=0 mib=ENABLED screen=JOYSTICK menu=0
+  now_us -> 3500020
+  sample -> link=0 mib=ENABLED screen=JOYSTICK menu=0
+  = t=3500021 link=0 mib=ENABLED screen=JOYSTICK menu=0 moa=0 locked=1 wait=0 timer=0 gate=0 banner=5/2000

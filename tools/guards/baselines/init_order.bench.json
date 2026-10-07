@@ -1,7 +1,13 @@
 {
   "schema": 1,
   "about": "G4 init-order baseline (tools/guards/init_order.py). Regenerate with `write` only after reviewing the diff; `allow` is hand-kept.",
-  "allow": [],
+  "allow": [
+    {
+      "object": "main/main.cpp.obj",
+      "symbol": "drive_adapter",
+      "reason": "Planned addition (app-main-shrink.md S1, section 2.1: the unit keeps one adapter instance). DriveAdapter<MainDriveView> is built at namespace scope where the drive draft's drive_state was; its constructor builds only an espp::Logger for the fault path (made at start-up, CS-SAF-04): no hardware, LVGL, flash or calibration (V6). Needs the reviewer's OK."
+    }
+  ],
   "shared_objects": [
     "guard variable for fmt::v12::format_facet<std::locale>::id"
   ],

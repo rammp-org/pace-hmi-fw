@@ -19,6 +19,7 @@
 #include <optional>
 #include <stdlib.h>
 #include <sys/time.h>
+#include <utility>
 #include <vector>
 
 #include "m5stack-tab5.hpp"
@@ -47,6 +48,8 @@
 #include "about_ui.hpp"
 #include "actions_spec.h"
 #include "boot_logo.h"
+#include "drive_adapter.hpp"
+#include "drive_session.hpp"
 #include "fw_info.hpp"
 #include "github_ota.hpp"
 #include "internet_ui.hpp"
@@ -809,96 +812,8 @@ extern "C" void app_main(void) {
   // Down at the newest line leaves the log for the burger key.
   log_view_set_escape(nav_to_key);
 
-  // SeatScreen. Both grids are built here rather than declared with
-  // initialisers because the ui_* globals only exist once ui_init has run.
-  //
-  // The numbers skip 3 and jump to 7: SquareLine renumbered these when the
-  // screen was renamed, and re-lettering them would be a permutation that a
-  // name-keyed rename pass cannot apply twice. Phase 5 rebuilds this screen
-  // from a SeatTile component and settles the names then; until it does, the
-  // grid below is the only place the visual order is written down.
-  seat_buttons_grid.rows = 3;
-  seat_buttons_grid.cols[0] = 2;
-  seat_buttons_grid.cell[0][0] = ui_SeatButton1; // Elevation
-  seat_buttons_grid.cell[0][1] = ui_SeatButton2; // Backseat
-  seat_buttons_grid.cols[1] = 2;
-  seat_buttons_grid.cell[1][0] = ui_SeatButton4; // Side Tilt
-  seat_buttons_grid.cell[1][1] = ui_SeatButton7; // Setback
-  seat_buttons_grid.cols[2] = 2;
-  seat_buttons_grid.cell[2][0] = ui_SeatButton5; // Static
-  seat_buttons_grid.cell[2][1] = ui_SeatButton6; // Dynamic
-
-  // Spec 04b, top to bottom: the back button, "-" and "+", the three presets.
-  seat_adjust_grid.rows = 3;
-  seat_adjust_grid.cols[0] = 1;
-  seat_adjust_grid.cell[0][0] = ui_SeatBackButton;
-  seat_adjust_grid.cols[1] = 2;
-  seat_adjust_grid.cell[1][0] = ui_SeatAdjustmentButton1;
-  seat_adjust_grid.cell[1][1] = ui_SeatAdjustmentButton2;
-  seat_adjust_grid.cols[2] = 3;
-  seat_adjust_grid.cell[2][0] = ui_SeatAdjustmentButton3;
-  seat_adjust_grid.cell[2][1] = ui_SeatAdjustmentButton4;
-  seat_adjust_grid.cell[2][2] = ui_SeatAdjustmentButton5;
-
-  // Neither page's buttons carry a FOCUSED style in the export, so joystick
-  // focus would be invisible. Recolour the 2 px border they already have, the
-  // same way the settings rows do, so it tracks the day/dark theme instead of
-  // being a hardcoded accent.
-  //
-  // The selector is spelled out rather than written `LV_PART_MAIN |
-  // LV_STATE_FOCUSED` as the C export does: C++ deprecates a bitwise OR between
-  // two different enum types, and -Werror turns that into a build failure.
-  auto style_focus = [](lv_obj_t *button) {
-    static constexpr lv_style_selector_t kFocused =
-        static_cast<lv_style_selector_t>(LV_PART_MAIN) |
-        static_cast<lv_style_selector_t>(LV_STATE_FOCUSED);
-    ui_object_set_themeable_style_property(button, kFocused, LV_STYLE_BORDER_COLOR,
-                                           _ui_theme_color_focused);
-    ui_object_set_themeable_style_property(button, kFocused, LV_STYLE_BORDER_OPA,
-                                           _ui_theme_alpha_focused);
-  };
-
-  // The label each function button names on the adjustment page, or null for the
-  // two inert ones. Indexed to match seat_buttons_grid.
-  lv_obj_t *seat_labels[3][2] = {
-      {ui_SeatButtonLabel1, ui_SeatButtonLabel2},
-      {ui_SeatButtonLabel4, ui_SeatButtonLabel7},
-      {nullptr, nullptr},
-  };
-
-  seat_group = lv_group_create();
-  for (int r = 0; r < seat_buttons_grid.rows; r++) {
-    for (int c = 0; c < seat_buttons_grid.cols[r]; c++) {
-      lv_obj_t *button = seat_buttons_grid.cell[r][c];
-      lv_group_add_obj(seat_group, button);
-      lv_obj_add_event_cb(button, grid_key_cb, LV_EVENT_KEY, &seat_buttons_grid);
-      lv_obj_add_event_cb(button, seat_click_cb, LV_EVENT_CLICKED, seat_labels[r][c]);
-      style_focus(button);
-    }
-  }
-
-  // The adjustment page: "-"/"+" and the three presets, handled by
-  // grid_click_cb against whichever axis the function button picked, and the
-  // back button, which closes the page. The design draws them in the negative
-  // when pressed or checked; the ring is the cursor, as everywhere else.
-  seat_adjust_group = lv_group_create();
-  for (int r = 0; r < seat_adjust_grid.rows; r++) {
-    for (int c = 0; c < seat_adjust_grid.cols[r]; c++) {
-      lv_obj_t *button = seat_adjust_grid.cell[r][c];
-      lv_group_add_obj(seat_adjust_group, button);
-      lv_obj_add_event_cb(button, grid_key_cb, LV_EVENT_KEY, &seat_adjust_grid);
-      if (button == ui_SeatBackButton) {
-        lv_obj_add_event_cb(
-            button, [](lv_event_t *) { seat_show_buttons_page(); }, LV_EVENT_CLICKED, nullptr);
-      } else {
-        lv_obj_add_event_cb(button, grid_click_cb, LV_EVENT_CLICKED, &seat_adjust_grid);
-      }
-      nav_focus_ring(button);
-      nav_mirror_states(button);
-    }
-  }
-  // It covers the function buttons: its fill is what hides them.
-  keep_overlay_fill(ui_SeatAdjustmentPanel);
+  // SeatScreen: both pages, their grids and groups.
+  seat_view.init_pages();
 
   // InternetScreen: Ethernet or WiFi, the network list and the password page.
   // Its two pages cover the body, so their fill is what hides it.
@@ -940,33 +855,10 @@ extern "C" void app_main(void) {
       lv_timer_create([](lv_timer_t *) { github_ota_boot_confirm(); }, kOtaConfirmAfterMs, nullptr),
       1);
 
-  lv_subject_init_string(&seat_function_subject, seat_function_buf, seat_function_prev_buf,
-                         sizeof(seat_function_buf), lv_label_get_text(ui_AngleSettingLabel));
-  lv_label_bind_text(ui_AngleSettingLabel, &seat_function_subject, nullptr);
-
-  // The seat values, shared by this screen and the DEBUG ACTUATORS page. These come
-  // first because binding to an lv_subject_t means storing a pointer into it: every
-  // observer below, and the settings rows built on demand later, read these.
+  // The seat values, shared by this screen and the DEBUG ACTUATORS page, and the
+  // numbers bound to them.
   seat_axis_count = static_cast<uint8_t>(rammp::kSeatAxisCount);
-  for (uint8_t i = 0; i < seat_axis_count; i++) {
-    lv_subject_init_int(&seat_axis_value[i], kValueUnknown);
-    const rammp::SeatAxisSpec &axis = rammp::kSeatAxes[i];
-    seat_axis_format[i] = {axis.short_name, axis.label,    axis.min_value, axis.max_value,
-                           axis.step,       axis.decimals, axis.unit};
-  }
-
-  // The number under each function button, and the pair on the adjustment page,
-  // read the values the MCB reports and nothing else: a press asks, and the
-  // screen moves when SeatState says the seat did. The export's placeholders
-  // ("4.0 in", "12°") are replaced the moment the first sample lands, and read
-  // "--" until then.
-  lv_obj_t *seat_values[] = {ui_SeatButtonValue1, ui_SeatButtonValue2, ui_SeatButtonValue4,
-                             ui_SeatButtonValue5};
-  for (uint8_t i = 0; i < seat_axis_count && i < std::size(seat_values); i++) {
-    lv_subject_add_observer_obj(&seat_axis_value[i], seat_button_value_observer, seat_values[i],
-                                &seat_axis_format[i]);
-    lv_subject_add_observer_obj(&seat_axis_value[i], seat_angle_observer, ui_AngleLabel, nullptr);
-  }
+  seat_view.init_values();
 
   // Hand the joystick between groups as the screen changes. Every screen
   // ui_init builds, so each route in and out is covered; the ones built on
@@ -1062,68 +954,8 @@ extern "C" void app_main(void) {
       },
   });
 
-  // BenchGateScreen: the PIN pad and its four dots.
-  //
-  // The checkboxes need no observer of their own - each one is CHECKED exactly
-  // when the entry has reached it, which lv_obj_bind_state_if_ge says directly.
-  lv_subject_init_int(&rd_pin_len_subject, 0);
-  lv_subject_init_string(&rd_pin_message_subject, rd_pin_message_buf, rd_pin_message_prev_buf,
-                         sizeof(rd_pin_message_buf), kRdPinPromptText);
-  lv_label_bind_text(ui_BenchIntro, &rd_pin_message_subject, nullptr);
-
-  // The dots. The export draws them as an empty outline with no CHECKED look of
-  // its own, so a filled one is added here in the theme's text colour -- and
-  // themeable rather than a literal, so it follows a day/dark switch.
-  lv_obj_t *rd_dots[kRdPinLen] = {ui_BenchPinDot1, ui_BenchPinDot2, ui_BenchPinDot3,
-                                  ui_BenchPinDot4};
-  static constexpr lv_style_selector_t kMainChecked =
-      static_cast<lv_style_selector_t>(LV_PART_MAIN) |
-      static_cast<lv_style_selector_t>(LV_STATE_CHECKED);
-  for (int i = 0; i < kRdPinLen; i++) {
-    ui_object_set_themeable_style_property(rd_dots[i], kMainChecked, LV_STYLE_BG_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(rd_dots[i], kMainChecked, LV_STYLE_BG_OPA,
-                                           _ui_theme_alpha_text);
-    lv_obj_bind_state_if_ge(rd_dots[i], &rd_pin_len_subject, LV_STATE_CHECKED, i + 1);
-  }
-
-  // The pad, in the order it is drawn: three rows of three, then 0 and
-  // backspace under the middle and right columns. Each button carries its digit
-  // as user_data, and the grid gives the joystick the 2D walk the buttonmatrix
-  // used to bring with it.
-  rd_grid.rows = 4;
-  lv_obj_t *rd_keys[4][kGridMaxCols] = {
-      {ui_BenchKey1, ui_BenchKey2, ui_BenchKey3},
-      {ui_BenchKey4, ui_BenchKey5, ui_BenchKey6},
-      {ui_BenchKey7, ui_BenchKey8, ui_BenchKey9},
-      {nullptr, ui_BenchKey0, ui_BenchKeyBack},
-  };
-  const int rd_digits[4][kGridMaxCols] = {
-      {1, 2, 3},
-      {4, 5, 6},
-      {7, 8, 9},
-      {0, 0, kRdBack},
-  };
-  rd_group = lv_group_create();
-  for (int r = 0; r < rd_grid.rows; r++) {
-    rd_grid.cols[r] = kGridMaxCols;
-    for (int c = 0; c < kGridMaxCols; c++) {
-      lv_obj_t *key = rd_keys[r][c];
-      rd_grid.cell[r][c] = key;
-      if (key == nullptr) {
-        continue; // the hole under "7"
-      }
-      lv_group_add_obj(rd_group, key);
-      lv_obj_add_event_cb(key, rd_keypad_cb, LV_EVENT_CLICKED,
-                          reinterpret_cast<void *>(static_cast<intptr_t>(rd_digits[r][c])));
-      lv_obj_add_event_cb(key, grid_key_cb, LV_EVENT_KEY, &rd_grid);
-      // The cursor is the same focus ring as every other button; a press is
-      // the key's negative (the export's PRESSED style), carried to its label.
-      nav_focus_ring(key);
-      nav_mirror_states(key);
-      clear_click_focusable_recursive(key);
-    }
-  }
+  // BenchGateScreen: the PIN pad, its four dots and the line above them.
+  rd_group = bench_pin_view.init();
 
   // SettingsScreen: what outlives the screen, which is built on demand
   // (settings_screen_ensure). The seat values it steps are initialised further

@@ -33,6 +33,8 @@ idf_component_register(SRC_DIRS "."
                          esp_http_client
                          rammp_rtps_messages
                          fw_core
+                         drive_adapter
+                         drive_session
                          ota_parse
                        EMBED_TXTFILES click.wav)
 

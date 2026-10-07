@@ -187,9 +187,11 @@ static void nav_to_key() {
 // everywhere else the same stick is walking focus around, and a push meant for
 // the next row must not also move the chair. The ADC task reads this and sends
 // the MCB a centred stick whenever it is false.
+// The rule is the drive session's pure stick_drives (drive_session_table.hpp).
 static void nav_update_stick_gate() {
-  stick_drives.store(lv_subject_get_int(&locked_subject) == 0 &&
-                     lv_screen_active() == ui_DriveScreen && nav_menu_open == nullptr);
+  stick_drives.store(hmi::drive_session::stick_drives(lv_subject_get_int(&locked_subject) != 0,
+                                                      drive_screen_of(lv_screen_active()),
+                                                      nav_menu_open != nullptr));
 }
 
 // --- the menu ------------------------------------------------------------------
@@ -460,9 +462,8 @@ static void nav_row_cb(lv_event_t *e) {
   }
   // Drive the same way, while there is a drive to ask for: driving already,
   // the row only goes back to the Drive screen.
-  if (dest == NAV_DRIVE && lv_subject_get_int(&locked_subject) != 0 && !mcb_ready()) {
-    refusal_feedback();
-    entry_refused_show(kRefusedDriveMenu, kDriveRefusedShowMs);
+  // The drive session refuses it (rows 40-41: locked, MCB not ready).
+  if (dest == NAV_DRIVE && drive_session_input(hmi::drive_session::Input::MENU_ROW_DRIVE)) {
     return;
   }
   lv_obj_add_state(lv_event_get_target_obj(e), LV_STATE_CHECKED);
@@ -486,12 +487,11 @@ static void nav_key_cb(lv_event_t *e) {
   }
   // While driving, the menu is the way off the Drive screen, and whether
   // driving stops is the MIB's call. So the key asks it to stop, and the menu
-  // opens over the Locked screen once it has (drive_screen_follow_state). If
-  // the MIB keeps driving, the Drive screen stays and its banner says so.
+  // opens over the Locked screen once it has (the drive session's relock). If
+  // the MIB keeps driving, the Drive screen stays and its banner says so. While
+  // a stop is already being waited for, the key does nothing (rows 25-28).
   if (lv_screen_active() == ui_DriveScreen && lv_subject_get_int(&locked_subject) == 0) {
-    if (drive_exit_until_us == 0) {
-      drive_exit_ask(true);
-    }
+    (void)drive_session_input(hmi::drive_session::Input::MENU_KEY_DRIVE);
     return;
   }
   nav_open_menu(overlay);

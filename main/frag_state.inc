@@ -42,8 +42,6 @@ static std::atomic<bool> joy_button_pressed{false};
 // reason as the button: the ADC task must not take the LVGL lock to read it.
 static lv_subject_t drive_profile_subject;
 static std::atomic<MIB::DriveProfile> drive_profile_published{MIB::DriveProfile::NORMAL};
-// Sends the current drive request + profile; defined with the drive gestures.
-static void drive_publish();
 
 // Link health behind those two, polled from rtps_comms (RtpsLinkState). Drives
 // the TopBar's RTPS indicator, and greys the status labels when it is not
@@ -104,8 +102,6 @@ static void keep_overlay_fill(lv_obj_t *obj) {
 static lv_indev_t *joystick_indev = nullptr;
 static lv_group_t *joystick_group = nullptr;
 static lv_group_t *menu_group = nullptr;        // the menu overlay's rows
-static lv_group_t *seat_group = nullptr;        // seat screen, function buttons page
-static lv_group_t *seat_adjust_group = nullptr; // seat screen, adjustment page
 static lv_group_t *rd_group = nullptr;          // the bench gate's PIN keypad
 
 // The Settings rows; brightness has its own brightness_subject. Up here because
@@ -157,6 +153,7 @@ static void nav_update_stick_gate();
 
 // The subjects above that the hmi_ui views read (components/hmi_ui/shared_subjects.hpp).
 #include "hmi_ui/link_state.hpp"
+#include "hmi_ui/nav_port.hpp"
 #include "hmi_ui/shared_subjects.hpp"
 static constexpr hmi::ui::SharedSubjects ui_shared_subjects{
     .locked = &locked_subject,
@@ -175,3 +172,10 @@ static_assert(same_link_state(RtpsLinkState::LINK_DOWN, hmi::ui::LinkState::LINK
 static_assert(same_link_state(RtpsLinkState::NO_IP, hmi::ui::LinkState::NO_IP));
 static_assert(same_link_state(RtpsLinkState::NO_PEER, hmi::ui::LinkState::NO_PEER));
 static_assert(same_link_state(RtpsLinkState::CONNECTED, hmi::ui::LinkState::CONNECTED));
+// main's navigation, for the hmi_ui views (components/hmi_ui/nav_port.hpp).
+static constexpr hmi::ui::NavPort ui_nav_port{
+    .to_key = nav_to_key,
+    .use_group = nav_use_group,
+    .focus_ring = nav_focus_ring,
+    .mirror_states = nav_mirror_states,
+};
