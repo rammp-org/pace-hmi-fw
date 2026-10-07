@@ -1,4 +1,23 @@
 // split_main.py fragment of main.cpp (frag_display_flip: original lines 4237-4418); one TU, see main.cpp.
+// Direct-mode flush. LVGL renders into the DPI panel's own frame buffers, so
+// px_map is already a frame buffer and esp_lcd_panel_draw_bitmap takes its
+// no-copy branch: it writes the cache back, sets cur_fb_index, and returns,
+// instead of copying 1.8 MB.
+//
+// That branch is not self-synchronising: it fires on_color_trans_done
+// SYNCHRONOUSLY (esp_lcd_panel_dpi.c), which the BSP wires to
+// lv_display_flush_ready, so disp->flushing clears before this function even
+// returns. The actual buffer swap only lands when the DSI DMA re-arms at the
+// end of the current frame. present_frame() blocks until it does. Blocking here
+// is what gates the renderer: LVGL is single-threaded and cannot start the next
+// refresh while flush_cb is on the stack, so by the time this returns the DMA
+// is scanning the frame we just queued and the other buffer is free to draw
+// into. Costs up to one panel refresh period (~17 ms) per frame, during which
+// the LVGL task holds lvgl_mutex.
+//
+// Ignoring `area` and flushing full-screen IS correct here: call_flush_cb passes
+// the buffer START (not an offset), and refr_sync_areas already copies the
+// previous frame's invalid areas forward, so both buffers stay coherent.
 static void direct_flush_cb(lv_display_t *disp, const lv_area_t * /*area*/, uint8_t *px_map) {
   if (!lv_display_flush_is_last(disp)) {
     lv_display_flush_ready(disp);
