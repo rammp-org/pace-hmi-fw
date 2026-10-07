@@ -21,6 +21,9 @@ jobs:
     steps:
     - name: Checkout repo
       uses: actions/checkout@v7
+      with:
+        # scripts/rammp_rtps.py (the MCB sim self test below) reads the shared spec headers
+        submodules: recursive
 
     # ubuntu-latest (24.04) ships Python 3.12; both scripts are stdlib only.
     - name: Ratchet self test
@@ -45,6 +48,11 @@ jobs:
         python3 tools/guards/exports.py selftest
         python3 tools/guards/task_dump.py selftest
         python3 tools/guards/observer_census.py selftest
+
+    # The simulated MCB's decisions and bench fault modes (docs/plans/hazard-fixes.md §3 B5):
+    # scripts/mcb_sim_logic.py, cases SIM-001.., no network and no tkinter.
+    - name: MCB sim self test (rtps_mcb_sim.py decision logic)
+      run: python3 scripts/rtps_mcb_sim.py selftest
 
     - name: Test manifest (TS-DEF-02)
       run: |

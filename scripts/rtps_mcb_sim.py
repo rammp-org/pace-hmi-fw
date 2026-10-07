@@ -17,6 +17,27 @@ Usage:
   python rtps_mcb_sim.py --cycle          # rotate through every combination
   python rtps_mcb_sim.py --list-interfaces
   python rtps_mcb_sim.py --advertised-address 192.168.1.42
+  python rtps_mcb_sim.py --event-log sim.jsonl --ignore-disable 1
+  python rtps_mcb_sim.py selftest         # the decision logic's cases (no network)
+
+Bench fault modes (for the hazard fixes, docs/plans/hazard-fixes.md §3 B5). Each is a
+stdin command and, where it makes sense at start-up, a flag; 'h' lists them all:
+  x / s             refuse ENABLE / DISABLE until toggled off (as before)
+  ign N             ignore the next N DISABLEs: received and answered, state kept, so
+                    an ENABLED MIB stays ENABLED (--ignore-disable N)
+  drop N            drop the next N DISABLEs: as if lost on the wire, no reply
+                    (--drop-disable N)
+  ongone keep|idle  what the MIB does when the HMI goes away (no XYTwist for 1 s: a
+                    reset, a crash or a lost link). keep, the default, stays ENABLED
+                    across an HMI reset; idle drops ENABLED to IDLE (--on-hmi-gone)
+  p / r             pause / resume MibStatus: link loss as the HMI sees it (> 2 s)
+  mark LABEL        a mark in the event log, for a script to find its place
+--event-log PATH appends one JSON object per line: every DriveCommand and
+SeatCommand received (with what the sim did with it), every non-zero or
+button-changing XYTwist plus a per-second XYTwist summary, every MibStatus state
+change actually sent, pause/resume, the HMI going and coming back, mode changes
+and marks. Each record has `t` (wall clock), `mono` (monotonic s) and `ev`. The
+decision logic lives in mcb_sim_logic.py, where `selftest` tests it.
 
 The status is republished every --period seconds, not only when it changes: the
 writer is best-effort with no durability, so a joystick that reboots or joins
@@ -46,7 +67,14 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import rammp_rtps as spec  # noqa: E402  (path setup must run first)
+import mcb_sim_logic as sim_logic  # noqa: E402  (path setup must run first)
+
+if __name__ == "__main__" and sys.argv[1:] == ["selftest"]:
+    # Before the imports below: rtps_drive_game needs tkinter, which CI's python3
+    # (and WSL's) does not have, and the decision logic's cases need none of it.
+    sys.exit(sim_logic.selftest())
+
+import rammp_rtps as spec  # noqa: E402
 import rtps_host  # noqa: E402
 import rtps_drive_game  # noqa: E402
 import rtps_net  # noqa: E402
@@ -119,8 +147,24 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
         self.announced_targets = -1
         # Stop publishing without tearing the participant down, so the HMI's
         # stale path can be exercised and then recovered from without a fresh
-        # discovery round confusing the picture.
-        self.paused = False
+        # discovery round confusing the picture. A property: pause and resume are
+        # logged to the event log however they are set (stdin, --cycle, the GUI).
+        self._paused = False
+
+        # ---- bench fault modes (mcb_sim_logic) -----------------------------
+        # Counts of DISABLEs still to ignore (received, state kept) and to drop (as
+        # if lost on the wire); what to do when the HMI goes away. Set from stdin
+        # and the flags; read on the network thread, hence the lock.
+        self.ignore_disable = 0
+        self.drop_disable = 0
+        self.on_hmi_gone = sim_logic.ON_HMI_GONE_KEEP
+        self._modes_lock = threading.Lock()
+        self.presence = sim_logic.HmiPresence()
+        self.xytwist_log = sim_logic.XyTwistLog()
+        # The timestamped JSONL log (--event-log); a no-op until main() opens one.
+        self.events = sim_logic.EventLog(None)
+        # The state in the last MibStatus actually sent, to log each change once.
+        self._last_sent_state: int | None = None
 
         # ---- seat -------------------------------------------------------
         # The MCB owns every seat position; the HMI only ever asks, with an
@@ -209,6 +253,45 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
                 entity_index=len(self.local_readers),
             ))
 
+    @property
+    def paused(self) -> bool:
+        return self._paused
+
+    @paused.setter
+    def paused(self, value: bool) -> None:
+        if value != self._paused:
+            self.events.write("pause" if value else "resume")
+        self._paused = value
+
+    def describe_modes(self) -> str:
+        return (f"refuse ENABLE={self.refuse_drive} refuse DISABLE={self.refuse_stop} "
+                f"ignore next {self.ignore_disable} DISABLE(s), drop next "
+                f"{self.drop_disable} DISABLE(s), on HMI gone: {self.on_hmi_gone}"
+                + (f", HMI back {self.presence.returns} time(s)" if self.presence.returns
+                   else ""))
+
+    def apply_mode_command(self, text: str) -> str:
+        """One of mcb_sim_logic.MODE_COMMANDS; returns the line to print. ValueError
+        on a bad argument."""
+        name, value = sim_logic.parse_mode_command(text)
+        if name == "mark":
+            self.events.write("mark", label=value)
+            return f"MARK {value}"
+        if name == "modes":
+            return self.describe_modes()
+        with self._modes_lock:
+            if name == "ign":
+                self.ignore_disable = value
+                reply = f"ignoring the next {value} DISABLE(s)"
+            elif name == "drop":
+                self.drop_disable = value
+                reply = f"dropping the next {value} DISABLE(s)"
+            else:
+                self.on_hmi_gone = value
+                reply = f"on HMI gone: {value}"
+        self.events.write("mode", **{name: value})
+        return reply
+
     def _send_on(self, writer: rtps_host.WriterConfig, cdr_payload: bytes) -> int:
         """Publish one sample on `writer`; returns how many targets it went to."""
         payload = self.build_data_message(writer, cdr_payload)
@@ -264,27 +347,31 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
             rtps_host.log(f"[selftest] run {r.run_id}: {verdict} - {r.value} pass, {r.lo} fail, "
                           f"{r.hi} skip in {r.detail}")
 
-    def apply_drive_command(self, request: int, profile: int) -> None:
+    def apply_drive_command(self, request: int, profile: int) -> sim_logic.DriveDecision:
         """Take one DriveCommand from the joystick.
 
         The MCB is what decides whether the chair drives — the joystick asks
         and waits. With refuse_drive set, the request is recorded and ignored,
-        which is what a chair inhibited by a fault or a raised seat does.
+        which is what a chair inhibited by a fault or a raised seat does. The
+        decision itself, fault modes included, is mcb_sim_logic.decide_drive_command
+        (ERROR and INITIALIZING are not ours to leave); a dropped command changes
+        nothing here at all.
         """
+        with self._modes_lock:
+            decision = sim_logic.decide_drive_command(
+                self.system_state, request, refuse_drive=self.refuse_drive,
+                refuse_stop=self.refuse_stop, ignore_disable=self.ignore_disable,
+                drop_disable=self.drop_disable)
+            self.ignore_disable = decision.ignore_left
+            self.drop_disable = decision.drop_left
+        if not decision.received:
+            return decision
         self.drive_request = request
         self.requested_profile = profile
         if self.follow_profile:
             self.profile = profile
-        if request == spec.DRIVE_REQUEST_ENABLE and self.refuse_drive:
-            return
-        if request == spec.DRIVE_REQUEST_DISABLE and self.refuse_stop:
-            return
-        # ERROR and INITIALIZING are not ours to leave: a drive request neither clears a
-        # fault nor finishes booting.
-        if self.system_state in (spec.MIB_SYSTEM_STATE_IDLE, spec.MIB_SYSTEM_STATE_ENABLED):
-            self.system_state = (spec.MIB_SYSTEM_STATE_ENABLED
-                                 if request == spec.DRIVE_REQUEST_ENABLE
-                                 else spec.MIB_SYSTEM_STATE_IDLE)
+        self.system_state = decision.state
+        return decision
 
     def apply_seat_command(self, axis_id: int, target: float) -> int:
         """Judge one seat request from the HMI, return the SEAT_RESULT_* verdict.
@@ -332,6 +419,7 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
                 if sample is not None:
                     self.joystick = sample
                     self.adc_rx_count += 1
+                    self._note_xy_twist(sample)
             elif topic == spec.TOPIC_HMI_COUNTER:
                 self._answer_selftest_ping(payload)
             elif topic == spec.TOPIC_SELFTEST_REPORT:
@@ -351,6 +439,8 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
                 rtps_host.log(
                     f"[seat] {name} -> {shown} : {SEAT_RESULTS.get(result, '?')}"
                 )
+                self.events.write("seat_command", axis=axis_id, axis_name=name, target=target,
+                                  result=SEAT_RESULTS.get(result, str(result)))
                 # Answer immediately. The periodic republish below is the
                 # convergence path, not the reply path.
                 self.publish_now()
@@ -359,16 +449,52 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
                 if command is None:
                     continue
                 request, profile = command
-                self.apply_drive_command(request, profile)
-                rtps_host.log(
-                    f"[drive] {spec.DRIVE_REQUEST_NAMES.get(request, '?')} "
-                    f"profile={spec.DRIVE_PROFILE_NAMES.get(profile, '?')} -> "
-                    f"{spec.MIB_SYSTEM_STATE_NAMES.get(self.system_state, '?')}"
-                    + (" (refusing)" if request == spec.DRIVE_REQUEST_ENABLE
-                       and self.refuse_drive else "")
-                )
-                # The HMI is waiting on this to open its drive screen.
-                self.publish_now()
+                before = self.system_state
+                decision = self.apply_drive_command(request, profile)
+                rtps_host.log(sim_logic.format_drive_line(request, profile, decision,
+                                                          self.refuse_drive))
+                self.events.write(
+                    "drive_command", request=sim_logic.request_name(request),
+                    profile=sim_logic.profile_name(profile), action=decision.action,
+                    state_before=sim_logic.state_name(before),
+                    state_after=sim_logic.state_name(decision.state),
+                    ignore_left=decision.ignore_left, drop_left=decision.drop_left)
+                # The HMI is waiting on this to open its drive screen. A dropped
+                # command never arrived, so nothing answers it.
+                if decision.reply:
+                    self.publish_now()
+
+    def _note_xy_twist(self, sample: tuple) -> None:
+        """Presence and the event log; called for every XYTwist on the network thread."""
+        now = time.monotonic()
+        with self._modes_lock:
+            seen = self.presence.sample(now)
+            records = self.xytwist_log.add(now, sample)
+        if seen is not None:
+            self.events.record(seen)
+            if seen["ev"] == "hmi_back":
+                rtps_host.log(f"[hmi] back after {seen['gap_s']:.1f}s without XYTwist "
+                              f"(return {seen['returns']}); state "
+                              f"{sim_logic.state_name(self.system_state)}")
+        for record in records:
+            self.events.record(record)
+
+    def _check_hmi_gone(self) -> None:
+        """An HMI that stopped sending XYTwist: log it once, apply on_hmi_gone."""
+        now = time.monotonic()
+        with self._modes_lock:
+            gone = self.presence.tick(now)
+            summary = self.xytwist_log.flush(now) if gone is not None else None
+        if gone is None:
+            return
+        self.events.record(summary)
+        self.events.record(gone)
+        before = self.system_state
+        self.system_state = sim_logic.state_on_hmi_gone(before, self.on_hmi_gone)
+        rtps_host.log(f"[hmi] gone: no XYTwist for {gone['silent_s']:.1f}s; "
+                      f"on HMI gone '{self.on_hmi_gone}': "
+                      f"{sim_logic.state_name(before)} -> "
+                      f"{sim_logic.state_name(self.system_state)}")
 
     def step_speed(self, _dt: float = 0.0) -> None:
         """Advance the simulated chair and take its speed.
@@ -396,6 +522,11 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
             + (f" status_text='{self.status_text}'" if self.status_text else "")
             + f" speed={self.speed_tenths / 10:.1f}"
             + (" [PAUSED]" if self.paused else "")
+            # the fault modes only when armed, so the default line is the old one
+            + (f" [IGNORE {self.ignore_disable} DISABLE]" if self.ignore_disable else "")
+            + (f" [DROP {self.drop_disable} DISABLE]" if self.drop_disable else "")
+            + (f" [ON HMI GONE: {self.on_hmi_gone}]"
+               if self.on_hmi_gone != sim_logic.ON_HMI_GONE_KEEP else "")
         )
 
     def seat_units(self) -> tuple:
@@ -427,6 +558,8 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
 
     def publish_now(self) -> None:
         """Called by the harness run loop every --period seconds."""
+        # Before the pause check: the HMI can go away while MibStatus is paused too.
+        self._check_hmi_gone()
         if self.paused:
             return
         self.publish_diagnostics()
@@ -448,6 +581,14 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
         for destination in targets:
             self.send_user_datagram(payload, destination)
         self.seq = (self.seq + 1) & 0xFF
+        # Every state change actually put on the wire, once. A sample with no
+        # subscriber yet went nowhere, so it is not a change the HMI could see.
+        if targets and self.system_state != self._last_sent_state:
+            self.events.write("mib_state", state=sim_logic.state_name(self.system_state),
+                              previous=(None if self._last_sent_state is None
+                                        else sim_logic.state_name(self._last_sent_state)),
+                              seq=(self.seq - 1) & 0xFF, targets=len(targets))
+            self._last_sent_state = self.system_state
 
         # Log only when the number of reachable subscribers changes: silence
         # here means discovery never matched, which is the failure worth
@@ -540,6 +681,7 @@ HELP_TEXT = """commands:
   p               pause publishing (HMI should go stale after
                   MIB_STATUS_TIMEOUT_MS: blinking orange RTPS, '---')
   r               resume publishing (HMI should go straight back to green)
+""" + sim_logic.MODE_HELP + """
   <enter>         show what is being published
   q               quit"""
 
@@ -586,6 +728,13 @@ def run_interactive(harness: SystemStatePublisher) -> None:
         elif command in ("h", "help", "?"):
             print(HELP_TEXT)
             continue
+        elif sim_logic.is_mode_command(command):
+            # ign / drop / ongone / mark / modes: nothing to republish for these
+            try:
+                print(f"  {harness.apply_mode_command(command)}", flush=True)
+            except ValueError as e:
+                print(f"  {e}")
+            continue
         elif command:
             print(f"  unknown command '{command}' — 'h' for help")
             continue
@@ -624,7 +773,10 @@ def run_cycle(harness: SystemStatePublisher, dwell: float) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Emulate the Main Control Board's status broadcast over RTPS."
+        description="Emulate the Main Control Board's status broadcast over RTPS.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="interactive " + HELP_TEXT
+        + "\n\n'rtps_mcb_sim.py selftest' runs the decision logic's cases (mcb_sim_logic.py).",
     )
     parser.add_argument(
         "--cycle", action="store_true",
@@ -668,7 +820,29 @@ def main() -> int:
         help="Participant ids to try on each --peer, as '0-3' or '0,1,2' (default 0-3)")
     parser.add_argument("--trace-packets", action="store_true",
                         help="Log every received UDP packet and its RTPS submessage headers")
+    parser.add_argument(
+        "--event-log", default=None, metavar="PATH",
+        help="Append a timestamped JSON-lines log to PATH: every DriveCommand and "
+             "SeatCommand received and what the sim did with it, every non-zero or "
+             "button-changing XYTwist plus a per-second summary, every MibStatus state "
+             "change sent, pause/resume, the HMI going and coming back, marks")
+    parser.add_argument(
+        "--ignore-disable", type=int, default=0, metavar="N",
+        help="Ignore the next N DISABLEs: received and answered, state kept (stdin: ign N)")
+    parser.add_argument(
+        "--drop-disable", type=int, default=0, metavar="N",
+        help="Drop the next N DISABLEs as if lost on the wire: no state change, no "
+             "reply (stdin: drop N)")
+    parser.add_argument(
+        "--on-hmi-gone", choices=sim_logic.ON_HMI_GONE, default=sim_logic.ON_HMI_GONE_KEEP,
+        help="When the HMI stops sending XYTwist for 1 s (a reset): 'keep' the state, so "
+             "an ENABLED MIB stays ENABLED across the reset (default, as before), or "
+             "'idle': ENABLED drops to IDLE (stdin: ongone keep|idle)")
     cli = parser.parse_args()
+    for flag, count in (("--ignore-disable", cli.ignore_disable),
+                        ("--drop-disable", cli.drop_disable)):
+        if not 0 <= count <= sim_logic.MAX_FAULT_COUNT:
+            parser.error(f"{flag} must be 0..{sim_logic.MAX_FAULT_COUNT}")
 
     if cli.list_interfaces:
         print("network adapters (pass an address as --advertised-address):")
@@ -691,6 +865,13 @@ def main() -> int:
     print(f"advertised address: {args.advertised_address} "
           "(--list-interfaces shows the alternatives)")
     harness = SystemStatePublisher(args)
+    harness.events = sim_logic.EventLog(cli.event_log)
+    harness.ignore_disable = cli.ignore_disable
+    harness.drop_disable = cli.drop_disable
+    harness.on_hmi_gone = cli.on_hmi_gone
+    harness.events.write("open", argv=sys.argv[1:], peer=peer, modes=harness.describe_modes())
+    if cli.event_log:
+        print(f"event log: {os.path.abspath(cli.event_log)}")
     network = threading.Thread(target=harness.run, daemon=True)
     network.start()
     rtps_net.save_config({"peer": peer, "advertised_address": args.advertised_address,
@@ -698,10 +879,14 @@ def main() -> int:
 
     print(f"Publishing '{spec.TOPIC_MIB_STATUS}' [{spec.TYPE_MIB_STATUS}] "
           f"every {cli.period:.2f}s\n")
-    if cli.cycle:
-        run_cycle(harness, cli.dwell)
-    else:
-        run_interactive(harness)
+    try:
+        if cli.cycle:
+            run_cycle(harness, cli.dwell)
+        else:
+            run_interactive(harness)
+    finally:
+        harness.events.write("close")
+        harness.events.close()
     return 0
 
 
