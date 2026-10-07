@@ -7,7 +7,7 @@
   level: L1
   path: components/stick/test
   requirements: [REQ-STK-01, REQ-STK-02, REQ-STK-03, REQ-STK-04, REQ-STK-05, REQ-STK-06,
-                 REQ-STK-07]
+                 REQ-STK-07, REQ-STK-08]
   resources: [host]
   timeout_s: 300
   expected_s: 60

@@ -1,4 +1,5 @@
 // split_main.py fragment of main.cpp (frag_stick_button: original lines 853-953); one TU, see main.cpp.
+#include "stick/button_edges.hpp"
 static void stick_button_edge(bool active) {
   // lv_subject_set_int runs the observers synchronously on this task, and they
   // touch widgets, so this needs the LVGL lock
@@ -11,19 +12,15 @@ static void stick_button_edge(bool active) {
   // same every-edge signal the panel follows
   joy_button_pressed.store(active);
 
+  // What the edge means (hmi::stick::ButtonEdges): a release that ends a short
+  // press selects; only the counter is debounced. One instance, on this task.
   const int64_t now = esp_timer_get_time();
-  static int64_t pressed_at_us = 0;
-  if (active) {
-    pressed_at_us = now;
-  } else if (now - pressed_at_us < kSelectMaxUs) {
+  static constinit hmi::stick::ButtonEdges edges;
+  const hmi::stick::ButtonEdges::Effect effect = edges.edge(active, now);
+  if (effect.select) {
     select_key.store(true);
   }
-
-  // only the counter is debounced. espp's GPIO glitch filters are ns-scale and
-  // do nothing against millisecond-scale mechanical bounce.
-  static int64_t last_press_us = 0;
-  if (active && (now - last_press_us) > 30000) {
-    last_press_us = now;
+  if (effect.count) {
     lv_subject_set_int(&button_count_subject, lv_subject_get_int(&button_count_subject) + 1);
   }
 }
@@ -88,7 +85,8 @@ static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c);
 
 #include "hmi_ui/hold_gesture.hpp"
 static constexpr uint32_t kHoldMs = hmi::ui::HOLD_MS; // hold time to fill a gesture widget
-// Dead time before a hold starts filling; a select is a press shorter than this (kSelectMaxUs).
+// Dead time before a hold starts filling; a select is a press shorter than this
+// (hmi::stick::SELECT_MAX_US, the same value).
 static constexpr uint32_t kBarGraceMs = hmi::ui::HOLD_GRACE_MS;
 static constexpr int32_t kHoldMax = hmi::ui::HOLD_MAX; // arc/bar range (LVGL's default)
 // Beat between the unlock landing and the Drive screen dissolving in, so the
@@ -101,4 +99,6 @@ static_assert(std::chrono::milliseconds{hmi::ui::HOLD_MS} == hmi::drive_session:
 static_assert(std::chrono::milliseconds{hmi::ui::HOLD_GRACE_MS} == hmi::drive_session::kBarGrace);
 static_assert(std::chrono::milliseconds{hmi::ui::HOLD_POLL_MS} ==
               hmi::drive_session::kHoldPollPeriod);
+static_assert(hmi::stick::SELECT_MAX_US == int64_t{hmi::ui::HOLD_GRACE_MS} * 1000,
+              "a press short enough to select never starts a hold filling");
 

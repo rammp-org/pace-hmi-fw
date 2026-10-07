@@ -18,6 +18,7 @@
 
 #include "golden_stick.inc"
 #include "legacy_adc_cycle.hpp"
+#include "stick/button_edges.hpp"
 #include "stick/stick_pipeline.hpp"
 #include "stick_vectors.hpp"
 #include "test_case.hpp"
@@ -500,4 +501,34 @@ TEST_CASE("STK-037 the HMI's pipeline config carries the dead zones main always 
                           bits(got.calibration.vertical.center_mv));
   TEST_ASSERT_EQUAL_UINT32(want.keys.up, got.keys.up);
   TEST_ASSERT_EQUAL_UINT32(want.keys.left, got.keys.left);
+}
+
+TEST_CASE("STK-040 a release within SELECT_MAX_US of its press selects; a later one does not",
+          "[stick][button]") {
+  hmi::stick::ButtonEdges e;
+  TEST_ASSERT_FALSE(e.edge(true, 1'000'000).select);
+  TEST_ASSERT_TRUE(e.edge(false, 1'000'000 + hmi::stick::SELECT_MAX_US - 1).select);
+  TEST_ASSERT_FALSE(e.edge(true, 3'000'000).select);
+  TEST_ASSERT_FALSE(e.edge(false, 3'000'000 + hmi::stick::SELECT_MAX_US).select);
+}
+
+TEST_CASE("STK-041 a press counts unless it comes within the debounce of the last counted one",
+          "[stick][button]") {
+  hmi::stick::ButtonEdges e;
+  TEST_ASSERT_TRUE(e.edge(true, 1'000'000).count);
+  TEST_ASSERT_FALSE(e.edge(false, 1'000'100).count); // a release never counts
+  TEST_ASSERT_FALSE(e.edge(true, 1'000'000 + hmi::stick::COUNT_DEBOUNCE_US).count);
+  TEST_ASSERT_TRUE(e.edge(true, 1'000'000 + hmi::stick::COUNT_DEBOUNCE_US + 1).count);
+}
+
+TEST_CASE("STK-042 the first press after start counts, and a bounce re-arms the select window",
+          "[stick][button]") {
+  hmi::stick::ButtonEdges e;
+  // pressed_at and last_press start at 0, as the two statics did.
+  TEST_ASSERT_TRUE(e.edge(true, hmi::stick::COUNT_DEBOUNCE_US + 1).count);
+  const int64_t t = 10'000'000;
+  (void)e.edge(true, t);
+  (void)e.edge(false, t + 10); // bounce: a release inside the window selects
+  (void)e.edge(true, t + 20);  // the window restarts at the bounce's press
+  TEST_ASSERT_TRUE(e.edge(false, t + 20 + hmi::stick::SELECT_MAX_US - 1).select);
 }
