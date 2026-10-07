@@ -14,6 +14,7 @@ behaviour.
 | --- | --- |
 | `include/hmi_ui/shared_subjects.hpp` | `SharedSubjects`: the subjects main still defines (`main/frag_state.inc`) and several views read. main fills it once; it shrinks as each subject moves to its view (S7) |
 | `include/hmi_ui/link_state.hpp` | `LinkState`: the values the `rtps_link` subject carries, equal to main's `RtpsLinkState` (main static_asserts it) |
+| `include/hmi_ui/bench_pin_view.hpp`, `src/bench_pin_view.cpp` | `BenchPinView`: the BenchGateScreen's PIN pad, dots and line, on hmi_models' `PinModel` (from `main/frag_bench_pin.inc` and app_main's wiring) |
 | `include/hmi_ui/brightness_view.hpp`, `src/brightness_view.cpp` | `BrightnessView`: the backlight level as a subject, applied on every change and saved once it settles (from `main/frag_brightness.inc`) |
 | `include/hmi_ui/button_grid.hpp`, `src/button_grid.cpp` | `ButtonGrid`, `grid_key_cb`, `grid_sync_cursor`: the joystick's walk over a page of buttons (seat, bench PIN), on hmi_models' `grid_step` (from `main/frag_seat.inc`) |
 | `include/hmi_ui/rtps_label_view.hpp`, `src/rtps_label_view.cpp` | `RtpsLabelView`: the TopBar's RTPS label (from `main/frag_rtps_label.inc`) |
@@ -43,6 +44,7 @@ behaviour.
 | REQ-UI-04 | The TopBar's RTPS label is in the alert colour for NET_FAILED and LINK_DOWN, orange (`STATUS_ORANGE`) for NO_IP, orange and blinking with `rtps_blink` (opacity, so nothing reflows) for NO_PEER, and the theme's ok colour for CONNECTED; it repaints on `rtps_link` and `rtps_blink`. | bench B4 |
 | REQ-UI-05 | The backlight follows the brightness subject on every change, the boot value included. A level is saved once it has stayed unchanged for the save delay (main: 1 s), so a run of changes is one write; the boot value is not saved. `set` clamps to `min_percent`..`max_percent` (never 0); `step` goes to the next of 25/50/75/100 % above the current level, and from 100 % back to 25 %. | bench (side button, Settings row, `rtps_brightness.py`) |
 | REQ-UI-06 | The TopBar clock reads `--:--` until main says the system clock holds a real time, then `HH:MM` of the system clock (hmi_format REQ-FMT-06), from the first frame and then read once a second (`CLOCK_POLL_MS`); the subject changes only when the text does. The link label reads the text main gives: the setting at boot, the link RTPS brought up after it starts. | bench B4 |
+| REQ-UI-07 | The bench gate: each pad key types its digit (DIGITS) or takes one back; the dots show how many are typed; typing puts the prompt back; the fourth digit is judged by `PinModel` (REQ-MOD-05..08): the right PIN empties the entry and calls `accepted`, a wrong one empties it and shows WRONG_TEXT. `reset` (every visit) empties it and shows the prompt. The joystick walks the pad as a ButtonGrid, down off it calls `off_bottom`. | bench B4b |
 
 ## Tasks and dependencies
 
