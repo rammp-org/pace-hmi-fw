@@ -89,15 +89,10 @@ static std::atomic<uint32_t> joy_flick{0};
 // An indev can own exactly one group, so the joystick's group follows the
 // active screen. The swap happens on LV_EVENT_SCREEN_LOADED, so it covers
 // every route between the screens.
-// "This object covers what is behind it" -- see strip_redundant_backgrounds.
-// LVGL leaves the USER flags for exactly this; nothing in the export uses them.
-static constexpr lv_obj_flag_t kOverlayFlag = LV_OBJ_FLAG_USER_1;
-
-// Kept out of the overdraw pass, and kept opaque whatever the theme says.
-static void keep_overlay_fill(lv_obj_t *obj) {
-  lv_obj_add_flag(obj, kOverlayFlag);
-  lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, LV_PART_MAIN);
-}
+// "This object covers what is behind it" (components/hmi_ui overdraw.hpp).
+#include "hmi_ui/overdraw.hpp"
+static constexpr lv_obj_flag_t kOverlayFlag = hmi::ui::OVERLAY_FLAG;
+using hmi::ui::keep_overlay_fill;
 
 static lv_indev_t *joystick_indev = nullptr;
 static lv_group_t *joystick_group = nullptr;
