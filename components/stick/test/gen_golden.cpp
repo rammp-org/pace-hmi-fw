@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -92,9 +93,7 @@ void sweeps() {
       for (int mv = 0; mv <= 3300; mv += 50) {
         values.push_back(static_cast<float>(mv));
       }
-      for (const float s : specials) {
-        values.push_back(s);
-      }
+      values.insert(values.end(), std::begin(specials), std::end(specials));
       bool first = true;
       for (const float mv : values) {
         StickVector v = rest(cal);
@@ -153,7 +152,7 @@ void noise() {
 }
 
 /// A ramp out to the end of travel and back on one board-2 axis (0 = right, 1 = up).
-void ramp(StickVector base, int dir, const std::string &c, bool first) {
+void ramp(const StickVector &base, int dir, const std::string &c, bool first) {
   const CalMv &cal = BOARD2;
   for (int i = 0; i <= 24; ++i) {
     const int k = i <= 12 ? i : 24 - i;

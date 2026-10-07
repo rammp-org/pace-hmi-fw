@@ -177,22 +177,27 @@ void lv_subject_set_int(lv_subject_t *subject, std::int32_t value) {
   g_out.bars_set = true;
 }
 
+// What the fake reports back. The real call returns false until RTPS is up and a subscriber
+// is discovered; the harness discards the result (cycle() reads g_out.published), so the fake
+// returns a harness value rather than a constant.
+std::atomic<bool> g_publish_result{true};
+
 bool rtps_comms_publish_adc(float x, float y, float twist, rammp::Buttons buttons) {
   g_out.published = true;
   g_out.cmd_x = std::bit_cast<std::uint32_t>(x);
   g_out.cmd_y = std::bit_cast<std::uint32_t>(y);
   g_out.cmd_twist = std::bit_cast<std::uint32_t>(twist);
   g_out.buttons = static_cast<std::uint32_t>(buttons);
-  return true;
+  return g_publish_result.load();
 }
 
 // The body of adc_task_fn after its reads (main.cpp:1481-1601), verbatim apart from the edits
 // listed at the top. Returns adc_published.
 bool adc_cycle_body(std::optional<float> vert_mv, std::optional<float> horiz_mv,
                     std::optional<float> twist_mv) {
-  espp::Joystick &stick = *g_stick; // was app_main's `static espp::Joystick stick`
   bool adc_published = false;
   if (vert_mv && horiz_mv && twist_mv) {
+    espp::Joystick &stick = *g_stick; // was app_main's `static espp::Joystick stick`
     // A calibration run just finished: switch to it here, between two
     // samples, on the task that owns the stick.
     if (auto cal = joystick_cal_take_new()) {
