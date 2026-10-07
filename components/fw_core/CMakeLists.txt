@@ -10,6 +10,4 @@ idf_component_register(
   REQUIRES freertos
   PRIV_REQUIRES logger)
 
-if(COMMAND fw_component_options)
-  fw_component_options(${COMPONENT_LIB})
-endif()
+fw_component_options(${COMPONENT_LIB})

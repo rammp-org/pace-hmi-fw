@@ -12,6 +12,7 @@ idf_component_register(SRC_DIRS "."
                          input_drivers
                          joystick
                          joystick_cal
+                         stick
                          lvgl
                          m5stack-tab5
                          ui

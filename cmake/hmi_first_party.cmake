@@ -146,3 +146,34 @@ function(hmi_mark_third_party_system)
   message(STATUS "fw-standards non-SYSTEM (override toolchain headers): ${overrides}")
   fw_mark_third_party_system(${first_party} ${overrides})
 endfunction()
+
+# hmi_check_fw_options(): fail the configure when a first-party component's library
+# did not get fw_component_options() (CS-LNG-02). The call used to be skipped silently
+# (the function was defined after project()), so this makes a missing or ineffective call
+# loud. `main` is exempt by the profile's CS-LNG-02 deviation; header-only (INTERFACE)
+# components compile nothing of their own. Call after project().
+function(hmi_check_fw_options)
+  idf_build_get_property(components BUILD_COMPONENTS)
+  set(missing "")
+  foreach(component IN LISTS components)
+    idf_component_get_property(dir ${component} COMPONENT_DIR)
+    idf_component_get_property(lib ${component} COMPONENT_LIB)
+    hmi_is_first_party(is_first "${dir}" "${CMAKE_SOURCE_DIR}")
+    if(NOT is_first OR component STREQUAL "main" OR NOT TARGET ${lib})
+      continue()
+    endif()
+    get_target_property(type ${lib} TYPE)
+    if(type STREQUAL "INTERFACE_LIBRARY")
+      continue()
+    endif()
+    get_target_property(options ${lib} COMPILE_OPTIONS)
+    if(NOT options OR NOT "-Wconversion" IN_LIST options)
+      list(APPEND missing ${component})
+    endif()
+  endforeach()
+  if(missing)
+    message(FATAL_ERROR "fw-standards: first-party components without fw_component_options() "
+                        "(CS-LNG-02): ${missing}. Call fw_component_options(\${COMPONENT_LIB}) "
+                        "after idf_component_register().")
+  endif()
+endfunction()

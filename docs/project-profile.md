@@ -24,8 +24,13 @@ yet measured or decided, and "none" means checked and absent.
   `==1.3.2` in `main/idf_component.yml` · LVGL 9.5.0 · clang-format 14.0.6 (not installed locally;
   pre-commit fetches it) · esp-clang 20.1.1 (from ESP-IDF 6.0) · cppcheck from
   `esp-cpp/StaticAnalysis@master` in CI (version unknown; not installed locally).
-- C++ standard: IDF 6.0 builds `-std=gnu++26`. `CMAKE_CXX_STANDARD 20` in `CMakeLists.txt` has no
-  effect (CS-LNG-02).
+- C++ standard: IDF 6.0 builds `-std=gnu++26`; that is what `main` and every third-party component
+  get. First-party components get `-std=gnu++23` and the CS-LNG-02 warning set as errors
+  from `fw_component_options()` (`cmake/fw_standards.cmake`), placed after IDF's flags so they
+  win. That has applied only since `dev_ai_refactor_fwopts`. Before it, the function was
+  defined after `project()`, where IDF has already run every component's `CMakeLists.txt`, so
+  the call was skipped and every first-party component built with IDF's defaults.
+  `CMAKE_CXX_STANDARD` has no effect on IDF component targets.
 - Build variants (CS-LAY-09):
 
   | Variant | How | Differences |
@@ -49,6 +54,7 @@ yet measured or decided, and "none" means checked and absent.
 | `components/fw_core` | the channel helpers, ThreadChecker, `Owned<T>`, `check()`, context tokens (not used by the firmware yet) | used by safety | host L1 (FWC-L1) | none |
 | `components/hmi_format` | pure screen-text formatting (speed, steppers, seat, clock, diagnostics) | no | host L1 (L1-FMT) | README |
 | `components/hmi_models` | pure UI models: the button-grid cursor walk and the bench PIN entry | no | host L1 (L1-MOD) | README |
+| `components/hmi_ui` | the UI island: every LVGL view the UI task draws (so far the TopBar clock, link and RTPS label, the DriveBand status cells, the backlight) | no (shows the chair's state and faults, commands nothing) | no (LVGL-bound; bench B4) | README |
 | `components/joystick` | espp joystick plus a twist axis (vendored espp 1.2.0, sha 615b8df; README + upstream.diff) | yes | host L1 (L1-JOY) | none |
 | `components/post` | the quick POST evaluator: boot facts in, a verdict per check and an overall state out (not wired yet; hazard-fixes C3) | yes (gates motion once C3 wires it) | host L1 (L1-POST) | README |
 | `components/m5stack-tab5` | vendored espp Tab5 BSP 1.2.0 (sha 615b8df), modified (VENDORED.md + upstream.diff) | no | no | none |
