@@ -1232,8 +1232,10 @@ extern "C" void app_main(void) {
   // The stick pipeline (components/stick): the joystick mapping on this
   // calibration, the key trigger and the gate. Owned by the ADC task below.
   // Named `stick`, as the espp::Joystick it wraps was: the same lazy static,
-  // built at the same point (tools/guards init_order baseline).
-  static hmi::stick::StickPipeline stick(stick_pipeline_config(joystick_cal));
+  // built at the same point (tools/guards init_order baseline). A StickSlot is
+  // the StickPipeline itself, or with CONFIG_HMI_BENCH_STICK_INJECT the bench
+  // stick injection in front of its reads (stick_inject.hpp).
+  static StickSlot stick(stick_pipeline_config(joystick_cal));
 
   // customization knobs: sampling/LVGL/RTPS cadence, and how often the serial
   // line is printed. The log is divided down because 30 lines/s is the

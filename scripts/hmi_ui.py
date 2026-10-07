@@ -15,6 +15,13 @@ instead of by someone looking at the display.
     python hmi_ui.py watch --fps 2             # crude video into ./watch
     python hmi_ui.py raw "SWIPE 360 900 360 300 400"
 
+    # Bench stick injection (CONFIG_HMI_BENCH_STICK_INJECT): raw mV for the three
+    # pots (horizontal, vertical, twist), refreshed every --period ms; the board
+    # drops back to the real stick 300 ms after the last one.
+    python hmi_ui.py stick hold 1507 6 1477 --ms 3000         # full forward, board 2
+    python hmi_ui.py stick sweep 1507 1510 1477 1507 6 1477   # rest -> forward
+    python hmi_ui.py stick fail 2 1507 1510 1477              # the vertical read fails
+
 --host takes the board's address; without it the script asks the network (an
 RTPS participant announces itself, so rtps_net.py's sweep finds the board) and
 falls back to HMI_HOST from the environment.
@@ -22,9 +29,11 @@ falls back to HMI_HOST from the environment.
 Stdlib only, like its neighbours: zlib and a short struct header are enough to
 write a PNG, so nothing here needs Pillow.
 
-It cannot drive the chair -- injected stick directions only move the UI's
-focus, never the stick values the MCB receives -- but it can press anything on
-screen, the seat and actuator jogs included. Bench use only.
+KEY only moves the UI's focus, never the stick values the MCB receives. STICK
+(a build with CONFIG_HMI_BENCH_STICK_INJECT only) replaces the stick's raw reads,
+so it DOES command motion through the real gate: run it only with a simulated MCB.
+Everything here can press anything on screen, the seat and actuator jogs
+included. Bench use only.
 """
 
 from __future__ import annotations
@@ -134,6 +143,15 @@ class Hmi:
 
     def theme(self, index: int) -> str:
         return self.command(f"THEME {index}")
+
+    def stick(self, h_mv: int, v_mv: int, twist_mv: int, fail_mask: int, seq: int) -> str:
+        """One STICK injection: the three raw reads in mV, the reads that fail
+        (bit 0 horizontal, 1 vertical, 2 twist) and a sequence number. Holds
+        for STICK_EXPIRY_MS on the board; raises on anything but OK."""
+        reply = self.command(f"STICK {h_mv} {v_mv} {twist_mv} {fail_mask} {seq}")
+        if reply != "OK":
+            raise RuntimeError(f"STICK refused: {reply}")
+        return reply
 
     # --- the joystick, as a person would use it -------------------------------
 
@@ -272,6 +290,52 @@ def cmd_walk(hmi: Hmi, out: pathlib.Path, half: bool) -> int:
     return 0
 
 
+# What main/stick_inject.hpp and components/stick/include/stick/bench_inject.hpp
+# accept: an injection holds this long after the last STICK, mV 0..3300, mask 0..7.
+STICK_EXPIRY_MS = 300
+STICK_MAX_MV = 3300
+STICK_FAIL_ALL = 7
+
+
+def stick_check(start: tuple[int, ...], end: tuple[int, ...], fail_mask: int,
+                period_ms: int) -> None:
+    """Refuse, before connecting, what the board would refuse or let expire."""
+    for mv in (*start, *end):
+        if not 0 <= mv <= STICK_MAX_MV:
+            raise SystemExit(f"{mv} mV is outside 0..{STICK_MAX_MV}")
+    if not 0 <= fail_mask <= STICK_FAIL_ALL:
+        raise SystemExit(f"fail mask {fail_mask} is outside 0..{STICK_FAIL_ALL}")
+    if not 10 <= period_ms <= STICK_EXPIRY_MS // 2:
+        raise SystemExit(f"--period must be 10..{STICK_EXPIRY_MS // 2} ms, so a late "
+                         f"refresh cannot let the {STICK_EXPIRY_MS} ms expiry run out")
+
+
+def stick_run(hmi: Hmi, start: tuple[int, ...], end: tuple[int, ...],
+              fail_mask: int, ms: int, period_ms: int, log: pathlib.Path | None) -> int:
+    """Inject from `start` to `end` (linearly; equal for a hold) over `ms`,
+    one STICK every `period_ms`, then stop and let the board's 300 ms expiry
+    hand the stick back. Each line sent is logged (monotonic s, seq, values)
+    so a bench run can line it up with the MCB simulator's XYTwist log."""
+    stick_check(start, end, fail_mask, period_ms)
+    steps = max(1, ms // period_ms)
+    rows = []
+    t0 = time.monotonic()
+    for seq in range(steps + 1):
+        frac = seq / steps
+        values = tuple(round(a + (b - a) * frac) for a, b in zip(start, end))
+        hmi.stick(*values, fail_mask, seq)
+        rows.append(f"{time.monotonic() - t0:.3f},{seq},{values[0]},{values[1]},{values[2]},"
+                    f"{fail_mask}")
+        time.sleep(max(0.0, t0 + (seq + 1) * period_ms / 1000 - time.monotonic()))
+    print(f"sent {len(rows)} STICK over {time.monotonic() - t0:.2f} s; the board returns to "
+          f"the real stick {STICK_EXPIRY_MS} ms after the last", file=sys.stderr)
+    if log:
+        log.write_text("".join(f"{row}\n" for row in ["t_s,seq,h_mv,v_mv,twist_mv,fail_mask",
+                                                        *rows]))
+        print(log)
+    return 0
+
+
 def cmd_watch(hmi: Hmi, out: pathlib.Path, fps: float, half: bool) -> int:
     out.mkdir(parents=True, exist_ok=True)
     period = 1.0 / max(fps, 0.1)
@@ -335,7 +399,32 @@ def main() -> int:
     raw = sub.add_parser("raw", help="send one command verbatim")
     raw.add_argument("text")
 
+    stick = sub.add_parser(
+        "stick", help="bench stick injection (CONFIG_HMI_BENCH_STICK_INJECT): raw mV, refreshed")
+    stick_sub = stick.add_subparsers(dest="mode", required=True)
+    for name, text in (("hold", "hold one value"),
+                       ("sweep", "go linearly from one value to another"),
+                       ("fail", "hold one value with these reads failing")):
+        mode = stick_sub.add_parser(name, help=text)
+        if name == "fail":
+            mode.add_argument("mask", type=int,
+                              help="reads that fail: 1 horizontal, 2 vertical, 4 twist (0..7)")
+        mode.add_argument("mv", type=int, nargs=6 if name == "sweep" else 3,
+                          metavar="MV", help="horizontal vertical twist, raw mV "
+                          "(sweep: from h v t, then to h v t)")
+        if name != "fail":
+            mode.add_argument("--fail", type=int, default=0, help="fail mask (0..7)")
+        mode.add_argument("--ms", type=int, default=2000, help="how long (default 2000)")
+        mode.add_argument("--period", type=int, default=100,
+                          help="ms between refreshes (default 100; the board expires at 300)")
+        mode.add_argument("--log", type=pathlib.Path, help="write what was sent as CSV")
+
     args = parser.parse_args()
+    if args.command == "stick":
+        args.start = tuple(args.mv[:3])
+        args.end = tuple(args.mv[3:]) if args.mode == "sweep" else args.start
+        args.mask = args.mask if args.mode == "fail" else args.fail
+        stick_check(args.start, args.end, args.mask, args.period)
     host = args.host or find_host()
 
     with Hmi(host) as hmi:
@@ -369,6 +458,9 @@ def main() -> int:
             return cmd_watch(hmi, args.out, args.fps, args.half)
         elif args.command == "raw":
             print(hmi.command(args.text))
+        elif args.command == "stick":
+            return stick_run(hmi, args.start, args.end, args.mask, args.ms, args.period,
+                             args.log)
     return 0
 
 
