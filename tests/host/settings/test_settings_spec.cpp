@@ -1,6 +1,6 @@
-// Spec-table tests for main/settings_spec.hpp (TS-UNIT-04): the invariants of SETTINGS_PAGES and
-// SETTINGS_PARAMS, and that the typed tables hold exactly what the X-macro tables they replaced
-// held (plan step 8, the refactor commit). The golden rows below are the old
+// Spec-table tests for components/settings/include/settings_spec.hpp (TS-UNIT-04): the invariants
+// of SETTINGS_PAGES and SETTINGS_PARAMS, and that the typed tables hold exactly what the X-macro
+// tables they replaced held (plan step 8, the refactor commit). The golden rows below are the old
 // SETTINGS_PAGE_TABLE / SETTINGS_PARAM_TABLE lines (dev_refactor fa3f13a), copied as data.
 
 #include <algorithm>

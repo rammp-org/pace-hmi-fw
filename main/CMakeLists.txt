@@ -14,6 +14,7 @@ idf_component_register(SRC_DIRS "."
                          joystick
                          joystick_cal
                          stick
+                         settings
                          storage
                          lvgl
                          m5stack-tab5

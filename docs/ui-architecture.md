@@ -257,7 +257,7 @@ flowchart LR
 
 ## 6. Settings, sounds and the rest
 
-- **Settings** rows come from `main/settings_spec.hpp`, one line each; the firmware builds
+- **Settings** rows come from `components/settings/include/settings_spec.hpp`, one line each; the firmware builds
   a `SettingRow` per line and saves every value to `/storage/settings.txt`. Adding a
   setting is a table line, its names in `kSettingParamNames`, its subject in
   `kSettingParamValue`, and a `case` in `setting_store_observer` if it needs applying.

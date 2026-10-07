@@ -57,7 +57,6 @@
       "main/rtps_comms.cpp": 36,
       "main/selftest.cpp": 30,
       "main/selftest.hpp": 1,
-      "main/settings.cpp": 11,
       "main/update_ui.cpp": 2,
       "main/update_ui.hpp": 1
     },
@@ -82,7 +81,6 @@
       "main/remote_ui.cpp": 6,
       "main/rtps_comms.cpp": 32,
       "main/selftest.cpp": 25,
-      "main/settings.cpp": 2,
       "main/update_ui.cpp": 9
     },
     "sleep_this_thread": {
@@ -210,6 +208,29 @@
       "heap_raw": {
         "main/main.cpp@f1eb6ce8e1d7311c18b9014104c91a6b1eb0f728": [
           "72f926642a9f8eb85604f5c0c6366a3bd4fe5448"
+        ]
+      }
+    },
+    "components/settings/src/settings.cpp": {
+      "locks": {
+        "main/settings.cpp@3a213687bf738a5f44a8183c4b46952cd573c6aa": [
+          "26db70a436045e93e5701ed76edb2037bfbfd87d",
+          "26db70a436045e93e5701ed76edb2037bfbfd87d",
+          "26db70a436045e93e5701ed76edb2037bfbfd87d",
+          "26db70a436045e93e5701ed76edb2037bfbfd87d",
+          "26db70a436045e93e5701ed76edb2037bfbfd87d",
+          "26db70a436045e93e5701ed76edb2037bfbfd87d",
+          "26db70a436045e93e5701ed76edb2037bfbfd87d",
+          "26db70a436045e93e5701ed76edb2037bfbfd87d",
+          "26db70a436045e93e5701ed76edb2037bfbfd87d",
+          "43eea135d299f54e0d2ba2a99b7e88b1236aaac3",
+          "43eea135d299f54e0d2ba2a99b7e88b1236aaac3"
+        ]
+      },
+      "mutable_globals": {
+        "main/settings.cpp@3a213687bf738a5f44a8183c4b46952cd573c6aa": [
+          "43eea135d299f54e0d2ba2a99b7e88b1236aaac3",
+          "877989c5b59fc70e4b2389c626a26e845dc3c615"
         ]
       }
     }
