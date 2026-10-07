@@ -1557,6 +1557,9 @@ extern "C" void app_main(void) {
   {
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
     lv_subject_copy_string(&link_subject, link_text(rtps_comms_net_link()));
+    if constexpr (BENCH_STICK_INJECT) {
+      stick_inject.start_marker(); // the hidden STICK INJECTED label and its timer
+    }
   }
   // The firmware's SHA-256 for the About screen: ~4 MB of flash read on a
   // low-priority thread. Only once rtps_comms_start has set the W5500 up: run
@@ -1568,6 +1571,9 @@ extern "C" void app_main(void) {
   // because it drives everything above it: input goes into the same latches the
   // ADC task and the GPIO48 callback write, so what a script exercises is the
   // real handling and not a parallel path.
+  if constexpr (BENCH_STICK_INJECT) {
+    remote_ui_attach_stick_inject(stick_inject.writer()); // STICK: the one writer
+  }
   remote_ui_start({
       .lvgl_mutex = &lvgl_mutex,
       .set_key =

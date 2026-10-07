@@ -12,7 +12,9 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -29,6 +31,7 @@
 #include "lwip/sockets.h"
 #include "riscv/rvruntime-frames.h"
 #include "soc/soc_caps.h"
+#include "stick_inject_ui.hpp"
 #include "ui.h"
 
 namespace {
@@ -47,7 +50,12 @@ constexpr int kSwipeStepMs = 20;
 // board reset with nothing on the console.
 constexpr size_t kStackBytes = 16 * 1024;
 
-RemoteUiConfig cfg;
+// What remote_ui_start was given, plus the STICK verb's write end
+// (remote_ui_attach_stick_inject; set before the server task exists).
+struct ServerConfig : RemoteUiConfig {
+  std::optional<StickInjectWriter> stick_inject;
+};
+ServerConfig cfg;
 
 // Written by the server task, read by the LVGL task through the indev. Plain
 // atomics rather than a lock: the read callback runs inside lv_timer_handler
@@ -344,6 +352,27 @@ bool send_tasks(int sock) {
   return send_line(sock, out);
 }
 
+// STICK <h_mv> <v_mv> <twist_mv> <fail_mask> <seq> (hazard-fixes.md B1): this task only
+// parses (stick/bench_inject.hpp) and writes the mailbox; the ADC task swaps the reads in
+// and drops them 300 ms after the last STICK, so a client that stops sending, or goes,
+// hands the stick back by itself.
+bool handle_stick(int sock, std::string_view args) {
+  if constexpr (!BENCH_STICK_INJECT) {
+    return send_line(sock, "ERR STICK needs CONFIG_HMI_BENCH_STICK_INJECT");
+  } else {
+    const std::optional<hmi::stick::StickInjectMsg> msg = hmi::stick::parse_stick_inject(args);
+    if (!msg) {
+      return send_line(sock, "ERR usage: STICK <h_mv> <v_mv> <twist_mv> <fail_mask> <seq> "
+                             "(mV 0..3300, fail_mask 0..7)");
+    }
+    if (!cfg.stick_inject) {
+      return send_line(sock, "ERR stick injection not attached");
+    }
+    cfg.stick_inject->write(*msg);
+    return send_line(sock, "OK");
+  }
+}
+
 bool handle(int sock, const std::string &line) {
   const std::vector<std::string> words = split(line);
   if (words.empty()) {
@@ -454,6 +483,9 @@ bool handle(int sock, const std::string &line) {
     ui_theme_set(static_cast<uint8_t>(arg(words, 1) != 0 ? UI_THEME_DAY : UI_THEME_DEFAULT));
     return send_line(sock, "OK");
   }
+  if (verb == "STICK") {
+    return handle_stick(sock, std::string_view(line).substr(line.find(verb) + verb.size()));
+  }
   return send_line(sock, "ERR unknown command: " + verb);
 }
 
@@ -500,8 +532,8 @@ void server_task() {
     ::close(listener);
     return;
   }
-  ESP_LOGW(kTag, "remote UI listening on %u -- DEBUG ONLY, it can press anything on screen",
-           kRemoteUiPort);
+  ESP_LOGW(kTag, "remote UI listening on %u -- DEBUG ONLY, it can press anything on screen%s",
+           kRemoteUiPort, BENCH_STICK_INJECT ? " and STICK commands motion" : "");
 
   while (true) {
     const int client = ::accept(listener, nullptr, nullptr);
@@ -529,8 +561,10 @@ void server_task() {
 
 } // namespace
 
+void remote_ui_attach_stick_inject(StickInjectWriter writer) { cfg.stick_inject = writer; }
+
 void remote_ui_start(const RemoteUiConfig &config) {
-  cfg = config;
+  static_cast<RemoteUiConfig &>(cfg) = config;
   {
     std::lock_guard<std::recursive_mutex> lock(*cfg.lvgl_mutex);
     // A second POINTER indev beside the GT911's, so real touch keeps working:

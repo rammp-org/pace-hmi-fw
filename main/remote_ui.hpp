@@ -28,13 +28,20 @@
  *   PING                      OK, for a liveness check
  *   TASKS                     every task's name, priority, core and stack, as one
  *                             JSON line (tools/guards/task_dump.py, guard G10)
+ *   STICK h v t mask seq      bench stick injection (CONFIG_HMI_BENCH_STICK_INJECT
+ *                             only, else ERR): the three raw stick reads in mV
+ *                             (0..3300), the reads that fail (bit 0 horizontal, 1
+ *                             vertical, 2 twist), a sequence number. Holds 300 ms;
+ *                             refresh it to hold longer (stick/bench_inject.hpp)
  *
  * One client at a time: a second connection is accepted and closed, so a
  * half-dead session cannot lock the channel out.
  *
- * What it can and cannot reach. The joystick directions it injects go into the
- * keypad latch LVGL reads, never into the stick values sent to the MCB, so it
- * cannot steer the chair. It CAN press anything on screen and hold the stick
+ * What it can and cannot reach. The joystick directions KEY injects go into the
+ * keypad latch LVGL reads, never into the stick values sent to the MCB. STICK
+ * does reach them: in a CONFIG_HMI_BENCH_STICK_INJECT build it replaces the raw
+ * stick reads, so it steers the chair whenever the gate is open (bench only,
+ * with a simulated MCB). It CAN press anything on screen and hold the stick
  * button (BTN): asking the MIB to drive, the seat and actuator jog buttons, the
  * drive mode. Those move things. There is no
  * authentication, so anything on the network can do it -- which is why the
@@ -66,3 +73,7 @@ struct RemoteUiConfig {
 /// Start the server task. Call once from app_main, after ui_init and the LVGL
 /// task, and after the network is up. A no-op when CONFIG_HMI_REMOTE_UI is off.
 void remote_ui_start(const RemoteUiConfig &config);
+
+// remote_ui_attach_stick_inject (the STICK verb's write end) is declared in
+// stick_inject_ui.hpp, so this header, which release builds include, pulls in
+// none of the bench injection.
