@@ -212,14 +212,8 @@ extern "C" void app_main(void) {
     assert(lv_display_get_rotation(lv_display_get_default()) == LV_DISPLAY_ROTATION_0 &&
            "DIRECT render mode requires rotation 0");
     if (fb_err == ESP_OK && fb0 && fb1) {
-      lv_display_set_buffers(lv_display_get_default(), fb0, fb1, fb_bytes,
-                             LV_DISPLAY_RENDER_MODE_DIRECT);
-      lv_display_set_flush_cb(lv_display_get_default(), direct_flush_cb);
-      panel_fb[0] = static_cast<uint8_t *>(fb0);
-      panel_fb[1] = static_cast<uint8_t *>(fb1);
-      panel_fb_bytes = fb_bytes;
-      panel_w = tab5.display_width();
-      panel_h = tab5.display_height();
+      display_flip.use_panel_buffers(lv_display_get_default(), fb0, fb1, fb_bytes,
+                                     tab5.display_width(), tab5.display_height());
       direct_render = true;
       logger.info("LVGL rendering directly into the DSI frame buffers (DIRECT mode)");
     } else {
@@ -1173,7 +1167,7 @@ extern "C" void app_main(void) {
   }
   if (auto touchpad = tab5.touchpad_input()) {
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
-    flip_wrap_touch(touchpad->get_touchpad_input_device());
+    display_flip.wrap_touch(touchpad->get_touchpad_input_device());
   }
 
   // start a simple thread to do the lv_task_handler every 8ms — the refresh
