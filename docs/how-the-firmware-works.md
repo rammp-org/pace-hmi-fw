@@ -66,6 +66,7 @@ hardware, a red outline is safety-relevant, and a dashed outline is generated co
 | `components/fw_core` | Channels (`Mailbox`, `Queue`, `AtomicValue`), `ThreadChecker`, `Owned<T>`, `check()`, context tokens. **Linked but unused** | for later | host L1 (FWC-L1) |
 | `components/hmi_format` | Pure text formatting: speed, steppers, clock, diagnostics, about, update, network | no | host L1 (L1-FMT) |
 | `components/hmi_models` | Pure UI models: the button-grid cursor walk and the bench PIN | no | host L1 (L1-MOD) |
+| `components/hmi_ui` | The UI island's views: TopBar clock, link and RTPS label, DriveBand status cells, backlight (more move in, app-main-shrink S4-S6) | no | bench B4 |
 | `components/ota_parse` | Pure OTA parsing: release list, image header check, fwinfo, boot-confirm marker search | no | host L1 (L1-OTA) |
 | `components/joystick` | espp's joystick, vendored, plus a twist (Z) axis | yes | host L1 (L1-JOY) |
 | `components/m5stack-tab5` | espp's Tab5 board support, vendored and modified (two frame buffers, vsync present) | no | none |
@@ -114,8 +115,10 @@ What this means in practice:
   (`tools/split_main.py:12-13`).
 - **The binary did not change.** `tools/split_guard.py` compared the firmware before and
   after the split; only an assert's `__LINE__` moved.
-- **It is temporary.** Each fragment is meant to become a component as the refactor goes
-  on ([plans/app-main-shrink.md](plans/app-main-shrink.md)).
+- **It is temporary.** The fragments are being dissolved into components grouped by concern,
+  not one component each: the UI views into `hmi_ui`, haptics and sound into `feedback`, the stick
+  parts into `stick`, the drive logic into `drive_session`/`drive_adapter`
+  ([plans/app-main-shrink.md](plans/app-main-shrink.md), revision V15).
 
 ### 2.3 The other files in `main/`
 
@@ -580,7 +583,7 @@ subject before anything binds to it.
 | `seat_axis_value[4]` | RTPS receive | seat buttons, angle text, Actuators rows |
 | `entry_refused_subject` | LVGL | refusal banners |
 | `diag_value[n][3]`, `diag_stale`, `diag_rate` | RTPS receive; LVGL `diag_poll` | Diagnostics rows |
-| `clock_subject`, `link_subject` | LVGL; `app_main` | TopBar |
+| `TopBarView`'s clock and link subjects (`hmi_ui`) | LVGL; `app_main` (link, under the lock) | TopBar |
 | hold `progress` ×3 | LVGL | padlock ring, calibrate bar |
 
 ### 10.4 The SquareLine contract
@@ -661,7 +664,7 @@ in the last 2000 ms, otherwise NO_PEER. Only CONNECTED lets anything drive.
 | Files | `settings.txt`, `joystick_cal.txt` (versioned), `wifi.txt` (password in plain text), `fwinfo.txt` | |
 | OTA | Update screen → GitHub release list → `github_ota_start` thread:<br>- streams 64 KB blocks to the other slot<br>- checks the first block (magic, chip, project)<br>- computes SHA-256<br>- `esp_ota_end`<br>- compares with GitHub's digest **only if one exists**<br>- sets the boot partition<br>Restarts only when the MIB is not ENABLED. Rollback is on: the new image marks itself valid after 30 s of the LVGL task running | `github_ota.cpp`, `update_ui.cpp`, `components/ota_parse` |
 | Self-test | 54 checks in `selftest_spec.hpp` covering system, network, RTPS, memory, I2C, IMU, RTC, power, haptics, display, timing and joystick. Started from Skunk Works or by a RUN command over RTPS (any peer, H7). Runs on its own task; draws an overlay that takes over the joystick input. Reports over RTPS and as a `[SELFTEST]` table on serial | `selftest.cpp` |
-| Remote UI | Bench builds only (`CONFIG_HMI_REMOTE_UI`), TCP 3333, no authentication (H13). Commands: SHOT, TAP, PRESS, RELEASE, SWIPE, KEY, BTN, THEME, SCREEN, FOCUS, PING, TASKS. Input goes through the same atomics as the real stick and button. With `CONFIG_HMI_BENCH_STICK_INJECT` also STICK: an `fw_core` mailbox to the ADC task, which swaps its three raw reads for the injected mV (or failed reads) until 300 ms after the last STICK; a red "STICK INJECTED" label shows meanwhile. This one reaches XYTwist | `remote_ui.cpp`, `stick_inject_ui.hpp`, `components/stick` (`bench_inject.hpp`), `scripts/hmi_ui.py` |
+| Remote UI | Bench builds only (`CONFIG_HMI_REMOTE_UI`), TCP 3333, no authentication (H13). Commands: SHOT, TAP, PRESS, RELEASE, SWIPE, KEY, BTN, THEME, SCREEN, FOCUS, PING, TASKS. Input goes through the same atomics as the real stick and button. With `CONFIG_HMI_BENCH_STICK_INJECT` also STICK: an `fw_core` mailbox to the ADC task, which swaps its three raw reads for the injected mV (or failed reads) until 300 ms after the last STICK; a red "STICK INJECTED" label shows meanwhile. This one reaches XYTwist | `remote_ui.cpp`, `stick_inject.hpp`, `components/stick` (`bench_inject.hpp`), `scripts/hmi_ui.py` |
 | Log | stdout and stderr are copied into a 500-line PSRAM ring; the Log screen rebuilds from it | `log_capture.cpp`, `log_view.cpp` |
 | Haptics, sound | DRV2605 waveforms (`haptic_play`, no lock of its own); a WAV click through `tab5.play_audio`. Several tasks reach the audio path (H16) | `frag_haptics.inc`, `frag_audio.inc` |
 
@@ -675,13 +678,13 @@ during boot).
 | `frag_fps` | frame-rate debug, `CONFIG_HMI_DEBUG_FPS` only | `kFpsInstrument`, render start/ready callbacks | LVGL |
 | `frag_state` | the shared state: subjects, atomics, groups, forward declarations | `stick_drives`, `joy_*`, settings atomics, `locked_subject`, `nav_menu_open` | all |
 | `frag_haptics` | DRV2605 play helper | `haptic_play` | LVGL, self-test |
-| `frag_status_band` | DriveBand labels (DRIVE ACTIVE/LOCKED, STATE) | `mcb_status_label_observer`, `bind_status_panel`; also FPS toggle and stick dead-zone constants | LVGL, RTPS rx |
+| `frag_status_band` | the `StatusBandView` instance (code in `hmi_ui`); FPS toggle, GPIO48 counter colour, stick dead-zone constants | `bind_status_panel` | LVGL, RTPS rx |
 | `frag_stick_config` | joystick axis configs and calibration apply | `stick_*_config`, `stick_apply_cal`, `kRtpsPollMs` | Read ADC |
-| `frag_rtps_label` | TopBar RTPS indicator | `rtps_label_observer` | LVGL |
+| `frag_rtps_label` | the `RtpsLabelView` instance (code in `hmi_ui`) | `bind_rtps_label` | LVGL |
 | `frag_drive_band` | Drive-screen profile buttons and speed | `drive_profile_click_cb`, `drive_mode_publish_observer` | LVGL, RTPS rx |
 | `frag_rtps_poll` | the 250 ms poll: link, blink, diagnostics, **drive tick**, theme | `rtps_poll_cb` | LVGL |
-| `frag_brightness` | backlight subject and save; setters for other tasks | `brightness_set` (RTPS), `brightness_step` (side button) | several, under the lock |
-| `frag_clock` | TopBar clock and link text; MCB time sync | `clock_poll_cb`, `clock_note_mcb_time` (RTPS rx) | LVGL, RTPS rx |
+| `frag_brightness` | `brightness_subject`, the `BrightnessView` instance (code in `hmi_ui`); setters for other tasks | `brightness_set` (RTPS), `brightness_step` (side button), each taking `lvgl_mutex` | several, under the lock |
+| `frag_clock` | MCB time sync; the `TopBarView` instance (code in `hmi_ui`) | `clock_note_mcb_time` (RTPS rx), `bind_topbar_labels`, `bind_chrome_views` | LVGL, RTPS rx |
 | `frag_stick_button` | GPIO48 edges; hold constants; forward declarations | `stick_button_edge` | Button, remote UI |
 | `frag_hold` | the hold engine | `HoldGesture`, `hold_poll` | LVGL |
 | `frag_lock` | padlock visuals, `set_locked`, unlock gesture | `set_locked`, `unlock_gesture`, `lock_visual_*` | LVGL |
@@ -775,7 +778,6 @@ Found while writing this; none is a hazard on its own.
 | menu constants | `frag_diag` | `frag_nav` |
 | `kOtaConfirmAfterMs` | `frag_nav` | the OTA code |
 | `logger_nav` | `frag_display_flip` | `frag_nav` |
-| clock constants | `frag_brightness` | `frag_clock` |
 | `kSelectMaxUs` | `frag_clock` | `frag_stick_button` |
 | stick dead-zone constants | `frag_status_band` | `frag_stick_config` |
 | the `direct_flush_cb` doc | `frag_overdraw` | `frag_display_flip` |

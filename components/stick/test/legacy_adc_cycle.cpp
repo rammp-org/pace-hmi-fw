@@ -19,7 +19,7 @@
 //   2. `twist_lowpass` is the identity: the filter reads esp_timer, stays in main, and the
 //      vector's twist_mv is its output;
 //   3. calls out (joystick_cal_note_raw, lv_subject_set_int, rtps_comms_publish_adc) are fakes
-//      that record what they were given (the publish fake returns g_publish_returns, true);
+//      that record what they were given;
 //   4. the function-local `static bool engaged` and the app_main-local `static espp::Joystick
 //      stick` are harness state, so each scenario can start from power-on.
 // Keep it that way: this file is the "before" the extraction is measured against.
@@ -154,10 +154,6 @@ std::recursive_mutex lvgl_mutex;
 std::optional<JoystickCal> g_new_cal;
 bool g_calibrating = false;
 StickOutputs g_out{};
-// What the fake rtps_comms_publish_adc returns. The real one returns false until RTPS is up and
-// a peer has matched; the vectors all run with it up. A variable rather than a literal, so the
-// call's result is not a constant to static analysis (cppcheck knownConditionTrueFalse).
-bool g_publish_returns = true;
 
 std::optional<JoystickCal> joystick_cal_take_new() {
   return std::exchange(g_new_cal, std::nullopt);
@@ -181,13 +177,18 @@ void lv_subject_set_int(lv_subject_t *subject, std::int32_t value) {
   g_out.bars_set = true;
 }
 
+// What the fake reports back. The real call returns false until RTPS is up and a subscriber
+// is discovered; the harness discards the result (cycle() reads g_out.published), so the fake
+// returns a harness value rather than a constant.
+std::atomic<bool> g_publish_result{true};
+
 bool rtps_comms_publish_adc(float x, float y, float twist, rammp::Buttons buttons) {
   g_out.published = true;
   g_out.cmd_x = std::bit_cast<std::uint32_t>(x);
   g_out.cmd_y = std::bit_cast<std::uint32_t>(y);
   g_out.cmd_twist = std::bit_cast<std::uint32_t>(twist);
   g_out.buttons = static_cast<std::uint32_t>(buttons);
-  return g_publish_returns;
+  return g_publish_result.load();
 }
 
 // The body of adc_task_fn after its reads (main.cpp:1481-1601), verbatim apart from the edits

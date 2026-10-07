@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <optional>
@@ -31,7 +32,7 @@
 #include "lwip/sockets.h"
 #include "riscv/rvruntime-frames.h"
 #include "soc/soc_caps.h"
-#include "stick_inject_ui.hpp"
+#include "stick_inject.hpp"
 #include "ui.h"
 
 namespace {
@@ -50,10 +51,13 @@ constexpr int kSwipeStepMs = 20;
 // board reset with nothing on the console.
 constexpr size_t kStackBytes = 16 * 1024;
 
-// What remote_ui_start was given, plus the STICK verb's write end
-// (remote_ui_attach_stick_inject; set before the server task exists).
+// What remote_ui_start was given, plus the bench stick injection's channel ends
+// (remote_ui_attach_stick_inject, from app_main before the server task exists) and
+// the STICK INJECTED label (built by remote_ui_start, then LVGL task only).
 struct ServerConfig : RemoteUiConfig {
-  std::optional<StickInjectWriter> stick_inject;
+  std::optional<StickInjectWriter> stick_inject;       // STICK's write end
+  std::optional<StickInjectActiveReader> stick_active; // read by the marker's timer
+  lv_obj_t *stick_marker = nullptr;
 };
 ServerConfig cfg;
 
@@ -373,6 +377,39 @@ bool handle_stick(int sock, std::string_view args) {
   }
 }
 
+// LVGL task (an lv_timer): the STICK INJECTED label shows while the ADC task reports an
+// injection, brought to the front of the top layer (over the self-test overlay).
+void stick_marker_poll(lv_timer_t * /*timer*/) {
+  const bool on = cfg.stick_active->read();
+  if (on == !lv_obj_has_flag(cfg.stick_marker, LV_OBJ_FLAG_HIDDEN)) {
+    return;
+  }
+  if (on) {
+    lv_obj_remove_flag(cfg.stick_marker, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(cfg.stick_marker);
+  } else {
+    lv_obj_add_flag(cfg.stick_marker, LV_OBJ_FLAG_HIDDEN);
+  }
+}
+
+// The hidden marker and its 100 ms poll, built once by remote_ui_start under the LVGL lock
+// (as the pointer indev). Allocation fails only here, at start-up, where aborting is allowed:
+// a bench build that cannot show an injection must not run one.
+void start_stick_marker() {
+  cfg.stick_marker = lv_label_create(lv_layer_top());
+  if (cfg.stick_marker == nullptr || lv_timer_create(stick_marker_poll, 100, nullptr) == nullptr) {
+    std::abort();
+  }
+  lv_label_set_text_static(cfg.stick_marker, "STICK INJECTED");
+  lv_obj_set_style_bg_color(cfg.stick_marker, lv_palette_main(LV_PALETTE_RED), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(cfg.stick_marker, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_text_color(cfg.stick_marker, lv_color_white(), LV_PART_MAIN);
+  lv_obj_set_style_text_font(cfg.stick_marker, &lv_font_montserrat_34, LV_PART_MAIN);
+  lv_obj_set_style_pad_all(cfg.stick_marker, 12, LV_PART_MAIN);
+  lv_obj_align(cfg.stick_marker, LV_ALIGN_TOP_MID, 0, 8);
+  lv_obj_add_flag(cfg.stick_marker, LV_OBJ_FLAG_HIDDEN);
+}
+
 bool handle(int sock, const std::string &line) {
   const std::vector<std::string> words = split(line);
   if (words.empty()) {
@@ -561,7 +598,10 @@ void server_task() {
 
 } // namespace
 
-void remote_ui_attach_stick_inject(StickInjectWriter writer) { cfg.stick_inject = writer; }
+void remote_ui_attach_stick_inject(StickInjectWriter writer, StickInjectActiveReader active) {
+  cfg.stick_inject = writer;
+  cfg.stick_active = active;
+}
 
 void remote_ui_start(const RemoteUiConfig &config) {
   static_cast<RemoteUiConfig &>(cfg) = config;
@@ -572,6 +612,9 @@ void remote_ui_start(const RemoteUiConfig &config) {
     pointer = lv_indev_create();
     lv_indev_set_type(pointer, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(pointer, pointer_read);
+    if (cfg.stick_active) {
+      start_stick_marker(); // bench stick injection only: STICK INJECTED, hidden
+    }
   }
   esp_pthread_cfg_t thread_cfg = esp_pthread_get_default_config();
   thread_cfg.stack_size = kStackBytes;

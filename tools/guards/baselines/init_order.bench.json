@@ -275,7 +275,7 @@
         "guard variable for app_main::kf",
         "guard variable for app_main::label_text",
         "guard variable for app_main::rotate_display",
-        "guard variable for app_main::stick_pipeline",
+        "guard variable for app_main::stick",
         "guard variable for app_main::twist_adc",
         "guard variable for app_main::twist_lowpass",
         "guard variable for app_main::{lambda(auto:1 const&)#1}::operator()<espp::TouchpadData>(espp::TouchpadData const&) const::previous_touchpad_data",
@@ -445,21 +445,11 @@
       "shared": [
         "guard variable for fmt::v12::format_facet<std::locale>::id"
       ]
-    },
-    "stick/src/stick_pipeline.cpp.obj": {
-      "init_functions": 1,
-      "objects": [],
-      "reads_external": [],
-      "lazy_statics": [],
-      "calls": [],
-      "shared": [
-        "guard variable for fmt::v12::format_facet<std::locale>::id"
-      ]
     }
   },
   "source": {
-    "build": "C:/b/inject_base_bench",
-    "project": "C:/w/inject",
-    "objects_scanned": 106
+    "build": "C:\\b\\final_bench",
+    "project": "C:/Users/halai/Offline_Documents/ATDev/rammp/pace-hmi-fw-refactor",
+    "objects_scanned": 105
   }
 }

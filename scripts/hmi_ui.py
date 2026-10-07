@@ -290,7 +290,7 @@ def cmd_walk(hmi: Hmi, out: pathlib.Path, half: bool) -> int:
     return 0
 
 
-# What main/stick_inject_ui.hpp and components/stick/include/stick/bench_inject.hpp
+# What main/stick_inject.hpp and components/stick/include/stick/bench_inject.hpp
 # accept: an injection holds this long after the last STICK, mV 0..3300, mask 0..7.
 STICK_EXPIRY_MS = 300
 STICK_MAX_MV = 3300

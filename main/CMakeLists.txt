@@ -8,6 +8,7 @@ idf_component_register(SRC_DIRS "."
                          filters
                          hmi_format
                          hmi_models
+                         hmi_ui
                          input_drivers
                          joystick
                          stick

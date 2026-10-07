@@ -234,13 +234,12 @@ extern "C" void app_main(void) {
   // run the LVGL refresh timer at 60 fps — the espp lv_conf.h compiles in a
   // 33 ms (30 fps) default period; the lv_task loop below already calls
   // lv_task_handler every 16 ms so it can keep up
-  lv_timer_set_period(lv_display_get_refr_timer(lv_display_get_default()), 16);
+  lv_display_t *const display = lv_display_get_default();
+  lv_timer_set_period(lv_display_get_refr_timer(display), 16);
 
   if constexpr (kFpsInstrument) {
-    lv_display_add_event_cb(lv_display_get_default(), fps_render_start_cb, LV_EVENT_RENDER_START,
-                            nullptr);
-    lv_display_add_event_cb(lv_display_get_default(), fps_render_ready_cb, LV_EVENT_RENDER_READY,
-                            nullptr);
+    lv_display_add_event_cb(display, fps_render_start_cb, LV_EVENT_RENDER_START, nullptr);
+    lv_display_add_event_cb(display, fps_render_ready_cb, LV_EVENT_RENDER_READY, nullptr);
     logger.info("FPS instrumentation enabled (stress={})", kFpsStress);
   }
 
@@ -512,8 +511,7 @@ extern "C" void app_main(void) {
       theme != ui_theme_idx && (theme == UI_THEME_DEFAULT || theme == UI_THEME_DAY)) {
     ui_theme_set(theme);
   }
-  lv_subject_init_int(&brightness_subject, settings_brightness());
-  lv_subject_add_observer(&brightness_subject, brightness_observer, nullptr);
+  brightness_view.init(settings_brightness());
   // Theme: the row switches the UI's palette; rtps_poll_cb notices the switch
   // (however it was made) and saves it, and keeps this subject in step.
   lv_subject_init_int(&theme_subject, ui_theme_idx == UI_THEME_DAY ? 1 : 0);
@@ -544,8 +542,7 @@ extern "C" void app_main(void) {
     lv_subject_add_observer(subject, setting_store_observer,
                             reinterpret_cast<void *>(static_cast<intptr_t>(param)));
   }
-  brightness_save_timer = lv_timer_create(brightness_save_cb, kBrightnessSaveDelayMs, nullptr);
-  lv_timer_pause(brightness_save_timer);
+  brightness_view.start_save_timer(kBrightnessSaveDelayMs);
 
   // Bind the Settings-screen axis bars to the ADC subjects (observer pattern).
   // Bars show the calibrated joystick position as a percentage: -100..+100,
@@ -591,9 +588,7 @@ extern "C" void app_main(void) {
   // here. One list rather than three, because a screen whose band, TopBar and
   // chrome do not all get bound shows a frozen readout, and lining the three
   // calls up separately is how one gets forgotten.
-  lv_subject_init_string(&clock_subject, clock_buf, clock_prev_buf, sizeof(clock_buf), "--:--");
-  lv_subject_init_string(&link_subject, link_buf, link_prev_buf, sizeof(link_buf),
-                         link_text(static_cast<NetLink>(settings_get(SETTINGS_PARAM_NETWORK))));
+  topbar_view.init(link_text(static_cast<NetLink>(settings_get(SETTINGS_PARAM_NETWORK))));
   struct ScreenChrome {
     lv_obj_t *bar;
     lv_obj_t *band;
@@ -617,17 +612,14 @@ extern "C" void app_main(void) {
       {ui_TopBar13, ui_DriveBand13, ui_MenuKey13, ui_MenuOverlay13, true}, // AboutScreen
   };
   for (const ScreenChrome &c : kChrome) {
-    bind_status_panel(c.band);
-    bind_rtps_label(c.bar);
-    bind_topbar_labels(c.bar);
+    bind_chrome_views(c.band, c.bar);
     nav_attach_chrome(c.key, c.overlay, c.band_goes_home ? c.band : nullptr);
   }
   // The menu stays reachable while locked: Log, Diagnostics, Settings and
   // the bench tools are all useful with the chair not driving -- and without an
   // MCB at all. Locked still means nothing moves: the band reads LOCKED on every
   // screen and the stick only drives from Drive (stick_drives).
-  clock_poll_cb(nullptr); // the RTC's time, when it had one, from the first frame
-  lv_timer_create(clock_poll_cb, kClockPollMs, nullptr);
+  topbar_view.start_clock();
   lv_subject_add_observer_obj(&speed_tenths_subject, speed_label_observer, ui_SpeedValue, nullptr);
   lv_subject_init_int(&drive_profile_subject, static_cast<int32_t>(MIB::DriveProfile::NORMAL));
   bind_drive_profile_button(ui_ModeManual, &kProfileHigh);
@@ -1200,10 +1192,11 @@ extern "C" void app_main(void) {
            lv_task_handler();
          }
          if constexpr (kFpsInstrument) {
-           static espp::Logger fps_log({.tag = "fps", .level = espp::Logger::Verbosity::DEBUG});
            static int64_t last_report_us = esp_timer_get_time();
            const int64_t now_us = esp_timer_get_time();
            if (now_us - last_report_us >= 1000000) {
+             // Made per report rather than kept in a static: debug build, once a second.
+             const espp::Logger fps_log({.tag = "fps", .level = espp::Logger::Verbosity::DEBUG});
              const uint32_t frames = fps_frames.exchange(0);
              const uint64_t total_us = fps_render_us_total.exchange(0);
              const uint32_t max_us = fps_render_us_max.exchange(0);
@@ -1253,7 +1246,7 @@ extern "C" void app_main(void) {
   tab5.mute(false);
   tab5.volume(60.0f);
 
-  // (brightness is the saved setting, applied when brightness_subject is bound)
+  // (brightness is the saved setting, applied when brightness_view.init adds its observer)
 
   // make a task to read out various data such as IMU, battery monitoring, etc.
   // and print it to screen
@@ -1440,10 +1433,11 @@ extern "C" void app_main(void) {
   const JoystickCal joystick_cal = joystick_cal_load({kIdealAxis, kIdealAxis, kIdealAxis});
   // The stick pipeline (components/stick): the joystick mapping on this
   // calibration, the key trigger and the gate. Owned by the ADC task below.
-  static hmi::stick::StickPipeline stick_pipeline(stick_pipeline_config(joystick_cal));
-  // Bench stick injection (CONFIG_HMI_BENCH_STICK_INJECT, stick_inject_ui.hpp): the
-  // remote UI's STICK verb into the ADC task below. Otherwise an empty type, unused.
-  static StickInjectSlot stick_inject;
+  // Named `stick`, as the espp::Joystick it wraps was: the same lazy static,
+  // built at the same point (tools/guards init_order baseline). A StickSlot is
+  // the StickPipeline itself, or with CONFIG_HMI_BENCH_STICK_INJECT the bench
+  // stick injection in front of its reads (stick_inject.hpp).
+  static StickSlot stick(stick_pipeline_config(joystick_cal));
 
   // customization knobs: sampling/LVGL/RTPS cadence, and how often the serial
   // line is printed. The log is divided down because 30 lines/s is the
@@ -1481,19 +1475,12 @@ extern "C" void app_main(void) {
     // hmi::stick::StickPipeline (components/stick), fed through AdcStickIo
     // (frag_stick_config.inc) in the order this ran inline before. Only a
     // cycle with all three reads does anything; otherwise nothing is published.
-    hmi::stick::RawReadsMv raw{
-        .horizontal_mv = horiz_mv, .vertical_mv = vert_mv, .twist_mv = twist_mv};
-    // Bench only (CONFIG_HMI_BENCH_STICK_INJECT; compiled out otherwise): a STICK from
-    // the remote UI stands in for the three reads until 300 ms after the last one.
-    if constexpr (BENCH_STICK_INJECT) {
-      raw = stick_inject.apply(raw);
-    }
     AdcStickIo stick_io{.twist_lowpass = twist_lowpass};
-    const bool adc_published = stick_pipeline.cycle(stick_io, raw);
+    const bool adc_published = stick.cycle(
+        stick_io, {.horizontal_mv = horiz_mv, .vertical_mv = vert_mv, .twist_mv = twist_mv});
     // Every cycle, valid or not: the self test measures the loop's cadence and
     // how often a read fails, as well as the values. A no-op unless a run is
-    // capturing. X is the horizontal channel, as everywhere above. The ADC's own
-    // reads, also while a bench STICK injection stands in for them.
+    // capturing. X is the horizontal channel, as everywhere above.
     selftest_note_adc(vert_mv && horiz_mv && twist_mv, horiz_mv.value_or(0.0f),
                       vert_mv.value_or(0.0f), twist_mv.value_or(0.0f), adc_published,
                       joy_button_pressed.load());
@@ -1556,10 +1543,7 @@ extern "C" void app_main(void) {
   }
   {
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
-    lv_subject_copy_string(&link_subject, link_text(rtps_comms_net_link()));
-    if constexpr (BENCH_STICK_INJECT) {
-      stick_inject.start_marker(); // the hidden STICK INJECTED label and its timer
-    }
+    topbar_view.set_link(link_text(rtps_comms_net_link()));
   }
   // The firmware's SHA-256 for the About screen: ~4 MB of flash read on a
   // low-priority thread. Only once rtps_comms_start has set the W5500 up: run
@@ -1571,9 +1555,6 @@ extern "C" void app_main(void) {
   // because it drives everything above it: input goes into the same latches the
   // ADC task and the GPIO48 callback write, so what a script exercises is the
   // real handling and not a parallel path.
-  if constexpr (BENCH_STICK_INJECT) {
-    remote_ui_attach_stick_inject(stick_inject.writer()); // STICK: the one writer
-  }
   remote_ui_start({
       .lvgl_mutex = &lvgl_mutex,
       .set_key =

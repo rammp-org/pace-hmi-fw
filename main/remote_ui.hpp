@@ -75,5 +75,5 @@ struct RemoteUiConfig {
 void remote_ui_start(const RemoteUiConfig &config);
 
 // remote_ui_attach_stick_inject (the STICK verb's write end) is declared in
-// stick_inject_ui.hpp, so this header, which release builds include, pulls in
+// stick_inject.hpp, so this header, which release builds include, pulls in
 // none of the bench injection.

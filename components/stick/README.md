@@ -23,10 +23,10 @@ extraction (`test/golden_stick.inc`, frozen). They are not a reviewed specificat
 ## Bench stick injection (`stick/bench_inject.hpp`, hazard-fixes.md §3 B1)
 
 Bench only: the firmware uses it only behind `CONFIG_HMI_BENCH_STICK_INJECT` (which depends on
-`CONFIG_HMI_REMOTE_UI`), in `if constexpr` arms, so a release build compiles none of it. The
+`CONFIG_HMI_REMOTE_UI`), selected at compile time (`StickSlot`), so a release build compiles none of it. The
 remote UI's `STICK` verb parses a `StickInjectMsg` and writes it to an `fw_core` mailbox; the ADC
 task drains it and swaps its three raw reads for the injected ones before `StickPipeline::cycle`
-(`main/stick_inject_ui.hpp`). Everything after the reads is the real code.
+(`main/stick_inject.hpp`). Everything after the reads is the real code.
 
 | ID | Requirement | Tests |
 | --- | --- | --- |

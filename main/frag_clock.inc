@@ -1,9 +1,20 @@
 // split_main.py fragment of main.cpp (frag_clock: original lines 767-852); one TU, see main.cpp.
 #include "hmi_format/topbar.hpp"
+#include "hmi_ui/topbar_view.hpp"
+
+/////////////////////////////////////////////////////////////////////////////
+// TopBar clock
+//
+// The MIB sends Unix time plus its UTC offset in every MibStatus. It sets the
+// system clock and the RTC, so the time keeps running through a lost link, and
+// across a reboot without the MIB. Clock1 on every TopBar shows the system
+// clock. No TZ is set, so the system clock simply holds the local wall time the
+// MIB reported and nothing converts again.
+/////////////////////////////////////////////////////////////////////////////
+
+static constexpr int64_t kClockMaxDriftS = 2; // disagree by more and the MCB wins
+
 static std::atomic<bool> clock_valid{false};
-static lv_subject_t clock_subject;
-static char clock_buf[8];
-static char clock_prev_buf[8];
 
 // An RTC that lost power reads 2000; anything before 2025 is not a real time
 // (components/hmi_format, REQ-FMT-06).
@@ -43,38 +54,26 @@ static void clock_note_mcb_time(const MIB::MibStatus &status) {
   }
 }
 
-// LVGL task.
-static void clock_poll_cb(lv_timer_t *) {
-  char text[sizeof(clock_buf)] = "--:--";
-  if (clock_valid) {
-    const time_t now = time(nullptr);
-    std::tm t{};
-    gmtime_r(&now, &t);
-    hmi::format::clock_text(t, text);
-  }
-  if (strcmp(lv_subject_get_string(&clock_subject), text) != 0) {
-    lv_subject_copy_string(&clock_subject, text);
-  }
-}
-
 // The TopBar's link label: what RTPS runs over. The design's "BT · WI-FI" is only
 // a placeholder; it is set from the setting before rtps_comms_start, then from the
 // link it brought up (WiFi with no network known runs Ethernet).
-static lv_subject_t link_subject;
-static char link_buf[16];
-static char link_prev_buf[16];
-
 // NetLink -> hmi_format's Link (REQ-FMT-07): anything but WiFi reads Ethernet.
 static const char *link_text(NetLink link) {
   return hmi::format::link_text(link == NetLink::WIFI ? hmi::format::Link::WIFI
                                                       : hmi::format::Link::ETHERNET);
 }
 
-static void bind_topbar_labels(lv_obj_t *bar) {
-  if (bar != nullptr) {
-    lv_label_bind_text(ui_comp_get_child(bar, UI_COMP_TOPBAR_CLOCK), &clock_subject, nullptr);
-    lv_label_bind_text(ui_comp_get_child(bar, UI_COMP_TOPBAR_LINK), &link_subject, nullptr);
-  }
+// The one instance, for every TopBar; bound from app_main and the screens built on demand.
+static constinit hmi::ui::TopBarView topbar_view{{.clock_valid = &clock_valid}};
+static void bind_topbar_labels(lv_obj_t *bar) { topbar_view.bind(bar); }
+
+// The hmi_ui chrome views of one screen, in the order app_main has always bound them: the
+// DriveBand's status cells, then the TopBar's RTPS label, then its clock and link. The screens
+// built on demand bind the same three in their *_ensure().
+static void bind_chrome_views(lv_obj_t *band, lv_obj_t *bar) {
+  bind_status_panel(band);
+  bind_rtps_label(bar);
+  bind_topbar_labels(bar);
 }
 
 // One edge of the stick button, from the GPIO or from the remote UI channel --

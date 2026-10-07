@@ -1,0 +1,146 @@
+# post
+
+The quick POST evaluator: facts gathered at boot go in, a verdict per check and an overall
+POST state come out (TS-POST-01, hazard-fixes §3 B2).
+
+It is pure C++: no ESP-IDF, FreeRTOS or LVGL includes, no allocation, no logging. It builds
+for the host and the target (`fw_component_options`, `-Wswitch-enum`, a `.clang-tidy` with
+60-line functions). Safety-relevant (CS-SAF-01): once wired, a POST that is not PASS keeps
+the chair from moving.
+
+## Not yet wired
+
+Nothing in the firmware calls this yet. `main` does not require it; the project's
+`COMPONENTS` list names it only so that it builds for the target. Wiring it in is
+**hazard-fixes §4 C3**, a safety behaviour change that needs its own spec and the owner's
+approval first. C3 adds:
+
+- the `POST_PENDING` and `POST_FAILED` phases to the drive table;
+- the ADC task's rest window (`StickWindow`, sent as a message about once a second);
+- the boot facts gathered in `app_main`;
+- a `std::atomic<uint8_t>` POST state that the UI task reads;
+- the persistent fault indicator that names `blocking_check()`.
+
+The extended self test (`main/selftest*`) is not touched and stays separate.
+
+## The concern
+
+C3 splits the checks in two (`Kind` in `post/checks.hpp`):
+
+| Kind | Checks | A FAIL... |
+| --- | --- | --- |
+| `LATCHED` (hardware) | ADC valid, calibration saved, calibration span, expected I2C devices, reset reason, image, heap headroom (4), stack headroom (2) | holds until the next reset: the POST fails |
+| `LIVE` (stick at rest) | X/Y/twist offset from the calibrated centre, X/Y/twist stillness (peak-to-peak), stick button released | only delays: it is judged again on every window, so a stick bumped at power-on never locks the user out |
+
+## Interface
+
+| Header | What |
+| --- | --- |
+| `post/facts.hpp` | `Facts`, built from `StickWindow`, `AxisRest`, `Calibration`, `AxisCal`, `I2cSet`, `ImageFacts`, `MemoryFacts` and `StackFacts`, plus `ResetReason` and `OtaImageState` (these two mirror the IDF enums value for value). Every group is a `std::optional`: a group not gathered yet is `nullopt` |
+| `post/checks.hpp` | `CHECKS`, the table (TS-POST-03): `Id`, name, unit, `lo`/`hi` (inclusive), `Kind`, `Need`, why. Also the limit constants, `EXPECTED_I2C`, and the `static_assert`ed invariants |
+| `post/post.hpp` | `evaluate`, `evaluate_check`, `overall_of`, `merge`, `next_overall`, `blocking_check`, `to_string`. Also `Verdict`, `Reason`, `Overall`, `Result`, `Report` and `OVERALL_TRANSITIONS` |
+
+How a caller is meant to use it (C3 decides the details):
+
+```cpp
+hmi::post::Report latched = hmi::post::evaluate({});            // all PENDING
+// on each new fact or rest window:
+latched = hmi::post::merge(latched, hmi::post::evaluate(facts));
+// latched.overall: PENDING (wait, show blocking_check), PASS, or FAIL (latched)
+```
+
+```mermaid
+stateDiagram-v2
+  [*] --> PENDING
+  PENDING --> PENDING: evaluated PENDING
+  PENDING --> PASS: evaluated PASS
+  PENDING --> FAIL: evaluated FAIL
+  PASS --> PASS: anything (until reset)
+  FAIL --> FAIL: anything (until reset)
+```
+
+D4 of the overall state, hand-drawn from `OVERALL_TRANSITIONS`. `tools/gen_diagrams` draws
+only D2 and D3 today.
+
+## Requirements
+
+| ID | Requirement | Tests |
+| --- | --- | --- |
+| REQ-POST-01 | The facts are a plain struct of optional groups. `ResetReason` and `OtaImageState` carry ESP-IDF v6.0's `esp_reset_reason_t` and `esp_ota_img_states_t` values, value for value. `StickWindow` is trivially copyable and at most 128 B, so it can cross tasks as a message. | POST-030, POST-031 (and `static_assert`s in `facts.hpp`) |
+| REQ-POST-02 | `CHECKS` has one row per `Id`, in `Id` order, with unique names and `lo <= hi`. A check is `LIVE` exactly when it is part of the stick-at-rest guard, and every `LIVE` row is `REQUIRED`. `LATCHED` rows come first. The X/Y rest limit sits inside the stick's 0.10 dead zone of the shortest accepted travel, and the twist rest limit inside the 60 mV twist dead band. | POST-001 (and `static_assert`s in `checks.hpp`) |
+| REQ-POST-03 | A check whose facts are missing is PENDING (`NOT_MEASURED`). A window shorter than `WINDOW_MIN_SAMPLES` is PENDING (`TOO_FEW_SAMPLES`). Neither is ever a FAIL. | POST-002, POST-005, POST-006 |
+| REQ-POST-04 | A measured value inside `[lo, hi]` is PASS. Outside it is FAIL with the value and a reason: `BELOW_MIN`/`ABOVE_MAX`, or the row's own (`NOT_SAVED`, `DEVICE_MISSING`, `UNCLEAN_RESET`, `IMAGE_STATE`, `BUTTON_PRESSED`). The measurements: `adc.valid` = valid × 1000 / cycles, rounded down; `joy.cal_span` = the least of centre − min and max − centre over the three axes; `joy.*_cal_off` = abs(mean − calibrated centre); `joy.*_noise` = max − min. | POST-003, POST-004, POST-007, POST-011, POST-012, POST-018 |
+| REQ-POST-05 | Reset reasons: POWERON, EXT, SW, DEEPSLEEP, SDIO, USB and JTAG pass. PANIC, INT_WDT, TASK_WDT, WDT, BROWNOUT, EFUSE, PWR_GLITCH and CPU_LOCKUP fail (`UNCLEAN_RESET`). UNKNOWN, or any value ESP-IDF v6.0 does not name, fails (`UNKNOWN_RESET`). | POST-013, POST-014 |
+| REQ-POST-06 | An image that is not verified fails (`IMAGE_NOT_VERIFIED`). A verified image passes in VALID, UNDEFINED or PENDING_VERIFY. NEW, INVALID, ABORTED or an unnamed state fail (`IMAGE_STATE`). | POST-015, POST-027 |
+| REQ-POST-07 | `i2c.missing` counts the `EXPECTED_I2C` addresses the scan did not find. Extra devices do not count. `I2cSet` holds exactly the 7-bit addresses added. | POST-016, POST-017 |
+| REQ-POST-08 | These facts fail with `BAD_FACTS`: more valid cycles than cycles, a mean outside its min..max, and an `Id` that is not a check. Extreme `int32` facts saturate and never overflow (run under UBSan). | POST-008, POST-009, POST-010, POST-029 |
+| REQ-POST-09 | Overall: FAIL when a REQUIRED LATCHED check fails. Otherwise PENDING when any REQUIRED check is not PASS, so a LIVE FAIL only delays. Otherwise PASS. OPTIONAL rows never count. An empty table, results that don't line up with the table, or a verdict outside the enum give FAIL. | POST-004, POST-018, POST-020, POST-021, POST-025 |
+| REQ-POST-10 | The overall state follows `OVERALL_TRANSITIONS`. From PENDING it follows the evaluation. PASS and FAIL hold until reset. A state outside the enum gives FAIL. | POST-022, POST-024, POST-026 |
+| REQ-POST-11 | `merge` keeps a LATCHED check's first PASS or FAIL. A LATCHED PENDING check, and every LIVE check, take the newest result. A kept result whose id doesn't match its row is judged again. | POST-023, POST-024, POST-025, POST-027, POST-033 |
+| REQ-POST-12 | `blocking_check` returns the first REQUIRED FAIL in table order (hardware first), else the first REQUIRED PENDING, else none. | POST-004, POST-018, POST-024, POST-025, POST-027, POST-028 |
+| REQ-POST-13 | Each verdict, overall state and reason has its own name. A value outside the enum reads `?`. | POST-032 |
+
+The safe state for every requirement is "overall not PASS": no motion once C3 wires this in.
+
+## Limits waiting for owner values (hazard-fixes D4)
+
+Each limit is a placeholder on the strict side of what is known. They are marked `D4:` in
+`post/checks.hpp`.
+
+| Constant | Placeholder | Source |
+| --- | --- | --- |
+| `WINDOW_MIN_SAMPLES` | 25 cycles (~0.8 s) | B2 asks for about 1 s of rest statistics |
+| `ADC_VALID_MIN_PERMILLE` | 990 (99.0 %) | self test `joy.valid`; this means no failed read in a window under 100 cycles |
+| `EXPECTED_I2C` | 0x10 0x28 0x32 0x36 0x40 0x41 0x43 0x44 0x55 0x5a 0x68 | board 2's boot scan, every bench boot on 2026-10-06; required vs board-optional not split yet |
+| `MEM_INT_MIN_B`, `MEM_INT_BLOCK_B` | 12 KiB each | self test `mem.int_min`, `mem.int_block` |
+| `MEM_DMA_MIN_B` | 1536 B | self test `mem.dma_min` |
+| `MEM_PSRAM_FREE_B` | 8 MiB | self test `mem.psram_free` |
+| `STK_ADC_MIN_B`, `STK_UI_MIN_B` | 1024 B, 2048 B | self test `mem.stk_adc`, `mem.stk_lvgl` |
+| `REST_XY_MAX_MV`, `REST_TWIST_MAX_MV` | 40 mV, 50 mV | self test `joy.*_cal_off` |
+| `STILL_XY_MAX_MV`, `STILL_TWIST_MAX_MV` | 30 mV, 120 mV | self test `joy.*_noise` |
+
+Decided here, for the owner to confirm:
+
+- A panic, watchdog or brownout reset fails the POST until the next reset. The alternative is
+  to show it only.
+- An image in PENDING_VERIFY (first boot of an update) passes.
+- No check is OPTIONAL. A `static_assert` makes adding one an explicit decision.
+
+Fixed values, not D4: `CAL_MIN_HALF_SPAN_MV` = 1000 is `joystick_cal.cpp`'s `kFullTravelMv`.
+`STICK_DEAD_ZONE_PERMILLE` = 100 and `TWIST_DEAD_BAND_MV` = 60 mirror `main`'s stick
+constants and are used only in `static_assert`s.
+
+## Open points for C3
+
+- **The wait has no timeout.** A stick held off centre, or a noisy pot, keeps the POST PENDING
+  for as long as it lasts. That is safe (no motion), but C3 must decide when the UI escalates
+  it to the persistent fault indicator.
+- **Gathering the facts:**
+  - `ImageFacts::verified`: the bootloader already validates the image on every boot under
+    `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`, unless a skip option is set. Choose
+    `esp_image_verify` or the bootloader's result.
+  - The memory and stack numbers depend on when they are taken.
+- **IDF parity at the call site.** The adapter that converts `esp_reset_reason()` and
+  `esp_ota_get_state_partition()` should `static_assert` the enum values next to the IDF
+  headers. POST-030 and POST-031 already compare the text of those headers.
+
+## Tasks and dependencies
+
+- Tasks: none. Every function is pure, and runs on whichever task calls it (C3: the control
+  island).
+- Dependencies: the C++ standard library only. Nothing requires this component yet.
+
+## Tests
+
+`test/` is the host L1 app (`make test`, `make coverage`; manifest entry `L1-POST`, run with
+`python tests/run.py run L1-POST`):
+
+| File | What it holds |
+| --- | --- |
+| `fixtures.hpp` | a healthy boot (`good_facts`) and `set_measured`, which makes one check measure a chosen value and leaves the others alone |
+| `test_post.cpp` | POST-001..POST-029, POST-032, POST-033 |
+| `test_idf_parity.cpp` | POST-030 and POST-031. They read `esp_system.h` and `esp_flash_partitions.h` from the IDF tree that `UNITY_DIR` is in |
+
+Coverage of `src/post.cpp` on 2026-10-06 (gcov, host): 98.9 % of lines, 94.4 % of branches.
+What is not reached: the `default` of `measure()` (`evaluate_check` turns away an unknown id
+first) and the OPTIONAL skip in `blocking_check` (no row is OPTIONAL).

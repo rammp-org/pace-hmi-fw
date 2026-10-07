@@ -18,6 +18,16 @@
       "reqs": [],
       "priv_reqs": []
     },
+    "hmi_ui": {
+      "reqs": [
+        "lvgl__lvgl"
+      ],
+      "priv_reqs": [
+        "hmi_format",
+        "rammp_rtps_messages",
+        "ui"
+      ]
+    },
     "main": {
       "reqs": [],
       "priv_reqs": [
@@ -74,6 +84,7 @@
         "fw_core",
         "hmi_format",
         "hmi_models",
+        "hmi_ui",
         "joystick",
         "lvgl__lvgl",
         "lwip",
@@ -81,6 +92,7 @@
         "mbedtls",
         "ota_parse",
         "rammp_rtps_messages",
+        "stick",
         "ui"
       ]
     },
@@ -89,6 +101,16 @@
       "priv_reqs": [
         "espressif__cjson"
       ]
+    },
+    "post": {
+      "reqs": [],
+      "priv_reqs": []
+    },
+    "stick": {
+      "reqs": [
+        "joystick"
+      ],
+      "priv_reqs": []
     }
   },
   "dependencies": {
