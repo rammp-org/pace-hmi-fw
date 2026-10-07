@@ -34,9 +34,11 @@ plus the boot capture, self-test JSON, walk PNGs and the sim logs beside it.
 
 Verdicts: PASS, FAIL, INVALID (B0 preflight; B2's no-IP-after-join rule), SKIP (declared on the
 command line), NOT_RUN (nothing to test against, e.g. no IP; or a runner crash: not a verdict),
-RECORD (a characterisation, B5e: today's behaviour as data; passes the run, never saves last-good).
-Last-good is saved only when every step that ran is PASS, so with B5e in the default list a
-`--flash` run saves last-good only when `--steps` leaves B5e out.
+RECORD (a characterisation, B5e: today's behaviour as data; passes the run).
+Last-good (with `--flash`) is saved when every step is PASS, or RECORD with its graded checks
+(set-up, clean-up) all passed and no problems; a RECORD without clean graded checks, or any
+SKIP, NOT_RUN, FAIL or INVALID, saves nothing (`run_bench.last_good_decision`, BENCH-010..012;
+orchestrator decision 2026-10-06, option B). `summary.json` → `last_good` says why.
 
 ## B5a..B5e: the sim's fault modes
 In the default step list, after B5, since their first board runs (2026-10-06, final-a9a040f:

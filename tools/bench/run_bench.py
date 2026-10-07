@@ -43,9 +43,13 @@ B5a..B5e scenario_hazards.py, the drive path against the sim's fault modes (exit
     hold, burger-key exit, relock on link loss, profile click after relock,
     ignored/dropped DISABLE). In the default list since their first board runs
     (2026-10-06, final-a9a040f). B5e is a characterisation: RECORD, not PASS/FAIL.
-    RECORD counts as passing for the run's verdict and exit code, but a run with
-    a RECORD step never saves last-good (that needs every step PASS): a default
-    --flash run therefore saves last-good only with B5e left out of --steps.
+    RECORD counts as passing for the run's verdict and exit code, and for
+    last-good when its own graded checks (set-up, clean-up) all passed.
+Last-good (with --flash, without --no-save): saved when every step recorded is
+    PASS, or RECORD with a non-empty `checks` list that all passed and no
+    `problems` (last_good_decision). SKIP, NOT_RUN, FAIL, INVALID, or a RECORD
+    without clean graded checks, and nothing is saved; summary.json's
+    `last_good` says why.
 """
 
 from __future__ import annotations
@@ -332,6 +336,26 @@ def only_ip_missing(report: dict) -> bool:
     return all("got_ip" in p for p in report["problems"])
 
 
+def last_good_decision(steps: dict) -> tuple[bool, str]:
+    """(save, why) for the steps of a run, in summary.json's form. A RECORD counts only
+    when its graded part is clean: at least one check, every check ok, no problems.
+    scenario_hazards gives RECORD only then, but this does not take that on trust."""
+    if not steps:
+        return False, "no step ran"
+    for name, step in steps.items():
+        verdict = step.get("verdict")
+        if verdict == "PASS":
+            continue
+        if verdict == "RECORD":
+            checks = step.get("checks") or []
+            if step.get("problems") or not checks or not all(c.get("ok") is True
+                                                             for c in checks):
+                return False, f"{name} RECORD without clean graded checks"
+            continue
+        return False, f"{name} {verdict}"
+    return True, "every step PASS, or RECORD with its graded checks passed"
+
+
 def plan_steps(steps_arg: str | None) -> tuple[list[str], list[str]]:
     """(sequence, steps): the order steps run in, and the ones asked for (names in any
     case). ValueError on a name that is not a step."""
@@ -434,10 +458,12 @@ def main() -> int:
         run.summary["verdict"] = ("FAIL" if "FAIL" in verdicts else
                                   "INVALID" if "INVALID" in verdicts else
                                   "INCOMPLETE" if "NOT_RUN" in verdicts else "PASS")
-        # RECORD (a characterisation step, B5e) passes the run but is not PASS.
-        # Last-good only when every step that ran passed (all PASS; RECORD is not PASS).
-        if a.flash and not a.no_save and verdicts and all(v == "PASS" for v in verdicts):
-            run.summary["saved_last_good"] = str(flash.save(a.build_dir, a.label, "B0-B5 PASS"))
+        # RECORD (a characterisation step, B5e) passes the run; for last-good it counts
+        # only with its graded set-up and clean-up passed (last_good_decision).
+        save, why = last_good_decision(run.summary["steps"])
+        run.summary["last_good"] = why
+        if a.flash and not a.no_save and save:
+            run.summary["saved_last_good"] = str(flash.save(a.build_dir, a.label, why))
         run.save()
         common.log(f"lease: {lease.release(owner)}")
     print(json.dumps({k: v["verdict"] for k, v in run.summary["steps"].items()}, indent=1))

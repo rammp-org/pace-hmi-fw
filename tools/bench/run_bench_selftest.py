@@ -204,6 +204,48 @@ def t_no_ip_anywhere() -> None:
     expect("reason", "no board IP" in summary["steps"]["B5"]["reason"], True)
 
 
+def _record(checks: list[bool], problems: list[str] | None = None) -> dict:
+    return {"verdict": "RECORD", "checks": [{"check": f"c{i}", "ok": ok}
+                                             for i, ok in enumerate(checks)],
+            "problems": problems if problems is not None else
+            [f"c{i}" for i, ok in enumerate(checks) if not ok]}
+
+
+def t_last_good_clean_record_saves() -> None:
+    passed = {s: {"verdict": "PASS"} for s in ("B0", "B1", "B2", "B5")}
+    expect("all PASS", run_bench.last_good_decision(passed)[0], True)
+    expect("PASS + a clean RECORD", run_bench.last_good_decision(
+        {**passed, "B5e": _record([True, True, True])})[0], True)
+    # a step's record as run_bench stores it: the clean RECORD keeps its checks
+    fake = FakeBoard()
+    real = fake.app_step
+    fake.app_step = lambda name, ip: (_record([True]) if name == "B5e" else real(name, ip))
+    summary, _ = bench(fake, "B5,B5e")
+    ran = {k: v for k, v in summary["steps"].items() if k in ("B5", "B5e")}
+    expect("run", (verdicts(summary), run_bench.last_good_decision(ran)[0]),
+           ({"B5": "PASS", "B5e": "RECORD"}, True))
+
+
+def t_last_good_dirty_record_does_not() -> None:
+    passed = {"B0": {"verdict": "PASS"}}
+    for what, rec in (("a failed check", _record([True, False])),
+                      ("a problem listed, checks ok", _record([True], ["clean-up: not locked"])),
+                      ("no graded checks at all", _record([])),
+                      ("a check without ok", {"verdict": "RECORD", "checks": [{"check": "x"}],
+                                              "problems": []})):
+        save, why = run_bench.last_good_decision({**passed, "B5e": rec})
+        expect(what, (save, "B5e RECORD" in why), (False, True))
+
+
+def t_last_good_fail_does_not() -> None:
+    for verdict in ("FAIL", "INVALID", "NOT_RUN", "SKIP"):
+        save, why = run_bench.last_good_decision({"B0": {"verdict": "PASS"},
+                                                  "B5": {"verdict": verdict},
+                                                  "B5e": _record([True])})
+        expect(verdict, (save, why), (False, f"B5 {verdict}"))
+    expect("nothing ran", run_bench.last_good_decision({})[0], False)
+
+
 def t_no_reset_no_wait() -> None:
     summary, log = bench(FakeBoard(), "B5,B5c")
     expect("verdicts", verdicts(summary), {"B5": "PASS", "B5c": "PASS"})
@@ -238,6 +280,11 @@ CASES = [
     ("BENCH-008 B0 then app steps with no --ip and no B2: the wait's Got IP gives the IP",
      t_ip_from_the_wait),
     ("BENCH-009 no reset and no --ip: the app steps are NOT_RUN, no IP", t_no_ip_anywhere),
+    ("BENCH-010 last-good: every step PASS, or a RECORD with clean graded checks, saves",
+     t_last_good_clean_record_saves),
+    ("BENCH-011 last-good: a RECORD with a failed, listed or missing graded check does not save",
+     t_last_good_dirty_record_does_not),
+    ("BENCH-012 last-good: FAIL, INVALID, NOT_RUN or SKIP does not save", t_last_good_fail_does_not),
 ]
 
 
