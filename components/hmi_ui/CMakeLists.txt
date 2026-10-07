@@ -14,6 +14,7 @@ idf_component_register(SRCS "src/about_view.cpp"
                        REQUIRES hmi_format
                                 hmi_models
                                 lvgl
+                                ota_parse
                                 rammp_rtps_messages
                        PRIV_REQUIRES ui)
 
