@@ -1,11 +1,14 @@
 # hmi_ui: the UI island, everything the UI task draws (CS-UI-02, CS-UI-04). README.md has the
 # concern, the file map and the requirements.
-idf_component_register(SRCS "src/overdraw.cpp"
+idf_component_register(SRCS "src/fps_meter.cpp"
+                            "src/overdraw.cpp"
                             "src/rtps_label_view.cpp"
                             "src/status_band_view.cpp"
                        INCLUDE_DIRS "include"
                        REQUIRES lvgl
-                       PRIV_REQUIRES rammp_rtps_messages
+                       PRIV_REQUIRES esp_timer
+                                     logger
+                                     rammp_rtps_messages
                                      ui)
 
 # CS-LNG-02. The top-level CMakeLists includes fw_standards.cmake only after project(), and
