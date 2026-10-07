@@ -154,6 +154,7 @@ static void nav_update_stick_gate();
 // The subjects above that the hmi_ui views read (components/hmi_ui/shared_subjects.hpp).
 #include "hmi_ui/link_state.hpp"
 #include "hmi_ui/nav_port.hpp"
+#include "hmi_ui/nav_view.hpp"
 #include "hmi_ui/shared_subjects.hpp"
 static constexpr hmi::ui::SharedSubjects ui_shared_subjects{
     .locked = &locked_subject,
@@ -172,10 +173,11 @@ static_assert(same_link_state(RtpsLinkState::LINK_DOWN, hmi::ui::LinkState::LINK
 static_assert(same_link_state(RtpsLinkState::NO_IP, hmi::ui::LinkState::NO_IP));
 static_assert(same_link_state(RtpsLinkState::NO_PEER, hmi::ui::LinkState::NO_PEER));
 static_assert(same_link_state(RtpsLinkState::CONNECTED, hmi::ui::LinkState::CONNECTED));
-// main's navigation, for the hmi_ui views (components/hmi_ui/nav_port.hpp).
+// Navigation for the hmi_ui views (components/hmi_ui/nav_port.hpp): NavView's API. The look
+// is NavView's own (static); the two calls that need the one instance go through it.
 static constexpr hmi::ui::NavPort ui_nav_port{
     .to_key = nav_to_key,
     .use_group = nav_use_group,
-    .focus_ring = nav_focus_ring,
-    .mirror_states = nav_mirror_states,
+    .focus_ring = hmi::ui::NavView::focus_ring,
+    .mirror_states = hmi::ui::NavView::mirror_states,
 };
