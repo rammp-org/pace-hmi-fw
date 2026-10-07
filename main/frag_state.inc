@@ -21,10 +21,8 @@ static char drive_text_prev_buf[rammp::kMcbTextLen];
 static char state_text_buf[rammp::kMcbTextLen];
 static char state_text_prev_buf[rammp::kMcbTextLen];
 
-// Drive-screen readouts the MCB owns: the big speed number, and the body and
-// footer of the error banner. Speed is carried as tenths so the wire stays
-// integer; the label formats it as N.N.
-static lv_subject_t speed_tenths_subject;
+// The error banner's body and footer, as the MCB sends them. (The speed readout is
+// DriveBandView's own subject.)
 static lv_subject_t error_text_subject;
 static lv_subject_t error_footer_subject;
 static char error_text_buf[rammp::kErrorTextLen];
@@ -36,11 +34,10 @@ static char error_footer_prev_buf[rammp::kErrorFooterLen];
 // it alongside the stick position without taking the LVGL lock.
 static std::atomic<bool> joy_button_pressed{false};
 
-// Which drive mode the user picked on the DriveScreen. The HMI owns this - it
-// is a question about what the person wants the stick to mean - and reports it
-// to the MCB with every joystick sample. Mirrored into an atomic for the same
-// reason as the button: the ADC task must not take the LVGL lock to read it.
-static lv_subject_t drive_profile_subject;
+// Which drive mode the user picked on the DriveScreen (DriveBandView's profile
+// subject shows what the MIB took). The HMI reports it to the MCB with every
+// DriveCommand; an atomic for the same reason as the button: the ADC task must
+// not take the LVGL lock to read it.
 static std::atomic<MIB::DriveProfile> drive_profile_published{MIB::DriveProfile::NORMAL};
 
 // Link health behind those two, polled from rtps_comms (RtpsLinkState). Drives

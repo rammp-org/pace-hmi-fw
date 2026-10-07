@@ -570,7 +570,7 @@ extern "C" void app_main(void) {
                          sizeof(drive_text_buf), "");
   lv_subject_init_string(&state_text_subject, state_text_buf, state_text_prev_buf,
                          sizeof(state_text_buf), "");
-  lv_subject_init_int(&speed_tenths_subject, 0);
+  lv_subject_init_int(drive_band_view.speed_subject(), 0);
   lv_subject_init_string(&error_text_subject, error_text_buf, error_text_prev_buf,
                          sizeof(error_text_buf), "");
   lv_subject_init_string(&error_footer_subject, error_footer_buf, error_footer_prev_buf,
@@ -614,7 +614,8 @@ extern "C" void app_main(void) {
   // screen and the stick only drives from Drive (stick_drives).
   topbar_view.start_clock();
   drive_band_view.bind_speed(ui_SpeedValue);
-  lv_subject_init_int(&drive_profile_subject, static_cast<int32_t>(MIB::DriveProfile::NORMAL));
+  lv_subject_init_int(drive_band_view.profile_subject(),
+                      static_cast<int32_t>(MIB::DriveProfile::NORMAL));
   drive_band_view.bind_profile_buttons(ui_ModeManual, ui_ModeAssist, ui_ModeAuto);
   drive_band_view.bind_profile_mirror();
   // Before the panels that observe it. lv_subject_init_int memzeroes the subject,
@@ -1300,10 +1301,11 @@ extern "C" void app_main(void) {
     lv_subject_set_int(&mib_state_subject, static_cast<int32_t>(status.systemState));
     // What the MIB is actually driving with: the three profile buttons highlight from
     // this, so they follow the chair even when something else changed it.
-    lv_subject_set_int(&drive_profile_subject, static_cast<int32_t>(status.activeProfile));
+    lv_subject_set_int(drive_band_view.profile_subject(),
+                       static_cast<int32_t>(status.activeProfile));
     // m/s on the wire, mph on the dial: the shared spec carries the real
     // quantity and the unit on the label is ours to pick.
-    lv_subject_set_int(&speed_tenths_subject, speed_display_tenths(status.speed));
+    lv_subject_set_int(drive_band_view.speed_subject(), speed_display_tenths(status.speed));
     // copy_string cuts each text to its subject's buffer (RAMMP_*_LEN). drive_text_subject
     // stays empty: the MIB sends one wording, and the state label is where it belongs.
     lv_subject_copy_string(&state_text_subject, status.status_text.c_str());

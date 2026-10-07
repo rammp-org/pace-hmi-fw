@@ -34,7 +34,7 @@ void hmi::ui::DriveBandView::bind_profile_button(lv_obj_t *button, ProfileButton
   lv_obj_add_event_cb(button, profile_click_cb, LV_EVENT_CLICKED, slot);
   // The label takes the inverted colour with the button (pressed and checked).
   config_.nav->mirror_states(button);
-  lv_subject_add_observer_obj(config_.profile, profile_button_observer, button, slot);
+  lv_subject_add_observer_obj(&profile_, profile_button_observer, button, slot);
 }
 
 void hmi::ui::DriveBandView::bind_profile_buttons(lv_obj_t *manual, lv_obj_t *assist,
@@ -57,7 +57,7 @@ void hmi::ui::DriveBandView::profile_mirror_observer(lv_observer_t *observer,
 }
 
 void hmi::ui::DriveBandView::bind_profile_mirror() {
-  lv_subject_add_observer(config_.profile, profile_mirror_observer, this);
+  lv_subject_add_observer(&profile_, profile_mirror_observer, this);
 }
 
 // The speed reaches the subject as tenths; the label wants "N.N". No built-in
@@ -68,6 +68,6 @@ void hmi::ui::DriveBandView::speed_label_observer(lv_observer_t *observer, lv_su
   lv_label_set_text(lv_observer_get_target_obj(observer), text);
 }
 
-void hmi::ui::DriveBandView::bind_speed(lv_obj_t *label) const {
-  lv_subject_add_observer_obj(config_.speed_tenths, speed_label_observer, label, nullptr);
+void hmi::ui::DriveBandView::bind_speed(lv_obj_t *label) {
+  lv_subject_add_observer_obj(&speed_tenths_, speed_label_observer, label, nullptr);
 }
