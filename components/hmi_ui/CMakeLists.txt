@@ -4,14 +4,15 @@ idf_component_register(SRCS "src/bench_pin_view.cpp"
                             "src/brightness_view.cpp"
                             "src/button_grid.cpp"
                             "src/rtps_label_view.cpp"
+                            "src/seat_view.cpp"
                             "src/status_band_view.cpp"
                             "src/topbar_view.cpp"
                        INCLUDE_DIRS "include"
-                       REQUIRES hmi_models
+                       REQUIRES hmi_format
+                                hmi_models
                                 lvgl
-                       PRIV_REQUIRES hmi_format
-                                     rammp_rtps_messages
-                                     ui)
+                                rammp_rtps_messages
+                       PRIV_REQUIRES ui)
 
 # CS-LNG-02. Today the top-level CMakeLists includes fw_standards.cmake only after project(),
 # while this file runs inside project(), so fw_component_options does not exist yet here and
