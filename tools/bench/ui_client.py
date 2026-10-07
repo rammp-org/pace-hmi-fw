@@ -214,18 +214,34 @@ def ping(host: str, within: float, port: int = 3333, every: float = 1.0) -> tupl
 
 # ---------------------------------------------------------------- selftest
 
+# Timeouts in the cases, injected per command (_with_fake replaces _timeout_for):
+# a command the case has planned to stall (FakeRemoteUi.stall_next) gets STALL_TIMEOUT_S,
+# which it always waits out in full; every command that is meant to be answered gets
+# ANSWER_TIMEOUT_S, which it never waits out unless the machine stops it for that long.
+# Why: the cases used one 0.3 s timeout for both, so an answer scheduled late on a loaded
+# machine (idf.py builds alongside) timed out; a run failed once that way (2026-10-07).
+# Verified 2026-10-07: every answer delayed 0.35 s made UI-001..003 fail at 0.3 s; one
+# 2.0 s timeout for both still let UI-001 fail 2 times in 50 runs at nice 19 beside 96
+# busy processes (WSL, 32 cores; a starved SCREEN was retried); with these two, 0 in 50
+# there and 0 in 50 beside 48 busy processes on Windows, and answers 1.0 s late pass.
+STALL_TIMEOUT_S = 0.5
+ANSWER_TIMEOUT_S = 30.0
+
 
 class FakeRemoteUi:
     """A localhost stand-in for main/remote_ui.cpp: one client at a time, line in, line out.
     `stall` maps a verb to how many of its next commands get no answer (the connection
-    stays open, as on a stalled Wi-Fi link)."""
+    stays open, as on a stalled Wi-Fi link). `delay` answers every command that late
+    (a slow, busy machine)."""
 
-    def __init__(self) -> None:
+    def __init__(self, delay: float = 0.0) -> None:
+        self.delay = delay
         self.listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.listener.bind(("127.0.0.1", 0))
         self.listener.listen(4)
         self.port = self.listener.getsockname()[1]
-        self.stall: dict[str, int] = {}
+        self.stall: dict[str, int] = {}       # the server's count, taken as commands arrive
+        self.planned: dict[str, int] = {}     # the client side's copy, taken as they are sent
         self.seen: list[str] = []
         self.clients = 0
         self.screen = "LockedScreen"
@@ -260,12 +276,28 @@ class FakeRemoteUi:
                     if self.stall.get(verb, 0) > 0:
                         self.stall[verb] -= 1
                         continue  # no answer
+                    if self.delay:
+                        time.sleep(self.delay)  # a late answer, by design of the case
                     if verb == "SCREEN":
                         client.sendall(f"OK {self.screen}\n".encode())
                     elif verb == "SHOT":
                         client.sendall(b"FRAME 2 2 8\n" + bytes(range(8)))
                     else:
                         client.sendall(b"OK\n")
+
+    def stall_next(self, verb: str, count: int = 1) -> None:
+        """The next `count` commands with this verb get no answer."""
+        self.stall[verb] = self.stall.get(verb, 0) + count
+        self.planned[verb] = self.planned.get(verb, 0) + count
+
+    def timeout_for(self, text: str) -> float:
+        """The injected _timeout_for: short for a send the case planned to stall (counted
+        here, on the client side, so it never depends on when the server thread runs)."""
+        verb = text.split()[0].upper() if text.split() else ""
+        if self.planned.get(verb, 0) > 0:
+            self.planned[verb] -= 1
+            return STALL_TIMEOUT_S
+        return ANSWER_TIMEOUT_S
 
     def close(self) -> None:
         self._stop = True
@@ -279,11 +311,12 @@ def _hmi_ui():
     return hmi_ui
 
 
-def _with_fake(fn: Callable[[FakeRemoteUi, object, pathlib.Path], None]) -> Callable[[], None]:
+def _with_fake(fn: Callable[[FakeRemoteUi, object, pathlib.Path], None],
+               delay: float = 0.0) -> Callable[[], None]:
     def run() -> None:
-        global COMMAND_TIMEOUT_S
-        saved, COMMAND_TIMEOUT_S = COMMAND_TIMEOUT_S, 0.3
-        fake = FakeRemoteUi()
+        global _timeout_for
+        fake = FakeRemoteUi(delay)
+        saved, _timeout_for = _timeout_for, fake.timeout_for
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 log = pathlib.Path(tmp) / "remote-ui.jsonl"
@@ -293,7 +326,7 @@ def _with_fake(fn: Callable[[FakeRemoteUi, object, pathlib.Path], None]) -> Call
                 finally:
                     hmi.close()
         finally:
-            COMMAND_TIMEOUT_S = saved
+            _timeout_for = saved
             fake.close()
     run.__wrapped__ = fn
     return run
@@ -310,20 +343,22 @@ def _rows(log: pathlib.Path) -> list[dict]:
 
 def t_logged(fake, hmi, log) -> None:
     expect("screen", hmi.screen(), "LockedScreen")
-    hmi.press(10)  # BTN 1, BTN 0: the hold helpers run on the logged I/O
+    hmi.press(200)  # BTN 1, 200 ms, BTN 0: the hold helpers run on the logged I/O
     expect("shot", hmi.shot()[:2], (2, 2))
     rows = _rows(log)
     expect("one line per command", [r["cmd"] for r in rows], ["SCREEN", "BTN 1", "BTN 0", "SHOT"])
     expect("fields", sorted(rows[1]), sorted(["cmd", "attempt", "sent", "answered", "dur_s",
                                               "gap_s", "reply"]))
-    expect("first gap is None, later ones measured",
-           (rows[0]["gap_s"] is None, rows[2]["gap_s"] >= 0.01), (True, True))
+    # the gap before BTN 0 is the 200 ms hold; load only lengthens a sleep, so a lower
+    # bound holds (0.15: the coarsest monotonic clock seen, Windows', ticks 15.6 ms)
+    expect("first gap is None, the hold's gap measured",
+           (rows[0]["gap_s"] is None, rows[2]["gap_s"] >= 0.15), (True, True))
     expect("reply", (rows[0]["reply"], rows[3]["reply"]), ("OK LockedScreen",
                                                            "FRAME 2 2 (8 bytes)"))
 
 
 def t_retry_idempotent(fake, hmi, log) -> None:
-    fake.stall["BTN"] = 1
+    fake.stall_next("BTN")
     expect("BTN answered on the retry", hmi.command("BTN 0"), "OK")
     rows = _rows(log)
     expect("attempts", [(r["attempt"], "error" in r, r.get("retried")) for r in rows],
@@ -334,7 +369,7 @@ def t_retry_idempotent(fake, hmi, log) -> None:
 
 
 def t_tap_not_retried(fake, hmi, log) -> None:
-    fake.stall["TAP"] = 1
+    fake.stall_next("TAP")
     try:
         hmi.tap(360, 1198)
     except RemoteUiError as e:
@@ -348,7 +383,7 @@ def t_tap_not_retried(fake, hmi, log) -> None:
 
 
 def t_retry_fails_too(fake, hmi, log) -> None:
-    fake.stall["SCREEN"] = 2
+    fake.stall_next("SCREEN", 2)
     try:
         hmi.screen()
     except RemoteUiError as e:
@@ -356,6 +391,19 @@ def t_retry_fails_too(fake, hmi, log) -> None:
     else:
         raise AssertionError("two stalls did not raise")
     expect("two attempts logged", [r["attempt"] for r in _rows(log)], [1, 2])
+
+
+def t_late_answers(fake, hmi, log) -> None:
+    expect("screen", hmi.screen(), "LockedScreen")
+    hmi.press(10)
+    expect("shot", hmi.shot()[:2], (2, 2))
+    rows = _rows(log)
+    expect("answered on the first attempt, no error",
+           [(r["cmd"], r["attempt"], "error" in r) for r in rows],
+           [("SCREEN", 1, False), ("BTN 1", 1, False), ("BTN 0", 1, False), ("SHOT", 1, False)])
+    expect("each took the delay", all(r["dur_s"] >= 0.45 for r in rows), True)
+    expect("stats", {k: hmi.stats()[k] for k in ("commands", "errors", "retries")},
+           {"commands": 4, "errors": 0, "retries": 0})
 
 
 def t_shot_timeout_longer() -> None:
@@ -367,7 +415,7 @@ def t_shot_timeout_longer() -> None:
 def t_ping() -> None:
     fake = FakeRemoteUi()
     try:
-        expect("answers", ping("127.0.0.1", 2.0, port=fake.port)[0], True)
+        expect("answers", ping("127.0.0.1", 5.0, port=fake.port)[0], True)
     finally:
         fake.close()
     probe = socket.socket()
@@ -388,6 +436,8 @@ CASES = [
     ("UI-004 a retry that times out too raises RemoteUiError", _with_fake(t_retry_fails_too)),
     ("UI-005 SHOT and SWIPE get longer timeouts", t_shot_timeout_longer),
     ("UI-006 ping polls PING until OK, or reports what it last saw", t_ping),
+    ("UI-007 answers 0.5 s late (a loaded machine) still pass on the first attempt",
+     _with_fake(t_late_answers, delay=0.5)),
 ]
 
 
