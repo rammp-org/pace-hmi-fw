@@ -7,6 +7,8 @@
 
 #include "lvgl.h"
 
+#include "messages/mib_message.hpp"
+
 #include "hmi_ui/link_state.hpp"
 #include "hmi_ui/shared_subjects.hpp"
 
@@ -30,6 +32,32 @@ enum Refused : int32_t {
   REFUSED_DRIVE_MENU = 7,
 };
 
+/// A banner's body and footer.
+struct BannerLines {
+  const char *body;
+  const char *footer;
+};
+
+/// A banner's three lines.
+struct BannerText {
+  const char *title;
+  const char *body;
+  const char *footer;
+};
+
+/// The banners' words: the shared spec's (main fills this from hmi_rtps_spec.hpp), so the
+/// MCB's logs and these banners use the same words.
+struct RefusalTexts {
+  BannerLines eth_failed, wifi_failed, link_down, wifi_down, no_ip, no_peer; ///< the link
+  const char *mcb_no_text_fmt; ///< printf: %u the MIB state's value, %s its name
+  const char *(*state_name)(MIB::MibSystemState state);
+  BannerText drive_stopped, drive_not_granted, exit_refused; ///< the MIB's own refusals
+  const char *link_refused_title, *mcb_refused_title;        ///< a refused push
+  const char *seat_link_refused_title, *seat_mcb_refused_title;
+  const char *drive_lost_link_title, *drive_lost_mcb_title;
+  const char *link_lost_title, *mcb_fault_title; ///< a drive cut short
+};
+
 /// One instance for every refusal banner. `refused` records only THAT a request was refused;
 /// the banners work out WHY from the link and state subjects whenever any of them changes, so
 /// they always name the current cause. All words come from the shared spec
@@ -38,6 +66,7 @@ class RefusalView {
 public:
   struct Config {
     const SharedSubjects *shared;             ///< `rtps_link`, `mib_state` and `locked` are read
+    const RefusalTexts *texts;                ///< the words
     lv_subject_t *error_text;                 ///< string: the MIB's error_message ("" = none)
     lv_subject_t *error_footer;               ///< string: the MIB's error_footer ("" = none)
     lv_subject_t *refused;                    ///< int: Refused; banners up unless REFUSED_NONE
@@ -91,11 +120,7 @@ public:
   void poll();
 
 private:
-  struct Text {
-    const char *body;
-    const char *footer;
-  };
-  [[nodiscard]] Text link_text(LinkState link) const;
+  [[nodiscard]] BannerLines link_text(LinkState link) const;
   void fill_mib_reason(lv_obj_t *panel, const char *title, const char *fallback_body,
                        const char *fallback_footer) const;
   static void refused_panel_observer(lv_observer_t *observer, lv_subject_t *subject);

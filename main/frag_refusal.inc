@@ -64,9 +64,36 @@ static_assert(sizeof(rammp::kHmiEthFailedFooter) <= rammp::kErrorFooterLen &&
 // The drive session's input, defined in frag_drive.inc.
 static bool drive_session_input(hmi::drive_session::Input input);
 
+// The banners' words, from the shared spec.
+static constexpr hmi::ui::RefusalTexts kRefusalTexts{
+    .eth_failed = {rammp::kHmiEthFailedText, rammp::kHmiEthFailedFooter},
+    .wifi_failed = {rammp::kHmiWifiFailedText, rammp::kHmiWifiFailedFooter},
+    .link_down = {rammp::kHmiLinkDownText, rammp::kHmiLinkDownFooter},
+    .wifi_down = {rammp::kHmiWifiDownText, rammp::kHmiWifiDownFooter},
+    .no_ip = {rammp::kHmiNoIpText, rammp::kHmiNoIpFooter},
+    .no_peer = {rammp::kHmiNoPeerText, rammp::kHmiNoPeerFooter},
+    .mcb_no_text_fmt = rammp::kHmiMcbNoTextFmt,
+    .state_name = [](MIB::MibSystemState state) { return rammp::to_string(state); },
+    .drive_stopped = {rammp::kHmiDriveStoppedTitle, rammp::kHmiDriveStoppedText,
+                      rammp::kHmiDriveStoppedFooter},
+    .drive_not_granted = {rammp::kHmiDriveNotGrantedTitle, rammp::kHmiDriveNotGrantedText,
+                          rammp::kHmiDriveNotGrantedFooter},
+    .exit_refused = {rammp::kHmiExitRefusedTitle, rammp::kHmiExitRefusedText,
+                     rammp::kHmiExitRefusedFooter},
+    .link_refused_title = rammp::kHmiLinkRefusedTitle,
+    .mcb_refused_title = rammp::kHmiMcbRefusedTitle,
+    .seat_link_refused_title = rammp::kHmiSeatLinkRefusedTitle,
+    .seat_mcb_refused_title = rammp::kHmiSeatMcbRefusedTitle,
+    .drive_lost_link_title = rammp::kHmiDriveLostLinkTitle,
+    .drive_lost_mcb_title = rammp::kHmiDriveLostMcbTitle,
+    .link_lost_title = rammp::kHmiLinkLostTitle,
+    .mcb_fault_title = rammp::kHmiMcbFaultTitle,
+};
+
 // The one instance, for every refusal banner.
 static constinit hmi::ui::RefusalView refusal_view{{
     .shared = &ui_shared_subjects,
+    .texts = &kRefusalTexts,
     .error_text = &error_text_subject,
     .error_footer = &error_footer_subject,
     .refused = &entry_refused_subject,
@@ -83,19 +110,18 @@ static constinit hmi::ui::RefusalView refusal_view{{
     .grace_ms = kBarGraceMs,
 }};
 
-hmi::ui::RefusalView::Text hmi::ui::RefusalView::link_text(LinkState link) const {
+hmi::ui::BannerLines hmi::ui::RefusalView::link_text(LinkState link) const {
   const bool wifi = config_.wifi();
+  const RefusalTexts &t = *config_.texts;
   switch (link) {
   case LinkState::NET_FAILED:
-    return wifi ? Text{rammp::kHmiWifiFailedText, rammp::kHmiWifiFailedFooter}
-                : Text{rammp::kHmiEthFailedText, rammp::kHmiEthFailedFooter};
+    return wifi ? t.wifi_failed : t.eth_failed;
   case LinkState::LINK_DOWN:
-    return wifi ? Text{rammp::kHmiWifiDownText, rammp::kHmiWifiDownFooter}
-                : Text{rammp::kHmiLinkDownText, rammp::kHmiLinkDownFooter};
+    return wifi ? t.wifi_down : t.link_down;
   case LinkState::NO_IP:
-    return {rammp::kHmiNoIpText, rammp::kHmiNoIpFooter};
+    return t.no_ip;
   case LinkState::NO_PEER:
-    return {rammp::kHmiNoPeerText, rammp::kHmiNoPeerFooter};
+    return t.no_peer;
   case LinkState::CONNECTED:
     break;
   }
@@ -115,7 +141,7 @@ void hmi::ui::RefusalView::fill_drive_blocked(lv_obj_t *panel, const char *link_
   // subject is only the last thing the MCB said, not what it is saying now.
   const auto link = static_cast<LinkState>(lv_subject_get_int(config_.shared->rtps_link));
   if (link != LinkState::CONNECTED) {
-    const Text text = link_text(link);
+    const BannerLines text = link_text(link);
     lv_label_set_text(title, link_title);
     lv_label_set_text(body, text.body);
     lv_label_set_text(footer, text.footer);
@@ -127,8 +153,8 @@ void hmi::ui::RefusalView::fill_drive_blocked(lv_obj_t *panel, const char *link_
     if (error_text[0] != '\0') {
       lv_label_set_text(body, error_text);
     } else {
-      lv_label_set_text_fmt(body, rammp::kHmiMcbNoTextFmt, static_cast<unsigned>(state),
-                            rammp::to_string(state));
+      lv_label_set_text_fmt(body, config_.texts->mcb_no_text_fmt, static_cast<unsigned>(state),
+                            config_.texts->state_name(state));
     }
     lv_label_set_text(footer, lv_subject_get_string(config_.error_footer));
   }
@@ -201,11 +227,9 @@ void hmi::ui::RefusalView::refused_panel_observer(lv_observer_t *observer, lv_su
   // The MIB's own refusals: shown for their window whatever the state says now,
   // because "driving stopped" is worth reading precisely when all is well again.
   if (refused == REFUSED_DRIVE_NOT_GRANTED || refused == REFUSED_DRIVE_STOPPED) {
-    const bool stopped = refused == REFUSED_DRIVE_STOPPED;
-    view->fill_mib_reason(
-        panel, stopped ? rammp::kHmiDriveStoppedTitle : rammp::kHmiDriveNotGrantedTitle,
-        stopped ? rammp::kHmiDriveStoppedText : rammp::kHmiDriveNotGrantedText,
-        stopped ? rammp::kHmiDriveStoppedFooter : rammp::kHmiDriveNotGrantedFooter);
+    const BannerText &t = refused == REFUSED_DRIVE_STOPPED ? view->config_.texts->drive_stopped
+                                                          : view->config_.texts->drive_not_granted;
+    view->fill_mib_reason(panel, t.title, t.body, t.footer);
     shown(true);
     return;
   }
@@ -213,13 +237,13 @@ void hmi::ui::RefusalView::refused_panel_observer(lv_observer_t *observer, lv_su
     shown(false);
     return;
   }
+  const RefusalTexts &t = *view->config_.texts;
   if (refused == REFUSED_SEAT) {
-    view->fill_drive_blocked(panel, rammp::kHmiSeatLinkRefusedTitle,
-                             rammp::kHmiSeatMcbRefusedTitle);
+    view->fill_drive_blocked(panel, t.seat_link_refused_title, t.seat_mcb_refused_title);
   } else if (refused == REFUSED_DRIVE_LOST) {
-    view->fill_drive_blocked(panel, rammp::kHmiDriveLostLinkTitle, rammp::kHmiDriveLostMcbTitle);
+    view->fill_drive_blocked(panel, t.drive_lost_link_title, t.drive_lost_mcb_title);
   } else {
-    view->fill_drive_blocked(panel, rammp::kHmiLinkRefusedTitle, rammp::kHmiMcbRefusedTitle);
+    view->fill_drive_blocked(panel, t.link_refused_title, t.mcb_refused_title);
   }
   shown(true);
 }
@@ -244,8 +268,8 @@ void hmi::ui::RefusalView::lost_panel_observer(lv_observer_t *observer, lv_subje
   // A refused exit: the MIB is still driving, so the screen stays and says why.
   if (lv_subject_get_int(view->config_.refused) == REFUSED_EXIT &&
       lv_screen_active() == ui_DriveScreen) {
-    view->fill_mib_reason(panel, rammp::kHmiExitRefusedTitle, rammp::kHmiExitRefusedText,
-                          rammp::kHmiExitRefusedFooter);
+    const BannerText &t = view->config_.texts->exit_refused;
+    view->fill_mib_reason(panel, t.title, t.body, t.footer);
     view->show(panel, true);
     return;
   }
@@ -253,7 +277,8 @@ void hmi::ui::RefusalView::lost_panel_observer(lv_observer_t *observer, lv_subje
     view->show(panel, false);
     return;
   }
-  view->fill_drive_blocked(panel, rammp::kHmiLinkLostTitle, rammp::kHmiMcbFaultTitle);
+  view->fill_drive_blocked(panel, view->config_.texts->link_lost_title,
+                           view->config_.texts->mcb_fault_title);
   view->show(panel, true);
 }
 
