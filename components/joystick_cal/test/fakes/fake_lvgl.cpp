@@ -1,9 +1,9 @@
-// The fake LVGL behind fakes/lvgl.h (test only). See that header for what it copies from LVGL 9.
+// The fake LVGL behind fakes/lvgl.h (test only). See fake_lvgl.hpp for what it copies from LVGL 9.
 
 #include <cstdio>
 #include <cstdlib>
 
-#include "lvgl.h"
+#include "fake_lvgl.hpp"
 
 namespace {
 

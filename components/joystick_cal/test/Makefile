@@ -6,7 +6,7 @@
 #   main/joystick_cal.cpp         the LVGL view and file I/O, through main/joystick_cal.hpp
 #                                 only (test_joystick_cal.cpp: the characterisation cases)
 # main/joystick_cal.cpp is compiled as it is, against two test-only fakes in fakes/:
-#   lvgl.h + fake_lvgl.cpp        the dozen lv_* calls the calibration run makes; found before
+#   lvgl.h -> fake_lvgl.hpp/.cpp  the dozen lv_* calls the calibration run makes; found before
 #                                 the real lvgl.h because LVGL is not on this include path
 #   fake_storage.cpp              storage_path()/storage_write() on a host temp folder
 # Logging is the real espp::Logger. The characterisation cases use only main/joystick_cal.hpp,
