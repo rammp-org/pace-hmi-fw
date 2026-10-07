@@ -11,6 +11,9 @@ static bool joy_button_armed = true;
 // The gestures and the engine that runs them (hmi::ui::HoldGesture, HoldEngine).
 using hmi::ui::HoldGesture;
 
+// Defined with the refusal banners, further down: the push check that shadows the unlock hold.
+static void entry_refusal_poll();
+
 // The one engine. Its confirmation is the same for all three gestures. Both calls are
 // non-blocking - one short I2C burst, and one xStreamBufferSend with a zero timeout - so
 // neither holds the LVGL task for the duration of the effect it starts.
@@ -20,10 +23,29 @@ static constinit hmi::ui::HoldEngine hold_engine{{
           haptic_play(espp::Drv2605::Waveform::STRONG_CLICK, 1);
           play_click(espp::M5StackTab5::get());
         },
+    // The self-test overlay owns the stick while it is up (see the keypad read in app_main).
+    .overlay_up = [] { return selftest_ui_visible(); },
+    .before_poll = [] { entry_refusal_poll(); },
 }};
 
-static void hold_poll(HoldGesture *g) { hold_engine.poll(g); }
-static void hold_reset(HoldGesture *g) { hmi::ui::HoldEngine::reset(g); }
+// Cancel anything mid-fill rather than let it complete - and navigate - behind the
+// overlay.
+void hmi::ui::HoldEngine::poll_all(std::span<HoldGesture *const> gestures) const {
+  if (config_.overlay_up()) {
+    for (HoldGesture *g : gestures) {
+      if (g->holding) {
+        g->holding = false;
+        reset(g);
+      }
+    }
+    return;
+  }
+  config_.before_poll();
+  for (HoldGesture *g : gestures) {
+    poll(g);
+  }
+}
+
 
 // The stick's own button. Reads the level the button callback mirrors out, not
 // the edge-latched select_key: a hold gesture needs to know the button is still

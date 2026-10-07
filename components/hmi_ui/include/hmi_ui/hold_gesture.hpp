@@ -3,6 +3,7 @@
 // happens. The widget a gesture fills is bound to its `progress` subject.
 
 #include <cstdint>
+#include <span>
 
 #include "lvgl.h"
 
@@ -12,6 +13,12 @@ namespace hmi::ui {
 inline constexpr int32_t HOLD_MAX = 100;
 /// How long a hold takes to fill, after the gesture's grace period.
 inline constexpr uint32_t HOLD_MS = 1000;
+/// Dead time before a hold starts filling. The stick button doubles as select, and a select is
+/// a press shorter than this, so a tap never ticks a fill up and snaps it back.
+inline constexpr uint32_t HOLD_GRACE_MS = 500;
+/// Poll cadence for the inputs. Matched to the ADC task's 33 ms period: joy_key cannot change
+/// faster than that, so a shorter period would only burn UI task time re-reading the same value.
+inline constexpr uint32_t HOLD_POLL_MS = 33;
 
 class HoldEngine;
 
@@ -37,6 +44,11 @@ public:
     /// Confirmation feedback when a hold completes, the same for every gesture (main's
     /// STRONG_CLICK haptic and click sound). Must not block the UI task.
     void (*confirm)();
+    /// The self-test overlay is up: it owns the stick, so every fill is cancelled.
+    bool (*overlay_up)();
+    /// Runs before the gestures on each poll without the overlay (main's refusal check, which
+    /// shadows the unlock gesture on the same input and cadence).
+    void (*before_poll)();
   };
 
   constexpr explicit HoldEngine(const Config &config) noexcept
@@ -46,6 +58,11 @@ public:
   ///        fill on a change of "held, armed and applies".
   /// UI task, lvgl_mutex held.
   void poll(HoldGesture *g) const;
+
+  /// @brief One poll of every gesture, in order (main's hold poll timer, every HOLD_POLL_MS).
+  ///        With the overlay up, cancels any fill instead and polls nothing.
+  /// UI task, lvgl_mutex held.
+  void poll_all(std::span<HoldGesture *const> gestures) const;
 
   /// @brief Cancels any fill in flight and empties the widget. The gesture is also the
   ///        animation's `var`, so it is the handle lv_anim_delete matches on.

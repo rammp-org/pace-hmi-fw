@@ -62,24 +62,7 @@ static HoldGesture *const kHoldGestures[] = {
     &calibrate_gesture,
 };
 
-static void hold_poll_cb(lv_timer_t *) {
-  // The self-test overlay owns the stick while it is up (see the keypad read in
-  // app_main). Cancel anything mid-fill rather than let it complete - and
-  // navigate - behind the overlay.
-  if (selftest_ui_visible()) {
-    for (HoldGesture *g : kHoldGestures) {
-      if (g->holding) {
-        g->holding = false;
-        hold_reset(g);
-      }
-    }
-    return;
-  }
-  entry_refusal_poll();
-  for (HoldGesture *g : kHoldGestures) {
-    hold_poll(g);
-  }
-}
+static void hold_poll_cb(lv_timer_t *) { hold_engine.poll_all(kHoldGestures); }
 
 /////////////////////////////////////////////////////////////////////////////
 // SeatScreen: joystick navigation of both pages
