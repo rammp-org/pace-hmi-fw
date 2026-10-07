@@ -44,7 +44,7 @@
       "main/remote_ui.cpp": 1
     },
     "lines": {
-      "main/main.cpp": 3984,
+      "main/main.cpp": 3983,
       "main/selftest.cpp": 1030
     },
     "locks": {
@@ -66,7 +66,7 @@
       "main/update_ui.hpp": 1
     },
     "log_direct": {
-      "main/main.cpp": 6,
+      "main/main.cpp": 5,
       "main/remote_ui.cpp": 5,
       "main/selftest.cpp": 5
     },
