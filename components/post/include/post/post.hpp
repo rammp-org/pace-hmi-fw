@@ -3,6 +3,7 @@
 // (README, REQ-POST-01..13). Pure: no ESP-IDF, no FreeRTOS, no LVGL, no allocation, no logging.
 // Not wired into the firmware yet: that is hazard-fixes C3 (README, "Not yet wired").
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -85,30 +86,26 @@ inline constexpr std::array OVERALL_TRANSITIONS{
 /// @return true when the table is complete and has no duplicate
 consteval bool overall_table_complete() {
   constexpr std::array<Overall, 3> states{Overall::PENDING, Overall::PASS, Overall::FAIL};
-  for (const Overall from : states) {
-    for (const Overall evaluated : states) {
-      int found = 0;
-      for (const OverallTransition &t : OVERALL_TRANSITIONS) {
-        found += (t.from == from && t.evaluated == evaluated) ? 1 : 0;
-      }
-      if (found != 1) {
-        return false;
-      }
-    }
-  }
-  return OVERALL_TRANSITIONS.size() == states.size() * states.size();
+  const auto listed_once = [](Overall from, Overall evaluated) {
+    return std::count_if(OVERALL_TRANSITIONS.begin(), OVERALL_TRANSITIONS.end(),
+                         [&](const OverallTransition &t) {
+                           return t.from == from && t.evaluated == evaluated;
+                         }) == 1;
+  };
+  return OVERALL_TRANSITIONS.size() == states.size() * states.size() &&
+         std::all_of(states.begin(), states.end(), [&](Overall from) {
+           return std::all_of(states.begin(), states.end(),
+                              [&](Overall evaluated) { return listed_once(from, evaluated); });
+         });
 }
 static_assert(overall_table_complete(), "OVERALL_TRANSITIONS must list every pair exactly once");
 
 /// @brief PASS and FAIL are absorbing: no row leaves them.
 /// @return true when every row from PASS or FAIL stays there
 consteval bool overall_ends_absorb() {
-  for (const OverallTransition &t : OVERALL_TRANSITIONS) {
-    if (t.from != Overall::PENDING && t.to != t.from) {
-      return false;
-    }
-  }
-  return true;
+  return std::all_of(
+      OVERALL_TRANSITIONS.begin(), OVERALL_TRANSITIONS.end(),
+      [](const OverallTransition &t) { return t.from == Overall::PENDING || t.to == t.from; });
 }
 static_assert(overall_ends_absorb(), "a POST PASS or FAIL must hold until the next reset");
 
