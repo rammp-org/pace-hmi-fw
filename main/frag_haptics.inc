@@ -146,16 +146,16 @@ bool Haptics::play(espp::Drv2605::Waveform w, uint8_t slots) {
   std::error_code ec;
   for (uint8_t slot = 0; slot < slots; slot++) {
     if (!haptic_->set_waveform(slot, w, ec)) {
-      fmt::print("DRV2605 set_waveform failed: {}\n", ec.message());
+      logger_.error("DRV2605 set_waveform failed: {}", ec.message());
       return false;
     }
   }
   if (!haptic_->set_waveform(slots, espp::Drv2605::Waveform::END, ec)) {
-    fmt::print("DRV2605 set_waveform failed: {}\n", ec.message());
+    logger_.error("DRV2605 set_waveform failed: {}", ec.message());
     return false;
   }
   if (!haptic_->start(ec)) {
-    fmt::print("DRV2605 start failed: {}\n", ec.message());
+    logger_.error("DRV2605 start failed: {}", ec.message());
     return false;
   }
   return true;
