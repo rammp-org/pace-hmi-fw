@@ -50,6 +50,7 @@ yet measured or decided, and "none" means checked and absent.
 | `components/hmi_format` | pure screen-text formatting (speed, steppers, seat, clock, diagnostics) | no | host L1 (L1-FMT) | README |
 | `components/hmi_models` | pure UI models: the button-grid cursor walk and the bench PIN entry | no | host L1 (L1-MOD) | README |
 | `components/joystick` | espp joystick plus a twist axis (vendored espp 1.2.0, sha 615b8df; README + upstream.diff) | yes | host L1 (L1-JOY) | none |
+| `components/post` | the quick POST evaluator: boot facts in, a verdict per check and an overall state out (not wired yet; hazard-fixes C3) | yes (gates motion once C3 wires it) | host L1 (L1-POST) | README |
 | `components/m5stack-tab5` | vendored espp Tab5 BSP 1.2.0 (sha 615b8df), modified (VENDORED.md + upstream.diff) | no | no | none |
 | `components/ui` | SquareLine export, generated | no | n/a | none |
 | `rammp_rtps_messages` (submodule `external/rammp-rtps`) | shared RTPS message and topic spec | yes (wire format of motion commands) | header-only | none |
