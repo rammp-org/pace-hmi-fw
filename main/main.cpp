@@ -745,7 +745,7 @@ extern "C" void app_main(void) {
         // focus (Boot and Update have none), and only when it stays lost for
         // two checks in a row: a screen change or a row press in flight
         // passes through an empty group on its way to SCREEN_LOADED.
-        if (nav_chrome_of(lv_screen_active()) == nullptr || nav_press_timer != nullptr ||
+        if (!nav_view.has_chrome(lv_screen_active()) || nav_view.row_press_pending() ||
             ++lost < 2) {
           return;
         }

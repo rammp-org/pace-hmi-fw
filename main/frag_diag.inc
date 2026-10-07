@@ -103,10 +103,3 @@ static void diagnostics_open() { diag_view.open(); }
 // split removes.
 /////////////////////////////////////////////////////////////////////////////
 
-// The overlay sits over the body; sliding it clear of the screen bottom is the
-// closed position. 921 px in 280 ms is the spec's transition.
-static constexpr int32_t kMenuShownY = 195;
-static constexpr int32_t kMenuHiddenY = 195 + 921;
-static constexpr uint32_t kMenuSlideMs = 280;
-// p21 "ROW PRESS": the row holds negative this long before anything moves.
-static constexpr uint32_t kRowPressMs = 300;
