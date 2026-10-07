@@ -17,6 +17,7 @@ behaviour.
 | `include/hmi_ui/brightness_view.hpp`, `src/brightness_view.cpp` | `BrightnessView`: the backlight level as a subject, applied on every change and saved once it settles (from `main/frag_brightness.inc`) |
 | `include/hmi_ui/rtps_label_view.hpp`, `src/rtps_label_view.cpp` | `RtpsLabelView`: the TopBar's RTPS label (from `main/frag_rtps_label.inc`) |
 | `include/hmi_ui/status_band_view.hpp`, `src/status_band_view.cpp` | `StatusBandView`: the DriveBand's DRIVE and STATE cells, on every resident and on-demand screen (from `main/frag_status_band.inc`) |
+| `include/hmi_ui/topbar_view.hpp`, `src/topbar_view.cpp` | `TopBarView`: the TopBar's clock and link labels (from `main/frag_clock.inc`). Setting the clock from the MCB is not UI and stays in main |
 
 ## Rules for code here
 
@@ -40,18 +41,21 @@ behaviour.
 | REQ-UI-03 | A band's labels repaint on every change of a subject their text depends on: DRIVE on `mib_state`, `rtps_link`, `drive_text` and `locked`; STATE on `mib_state`, `rtps_link` and `state_text` (seven observers per band, each bound to its label). | bench B4, B5; G11 census when it exists |
 | REQ-UI-04 | The TopBar's RTPS label is in the alert colour for NET_FAILED and LINK_DOWN, orange (`STATUS_ORANGE`) for NO_IP, orange and blinking with `rtps_blink` (opacity, so nothing reflows) for NO_PEER, and the theme's ok colour for CONNECTED; it repaints on `rtps_link` and `rtps_blink`. | bench B4 |
 | REQ-UI-05 | The backlight follows the brightness subject on every change, the boot value included. A level is saved once it has stayed unchanged for the save delay (main: 1 s), so a run of changes is one write; the boot value is not saved. `set` clamps to `min_percent`..`max_percent` (never 0); `step` goes to the next of 25/50/75/100 % above the current level, and from 100 % back to 25 %. | bench (side button, Settings row, `rtps_brightness.py`) |
+| REQ-UI-06 | The TopBar clock reads `--:--` until main says the system clock holds a real time, then `HH:MM` of the system clock (hmi_format REQ-FMT-06), from the first frame and then read once a second (`CLOCK_POLL_MS`); the subject changes only when the text does. The link label reads the text main gives: the setting at boot, the link RTPS brought up after it starts. | bench B4 |
 
 ## Tasks and dependencies
 
 - Tasks: none of its own. Views run on the UI task (LVGL timers and observers) and on
   `app_main` during start-up.
 - Dependencies: `lvgl` (public: the headers use its types); private: `ui` (the export: widgets,
-  component children, theme colours), `rammp_rtps_messages` (`MIB::MibSystemState`). `main`
-  requires the component (`PRIV_REQUIRES hmi_ui`).
+  component children, theme colours), `rammp_rtps_messages` (`MIB::MibSystemState`),
+  `hmi_format` (the clock text). `main` requires the component (`PRIV_REQUIRES hmi_ui`).
 - Build: `fw_component_options` really applies here (C++23 and the warning set as errors).
-  CMakeLists.txt includes `cmake/fw_standards.cmake` itself, because the top-level file includes
-  it only after `project()`, when the `if(COMMAND ...)` guard the other components use has
-  already been evaluated as false.
+  Today the top-level CMakeLists includes `cmake/fw_standards.cmake` only after `project()`,
+  so the function does not exist yet when component CMakeLists run, and the
+  `if(COMMAND ...)` guard the other components use skips it silently. CMakeLists.txt
+  includes the file itself while the function is missing; once the repo-wide fix
+  (`dev_ai_refactor_fwopts`) defines it first, that block does nothing and can be dropped.
 
 ## Tests
 
