@@ -11,6 +11,7 @@ set PY=C:\Espressif\tools\python\v6.0\venv\Scripts\python.exe
 %PY% tools\bench\run_bench.py --build-dir C:\b\main_bench --label baseline-bench --flash
 %PY% tools\bench\run_bench.py --build-dir <build> --label dry            # no flash: B1's flash is SKIP
 %PY% tools\bench\run_bench.py --build-dir <build> --label x --steps B0,B2,B3
+%PY% tools\bench\run_bench.py --build-dir <build> --label x --sim-mode-steps        # + B5a..B5e
 ```
 
 Results: `C:\b\bench\results\<label>-<time>\summary.json` (one verdict per step, the board IP),
@@ -25,9 +26,27 @@ plus the boot capture, self-test JSON, walk PNGs and the sim logs beside it.
 | B4 walk | `walk_check.py` | 13 names == baseline; static screens pixel-equal below y=60 |
 | B4b PIN pad and seat grid | `ui_models_check.py` | wrong PIN 1111 shows the notice and stays; 1234 opens SettingsScreen (actuators page); Seat Functions cursor walk = hmi_models goldens (3 rows of 2, clamped, DOWN off the bottom -> burger key); navigation only, no seat command |
 | B5 drive | `scenario_drive.py` | hold → Drive; `e` → Locked ≤3 s; XYTwist 0 while locked; refused hold never Drive |
+| B5a exit hold (opt-in) | `scenario_hazards.py` | exit hold on Drive → Locked ≤3 s, the sim applied a DISABLE, XYTwist 0 |
+| B5b burger-key exit (opt-in) | `scenario_hazards.py` | burger key on Drive → Locked ≤3 s (menu over it), DISABLE applied, XYTwist 0 |
+| B5c relock on link loss (opt-in) | `scenario_hazards.py` | sim `p` → Locked ≤ MIB_STATUS_TIMEOUT + 2 s, XYTwist 0 while down; records the DriveCommands while down and the screens after `r` with the sim still ENABLED |
+| B5d profile click after relock (opt-in) | `scenario_hazards.py` | as B5c, then `x` and `r`: if Drive comes back, a profile tap reaches the sim as a DriveCommand (its request is recorded) |
+| B5e ignored/dropped DISABLE (opt-in) | `scenario_hazards.py` | RECORD: with `ign 50` and with `drop 50`, the DISABLEs and screens 7 s after an exit hold, then the burger key; graded only set-up and clean-up |
 
 Verdicts: PASS, FAIL, INVALID (B0 preflight; B2's no-IP-after-join rule), SKIP (declared on the
-command line), NOT_RUN (nothing to test against, e.g. no IP; or a runner crash: not a verdict).
+command line), NOT_RUN (nothing to test against, e.g. no IP; or a runner crash: not a verdict),
+RECORD (a characterisation, B5e: today's behaviour as data; passes the run, never saves last-good).
+
+## B5a..B5e: the sim's fault modes (opt-in)
+Not in the default step list until they have run on the board once: `--sim-mode-steps` adds
+them after B5, and `--steps` may name them only with that flag. Each step starts its own sim
+(`sim_child.py` + `--event-log <step>/sim-events.jsonl`), so it begins IDLE, and ends with a
+graded clean-up (every mode off, `ok`, LockedScreen). Remote-UI verbs only (SCREEN, TAP, BTN,
+SHOT): no stick is moved and XYTwist is only observed. The sim's JSONL log is the evidence;
+before each UI action the step writes a `mark` into it and grades only what follows. Every
+`records` entry is today's behaviour, hazards included (H1, H5, H6), so the hazard fixes
+(docs/plans/hazard-fixes.md §4 C1) show up as a diff, not as a FAIL. The full step list is in
+`scenario_hazards.py`'s docstring. Not covered here: the sim's `ongone` policy (an HMI reset
+needs a serial reset; it belongs with C3's boot steps).
 
 ## Rules the code enforces
 - Never erases. `common.esptool()` refuses any erase option. The only write is
@@ -54,6 +73,7 @@ command line), NOT_RUN (nothing to test against, e.g. no IP; or a runner crash: 
 %PY% tools\bench\compare_selftest.py --ip A [--out f.json]     or  --compare-only f.json
 %PY% tools\bench\walk_check.py --ip A --out DIR
 %PY% tools\bench\scenario_drive.py --ip A --out DIR
+%PY% tools\bench\scenario_hazards.py --ip A --out DIR [--steps B5a,B5e]
 %PY% tools\bench\ui_models_check.py --ip A --out DIR
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\bench\hotspot.ps1 status|restart
 ```

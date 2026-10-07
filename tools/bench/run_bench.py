@@ -30,6 +30,12 @@ B3  compare_selftest.py (no sim may run).   B4  walk_check.py.
 B4b ui_models_check.py: PIN pad (wrong PIN notice, 1234 opens the actuators page) and the
     Seat Functions cursor walk against the hmi_models goldens; navigation only.
 B5  scenario_drive.py.
+B5a..B5e (only with --sim-mode-steps; opt-in until they have run on the board
+    once): scenario_hazards.py, the drive path against the sim's fault modes
+    (exit hold, burger-key exit, relock on link loss, profile click after relock,
+    ignored/dropped DISABLE). B5e is a characterisation: RECORD, not PASS/FAIL.
+    RECORD counts as passing for the run's verdict and exit code, but a run with
+    a RECORD step never saves last-good (that needs every step PASS).
 """
 
 from __future__ import annotations
@@ -53,10 +59,13 @@ import compare_selftest  # noqa: E402
 import flash  # noqa: E402
 import lease  # noqa: E402
 import scenario_drive  # noqa: E402
+import scenario_hazards  # noqa: E402
 import ui_models_check  # noqa: E402
 import walk_check  # noqa: E402
 
 ALL_STEPS = ["B0", "B1", "B2", "B3", "B4", "B4b", "B5"]
+# Opt-in (--sim-mode-steps) until they have run on the board once; then they join ALL_STEPS.
+SIM_MODE_STEPS = list(scenario_hazards.STEPS)
 BOOT_CAPTURE_S = 90.0
 NO_IP_AFTER_JOIN_S = 60.0
 
@@ -257,6 +266,11 @@ class Run:
         report = scenario_drive.scenario(self.ip, self.dir / "drive", self.a.tree)
         return self.record("B5", report.pop("verdict"), **report)
 
+    def sim_mode_step(self, step: str) -> str:
+        report = scenario_hazards.run_step(step, self.ip, self.dir / "hazards" / step.lower(),
+                                           self.a.tree)
+        return self.record(step, report.pop("verdict"), **report)
+
 
 def only_ip_missing(report: dict) -> bool:
     return all("got_ip" in p for p in report["problems"])
@@ -273,9 +287,17 @@ def main() -> int:
     p.add_argument("--tree", type=pathlib.Path, default=common.REPO,
                    help="where scripts/ (selftest, sim, hmi_ui) are run from")
     p.add_argument("--ip", default=None, help="board IP when B2 is not in --steps")
+    p.add_argument("--sim-mode-steps", action="store_true",
+                   help=f"also run {','.join(SIM_MODE_STEPS)} after B5 (scenario_hazards.py: "
+                        "the sim's fault modes; not in the default list until run on the board)")
     a = p.parse_args()
-    by_upper = {s.upper(): s for s in ALL_STEPS}
+    sequence = ALL_STEPS + (SIM_MODE_STEPS if a.sim_mode_steps else [])
+    if a.sim_mode_steps and a.steps == p.get_default("steps"):
+        a.steps = ",".join(sequence)
+    by_upper = {s.upper(): s for s in ALL_STEPS + SIM_MODE_STEPS}
     steps = [by_upper.get(s.strip().upper(), s.strip()) for s in a.steps.split(",") if s.strip()]
+    if not a.sim_mode_steps and any(s in SIM_MODE_STEPS for s in steps):
+        p.error(f"{','.join(SIM_MODE_STEPS)} run only with --sim-mode-steps")
     if "B0" not in steps and (a.flash or "B1" in steps):
         p.error("flashing needs the B0 preflight")
 
@@ -295,9 +317,11 @@ def main() -> int:
     run.ip = a.ip
     order = {"B0": run.b0, "B1": run.b1, "B2": run.b2, "B3": run.b3, "B4": run.b4, "B4b": run.b4b,
              "B5": run.b5}
+    for step in SIM_MODE_STEPS:
+        order[step] = lambda step=step: run.sim_mode_step(step)
     try:
         stop_reason = None
-        for step in ALL_STEPS:
+        for step in sequence:
             if step not in steps:
                 run.record(step, "SKIP", reason="not in --steps")
                 continue
@@ -306,7 +330,7 @@ def main() -> int:
                 continue
             if step in ("B1", "B2") and run.port is None:
                 run.port = board.find_port()
-            if step in ("B3", "B4", "B4b", "B5") and not run.ip:
+            if step in ("B3", "B4", "B4b", "B5", *SIM_MODE_STEPS) and not run.ip:
                 run.record(step, "NOT_RUN", reason="no board IP (B2 did not pass)")
                 continue
             try:
@@ -327,6 +351,7 @@ def main() -> int:
         run.summary["verdict"] = ("FAIL" if "FAIL" in verdicts else
                                   "INVALID" if "INVALID" in verdicts else
                                   "INCOMPLETE" if "NOT_RUN" in verdicts else "PASS")
+        # RECORD (a characterisation step, B5e) passes the run but is not PASS.
         # Last-good only when every step passed (B0..B5 all run and PASS).
         if a.flash and not a.no_save and verdicts and all(v == "PASS" for v in verdicts):
             run.summary["saved_last_good"] = str(flash.save(a.build_dir, a.label, "B0-B5 PASS"))

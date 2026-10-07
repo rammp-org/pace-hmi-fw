@@ -2,10 +2,17 @@
 
 Readiness is a condition, not a sleep (TS-DET-01): the sim is ready once the
 board streams XYTwist to it, which means discovery matched both ways.
+
+With `event_log`, the sim writes its JSONL event log there (rtps_mcb_sim.py
+--event-log): every DriveCommand it received and what it did with it, the
+MibStatus states it sent, XYTwist. `event_mark(label)` puts a mark in that log
+and `events(after=label)` reads what came after it, so a step grades only what
+its own action caused, by order in the sim's log rather than by clocks.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import re
@@ -19,9 +26,14 @@ import common  # noqa: E402
 
 
 class SimChild:
-    def __init__(self, ip: str, tree: pathlib.Path, log_path: pathlib.Path | None = None):
+    def __init__(self, ip: str, tree: pathlib.Path, log_path: pathlib.Path | None = None,
+                 event_log: pathlib.Path | None = None):
         cmd = [common.python(), str(common.HERE / "sim_child.py"), "--tree", str(tree), "--",
                "--peer", ip, "--bind-address", common.PC_IP]
+        self.event_log = event_log
+        if event_log is not None:
+            event_log.parent.mkdir(parents=True, exist_ok=True)
+            cmd += ["--event-log", str(event_log)]
         common.log("sim: " + " ".join(cmd))
         self.proc = subprocess.Popen(cmd, cwd=str(tree), stdin=subprocess.PIPE,
                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -88,6 +100,38 @@ class SimChild:
             time.sleep(0.5)  # poll interval, not a wait for a condition
         return False
 
+    def reply(self, cmd: str, regex: str, timeout: float = 5.0) -> re.Match | None:
+        """Send a sim command and wait for the sim's own answer to it (not the echo)."""
+        at = self.mark()
+        self.send(cmd)
+        return self.wait_for(regex, timeout, at)
+
+    def event_mark(self, label: str, timeout: float = 5.0) -> bool:
+        """A mark in the event log; True once the sim has written it. Labels are
+        lower case: the sim lower-cases every command."""
+        return self.reply(f"mark {label}", r"MARK " + re.escape(label) + r"$", timeout) is not None
+
+    def events(self, after: str | None = None) -> list[dict]:
+        """The event log's records; with `after`, only those after the last mark so named
+        (none if that mark is not there)."""
+        records = read_jsonl(self.event_log) if self.event_log is not None else []
+        if after is None:
+            return records
+        marks = [i for i, r in enumerate(records)
+                 if r.get("ev") == "mark" and r.get("label") == after]
+        return records[marks[-1] + 1:] if marks else []
+
+    def wait_event(self, predicate, timeout: float, after: str) -> dict | None:
+        """The first record after mark `after` for which predicate(record) holds."""
+        deadline = time.monotonic() + timeout
+        while True:
+            for record in self.events(after):
+                if predicate(record):
+                    return record
+            if time.monotonic() >= deadline or self.proc.poll() is not None:
+                return None
+            time.sleep(0.1)  # poll period of the log file, bounded by the deadline
+
     def stop(self) -> None:
         try:
             self.send("q")
@@ -105,3 +149,13 @@ class SimChild:
 
     def __exit__(self, *_: object) -> None:
         self.stop()
+
+
+def read_jsonl(path: pathlib.Path) -> list[dict]:
+    """Every complete line of a JSON-lines file; the part after the last newline (a
+    line still being written) is left out. A missing file is empty."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return []
+    return [json.loads(line) for line in text.split("\n")[:-1] if line.strip()]
