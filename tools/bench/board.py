@@ -81,10 +81,17 @@ def capture(port: str, seconds: float, reset: bool = False,
     s = _open(port)
     try:
         if reset:
+            # esptool's HardReset for USB-Serial/JTAG. Windows' usbser.sys only sends
+            # SET_CONTROL_LINE_STATE when DTR is written, so each RTS change is followed
+            # by a write of the unchanged DTR (esptool's _setRTS does the same). Without
+            # it the pulse never reached the chip (found 2026-10-07): B2 was capturing
+            # the boot that the preceding esptool hard-reset had started.
             s.rts = True
+            s.dtr = s.dtr
             time.sleep(0.2)  # esptool's USB hard-reset pulse width
             s.rts = False
-            cap.notes.append("reset pulse sent (RTS 200 ms, DTR low)")
+            s.dtr = s.dtr
+            cap.notes.append("reset pulse sent (RTS 200 ms, DTR low, DTR rewritten)")
         partial = b""
         while time.monotonic() < end:
             try:
