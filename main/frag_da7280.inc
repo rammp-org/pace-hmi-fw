@@ -166,11 +166,11 @@ static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c) {
   // any future zero-output mystery has fault data attached instead of
   // needing a re-run to diagnose.
   // print_step_header draws a heavy divider (step boundary); run_test draws
-  // a light divider (test boundary) before its own header line. Both print
-  // raw via fmt::print (blank lines + dividers, no logger tag/timestamp
-  // prefix) so the boundary is visually obvious when scrolling a busy log.
+  // a light divider (test boundary) before its own header line. Both are log
+  // lines (CS-LOG-01), so the boundary is visually obvious when scrolling a
+  // busy log.
   auto print_step_header = [&](const char *text) {
-    fmt::print("\n\n========================================\n");
+    logger.info("========================================");
     logger.info(text);
   };
 
@@ -178,7 +178,7 @@ static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c) {
   auto run_test = [&](const char *label, uint8_t magnitude,
                       std::chrono::milliseconds duration = kDa7280DriveDuration) {
     ++test_index;
-    fmt::print("\n----------------------------------------\n");
+    logger.info("----------------------------------------");
     logger.info("[DA7280 TEST {:02}/{}] {}: vibrate({})", test_index, kDa7280TotalTests, label,
                 magnitude);
     da7280.vibrate(magnitude, ec);
