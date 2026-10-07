@@ -1440,7 +1440,9 @@ extern "C" void app_main(void) {
   const JoystickCal joystick_cal = joystick_cal_load({kIdealAxis, kIdealAxis, kIdealAxis});
   // The stick pipeline (components/stick): the joystick mapping on this
   // calibration, the key trigger and the gate. Owned by the ADC task below.
-  static hmi::stick::StickPipeline stick_pipeline(stick_pipeline_config(joystick_cal));
+  // Named `stick`, as the espp::Joystick it wraps was: the same lazy static,
+  // built at the same point (tools/guards init_order baseline).
+  static hmi::stick::StickPipeline stick(stick_pipeline_config(joystick_cal));
 
   // customization knobs: sampling/LVGL/RTPS cadence, and how often the serial
   // line is printed. The log is divided down because 30 lines/s is the
@@ -1479,7 +1481,7 @@ extern "C" void app_main(void) {
     // (frag_stick_config.inc) in the order this ran inline before. Only a
     // cycle with all three reads does anything; otherwise nothing is published.
     AdcStickIo stick_io{.twist_lowpass = twist_lowpass};
-    const bool adc_published = stick_pipeline.cycle(
+    const bool adc_published = stick.cycle(
         stick_io, {.horizontal_mv = horiz_mv, .vertical_mv = vert_mv, .twist_mv = twist_mv});
     // Every cycle, valid or not: the self test measures the loop's cadence and
     // how often a read fails, as well as the values. A no-op unless a run is
