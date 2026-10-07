@@ -23,6 +23,7 @@ Unity-format case runner the `selftest` modes print with.
 ```
 python tools/guards/init_order.py check --build C:\b\integ6b_default                  # default variant
 python tools/guards/init_order.py check --build C:\b\final_bench --variant bench      # CONFIG_HMI_REMOTE_UI
+python tools/guards/init_order.py check --build C:\b\inject2_bench_inject --variant bench_inject  # + stick injection
 python tools/guards/exports.py check --build C:\b\integ6b_default --src C:\w\<tree>
 python tools/guards/task_dump.py fetch --ip <board> --out tasks.json --into selftest.json
 python tools/guards/task_dump.py check --dump tasks.json
@@ -39,6 +40,7 @@ and notes for a runner.
 | --- | --- | --- |
 | `baselines/init_order.default.json` | `init_order.py write --build C:\b\integ6b_default` (dev_refactor 5e035fc) | `write` after the diff is reviewed; `allow` entries ({object or `*`, symbol, reason}) are hand-kept and survive `write` |
 | `baselines/init_order.bench.json` | `write --build C:\b\final_bench --variant bench` | same; differs from default only by `remote_ui.cpp`'s `cfg` |
+| `baselines/init_order.bench_inject.json` | by hand from the bench baseline, checked against `C:\b\inject2_bench_inject` (bench plus ci/sdkconfig.stick_inject) | derived from `init_order.bench.json` (allow list included): differs only by `remote_ui.cpp`'s `ServerConfig` destructor and fmt facet guard. The stick stays `app_main::stick` (a `StickSlot`) |
 | `baselines/exports_allowlist.json` | by hand | one entry per excused finding, each with a reason; printed on every run, stale ones reported |
 | `baselines/tasks.json` | by hand from source (file:line per task) | `task_dump.py baseline --dump <dump>` adds observed IDF/espp tasks and fills nulls, never overwrites a declared value |
 | `baselines/observers.json` | not yet (no firmware half) | `observer_census.py baseline` from a reviewed boot |

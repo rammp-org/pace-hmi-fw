@@ -4,6 +4,7 @@ idf_component_register(SRC_DIRS "."
                          adc
                          button
                          drv2605
+                         feedback
                          file_system
                          filters
                          hmi_format
@@ -11,6 +12,7 @@ idf_component_register(SRC_DIRS "."
                          hmi_ui
                          input_drivers
                          joystick
+                         joystick_cal
                          stick
                          lvgl
                          m5stack-tab5
@@ -33,6 +35,8 @@ idf_component_register(SRC_DIRS "."
                          esp_http_client
                          rammp_rtps_messages
                          fw_core
+                         drive_adapter
+                         drive_session
                          ota_parse
                        EMBED_TXTFILES click.wav)
 

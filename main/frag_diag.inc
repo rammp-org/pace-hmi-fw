@@ -1,5 +1,6 @@
 // split_main.py fragment of main.cpp (frag_diag: original lines 2980-3229); one TU, see main.cpp.
 #include "hmi_format/diag.hpp"
+#include "hmi_ui/diagnostics_view.hpp"
 /////////////////////////////////////////////////////////////////////////////
 // DiagnosticsScreen: live readings from the MCB
 //
@@ -25,40 +26,13 @@
 
 static_assert(rammp::kDiagFields == 3, "the DiagnosticComponent has exactly three readings");
 
-// Each reading's container, units label and value label in the component.
-struct DiagFieldIds {
-  int container;
-  int units;
-  int value;
-};
-static constexpr DiagFieldIds kDiagFieldIds[rammp::kDiagFields] = {
-    {UI_COMP_DIAGROW_CELL1, UI_COMP_DIAGROW_CELL1_UNIT1, UI_COMP_DIAGROW_CELL1_VALUE1},
-    {UI_COMP_DIAGROW_CELL2, UI_COMP_DIAGROW_CELL2_UNIT2, UI_COMP_DIAGROW_CELL2_VALUE2},
-    {UI_COMP_DIAGROW_CELL3, UI_COMP_DIAGROW_CELL3_UNIT3, UI_COMP_DIAGROW_CELL3_VALUE3},
-};
-
 // Readings, raw, [table row][reading]; kValueUnknown until the MCB sends one.
 // Static: the rows' observers point at them, and they keep updating with no
 // screen up.
 static lv_subject_t diag_value[rammp::kDiagCount][rammp::kDiagFields];
 static lv_subject_t diag_stale_subject; // 1 = nothing within rammp::kDiagTimeout, or ever
 static lv_subject_t diag_rate_subject;  // arrival rate, tenths of a Hz
-
-// Which reading a value observer shows; static so an observer can point at it.
-struct DiagField {
-  uint8_t item;
-  uint8_t field;
-};
-static DiagField diag_fields[rammp::kDiagCount][rammp::kDiagFields];
-
-static lv_obj_t *diag_rows[rammp::kDiagCount];
-static int diag_row_count; // rows on screen; 0 while it is not up
-static int diag_cursor;    // which row the joystick is on
 static lv_group_t *diag_group = nullptr;
-
-static constexpr lv_style_selector_t kDiagStale = static_cast<lv_style_selector_t>(LV_PART_MAIN) |
-                                                  static_cast<lv_style_selector_t>(LV_STATE_USER_1);
-static constexpr uint32_t kDiagStaleColour = 0xFF5050; // the self test's FAIL red
 
 // Keeps diag_stale_subject and diag_rate_subject current. LVGL task, from
 // rtps_poll_cb: staleness has to be polled - nothing happens when a sample
@@ -73,137 +47,23 @@ static void diag_poll() {
   lv_subject_set_int(&diag_rate_subject, stale ? 0 : stats.rate_tenths_hz);
 }
 
-// A reading, scaled by its decimals. stepper_format's StepperSpec carries the
-// decimals; the rest of it does not apply here.
-static void diag_value_observer(lv_observer_t *observer, lv_subject_t *subject) {
-  const auto *field = static_cast<const DiagField *>(lv_observer_get_user_data(observer));
-  lv_obj_t *label = lv_observer_get_target_obj(observer);
-  const int32_t raw = lv_subject_get_int(subject);
-  if (raw == kValueUnknown) {
-    lv_label_set_text(label, "--");
-    return;
-  }
-  const rammp::DiagSpec &spec = rammp::kDiagItems[field->item];
-  const StepperSpec format{nullptr, nullptr, 0, 0, 0, spec.decimals[field->field], nullptr};
-  char text[24];
-  stepper_format(format, raw, text);
-  lv_label_set_text(label, text);
-}
-
-static lv_opa_t diag_blink_opa() {
-  return lv_subject_get_int(&rtps_blink_subject) ? LV_OPA_COVER : LV_OPA_TRANSP;
-}
-
-// Every label under `obj` takes LV_STATE_USER_1 while stale, whose style is
-// red text at the blink's opacity.
-static void diag_mark_stale(lv_obj_t *obj, bool stale, lv_opa_t opa) {
-  for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
-    lv_obj_t *child = lv_obj_get_child(obj, i);
-    if (lv_obj_check_type(child, &lv_label_class)) {
-      lv_obj_set_style_text_color(child, lv_color_hex(kDiagStaleColour), kDiagStale);
-      lv_obj_set_style_text_opa(child, opa, kDiagStale);
-      lv_obj_set_state(child, LV_STATE_USER_1, stale);
-    }
-    diag_mark_stale(child, stale, opa);
-  }
-}
-
-// Bound to each row, on the stale and blink subjects both.
-static void diag_row_stale_observer(lv_observer_t *observer, lv_subject_t *) {
-  diag_mark_stale(lv_observer_get_target_obj(observer),
-                  lv_subject_get_int(&diag_stale_subject) != 0, diag_blink_opa());
-}
-
-// DiagnosticsFreqLabel, on the rate, stale and blink subjects.
+// The one instance; the readings, the stale and rate subjects and the group stay out here
+// (rtps_poll_cb, the RTPS handler, the on-demand screen and nav use them).
+static constinit hmi::ui::DiagnosticsView diag_view{{
+    .nav = &ui_nav_port,
+    .values = diag_value,
+    .stale = &diag_stale_subject,
+    .rate = &diag_rate_subject,
+    .blink = &rtps_blink_subject,
+    .screen_ensure = diagnostics_screen_ensure,
+    .row_focus_cb = setting_focus_cb,
+}};
 static void diag_freq_observer(lv_observer_t *observer, lv_subject_t *) {
-  lv_obj_t *label = lv_observer_get_target_obj(observer);
-  const bool stale = lv_subject_get_int(&diag_stale_subject) != 0;
-  if (stale) {
-    lv_label_set_text(label, "No data");
-  } else {
-    char text[32]; // "-214748364.-8 Hz - Live" at the very most
-    hmi::format::diag_rate_text(lv_subject_get_int(&diag_rate_subject), text);
-    lv_label_set_text(label, text);
-  }
-  lv_obj_set_style_text_color(label, lv_color_hex(kDiagStaleColour), kDiagStale);
-  lv_obj_set_style_text_opa(label, diag_blink_opa(), kDiagStale);
-  lv_obj_set_state(label, LV_STATE_USER_1, stale);
+  diag_view.paint_freq(lv_observer_get_target_obj(observer));
 }
-
-// Clamped rather than wrapped, for the reason in grid_key_cb.
-static void diag_focus(int index) {
-  if (diag_row_count == 0) {
-    return;
-  }
-  diag_cursor = std::clamp(index, 0, diag_row_count - 1);
-  lv_group_focus_obj(diag_rows[diag_cursor]);
-}
-
-// Up/down walk the rows, which scrolls a long table into view.
-static void diag_key_cb(lv_event_t *e) {
-  switch (lv_event_get_key(e)) {
-  case LV_KEY_UP:
-    diag_focus(diag_cursor - 1);
-    return;
-  case LV_KEY_DOWN:
-    if (diag_cursor + 1 >= diag_row_count) {
-      nav_to_key(); // below the last row is the burger key
-      return;
-    }
-    diag_focus(diag_cursor + 1);
-    return;
-  default:
-    return;
-  }
-}
-
-// Deleting a row takes its observers and events with it and drops it from
-// diag_group; the theme manager forgets it too.
-static void diag_rows_clear() {
-  for (int i = 0; i < diag_row_count; i++) {
-    lv_obj_delete(diag_rows[i]);
-  }
-  diag_row_count = 0;
-  diag_cursor = 0;
-}
-
-// Builds the rows and shows the screen. LVGL task (a click).
-static void diagnostics_open() {
-  diagnostics_screen_ensure(); // built on demand: see "Screens built on demand"
-  diag_rows_clear();
-  const auto &specs = rammp::kDiagItems;
-  for (uint8_t i = 0; i < rammp::kDiagCount; i++) {
-    lv_obj_t *row = ui_DiagRow_create(ui_DiagnosticsFlexRows);
-    diag_rows[diag_row_count++] = row;
-    lv_label_set_text(ui_comp_get_child(row, UI_COMP_DIAGROW_DIAGHEAD_DIAGNAMES_DIAGSHORT),
-                      specs[i].short_name);
-    lv_label_set_text(ui_comp_get_child(row, UI_COMP_DIAGROW_DIAGHEAD_DIAGNAMES_DIAGLABEL),
-                      specs[i].label);
-    for (uint8_t f = 0; f < rammp::kDiagFields; f++) {
-      if (specs[i].unit[f][0] == '\0') { // a reading this item does not have
-        lv_obj_add_flag(ui_comp_get_child(row, kDiagFieldIds[f].container), LV_OBJ_FLAG_HIDDEN);
-        continue;
-      }
-      lv_label_set_text(ui_comp_get_child(row, kDiagFieldIds[f].units), specs[i].unit[f]);
-      diag_fields[i][f] = {i, f};
-      lv_subject_add_observer_obj(&diag_value[i][f], diag_value_observer,
-                                  ui_comp_get_child(row, kDiagFieldIds[f].value),
-                                  &diag_fields[i][f]);
-    }
-    lv_subject_add_observer_obj(&diag_stale_subject, diag_row_stale_observer, row, nullptr);
-    lv_subject_add_observer_obj(&rtps_blink_subject, diag_row_stale_observer, row, nullptr);
-    lv_group_add_obj(diag_group, row);
-    lv_obj_add_event_cb(row, diag_key_cb, LV_EVENT_KEY, nullptr);
-    lv_obj_add_event_cb(row, setting_focus_cb, LV_EVENT_FOCUSED, nullptr);
-    lv_obj_add_event_cb(row, setting_focus_cb, LV_EVENT_DEFOCUSED, nullptr);
-    // Exported in its focused preview state, like the actuator rows; the
-    // focus callbacks are left as the only writers of LV_STATE_FOCUSED.
-    set_focused_recursive(row, false);
-    clear_click_focusable_recursive(row);
-  }
-  _ui_screen_change(&ui_DiagnosticsScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
-                    &ui_DiagnosticsScreen_screen_init);
-}
+static void diag_focus(int index) { diag_view.focus(index); }
+static void diag_rows_clear() { diag_view.rows_clear(); }
+static void diagnostics_open() { diag_view.open(); }
 
 /////////////////////////////////////////////////////////////////////////////
 // The burger menu, and moving around with the joystick

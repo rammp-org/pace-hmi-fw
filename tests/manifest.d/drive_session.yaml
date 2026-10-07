@@ -1,0 +1,18 @@
+# L1 host app for components/drive_session: the transition-table oracle (TS-UNIT-08), the
+# safe state and the stick gate. Cases DRV-001..022 in test/oracle/test_drive_session_oracle.cpp.
+# spec-deviation(TS-UNIT-01): host-native g++ in WSL, not the IDF linux target (owner, 2026-10-06).
+- id: DRV-L1
+  title: DriveSession against its AS-IS transition table, every phase x hidden x env x input
+  level: L1
+  path: components/drive_session/test/oracle
+  requirements: [REQ-DRV-01, REQ-DRV-02, REQ-DRV-03, REQ-DRV-04, REQ-DRV-05, REQ-DRV-06,
+                 REQ-DRV-07, REQ-DRV-08, REQ-DRV-09, REQ-DRV-10, REQ-DRV-11, REQ-DRV-12,
+                 REQ-DRV-13, REQ-DRV-14, REQ-DRV-15, REQ-DRV-16, REQ-DRV-17, REQ-DRV-18,
+                 REQ-DRV-19, REQ-DRV-20, REQ-DRV-21]
+  resources: [host]
+  timeout_s: 300
+  expected_s: 30
+  repeat: 1
+  pass_threshold: 1
+  safety: true
+  artifact: test

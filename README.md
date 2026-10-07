@@ -70,7 +70,7 @@ Settings opens a second level in the same menu. **< Settings** (or the stick to 
 | Firmware update | the GitHub releases; pick one and install it: see [Firmware update](#firmware-update) |
 | About | the firmware, whether it is a published release, and the board: see [About](#about) |
 
-Every row is one line in `main/settings_spec.h`, and every value is saved in LittleFS (`/storage`), so it survives a reboot.
+Every row is one line in `main/settings_spec.hpp`, and every value is saved in LittleFS (`/storage`), so it survives a reboot.
 
 ### About
 

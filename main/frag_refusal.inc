@@ -269,6 +269,8 @@ static void entry_refused_timer_cb(lv_timer_t *) { entry_refused_clear(); }
 
 // Defined below, with the drive gestures that raise most of these.
 static void entry_refused_show(int32_t which, uint32_t show_ms);
+// The drive session's input, defined in frag_drive.inc.
+static bool drive_session_input(hmi::drive_session::Input input);
 
 // Runs from hold_poll_cb, on the same input and cadence as the gesture it
 // shadows.
@@ -294,14 +296,13 @@ static void entry_refusal_poll() {
                        lv_subject_get_int(&locked_subject) != 0;
   const int32_t page = attempt ? kRefusedDrive : kRefusedNone;
   const int32_t refused = lv_subject_get_int(&entry_refused_subject);
-  if (pushed && page != kRefusedNone && !mcb_ready()) {
-    // Through the helper, so this always gets its own dwell back after a refusal
-    // that asked for a shorter one.
+  // A push is decided by the drive session (rows 38-39: locked, on the Locked
+  // screen, no menu, MCB not ready): the refusal goes through entry_refused_show,
+  // so it always gets its own dwell back after a refusal that asked for a shorter
+  // one, with refusal_feedback -- distinct from the STRONG_CLICK a completed hold
+  // gives, so a refusal can be felt as well as read.
+  if (pushed && drive_session_input(hmi::drive_session::Input::ENTRY_PUSH)) {
     refused_this_press = true;
-    entry_refused_show(page, kDriveRefusedShowMs);
-    // Distinct from the STRONG_CLICK a completed hold gives, so a refusal can
-    // be felt as well as read.
-    refusal_feedback();
   } else if ((refused == kRefusedDrive && (refused != page || mcb_ready())) ||
              ((refused == kRefusedSeat || refused == kRefusedDriveLost ||
                refused == kRefusedDriveMenu) &&
@@ -319,15 +320,14 @@ static void entry_refusal_poll() {
 // shows the DriveScreen only once MibStatus says ENABLED. Two windows, because saying
 // "that was refused" and giving up on the request are different jobs:
 //
-//  - kDriveAnswerUs is when to speak. One MibStatus period plus a margin, so a sample
+//  - kDriveAnswer is when to speak. One MibStatus period plus a margin, so a sample
 //    already in flight when the request went out cannot be mistaken for a refusal.
 //    This is as early as a refusal can honestly be known, and waiting longer just
 //    reads as the HMI ignoring the user.
-//  - kDriveWaitUs is when to stop asking, so a silent MIB is not left with a live
+//  - kDriveWait is when to stop asking, so a silent MIB is not left with a live
 //    request. The warning is long since up by then.
-static constexpr int64_t kDriveAnswerUs =
-    std::chrono::duration_cast<std::chrono::microseconds>(rammp::kMibStatusPeriod +
-                                                          std::chrono::milliseconds{250})
-        .count();
-static constexpr int64_t kDriveWaitUs =
-    std::chrono::duration_cast<std::chrono::microseconds>(rammp::kMibStatusTimeout).count();
+// Both are the drive table's (drive_session_table.hpp), the drive adapter's default
+// windows; here they are held to the RTPS spec they come from.
+static_assert(hmi::drive_session::kDriveAnswer ==
+              rammp::kMibStatusPeriod + std::chrono::milliseconds{250});
+static_assert(hmi::drive_session::kDriveWait == rammp::kMibStatusTimeout);
