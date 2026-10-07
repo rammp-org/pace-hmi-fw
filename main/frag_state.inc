@@ -11,15 +11,6 @@ static lv_subject_t adc_twist_subject;
 // enum from messages/mib_message.hpp.
 static lv_subject_t mib_state_subject;
 
-// The error banner's body and footer, as the MCB sends them. (The speed readout is
-// DriveBandView's own subject.)
-static lv_subject_t error_text_subject;
-static lv_subject_t error_footer_subject;
-static char error_text_buf[rammp::kErrorTextLen];
-static char error_text_prev_buf[rammp::kErrorTextLen];
-static char error_footer_buf[rammp::kErrorFooterLen];
-static char error_footer_prev_buf[rammp::kErrorFooterLen];
-
 // Joystick button, mirrored out of the LVGL world so the ADC task can publish
 // it alongside the stick position without taking the LVGL lock.
 static std::atomic<bool> joy_button_pressed{false};

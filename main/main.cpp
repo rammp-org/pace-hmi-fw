@@ -568,10 +568,7 @@ extern "C" void app_main(void) {
   // empty = no override, so the labels start on the enum names
   status_band_view.init_texts();
   lv_subject_init_int(drive_band_view.speed_subject(), 0);
-  lv_subject_init_string(&error_text_subject, error_text_buf, error_text_prev_buf,
-                         sizeof(error_text_buf), "");
-  lv_subject_init_string(&error_footer_subject, error_footer_buf, error_footer_prev_buf,
-                         sizeof(error_footer_buf), "");
+  refusal_view.init_error_texts();
   // Every screen ui_init built, in the screen order of the header list above.
   // The three built on demand bind their own chrome in *_screen_ensure(), and
   // BenchMotorsScreen is destroyed a few lines after ui_init, so neither is
@@ -1299,8 +1296,8 @@ extern "C" void app_main(void) {
     // copy_string cuts each text to its subject's buffer (RAMMP_*_LEN). drive_text stays
     // empty: the MIB sends one wording, and the state label is where it belongs.
     lv_subject_copy_string(status_band_view.state_text(), status.status_text.c_str());
-    lv_subject_copy_string(&error_text_subject, status.error_message.c_str());
-    lv_subject_copy_string(&error_footer_subject, status.error_footer.c_str());
+    lv_subject_copy_string(refusal_view.error_text(), status.error_message.c_str());
+    lv_subject_copy_string(refusal_view.error_footer(), status.error_footer.c_str());
     seat_apply_state(status.currentSeatState);
   });
   rtps_comms_on_diagnostics([](const rammp::Diagnostics &diag) {
