@@ -166,9 +166,9 @@ public:
     static_assert(Island::TASK == XCh::ROW.producer,
                   "topology: only the channel's producer task gets its write end (CS-OWN-06)");
     if constexpr (XCh::ROW.kind == Kind::QUEUE) {
-      return storage<XCh>().sender();
+      return fw::sender(storage<XCh>());
     } else {
-      return storage<XCh>().writer();
+      return fw::writer(storage<XCh>());
     }
   }
 
@@ -183,9 +183,9 @@ public:
     static_assert(Island::TASK == XCh::ROW.consumer,
                   "topology: only the channel's consumer task gets its read end (CS-OWN-06)");
     if constexpr (XCh::ROW.kind == Kind::QUEUE) {
-      return storage<XCh>().receiver();
+      return fw::receiver(storage<XCh>());
     } else {
-      return storage<XCh>().reader();
+      return fw::reader(storage<XCh>());
     }
   }
 
