@@ -4,3 +4,6 @@
 # release builds come from sdkconfig.defaults alone. No WiFi SSID or password here, ever:
 # those live only in an uncommitted sdkconfig*.local.
 CONFIG_HMI_REMOTE_UI=y
+# The DA7280 bring-up and functional tests at boot (bench only; the motor buzzes through
+# 15 numbered vibrations before the IO expanders come up).
+CONFIG_HMI_BENCH_DA7280_TEST=y

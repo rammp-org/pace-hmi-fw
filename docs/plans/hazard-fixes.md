@@ -88,6 +88,9 @@ that never regenerate goldens from the new code.
 | ADC task forces scale 0 when the UI heartbeat atomic is older than 200 ms, MibStatus is stale, or the last MIB state is not ENABLED (the full fix waits for the islands work) |
 | Task watchdog on the ADC, UI and net tasks; ADC task priority above UI, pinned, stack from the stress test |
 
+Measured (G10 task dump, 2026-10-06): the ADC task runs at prio 5 on core 0, below lv_task (prio 20, core 1), so H11's "ADC above UI" still needs a change.
+Unpinned FPU tasks (Read ADC, ContinuousAdc, rtps_*) get a boot-dependent core: ESP-IDF pins a task to the core of its first FPU use (ContinuousAdc: core 1 on one boot, core 0 on the next). C4 must pin the ADC task explicitly.
+
 ### Seat path (H8, H10 seat, H6 seat), after C1
 
 | Rule |

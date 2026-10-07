@@ -1,0 +1,18 @@
+{
+  "names": [
+    "LockedScreen",
+    "LockedScreen",
+    "SeatScreen",
+    "BenchGateScreen",
+    "DiagnosticsScreen",
+    "JoystickScreen",
+    "LogScreen",
+    "SkunkWorksScreen",
+    "SettingsScreen",
+    "SettingsScreen",
+    "InternetScreen",
+    "UpdateScreen",
+    "AboutScreen"
+  ],
+  "source": "walk of 2026-10-06 02:10 on e2047a4-identical firmware; re-confirmed 12:09 on final-a9a040f in Night (two walks, equal)"
+}

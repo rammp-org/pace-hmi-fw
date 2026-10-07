@@ -40,7 +40,7 @@ C = confirmed in code by the auditor and spot-checked by the orchestrator; S = s
 | H8 | CS-ERR-04 | A NaN or huge seat value from the MIB is UB in `seat_raw`; one press then commands the axis to its min or max. Unknown seat value steps from `min` | `hmi_rtps_spec.hpp:90-94`, `main.cpp:2531-2536` | C |
 | H9 | CS-SAF-03 | An ADC read failure stops XYTwist instead of sending neutral, and isn't shown | `main.cpp:6110` | C |
 | H10 | CS-SAF-02 | No neutral-stick check before ENABLE or before the gate opens; seat presses not gated on `seat_ready` | `main.cpp:1652`, `3418`, `1979` | C |
-| H11 | CS-SAF-06, CS-CON | No task watchdog on any app task; ADC task at priority 0, unpinned, 1,496 B stack free; TWDT fired on `main` at 8 s into boot (board 2) | `main.cpp:6248`; boot log | C |
+| H11 | CS-SAF-06, CS-CON | No task watchdog on any app task; ADC task at priority 0, unpinned, 1,496 B stack free; TWDT fired on `main` at 8 s into boot (board 2) (corrected 2026-10-06: measured prio 5 via the pthread default, core picked by first FPU use; see hazard-fixes C4) | `main.cpp:6248`; boot log | C |
 | H12 | CS-SAF-03 | A reset or panic is never shown (`esp_reset_reason` unread); battery "78%" and range "19 mi" are permanent placeholders | `ui_comp_topbar.c:42`, `ui_DriveScreen.c:189` | C |
 | H14 | CS-SAF, CS-OWN-09 | The stick-button bit reaches XYTwist only after the Button task takes `lvgl_mutex` (held for a whole render, ~100 ms): up to 3 ADC cycles late | `main.cpp:856-865` | C |
 | H15 | CS-UI-02 | `app_main` builds the UI without the lock (5050–5800) while the side-button and GPIO48 tasks are already live: a press during boot can corrupt LVGL's lists | `main.cpp:5003`, `5329`, `743`, `856` | C |
@@ -436,8 +436,9 @@ A refactor and a behaviour change are never in one commit.
   2. The `.text`, `.rodata`, `.data` and `.bss` sizes equal the baseline.
   3. The `nm -C` symbol set is equal.
   4. The only `.rodata` differences are `__LINE__`/`__FILE__` strings and the app descriptor.
-- **Deviation.** `.inc` fragments are not a CS-LAY layout. They are temporary: each fragment
-  becomes a real component in its own step, and each later step owns one fragment.
+- **Deviation.** `.inc` fragments are not a CS-LAY layout. They are temporary: the fragments
+  are dissolved into components grouped by concern (CS-LAY-02), not one component per fragment;
+  the target map is in [app-main-shrink.md](app-main-shrink.md), revision V15 (owner, 2026-10-06).
 
 ### 4.2 Step 1: tooling
 
@@ -512,7 +513,7 @@ HEAD at 06:30. Scripts decide every verdict (TS-PRI-02).
 | AI-UNA-02 "Never merge" | You authorised merges into `dev_refactor` | Your decision stands (AI-DIS-01); logged |
 | AI-UNA-02 / CS-SAF-05 (two approvals per safety change, refactors included) | Safety extractions would merge with none | Q4 default: drafts only |
 | TS-UNIT-01, CS-HAL-04 (IDF `linux` target) | Not installed; WSL has no sudo, cmake or IDF | Q6: host-native g++ in WSL with IDF's Unity source |
-| CS-LAY (layout) | Step 3's `.inc` fragments | Temporary; each becomes a component |
+| CS-LAY (layout) | Step 3's `.inc` fragments | Temporary; dissolved into components by concern (app-main-shrink.md V15) |
 | CS-LNG-02 gnu++23 | IDF 6.0 defaults to gnu++26 | New components use gnu++23; `main` switches in its own commit, only if it builds clean |
 | CS-NAM-01 UPPER_CASE | 217 `kCamelCase` constexprs | New code UPPER_CASE; legacy counted in the ratchet |
 | AI-SES-01 | The external `@` import isn't loaded until approved | Q2; agents also get CORE.md pasted into their prompts |

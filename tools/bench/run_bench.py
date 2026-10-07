@@ -30,6 +30,26 @@ B3  compare_selftest.py (no sim may run).   B4  walk_check.py.
 B4b ui_models_check.py: PIN pad (wrong PIN notice, 1234 opens the actuators page) and the
     Seat Functions cursor walk against the hmi_models goldens; navigation only.
 B5  scenario_drive.py.
+Board resets between steps: B0's partition-table read and B1's storage backup and
+    flash run esptool with `--after hard-reset`, so the board reboots. When B2 does
+    not run before the next step that needs the app (B3 onwards), the runner waits
+    for it first: the boot is captured from the serial port without a reset until
+    `Got IP` (BOOT_CAPTURE_S, saved as boot-after-<step>.log; that IP replaces or,
+    without --ip, supplies the board's address, as B2's log would; so --ip is
+    optional when B0 or B1 runs first), then the remote UI's PING is polled
+    (PING_WITHIN_S). Back = `Got IP` seen or PING answered; otherwise every later
+    step is NOT_RUN with the reason. Each wait is in summary.json's `board_back`.
+B5a..B5e scenario_hazards.py, the drive path against the sim's fault modes (exit
+    hold, burger-key exit, relock on link loss, profile click after relock,
+    ignored/dropped DISABLE). In the default list since their first board runs
+    (2026-10-06, final-a9a040f). B5e is a characterisation: RECORD, not PASS/FAIL.
+    RECORD counts as passing for the run's verdict and exit code, and for
+    last-good when its own graded checks (set-up, clean-up) all passed.
+Last-good (with --flash, without --no-save): saved when every step recorded is
+    PASS, or RECORD with a non-empty `checks` list that all passed and no
+    `problems` (last_good_decision). SKIP, NOT_RUN, FAIL, INVALID, or a RECORD
+    without clean graded checks, and nothing is saved; summary.json's
+    `last_good` says why.
 """
 
 from __future__ import annotations
@@ -39,6 +59,7 @@ import ipaddress
 import json
 import os
 import pathlib
+import re
 import socket
 import subprocess
 import sys
@@ -53,12 +74,20 @@ import compare_selftest  # noqa: E402
 import flash  # noqa: E402
 import lease  # noqa: E402
 import scenario_drive  # noqa: E402
+import scenario_hazards  # noqa: E402
+import ui_client  # noqa: E402
 import ui_models_check  # noqa: E402
 import walk_check  # noqa: E402
 
-ALL_STEPS = ["B0", "B1", "B2", "B3", "B4", "B4b", "B5"]
+# The sim-mode steps (scenario_hazards.py) were opt-in until their first board runs.
+SIM_MODE_STEPS = list(scenario_hazards.STEPS)
+ALL_STEPS = ["B0", "B1", "B2", "B3", "B4", "B4b", "B5", *SIM_MODE_STEPS]
 BOOT_CAPTURE_S = 90.0
 NO_IP_AFTER_JOIN_S = 60.0
+PING_WITHIN_S = 30.0
+GOT_IP_RE = re.compile(r"Got IP (\d+\.\d+\.\d+\.\d+)")
+# Steps that need the app running on the board (and its IP).
+APP_STEPS = ("B3", "B4", "B4b", "B5", *SIM_MODE_STEPS)
 
 
 class Run:
@@ -71,6 +100,9 @@ class Run:
         self.port: str | None = None
         self.ip: str | None = None
         self.hotspot_restarts = 0
+        # Set by a step whose esptool call reset the board ("B0: ..."); cleared by
+        # B2's boot or by wait_board_back().
+        self.reset_pending: str | None = None
 
     def record(self, step: str, verdict: str, **detail: object) -> str:
         self.summary["steps"][step] = {"verdict": verdict, **detail}
@@ -126,6 +158,8 @@ class Run:
         except Exception as e:
             check("rtps_peers", False, f"sweep failed: {e}")
         if self.port:
+            # esptool read-flash --after hard-reset: the board reboots (even if the read fails)
+            self.reset_pending = "B0: partition-table read"
             if self.a.flash:
                 checks.extend(flash.preflight(self.a.build_dir, self.port))
             else:
@@ -156,9 +190,12 @@ class Run:
 
     def b1(self) -> str:
         backup, made = board.backup_storage(self.port)
+        if made:
+            self.reset_pending = "B1: storage backup read"
         detail = {"storage_backup": str(backup), "backup_made_now": made}
         if not self.a.flash:
             return self.record("B1", "SKIP", reason="no --flash", **detail)
+        self.reset_pending = "B1: flash"
         code, out = flash.flash(self.a.build_dir, self.port)
         (self.dir / "flash.log").write_text(out, encoding="utf-8")
         if code != 0 and ("busy" in out.lower() or "could not open" in out.lower()):
@@ -204,6 +241,7 @@ class Run:
         return report, notes
 
     def b2(self) -> str:
+        self.reset_pending = None  # B2 resets the board itself and waits for its boot
         report, notes = self.boot("candidate")
         report.pop("verdict")
         no_ip_rule = report["ip"] is None and report["joined_wifi"]
@@ -237,6 +275,37 @@ class Run:
             return None
         return max(dirs, key=lambda d: d.stat().st_mtime).name
 
+    # --- between steps ------------------------------------------------------
+
+    def wait_board_back(self, before: str) -> str | None:
+        """After a reset by B0/B1, before `before` (an app step) when B2 has not booted
+        the board since. None when it is back, else the reason (see the docstring)."""
+        why, self.reset_pending = self.reset_pending, None
+        t0 = time.monotonic()
+        common.log(f"{before}: waiting for the board after the reset by {why}")
+        cap = board.capture(self.port, BOOT_CAPTURE_S, reset=False,
+                            on_line=lambda c, line: GOT_IP_RE.search(line) is not None)
+        text = cap.text()
+        tag = why.split(":")[0].lower()
+        (self.dir / f"boot-after-{tag}.log").write_text(text, encoding="utf-8")
+        m = GOT_IP_RE.search(text)
+        entry: dict = {"after": why, "before": before, "got_ip": m.group(1) if m else None,
+                       "capture_s": round(time.monotonic() - t0, 1), "notes": cap.notes}
+        if m and m.group(1) != self.ip:
+            entry["ip_changed"] = f"{self.ip} -> {m.group(1)} (the boot log wins, as in B2)"
+            self.ip = m.group(1)
+            self.summary["board_ip"] = self.ip
+        ok, detail = (ui_client.ping(self.ip, PING_WITHIN_S) if self.ip
+                      else (False, "no IP to ping"))
+        back = m is not None or ok
+        entry.update(ping=detail, back=back, waited_s=round(time.monotonic() - t0, 1))
+        self.summary.setdefault("board_back", []).append(entry)
+        self.save()
+        common.log(f"{before}: board {'back' if back else 'NOT back'} after "
+                   f"{entry['waited_s']}s (Got IP {entry['got_ip']}; {detail})")
+        return None if back else (f"the board did not come back after the reset by {why}: "
+                                  f"no Got IP in {BOOT_CAPTURE_S:.0f}s, {detail}")
+
     # --- B3..B5 --------------------------------------------------------------
 
     def b3(self) -> str:
@@ -257,9 +326,88 @@ class Run:
         report = scenario_drive.scenario(self.ip, self.dir / "drive", self.a.tree)
         return self.record("B5", report.pop("verdict"), **report)
 
+    def sim_mode_step(self, step: str) -> str:
+        report = scenario_hazards.run_step(step, self.ip, self.dir / "hazards" / step.lower(),
+                                           self.a.tree)
+        return self.record(step, report.pop("verdict"), **report)
+
 
 def only_ip_missing(report: dict) -> bool:
     return all("got_ip" in p for p in report["problems"])
+
+
+def last_good_decision(steps: dict) -> tuple[bool, str]:
+    """(save, why) for the steps of a run, in summary.json's form. A RECORD counts only
+    when its graded part is clean: at least one check, every check ok, no problems.
+    scenario_hazards gives RECORD only then, but this does not take that on trust."""
+    if not steps:
+        return False, "no step ran"
+    for name, step in steps.items():
+        verdict = step.get("verdict")
+        if verdict == "PASS":
+            continue
+        if verdict == "RECORD":
+            checks = step.get("checks") or []
+            if step.get("problems") or not checks or not all(c.get("ok") is True
+                                                             for c in checks):
+                return False, f"{name} RECORD without clean graded checks"
+            continue
+        return False, f"{name} {verdict}"
+    return True, "every step PASS, or RECORD with its graded checks passed"
+
+
+def plan_steps(steps_arg: str | None) -> tuple[list[str], list[str]]:
+    """(sequence, steps): the order steps run in, and the ones asked for (names in any
+    case). ValueError on a name that is not a step."""
+    sequence = list(ALL_STEPS)
+    if steps_arg is None:
+        steps_arg = ",".join(sequence)
+    by_upper = {s.upper(): s for s in ALL_STEPS}
+    steps = [by_upper.get(s.strip().upper(), s.strip()) for s in steps_arg.split(",") if s.strip()]
+    unknown = [s for s in steps if s not in ALL_STEPS]
+    if unknown:
+        raise ValueError(f"unknown steps {unknown}; known: {','.join(ALL_STEPS)}")
+    return sequence, steps
+
+
+def run_steps(run: Run, sequence: list[str], steps: list[str]) -> None:
+    """Run the asked-for steps in sequence order; record SKIP/NOT_RUN for the rest."""
+    order = {"B0": run.b0, "B1": run.b1, "B2": run.b2, "B3": run.b3, "B4": run.b4,
+             "B4b": run.b4b, "B5": run.b5}
+    for step in SIM_MODE_STEPS:
+        order[step] = lambda step=step: run.sim_mode_step(step)
+    stop_reason = None
+    for step in sequence:
+        if step not in steps:
+            run.record(step, "SKIP", reason="not in --steps")
+            continue
+        if stop_reason:
+            run.record(step, "NOT_RUN", reason=stop_reason)
+            continue
+        if step in ("B1", "B2") and run.port is None:
+            run.port = board.find_port()
+        try:
+            # The wait first: its boot capture is where the IP comes from when neither
+            # B2 nor --ip gave one (B0 or B1 reset the board).
+            if step in APP_STEPS and run.reset_pending:
+                stop_reason = run.wait_board_back(step)
+                if stop_reason:
+                    run.record(step, "NOT_RUN", reason=stop_reason)
+                    continue
+            if step in APP_STEPS and not run.ip:
+                run.record(step, "NOT_RUN", reason="no board IP (no --ip, no Got IP from B2 "
+                                                   "or from a boot after B0/B1)")
+                continue
+            verdict = order[step]()
+        except Exception as e:  # a crash in the runner is not a verdict on the firmware
+            run.record(step, "NOT_RUN", reason=f"runner error: {e}",
+                       traceback=traceback.format_exc()[-2000:])
+            stop_reason = f"runner error in {step}"
+            continue
+        if step == "B0" and verdict == "INVALID":
+            stop_reason = "B0 preflight INVALID"
+        if step == "B1" and verdict in ("FAIL", "INVALID"):
+            stop_reason = f"B1 {verdict}"
 
 
 def main() -> int:
@@ -267,17 +415,30 @@ def main() -> int:
     p.add_argument("--build-dir", type=pathlib.Path, required=True)
     p.add_argument("--label", required=True)
     p.add_argument("--flash", action="store_true")
-    p.add_argument("--steps", default=",".join(ALL_STEPS))
+    p.add_argument("--steps", default=None,
+                   help=f"comma-separated (default {','.join(ALL_STEPS)})")
     p.add_argument("--no-save", action="store_true",
                    help="never save this build as last-good (drafts that must not stay on the board)")
     p.add_argument("--tree", type=pathlib.Path, default=common.REPO,
                    help="where scripts/ (selftest, sim, hmi_ui) are run from")
-    p.add_argument("--ip", default=None, help="board IP when B2 is not in --steps")
+    p.add_argument("--ip", default=None,
+                   help="board IP when B2 is not in --steps; optional when B0 or B1 runs: "
+                        "their reset's boot log gives it")
+    p.add_argument("--sim-mode-steps", action="store_true",
+                   help=f"no effect: {','.join(SIM_MODE_STEPS)} are in the default list now "
+                        "(kept so older command lines still run)")
     a = p.parse_args()
-    by_upper = {s.upper(): s for s in ALL_STEPS}
-    steps = [by_upper.get(s.strip().upper(), s.strip()) for s in a.steps.split(",") if s.strip()]
+    try:
+        sequence, steps = plan_steps(a.steps)
+    except ValueError as e:
+        p.error(str(e))
     if "B0" not in steps and (a.flash or "B1" in steps):
         p.error("flashing needs the B0 preflight")
+    # The board's address is DHCP-assigned (.180 overnight, .218 since 11:31):
+    # when B2 runs, the IP comes only from its boot log, never from --ip or a
+    # stored value. Checked before the lease is taken, so an error never leaves it held.
+    if "B2" in steps and a.ip:
+        p.error("--ip is only for runs without B2: B2 takes the IP from the boot log")
 
     owner = f"run_bench:{a.label}"
     try:
@@ -288,33 +449,8 @@ def main() -> int:
     os.environ["BENCH_LEASE_OWNER"] = owner
     run = Run(a)
     run.ip = a.ip
-    order = {"B0": run.b0, "B1": run.b1, "B2": run.b2, "B3": run.b3, "B4": run.b4, "B4b": run.b4b,
-             "B5": run.b5}
     try:
-        stop_reason = None
-        for step in ALL_STEPS:
-            if step not in steps:
-                run.record(step, "SKIP", reason="not in --steps")
-                continue
-            if stop_reason:
-                run.record(step, "NOT_RUN", reason=stop_reason)
-                continue
-            if step in ("B1", "B2") and run.port is None:
-                run.port = board.find_port()
-            if step in ("B3", "B4", "B4b", "B5") and not run.ip:
-                run.record(step, "NOT_RUN", reason="no board IP (B2 did not pass)")
-                continue
-            try:
-                verdict = order[step]()
-            except Exception as e:  # a crash in the runner is not a verdict on the firmware
-                run.record(step, "NOT_RUN", reason=f"runner error: {e}",
-                           traceback=traceback.format_exc()[-2000:])
-                stop_reason = f"runner error in {step}"
-                continue
-            if step == "B0" and verdict == "INVALID":
-                stop_reason = "B0 preflight INVALID"
-            if step == "B1" and verdict in ("FAIL", "INVALID"):
-                stop_reason = f"B1 {verdict}"
+        run_steps(run, sequence, steps)
     finally:
         run.summary["finished"] = common.now_iso()
         run.summary["hotspot_restarts"] = run.hotspot_restarts
@@ -322,9 +458,12 @@ def main() -> int:
         run.summary["verdict"] = ("FAIL" if "FAIL" in verdicts else
                                   "INVALID" if "INVALID" in verdicts else
                                   "INCOMPLETE" if "NOT_RUN" in verdicts else "PASS")
-        # Last-good only when every step passed (B0..B5 all run and PASS).
-        if a.flash and not a.no_save and verdicts and all(v == "PASS" for v in verdicts):
-            run.summary["saved_last_good"] = str(flash.save(a.build_dir, a.label, "B0-B5 PASS"))
+        # RECORD (a characterisation step, B5e) passes the run; for last-good it counts
+        # only with its graded set-up and clean-up passed (last_good_decision).
+        save, why = last_good_decision(run.summary["steps"])
+        run.summary["last_good"] = why
+        if a.flash and not a.no_save and save:
+            run.summary["saved_last_good"] = str(flash.save(a.build_dir, a.label, why))
         run.save()
         common.log(f"lease: {lease.release(owner)}")
     print(json.dumps({k: v["verdict"] for k, v in run.summary["steps"].items()}, indent=1))
@@ -333,4 +472,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["selftest"]:
+        import run_bench_selftest
+        sys.exit(run_bench_selftest.main())
     sys.exit(main())

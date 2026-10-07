@@ -1,4 +1,4 @@
-# tools/bench: the board-test runner (plan §6, B0–B5 and B4b)
+# tools/bench: the board-test runner (plan §6, B0–B5, B4b and B5a–B5e)
 
 Board 2 (Tab5, ESP32-P4), USB serial number `80:F1:B2:D1:51:A6`, on the Windows hotspot
 192.168.137.0/24 (PC = 192.168.137.2). No motors exist: the MCB is `scripts/rtps_mcb_sim.py`.
@@ -11,6 +11,7 @@ set PY=C:\Espressif\tools\python\v6.0\venv\Scripts\python.exe
 %PY% tools\bench\run_bench.py --build-dir C:\b\main_bench --label baseline-bench --flash
 %PY% tools\bench\run_bench.py --build-dir <build> --label dry            # no flash: B1's flash is SKIP
 %PY% tools\bench\run_bench.py --build-dir <build> --label x --steps B0,B2,B3
+%PY% tools\bench\run_bench.py --build-dir <build> --label x --steps B0,B5,B5a,B5b    # no B2: --ip optional
 ```
 
 Results: `C:\b\bench\results\<label>-<time>\summary.json` (one verdict per step, the board IP),
@@ -25,9 +26,32 @@ plus the boot capture, self-test JSON, walk PNGs and the sim logs beside it.
 | B4 walk | `walk_check.py` | 13 names == baseline; static screens pixel-equal below y=60 |
 | B4b PIN pad and seat grid | `ui_models_check.py` | wrong PIN 1111 shows the notice and stays; 1234 opens SettingsScreen (actuators page); Seat Functions cursor walk = hmi_models goldens (3 rows of 2, clamped, DOWN off the bottom -> burger key); navigation only, no seat command |
 | B5 drive | `scenario_drive.py` | hold → Drive; `e` → Locked ≤3 s; XYTwist 0 while locked; refused hold never Drive |
+| B5a exit hold | `scenario_hazards.py` | exit hold on Drive → Locked ≤3 s, the sim applied a DISABLE, XYTwist 0 |
+| B5b burger-key exit | `scenario_hazards.py` | burger key on Drive → Locked ≤3 s (menu over it), DISABLE applied, XYTwist 0 |
+| B5c relock on link loss | `scenario_hazards.py` | sim `p` → Locked ≤ MIB_STATUS_TIMEOUT + 2 s, XYTwist 0 while down; records the DriveCommands while down and the screens after `r` with the sim still ENABLED |
+| B5d profile click after relock | `scenario_hazards.py` | as B5c, then `x` and `r`: if Drive comes back, a profile tap reaches the sim as a DriveCommand (its request is recorded) |
+| B5e ignored/dropped DISABLE | `scenario_hazards.py` | RECORD: with `ign 50` and with `drop 50`, the DISABLEs and screens 7 s after an exit hold, then the burger key; graded only set-up and clean-up |
 
 Verdicts: PASS, FAIL, INVALID (B0 preflight; B2's no-IP-after-join rule), SKIP (declared on the
-command line), NOT_RUN (nothing to test against, e.g. no IP; or a runner crash: not a verdict).
+command line), NOT_RUN (nothing to test against, e.g. no IP; or a runner crash: not a verdict),
+RECORD (a characterisation, B5e: today's behaviour as data; passes the run).
+Last-good (with `--flash`) is saved when every step is PASS, or RECORD with its graded checks
+(set-up, clean-up) all passed and no problems; a RECORD without clean graded checks, or any
+SKIP, NOT_RUN, FAIL or INVALID, saves nothing (`run_bench.last_good_decision`, BENCH-010..012;
+orchestrator decision 2026-10-06, option B). `summary.json` → `last_good` says why.
+
+## B5a..B5e: the sim's fault modes
+In the default step list, after B5, since their first board runs (2026-10-06, final-a9a040f:
+B5a–B5d PASS, B5e RECORD; the H1, H5 and H6 records as expected). `--sim-mode-steps` is
+still accepted and does nothing. Each step starts its own sim
+(`sim_child.py` + `--event-log <step>/sim-events.jsonl`), so it begins IDLE, and ends with a
+graded clean-up (every mode off, `ok`, LockedScreen). Remote-UI verbs only (SCREEN, TAP, BTN,
+SHOT): no stick is moved and XYTwist is only observed. The sim's JSONL log is the evidence;
+before each UI action the step writes a `mark` into it and grades only what follows. Every
+`records` entry is today's behaviour, hazards included (H1, H5, H6), so the hazard fixes
+(docs/plans/hazard-fixes.md §4 C1) show up as a diff, not as a FAIL. The full step list is in
+`scenario_hazards.py`'s docstring. Not covered here: the sim's `ongone` policy (an HMI reset
+needs a serial reset; it belongs with C3's boot steps).
 
 ## Rules the code enforces
 - Never erases. `common.esptool()` refuses any erase option. The only write is
@@ -45,6 +69,23 @@ command line), NOT_RUN (nothing to test against, e.g. no IP; or a runner crash: 
 - The board lease (`C:\Users\halai\Offline_Documents\ATDev\rammp\.board-lease`, JSON
   `{owner, since, pid}`) is held for the whole run; `lease.py status|acquire|release`. A lease
   whose pid is dead is taken over and the takeover is logged.
+- Every esptool call ends with `--after hard-reset`, so B0's table read and B1's backup and
+  flash reboot the board. When B2 does not boot it before the next app step (B3 onwards), the
+  runner waits first: a serial capture without a reset until `Got IP` (90 s, saved as
+  `boot-after-b0.log` / `-b1.log`; that IP replaces `--ip`, or supplies it, so `--ip` is
+  optional when B0 or B1 runs first), then the remote UI's PING (30 s). Back = either; otherwise the later steps are NOT_RUN with the reason. Each wait
+  is in `summary.json` → `board_back`. Seen 2026-10-06: `--steps B0,B5,...` started B5's sim
+  while the board was booting ("Could not find the board").
+- Remote UI from the steps (B4b, B5, B5a..e) goes through `ui_client.py`: a 5 s timeout per
+  command (SHOT 20 s), on a timeout a reconnect and ONE retry for idempotent verbs (SCREEN,
+  BTN, KEY, SHOT, FOCUS, PING, ...); TAP and SWIPE are not retried (a lost reply may hide a
+  tap that happened, and a second burger-key tap undoes it): they raise after the reconnect,
+  so the step is NOT_RUN, not graded on a guess. A reconnect releases what was held (the
+  board lets go when a client goes). Every command is a line in `<step>/remote-ui.jsonl`
+  (sent, answered, duration, gap since the previous answer, attempt, reply or error) and the
+  step's `remote_ui` sums it up (slow commands over 1 s, retries, the largest gap). A long
+  gap with fast round trips is time spent on the PC, not on the wire. B4's walk runs
+  `hmi_ui.py walk` as a child and keeps hmi_ui's own client (20 s socket timeout, no retry).
 
 ## Single tools
 ```
@@ -54,8 +95,11 @@ command line), NOT_RUN (nothing to test against, e.g. no IP; or a runner crash: 
 %PY% tools\bench\compare_selftest.py --ip A [--out f.json]     or  --compare-only f.json
 %PY% tools\bench\walk_check.py --ip A --out DIR
 %PY% tools\bench\scenario_drive.py --ip A --out DIR
+%PY% tools\bench\scenario_hazards.py --ip A --out DIR [--steps B5a,B5e]
 %PY% tools\bench\ui_models_check.py --ip A --out DIR
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\bench\hotspot.ps1 status|restart
+python tools\bench\ui_client.py selftest     # UI-001.., a localhost fake remote UI (in L0)
+python tools\bench\run_bench.py selftest     # BENCH-001.., step sequencing on a fake board (in L0)
 ```
 `--tree` (default: this worktree) is where `scripts/` is run from: run the tree that built the
 image. Children run with `PYTHONDONTWRITEBYTECODE=1`.
@@ -86,3 +130,16 @@ image. Children run with `PYTHONDONTWRITEBYTECODE=1`.
 - **Self-test bands** are in `compare_selftest.py` (`BANDS`, documented in its docstring).
   The baseline `selftest.json` was taken while `rtps_mcb_sim.py` was running (scratchpad
   `ready_rtps.py`), against the rule; its values passed their own limits.
+
+## Re-baseline 2026-10-06: Night theme (owner-approved, TS-DET-05)
+The owner set the Night theme (settings `theme 0`) on board 2 and it stays.
+- B2: `tests/characterisation/baseline-e2047a4/boot-expected.json` overrides the expected
+  `settings_loaded` value (theme 1 → theme 0) and keeps the old value beside it.
+  `boot-board2.log` stays the unedited capture.
+- B4: the six static screens were captured fresh on final-a9a040f in Night (two walks, equal
+  outside the masks; the Settings marquee masks still cover the only differences). The Day
+  originals are kept as `walk/<stem>-day.png`. The side-by-side sheets (Day left, Night right)
+  are in `C:\b\bench\baseline\night-vs-day\`. The screen names are unchanged and are now
+  committed as `walk/names.json`.
+- The board's IP is DHCP-assigned (.180 overnight, .218 since 11:31). B2 takes it from the boot
+  log; `run_bench.py` refuses `--ip` when B2 is in `--steps`.

@@ -7,6 +7,9 @@ see [tools/gen_diagrams/README.md](../tools/gen_diagrams/README.md).
 
 ## Today vs target
 
+For a file-by-file walk through the code as it is today (boot, tasks, the motion path, the drive
+state machine, every fragment), read [how-the-firmware-works.md](how-the-firmware-works.md).
+
 - **Today:** almost everything is one component, `main` (a `main.cpp` split into one-TU
   `frag_*.inc` fragments, plus the screen, network, OTA and self-test files). Tasks share state
   through statics and a global recursive `lvgl_mutex`. There are no islands, no channels and no
@@ -101,6 +104,7 @@ flowchart LR
   c_m5stack_tab5["m5stack-tab5 (vendored)"]
   c_main["main"]:::safety
   c_ota_parse["ota_parse"]
+  c_post["post"]:::safety
   c_rammp_rtps_messages["rammp_rtps_messages (submodule)"]:::safety
   c_ui["ui"]:::gen
   g_ESP_IDF["ESP-IDF · 13"]
