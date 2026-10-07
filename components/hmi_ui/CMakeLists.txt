@@ -3,6 +3,7 @@
 idf_component_register(SRCS "src/bench_pin_view.cpp"
                             "src/brightness_view.cpp"
                             "src/button_grid.cpp"
+                            "src/diagnostics_view.cpp"
                             "src/rtps_label_view.cpp"
                             "src/seat_view.cpp"
                             "src/status_band_view.cpp"
