@@ -1,4 +1,4 @@
-# tools/bench: the board-test runner (plan §6, B0–B5 and B4b)
+# tools/bench: the board-test runner (plan §6, B0–B5, B4b and B5a–B5e)
 
 Board 2 (Tab5, ESP32-P4), USB serial number `80:F1:B2:D1:51:A6`, on the Windows hotspot
 192.168.137.0/24 (PC = 192.168.137.2). No motors exist: the MCB is `scripts/rtps_mcb_sim.py`.
@@ -11,7 +11,7 @@ set PY=C:\Espressif\tools\python\v6.0\venv\Scripts\python.exe
 %PY% tools\bench\run_bench.py --build-dir C:\b\main_bench --label baseline-bench --flash
 %PY% tools\bench\run_bench.py --build-dir <build> --label dry            # no flash: B1's flash is SKIP
 %PY% tools\bench\run_bench.py --build-dir <build> --label x --steps B0,B2,B3
-%PY% tools\bench\run_bench.py --build-dir <build> --label x --sim-mode-steps        # + B5a..B5e
+%PY% tools\bench\run_bench.py --build-dir <build> --label x --steps B0,B5,B5a,B5b    # no B2: --ip optional
 ```
 
 Results: `C:\b\bench\results\<label>-<time>\summary.json` (one verdict per step, the board IP),
@@ -26,19 +26,22 @@ plus the boot capture, self-test JSON, walk PNGs and the sim logs beside it.
 | B4 walk | `walk_check.py` | 13 names == baseline; static screens pixel-equal below y=60 |
 | B4b PIN pad and seat grid | `ui_models_check.py` | wrong PIN 1111 shows the notice and stays; 1234 opens SettingsScreen (actuators page); Seat Functions cursor walk = hmi_models goldens (3 rows of 2, clamped, DOWN off the bottom -> burger key); navigation only, no seat command |
 | B5 drive | `scenario_drive.py` | hold → Drive; `e` → Locked ≤3 s; XYTwist 0 while locked; refused hold never Drive |
-| B5a exit hold (opt-in) | `scenario_hazards.py` | exit hold on Drive → Locked ≤3 s, the sim applied a DISABLE, XYTwist 0 |
-| B5b burger-key exit (opt-in) | `scenario_hazards.py` | burger key on Drive → Locked ≤3 s (menu over it), DISABLE applied, XYTwist 0 |
-| B5c relock on link loss (opt-in) | `scenario_hazards.py` | sim `p` → Locked ≤ MIB_STATUS_TIMEOUT + 2 s, XYTwist 0 while down; records the DriveCommands while down and the screens after `r` with the sim still ENABLED |
-| B5d profile click after relock (opt-in) | `scenario_hazards.py` | as B5c, then `x` and `r`: if Drive comes back, a profile tap reaches the sim as a DriveCommand (its request is recorded) |
-| B5e ignored/dropped DISABLE (opt-in) | `scenario_hazards.py` | RECORD: with `ign 50` and with `drop 50`, the DISABLEs and screens 7 s after an exit hold, then the burger key; graded only set-up and clean-up |
+| B5a exit hold | `scenario_hazards.py` | exit hold on Drive → Locked ≤3 s, the sim applied a DISABLE, XYTwist 0 |
+| B5b burger-key exit | `scenario_hazards.py` | burger key on Drive → Locked ≤3 s (menu over it), DISABLE applied, XYTwist 0 |
+| B5c relock on link loss | `scenario_hazards.py` | sim `p` → Locked ≤ MIB_STATUS_TIMEOUT + 2 s, XYTwist 0 while down; records the DriveCommands while down and the screens after `r` with the sim still ENABLED |
+| B5d profile click after relock | `scenario_hazards.py` | as B5c, then `x` and `r`: if Drive comes back, a profile tap reaches the sim as a DriveCommand (its request is recorded) |
+| B5e ignored/dropped DISABLE | `scenario_hazards.py` | RECORD: with `ign 50` and with `drop 50`, the DISABLEs and screens 7 s after an exit hold, then the burger key; graded only set-up and clean-up |
 
 Verdicts: PASS, FAIL, INVALID (B0 preflight; B2's no-IP-after-join rule), SKIP (declared on the
 command line), NOT_RUN (nothing to test against, e.g. no IP; or a runner crash: not a verdict),
 RECORD (a characterisation, B5e: today's behaviour as data; passes the run, never saves last-good).
+Last-good is saved only when every step that ran is PASS, so with B5e in the default list a
+`--flash` run saves last-good only when `--steps` leaves B5e out.
 
-## B5a..B5e: the sim's fault modes (opt-in)
-Not in the default step list until they have run on the board once: `--sim-mode-steps` adds
-them after B5, and `--steps` may name them only with that flag. Each step starts its own sim
+## B5a..B5e: the sim's fault modes
+In the default step list, after B5, since their first board runs (2026-10-06, final-a9a040f:
+B5a–B5d PASS, B5e RECORD; the H1, H5 and H6 records as expected). `--sim-mode-steps` is
+still accepted and does nothing. Each step starts its own sim
 (`sim_child.py` + `--event-log <step>/sim-events.jsonl`), so it begins IDLE, and ends with a
 graded clean-up (every mode off, `ok`, LockedScreen). Remote-UI verbs only (SCREEN, TAP, BTN,
 SHOT): no stick is moved and XYTwist is only observed. The sim's JSONL log is the evidence;
