@@ -36,9 +36,11 @@ struct Block {
 struct Walk {
   uintptr_t heap_start;
   uintptr_t heap_end;
+  uintptr_t last_end; // end of the last block walked in this heap
   uint32_t index;
   std::array<Block, kHistory> history;
   bool bad;
+  const char *bad_reason;
   Block bad_block;
   uint32_t bad_index;
   uintptr_t bad_heap_start;
@@ -66,10 +68,36 @@ Block snapshot(uintptr_t ptr, size_t size, bool used, uintptr_t heap_end) {
   return b;
 }
 
+void mark_bad(const char *reason, const Block &b) {
+  if (walk.bad) {
+    return;
+  }
+  walk.bad = true;
+  walk.bad_reason = reason;
+  walk.bad_block = b;
+  walk.bad_index = walk.index;
+  walk.bad_heap_start = walk.heap_start;
+  walk.bad_heap_end = walk.heap_end;
+  walk.bad_history = walk.history;
+}
+
+// A heap's walk must reach its end: a wrong size can also end it early, quietly
+// (a size of 0 reads as the last block).
+constexpr uintptr_t kEndSlack = 32;
+
+void check_heap_end() {
+  if (walk.heap_start != 0 && walk.last_end + kEndSlack < walk.heap_end) {
+    const Block last{.ptr = walk.last_end, .size = 0, .used = false, .words = {}};
+    mark_bad("walk ended early (block at ptr is where it stopped)", last);
+  }
+}
+
 bool on_block(walker_heap_into_t heap, walker_block_info_t block, void *) {
   if (static_cast<uintptr_t>(heap.start) != walk.heap_start) {
+    check_heap_end();
     walk.heap_start = static_cast<uintptr_t>(heap.start);
     walk.heap_end = static_cast<uintptr_t>(heap.end);
+    walk.last_end = walk.heap_start;
     walk.index = 0;
   }
   const auto ptr = reinterpret_cast<uintptr_t>(block.ptr);
@@ -77,21 +105,24 @@ bool on_block(walker_heap_into_t heap, walker_block_info_t block, void *) {
   const bool inside = ptr >= walk.heap_start && ptr < walk.heap_end && block.size % 4 == 0 &&
                       block.size <= walk.heap_end - ptr;
   if (!inside) {
-    if (!walk.bad) {
-      walk.bad = true;
-      walk.bad_block = b;
-      walk.bad_index = walk.index;
-      walk.bad_heap_start = walk.heap_start;
-      walk.bad_heap_end = walk.heap_end;
-      walk.bad_history = walk.history;
-    }
+    mark_bad("size runs outside the heap", b);
     return false; // the next block would be found through this size: stop this heap here
+  }
+  // TLSF keeps the next block's prev_free bit (bit 1 of its size word, at
+  // ptr + size) equal to this block being free.
+  if (ptr + block.size + 4 <= walk.heap_end) {
+    const uint32_t next_size = *reinterpret_cast<const volatile uint32_t *>(ptr + block.size);
+    if (((next_size & 2U) != 0) != !block.used) {
+      mark_bad("next block's prev_free bit disagrees with this block", b);
+      return false;
+    }
   }
   if (walk.mapping && ptr >= kMapLo && ptr < kMapHi && walk.map_count < kMapMax) {
     walk.map[walk.map_count++] = b;
   }
   walk.history[walk.index % kHistory] = b;
   walk.index++;
+  walk.last_end = ptr + block.size;
   return true;
 }
 
@@ -144,6 +175,7 @@ void watch_task(void *) {
     walk.heap_start = 0;
     walk.index = 0;
     heap_caps_walk(kCaps, on_block, nullptr);
+    check_heap_end(); // the last heap walked
     bool ok = !walk.bad;
     ++walks;
     if (ok && kIntegrityEvery != 0 && walks % kIntegrityEvery == 0) {

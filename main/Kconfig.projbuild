@@ -149,6 +149,43 @@ menu "RAMMP HMI"
         hex "Debug: heap watch map, end address"
         default 0x4FF3B900
 
+    config HMI_DEBUG_LOG_FLOOD
+        bool "Debug: reproduce the stdout tee overrun (HEAPFLOOD)"
+        default n
+        help
+            From 3 s after boot, prints so as to hit the stdout tee's
+            buffer-full corner: an espp line (one fwrite) that fills the
+            buffer to the byte, then an IDF-style line (vprintf). See
+            main/log_flood.hpp. Use with HMI_DEBUG_HEAP_WATCH.
+
+            A debug feature (CS-LAY-09): off by default and never in
+            sdkconfig.defaults, which ships.
+
+    config HMI_DEBUG_LOG_FLOOD_EXACT
+        bool "Debug: one deterministic trigger instead of a flood"
+        default n
+
+    config HMI_DEBUG_LOG_FLOOD_TASKS
+        int "Debug: flood tasks"
+        range 1 4
+        default 1
+
+    config HMI_DEBUG_LOG_FLOOD_PAIRS
+        int "Debug: espp + IDF line pairs per flood task"
+        range 1 100000
+        default 600
+
+    # Hidden: the two flood options as 0/1 (CS-TYP-05, as above).
+    config HMI_DEBUG_LOG_FLOOD_AS_INT
+        int
+        default 1 if HMI_DEBUG_LOG_FLOOD
+        default 0
+
+    config HMI_DEBUG_LOG_FLOOD_EXACT_AS_INT
+        int
+        default 1 if HMI_DEBUG_LOG_FLOOD_EXACT
+        default 0
+
     # Hidden: HMI_DEBUG_HEAP_WATCH as 0/1 (CS-TYP-05, as above).
     config HMI_DEBUG_HEAP_WATCH_AS_INT
         int
