@@ -1,9 +1,20 @@
 // split_main.py fragment of main.cpp (frag_clock: original lines 767-852); one TU, see main.cpp.
 #include "hmi_format/topbar.hpp"
+#include "hmi_ui/topbar_view.hpp"
+
+/////////////////////////////////////////////////////////////////////////////
+// TopBar clock
+//
+// The MIB sends Unix time plus its UTC offset in every MibStatus. It sets the
+// system clock and the RTC, so the time keeps running through a lost link, and
+// across a reboot without the MIB. Clock1 on every TopBar shows the system
+// clock. No TZ is set, so the system clock simply holds the local wall time the
+// MIB reported and nothing converts again.
+/////////////////////////////////////////////////////////////////////////////
+
+static constexpr int64_t kClockMaxDriftS = 2; // disagree by more and the MCB wins
+
 static std::atomic<bool> clock_valid{false};
-static lv_subject_t clock_subject;
-static char clock_buf[8];
-static char clock_prev_buf[8];
 
 // An RTC that lost power reads 2000; anything before 2025 is not a real time
 // (components/hmi_format, REQ-FMT-06).
@@ -44,38 +55,58 @@ static void clock_note_mcb_time(const MIB::MibStatus &status) {
 }
 
 // LVGL task.
-static void clock_poll_cb(lv_timer_t *) {
-  char text[sizeof(clock_buf)] = "--:--";
-  if (clock_valid) {
+void hmi::ui::TopBarView::clock_poll() {
+  std::array<char, CLOCK_TEXT_SIZE> text{"--:--"};
+  if (*config_.clock_valid) {
     const time_t now = time(nullptr);
     std::tm t{};
     gmtime_r(&now, &t);
     hmi::format::clock_text(t, text);
   }
-  if (strcmp(lv_subject_get_string(&clock_subject), text) != 0) {
-    lv_subject_copy_string(&clock_subject, text);
+  if (strcmp(lv_subject_get_string(&clock_subject_), text.data()) != 0) {
+    lv_subject_copy_string(&clock_subject_, text.data());
   }
+}
+
+void hmi::ui::TopBarView::clock_poll_cb(lv_timer_t *timer) {
+  static_cast<TopBarView *>(lv_timer_get_user_data(timer))->clock_poll();
+}
+
+void hmi::ui::TopBarView::init(const char *link) {
+  lv_subject_init_string(&clock_subject_, clock_buf_.data(), clock_prev_buf_.data(),
+                         clock_buf_.size(), "--:--");
+  lv_subject_init_string(&link_subject_, link_buf_.data(), link_prev_buf_.data(),
+                         link_buf_.size(), link);
+}
+
+void hmi::ui::TopBarView::bind(lv_obj_t *bar) {
+  if (bar != nullptr) {
+    lv_label_bind_text(ui_comp_get_child(bar, UI_COMP_TOPBAR_CLOCK), &clock_subject_, nullptr);
+    lv_label_bind_text(ui_comp_get_child(bar, UI_COMP_TOPBAR_LINK), &link_subject_, nullptr);
+  }
+}
+
+void hmi::ui::TopBarView::start_clock() {
+  clock_poll(); // the RTC's time, when it had one, from the first frame
+  lv_timer_create(clock_poll_cb, CLOCK_POLL_MS, this);
+}
+
+void hmi::ui::TopBarView::set_link(const char *text) {
+  lv_subject_copy_string(&link_subject_, text);
 }
 
 // The TopBar's link label: what RTPS runs over. The design's "BT · WI-FI" is only
 // a placeholder; it is set from the setting before rtps_comms_start, then from the
 // link it brought up (WiFi with no network known runs Ethernet).
-static lv_subject_t link_subject;
-static char link_buf[16];
-static char link_prev_buf[16];
-
 // NetLink -> hmi_format's Link (REQ-FMT-07): anything but WiFi reads Ethernet.
 static const char *link_text(NetLink link) {
   return hmi::format::link_text(link == NetLink::WIFI ? hmi::format::Link::WIFI
                                                       : hmi::format::Link::ETHERNET);
 }
 
-static void bind_topbar_labels(lv_obj_t *bar) {
-  if (bar != nullptr) {
-    lv_label_bind_text(ui_comp_get_child(bar, UI_COMP_TOPBAR_CLOCK), &clock_subject, nullptr);
-    lv_label_bind_text(ui_comp_get_child(bar, UI_COMP_TOPBAR_LINK), &link_subject, nullptr);
-  }
-}
+// The one instance, for every TopBar; bound from app_main and the screens built on demand.
+static constinit hmi::ui::TopBarView topbar_view{{.clock_valid = &clock_valid}};
+static void bind_topbar_labels(lv_obj_t *bar) { topbar_view.bind(bar); }
 
 // One edge of the stick button, from the GPIO or from the remote UI channel --
 // one path, so what a script presses is the real handling. Touches subjects,

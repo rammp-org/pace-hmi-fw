@@ -588,9 +588,7 @@ extern "C" void app_main(void) {
   // here. One list rather than three, because a screen whose band, TopBar and
   // chrome do not all get bound shows a frozen readout, and lining the three
   // calls up separately is how one gets forgotten.
-  lv_subject_init_string(&clock_subject, clock_buf, clock_prev_buf, sizeof(clock_buf), "--:--");
-  lv_subject_init_string(&link_subject, link_buf, link_prev_buf, sizeof(link_buf),
-                         link_text(static_cast<NetLink>(settings_get(SETTINGS_PARAM_NETWORK))));
+  topbar_view.init(link_text(static_cast<NetLink>(settings_get(SETTINGS_PARAM_NETWORK))));
   struct ScreenChrome {
     lv_obj_t *bar;
     lv_obj_t *band;
@@ -623,8 +621,7 @@ extern "C" void app_main(void) {
   // the bench tools are all useful with the chair not driving -- and without an
   // MCB at all. Locked still means nothing moves: the band reads LOCKED on every
   // screen and the stick only drives from Drive (stick_drives).
-  clock_poll_cb(nullptr); // the RTC's time, when it had one, from the first frame
-  lv_timer_create(clock_poll_cb, kClockPollMs, nullptr);
+  topbar_view.start_clock();
   lv_subject_add_observer_obj(&speed_tenths_subject, speed_label_observer, ui_SpeedValue, nullptr);
   lv_subject_init_int(&drive_profile_subject, static_cast<int32_t>(MIB::DriveProfile::NORMAL));
   bind_drive_profile_button(ui_ModeManual, &kProfileHigh);
@@ -1662,7 +1659,7 @@ extern "C" void app_main(void) {
   }
   {
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
-    lv_subject_copy_string(&link_subject, link_text(rtps_comms_net_link()));
+    topbar_view.set_link(link_text(rtps_comms_net_link()));
   }
   // The firmware's SHA-256 for the About screen: ~4 MB of flash read on a
   // low-priority thread. Only once rtps_comms_start has set the W5500 up: run

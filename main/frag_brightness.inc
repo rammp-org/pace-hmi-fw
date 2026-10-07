@@ -22,16 +22,3 @@ static void brightness_step() {
   std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
   brightness_view.step();
 }
-
-/////////////////////////////////////////////////////////////////////////////
-// TopBar clock
-//
-// The MIB sends Unix time plus its UTC offset in every MibStatus. It sets the
-// system clock and the RTC, so the time keeps running through a lost link, and
-// across a reboot without the MIB. Clock1 on every TopBar shows the system
-// clock. No TZ is set, so the system clock simply holds the local wall time the
-// MIB reported and nothing converts again.
-/////////////////////////////////////////////////////////////////////////////
-
-static constexpr uint32_t kClockPollMs = 1000;
-static constexpr int64_t kClockMaxDriftS = 2; // disagree by more and the MCB wins
