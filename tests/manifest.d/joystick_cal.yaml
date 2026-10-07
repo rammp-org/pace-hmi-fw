@@ -1,0 +1,15 @@
+# L1 host app for the joystick calibration (cases CAL-xxx in components/joystick_cal/test).
+# spec-deviation(TS-UNIT-01): host-native g++ in WSL, not the IDF linux target (owner, 2026-10-06).
+# safety: true -- the calibration sets the stick's travel (plan §2.3: "yes (feeds the stick)").
+- id: L1-CAL
+  title: joystick calibration codec, plausibility, boot log line, run model and its transition-table oracle
+  level: L1
+  path: components/joystick_cal/test
+  requirements: []
+  resources: [host]
+  timeout_s: 300
+  expected_s: 60
+  repeat: 1
+  pass_threshold: 1
+  safety: true
+  artifact: test
