@@ -1,5 +1,6 @@
 // split_main.py fragment of main.cpp (frag_settings_ui: original lines 2152-2781); one TU, see main.cpp.
 #include "hmi_format/stepper.hpp"
+#include "hmi_ui/settings_view.hpp"
 /////////////////////////////////////////////////////////////////////////////
 // SettingsScreen: pages of -/+ rows
 //
@@ -28,18 +29,6 @@
 using hmi::format::seat_format;
 using hmi::format::stepper_format;
 using hmi::format::StepperSpec;
-
-// Everything needed to drive one row, so a key callback or an observer gets it
-// all from one user_data pointer.
-struct SettingRow {
-  StepperSpec spec;
-  lv_subject_t *value; // the row's whole truth; kValueUnknown until known
-  int index;           // position on the page; on the actuators page, the actuator id
-  lv_obj_t *row;       // the SettingRow root; what takes focus
-  lv_obj_t *value_label;
-  lv_obj_t *minus;
-  lv_obj_t *plus;
-};
 
 struct SettingPageText {
   const char *title;
@@ -108,9 +97,7 @@ static_assert(std::size(kSettingParamValue) == SETTINGS_PARAM_COUNT,
               "every settings_spec.h parameter needs its subject here");
 
 static constexpr int kSettingRowsMax = std::max<int>(rammp::kSeatAxisCount, SETTINGS_PARAM_COUNT);
-static SettingRow setting_rows[kSettingRowsMax];
-static int setting_row_count; // rows on the page that is up; 0 while the screen is not
-static int setting_cursor;    // which row the joystick is on
+static_assert(kSettingRowsMax <= hmi::ui::SettingsView::ROWS_MAX, "a page has more rows than the view");
 static lv_group_t *setting_group = nullptr;
 // Which page is up: a SETTINGS_PAGE_* or kActuatorsPage. A subject because the
 // warning panel depends on it.
@@ -127,14 +114,6 @@ static uint8_t seat_axis_count; // actuators in the table
 // stay greyed while a row reads this, because commanding an actuator whose
 // position is unknown is exactly what the request/response arrangement avoids.
 static constexpr int32_t kValueUnknown = hmi::format::VALUE_UNKNOWN;
-
-// The rejection flash: which actuator was refused, and why. One subject rather
-// than two, because the pair is only ever meaningful together and a single
-// lv_subject_set_int cannot tear. -1 = nothing being flashed.
-static lv_subject_t actuator_reject_subject;
-static constexpr int32_t kActuatorRejectNone = -1;
-static constexpr uint32_t kActuatorRejectFlashMs = 900;
-static uint8_t actuator_reject_id(int32_t packed) { return static_cast<uint8_t>(packed & 0xFF); }
 
 static void set_display_flipped(bool on); // screen flip, beside direct_flush_cb
 
@@ -172,52 +151,6 @@ static void setting_store_observer(lv_observer_t *observer, lv_subject_t *subjec
   }
 }
 
-// The row's number. An observer rather than lv_label_bind_text because the
-// value is scaled: bind_text's format string is handed the raw integer.
-static void setting_value_observer(lv_observer_t *observer, lv_subject_t *subject) {
-  const auto *row = static_cast<const SettingRow *>(lv_observer_get_user_data(observer));
-  const int32_t raw = lv_subject_get_int(subject);
-  if (raw == kValueUnknown) {
-    lv_label_set_text(lv_observer_get_target_obj(observer), "--");
-    return;
-  }
-  char text[24];
-  stepper_format(row->spec, raw, text);
-  lv_label_set_text(lv_observer_get_target_obj(observer), text);
-}
-
-// Greys each step button when its end of the range is reached, so the limit is
-// visible before the user leans on it. One observer setting both buttons
-// rather than two lv_obj_bind_state_if_* bindings: the unknown case has to
-// grey BOTH, and two bindings writing the same state would undo each other.
-static void setting_limits_observer(lv_observer_t *observer, lv_subject_t *subject) {
-  const auto *row = static_cast<const SettingRow *>(lv_observer_get_user_data(observer));
-  const int32_t raw = lv_subject_get_int(subject);
-  const bool known = raw != kValueUnknown;
-  lv_obj_set_state(row->minus, LV_STATE_DISABLED, !known || raw <= row->spec.min_value);
-  lv_obj_set_state(row->plus, LV_STATE_DISABLED, !known || raw >= row->spec.max_value);
-}
-
-// The rejection flash: a red wash behind the refused row's number. The
-// BACKGROUND, not the text colour: the label's text colour is themed for both
-// DEFAULT and FOCUSED, so a red on DEFAULT would lose to the FOCUSED style on
-// the very row the user just pressed. Nothing themes this label's background.
-static void actuator_reject_observer(lv_observer_t *observer, lv_subject_t *subject) {
-  const auto *row = static_cast<const SettingRow *>(lv_observer_get_user_data(observer));
-  lv_obj_t *label = lv_observer_get_target_obj(observer);
-  const int32_t packed = lv_subject_get_int(subject);
-  const bool rejected = packed != kActuatorRejectNone && actuator_reject_id(packed) == row->index;
-  lv_obj_set_style_bg_color(label, lv_palette_main(LV_PALETTE_RED), LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(label, rejected ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_MAIN);
-}
-
-static void actuator_reject_clear_cb(lv_timer_t *timer) {
-  lv_timer_pause(timer);
-  lv_subject_set_int(&actuator_reject_subject, kActuatorRejectNone);
-}
-
-static lv_timer_t *actuator_reject_timer = nullptr;
-
 // Seat values come from the MIB and nowhere else: a press publishes a request, and the
 // number on screen moves only when the next MibStatus says the seat moved. The wire
 // carries whole units, the screens raw integers, so each field is converted here.
@@ -245,44 +178,99 @@ static void seat_step(size_t row, int direction) {
   seat_request(spec.id, from + direction * spec.step);
 }
 
-// Puts the joystick cursor on `index`, clamped. Clamping rather than wrapping,
-// for the reason in grid_key_cb.
-static void setting_focus(int index) {
-  if (setting_row_count == 0) {
-    return;
-  }
-  setting_cursor = std::clamp(index, 0, setting_row_count - 1);
-  lv_group_focus_obj(setting_rows[setting_cursor].row);
+lv_group_t *hmi::ui::SettingsView::init() {
+  // The rejection flash: which actuator was refused, and why. One subject rather
+  // than two, because the pair is only ever meaningful together and a single
+  // lv_subject_set_int cannot tear. -1 = nothing being flashed.
+  lv_subject_init_int(&reject_subject_, REJECT_NONE);
+  reject_timer_ = lv_timer_create(reject_clear_cb, REJECT_FLASH_MS, this);
+  lv_timer_pause(reject_timer_);
+  press_flash_timer_ = lv_timer_create(press_flash_cb, PRESS_FLASH_MS, this);
+  lv_timer_pause(press_flash_timer_);
+  group_ = lv_group_create();
+  return group_;
 }
 
-// How long a joystick press shows on a step button. Comfortably shorter than
-// the 250 ms key repeat, so holding the stick reads as one blink per step.
+// The row's number. An observer rather than lv_label_bind_text because the
+// value is scaled: bind_text's format string is handed the raw integer.
+void hmi::ui::SettingsView::value_observer(lv_observer_t *observer, lv_subject_t *subject) {
+  const auto *row = static_cast<const Row *>(lv_observer_get_user_data(observer));
+  const int32_t raw = lv_subject_get_int(subject);
+  if (raw == format::VALUE_UNKNOWN) {
+    lv_label_set_text(lv_observer_get_target_obj(observer), "--");
+    return;
+  }
+  char text[24];
+  format::stepper_format(row->spec, raw, text);
+  lv_label_set_text(lv_observer_get_target_obj(observer), text);
+}
+
+// Greys each step button when its end of the range is reached, so the limit is
+// visible before the user leans on it. One observer setting both buttons
+// rather than two lv_obj_bind_state_if_* bindings: the unknown case has to
+// grey BOTH, and two bindings writing the same state would undo each other.
+void hmi::ui::SettingsView::limits_observer(lv_observer_t *observer, lv_subject_t *subject) {
+  const auto *row = static_cast<const Row *>(lv_observer_get_user_data(observer));
+  const int32_t raw = lv_subject_get_int(subject);
+  const bool known = raw != format::VALUE_UNKNOWN;
+  lv_obj_set_state(row->minus, LV_STATE_DISABLED, !known || raw <= row->spec.min_value);
+  lv_obj_set_state(row->plus, LV_STATE_DISABLED, !known || raw >= row->spec.max_value);
+}
+
+// The rejection flash: a red wash behind the refused row's number. The
+// BACKGROUND, not the text colour: the label's text colour is themed for both
+// DEFAULT and FOCUSED, so a red on DEFAULT would lose to the FOCUSED style on
+// the very row the user just pressed. Nothing themes this label's background.
+void hmi::ui::SettingsView::reject_observer(lv_observer_t *observer, lv_subject_t *subject) {
+  const auto *row = static_cast<const Row *>(lv_observer_get_user_data(observer));
+  lv_obj_t *label = lv_observer_get_target_obj(observer);
+  const int32_t packed = lv_subject_get_int(subject);
+  const bool rejected = packed != REJECT_NONE && reject_id(packed) == row->index;
+  lv_obj_set_style_bg_color(label, lv_palette_main(LV_PALETTE_RED), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(label, rejected ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_MAIN);
+}
+
+void hmi::ui::SettingsView::reject_clear_cb(lv_timer_t *timer) {
+  lv_timer_pause(timer);
+  auto *view = static_cast<SettingsView *>(lv_timer_get_user_data(timer));
+  lv_subject_set_int(&view->reject_subject_, REJECT_NONE);
+}
+
+// Puts the joystick cursor on `index`, clamped. Clamping rather than wrapping,
+// for the reason in grid_key_cb.
+void hmi::ui::SettingsView::focus(int index) {
+  if (row_count_ == 0) {
+    return;
+  }
+  cursor_ = std::clamp(index, 0, row_count_ - 1);
+  lv_group_focus_obj(rows_[cursor_].row);
+}
+
+// How long a joystick press shows on a step button: PRESS_FLASH_MS.
 //
 // The pressed state has to be faked because nothing here is a real touch:
 // LVGL only sets it from an indev acting on the object itself, and the
 // joystick's indev is acting on the row. One timer and one button, rather than
 // a timer per press: a press ends the previous one early, and deleting the
 // rows only has to forget one pointer for no timer to outlive its button.
-static constexpr uint32_t kPressFlashMs = 120;
-static lv_timer_t *press_flash_timer = nullptr;
-static lv_obj_t *press_flash_button = nullptr;
-
-static void press_flash_end() {
-  if (press_flash_button != nullptr) {
-    lv_obj_remove_state(press_flash_button, LV_STATE_PRESSED);
-    press_flash_button = nullptr;
+void hmi::ui::SettingsView::press_flash_end() {
+  if (press_flash_button_ != nullptr) {
+    lv_obj_remove_state(press_flash_button_, LV_STATE_PRESSED);
+    press_flash_button_ = nullptr;
   }
-  lv_timer_pause(press_flash_timer);
+  lv_timer_pause(press_flash_timer_);
 }
 
-static void press_flash_cb(lv_timer_t *) { press_flash_end(); }
+void hmi::ui::SettingsView::press_flash_cb(lv_timer_t *timer) {
+  static_cast<SettingsView *>(lv_timer_get_user_data(timer))->press_flash_end();
+}
 
-static void press_flash(lv_obj_t *button) {
+void hmi::ui::SettingsView::press_flash(lv_obj_t *button) {
   press_flash_end();
   lv_obj_add_state(button, LV_STATE_PRESSED);
-  press_flash_button = button;
-  lv_timer_reset(press_flash_timer);
-  lv_timer_resume(press_flash_timer);
+  press_flash_button_ = button;
+  lv_timer_reset(press_flash_timer_);
+  lv_timer_resume(press_flash_timer_);
 }
 
 // Steps `row` one step in `direction`, and shows the press.
@@ -290,20 +278,20 @@ static void press_flash(lv_obj_t *button) {
 // The DISABLED check is not belt-and-braces: LVGL suppresses clicks on a
 // disabled object inside the indev, which covers touch, but the joystick path
 // reaches the button through lv_obj_send_event and never passes that check.
-static void setting_step(const SettingRow *row, int direction) {
+void hmi::ui::SettingsView::step(const Row *row, int direction) {
   lv_obj_t *button = direction < 0 ? row->minus : row->plus;
   if (lv_obj_has_state(button, LV_STATE_DISABLED)) {
-    refusal_feedback(); // at its limit
+    config_.refuse(); // at its limit
     return;
   }
-  if (row->spec.locked_only && lv_subject_get_int(&locked_subject) == 0) {
-    refusal_feedback(); // not while driving
+  if (row->spec.locked_only && lv_subject_get_int(config_.locked) == 0) {
+    config_.refuse(); // not while driving
     return;
   }
   press_flash(button);
-  if (lv_subject_get_int(&setting_page_subject) == kActuatorsPage) {
+  if (lv_subject_get_int(config_.page) == config_.actuators_page) {
     // A request: the value moves only when the MCB's state sample says so.
-    seat_step(static_cast<size_t>(row->index), direction < 0 ? -1 : 1);
+    config_.seat_step(static_cast<size_t>(row->index), direction < 0 ? -1 : 1);
     return;
   }
   const int32_t now = lv_subject_get_int(row->value);
@@ -313,24 +301,25 @@ static void setting_step(const SettingRow *row, int direction) {
 
 // Up/down walk the rows, left/right step the focused one. Holding the stick
 // repeats: lv_indev raises LV_EVENT_KEY again every long_press_repeat_time.
-static void setting_key_cb(lv_event_t *e) {
-  const auto *row = static_cast<const SettingRow *>(lv_event_get_user_data(e));
+void hmi::ui::SettingsView::key_cb(lv_event_t *e) {
+  const auto *row = static_cast<const Row *>(lv_event_get_user_data(e));
+  SettingsView *view = row->view;
   switch (lv_event_get_key(e)) {
   case LV_KEY_LEFT:
-    setting_step(row, -1);
+    view->step(row, -1);
     return;
   case LV_KEY_RIGHT:
-    setting_step(row, +1);
+    view->step(row, +1);
     return;
   case LV_KEY_UP:
-    setting_focus(setting_cursor - 1);
+    view->focus(view->cursor_ - 1);
     return;
   case LV_KEY_DOWN:
-    if (setting_cursor + 1 >= setting_row_count) {
-      nav_to_key(); // below the last row is the burger key
+    if (view->cursor_ + 1 >= view->row_count_) {
+      view->config_.nav->to_key(); // below the last row is the burger key
       return;
     }
-    setting_focus(setting_cursor + 1);
+    view->focus(view->cursor_ + 1);
     return;
   default:
     return;
@@ -339,23 +328,89 @@ static void setting_key_cb(lv_event_t *e) {
 
 // A tap on a step button. Moves the cursor to that row first, so touch and the
 // joystick never disagree about which row left/right would act on.
-static void setting_step_click_cb(lv_event_t *e) {
-  const auto *row = static_cast<const SettingRow *>(lv_event_get_user_data(e));
-  setting_focus(row->index);
-  setting_step(row, lv_event_get_target_obj(e) == row->minus ? -1 : +1);
+void hmi::ui::SettingsView::step_click_cb(lv_event_t *e) {
+  const auto *row = static_cast<const Row *>(lv_event_get_user_data(e));
+  row->view->focus(row->index);
+  row->view->step(row, lv_event_get_target_obj(e) == row->minus ? -1 : +1);
 }
 
 // A tap on the row itself: focus, nothing else.
-static void setting_row_click_cb(lv_event_t *e) {
-  setting_focus(static_cast<const SettingRow *>(lv_event_get_user_data(e))->index);
+void hmi::ui::SettingsView::row_click_cb(lv_event_t *e) {
+  const auto *row = static_cast<const Row *>(lv_event_get_user_data(e));
+  row->view->focus(row->index);
 }
 
 // Registered for LV_EVENT_FOCUSED and LV_EVENT_DEFOCUSED on each row. The step
 // buttons keep their DISABLED state through this: DISABLED and FOCUSED are
-// different bits, and only setting_limits_observer writes the one.
-static void setting_focus_cb(lv_event_t *e) {
+// different bits, and only limits_observer writes the one.
+void hmi::ui::SettingsView::focus_cb(lv_event_t *e) {
   set_focused_recursive(lv_event_get_target_obj(e), lv_event_get_code(e) == LV_EVENT_FOCUSED);
 }
+
+// Deleting a row takes its observers and events with it (all bound to the
+// object) and drops it from the group; the theme manager forgets it too.
+void hmi::ui::SettingsView::rows_clear() {
+  press_flash_end(); // before its button goes
+  for (int i = 0; i < row_count_; i++) {
+    lv_obj_delete(rows_[i].row);
+  }
+  row_count_ = 0;
+  cursor_ = 0;
+}
+
+void hmi::ui::SettingsView::row_add(const format::StepperSpec &spec, lv_subject_t *value,
+                                    bool actuator) {
+  Row &entry = rows_[row_count_];
+  entry.spec = spec;
+  entry.value = value;
+  entry.index = row_count_++;
+  entry.view = this;
+  entry.row = ui_SettingRow_create(ui_SpecificSettingsRows);
+  entry.value_label = ui_comp_get_child(entry.row, UI_COMP_SETTINGROW_VALUEBOX_VALUE);
+  entry.minus = ui_comp_get_child(entry.row, UI_COMP_SETTINGROW_MINUS);
+  entry.plus = ui_comp_get_child(entry.row, UI_COMP_SETTINGROW_PLUS);
+
+  // Fixed for the life of the row - they come from a build-time table - so
+  // set once rather than driven through a subject.
+  lv_label_set_text(ui_comp_get_child(entry.row, UI_COMP_SETTINGROW_HEAD_NAMES_SHORT),
+                    spec.short_name);
+  lv_label_set_text(ui_comp_get_child(entry.row, UI_COMP_SETTINGROW_HEAD_NAMES_LABEL), spec.label);
+
+  lv_subject_add_observer_obj(value, value_observer, entry.value_label, &entry);
+  lv_subject_add_observer_obj(value, limits_observer, entry.row, &entry);
+  if (actuator) {
+    lv_subject_add_observer_obj(&reject_subject_, reject_observer, entry.value_label, &entry);
+  }
+
+  lv_group_add_obj(group_, entry.row);
+  lv_obj_add_event_cb(entry.row, key_cb, LV_EVENT_KEY, &entry);
+  lv_obj_add_event_cb(entry.row, row_click_cb, LV_EVENT_CLICKED, &entry);
+  lv_obj_add_event_cb(entry.row, focus_cb, LV_EVENT_FOCUSED, nullptr);
+  lv_obj_add_event_cb(entry.row, focus_cb, LV_EVENT_DEFOCUSED, nullptr);
+  lv_obj_add_event_cb(entry.minus, step_click_cb, LV_EVENT_CLICKED, &entry);
+  lv_obj_add_event_cb(entry.plus, step_click_cb, LV_EVENT_CLICKED, &entry);
+
+  // SquareLine exports the state each object was previewed in, and the
+  // component was drawn focused throughout - so every row would come up
+  // focused at once. Clearing it leaves focus_cb as its only writer.
+  set_focused_recursive(entry.row, false);
+  clear_click_focusable_recursive(entry.row);
+}
+
+// The one instance. The pages' contents (the settings tables, the actuator
+// rows, setting_page_open) and what a setting does when it changes
+// (setting_store_observer) stay in main.
+static constinit hmi::ui::SettingsView settings_view{{
+    .nav = &ui_nav_port,
+    .page = &setting_page_subject,
+    .locked = &locked_subject,
+    .actuators_page = kActuatorsPage,
+    .seat_step = seat_step,
+    .refuse = refusal_feedback,
+}};
+static void setting_focus(int index) { settings_view.focus(index); }
+static constexpr lv_event_cb_t setting_focus_cb = hmi::ui::SettingsView::focus_cb;
+static void setting_rows_clear() { settings_view.rows_clear(); }
 
 // ErrorBanner6. Raised only on a page that needs the MCB - the
 // actuators - and then exactly as on the drive and seat screens: while the
@@ -368,55 +423,6 @@ static void setting_warning_observer(lv_observer_t *observer, lv_subject_t *) {
   }
   fill_drive_blocked_panel(panel, rammp::kHmiLinkLostTitle, rammp::kHmiMcbFaultTitle);
   banner_show(panel, true);
-}
-
-// Deleting a row takes its observers and events with it (all bound to the
-// object) and drops it from setting_group; the theme manager forgets it too.
-static void setting_rows_clear() {
-  press_flash_end(); // before its button goes
-  for (int i = 0; i < setting_row_count; i++) {
-    lv_obj_delete(setting_rows[i].row);
-  }
-  setting_row_count = 0;
-  setting_cursor = 0;
-}
-
-static void setting_row_add(const StepperSpec &spec, lv_subject_t *value, bool actuator) {
-  SettingRow &entry = setting_rows[setting_row_count];
-  entry.spec = spec;
-  entry.value = value;
-  entry.index = setting_row_count++;
-  entry.row = ui_SettingRow_create(ui_SpecificSettingsRows);
-  entry.value_label = ui_comp_get_child(entry.row, UI_COMP_SETTINGROW_VALUEBOX_VALUE);
-  entry.minus = ui_comp_get_child(entry.row, UI_COMP_SETTINGROW_MINUS);
-  entry.plus = ui_comp_get_child(entry.row, UI_COMP_SETTINGROW_PLUS);
-
-  // Fixed for the life of the row - they come from a build-time table - so
-  // set once rather than driven through a subject.
-  lv_label_set_text(ui_comp_get_child(entry.row, UI_COMP_SETTINGROW_HEAD_NAMES_SHORT),
-                    spec.short_name);
-  lv_label_set_text(ui_comp_get_child(entry.row, UI_COMP_SETTINGROW_HEAD_NAMES_LABEL), spec.label);
-
-  lv_subject_add_observer_obj(value, setting_value_observer, entry.value_label, &entry);
-  lv_subject_add_observer_obj(value, setting_limits_observer, entry.row, &entry);
-  if (actuator) {
-    lv_subject_add_observer_obj(&actuator_reject_subject, actuator_reject_observer,
-                                entry.value_label, &entry);
-  }
-
-  lv_group_add_obj(setting_group, entry.row);
-  lv_obj_add_event_cb(entry.row, setting_key_cb, LV_EVENT_KEY, &entry);
-  lv_obj_add_event_cb(entry.row, setting_row_click_cb, LV_EVENT_CLICKED, &entry);
-  lv_obj_add_event_cb(entry.row, setting_focus_cb, LV_EVENT_FOCUSED, nullptr);
-  lv_obj_add_event_cb(entry.row, setting_focus_cb, LV_EVENT_DEFOCUSED, nullptr);
-  lv_obj_add_event_cb(entry.minus, setting_step_click_cb, LV_EVENT_CLICKED, &entry);
-  lv_obj_add_event_cb(entry.plus, setting_step_click_cb, LV_EVENT_CLICKED, &entry);
-
-  // SquareLine exports the state each object was previewed in, and the
-  // component was drawn focused throughout - so every row would come up
-  // focused at once. Clearing it leaves setting_focus_cb as its only writer.
-  set_focused_recursive(entry.row, false);
-  clear_click_focusable_recursive(entry.row);
 }
 
 // Fills the screen for `page` and shows it. LVGL task (a click handler).
@@ -432,7 +438,7 @@ static void setting_page_open(int32_t page) {
   if (page == kActuatorsPage) {
     const auto &specs = rammp::kSeatAxes;
     for (uint8_t i = 0; i < seat_axis_count; i++) {
-      setting_row_add({specs[i].short_name, specs[i].label, specs[i].min_value, specs[i].max_value,
+      settings_view.row_add({specs[i].short_name, specs[i].label, specs[i].min_value, specs[i].max_value,
                        specs[i].step, specs[i].decimals, nullptr},
                       &seat_axis_value[i], true);
     }
@@ -446,7 +452,7 @@ static void setting_page_open(int32_t page) {
         spec.locked_only = i == SETTINGS_PARAM_STICK_INVERT_X ||
                            i == SETTINGS_PARAM_STICK_INVERT_Y || i == SETTINGS_PARAM_STICK_SWAP ||
                            i == SETTINGS_PARAM_DRIVE_SPEED;
-        setting_row_add(spec, kSettingParamValue[i], false);
+        settings_view.row_add(spec, kSettingParamValue[i], false);
       }
     }
   }

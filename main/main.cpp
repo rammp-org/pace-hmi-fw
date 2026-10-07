@@ -952,13 +952,7 @@ extern "C" void app_main(void) {
   // (settings_screen_ensure). The seat values it steps are initialised further
   // up, with the seat screen that shares them.
 
-  lv_subject_init_int(&actuator_reject_subject, kActuatorRejectNone);
-  actuator_reject_timer =
-      lv_timer_create(actuator_reject_clear_cb, kActuatorRejectFlashMs, nullptr);
-  lv_timer_pause(actuator_reject_timer);
-  press_flash_timer = lv_timer_create(press_flash_cb, kPressFlashMs, nullptr);
-  lv_timer_pause(press_flash_timer);
-  setting_group = lv_group_create();
+  setting_group = settings_view.init();
 
   // Initialised before the screen's warning panel ever binds to it.
   lv_subject_init_int(&setting_page_subject, SETTINGS_PAGE_DISPLAY);
