@@ -10,6 +10,7 @@ idf_component_register(SRCS "src/about_view.cpp"
                             "src/seat_view.cpp"
                             "src/status_band_view.cpp"
                             "src/topbar_view.cpp"
+                            "src/update_view.cpp"
                        INCLUDE_DIRS "include"
                        REQUIRES hmi_format
                                 hmi_models

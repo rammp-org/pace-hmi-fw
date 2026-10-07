@@ -25,6 +25,7 @@ behaviour.
 | `include/hmi_ui/rtps_label_view.hpp`, `src/rtps_label_view.cpp` | `RtpsLabelView`: the TopBar's RTPS label (from `main/frag_rtps_label.inc`) |
 | `include/hmi_ui/seat_view.hpp`, `src/seat_view.cpp` | `SeatView`: the SeatScreen's function buttons and adjustment page, and the seat numbers on them (from `main/frag_seat.inc`, the seat parts of `frag_settings_ui.inc` and app_main's wiring). The seat command path (`seat_step`, `seat_request`, `seat_apply_state`) stays in main |
 | `include/hmi_ui/status_band_view.hpp`, `src/status_band_view.cpp` | `StatusBandView`: the DriveBand's DRIVE and STATE cells, on every resident and on-demand screen (from `main/frag_status_band.inc`) |
+| `include/hmi_ui/update_view.hpp`, `src/update_view.cpp` | `UpdateView`, `ReleaseList`, `InstallStage`, `InstallStatus`: the UpdateScreen's three pages (from `main/update_ui.cpp`); the release list, the install, the worker thread, the hand-back to the LVGL task and the restart after an install (with its may_restart guard) are main's (`main/update_ui.cpp`) |
 | `include/hmi_ui/topbar_view.hpp`, `src/topbar_view.cpp` | `TopBarView`: the TopBar's clock and link labels (from `main/frag_clock.inc`). Setting the clock from the MCB is not UI and stays in main |
 
 ## Rules for code here
@@ -55,6 +56,7 @@ behaviour.
 | REQ-UI-12 | About: version, commit, build date and time, MAC and hostname are filled once; the verdict, the SHA-256 (two lines of four groups), the link ("<name>, <state words>") and the IP are refreshed every REFRESH_MS while the screen is up and on its arrival. The mark is a green check for a known release or pre-release, a red cross with the reason otherwise, nothing while the hash is still being computed. | bench B4 |
 | REQ-UI-13 | Log: the lines the capture keeps, oldest first, one per line, errors red and warnings amber (a "#" escaped so it shows); rebuilt at most every POLL_MS and only while the screen is up. It follows the newest line while the reader is at the bottom (or just arrived), and otherwise keeps the line being read in place as old lines drop out. Up/down page vertically, left/right sideways; down at the newest line calls the escape (main: the burger key). Without memory for the text the export's placeholder stays. | bench B4 |
 | REQ-UI-14 | Internet: the main page shows the chosen link (Ethernet/WiFi, checked), the saved network, the link in use, its state, IP and signal, refreshed every STATUS_POLL_MS while it is up; "Restart" is shown only when a restart would change the link, and calls main's restart. "WiFi network" scans on a worker and lists the networks; an open one is joined at once, a secured one asks for its password (8+ characters, or none). One scan or join at a time; a result for a page already left is dropped. A join that fails says why and refuses; one that succeeds returns to the main page. | bench B4 (Wi-Fi in range) |
+| REQ-UI-15 | Update: the list page shows the version installed (and whether it is a release), then every release newest first, the running one marked "Installed"; it is fetched again on a worker at each visit (one request at a time; a failed fetch keeps the last list and refuses). The pick page shows date, kind, size and notes, and Install only starts one with a firmware file and none running. The run page shows the stage, message, progress and log, and while the install is done but main may not restart yet, says it waits for the chair to stop. | bench B4 (list, pick); install not run on the bench |
 
 ## Tasks and dependencies
 
@@ -62,7 +64,7 @@ behaviour.
   `app_main` during start-up.
 - Dependencies, public (the headers use their types): `lvgl`, `hmi_format` (texts,
   `StepperSpec`), `hmi_models` (`grid.hpp`, `pin.hpp`), `rammp_rtps_messages`
-  (`MIB::MibSystemState`, the seat axis table). Private: `ui` (the export: widgets, component
+  (`MIB::MibSystemState`, the seat axis table), `ota_parse` (`hmi::ota::Release`). Private: `ui` (the export: widgets, component
   children, theme colours). `main` requires the component (`PRIV_REQUIRES hmi_ui`).
 - Build: `fw_component_options(${COMPONENT_LIB})` (C++23 and the fw warning set as errors),
   called unguarded like every first-party component; the top-level CMakeLists defines it
