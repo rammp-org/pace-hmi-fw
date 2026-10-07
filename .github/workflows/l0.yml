@@ -24,6 +24,8 @@ jobs:
       with:
         # Full history: ratchet.py check re-verifies transfer grants against their base commit.
         fetch-depth: 0
+        # scripts/rammp_rtps.py (the MCB sim self test below) reads the shared spec headers
+        submodules: recursive
 
     # ubuntu-latest (24.04) ships Python 3.12; both scripts are stdlib only.
     - name: Ratchet self test
@@ -48,6 +50,18 @@ jobs:
         python3 tools/guards/exports.py selftest
         python3 tools/guards/task_dump.py selftest
         python3 tools/guards/observer_census.py selftest
+
+    # The simulated MCB's decisions and bench fault modes (docs/plans/hazard-fixes.md §3 B5):
+    # scripts/mcb_sim_logic.py, cases SIM-001.., no network and no tkinter.
+    - name: MCB sim self test (rtps_mcb_sim.py decision logic)
+      run: python3 scripts/rtps_mcb_sim.py selftest
+
+    # tools/bench without a board: the remote-UI client (timeouts, retry, log) against a
+    # localhost fake, and run_bench's step sequencing (waits after a reset) on a fake board.
+    - name: Bench runner self tests (ui_client UI-*, run_bench BENCH-*)
+      run: |
+        python3 tools/bench/ui_client.py selftest
+        python3 tools/bench/run_bench.py selftest
 
     # check also fails the requirement-ID rules: a retired requirement cited by a test, an
     # ID declared twice or deleted from its series (tests/reqmatrix.py, TS-COV-01).

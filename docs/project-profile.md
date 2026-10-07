@@ -124,7 +124,11 @@ yet measured or decided, and "none" means checked and absent.
   does not read a battery: the ~8.4 V it reports, the occasional ~4.4 V reads and the top bar's
   "78 %" are not battery state. Ignored for now (owner, P3).
 - Peer simulators: `scripts/rtps_mcb_sim.py --peer <ip> --bind-address 192.168.137.2`, with stdin
-  commands `e`, `ok`, `x`, `s`. `scripts/rtps_selftest.py` acts as the MCB during a self-test run.
+  commands `e`, `ok`, `x`, `s`, `p`/`r` (pause MibStatus), and the bench fault modes `ign N` / `drop N`
+  (ignore or drop the next N DISABLEs), `ongone keep|idle` (what the MIB does when the HMI goes
+  away), `mark <label>`; `--event-log PATH` writes a JSONL log of what it received and sent. Its
+  decision logic is `scripts/mcb_sim_logic.py` (`rtps_mcb_sim.py selftest`, cases SIM-001.., in
+  L0). `scripts/rtps_selftest.py` acts as the MCB during a self-test run.
 - Debug channel: `scripts/hmi_ui.py` on TCP 3333 (screenshots, taps, keys, walk). Test builds
   enable it with `CONFIG_HMI_REMOTE_UI=y`.
 

@@ -2,8 +2,9 @@
 
     python sim_child.py --tree C:\\w\\bench -- --peer 192.168.137.180 --bind-address 192.168.137.2
 
-Everything after `--` goes to rtps_mcb_sim.py, and every stdin command it
-knows (ok, e, x, s, q, ...) works as before. Three more are answered here and
+Everything after `--` goes to rtps_mcb_sim.py (its --event-log and fault-mode
+flags included), and every stdin command it knows (ok, e, x, s, p, r, ign, drop,
+mark, q, ...) works as before. Three more are answered here and
 never reach the sim:
   jstart   start recording every XYTwist sample (clears the record)
   jstop    stop, print `XYT {json}`: count, max |x|, |y|, |twist|, the button
