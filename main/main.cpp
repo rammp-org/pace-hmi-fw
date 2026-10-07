@@ -154,7 +154,7 @@ extern "C" void app_main(void) {
   // the unlock and hold clicks, a refusal); the click's samples load after the
   // LVGL task starts. Lives as long as app_main, which never returns once the UI
   // runs; the unit reaches it through `feedback`.
-  hmi::feedback::Feedback cues(feedback_config(logger, i2c));
+  hmi::feedback::Feedback cues({.i2c = i2c, .boot_log = logger, .sound = click_sound_config()});
   feedback = &cues;
 
   // DA7280 bring-up test (raw register read) and driver functional test (Da7280

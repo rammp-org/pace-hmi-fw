@@ -15,31 +15,22 @@ static bool haptic_play(espp::Drv2605::Waveform w, uint8_t slots) {
   return feedback != nullptr && feedback->haptics().play(w, slots);
 }
 
-// How the cues reach the board and the LVGL task, for app_main's Feedback.
-static hmi::feedback::Feedback::Config feedback_config(espp::Logger &logger, espp::I2c &i2c) {
+// How the click sound reaches the speaker and the LVGL task, for app_main's Feedback.
+static hmi::feedback::ClickSound::Config click_sound_config() {
   return {
-      .i2c = i2c,
-      .boot_log = logger,
-      .sound =
-          {
-              .sounds_on = sounds_on,
-              .play =
-                  [](std::span<const uint8_t> samples) {
-                    espp::M5StackTab5::get().play_audio(samples);
-                  },
-              .now_ms = [] { return lv_tick_get(); },
-              // The second click of a refusal: a one-shot LVGL timer, so it runs
-              // on the LVGL task like the first.
-              .click_later =
-                  [](uint32_t delay_ms, hmi::feedback::ClickSound &sound) {
-                    lv_timer_t *second = lv_timer_create(
-                        [](lv_timer_t *timer) {
-                          static_cast<hmi::feedback::ClickSound *>(lv_timer_get_user_data(timer))
-                              ->click();
-                        },
-                        delay_ms, &sound);
-                    lv_timer_set_repeat_count(second, 1);
-                  },
+      .sounds_on = sounds_on,
+      .play = [](std::span<const uint8_t> samples) { espp::M5StackTab5::get().play_audio(samples); },
+      .now_ms = [] { return lv_tick_get(); },
+      // The second click of a refusal: a one-shot LVGL timer, so it runs on the
+      // LVGL task like the first.
+      .click_later =
+          [](uint32_t delay_ms, hmi::feedback::ClickSound &sound) {
+            lv_timer_t *second = lv_timer_create(
+                [](lv_timer_t *timer) {
+                  static_cast<hmi::feedback::ClickSound *>(lv_timer_get_user_data(timer))->click();
+                },
+                delay_ms, &sound);
+            lv_timer_set_repeat_count(second, 1);
           },
   };
 }
