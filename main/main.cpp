@@ -514,8 +514,7 @@ extern "C" void app_main(void) {
       theme != ui_theme_idx && (theme == UI_THEME_DEFAULT || theme == UI_THEME_DAY)) {
     ui_theme_set(theme);
   }
-  lv_subject_init_int(&brightness_subject, settings_brightness());
-  lv_subject_add_observer(&brightness_subject, brightness_observer, nullptr);
+  brightness_view.init(settings_brightness());
   // Theme: the row switches the UI's palette; rtps_poll_cb notices the switch
   // (however it was made) and saves it, and keeps this subject in step.
   lv_subject_init_int(&theme_subject, ui_theme_idx == UI_THEME_DAY ? 1 : 0);
@@ -546,8 +545,7 @@ extern "C" void app_main(void) {
     lv_subject_add_observer(subject, setting_store_observer,
                             reinterpret_cast<void *>(static_cast<intptr_t>(param)));
   }
-  brightness_save_timer = lv_timer_create(brightness_save_cb, kBrightnessSaveDelayMs, nullptr);
-  lv_timer_pause(brightness_save_timer);
+  brightness_view.start_save_timer(kBrightnessSaveDelayMs);
 
   // Bind the Settings-screen axis bars to the ADC subjects (observer pattern).
   // Bars show the calibrated joystick position as a percentage: -100..+100,
@@ -593,9 +591,7 @@ extern "C" void app_main(void) {
   // here. One list rather than three, because a screen whose band, TopBar and
   // chrome do not all get bound shows a frozen readout, and lining the three
   // calls up separately is how one gets forgotten.
-  lv_subject_init_string(&clock_subject, clock_buf, clock_prev_buf, sizeof(clock_buf), "--:--");
-  lv_subject_init_string(&link_subject, link_buf, link_prev_buf, sizeof(link_buf),
-                         link_text(static_cast<NetLink>(settings_get(SETTINGS_PARAM_NETWORK))));
+  topbar_view.init(link_text(static_cast<NetLink>(settings_get(SETTINGS_PARAM_NETWORK))));
   struct ScreenChrome {
     lv_obj_t *bar;
     lv_obj_t *band;
@@ -619,17 +615,14 @@ extern "C" void app_main(void) {
       {ui_TopBar13, ui_DriveBand13, ui_MenuKey13, ui_MenuOverlay13, true}, // AboutScreen
   };
   for (const ScreenChrome &c : kChrome) {
-    bind_status_panel(c.band);
-    bind_rtps_label(c.bar);
-    bind_topbar_labels(c.bar);
+    bind_chrome_views(c.band, c.bar);
     nav_attach_chrome(c.key, c.overlay, c.band_goes_home ? c.band : nullptr);
   }
   // The menu stays reachable while locked: Log, Diagnostics, Settings and
   // the bench tools are all useful with the chair not driving -- and without an
   // MCB at all. Locked still means nothing moves: the band reads LOCKED on every
   // screen and the stick only drives from Drive (stick_drives).
-  clock_poll_cb(nullptr); // the RTC's time, when it had one, from the first frame
-  lv_timer_create(clock_poll_cb, kClockPollMs, nullptr);
+  topbar_view.start_clock();
   lv_subject_add_observer_obj(&speed_tenths_subject, speed_label_observer, ui_SpeedValue, nullptr);
   lv_subject_init_int(&drive_profile_subject, static_cast<int32_t>(MIB::DriveProfile::NORMAL));
   bind_drive_profile_button(ui_ModeManual, &kProfileHigh);
@@ -1256,7 +1249,7 @@ extern "C" void app_main(void) {
   tab5.mute(false);
   tab5.volume(60.0f);
 
-  // (brightness is the saved setting, applied when brightness_subject is bound)
+  // (brightness is the saved setting, applied when brightness_view.init adds its observer)
 
   // make a task to read out various data such as IMU, battery monitoring, etc.
   // and print it to screen
@@ -1441,13 +1434,11 @@ extern "C" void app_main(void) {
   static constexpr JoystickAxisCal kIdealAxis{
       .min_mv = 0.0f, .center_mv = 1650.0f, .max_mv = 3300.0f};
   const JoystickCal joystick_cal = joystick_cal_load({kIdealAxis, kIdealAxis, kIdealAxis});
-  static espp::Joystick stick({.x_calibration = stick_horizontal_config(joystick_cal),
-                               .y_calibration = stick_vertical_config(joystick_cal),
-                               .z_calibration = stick_twist_config(joystick_cal),
-                               .type = espp::Joystick::Type::CIRCULAR,
-                               .center_deadzone_radius = kStickCenterDeadzoneRadius,
-                               .range_deadzone = kStickRangeDeadzone,
-                               .log_level = espp::Logger::Verbosity::WARN});
+  // The stick pipeline (components/stick): the joystick mapping on this
+  // calibration, the key trigger and the gate. Owned by the ADC task below.
+  // Named `stick`, as the espp::Joystick it wraps was: the same lazy static,
+  // built at the same point (tools/guards init_order baseline).
+  static hmi::stick::StickPipeline stick(stick_pipeline_config(joystick_cal));
 
   // customization knobs: sampling/LVGL/RTPS cadence, and how often the serial
   // line is printed. The log is divided down because 30 lines/s is the
@@ -1481,127 +1472,13 @@ extern "C" void app_main(void) {
       }
     }
 
-    bool adc_published = false;
-    if (vert_mv && horiz_mv && twist_mv) {
-      // A calibration run just finished: switch to it here, between two
-      // samples, on the task that owns the stick.
-      if (auto cal = joystick_cal_take_new()) {
-        stick_apply_cal(stick, *cal);
-      }
-      const float twist_smoothed = twist_lowpass(*twist_mv);
-      joystick_cal_note_raw(*horiz_mv, *vert_mv, twist_smoothed);
-      // While a calibration run owns the stick nothing downstream may act on
-      // it: the user is being told to push it to every end in turn.
-      const bool calibrating = joystick_cal_running();
-
-      // raw mV -> calibrated [-1,1] per axis: circular deadzone on the X/Y
-      // gimbal, twist mapped independently by its own range mapper. X is the
-      // horizontal channel, Y the vertical one (inverted, see "Joystick
-      // mapping").
-      stick.update(*horiz_mv, *vert_mv, twist_smoothed);
-      // The stick as mounted: Settings can swap its axes and mirror either
-      // one. Applied here, once, so the bars, the UI keys and the MCB all get
-      // the same stick. Swap first, then mirror, so "mirror left/right" always
-      // means the direction the user pushes, whatever the swap did.
-      float stick_x = stick.x();
-      float stick_y = stick.y();
-      if (stick_swap.load()) {
-        std::swap(stick_x, stick_y);
-      }
-      if (stick_invert_x.load()) {
-        stick_x = -stick_x;
-      }
-      if (stick_invert_y.load()) {
-        stick_y = -stick_y;
-      }
-
-      // Analog -> keypad level. Schmitt trigger (engage past kKeyEngage, release
-      // below kKeyRelease) so the boundary can't chatter; between the two
-      // thresholds the previous state holds. The direction is recomputed every
-      // cycle, so rolling the stick from one direction to another re-aims
-      // without needing to pass through center. The larger component wins, so a
-      // diagonal resolves to one direction rather than two.
-      //
-      // How far the stick must go to count as a key is the Settings stick
-      // sensitivity, 1..10. stick.x()/y() are rescaled past the circular dead
-      // zone -- 0 at its edge, 1 at the gate -- so the thresholds are fractions
-      // of the travel OUTSIDE it: level 1 engages at 0.30 (about 36% of the
-      // full throw), level 10 at 0.01, the moment the stick leaves the dead
-      // zone, and the default 9 at ~0.04 (about 14%; it was 0.06, and 0.20
-      // before that). Release is half the engage, so the key lets go on the
-      // way back rather than chattering at the boundary. The dead zone itself
-      // (kStickCenterDeadzoneRadius, shared with driving) is what keeps rest
-      // noise from engaging at any level.
-      const int level = std::clamp<int>(stick_sensitivity.load(), SETTINGS_STICK_SENSITIVITY_MIN,
-                                        SETTINGS_STICK_SENSITIVITY_MAX);
-      const float kKeyEngage = 0.30f - (level - 1) * (0.29f / 9.0f);
-      const float kKeyRelease = kKeyEngage * 0.5f;
-      {
-        static bool engaged = false;
-        const float x = stick_x;
-        const float y = stick_y;
-        const float mag = std::max(std::abs(x), std::abs(y));
-        if (calibrating) {
-          engaged = false; // "hold LEFT" must not page the menus or exit
-        } else if (mag > kKeyEngage) {
-          engaged = true;
-        } else if (mag < kKeyRelease) {
-          engaged = false;
-        }
-        const uint32_t was = joy_key.load();
-        if (remote_key.load() != 0) {
-          joy_key.store(remote_key.load());
-        } else if (!engaged) {
-          joy_key.store(0);
-        } else if (std::abs(x) >= std::abs(y)) {
-          joy_key.store(x > 0 ? LV_KEY_RIGHT : LV_KEY_LEFT);
-        } else {
-          // +Y is up after the vertical axis's inversion, and up the list is prev
-          joy_key.store(y > 0 ? LV_KEY_UP : LV_KEY_DOWN);
-        }
-        // A fresh engage (or a re-aim) is latched for the keypad; see joy_flick.
-        if (const uint32_t now = joy_key.load(); now != 0 && now != was) {
-          joy_flick.store(now);
-        }
-      }
-      {
-        // lv_subject_set_int runs the bar's observer callback synchronously,
-        // which touches the widget, so it needs the LVGL lock. Tried, not
-        // waited for: the UI holds it for a whole frame (a full redraw is
-        // ~100 ms, more with Flip screen), and the stick's path to the MCB
-        // below must not queue behind a render. A busy UI just gets the bars
-        // one cycle later.
-        std::unique_lock<std::recursive_mutex> lock(lvgl_mutex, std::try_to_lock);
-        if (lock.owns_lock()) {
-          lv_subject_set_int(&adc_x_subject, static_cast<int32_t>(stick_x * 100.0f));
-          lv_subject_set_int(&adc_y_subject, static_cast<int32_t>(stick_y * 100.0f));
-          lv_subject_set_int(&adc_twist_subject, static_cast<int32_t>(stick.z() * 100.0f));
-        }
-      }
-
-      // send the MCB the same calibrated -1..+1 values the bars show (+Y
-      // forward, deadzones applied), so it needs no calibration of its own.
-      // Centred whenever the stick is doing something else: while a
-      // calibration run sweeps it, and whenever it is walking the UI rather
-      // than driving -- any screen but Drive, or Drive with the menu open
-      // (stick_drives). Drive stays ACTIVE across the menu and the other
-      // screens, as the spec draws it, so this is what keeps a push meant for
-      // the next row from moving the chair. The bars keep moving, to show the
-      // stick is being read. Quiet no-op until RTPS is up and a subscriber is
-      // discovered.
-      //
-      // Settings "Speed sensitivity" scales all three axes on the way, as if the
-      // stick moved that much less: 1.0x sends it as it is, 0.1x a tenth of it.
-      // Only here -- the bars and the UI keys keep the stick as it is.
-      const float speed =
-          static_cast<float>(std::clamp<int>(drive_speed.load(), SETTINGS_DRIVE_SPEED_MIN,
-                                             SETTINGS_DRIVE_SPEED_MAX)) /
-          static_cast<float>(SETTINGS_DRIVE_SPEED_MAX);
-      const float scale = calibrating || !stick_drives.load() ? 0.0f : speed;
-      adc_published = rtps_comms_publish_adc(stick_x * scale, stick_y * scale, stick.z() * scale,
-                                             joy_button_pressed.load() ? rammp::Buttons::JOYSTICK
-                                                                       : rammp::Buttons::NONE);
-    }
+    // raw mV -> calibrated stick -> the keypad key, the bars and XYTwist:
+    // hmi::stick::StickPipeline (components/stick), fed through AdcStickIo
+    // (frag_stick_config.inc) in the order this ran inline before. Only a
+    // cycle with all three reads does anything; otherwise nothing is published.
+    AdcStickIo stick_io{.twist_lowpass = twist_lowpass};
+    const bool adc_published = stick.cycle(
+        stick_io, {.horizontal_mv = horiz_mv, .vertical_mv = vert_mv, .twist_mv = twist_mv});
     // Every cycle, valid or not: the self test measures the loop's cadence and
     // how often a read fails, as well as the values. A no-op unless a run is
     // capturing. X is the horizontal channel, as everywhere above.
@@ -1667,7 +1544,7 @@ extern "C" void app_main(void) {
   }
   {
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
-    lv_subject_copy_string(&link_subject, link_text(rtps_comms_net_link()));
+    topbar_view.set_link(link_text(rtps_comms_net_link()));
   }
   // The firmware's SHA-256 for the About screen: ~4 MB of flash read on a
   // low-priority thread. Only once rtps_comms_start has set the W5500 up: run
