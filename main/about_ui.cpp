@@ -7,9 +7,9 @@
 
 #include "esp_app_desc.h"
 #include "esp_mac.h"
-#include "format.hpp"
 #include "fw_info.hpp"
 #include "hmi_format/about.hpp"
+#include "hmi_ui/about_view.hpp"
 #include "lvgl.h"
 #include "rtps_comms.hpp"
 #include "ui.h"
@@ -19,20 +19,11 @@
 #define HMI_GIT_COMMIT "unknown"
 #endif
 
-namespace {
-
-constexpr uint32_t kRefreshMs = 1000;
-
-// What the mark shows. Kept so the themeable colour is only set on a change:
-// each call registers the label with the theme again.
-enum class Mark { NONE, RELEASE, NOT_RELEASE };
-Mark shown_mark = Mark::NONE;
-
-void set_mark(Mark mark) {
-  if (mark == shown_mark) {
+void hmi::ui::AboutView::set_mark(Mark mark) {
+  if (mark == shown_mark_) {
     return;
   }
-  shown_mark = mark;
+  shown_mark_ = mark;
   const auto main = static_cast<lv_style_selector_t>(LV_PART_MAIN) |
                     static_cast<lv_style_selector_t>(LV_STATE_DEFAULT);
   if (mark == Mark::RELEASE) {
@@ -52,7 +43,7 @@ void set_mark(Mark mark) {
   }
 }
 
-void show_verdict(const FwInfo &info) {
+void hmi::ui::AboutView::show_verdict(const FirmwareInfo &info) {
   if (!info.done) {
     set_mark(Mark::NONE);
     lv_label_set_text(ui_AboutVerdict, "Checking...");
@@ -66,8 +57,8 @@ void show_verdict(const FwInfo &info) {
   if (info.release) {
     set_mark(Mark::RELEASE);
     lv_label_set_text(ui_AboutVerdict,
-                      fmt::format("{} {}", info.release->prerelease ? "Pre-release" : "Release",
-                                  info.release->tag)
+                      (std::string(info.release->prerelease ? "Pre-release" : "Release") + " " +
+                       info.release->tag)
                           .c_str());
     return;
   }
@@ -75,12 +66,12 @@ void show_verdict(const FwInfo &info) {
   // A build that calls itself a release but has no matching line was either
   // never checked against GitHub (flashed without fw_verify.py) or is not the
   // published binary; one that does not is simply not a release.
-  lv_label_set_text(ui_AboutVerdict, hmi::format::names_a_tag(esp_app_get_description()->version)
+  lv_label_set_text(ui_AboutVerdict, format::names_a_tag(config_.identity().version)
                                          ? "Not verified against GitHub"
                                          : "Not a published release");
 }
 
-void show_sha(const FwInfo &info) {
+void hmi::ui::AboutView::show_sha(const FirmwareInfo &info) {
   if (!info.sha256) {
     lv_label_set_text(ui_AboutSha1, info.done ? "--" : "Computing...");
     lv_label_set_text(ui_AboutSha2, "");
@@ -91,66 +82,105 @@ void show_sha(const FwInfo &info) {
   const std::string &hex = *info.sha256;
   for (auto [label, from] :
        {std::pair{ui_AboutSha1, size_t{0}}, std::pair{ui_AboutSha2, size_t{32}}}) {
-    std::array<char, hmi::format::SHA_LINE_TEXT_SIZE> line{};
-    hmi::format::sha_line_text(hex, from, line);
+    std::array<char, format::SHA_LINE_TEXT_SIZE> line{};
+    format::sha_line_text(hex, from, line);
     lv_label_set_text(label, line.data());
   }
 }
 
-const char *link_words(RtpsLinkState state) {
+const char *hmi::ui::AboutView::link_words(LinkState state) {
   switch (state) {
-  case RtpsLinkState::NET_FAILED:
+  case LinkState::NET_FAILED:
     return "hardware not responding";
-  case RtpsLinkState::LINK_DOWN:
+  case LinkState::LINK_DOWN:
     return "not connected";
-  case RtpsLinkState::NO_IP:
+  case LinkState::NO_IP:
     return "waiting for an address";
-  case RtpsLinkState::NO_PEER:
-  case RtpsLinkState::CONNECTED:
+  case LinkState::NO_PEER:
+  case LinkState::CONNECTED:
     return "online";
   }
   return "--";
 }
 
-void refresh() {
-  const FwInfo info = fw_info();
+void hmi::ui::AboutView::refresh() {
+  const FirmwareInfo info = config_.firmware();
   show_verdict(info);
   show_sha(info);
-  lv_label_set_text(ui_AboutLinkValue,
-                    fmt::format("{}, {}", rtps_comms_net_link_name(rtps_comms_net_link()),
-                                link_words(rtps_comms_link_state()))
-                        .c_str());
-  const std::string ip = rtps_comms_ip();
+  lv_label_set_text(
+      ui_AboutLinkValue,
+      (std::string(config_.link_name()) + ", " + link_words(config_.link_state())).c_str());
+  const std::string ip = config_.ip();
   lv_label_set_text(ui_AboutIpValue, ip.empty() ? "--" : ip.c_str());
 }
 
-void fill_static() {
-  const esp_app_desc_t *desc = esp_app_get_description();
-  lv_label_set_text(ui_AboutVersionValue, desc->version);
-  lv_label_set_text(ui_AboutCommitValue, HMI_GIT_COMMIT);
-  lv_label_set_text(ui_AboutBuiltValue, fmt::format("{} {}", desc->date, desc->time).c_str());
+void hmi::ui::AboutView::fill_static() {
+  const FirmwareIdentity id = config_.identity();
+  lv_label_set_text(ui_AboutVersionValue, id.version);
+  lv_label_set_text(ui_AboutCommitValue, id.commit);
+  lv_label_set_text(ui_AboutBuiltValue, (std::string(id.date) + " " + id.time).c_str());
   // The base MAC: the USB serial number the PC sees, so a board on the bench
   // and a port in Device Manager can be matched up.
   std::array<uint8_t, 6> mac{};
-  if (esp_efuse_mac_get_default(mac.data()) == ESP_OK) {
-    std::array<char, hmi::format::MAC_TEXT_SIZE> text{};
-    hmi::format::mac_text(mac, text);
+  if (config_.mac(mac)) {
+    std::array<char, format::MAC_TEXT_SIZE> text{};
+    format::mac_text(mac, text);
     lv_label_set_text(ui_AboutDeviceValue, text.data());
   }
-  lv_label_set_text(ui_AboutHostValue, rtps_comms_hostname());
+  lv_label_set_text(ui_AboutHostValue, config_.hostname());
 }
+
+void hmi::ui::AboutView::refresh_cb(lv_timer_t *timer) {
+  if (lv_screen_active() == ui_AboutScreen) {
+    static_cast<AboutView *>(lv_timer_get_user_data(timer))->refresh();
+  }
+}
+
+void hmi::ui::AboutView::init() {
+  fill_static();
+  lv_timer_create(refresh_cb, REFRESH_MS, this);
+}
+
+void hmi::ui::AboutView::on_load() { refresh(); }
+
+namespace {
+
+// rtps_comms' RtpsLinkState, read as the view's LinkState: the same values
+// (static_asserted in main/frag_state.inc).
+hmi::ui::LinkState link_state() {
+  return static_cast<hmi::ui::LinkState>(static_cast<int32_t>(rtps_comms_link_state()));
+}
+
+hmi::ui::FirmwareInfo firmware() {
+  FwInfo info = fw_info();
+  hmi::ui::FirmwareInfo out{.done = info.done, .sha256 = std::move(info.sha256), .release = {}};
+  if (info.release) {
+    out.release = hmi::ui::FirmwareRelease{.tag = std::move(info.release->tag),
+                                           .prerelease = info.release->prerelease};
+  }
+  return out;
+}
+
+hmi::ui::FirmwareIdentity identity() {
+  const esp_app_desc_t *desc = esp_app_get_description();
+  return {
+      .version = desc->version, .date = desc->date, .time = desc->time, .commit = HMI_GIT_COMMIT};
+}
+
+// The one AboutView: everything it shows comes from these.
+constinit hmi::ui::AboutView view{{
+    .firmware = firmware,
+    .identity = identity,
+    .mac =
+        [](std::array<uint8_t, 6> &mac) { return esp_efuse_mac_get_default(mac.data()) == ESP_OK; },
+    .link_name = [] { return rtps_comms_net_link_name(rtps_comms_net_link()); },
+    .link_state = link_state,
+    .ip = rtps_comms_ip,
+    .hostname = rtps_comms_hostname,
+}};
 
 } // namespace
 
-void about_ui_init() {
-  fill_static();
-  lv_timer_create(
-      [](lv_timer_t *) {
-        if (lv_screen_active() == ui_AboutScreen) {
-          refresh();
-        }
-      },
-      kRefreshMs, nullptr);
-}
+void about_ui_init() { view.init(); }
 
-void about_ui_on_load() { refresh(); }
+void about_ui_on_load() { view.on_load(); }
