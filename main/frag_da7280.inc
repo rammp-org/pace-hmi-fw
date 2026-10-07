@@ -108,6 +108,8 @@ static std::optional<bool> drv2605_play_click(std::string &detail) {
   return true;
 }
 
+namespace hmi::feedback {
+
 // DA7280 haptic driver bring-up test: read-only register probe, no driver
 // class yet. Datasheet 7-bit slave address is 0x4A (its 0x94/0x95 values are
 // the pre-shifted 8-bit write/read forms) — espp::I2c shifts internally, so
@@ -157,6 +159,80 @@ static constexpr auto kDa7280PauseDuration = 1500ms;
 static constexpr auto kDa7280StepPause = 750ms;
 static constexpr auto kDa7280FreqTrackDriveDuration = 1500ms;
 static constexpr int kDa7280TotalTests = 15;
+
+// Steps 4-5 and step 6 of test_da7280_functional, split off so each function
+// stays within CS-FIL-01's 120 lines. `print_step_header` and `run_test` are that
+// function's lambdas, so the tests keep one numbering across the split.
+static void test_da7280_steps_4_5(espp::Da7280 &da7280, std::error_code &ec,
+                                  const auto &print_step_header, const auto &run_test) {
+  // 4. Rapid stop: enabled should snap to a stop, disabled should coast.
+  // Magnitude 100 (not 150): acceleration is still enabled at this point
+  // (left that way at the end of step 3), so anything above 127 would
+  // produce no output here too.
+  print_step_header("[DA7280 4/6] Rapid stop: enabled (snap) then disabled (coast)");
+  std::this_thread::sleep_for(kDa7280StepPause);
+  da7280.set_rapid_stop_enabled(true, ec);
+  run_test("Rapid stop enabled", 100);
+
+  da7280.set_rapid_stop_enabled(false, ec);
+  std::this_thread::sleep_for(kDa7280PauseDuration);
+  run_test("Rapid stop disabled", 100);
+  da7280.set_rapid_stop_enabled(true, ec); // restore default
+
+  // 5. Frequency tracking: enabled then disabled. A restrained/blocked
+  // motor can trip a spurious fault with tracking enabled; run_test's
+  // fault-status log is how to actually see that instead of guessing from
+  // silence.
+  print_step_header(
+      "[DA7280 5/6] Frequency tracking: enabled then disabled, checking fault status");
+  std::this_thread::sleep_for(kDa7280StepPause);
+  da7280.set_frequency_tracking_enabled(true, ec);
+  run_test("Freq tracking enabled", 80, kDa7280FreqTrackDriveDuration);
+
+  da7280.set_frequency_tracking_enabled(false, ec);
+  std::this_thread::sleep_for(kDa7280PauseDuration);
+  run_test("Freq tracking disabled", 80, kDa7280FreqTrackDriveDuration);
+  da7280.set_frequency_tracking_enabled(true, ec); // restore default
+}
+
+static void test_da7280_step_6(espp::Logger &logger, espp::Da7280 &da7280, std::error_code &ec,
+                               const auto &print_step_header, const auto &run_test) {
+  // 6. Custom Waveform Operation: SINE/SQUARE/TRIANGLE presets, then a raw
+  // CUSTOM coefficient triple. enable_custom_waveform(true, ...) disables
+  // acceleration/rapid-stop/amp-PID/frequency-tracking for us (required by
+  // the chip for this mode) - we restore them ourselves at the end since
+  // the driver won't do that automatically, see enable_custom_waveform()'s
+  // doc comment. Magnitude 150 is safe here regardless: acceleration is
+  // off for the whole step.
+  print_step_header("[DA7280 6/6] Custom Waveform Operation: SINE, SQUARE, TRIANGLE, CUSTOM");
+  std::this_thread::sleep_for(kDa7280StepPause);
+  if (!da7280.enable_custom_waveform(true, ec)) {
+    logger.error("[DA7280 6/6] enable_custom_waveform(true) failed: {}", ec.message());
+  }
+
+  da7280.set_wave_shape(espp::Da7280::WaveShape::SINE, ec);
+  run_test("Custom waveform SINE", 150);
+
+  da7280.set_wave_shape(espp::Da7280::WaveShape::SQUARE, ec);
+  run_test("Custom waveform SQUARE", 150);
+
+  da7280.set_wave_shape(espp::Da7280::WaveShape::TRIANGLE, ec);
+  run_test("Custom waveform TRIANGLE", 150);
+
+  // Arbitrary asymmetric shape: stays low, then jumps sharply near the end
+  // of the quarter-period - clearly distinct from the three presets above.
+  da7280.set_wave_coefficients(0x10, 0x30, 0xF8, ec);
+  run_test("Custom waveform CUSTOM", 150);
+
+  if (!da7280.enable_custom_waveform(false, ec)) {
+    logger.error("[DA7280 6/6] enable_custom_waveform(false) failed: {}", ec.message());
+  }
+  // Restore the closed-loop defaults enable_custom_waveform(true) turned off
+  da7280.set_acceleration_enabled(true, ec);
+  da7280.set_rapid_stop_enabled(true, ec);
+  da7280.set_frequency_tracking_enabled(true, ec);
+  da7280.set_amp_pid_enabled(false, ec);
+}
 
 static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c) {
   std::error_code ec;
@@ -266,70 +342,23 @@ static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c) {
   }
   da7280.set_acceleration_enabled(true, ec); // restore default
 
-  // 4. Rapid stop: enabled should snap to a stop, disabled should coast.
-  // Magnitude 100 (not 150): acceleration is still enabled at this point
-  // (left that way at the end of step 3), so anything above 127 would
-  // produce no output here too.
-  print_step_header("[DA7280 4/6] Rapid stop: enabled (snap) then disabled (coast)");
-  std::this_thread::sleep_for(kDa7280StepPause);
-  da7280.set_rapid_stop_enabled(true, ec);
-  run_test("Rapid stop enabled", 100);
-
-  da7280.set_rapid_stop_enabled(false, ec);
-  std::this_thread::sleep_for(kDa7280PauseDuration);
-  run_test("Rapid stop disabled", 100);
-  da7280.set_rapid_stop_enabled(true, ec); // restore default
-
-  // 5. Frequency tracking: enabled then disabled. A restrained/blocked
-  // motor can trip a spurious fault with tracking enabled; run_test's
-  // fault-status log is how to actually see that instead of guessing from
-  // silence.
-  print_step_header(
-      "[DA7280 5/6] Frequency tracking: enabled then disabled, checking fault status");
-  std::this_thread::sleep_for(kDa7280StepPause);
-  da7280.set_frequency_tracking_enabled(true, ec);
-  run_test("Freq tracking enabled", 80, kDa7280FreqTrackDriveDuration);
-
-  da7280.set_frequency_tracking_enabled(false, ec);
-  std::this_thread::sleep_for(kDa7280PauseDuration);
-  run_test("Freq tracking disabled", 80, kDa7280FreqTrackDriveDuration);
-  da7280.set_frequency_tracking_enabled(true, ec); // restore default
-
-  // 6. Custom Waveform Operation: SINE/SQUARE/TRIANGLE presets, then a raw
-  // CUSTOM coefficient triple. enable_custom_waveform(true, ...) disables
-  // acceleration/rapid-stop/amp-PID/frequency-tracking for us (required by
-  // the chip for this mode) - we restore them ourselves at the end since
-  // the driver won't do that automatically, see enable_custom_waveform()'s
-  // doc comment. Magnitude 150 is safe here regardless: acceleration is
-  // off for the whole step.
-  print_step_header("[DA7280 6/6] Custom Waveform Operation: SINE, SQUARE, TRIANGLE, CUSTOM");
-  std::this_thread::sleep_for(kDa7280StepPause);
-  if (!da7280.enable_custom_waveform(true, ec)) {
-    logger.error("[DA7280 6/6] enable_custom_waveform(true) failed: {}", ec.message());
-  }
-
-  da7280.set_wave_shape(espp::Da7280::WaveShape::SINE, ec);
-  run_test("Custom waveform SINE", 150);
-
-  da7280.set_wave_shape(espp::Da7280::WaveShape::SQUARE, ec);
-  run_test("Custom waveform SQUARE", 150);
-
-  da7280.set_wave_shape(espp::Da7280::WaveShape::TRIANGLE, ec);
-  run_test("Custom waveform TRIANGLE", 150);
-
-  // Arbitrary asymmetric shape: stays low, then jumps sharply near the end
-  // of the quarter-period - clearly distinct from the three presets above.
-  da7280.set_wave_coefficients(0x10, 0x30, 0xF8, ec);
-  run_test("Custom waveform CUSTOM", 150);
-
-  if (!da7280.enable_custom_waveform(false, ec)) {
-    logger.error("[DA7280 6/6] enable_custom_waveform(false) failed: {}", ec.message());
-  }
-  // Restore the closed-loop defaults enable_custom_waveform(true) turned off
-  da7280.set_acceleration_enabled(true, ec);
-  da7280.set_rapid_stop_enabled(true, ec);
-  da7280.set_frequency_tracking_enabled(true, ec);
-  da7280.set_amp_pid_enabled(false, ec);
+  test_da7280_steps_4_5(da7280, ec, print_step_header, run_test);
+  test_da7280_step_6(logger, da7280, ec, print_step_header, run_test);
 
   logger.info("DA7280 functional test complete");
 }
+
+// The DA7280 bench run at boot: test_da7280, then test_da7280_functional. Only
+// with CONFIG_HMI_BENCH_DA7280_TEST (kBenchDa7280Test); otherwise nothing.
+static void run_da7280_bench(espp::Logger &logger, espp::I2c &i2c,
+                             const std::vector<uint8_t> &found_addresses) {
+  if constexpr (kBenchDa7280Test) {
+    test_da7280(logger, i2c, found_addresses);
+    test_da7280_functional(logger, i2c);
+  }
+}
+
+} // namespace hmi::feedback
+
+// The self test reports whether the DA7280 answered the boot scan.
+using hmi::feedback::kDa7280Address;

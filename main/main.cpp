@@ -159,10 +159,7 @@ extern "C" void app_main(void) {
 
   // DA7280 bring-up test (raw register read) and driver functional test (Da7280
   // driver class, DRO mode): bench only, CONFIG_HMI_BENCH_DA7280_TEST.
-  if constexpr (kBenchDa7280Test) {
-    test_da7280(logger, i2c, found_addresses);
-    test_da7280_functional(logger, i2c);
-  }
+  hmi::feedback::run_da7280_bench(logger, i2c, found_addresses);
 
   // Initialize the IO expanders
   logger.info("Initializing IO expanders...");
