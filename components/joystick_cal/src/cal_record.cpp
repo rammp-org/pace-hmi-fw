@@ -12,24 +12,6 @@ namespace hmi::cal {
 
 namespace {
 
-class DecodeCategory final : public std::error_category {
-public:
-  const char *name() const noexcept override { return "joystick_cal"; }
-  std::string message(int value) const override {
-    switch (static_cast<DecodeError>(value)) {
-    case DecodeError::NOT_VERSION_1:
-      return fmt::format("not a version {} calibration file", kFileVersion);
-    case DecodeError::NO_HORIZONTAL:
-      return fmt::format("expected a '{} min center max' line", kAxisNames[0]);
-    case DecodeError::NO_VERTICAL:
-      return fmt::format("expected a '{} min center max' line", kAxisNames[1]);
-    case DecodeError::NO_TWIST:
-      return fmt::format("expected a '{} min center max' line", kAxisNames[2]);
-    }
-    return "unknown joystick_cal error";
-  }
-};
-
 constexpr std::array<DecodeError, kAxisCount> kNoAxisLine{
     DecodeError::NO_HORIZONTAL, DecodeError::NO_VERTICAL, DecodeError::NO_TWIST};
 
@@ -46,13 +28,20 @@ bool next_word(std::istream &in, std::string &word) {
 
 } // namespace
 
-const std::error_category &decode_category() noexcept {
-  static const DecodeCategory category;
-  return category;
-}
-
-std::error_code make_error_code(DecodeError e) noexcept {
-  return {static_cast<int>(e), decode_category()};
+std::string message(DecodeError error) {
+  switch (error) {
+  case DecodeError::NOT_VERSION_1:
+    return fmt::format("not a version {} calibration file", kFileVersion);
+  case DecodeError::NO_HORIZONTAL:
+    return fmt::format("expected a '{} min center max' line", kAxisNames[0]);
+  case DecodeError::NO_VERTICAL:
+    return fmt::format("expected a '{} min center max' line", kAxisNames[1]);
+  case DecodeError::NO_TWIST:
+    return fmt::format("expected a '{} min center max' line", kAxisNames[2]);
+  case DecodeError::NONE:
+    break;
+  }
+  return "unknown joystick_cal error";
 }
 
 std::string describe(const Record &record) {
@@ -81,23 +70,23 @@ std::string encode(const Record &record) {
   return text;
 }
 
-bool decode(std::istream &in, Record &out, std::error_code &ec) {
+bool decode(std::istream &in, Record &out, DecodeError &error) {
   std::string word;
   int version = 0;
   if (!next_word(in, word) || word != "version" || !(in >> version) || version != kFileVersion) {
-    ec = DecodeError::NOT_VERSION_1;
+    error = DecodeError::NOT_VERSION_1;
     return false;
   }
   Record record{};
   for (std::size_t i = 0; i < kAxisCount; ++i) {
     if (!next_word(in, word) || word != kAxisNames[i] ||
         !(in >> record[i].min_mv >> record[i].center_mv >> record[i].max_mv)) {
-      ec = kNoAxisLine[i];
+      error = kNoAxisLine[i];
       return false;
     }
   }
   out = record;
-  ec.clear();
+  error = DecodeError::NONE;
   return true;
 }
 

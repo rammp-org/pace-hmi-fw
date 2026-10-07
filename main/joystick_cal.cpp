@@ -42,9 +42,9 @@ std::optional<JoystickCal> read_file(const std::string &path) {
     return std::nullopt;
   }
   JoystickCal cal{};
-  std::error_code ec;
-  if (!hmi::cal::decode(in, cal, ec)) {
-    logger.warn("{}: {}", path, ec.message());
+  hmi::cal::DecodeError error = hmi::cal::DecodeError::NONE;
+  if (!hmi::cal::decode(in, cal, error)) {
+    logger.warn("{}: {}", path, hmi::cal::message(error));
     return std::nullopt;
   }
   return cal;

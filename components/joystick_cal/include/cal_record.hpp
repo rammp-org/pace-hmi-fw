@@ -28,8 +28,6 @@
 #include <istream>
 #include <string>
 #include <string_view>
-#include <system_error>
-#include <type_traits>
 
 namespace hmi::cal {
 
@@ -57,16 +55,20 @@ inline constexpr std::array<std::string_view, kAxisCount> kAxisNames{"horizontal
 /// rest the calibration run counts as pushed "fully".
 inline constexpr float kFullTravelMv = 1000.0f;
 
-/// Why decode() rejected a file. message() is the text the firmware logs after "<path>: ".
+/// Why decode() rejected a file; NONE after a successful decode. message() is the text the
+/// firmware logs after "<path>: ". A plain enum, not a std::error_code: no error_category
+/// singleton, so no lazy static (app-main-shrink V6).
 enum class DecodeError {
+  NONE = 0,          ///< decoded
   NOT_VERSION_1 = 1, ///< "not a version 1 calibration file"
   NO_HORIZONTAL,     ///< "expected a 'horizontal min center max' line"
   NO_VERTICAL,       ///< "expected a 'vertical min center max' line"
   NO_TWIST,          ///< "expected a 'twist min center max' line"
 };
 
-const std::error_category &decode_category() noexcept;
-std::error_code make_error_code(DecodeError e) noexcept;
+/// The log text for `error`; "unknown joystick_cal error" for NONE or a value outside the
+/// enum.
+[[nodiscard]] std::string message(DecodeError error);
 
 /// "horizontal 11/1507/2971, vertical 6/1510/2962, twist 10/1477/2960 mV": each number
 /// rounded to whole mV. The boot log line the bench checks is built from this.
@@ -79,10 +81,9 @@ std::error_code make_error_code(DecodeError e) noexcept;
 /// The file's text for `record`, numbers to 0.1 mV.
 [[nodiscard]] std::string encode(const Record &record);
 
-/// Reads one record from `in`. On success fills `out` and returns true; otherwise leaves
-/// `out` as it was, sets `ec` to a DecodeError and returns false. Does not check plausible().
-[[nodiscard]] bool decode(std::istream &in, Record &out, std::error_code &ec);
+/// Reads one record from `in`. On success fills `out`, sets `error` to NONE and returns true;
+/// otherwise leaves `out` as it was, sets `error` to the reason and returns false. Does not
+/// check plausible().
+[[nodiscard]] bool decode(std::istream &in, Record &out, DecodeError &error);
 
 } // namespace hmi::cal
-
-template <> struct std::is_error_code_enum<hmi::cal::DecodeError> : std::true_type {};

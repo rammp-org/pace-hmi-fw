@@ -38,9 +38,9 @@ bool same(const Record &a, const Record &b) {
   return true;
 }
 
-bool decode_text(std::string_view text, Record &out, std::error_code &ec) {
+bool decode_text(std::string_view text, Record &out, DecodeError &error) {
   std::istringstream in{std::string(text)};
-  return hmi::cal::decode(in, out, ec);
+  return hmi::cal::decode(in, out, error);
 }
 
 } // namespace
@@ -52,9 +52,9 @@ TEST_CASE("CAL-101 encode writes board 2's record as the golden version 1 file",
 TEST_CASE("CAL-102 decode reads the golden file back as board 2's record and clears the error",
           "[cal][record]") {
   Record out = kSentinel;
-  std::error_code ec = DecodeError::NO_TWIST;
-  TEST_ASSERT_TRUE(decode_text(kBoard2File, out, ec));
-  TEST_ASSERT_FALSE(static_cast<bool>(ec));
+  DecodeError error = DecodeError::NO_TWIST;
+  TEST_ASSERT_TRUE(decode_text(kBoard2File, out, error));
+  TEST_ASSERT_TRUE(error == DecodeError::NONE);
   TEST_ASSERT_TRUE(same(out, kBoard2));
 }
 
@@ -80,26 +80,26 @@ TEST_CASE("CAL-104 each rejection names its reason and leaves the output untouch
   }};
   for (const Bad &b : kBad) {
     Record out = kSentinel;
-    std::error_code ec;
-    TEST_ASSERT_FALSE_MESSAGE(decode_text(b.text, out, ec), b.text);
-    TEST_ASSERT_TRUE_MESSAGE(ec == b.error, b.text);
+    DecodeError error = DecodeError::NONE;
+    TEST_ASSERT_FALSE_MESSAGE(decode_text(b.text, out, error), b.text);
+    TEST_ASSERT_TRUE_MESSAGE(error == b.error, b.text);
     TEST_ASSERT_TRUE_MESSAGE(same(out, kSentinel), b.text);
   }
 }
 
 TEST_CASE("CAL-105 the error messages are the words the firmware has always logged",
           "[cal][record]") {
-  TEST_ASSERT_EQUAL_STRING("joystick_cal", hmi::cal::decode_category().name());
-  const std::error_code v = DecodeError::NOT_VERSION_1;
-  const std::error_code h = DecodeError::NO_HORIZONTAL;
-  const std::error_code ve = DecodeError::NO_VERTICAL;
-  const std::error_code t = DecodeError::NO_TWIST;
-  TEST_ASSERT_EQUAL_STRING("not a version 1 calibration file", v.message().c_str());
-  TEST_ASSERT_EQUAL_STRING("expected a 'horizontal min center max' line", h.message().c_str());
-  TEST_ASSERT_EQUAL_STRING("expected a 'vertical min center max' line", ve.message().c_str());
-  TEST_ASSERT_EQUAL_STRING("expected a 'twist min center max' line", t.message().c_str());
+  using hmi::cal::message;
+  TEST_ASSERT_EQUAL_STRING("not a version 1 calibration file",
+                           message(DecodeError::NOT_VERSION_1).c_str());
+  TEST_ASSERT_EQUAL_STRING("expected a 'horizontal min center max' line",
+                           message(DecodeError::NO_HORIZONTAL).c_str());
+  TEST_ASSERT_EQUAL_STRING("expected a 'vertical min center max' line",
+                           message(DecodeError::NO_VERTICAL).c_str());
+  TEST_ASSERT_EQUAL_STRING("expected a 'twist min center max' line",
+                           message(DecodeError::NO_TWIST).c_str());
   TEST_ASSERT_EQUAL_STRING("unknown joystick_cal error",
-                           hmi::cal::decode_category().message(99).c_str());
+                           message(static_cast<DecodeError>(99)).c_str());
 }
 
 TEST_CASE("CAL-106 plausible needs 1000 mV each way on every axis, inclusive; NaN fails",
@@ -141,8 +141,8 @@ TEST_CASE("CAL-108 encode then decode keeps a record to 0.1 mV and is stable aft
     std::generate(r.begin(), r.end(), [&] { return AxisCal{mv(rng), mv(rng), mv(rng)}; });
     const std::string once = hmi::cal::encode(r);
     Record back{};
-    std::error_code ec;
-    TEST_ASSERT_TRUE(decode_text(once, back, ec));
+    DecodeError error = DecodeError::NONE;
+    TEST_ASSERT_TRUE(decode_text(once, back, error));
     for (std::size_t axis = 0; axis < r.size(); ++axis) {
       TEST_ASSERT_FLOAT_WITHIN(0.051f, r[axis].min_mv, back[axis].min_mv);
       TEST_ASSERT_FLOAT_WITHIN(0.051f, r[axis].center_mv, back[axis].center_mv);
@@ -156,8 +156,8 @@ TEST_CASE("CAL-109 decode stops after the twist line and leaves the rest of the 
           "[cal][record]") {
   std::istringstream in{std::string(kBoard2File) + "tail"};
   Record out{};
-  std::error_code ec;
-  TEST_ASSERT_TRUE(hmi::cal::decode(in, out, ec));
+  DecodeError error = DecodeError::NONE;
+  TEST_ASSERT_TRUE(hmi::cal::decode(in, out, error));
   std::string rest;
   in >> rest;
   TEST_ASSERT_EQUAL_STRING("tail", rest.c_str());
@@ -175,11 +175,13 @@ TEST_CASE("CAL-110 seeded random bytes are rejected with a decode error or read 
       text = "version 1\nhorizontal " + text; // get past the header half the time
     }
     Record out = kSentinel;
-    std::error_code ec;
-    if (decode_text(text, out, ec)) {
-      TEST_ASSERT_FALSE(static_cast<bool>(ec));
+    DecodeError error = DecodeError::NONE;
+    if (decode_text(text, out, error)) {
+      TEST_ASSERT_TRUE(error == DecodeError::NONE);
     } else {
-      TEST_ASSERT_TRUE(ec.category() == hmi::cal::decode_category());
+      // A decode error, not some other code: one of the four reasons.
+      TEST_ASSERT_TRUE(error == DecodeError::NOT_VERSION_1 || error == DecodeError::NO_HORIZONTAL ||
+                       error == DecodeError::NO_VERTICAL || error == DecodeError::NO_TWIST);
       TEST_ASSERT_TRUE(same(out, kSentinel));
     }
   }
