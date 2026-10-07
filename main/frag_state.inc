@@ -1,4 +1,14 @@
 // split_main.py fragment of main.cpp (frag_state: original lines 108-263); one TU, see main.cpp.
+// What is left here after S7 (app-main-shrink.md), and why it stays in main for now:
+//  - mib_state, rtps_link, rtps_blink, locked: read by several views (SharedSubjects) and,
+//    with nav_menu_open and nav_menu_on_arrival, by name by the drive port and its frozen
+//    goldens (tests/host/drive_golden);
+//  - the atomics: what the ADC task and the drive port read without the LVGL lock (channels
+//    are T-H4a);
+//  - the Settings subjects and their atomics: the settings model's, which the modules lane
+//    moves with main/settings.cpp.
+// The views' own subjects are their members (CS-UI-05): JoystickView, DriveBandView,
+// StatusBandView, RefusalView; the groups are NavView's and BenchPinView's.
 // The Joystick test screen's readouts (axis bars, button count) own their subjects.
 #include "hmi_ui/joystick_view.hpp"
 static constinit hmi::ui::JoystickView joystick_view;
