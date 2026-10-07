@@ -64,6 +64,23 @@ needs a serial reset; it belongs with C3's boot steps).
 - The board lease (`C:\Users\halai\Offline_Documents\ATDev\rammp\.board-lease`, JSON
   `{owner, since, pid}`) is held for the whole run; `lease.py status|acquire|release`. A lease
   whose pid is dead is taken over and the takeover is logged.
+- Every esptool call ends with `--after hard-reset`, so B0's table read and B1's backup and
+  flash reboot the board. When B2 does not boot it before the next app step (B3 onwards), the
+  runner waits first: a serial capture without a reset until `Got IP` (90 s, saved as
+  `boot-after-b0.log` / `-b1.log`; a different IP there replaces `--ip`), then the remote UI's
+  PING (30 s). Back = either; otherwise the later steps are NOT_RUN with the reason. Each wait
+  is in `summary.json` → `board_back`. Seen 2026-10-06: `--steps B0,B5,...` started B5's sim
+  while the board was booting ("Could not find the board").
+- Remote UI from the steps (B4b, B5, B5a..e) goes through `ui_client.py`: a 5 s timeout per
+  command (SHOT 20 s), on a timeout a reconnect and ONE retry for idempotent verbs (SCREEN,
+  BTN, KEY, SHOT, FOCUS, PING, ...); TAP and SWIPE are not retried (a lost reply may hide a
+  tap that happened, and a second burger-key tap undoes it): they raise after the reconnect,
+  so the step is NOT_RUN, not graded on a guess. A reconnect releases what was held (the
+  board lets go when a client goes). Every command is a line in `<step>/remote-ui.jsonl`
+  (sent, answered, duration, gap since the previous answer, attempt, reply or error) and the
+  step's `remote_ui` sums it up (slow commands over 1 s, retries, the largest gap). A long
+  gap with fast round trips is time spent on the PC, not on the wire. B4's walk runs
+  `hmi_ui.py walk` as a child and keeps hmi_ui's own client (20 s socket timeout, no retry).
 
 ## Single tools
 ```
@@ -76,6 +93,8 @@ needs a serial reset; it belongs with C3's boot steps).
 %PY% tools\bench\scenario_hazards.py --ip A --out DIR [--steps B5a,B5e]
 %PY% tools\bench\ui_models_check.py --ip A --out DIR
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\bench\hotspot.ps1 status|restart
+python tools\bench\ui_client.py selftest     # UI-001.., a localhost fake remote UI (in L0)
+python tools\bench\run_bench.py selftest     # BENCH-001.., step sequencing on a fake board (in L0)
 ```
 `--tree` (default: this worktree) is where `scripts/` is run from: run the tree that built the
 image. Children run with `PYTHONDONTWRITEBYTECODE=1`.

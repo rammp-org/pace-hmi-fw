@@ -54,6 +54,13 @@ jobs:
     - name: MCB sim self test (rtps_mcb_sim.py decision logic)
       run: python3 scripts/rtps_mcb_sim.py selftest
 
+    # tools/bench without a board: the remote-UI client (timeouts, retry, log) against a
+    # localhost fake, and run_bench's step sequencing (waits after a reset) on a fake board.
+    - name: Bench runner self tests (ui_client UI-*, run_bench BENCH-*)
+      run: |
+        python3 tools/bench/ui_client.py selftest
+        python3 tools/bench/run_bench.py selftest
+
     - name: Test manifest (TS-DEF-02)
       run: |
         python3 -m pip install --quiet pyyaml
