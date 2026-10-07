@@ -26,6 +26,9 @@
  *   FOCUS                     where input stands: the joystick's focused object
  *                             (x,y,size,state) and each pointer's state
  *   PING                      OK, for a liveness check
+ *   DRIVETIME [RESET]         the drive code's timing on the LVGL task, as one JSON
+ *                             line; RESET then starts the counts again. Only with
+ *                             CONFIG_HMI_DEBUG_DRIVE_TIMING (drive_timing.hpp)
  *   TASKS                     every task's name, priority, core and stack, as one
  *                             JSON line (tools/guards/task_dump.py, guard G10)
  *
