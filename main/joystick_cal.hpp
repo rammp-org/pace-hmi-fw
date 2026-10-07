@@ -15,6 +15,10 @@
  * only feeds it samples and picks up the result between two cycles, so the
  * joystick is never reconfigured from two tasks at once.
  *
+ * The record, its file and the run's logic live in components/joystick_cal
+ * (cal_record.hpp, cal_run.hpp, plain C++ with host tests); this file and
+ * joystick_cal.cpp are the LVGL view, the file I/O and the shared state.
+ *
  * Kept in <file system root>/joystick_cal.txt (espp::FileSystem: LittleFS on
  * the `storage` partition), as text, so it can be read off a board by eye.
  */
@@ -23,20 +27,19 @@
 #include <functional>
 #include <optional>
 
+#include "cal_record.hpp"
 #include "lvgl.h"
 
 /// One axis's travel in raw ADC millivolts; min < center < max. Which physical
 /// direction reads which end is main.cpp's business (its AXIS WIRING note).
-struct JoystickAxisCal {
-  float min_mv;
-  float center_mv;
-  float max_mv;
-};
+/// The record itself, its file and its plausibility check are
+/// components/joystick_cal (cal_record.hpp); these names are kept for main.
+using JoystickAxisCal = hmi::cal::AxisCal;
 
 enum JoystickAxis { JOY_HORIZONTAL = 0, JOY_VERTICAL = 1, JOY_TWIST = 2 };
 
 /// Indexed by JoystickAxis.
-using JoystickCal = std::array<JoystickAxisCal, 3>;
+using JoystickCal = hmi::cal::Record;
 
 /// Mount the file system and load the saved calibration, falling back to
 /// `defaults` when there is none or it is implausible. Returns what is now in

@@ -139,7 +139,7 @@ Settings is not a screen but a second level of the same menu. The overlay holds 
 4. `cui_RowLabel<n>` / `cui_SubRowLabel<n>` in `scripts/ui_contract.py`, and `MENU_ROWS` /
    `SETTINGS_ROWS` in `scripts/hmi_ui.py`.
 
-A new Settings section that is a page of rows is a `P(...)` line in `settings_spec.h` plus its
+A new Settings section that is a page of rows is a `SETTINGS_PAGES` row in `settings_spec.hpp` plus its
 rows' page; `nav_go` opens it with `setting_page_open(SETTINGS_PAGE_<NAME>)`.
 
 ### What happens on a pick
@@ -257,7 +257,7 @@ flowchart LR
 
 ## 6. Settings, sounds and the rest
 
-- **Settings** rows come from `main/settings_spec.h`, one line each; the firmware builds
+- **Settings** rows come from `main/settings_spec.hpp`, one line each; the firmware builds
   a `SettingRow` per line and saves every value to `/storage/settings.txt`. Adding a
   setting is a table line, its names in `kSettingParamNames`, its subject in
   `kSettingParamValue`, and a `case` in `setting_store_observer` if it needs applying.
@@ -276,7 +276,7 @@ flowchart LR
 - **Internet** is `hmi_ui`'s `InternetView` (main's side, with the worker: `main/internet_ui.cpp`), not in the settings rows. Its three
   pages share one screen: the main page (Ethernet or WiFi, the network, the status) and two
   panels drawn over it, the network list and the password keyboard. The choice is the
-  `network` setting (on a page of its own in `settings_spec.h`), read at boot. The WiFi scan
+  `network` setting (on a page of its own in `settings_spec.hpp`), read at boot. The WiFi scan
   and join block for seconds, so they run on a worker thread (`run_on_worker`) and post their
   result back to the LVGL task; a result for a page that was left meanwhile is dropped. The
   scan and join themselves are `rtps_comms_wifi_scan` / `rtps_comms_wifi_join` in

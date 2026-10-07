@@ -16,7 +16,7 @@ inline constexpr int32_t VALUE_UNKNOWN = INT32_MIN;
 /// The most decimals a row may have: 10^9 is the largest power of ten an int32_t holds.
 inline constexpr uint8_t MAX_DECIMALS = 9;
 
-/// @brief A row's fixed description, from settings_spec.h or the RAMMP seat axis table.
+/// @brief A row's fixed description, from settings_spec.hpp or the RAMMP seat axis table.
 struct StepperSpec {
   const char *short_name; ///< "S1", "M1"
   const char *label;      ///< "Brightness"

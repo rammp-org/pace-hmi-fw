@@ -5,6 +5,10 @@
 using hmi::ui::ButtonGrid;
 using hmi::ui::grid_key_cb;
 using hmi::ui::grid_sync_cursor;
+// The subtree helpers (components/hmi_ui).
+#include "hmi_ui/widget_tree.hpp"
+using hmi::ui::clear_click_focusable_recursive;
+using hmi::ui::set_focused_recursive;
 
 static_assert(kGridMaxRows == hmi::ui::GRID_MAX_ROWS && kGridMaxCols == hmi::ui::GRID_MAX_COLS,
               "ButtonGrid and the cursor model must agree on the grid's size");
