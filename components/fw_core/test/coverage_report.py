@@ -21,13 +21,18 @@ import tempfile
 
 
 def gcov_json(build_dir):
-    gcdas = sorted(glob.glob(os.path.join(build_dir, "*.gcda")))
+    gcdas = sorted(glob.glob(os.path.join(build_dir, "**", "*.gcda"), recursive=True))
     if not gcdas:
-        sys.exit("coverage_report: no .gcda files in " + build_dir)
+        sys.exit("coverage_report: no .gcda files under " + build_dir)
     with tempfile.TemporaryDirectory() as tmp:
-        subprocess.run(["gcov", "--json-format", "--branch-probabilities", "-o", build_dir]
-                       + gcdas, cwd=tmp, check=True, stdout=subprocess.DEVNULL)
-        for path in glob.glob(os.path.join(tmp, "*.gcov.json.gz")):
+        # Each .gcda is named in full, so gcov finds its .gcno beside it.
+        # One folder per object, so two objects with the same base name cannot clash.
+        for i, gcda in enumerate(gcdas):
+            out = os.path.join(tmp, str(i))
+            os.mkdir(out)
+            subprocess.run(["gcov", "--json-format", "--branch-probabilities", gcda],
+                           cwd=out, check=True, stdout=subprocess.DEVNULL)
+        for path in glob.glob(os.path.join(tmp, "*", "*.gcov.json.gz")):
             with gzip.open(path, "rt") as f:
                 yield json.load(f)
 

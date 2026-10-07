@@ -1,4 +1,5 @@
 // split_main.py fragment of main.cpp (frag_diag: original lines 2980-3229); one TU, see main.cpp.
+#include "hmi_format/diag.hpp"
 /////////////////////////////////////////////////////////////////////////////
 // DiagnosticsScreen: live readings from the MCB
 //
@@ -85,7 +86,7 @@ static void diag_value_observer(lv_observer_t *observer, lv_subject_t *subject) 
   const rammp::DiagSpec &spec = rammp::kDiagItems[field->item];
   const StepperSpec format{nullptr, nullptr, 0, 0, 0, spec.decimals[field->field], nullptr};
   char text[24];
-  stepper_format(format, raw, text, sizeof(text));
+  stepper_format(format, raw, text);
   lv_label_set_text(label, text);
 }
 
@@ -120,9 +121,9 @@ static void diag_freq_observer(lv_observer_t *observer, lv_subject_t *) {
   if (stale) {
     lv_label_set_text(label, "No data");
   } else {
-    const int32_t rate = lv_subject_get_int(&diag_rate_subject);
-    lv_label_set_text_fmt(label, "%d.%d Hz - Live", static_cast<int>(rate / 10),
-                          static_cast<int>(rate % 10));
+    char text[32]; // "-214748364.-8 Hz - Live" at the very most
+    hmi::format::diag_rate_text(lv_subject_get_int(&diag_rate_subject), text);
+    lv_label_set_text(label, text);
   }
   lv_obj_set_style_text_color(label, lv_color_hex(kDiagStaleColour), kDiagStale);
   lv_obj_set_style_text_opa(label, diag_blink_opa(), kDiagStale);

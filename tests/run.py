@@ -217,6 +217,9 @@ def requirement_ids() -> str:
 def check_entries(entries: list[Entry]) -> list[str]:
     errors: list[str] = []
     seen: dict[str, Path] = {}
+    # Case IDs are unique across ALL entries: select() resolves a case ID to one entry, and a
+    # duplicate would silently run the later one (final review finding 16).
+    case_owner: dict[str, str] = {}
     readmes: str | None = None
     for e in entries:
         where = f"{e.source.name}:{e.data.get('id', '?')}"
@@ -270,8 +273,12 @@ def check_entries(entries: list[Entry]) -> list[str]:
                                       f"(TS-UNIT-02): {name!r} in {src.name}")
                     elif m.group("id") in case_ids:
                         errors.append(f"{where}: duplicate case id {m.group('id')}")
+                    elif m.group("id") in case_owner:
+                        errors.append(f"{where}: case id {m.group('id')} is also in "
+                                      f"{case_owner[m.group('id')]}")
                     else:
                         case_ids.add(m.group("id"))
+                        case_owner[m.group("id")] = e.id
         for req in d.get("requirements", []) or []:
             readmes = requirement_ids() if readmes is None else readmes
             if not isinstance(req, str) or not re.search(rf"\b{re.escape(req)}\b", readmes):

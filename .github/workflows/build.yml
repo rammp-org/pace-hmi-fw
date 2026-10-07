@@ -2,11 +2,10 @@ name: Build
 
 # TODO: update if you want to allow from forked repositories
 #
-# `push` is here as well as `pull_request` because pull_request events on this
-# repo record but never create runs (verified: workflow_dispatch green, three
-# pull_request events across two PRs, zero runs). Until that is sorted at the
-# org level, the push trigger is what actually gets a branch built. `main` is
-# excluded because package_main.yml already covers it.
+# `push` is here as well as `pull_request` so a branch is built before it has a
+# PR. pull_request events do create runs now (seen in `gh run list` since
+# 2026-09-30), so a branch with an open PR is built twice. `main` is excluded
+# because package_main.yml already covers it.
 on:
   pull_request:
   push:
@@ -41,6 +40,19 @@ jobs:
         esp_idf_version: ${{ env.IDF_VERSION }}
         path: "."
         target: ${{ env.IDF_TARGET }}
+
+    # Guards G4 (static init) and G2 (exported symbols) on the default variant's objects
+    # (docs/plans/app-main-shrink.md §5; tools/guards/README.md). In the IDF image: they need
+    # its readelf/objdump/nm. The bench variant's run is in l0.yml.
+    - name: Guards G4 init_order and G2 exports (default variant)
+      uses: espressif/esp-idf-ci-action@v1
+      with:
+        esp_idf_version: ${{ env.IDF_VERSION }}
+        path: "."
+        target: ${{ env.IDF_TARGET }}
+        command: >-
+          python3 tools/guards/init_order.py check --build build --variant default
+          && python3 tools/guards/exports.py check --build build
 
     - name: Determine Size Delta
       uses: esp-cpp/esp-idf-size-delta@v1

@@ -1,0 +1,20 @@
+# L1 host app for components/post, the quick POST evaluator (cases POST-001..POST-033 in
+# components/post/test/test_post.cpp and test_idf_parity.cpp): the check table's invariants,
+# a pass, a fail and a boundary case for every row, missing and contradictory facts, the reset
+# and image classifications, the latched/live split, the overall state machine (oracle) and
+# the mirrored IDF enums. Not wired into the firmware yet (hazard-fixes C3).
+# spec-deviation(TS-UNIT-01): host-native g++ in WSL, not the IDF linux target (owner, 2026-10-06).
+- id: L1-POST
+  title: quick POST evaluator (check table, verdicts, latched/live split, overall state) on host facts
+  level: L1
+  path: components/post/test
+  requirements: [REQ-POST-01, REQ-POST-02, REQ-POST-03, REQ-POST-04, REQ-POST-05, REQ-POST-06,
+                 REQ-POST-07, REQ-POST-08, REQ-POST-09, REQ-POST-10, REQ-POST-11, REQ-POST-12,
+                 REQ-POST-13]
+  resources: [host]
+  timeout_s: 300
+  expected_s: 30
+  repeat: 1
+  pass_threshold: 1
+  safety: true
+  artifact: test
