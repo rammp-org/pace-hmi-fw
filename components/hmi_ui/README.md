@@ -15,6 +15,7 @@ behaviour.
 | `include/hmi_ui/shared_subjects.hpp` | `SharedSubjects`: the subjects main still defines (`main/frag_state.inc`) and several views read. main fills it once; it shrinks as each subject moves to its view (S7) |
 | `include/hmi_ui/link_state.hpp` | `LinkState`: the values the `rtps_link` subject carries, equal to main's `RtpsLinkState` (main static_asserts it) |
 | `include/hmi_ui/brightness_view.hpp`, `src/brightness_view.cpp` | `BrightnessView`: the backlight level as a subject, applied on every change and saved once it settles (from `main/frag_brightness.inc`) |
+| `include/hmi_ui/button_grid.hpp`, `src/button_grid.cpp` | `ButtonGrid`, `grid_key_cb`, `grid_sync_cursor`: the joystick's walk over a page of buttons (seat, bench PIN), on hmi_models' `grid_step` (from `main/frag_seat.inc`) |
 | `include/hmi_ui/rtps_label_view.hpp`, `src/rtps_label_view.cpp` | `RtpsLabelView`: the TopBar's RTPS label (from `main/frag_rtps_label.inc`) |
 | `include/hmi_ui/status_band_view.hpp`, `src/status_band_view.cpp` | `StatusBandView`: the DriveBand's DRIVE and STATE cells, on every resident and on-demand screen (from `main/frag_status_band.inc`) |
 | `include/hmi_ui/topbar_view.hpp`, `src/topbar_view.cpp` | `TopBarView`: the TopBar's clock and link labels (from `main/frag_clock.inc`). Setting the clock from the MCB is not UI and stays in main |
@@ -49,7 +50,7 @@ behaviour.
   `app_main` during start-up.
 - Dependencies: `lvgl` (public: the headers use its types); private: `ui` (the export: widgets,
   component children, theme colours), `rammp_rtps_messages` (`MIB::MibSystemState`),
-  `hmi_format` (the clock text). `main` requires the component (`PRIV_REQUIRES hmi_ui`).
+  `hmi_format` (the clock text); public: `hmi_models` (`grid.hpp`, `pin.hpp`). `main` requires the component (`PRIV_REQUIRES hmi_ui`).
 - Build: `fw_component_options` really applies here (C++23 and the warning set as errors).
   Today the top-level CMakeLists includes `cmake/fw_standards.cmake` only after `project()`,
   so the function does not exist yet when component CMakeLists run, and the
