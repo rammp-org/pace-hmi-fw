@@ -1441,20 +1441,7 @@ extern "C" void app_main(void) {
     auto horiz_mv = adc.get_mv(channels[1]); // ADC1_CH1 (GPIO17)
     // twist pot on ADC2 (GPIO52), sampled oneshot — see comment at the
     // channel definitions above — and averaged (kTwistOversample)
-    std::optional<float> twist_mv;
-    {
-      float sum = 0.0f;
-      int reads = 0;
-      for (int i = 0; i < kTwistOversample; ++i) {
-        if (auto mv = twist_adc.read_mv(twist_channel)) {
-          sum += *mv;
-          ++reads;
-        }
-      }
-      if (reads > 0) {
-        twist_mv = sum / static_cast<float>(reads);
-      }
-    }
+    const std::optional<float> twist_mv = read_twist_mv(twist_adc, twist_channel, kTwistOversample);
 
     bool adc_published = false;
     if (vert_mv && horiz_mv && twist_mv) {
