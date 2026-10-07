@@ -49,10 +49,26 @@ jobs:
         python3 tools/guards/task_dump.py selftest
         python3 tools/guards/observer_census.py selftest
 
-    - name: Test manifest (TS-DEF-02)
+    # check also fails the requirement-ID rules: a retired requirement cited by a test, an
+    # ID declared twice or deleted from its series (tests/reqmatrix.py, TS-COV-01).
+    - name: Test manifest and requirement IDs (TS-DEF-02, TS-COV-01)
       run: |
         python3 -m pip install --quiet pyyaml
+        python3 tests/run.py selftest --matrix
         python3 tests/run.py check
+
+    # Informational (docs/plans/hazard-fixes.md B4): the requirement -> test matrix and its
+    # gaps (requirements with no test, tests with no requirement). It lists; it does not gate.
+    - name: Requirement matrix (TS-COV-01, informational)
+      run: |
+        python3 tests/run.py report > /dev/null
+        cat results/requirements/requirements.md >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload the requirement matrix
+      uses: actions/upload-artifact@v7
+      with:
+        name: requirement-matrix
+        path: results/requirements/
 
     # Debug channels stay out of what ships (CS-LAY-09; plan H13): the remote UI can press
     # the stick button, and an OTA test URL bypasses the release check. The bench DA7280
