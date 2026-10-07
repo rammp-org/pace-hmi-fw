@@ -55,15 +55,24 @@ set(
 # running it dry boot-loops the board. See that file.
 idf_build_set_property(COMPILE_DEFINITIONS "LV_USE_STDLIB_MALLOC=LV_STDLIB_CUSTOM" APPEND)
 
+# fw-standards (CS-LNG-02): fw_component_options() must exist BEFORE project().
+# ESP-IDF's project() macro is where every component's CMakeLists.txt runs for real
+# (add_subdirectory, tools/cmake/build.cmake idf_build_process); a function defined
+# after it is not there yet, and each component's `if(COMMAND fw_component_options)`
+# guard skipped it silently, so no component got the flags. The guard stays: the
+# requirements pass (tools/cmake/scripts/component_get_requirements.cmake) runs each
+# CMakeLists.txt in a separate `cmake -P`, where the function never exists.
+# The language standard is not set with CMAKE_CXX_STANDARD (no effect on IDF's
+# component targets); fw_component_options() passes -std after IDF's own.
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/fw_standards.cmake)
+
 project(rammp-hmi-p4)
 
-# fw-standards (CS-LNG-02). The language standard is not set here:
-# CMAKE_CXX_STANDARD has no effect after project(), where every component target
-# already exists. First-party components call fw_component_options() themselves;
-# everything else gets SYSTEM headers (cmake/hmi_first_party.cmake says which).
-include(${CMAKE_CURRENT_LIST_DIR}/cmake/fw_standards.cmake)
+# Everything that is not first-party gets SYSTEM headers (cmake/hmi_first_party.cmake
+# says which). This needs the component list, so it runs after project().
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/hmi_first_party.cmake)
 hmi_mark_third_party_system()
+hmi_check_fw_options()
 
 # picolibc's pthread.h uses `__noreturn` in trailing position (`void f(void)
 # __noreturn;`). In C++ that macro expands to `[[noreturn]]`, which then
