@@ -18,8 +18,11 @@ behaviour.
 | `include/hmi_ui/bench_pin_view.hpp`, `src/bench_pin_view.cpp` | `BenchPinView`: the BenchGateScreen's PIN pad, dots and line, on hmi_models' `PinModel` (from `main/frag_bench_pin.inc` and app_main's wiring) |
 | `include/hmi_ui/brightness_view.hpp`, `src/brightness_view.cpp` | `BrightnessView`: the backlight level as a subject, applied on every change and saved once it settles (from `main/frag_brightness.inc`) |
 | `include/hmi_ui/button_grid.hpp`, `src/button_grid.cpp` | `ButtonGrid`, `grid_key_cb`, `grid_sync_cursor`: the joystick's walk over a page of buttons (seat, bench PIN), on hmi_models' `grid_step` (from `main/frag_seat.inc`) |
+| `include/hmi_ui/display_flip.hpp`, `src/display_flip.cpp` | `DisplayFlip`: DIRECT rendering into the DSI panel's two frame buffers, the 180-degree Settings "Flip screen" (PPA, CPU fallback) and the touch input that turns with it (from `main/frag_display_flip.inc`). Finds itself through the display's and the touch input's LVGL driver data. The PSRAM frame's `heap_caps_aligned_alloc` is legacy debt moved with `ratchet.py transfer` |
 | `include/hmi_ui/drive_band_view.hpp`, `src/drive_band_view.cpp` | `DriveBandView`: the Drive screen's speed readout and its three drive-profile buttons (from `main/frag_drive_band.inc`) |
+| `include/hmi_ui/fps_meter.hpp`, `src/fps_meter.cpp` | `FpsMeter`: render time per frame and the once-a-second `[FPS]` debug line, `CONFIG_HMI_DEBUG_FPS` only (from `main/frag_fps.inc`) |
 | `include/hmi_ui/hold_gesture.hpp`, `src/hold_gesture.cpp` | `HoldGesture`, `HoldEngine`: the push-and-hold gestures (unlock, drive exit, calibrate) and the engine that fills and completes them (from `main/frag_hold.inc`) |
+| `include/hmi_ui/overdraw.hpp`, `src/overdraw.cpp` | `strip_screen_overdraw`, `strip_all_overdraw`: clear the background fills nobody can see (from `main/frag_overdraw.inc`; main keeps the log line) |
 | `include/hmi_ui/refusal_view.hpp`, `src/refusal_view.cpp` | `RefusalView`: the ErrorBanners that say why driving or the seat is not permitted (a refused request; a drive cut short or an exit refused), their dwell timer and the hold poll's push check (from `main/frag_refusal.inc`). `mcb_ready`, `seat_ready` and the texts table stay in main |
 | `include/hmi_ui/rtps_label_view.hpp`, `src/rtps_label_view.cpp` | `RtpsLabelView`: the TopBar's RTPS label (from `main/frag_rtps_label.inc`) |
 | `include/hmi_ui/seat_view.hpp`, `src/seat_view.cpp` | `SeatView`: the SeatScreen's function buttons and adjustment page, and the seat numbers on them (from `main/frag_seat.inc`, the seat parts of `frag_settings_ui.inc` and app_main's wiring). The seat command path (`seat_step`, `seat_request`, `seat_apply_state`) stays in main |
@@ -59,8 +62,9 @@ behaviour.
   `app_main` during start-up.
 - Dependencies, public (the headers use their types): `lvgl`, `hmi_format` (texts,
   `StepperSpec`), `hmi_models` (`grid.hpp`, `pin.hpp`), `rammp_rtps_messages`
-  (`MIB::MibSystemState`, the seat axis table). Private: `ui` (the export: widgets, component
-  children, theme colours). `main` requires the component (`PRIV_REQUIRES hmi_ui`).
+  (`MIB::MibSystemState`, the seat axis table), `esp_driver_ppa` and espp `logger`. Private:
+  `ui` (the export: widgets, component children, theme colours), `esp_mm` (the flip's cache
+  sync), `esp_timer` (the FPS meter). `main` requires the component (`PRIV_REQUIRES hmi_ui`).
 - Build: `fw_component_options(${COMPONENT_LIB})` (C++23 and the fw warning set as errors),
   called unguarded like every first-party component; the top-level CMakeLists defines it
   before the components are evaluated and fails the configure if a component leaves it out.

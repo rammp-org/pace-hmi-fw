@@ -24,8 +24,9 @@
 
 #include "m5stack-tab5.hpp"
 
-#include "da7280.hpp"
 #include "drv2605.hpp"
+#include "feedback/da7280_bench.hpp"
+#include "feedback/feedback.hpp"
 
 #include "kalman_filter.hpp"
 #include "madgwick_filter.hpp"
@@ -71,8 +72,6 @@
 #include "esp_timer.h"
 
 using namespace std::chrono_literals;
-
-static std::vector<uint8_t> audio_bytes;
 
 static std::recursive_mutex lvgl_mutex;
 
@@ -126,8 +125,6 @@ static std::recursive_mutex lvgl_mutex;
 // --
 #include "frag_display_flip.inc" // split_main.py
 // --
-#include "frag_da7280.inc" // split_main.py
-// --
 extern "C" void app_main(void) {
   // First, so the LogScreen has everything printed from here on - including
   // what the tasks started below print.
@@ -156,16 +153,16 @@ extern "C" void app_main(void) {
   }
   logger.info("Found devices at addresses: {::#02x}", found_addresses);
 
-  // DRV2605 haptic motor driver, armed with the 1 s waveform the HAPTIC TEST
-  // settings row plays (the button is wired up after ui_init() below).
-  init_haptic(logger, i2c);
+  // The haptic and sound cues: the DRV2605 comes up here (the HAPTIC TEST slot,
+  // the unlock and hold clicks, a refusal); the click's samples load after the
+  // LVGL task starts. Lives as long as app_main, which never returns once the UI
+  // runs; the unit reaches it through `feedback`.
+  hmi::feedback::Feedback cues({.i2c = i2c, .boot_log = logger, .sound = click_sound_config()});
+  feedback = &cues;
 
   // DA7280 bring-up test (raw register read) and driver functional test (Da7280
   // driver class, DRO mode): bench only, CONFIG_HMI_BENCH_DA7280_TEST.
-  if constexpr (kBenchDa7280Test) {
-    test_da7280(logger, i2c, found_addresses);
-    test_da7280_functional(logger, i2c);
-  }
+  hmi::feedback::run_da7280_bench(logger, i2c, found_addresses);
 
   // Initialize the IO expanders
   logger.info("Initializing IO expanders...");
@@ -218,14 +215,8 @@ extern "C" void app_main(void) {
     assert(lv_display_get_rotation(lv_display_get_default()) == LV_DISPLAY_ROTATION_0 &&
            "DIRECT render mode requires rotation 0");
     if (fb_err == ESP_OK && fb0 && fb1) {
-      lv_display_set_buffers(lv_display_get_default(), fb0, fb1, fb_bytes,
-                             LV_DISPLAY_RENDER_MODE_DIRECT);
-      lv_display_set_flush_cb(lv_display_get_default(), direct_flush_cb);
-      panel_fb[0] = static_cast<uint8_t *>(fb0);
-      panel_fb[1] = static_cast<uint8_t *>(fb1);
-      panel_fb_bytes = fb_bytes;
-      panel_w = tab5.display_width();
-      panel_h = tab5.display_height();
+      display_flip.use_panel_buffers(lv_display_get_default(), fb0, fb1, fb_bytes,
+                                     tab5.display_width(), tab5.display_height());
       direct_render = true;
       logger.info("LVGL rendering directly into the DSI frame buffers (DIRECT mode)");
     } else {
@@ -241,8 +232,7 @@ extern "C" void app_main(void) {
   lv_timer_set_period(lv_display_get_refr_timer(display), 16);
 
   if constexpr (kFpsInstrument) {
-    lv_display_add_event_cb(display, fps_render_start_cb, LV_EVENT_RENDER_START, nullptr);
-    lv_display_add_event_cb(display, fps_render_ready_cb, LV_EVENT_RENDER_READY, nullptr);
+    fps_meter.attach(display);
     logger.info("FPS instrumentation enabled (stress={})", kFpsStress);
   }
 
@@ -936,8 +926,8 @@ extern "C" void app_main(void) {
             return espp::M5StackTab5::get().internal_i2c().probe_device(address);
           },
       .boot_i2c_devices = found_addresses,
-      .drv2605_status = drv2605_status,
-      .drv2605_play = drv2605_play_click,
+      .drv2605_status = [] { return feedback->haptics().status(); },
+      .drv2605_play = [](std::string &detail) { return feedback->haptics().play_click(detail); },
       .da7280_found = std::find(found_addresses.begin(), found_addresses.end(), kDa7280Address) !=
                       found_addresses.end(),
       .direct_render = direct_render,
@@ -999,61 +989,49 @@ extern "C" void app_main(void) {
   }
   if (auto touchpad = tab5.touchpad_input()) {
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
-    flip_wrap_touch(touchpad->get_touchpad_input_device());
+    display_flip.wrap_touch(touchpad->get_touchpad_input_device());
   }
 
   // start a simple thread to do the lv_task_handler every 8ms — the refresh
   // timer runs at 16ms (60 fps), polling at twice that rate keeps its firing
   // jitter well under a frame
   logger.info("Starting LVGL task...");
-  espp::Task lv_task(
-      {.callback = [](std::mutex &m, std::condition_variable &cv) -> bool {
-         // steady_clock, never high_resolution_clock: on ESP-IDF that one is the
-         // wall clock, which the MCB's time moves (see "TopBar clock"), and
-         // wait_until on a wall clock that steps back sleeps out the whole step
-         // - the screen froze for as long as the clock went back.
-         auto start_time = std::chrono::steady_clock::now();
-         {
-           std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
-           if constexpr (kFpsStress) {
-             lv_obj_invalidate(lv_screen_active());
-           }
-           lv_task_handler();
-         }
-         if constexpr (kFpsInstrument) {
-           static int64_t last_report_us = esp_timer_get_time();
-           const int64_t now_us = esp_timer_get_time();
-           if (now_us - last_report_us >= 1000000) {
-             // Made per report rather than kept in a static: debug build, once a second.
-             const espp::Logger fps_log({.tag = "fps", .level = espp::Logger::Verbosity::DEBUG});
-             const uint32_t frames = fps_frames.exchange(0);
-             const uint64_t total_us = fps_render_us_total.exchange(0);
-             const uint32_t max_us = fps_render_us_max.exchange(0);
-             const float secs = (now_us - last_report_us) / 1e6f;
-             last_report_us = now_us;
-             fps_log.debug("[FPS] {:.1f} fps | render avg {:.2f} ms | max {:.2f} ms", frames / secs,
-                           frames ? (total_us / 1000.0f) / frames : 0.0f, max_us / 1000.0f);
-           }
-         }
-         std::unique_lock<std::mutex> lock(m);
-         // Always yield at least one tick: once a render cycle exceeds 8 ms
-         // the deadline is already past and wait_until returns without
-         // yielding, which pins core 1 at priority 20 and starves IDLE1.
-         const auto deadline = std::max(start_time + 8ms, std::chrono::steady_clock::now() + 1ms);
-         cv.wait_until(lock, deadline, []() { return false; });
-         return false;
-       },
-       .task_config = {
-           .name = "lv_task",
-           // Measured peak ~6 KB (self test mem.stk_lvgl: 26964 B of 32 KB
-           // never used). The stack is internal DMA-capable RAM, which RTPS
-           // start-up runs dry on: at 32 KB the W5500 driver's bounce buffer
-           // failed to allocate and the board boot-looped. mem.stk_lvgl
-           // guards the headroom.
-           .stack_size_bytes = 16 * 1024,
-           .priority = 20,
-           .core_id = 1,
-       }});
+  espp::Task lv_task({.callback = [](std::mutex &m, std::condition_variable &cv) -> bool {
+                        // steady_clock, never high_resolution_clock: on ESP-IDF that one is the
+                        // wall clock, which the MCB's time moves (see "TopBar clock"), and
+                        // wait_until on a wall clock that steps back sleeps out the whole step
+                        // - the screen froze for as long as the clock went back.
+                        auto start_time = std::chrono::steady_clock::now();
+                        {
+                          std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
+                          if constexpr (kFpsStress) {
+                            lv_obj_invalidate(lv_screen_active());
+                          }
+                          lv_task_handler();
+                        }
+                        if constexpr (kFpsInstrument) {
+                          fps_meter.report_if_due();
+                        }
+                        std::unique_lock<std::mutex> lock(m);
+                        // Always yield at least one tick: once a render cycle exceeds 8 ms
+                        // the deadline is already past and wait_until returns without
+                        // yielding, which pins core 1 at priority 20 and starves IDLE1.
+                        const auto deadline =
+                            std::max(start_time + 8ms, std::chrono::steady_clock::now() + 1ms);
+                        cv.wait_until(lock, deadline, []() { return false; });
+                        return false;
+                      },
+                      .task_config = {
+                          .name = "lv_task",
+                          // Measured peak ~6 KB (self test mem.stk_lvgl: 26964 B of 32 KB
+                          // never used). The stack is internal DMA-capable RAM, which RTPS
+                          // start-up runs dry on: at 32 KB the W5500 driver's bounce buffer
+                          // failed to allocate and the board boot-looped. mem.stk_lvgl
+                          // guards the headroom.
+                          .stack_size_bytes = 16 * 1024,
+                          .priority = 20,
+                          .core_id = 1,
+                      }});
   if (!lv_task.start()) {
     logger.error("Failed to start LVGL task!");
     return;
@@ -1283,20 +1261,7 @@ extern "C" void app_main(void) {
     auto horiz_mv = adc.get_mv(channels[1]); // ADC1_CH1 (GPIO17)
     // twist pot on ADC2 (GPIO52), sampled oneshot — see comment at the
     // channel definitions above — and averaged (kTwistOversample)
-    std::optional<float> twist_mv;
-    {
-      float sum = 0.0f;
-      int reads = 0;
-      for (int i = 0; i < kTwistOversample; ++i) {
-        if (auto mv = twist_adc.read_mv(twist_channel)) {
-          sum += *mv;
-          ++reads;
-        }
-      }
-      if (reads > 0) {
-        twist_mv = sum / static_cast<float>(reads);
-      }
-    }
+    const std::optional<float> twist_mv = read_twist_mv(twist_adc, twist_channel, kTwistOversample);
 
     // raw mV -> calibrated stick -> the keypad key, the bars and XYTwist:
     // hmi::stick::StickPipeline (components/stick), fed through AdcStickIo

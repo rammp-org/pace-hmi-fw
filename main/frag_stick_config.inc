@@ -100,3 +100,30 @@ struct AdcStickIo {
   }
 };
 
+// The twist pot's reading for the Read ADC task: `oversample` oneshot reads on
+// ADC2, averaged; nullopt if none succeeded.
+//
+// Out of line on purpose (noinline). OneshotAdc::read_mv brings espp Logger's
+// error paths with it, and once GCC also inlined Logger::get_time there (an fmt
+// buffer of ~500 B) the ADC task's own frame grew from 256 to 736 B, and every
+// call it makes (RTPS publish, the bars' observers) sat that much deeper: the
+// bench's mem.stk_adc fell ~500 B (B3, image a6ff6de, 2026-10-07). Here that cold
+// path holds stack only while the twist is read. Which way the inliner goes
+// depends on the rest of the unit, so this pins it instead of relying on it.
+[[gnu::noinline]] static std::optional<float>
+read_twist_mv(espp::OneshotAdc &twist_adc, const espp::AdcConfig &twist_channel, int oversample) {
+  std::optional<float> twist_mv;
+  float sum = 0.0f;
+  int reads = 0;
+  for (int i = 0; i < oversample; ++i) {
+    if (auto mv = twist_adc.read_mv(twist_channel)) {
+      sum += *mv;
+      ++reads;
+    }
+  }
+  if (reads > 0) {
+    twist_mv = sum / static_cast<float>(reads);
+  }
+  return twist_mv;
+}
+
