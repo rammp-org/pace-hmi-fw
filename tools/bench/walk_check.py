@@ -7,10 +7,12 @@ streams XYTwist to it, then `hmi_ui.py --host <ip> walk <out>`.
 Verdict (exit 0 PASS, 1 FAIL):
 - the walk exits 0 and reports 13 screens;
 - the 13 screen names equal the baseline names, in order. The baseline PNGs
-  were saved without their names, so the names live in
-  C:\\b\\bench\\baseline\\walk-names.json; when that file is missing this run
-  records it (reported as `names: RECORDED`) and the names are not graded;
+  were saved without their names; the names now live beside them in
+  walk/names.json (if neither that nor BENCH_HOME/baseline/walk-names.json
+  exists, this run records the latter and the names are not graded);
 - the static screens (STATIC below) equal the baseline PNGs pixel for pixel
+  (Night theme since 2026-10-06, owner-approved; the Day originals are kept as
+  walk/<stem>-day.png)
   (TS-DET-05: exact), with the top bar (y < 60: clock, link) masked, and on
   the two Settings sections the scrolling row names (MASKS below).
 The other screens (diagnostics, joystick, log, skunk works, internet, firmware
@@ -46,7 +48,11 @@ MASKS = {
     "09-settings-joystick-driving": [(0, 340, 150, 1010)],
 }
 EXPECTED_SCREENS = 13
-NAMES_FILE = common.LOCAL_BASELINE_DIR / "walk-names.json"
+# The names, committed beside the baseline PNGs; the run-time copy under
+# C:enchaseline is used only when the repo has none.
+NAMES_FILE = (common.BASELINE_DIR / "walk" / "names.json"
+              if (common.BASELINE_DIR / "walk" / "names.json").exists()
+              else common.LOCAL_BASELINE_DIR / "walk-names.json")
 
 
 def read_png(path: pathlib.Path) -> tuple[int, int, bytes]:

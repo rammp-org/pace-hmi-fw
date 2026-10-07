@@ -1,5 +1,8 @@
 {
   "metrics": {
+    "app_main_lines": {
+      "main/main.cpp": 1007
+    },
     "assert": {
       "components/joystick/src/joystick.cpp": 17,
       "main/main.cpp": 1
@@ -41,7 +44,7 @@
       "main/remote_ui.cpp": 1
     },
     "lines": {
-      "main/main.cpp": 3984,
+      "main/main.cpp": 3983,
       "main/selftest.cpp": 1030
     },
     "locks": {
@@ -52,10 +55,10 @@
       "main/internet_ui.hpp": 1,
       "main/joystick_cal.cpp": 11,
       "main/log_capture.cpp": 7,
-      "main/main.cpp": 32,
+      "main/main.cpp": 23,
       "main/remote_ui.cpp": 10,
       "main/remote_ui.hpp": 1,
-      "main/rtps_comms.cpp": 42,
+      "main/rtps_comms.cpp": 36,
       "main/selftest.cpp": 30,
       "main/selftest.hpp": 1,
       "main/settings.cpp": 11,
@@ -63,7 +66,7 @@
       "main/update_ui.hpp": 1
     },
     "log_direct": {
-      "main/main.cpp": 6,
+      "main/main.cpp": 5,
       "main/remote_ui.cpp": 5,
       "main/selftest.cpp": 5
     },
@@ -90,6 +93,12 @@
     "sleep_this_thread": {
       "main/main.cpp": 13,
       "main/remote_ui.cpp": 5,
+      "main/rtps_comms.cpp": 5
+    },
+    "static_state": {
+      "main/github_ota.cpp": 1,
+      "main/main.cpp": 40,
+      "main/remote_ui.cpp": 2,
       "main/rtps_comms.cpp": 5
     },
     "std_thread": {

@@ -86,3 +86,16 @@ image. Children run with `PYTHONDONTWRITEBYTECODE=1`.
 - **Self-test bands** are in `compare_selftest.py` (`BANDS`, documented in its docstring).
   The baseline `selftest.json` was taken while `rtps_mcb_sim.py` was running (scratchpad
   `ready_rtps.py`), against the rule; its values passed their own limits.
+
+## Re-baseline 2026-10-06: Night theme (owner-approved, TS-DET-05)
+The owner set the Night theme (settings `theme 0`) on board 2 and it stays.
+- B2: `tests/characterisation/baseline-e2047a4/boot-expected.json` overrides the expected
+  `settings_loaded` value (theme 1 → theme 0) and keeps the old value beside it.
+  `boot-board2.log` stays the unedited capture.
+- B4: the six static screens were captured fresh on final-a9a040f in Night (two walks, equal
+  outside the masks; the Settings marquee masks still cover the only differences). The Day
+  originals are kept as `walk/<stem>-day.png`. The side-by-side sheets (Day left, Night right)
+  are in `C:\b\bench\baseline\night-vs-day\`. The screen names are unchanged and are now
+  committed as `walk/names.json`.
+- The board's IP is DHCP-assigned (.180 overnight, .218 since 11:31). B2 takes it from the boot
+  log; `run_bench.py` refuses `--ip` when B2 is in `--steps`.

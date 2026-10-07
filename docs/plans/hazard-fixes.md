@@ -88,6 +88,9 @@ that never regenerate goldens from the new code.
 | ADC task forces scale 0 when the UI heartbeat atomic is older than 200 ms, MibStatus is stale, or the last MIB state is not ENABLED (the full fix waits for the islands work) |
 | Task watchdog on the ADC, UI and net tasks; ADC task priority above UI, pinned, stack from the stress test |
 
+Measured (G10 task dump, 2026-10-06): the ADC task runs at prio 5 on core 0, below lv_task (prio 20, core 1), so H11's "ADC above UI" still needs a change.
+Unpinned FPU tasks (Read ADC, ContinuousAdc, rtps_*) get a boot-dependent core: ESP-IDF pins a task to the core of its first FPU use (ContinuousAdc: core 1 on one boot, core 0 on the next). C4 must pin the ADC task explicitly.
+
 ### Seat path (H8, H10 seat, H6 seat), after C1
 
 | Rule |
@@ -132,3 +135,10 @@ shared file: B1 merges before B2's boot hook.
 | D2 | Firmware-only for H3: detect the high rail, NaN and failed reads; the low-rail open circuit (0 mV) is a documented residual hazard |
 | D3 | Pending: the owner asks the MCB team about the XYTwist timeout and DISABLE semantics; C3 sign-off waits for the answer |
 | Phase A | Approved to start on the draft branches (incl. the table-type move with a fingerprint, and the CLEAR_MENU_ON_ARRIVAL table correction as its own commit for review) |
+
+## 8. Findings during Phase A
+
+| Finding | Where | Action |
+| --- | --- | --- |
+| A lazily built `static espp::Logger` on a fault path (CS-SAF-04) | `components/fw_core/src/port_freertos.cpp:17` (`log_error`) | Construct at start-up before fw_core is used in a safety island |
+| clang-tidy is not in CI (cppcheck only), so the 60-line limit holds only via `idf.py clang-check`, which needs a clang-toolchain build | `.github/workflows/static_analysis.yml` | Add a clang-toolchain clang-check job |

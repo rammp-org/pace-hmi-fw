@@ -287,6 +287,11 @@ def main() -> int:
         return 3
     os.environ["BENCH_LEASE_OWNER"] = owner
     run = Run(a)
+    # The board's address is DHCP-assigned (.180 overnight, .218 since 11:31):
+    # when B2 runs, the IP comes only from its boot log, never from --ip or a
+    # stored value.
+    if "B2" in steps and a.ip:
+        p.error("--ip is only for runs without B2: B2 takes the IP from the boot log")
     run.ip = a.ip
     order = {"B0": run.b0, "B1": run.b1, "B2": run.b2, "B3": run.b3, "B4": run.b4, "B4b": run.b4b,
              "B5": run.b5}

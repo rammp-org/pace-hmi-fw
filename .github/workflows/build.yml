@@ -41,6 +41,19 @@ jobs:
         path: "."
         target: ${{ env.IDF_TARGET }}
 
+    # Guards G4 (static init) and G2 (exported symbols) on the default variant's objects
+    # (docs/plans/app-main-shrink.md §5; tools/guards/README.md). In the IDF image: they need
+    # its readelf/objdump/nm. The bench variant's run is in l0.yml.
+    - name: Guards G4 init_order and G2 exports (default variant)
+      uses: espressif/esp-idf-ci-action@v1
+      with:
+        esp_idf_version: ${{ env.IDF_VERSION }}
+        path: "."
+        target: ${{ env.IDF_TARGET }}
+        command: >-
+          python3 tools/guards/init_order.py check --build build --variant default
+          && python3 tools/guards/exports.py check --build build
+
     - name: Determine Size Delta
       uses: esp-cpp/esp-idf-size-delta@v1
       with:

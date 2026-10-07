@@ -115,11 +115,13 @@ static std::optional<bool> drv2605_play_click(std::string &detail) {
 static constexpr uint8_t kDa7280Address = 0x4A;
 static constexpr uint8_t kDa7280RegChipRev = 0x00;
 
+// Whether app_main runs test_da7280 and test_da7280_functional at boot: a bench
+// feature, off unless CONFIG_HMI_BENCH_DA7280_TEST (CS-LAY-09, CS-TYP-05).
+static constexpr bool kBenchDa7280Test = CONFIG_HMI_BENCH_DA7280_TEST_AS_INT != 0;
+
 static void test_da7280(espp::Logger &logger, espp::I2c &i2c,
                         const std::vector<uint8_t> &found_addresses) {
-  bool found = std::find(found_addresses.begin(), found_addresses.end(), kDa7280Address) !=
-               found_addresses.end();
-  if (!found) {
+  if (!std::ranges::contains(found_addresses, kDa7280Address)) {
     logger.warn("DA7280 not found at {:#02x} — check wiring", kDa7280Address);
     return;
   }
@@ -331,4 +333,3 @@ static void test_da7280_functional(espp::Logger &logger, espp::I2c &i2c) {
 
   logger.info("DA7280 functional test complete");
 }
-

@@ -157,11 +157,12 @@ extern "C" void app_main(void) {
   // settings row plays (the button is wired up after ui_init() below).
   init_haptic(logger, i2c);
 
-  // DA7280 haptic driver bring-up test (raw register read, no driver yet)
-  test_da7280(logger, i2c, found_addresses);
-
-  // DA7280 driver functional test (Da7280 driver class, DRO mode)
-  test_da7280_functional(logger, i2c);
+  // DA7280 bring-up test (raw register read) and driver functional test (Da7280
+  // driver class, DRO mode): bench only, CONFIG_HMI_BENCH_DA7280_TEST.
+  if constexpr (kBenchDa7280Test) {
+    test_da7280(logger, i2c, found_addresses);
+    test_da7280_functional(logger, i2c);
+  }
 
   // Initialize the IO expanders
   logger.info("Initializing IO expanders...");
@@ -233,13 +234,12 @@ extern "C" void app_main(void) {
   // run the LVGL refresh timer at 60 fps — the espp lv_conf.h compiles in a
   // 33 ms (30 fps) default period; the lv_task loop below already calls
   // lv_task_handler every 16 ms so it can keep up
-  lv_timer_set_period(lv_display_get_refr_timer(lv_display_get_default()), 16);
+  lv_display_t *const display = lv_display_get_default();
+  lv_timer_set_period(lv_display_get_refr_timer(display), 16);
 
-  if (kFpsInstrument) {
-    lv_display_add_event_cb(lv_display_get_default(), fps_render_start_cb, LV_EVENT_RENDER_START,
-                            nullptr);
-    lv_display_add_event_cb(lv_display_get_default(), fps_render_ready_cb, LV_EVENT_RENDER_READY,
-                            nullptr);
+  if constexpr (kFpsInstrument) {
+    lv_display_add_event_cb(display, fps_render_start_cb, LV_EVENT_RENDER_START, nullptr);
+    lv_display_add_event_cb(display, fps_render_ready_cb, LV_EVENT_RENDER_READY, nullptr);
     logger.info("FPS instrumentation enabled (stress={})", kFpsStress);
   }
 
@@ -498,7 +498,7 @@ extern "C" void app_main(void) {
 
   // Benchmark against a real screen rather than the boot screen, whose logo
   // otherwise dominates every measurement. Only with kFpsInstrument.
-  if (kFpsInstrument) {
+  if constexpr (kFpsInstrument) {
     lv_screen_load(ui_DriveScreen);
   }
 
@@ -1193,24 +1193,24 @@ extern "C" void app_main(void) {
          auto start_time = std::chrono::steady_clock::now();
          {
            std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
-           if (kFpsStress) {
+           if constexpr (kFpsStress) {
              lv_obj_invalidate(lv_screen_active());
            }
            lv_task_handler();
          }
-         if (kFpsInstrument) {
-           static int64_t last_report_us = 0;
+         if constexpr (kFpsInstrument) {
+           static int64_t last_report_us = esp_timer_get_time();
            const int64_t now_us = esp_timer_get_time();
-           if (last_report_us == 0)
-             last_report_us = now_us;
            if (now_us - last_report_us >= 1000000) {
+             // Made per report rather than kept in a static: debug build, once a second.
+             const espp::Logger fps_log({.tag = "fps", .level = espp::Logger::Verbosity::DEBUG});
              const uint32_t frames = fps_frames.exchange(0);
              const uint64_t total_us = fps_render_us_total.exchange(0);
              const uint32_t max_us = fps_render_us_max.exchange(0);
              const float secs = (now_us - last_report_us) / 1e6f;
              last_report_us = now_us;
-             fmt::print("[FPS] {:.1f} fps | render avg {:.2f} ms | max {:.2f} ms\n", frames / secs,
-                        frames ? (total_us / 1000.0f) / frames : 0.0f, max_us / 1000.0f);
+             fps_log.debug("[FPS] {:.1f} fps | render avg {:.2f} ms | max {:.2f} ms", frames / secs,
+                           frames ? (total_us / 1000.0f) / frames : 0.0f, max_us / 1000.0f);
            }
          }
          std::unique_lock<std::mutex> lock(m);
