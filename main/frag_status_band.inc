@@ -39,8 +39,6 @@ static void gpio48_panel_observer(lv_observer_t *observer, lv_subject_t *subject
 // has no built-in binding, hence an observer rather than lv_label_bind_text.
 /////////////////////////////////////////////////////////////////////////////
 
-static constexpr uint32_t kStatusOrange = 0xFF8C00; // network up, nothing peering
-
 // The one instance, for every DriveBand; bound from app_main and the screens built on demand.
 static constinit hmi::ui::StatusBandView status_band_view{{.shared = &ui_shared_subjects}};
 static void bind_status_panel(lv_obj_t *panel) { status_band_view.bind(panel); }
