@@ -1,12 +1,35 @@
-// category of errors to suppress, e.g. unusedFunction
+// cppcheck suppressions (CS-FMT-02: each one has a reason). Used by
+// .github/workflows/static_analysis.yml through --suppressions-list.
+// Inherited from the espp project template unless noted. None covers new code:
+// add a suppression only with a reason, and never for safety code (CS-SAF-07).
+
+// Categories of errors to suppress
+
+// The action runs with use_cmake: false, so cppcheck has no include paths:
+// every project and ESP-IDF header would be reported as missing.
 missingInclude
 missingIncludeSystem
+
+// Whole-program check with a partial view: app_main, the SquareLine export's
+// event callbacks and LVGL/espp callbacks are called from code cppcheck does
+// not see, so live functions are reported as unused.
 unusedFunction
+
+// Message structs mirror the RTPS wire layout and Config structs are read
+// through designated initialisers; cppcheck reports those fields as unused.
 unusedStructMember
+
+// Style hint ("member function can be static") that fights the component
+// pattern (CS-CMP-01), where members gain state as the class grows.
 functionStatic
+
+// LVGL and ESP-IDF macros expand to C-style casts in our files, and the C
+// files (CS-LNG-04) use them by necessity. tools/l0/ratchet.py counts
+// C-style casts in first-party code instead (metric c_cast).
 cstyleCast
 
 // Specific suppressions of the form:
 //   [error id]:[filename]:[line]
-*:components/espp/*
+
+// external/ is the rammp-rtps submodule: its own repo owns its findings.
 *:external/*

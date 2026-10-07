@@ -1,5 +1,6 @@
 #include "internet_ui.hpp"
 
+#include <array>
 #include <memory>
 #include <optional>
 #include <string>
@@ -10,6 +11,7 @@
 #include "esp_pthread.h"
 #include "esp_system.h"
 #include "format.hpp"
+#include "hmi_format/net.hpp"
 #include "logger.hpp"
 #include "rtps_comms.hpp"
 #include "ui.h"
@@ -120,7 +122,9 @@ void main_refresh() {
   const std::string ip = rtps_comms_ip();
   lv_label_set_text(ui_NetIpValue, ip.empty() ? "--" : ip.c_str());
   const std::optional<int> rssi = rtps_comms_wifi_rssi();
-  lv_label_set_text(ui_NetSignalValue, rssi ? fmt::format("{} dBm", *rssi).c_str() : "--");
+  std::array<char, hmi::format::SIGNAL_TEXT_SIZE> signal{};
+  hmi::format::signal_text(rssi, signal);
+  lv_label_set_text(ui_NetSignalValue, signal.data());
 
   // Offered only when a restart would change the link: WiFi chosen with no
   // network to join would come up on Ethernet again, so there is nothing to apply.
@@ -272,9 +276,10 @@ void networks_fill(std::optional<std::vector<WifiNetworkFound>> &found) {
     lv_obj_t *row = ui_NetRow_create(ui_NetList);
     lv_label_set_text(ui_comp_get_child(row, UI_COMP_NETROW_NETROWGROUND_NETROWNAME),
                       network.ssid.c_str());
-    lv_label_set_text(
-        ui_comp_get_child(row, UI_COMP_NETROW_NETROWGROUND_NETROWSIGNAL),
-        fmt::format("{}{} dBm", network.secured ? "" : "open  ", network.rssi).c_str());
+    std::array<char, hmi::format::ROW_SIGNAL_TEXT_SIZE> signal{};
+    hmi::format::net_row_signal_text(network.secured, network.rssi, signal);
+    lv_label_set_text(ui_comp_get_child(row, UI_COMP_NETROW_NETROWGROUND_NETROWSIGNAL),
+                      signal.data());
     cfg.claim_clicks(row);
     cfg.mirror_states(row);
     lv_obj_add_flag(row, LV_OBJ_FLAG_SCROLL_ON_FOCUS);

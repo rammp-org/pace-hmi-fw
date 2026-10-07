@@ -2,7 +2,7 @@
 """Run the joystick HMI's self test over RTPS and report the verdict.
 
 Every check the HMI makes, and the limits it is held to, live in
-main/selftest_spec.h. This script asks for a run, collects the report and
+main/selftest_spec.hpp. This script asks for a run, collects the report and
 exits with the verdict, so a firmware change can be checked objectively
 instead of by reading the code:
 
@@ -13,13 +13,13 @@ instead of by reading the code:
 
 It plays the MCB while it runs (it is an rtps_mcb_sim.SystemStatePublisher): the
 HMI's RTPS checks need McbStatus arriving and their pings answered, and a run
-requested from here holds the HMI to all of them (ST_REMOTE in the spec). So
+requested from here holds the HMI to all of them (Need::REMOTE in the spec). So
 close rtps_mcb_gui.py / rtps_mcb_sim.py first - two MCBs publishing at once
 would show up as McbStatus loss - or use the GUI's own "Run self test" button.
 
 On top of the HMI's checks it adds three only this side can make, prefixed
 pc.: that the report arrived whole, that it lists exactly the checks in this
-checkout's selftest_spec.h (catches a board running other firmware than you
+checkout's selftest_spec.hpp (catches a board running other firmware than you
 think), and the joystick sample rate as received here.
 
 The board and adapter are found the way rtps_mcb_sim.py finds them: --peer and
@@ -31,7 +31,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sys
 import threading
 import time
@@ -42,11 +41,10 @@ import rammp_rtps as spec  # noqa: E402  (path setup must run first)
 import rtps_host  # noqa: E402
 import rtps_mcb_sim  # noqa: E402
 
-SELFTEST_SPEC_PATH = os.path.join(os.path.dirname(spec.HEADER_PATH), "selftest_spec.h")
-# X(ID, "name", "unit", lo, hi, need, "what it proves")
-_ROW_RE = re.compile(
-    r'^\s*X\(\s*([A-Z0-9_]+)\s*,\s*"([^"]*)"\s*,\s*"([^"]*)"\s*,\s*([^,]+?)\s*,\s*([^,]+?)\s*,'
-    r'\s*(ST_[A-Z]+)\s*,\s*"([^"]*)"\s*\)', re.M)
+# The check table's parser lives in rammp_rtps, beside the other header scrapers, so it
+# imports without this script's GUI-side dependencies (tests/host/selftest_spec_parity).
+SELFTEST_SPEC_PATH = spec.SELFTEST_SPEC_PATH
+SpecRow = spec.SelfTestSpecRow
 
 #: after FINISHED, how long the end-of-run repeat gets to fill dropped rows
 REPORT_SETTLE_S = 3.0
@@ -59,24 +57,9 @@ ADC_RATE_WINDOW_S = 3.0
 EXIT_PASS, EXIT_FAIL, EXIT_NO_ANSWER = 0, 1, 2
 
 
-class SpecRow:
-    def __init__(self, name: str, unit: str, lo: str, hi: str, need: str, desc: str) -> None:
-        self.name = name
-        self.unit = unit
-        self.lo = spec.INT32_MIN if lo.startswith("ST_ANY") else int(lo, 0)
-        self.hi = spec.INT32_MAX if hi.startswith("ST_ANY") else int(hi, 0)
-        self.need = need
-        self.desc = desc
-
-
 def load_spec() -> dict[str, SpecRow]:
-    """This checkout's selftest_spec.h, keyed by check name."""
-    with open(SELFTEST_SPEC_PATH, encoding="utf-8") as handle:
-        rows = _ROW_RE.findall(handle.read())
-    if not rows:
-        raise RuntimeError(f"{SELFTEST_SPEC_PATH}: SELFTEST_TABLE parsed to nothing")
-    return {name: SpecRow(name, unit, lo, hi, need, desc)
-            for _id, name, unit, lo, hi, need, desc in rows}
+    """This checkout's selftest_spec.hpp, keyed by check name."""
+    return spec.load_selftest_spec()
 
 
 def pc_check(index: int, name: str, value: int, lo: int, hi: int, unit: str = "",

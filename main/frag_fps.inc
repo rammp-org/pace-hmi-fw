@@ -1,6 +1,7 @@
 // split_main.py fragment of main.cpp (frag_fps: original lines 78-107); one TU, see main.cpp.
 // ---------------------------------------------------------------------------
-// Frame-rate instrumentation: a bench switch, off in every build that ships.
+// Frame-rate instrumentation: a debug feature, off unless CONFIG_HMI_DEBUG_FPS
+// (CS-LAY-09), and never in sdkconfig.defaults, which ships.
 //
 // Reports over serial rather than the LVGL perf overlay, so throughput can be
 // measured without eyes on the panel. RENDER_START/RENDER_READY fire only when
@@ -9,10 +10,14 @@
 //
 // kFpsStress forces a full-screen invalidation every LVGL cycle. Without it a
 // static SquareLine screen invalidates nothing and renders nothing, which
-// measures the redraw path not at all. With it we get sustained worst case.
+// measures the redraw path not at all. With it we get sustained worst case
+// (CONFIG_HMI_DEBUG_FPS_STRESS).
+//
+// The once-a-second report goes through its own espp::Logger at debug level,
+// tag "fps" (CS-LOG-01/03): developer detail, and only in this debug build.
 // ---------------------------------------------------------------------------
-static constexpr bool kFpsInstrument = false;
-static constexpr bool kFpsStress = false;
+static constexpr bool kFpsInstrument = CONFIG_HMI_DEBUG_FPS_AS_INT != 0;
+static constexpr bool kFpsStress = CONFIG_HMI_DEBUG_FPS_STRESS_AS_INT != 0;
 static std::atomic<uint32_t> fps_frames{0};
 static std::atomic<uint64_t> fps_render_us_total{0};
 static std::atomic<uint32_t> fps_render_us_max{0};
@@ -28,4 +33,3 @@ static void fps_render_ready_cb(lv_event_t *) {
   while (us > prev && !fps_render_us_max.compare_exchange_weak(prev, us)) {
   }
 }
-

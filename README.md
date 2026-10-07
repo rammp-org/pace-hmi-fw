@@ -19,7 +19,7 @@ Firmware for the RAMMP wheelchair HMI: an M5Stack Tab5 (ESP32-P4) on the [RAMMP 
 
 ## Screens
 
-The UI follows RAMMP UI spec V2. Every screen has the same frame: the status bar, the **DRIVE / STATE** band, the screen's own content, and the **burger key** at the bottom, which opens the menu. [docs/ui-architecture.md](docs/ui-architecture.md) explains how it all works: where the screens come from, how the menu is built, how touch and the joystick move around, and how the chair's state reaches the screen.
+The UI follows RAMMP UI spec V2. Every screen has the same frame: the status bar, the **DRIVE / STATE** band, the screen's own content, and the **burger key** at the bottom, which opens the menu. [docs/ui-architecture.md](docs/ui-architecture.md) explains how it all works: where the screens come from, how the menu is built, how touch and the joystick move around, and how the chair's state reaches the screen. [docs/how-the-firmware-works.md](docs/how-the-firmware-works.md) walks through the code itself: boot, tasks, the joystick-to-motion path, the drive state machine and every `frag_*.inc` fragment.
 
 - **Driving**: on the Locked screen, **hold the joystick button** until the ring closes. The MIB decides: the Drive screen opens only once it says the chair is driving. Hold the button again on the Drive screen to stop. While driving, the burger key asks the MIB to stop first, and the menu opens once it has.
 - **Moving around**: touch, or the joystick. Push to move the highlight, press the button to select. Down past the last item reaches the burger key.

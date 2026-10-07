@@ -1,0 +1,123 @@
+{
+  "metrics": {
+    "app_main_lines": {
+      "main/main.cpp": 1007
+    },
+    "assert": {
+      "components/joystick/src/joystick.cpp": 17,
+      "main/main.cpp": 1
+    },
+    "c_cast": {
+      "main/da7280.hpp": 42,
+      "main/hmi_rtps_spec.hpp": 28,
+      "main/lv_mem_psram.c": 1
+    },
+    "esp_error_check": {},
+    "esp_timer_create": {},
+    "fn_over_120": {
+      "main/github_ota.cpp": 1,
+      "main/main.cpp": 2
+    },
+    "fn_over_60": {
+      "components/joystick/src/joystick.cpp": 1,
+      "main/da7280.hpp": 3,
+      "main/github_ota.cpp": 1,
+      "main/main.cpp": 4,
+      "main/remote_ui.cpp": 1,
+      "main/rtps_comms.cpp": 4,
+      "main/selftest.cpp": 2
+    },
+    "heap_raw": {
+      "main/fw_info.cpp": 1,
+      "main/github_ota.cpp": 3,
+      "main/internet_ui.cpp": 1,
+      "main/log_capture.cpp": 2,
+      "main/log_view.cpp": 1,
+      "main/lv_mem_psram.c": 5,
+      "main/main.cpp": 1,
+      "main/remote_ui.cpp": 2,
+      "main/rtps_comms.cpp": 1,
+      "main/selftest.cpp": 11,
+      "main/update_ui.cpp": 1
+    },
+    "if_config": {
+      "main/remote_ui.cpp": 1
+    },
+    "lines": {
+      "main/main.cpp": 3983,
+      "main/selftest.cpp": 1030
+    },
+    "locks": {
+      "main/da7280.hpp": 18,
+      "main/fw_info.cpp": 5,
+      "main/github_ota.cpp": 11,
+      "main/internet_ui.cpp": 2,
+      "main/internet_ui.hpp": 1,
+      "main/joystick_cal.cpp": 11,
+      "main/log_capture.cpp": 7,
+      "main/main.cpp": 23,
+      "main/remote_ui.cpp": 10,
+      "main/remote_ui.hpp": 1,
+      "main/rtps_comms.cpp": 36,
+      "main/selftest.cpp": 30,
+      "main/selftest.hpp": 1,
+      "main/settings.cpp": 11,
+      "main/update_ui.cpp": 2,
+      "main/update_ui.hpp": 1
+    },
+    "log_direct": {
+      "main/main.cpp": 5,
+      "main/remote_ui.cpp": 5,
+      "main/selftest.cpp": 5
+    },
+    "lv_outside_ui": {
+      "main/lv_mem_psram.c": 13,
+      "main/selftest.cpp": 136
+    },
+    "mutable_globals": {
+      "main/about_ui.cpp": 1,
+      "main/fw_info.cpp": 2,
+      "main/github_ota.cpp": 3,
+      "main/hmi_rtps_spec.hpp": 5,
+      "main/internet_ui.cpp": 11,
+      "main/joystick_cal.cpp": 16,
+      "main/log_capture.cpp": 8,
+      "main/log_view.cpp": 7,
+      "main/main.cpp": 143,
+      "main/remote_ui.cpp": 6,
+      "main/rtps_comms.cpp": 32,
+      "main/selftest.cpp": 25,
+      "main/settings.cpp": 2,
+      "main/update_ui.cpp": 9
+    },
+    "sleep_this_thread": {
+      "main/main.cpp": 13,
+      "main/remote_ui.cpp": 5,
+      "main/rtps_comms.cpp": 5
+    },
+    "static_state": {
+      "main/github_ota.cpp": 1,
+      "main/main.cpp": 40,
+      "main/remote_ui.cpp": 2,
+      "main/rtps_comms.cpp": 5
+    },
+    "std_thread": {
+      "main/fw_info.cpp": 1,
+      "main/github_ota.cpp": 1,
+      "main/internet_ui.cpp": 1,
+      "main/remote_ui.cpp": 1,
+      "main/update_ui.cpp": 1
+    },
+    "typedef": {
+      "components/joystick/include/joystick.hpp": 2,
+      "main/hmi_rtps_spec.hpp": 5
+    },
+    "vtaskdelay": {
+      "main/selftest.cpp": 6
+    },
+    "xtaskcreate": {
+      "main/selftest.cpp": 1
+    }
+  },
+  "version": 1
+}

@@ -128,7 +128,7 @@ alled, not installing again
 [M5Stack Tab5 Example/I][8.385]: Starting continuous adc...
 [joy_cal/I][8.393]: loaded /storage/joystick_cal.txt: horizontal 11/1507/2971, vertical 6/1510/2962, twist 10/1477/2960 mV
 [M5Stack Tab5 Example/I][8.407]: Starting RTPS comms...
-[rtps_comms/I][8.408]: WiFi network: 'AlainH' (built in)
+[rtps_comms/I][8.408]: WiFi network: '<ssid>' (built in)
 [rtps_comms/I][8.416]: Network: WiFi
 I (8418) transport: Attempt connection with slave: retry[0]
 W (8418) H_SDIO_DRV: Reset slave using GPIO[15]
@@ -181,23 +181,23 @@ I (10298) H_SDIO_DRV: Write thread started
 I (10488) RPC_WRAP: Coprocessor Boot-up
 [rtps_comms/I][10.606]: ESP32-C6 runs esp_hosted 1.4.1
 I (10741) RPC_WRAP: ESP Event: wifi station started
-[rtps_comms/I][10.751]: WiFi up, joining 'AlainH' (power save 0)
+[rtps_comms/I][10.751]: WiFi up, joining '<ssid>' (power save 0)
 I (10764) H_API: esp_wifi_remote_connect
 I (14525) RPC_WRAP: ESP Event: Station mode: Disconnected
-[rtps_comms/W][14.526]: WiFi: not connected to 'AlainH' (reason 2), retrying
+[rtps_comms/W][14.526]: WiFi: not connected to '<ssid>' (reason 2), retrying
 I (14526) H_API: esp_wifi_remote_connect
 I (16946) RPC_WRAP: ESP Event: Station mode: Disconnected
-[rtps_comms/W][16.947]: WiFi: not connected to 'AlainH' (reason 205), retrying
+[rtps_comms/W][16.947]: WiFi: not connected to '<ssid>' (reason 205), retrying
 I (16947) H_API: esp_wifi_remote_connect
 I (20384) RPC_WRAP: ESP Event: Station mode: Disconnected
-[rtps_comms/W][20.384]: WiFi: not connected to 'AlainH' (reason 2), retrying
+[rtps_comms/W][20.384]: WiFi: not connected to '<ssid>' (reason 2), retrying
 I (20385) H_API: esp_wifi_remote_connect
 I (22805) RPC_WRAP: ESP Event: Station mode: Disconnected
-[rtps_comms/W][22.805]: WiFi: not connected to 'AlainH' (reason 205), retrying
+[rtps_comms/W][22.805]: WiFi: not connected to '<ssid>' (reason 205), retrying
 I (22806) H_API: esp_wifi_remote_connect
 I (25539) RPC_WRAP: ESP Event: Station mode: Connected
 I (25539) esp_wifi_remote: esp_wifi_internal_reg_rxcb: sta: 0x401824b2
-[rtps_comms/I][25.576]: WiFi joined 'AlainH' on channel 11 (-31 dBm)
+[rtps_comms/I][25.576]: WiFi joined '<ssid>' on channel 11 (-31 dBm)
 [rtps_link/I][25.739]: LINK_DOWN -> NO_IP (link up, but no DHCP lease)
 I (27158) esp_netif_handlers: sta ip: 192.168.137.180, mask: 255.255.255.0, gw: 192.168.137.2
 [rtps_comms/I][27.158]: Got IP 192.168.137.180 (gateway 192.168.137.2)
