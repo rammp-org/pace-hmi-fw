@@ -235,8 +235,7 @@ extern "C" void app_main(void) {
   lv_timer_set_period(lv_display_get_refr_timer(display), 16);
 
   if constexpr (kFpsInstrument) {
-    lv_display_add_event_cb(display, fps_render_start_cb, LV_EVENT_RENDER_START, nullptr);
-    lv_display_add_event_cb(display, fps_render_ready_cb, LV_EVENT_RENDER_READY, nullptr);
+    fps_meter.attach(display);
     logger.info("FPS instrumentation enabled (stress={})", kFpsStress);
   }
 
@@ -1181,54 +1180,42 @@ extern "C" void app_main(void) {
   // timer runs at 16ms (60 fps), polling at twice that rate keeps its firing
   // jitter well under a frame
   logger.info("Starting LVGL task...");
-  espp::Task lv_task(
-      {.callback = [](std::mutex &m, std::condition_variable &cv) -> bool {
-         // steady_clock, never high_resolution_clock: on ESP-IDF that one is the
-         // wall clock, which the MCB's time moves (see "TopBar clock"), and
-         // wait_until on a wall clock that steps back sleeps out the whole step
-         // - the screen froze for as long as the clock went back.
-         auto start_time = std::chrono::steady_clock::now();
-         {
-           std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
-           if constexpr (kFpsStress) {
-             lv_obj_invalidate(lv_screen_active());
-           }
-           lv_task_handler();
-         }
-         if constexpr (kFpsInstrument) {
-           static int64_t last_report_us = esp_timer_get_time();
-           const int64_t now_us = esp_timer_get_time();
-           if (now_us - last_report_us >= 1000000) {
-             // Made per report rather than kept in a static: debug build, once a second.
-             const espp::Logger fps_log({.tag = "fps", .level = espp::Logger::Verbosity::DEBUG});
-             const uint32_t frames = fps_frames.exchange(0);
-             const uint64_t total_us = fps_render_us_total.exchange(0);
-             const uint32_t max_us = fps_render_us_max.exchange(0);
-             const float secs = (now_us - last_report_us) / 1e6f;
-             last_report_us = now_us;
-             fps_log.debug("[FPS] {:.1f} fps | render avg {:.2f} ms | max {:.2f} ms", frames / secs,
-                           frames ? (total_us / 1000.0f) / frames : 0.0f, max_us / 1000.0f);
-           }
-         }
-         std::unique_lock<std::mutex> lock(m);
-         // Always yield at least one tick: once a render cycle exceeds 8 ms
-         // the deadline is already past and wait_until returns without
-         // yielding, which pins core 1 at priority 20 and starves IDLE1.
-         const auto deadline = std::max(start_time + 8ms, std::chrono::steady_clock::now() + 1ms);
-         cv.wait_until(lock, deadline, []() { return false; });
-         return false;
-       },
-       .task_config = {
-           .name = "lv_task",
-           // Measured peak ~6 KB (self test mem.stk_lvgl: 26964 B of 32 KB
-           // never used). The stack is internal DMA-capable RAM, which RTPS
-           // start-up runs dry on: at 32 KB the W5500 driver's bounce buffer
-           // failed to allocate and the board boot-looped. mem.stk_lvgl
-           // guards the headroom.
-           .stack_size_bytes = 16 * 1024,
-           .priority = 20,
-           .core_id = 1,
-       }});
+  espp::Task lv_task({.callback = [](std::mutex &m, std::condition_variable &cv) -> bool {
+                        // steady_clock, never high_resolution_clock: on ESP-IDF that one is the
+                        // wall clock, which the MCB's time moves (see "TopBar clock"), and
+                        // wait_until on a wall clock that steps back sleeps out the whole step
+                        // - the screen froze for as long as the clock went back.
+                        auto start_time = std::chrono::steady_clock::now();
+                        {
+                          std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
+                          if constexpr (kFpsStress) {
+                            lv_obj_invalidate(lv_screen_active());
+                          }
+                          lv_task_handler();
+                        }
+                        if constexpr (kFpsInstrument) {
+                          fps_meter.report_if_due();
+                        }
+                        std::unique_lock<std::mutex> lock(m);
+                        // Always yield at least one tick: once a render cycle exceeds 8 ms
+                        // the deadline is already past and wait_until returns without
+                        // yielding, which pins core 1 at priority 20 and starves IDLE1.
+                        const auto deadline =
+                            std::max(start_time + 8ms, std::chrono::steady_clock::now() + 1ms);
+                        cv.wait_until(lock, deadline, []() { return false; });
+                        return false;
+                      },
+                      .task_config = {
+                          .name = "lv_task",
+                          // Measured peak ~6 KB (self test mem.stk_lvgl: 26964 B of 32 KB
+                          // never used). The stack is internal DMA-capable RAM, which RTPS
+                          // start-up runs dry on: at 32 KB the W5500 driver's bounce buffer
+                          // failed to allocate and the board boot-looped. mem.stk_lvgl
+                          // guards the headroom.
+                          .stack_size_bytes = 16 * 1024,
+                          .priority = 20,
+                          .core_id = 1,
+                      }});
   if (!lv_task.start()) {
     logger.error("Failed to start LVGL task!");
     return;
