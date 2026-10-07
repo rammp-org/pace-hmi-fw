@@ -97,15 +97,21 @@ static lv_opa_t diag_blink_opa() {
 // Every label under `obj` takes LV_STATE_USER_1 while stale, whose style is
 // red text at the blink's opacity.
 static void diag_mark_stale(lv_obj_t *obj, bool stale, lv_opa_t opa) {
-  for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
-    lv_obj_t *child = lv_obj_get_child(obj, i);
-    if (lv_obj_check_type(child, &lv_label_class)) {
-      lv_obj_set_style_text_color(child, lv_color_hex(kDiagStaleColour), kDiagStale);
-      lv_obj_set_style_text_opa(child, opa, kDiagStale);
-      lv_obj_set_state(child, LV_STATE_USER_1, stale);
-    }
-    diag_mark_stale(child, stale, opa);
-  }
+  struct Mark {
+    bool stale;
+    lv_opa_t opa;
+  } mark{stale, opa};
+  hmi::ui::for_each_descendant(
+      obj,
+      [](lv_obj_t *child, void *ctx) {
+        const auto *m = static_cast<const Mark *>(ctx);
+        if (lv_obj_check_type(child, &lv_label_class)) {
+          lv_obj_set_style_text_color(child, lv_color_hex(kDiagStaleColour), kDiagStale);
+          lv_obj_set_style_text_opa(child, m->opa, kDiagStale);
+          lv_obj_set_state(child, LV_STATE_USER_1, m->stale);
+        }
+      },
+      &mark);
 }
 
 // Bound to each row, on the stale and blink subjects both.

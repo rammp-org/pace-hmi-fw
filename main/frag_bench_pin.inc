@@ -24,9 +24,6 @@ static constexpr char kRdPin[] = "1234";
 static constexpr int kRdPinLen = sizeof(kRdPin) - 1;
 static_assert(kRdPinLen == hmi::ui::BenchPinView::PIN_LEN, "the model judges a four-digit PIN");
 
-// Defined with the settings rows (frag_settings_ui).
-static void clear_click_focusable_recursive(lv_obj_t *obj);
-
 // The one instance.
 static constinit hmi::ui::BenchPinView bench_pin_view{{
     .pin = std::string_view(kRdPin, kRdPinLen),
