@@ -1,7 +1,13 @@
 {
   "schema": 1,
-  "about": "G4 init-order baseline (tools/guards/init_order.py). Regenerate with `write` only after reviewing the diff; `allow` is hand-kept.",
-  "allow": [],
+  "about": "G4 init-order baseline (tools/guards/init_order.py). Regenerate with `write` only after reviewing the diff; `allow` is hand-kept. bench_inject: init_order.bench.json (dev_refactor 348c8f8, allow list included) plus the stick injection's remote_ui.cpp.obj ServerConfig destructor and fmt facet guard; app_main::stick keeps its name (StickSlot).",
+  "allow": [
+    {
+      "object": "main/main.cpp.obj",
+      "symbol": "drive_adapter",
+      "reason": "Planned addition (app-main-shrink.md S1, section 2.1: the unit keeps one adapter instance). DriveAdapter<MainDriveView> is built at namespace scope where the drive draft's drive_state was; its constructor builds only an espp::Logger for the fault path (made at start-up, CS-SAF-04): no hardware, LVGL, flash or calibration (V6). Needs the reviewer's OK."
+    }
+  ],
   "shared_objects": [
     "guard variable for fmt::v12::format_facet<std::locale>::id"
   ],
@@ -275,8 +281,7 @@
         "guard variable for app_main::kf",
         "guard variable for app_main::label_text",
         "guard variable for app_main::rotate_display",
-        "guard variable for app_main::stick_inject",
-        "guard variable for app_main::stick_pipeline",
+        "guard variable for app_main::stick",
         "guard variable for app_main::twist_adc",
         "guard variable for app_main::twist_lowpass",
         "guard variable for app_main::{lambda(auto:1 const&)#1}::operator()<espp::TouchpadData>(espp::TouchpadData const&) const::previous_touchpad_data",
@@ -448,21 +453,12 @@
       "shared": [
         "guard variable for fmt::v12::format_facet<std::locale>::id"
       ]
-    },
-    "stick/src/stick_pipeline.cpp.obj": {
-      "init_functions": 1,
-      "objects": [],
-      "reads_external": [],
-      "lazy_statics": [],
-      "calls": [],
-      "shared": [
-        "guard variable for fmt::v12::format_facet<std::locale>::id"
-      ]
     }
   },
   "source": {
-    "build": "C:/b/inject_bench_inject",
+    "build": "C:/b/inject2_bench_inject",
     "project": "C:/w/inject",
-    "objects_scanned": 106
+    "objects_scanned": 115,
+    "derived_from": "init_order.bench.json"
   }
 }
