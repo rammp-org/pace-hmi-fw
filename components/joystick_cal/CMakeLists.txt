@@ -6,3 +6,7 @@ idf_component_register(
   REQUIRES format)
 
 fw_component_options(${COMPONENT_LIB})
+
+# joystick_cal is safety-relevant (it feeds the stick, refactor.md §2.3): a switch over an enum
+# names every enumerator (CS-TYP-06), as in stick and post.
+target_compile_options(${COMPONENT_LIB} PRIVATE -Wswitch-enum -Werror=switch-enum)
