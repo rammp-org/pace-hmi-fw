@@ -1441,6 +1441,9 @@ extern "C" void app_main(void) {
   // The stick pipeline (components/stick): the joystick mapping on this
   // calibration, the key trigger and the gate. Owned by the ADC task below.
   static hmi::stick::StickPipeline stick_pipeline(stick_pipeline_config(joystick_cal));
+  // Bench stick injection (CONFIG_HMI_BENCH_STICK_INJECT, stick_inject_ui.hpp): the
+  // remote UI's STICK verb into the ADC task below. Otherwise an empty type, unused.
+  static StickInjectSlot stick_inject;
 
   // customization knobs: sampling/LVGL/RTPS cadence, and how often the serial
   // line is printed. The log is divided down because 30 lines/s is the
@@ -1478,12 +1481,19 @@ extern "C" void app_main(void) {
     // hmi::stick::StickPipeline (components/stick), fed through AdcStickIo
     // (frag_stick_config.inc) in the order this ran inline before. Only a
     // cycle with all three reads does anything; otherwise nothing is published.
+    hmi::stick::RawReadsMv raw{
+        .horizontal_mv = horiz_mv, .vertical_mv = vert_mv, .twist_mv = twist_mv};
+    // Bench only (CONFIG_HMI_BENCH_STICK_INJECT; compiled out otherwise): a STICK from
+    // the remote UI stands in for the three reads until 300 ms after the last one.
+    if constexpr (BENCH_STICK_INJECT) {
+      raw = stick_inject.apply(raw);
+    }
     AdcStickIo stick_io{.twist_lowpass = twist_lowpass};
-    const bool adc_published = stick_pipeline.cycle(
-        stick_io, {.horizontal_mv = horiz_mv, .vertical_mv = vert_mv, .twist_mv = twist_mv});
+    const bool adc_published = stick_pipeline.cycle(stick_io, raw);
     // Every cycle, valid or not: the self test measures the loop's cadence and
     // how often a read fails, as well as the values. A no-op unless a run is
-    // capturing. X is the horizontal channel, as everywhere above.
+    // capturing. X is the horizontal channel, as everywhere above. The ADC's own
+    // reads, also while a bench STICK injection stands in for them.
     selftest_note_adc(vert_mv && horiz_mv && twist_mv, horiz_mv.value_or(0.0f),
                       vert_mv.value_or(0.0f), twist_mv.value_or(0.0f), adc_published,
                       joy_button_pressed.load());

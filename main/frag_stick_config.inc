@@ -12,8 +12,10 @@
 // The stick math itself (mapping, mount, keys, gate, speed scale) is
 // hmi::stick::StickPipeline. The ADC task runs one cycle of it per sample and
 // AdcStickIo below is everything that cycle reads and writes here, in the order
-// the code ran inline before it was extracted.
+// the code ran inline before it was extracted. stick_inject_ui.hpp is the bench
+// stick injection the ADC task can put in front of it (CONFIG_HMI_BENCH_STICK_INJECT).
 #include "stick/stick_pipeline.hpp"
+#include "stick_inject_ui.hpp"
 
 static_assert(hmi::stick::SENSITIVITY_MIN == SETTINGS_STICK_SENSITIVITY_MIN &&
                   hmi::stick::SENSITIVITY_MAX == SETTINGS_STICK_SENSITIVITY_MAX,

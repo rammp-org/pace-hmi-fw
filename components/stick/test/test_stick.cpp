@@ -5,7 +5,9 @@
 // STK-010..029  the behaviours the table pins, hazards first, read off named golden rows. They
 //               state what the code does TODAY, including what is unsafe (refactor.md §1 H3,
 //               H9): a characterisation, not a specification. Fixing them is parked (§3.3).
-// STK-030..     the extracted pure stages, one behaviour each
+// STK-030..039  the extracted pure stages, one behaviour each
+// STK-040..     bench stick injection (stick/bench_inject.hpp, REQ-STK-07): the STICK verb's
+//               parser, the expiry, fail_mask, and injected reads through the real pipeline
 
 #include <array>
 #include <bit>
@@ -15,9 +17,13 @@
 #include <cstdio>
 #include <limits>
 #include <optional>
+#include <random>
+#include <string_view>
+#include <type_traits>
 
 #include "golden_stick.inc"
 #include "legacy_adc_cycle.hpp"
+#include "stick/bench_inject.hpp"
 #include "stick/stick_pipeline.hpp"
 #include "stick_vectors.hpp"
 #include "test_case.hpp"
@@ -482,4 +488,205 @@ TEST_CASE("STK-035 the command is a multiply: a NaN passes a closed gate as NaN"
   TEST_ASSERT_TRUE(std::isnan(c.x));
   TEST_ASSERT_EQUAL_HEX32(bits(-0.0f), bits(c.y));
   TEST_ASSERT_EQUAL_HEX32(bits(0.0f), bits(c.twist));
+}
+
+// ---------------------------------------------------------------- bench injection (REQ-STK-07)
+
+namespace {
+
+using hmi::stick::INJECT_EXPIRY;
+using hmi::stick::parse_stick_inject;
+using hmi::stick::RawReadsMv;
+using hmi::stick::StickInjectMsg;
+using hmi::stick::StickInjector;
+using std::chrono::milliseconds;
+
+const StickInjector::TimePoint T0{std::chrono::seconds{100}};
+
+constexpr StickInjectMsg inject_msg(float h_mv, float v_mv, float t_mv, std::uint8_t mask) {
+  return {
+      .horizontal_mv = h_mv, .vertical_mv = v_mv, .twist_mv = t_mv, .fail_mask = mask, .seq = 7};
+}
+
+constexpr RawReadsMv REAL_MV{.horizontal_mv = 1500.0f, .vertical_mv = 1510.0f, .twist_mv = 1477.0f};
+
+bool same_reads(const RawReadsMv &a, const RawReadsMv &b) {
+  return a.horizontal_mv == b.horizontal_mv && a.vertical_mv == b.vertical_mv &&
+         a.twist_mv == b.twist_mv;
+}
+
+/// A driving stick (gate open, full speed, ideal calibration) whose three reads come from the
+/// caller: what the ADC task does with an injection.
+struct InjectedDrive {
+  StickVector v{};
+  std::optional<StickPipeline> pipeline;
+  FakeIo io;
+
+  InjectedDrive() {
+    v.power_on_cal = stick_test::CAL_IDEAL;
+    v.sensitivity = 9;
+    v.drive_speed = 10;
+    v.drives = true;
+    pipeline.emplace(pipeline_config(stick_test::CAL_IDEAL));
+    io.in = &v;
+  }
+  bool cycle(const RawReadsMv &raw) {
+    io.out = StickOutputs{};
+    return pipeline->cycle(io, raw);
+  }
+};
+
+} // namespace
+
+TEST_CASE("STK-040 the STICK arguments parse into a message", "[stick][inject]") {
+  const auto m = parse_stick_inject(" 0 3300  1650 5 4294967295");
+  TEST_ASSERT_TRUE(m.has_value());
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, m->horizontal_mv);
+  TEST_ASSERT_EQUAL_FLOAT(3300.0f, m->vertical_mv);
+  TEST_ASSERT_EQUAL_FLOAT(1650.0f, m->twist_mv);
+  TEST_ASSERT_EQUAL_UINT8(5, m->fail_mask);
+  TEST_ASSERT_EQUAL_UINT32(4294967295U, m->seq);
+  static_assert(std::is_trivially_copyable_v<StickInjectMsg> && StickInjectMsg::IS_MESSAGE);
+  static_assert(sizeof(StickInjectMsg) <= 128); // fw_core's MAX_MESSAGE_SIZE (CS-OWN-05)
+}
+
+TEST_CASE("STK-041 hostile STICK arguments are rejected (TS-UNIT-07)", "[stick][inject]") {
+  constexpr std::array<std::string_view, 21> BAD{
+      "",                                   // empty
+      "   ",                                // only spaces
+      "1650 1650 1650 0",                   // truncated: four fields
+      "1650 1650 1650",                     // three
+      "1650 1650 1650 0 1 2",               // a sixth field
+      "3301 1650 1650 0 1",                 // horizontal just above the maximum
+      "1650 3301 1650 0 1",                 // vertical just above
+      "1650 1650 3301 0 1",                 // twist just above
+      "1650 1650 1650 8 1",                 // fail_mask just above 7
+      "1650 1650 1650 0 4294967296",        // seq just above 2^32-1
+      "99999999999999999999 1650 1650 0 1", // far above: overflows uint32
+      "-1 1650 1650 0 1",                   // a sign
+      "+1 1650 1650 0 1",                   // a plus sign
+      "1650.5 1650 1650 0 1",               // a fraction
+      "0x10 1650 1650 0 1",                 // hex
+      "1650x 1650 1650 0 1",                // text stuck to a number
+      "1650 1650 1650 0 1x",                // trailing text
+      "1650\t1650 1650 0 1",                // a tab is not a separator
+      "a b c d e",                          // words
+      "1650 1650 1650 0 1\n",               // a newline left on
+      "1650,1650,1650,0,1",                 // commas
+  };
+  for (const std::string_view text : BAD) {
+    if (parse_stick_inject(text).has_value()) {
+      std::printf("accepted: \"%.*s\"\n", static_cast<int>(text.size()), text.data());
+      TEST_FAIL();
+    }
+  }
+  // Seeded random text from the characters a valid line uses and a few it does not: no crash
+  // or overrun (ASan), and whatever is accepted is within every range.
+  constexpr unsigned SEED = 20261006U;
+  std::printf("STK-041 random seed %u\n", SEED);
+  std::mt19937 rng{SEED};
+  constexpr std::string_view ALPHABET = "0123456789 0123456789 -+.x\t";
+  std::uniform_int_distribution<std::size_t> pick{0, ALPHABET.size() - 1};
+  std::uniform_int_distribution<std::size_t> length{0, 64};
+  for (int n = 0; n < 20000; ++n) {
+    std::array<char, 64> buf{};
+    const std::size_t len = length(rng);
+    for (std::size_t i = 0; i < len; ++i) {
+      buf.at(i) = ALPHABET.at(pick(rng));
+    }
+    if (const auto m = parse_stick_inject({buf.data(), len})) {
+      TEST_ASSERT_TRUE(m->horizontal_mv <= 3300.0f && m->vertical_mv <= 3300.0f &&
+                       m->twist_mv <= 3300.0f && m->fail_mask <= 7);
+    }
+  }
+}
+
+TEST_CASE("STK-042 an injection replaces all three reads, failed real reads included",
+          "[stick][inject]") {
+  StickInjector inject;
+  inject.note(inject_msg(10.0f, 20.0f, 30.0f, 0), T0);
+  const RawReadsMv failed{};
+  const RawReadsMv want{.horizontal_mv = 10.0f, .vertical_mv = 20.0f, .twist_mv = 30.0f};
+  TEST_ASSERT_TRUE(inject.active(T0));
+  TEST_ASSERT_TRUE(same_reads(want, inject.apply(REAL_MV, T0)));
+  TEST_ASSERT_TRUE(same_reads(want, inject.apply(failed, T0)));
+}
+
+TEST_CASE("STK-043 with no injection the real reads pass unchanged", "[stick][inject]") {
+  const StickInjector inject;
+  const RawReadsMv some_failed{.horizontal_mv = 1500.0f, .vertical_mv = {}, .twist_mv = 1.0f};
+  TEST_ASSERT_FALSE(inject.active(T0));
+  TEST_ASSERT_TRUE(same_reads(REAL_MV, inject.apply(REAL_MV, T0)));
+  TEST_ASSERT_TRUE(same_reads(some_failed, inject.apply(some_failed, T0)));
+}
+
+TEST_CASE("STK-044 an injection expires 300 ms after its last message", "[stick][inject]") {
+  static_assert(INJECT_EXPIRY == milliseconds{300});
+  StickInjector inject;
+  inject.note(inject_msg(10.0f, 20.0f, 30.0f, 0), T0);
+  const auto just_before = T0 + INJECT_EXPIRY - std::chrono::nanoseconds{1};
+  TEST_ASSERT_TRUE(inject.active(just_before));
+  TEST_ASSERT_FALSE(same_reads(REAL_MV, inject.apply(REAL_MV, just_before)));
+  TEST_ASSERT_FALSE(inject.active(T0 + INJECT_EXPIRY));
+  TEST_ASSERT_TRUE(same_reads(REAL_MV, inject.apply(REAL_MV, T0 + INJECT_EXPIRY)));
+  TEST_ASSERT_FALSE(inject.active(T0 + std::chrono::hours{1}));
+}
+
+TEST_CASE("STK-045 a refresh holds the injection 300 ms from the refresh", "[stick][inject]") {
+  StickInjector inject;
+  inject.note(inject_msg(10.0f, 20.0f, 30.0f, 0), T0);
+  inject.note(inject_msg(40.0f, 50.0f, 60.0f, 0), T0 + milliseconds{250});
+  const auto later = T0 + milliseconds{500};
+  TEST_ASSERT_TRUE(inject.active(later));
+  const RawReadsMv want{.horizontal_mv = 40.0f, .vertical_mv = 50.0f, .twist_mv = 60.0f};
+  TEST_ASSERT_TRUE(same_reads(want, inject.apply(REAL_MV, later))); // the newest message
+  TEST_ASSERT_FALSE(inject.active(T0 + milliseconds{550}));
+}
+
+TEST_CASE("STK-046 fail_mask makes exactly the masked reads fail", "[stick][inject]") {
+  for (unsigned mask = 0; mask <= hmi::stick::INJECT_FAIL_ALL; ++mask) {
+    StickInjector inject;
+    inject.note(inject_msg(10.0f, 20.0f, 30.0f, static_cast<std::uint8_t>(mask)), T0);
+    const RawReadsMv got = inject.apply(REAL_MV, T0);
+    TEST_ASSERT_EQUAL((mask & 1U) == 0U, got.horizontal_mv.has_value());
+    TEST_ASSERT_EQUAL((mask & 2U) == 0U, got.vertical_mv.has_value());
+    TEST_ASSERT_EQUAL((mask & 4U) == 0U, got.twist_mv.has_value());
+    TEST_ASSERT_TRUE(got.horizontal_mv.value_or(10.0f) == 10.0f &&
+                     got.vertical_mv.value_or(20.0f) == 20.0f &&
+                     got.twist_mv.value_or(30.0f) == 30.0f);
+  }
+}
+
+TEST_CASE("STK-047 cancel ends an injection at once", "[stick][inject]") {
+  StickInjector inject;
+  inject.note(inject_msg(10.0f, 20.0f, 30.0f, 0), T0);
+  inject.cancel();
+  TEST_ASSERT_FALSE(inject.active(T0));
+  TEST_ASSERT_TRUE(same_reads(REAL_MV, inject.apply(REAL_MV, T0)));
+}
+
+TEST_CASE("STK-048 a clock that reads earlier than the message ends the injection",
+          "[stick][inject]") {
+  StickInjector inject;
+  inject.note(inject_msg(10.0f, 20.0f, 30.0f, 0), T0);
+  TEST_ASSERT_FALSE(inject.active(T0 - std::chrono::nanoseconds{1}));
+  TEST_ASSERT_TRUE(same_reads(REAL_MV, inject.apply(REAL_MV, T0 - milliseconds{1})));
+}
+
+TEST_CASE("STK-049 injected reads go through the real pipeline: forward passes an open gate, "
+          "a closed gate sends 0, a failed read publishes nothing",
+          "[stick][inject][safety]") {
+  StickInjector inject;
+  // Full forward: the vertical pot reads LOWER moving up (0 mV on the ideal calibration).
+  inject.note(inject_msg(1650.0f, 0.0f, 1650.0f, 0), T0);
+  InjectedDrive drive;
+  TEST_ASSERT_TRUE(drive.cycle(inject.apply(REAL_MV, T0)));
+  TEST_ASSERT_EQUAL_HEX32(bits(1.0f), drive.io.out.cmd_y);
+  drive.v.drives = false; // the gate closed: the same injection goes out as 0
+  TEST_ASSERT_TRUE(drive.cycle(inject.apply(REAL_MV, T0)));
+  TEST_ASSERT_EQUAL_FLOAT(0.0f, std::bit_cast<float>(drive.io.out.cmd_y));
+  drive.v.drives = true;
+  inject.note(inject_msg(1650.0f, 0.0f, 1650.0f, 0x02), T0); // the vertical read fails
+  TEST_ASSERT_FALSE(drive.cycle(inject.apply(REAL_MV, T0))); // H9 as today: nothing sent
+  TEST_ASSERT_FALSE(drive.io.out.published);
 }
