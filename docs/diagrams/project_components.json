@@ -92,6 +92,7 @@
         "mbedtls",
         "ota_parse",
         "rammp_rtps_messages",
+        "stick",
         "ui"
       ]
     },
@@ -103,6 +104,12 @@
     },
     "post": {
       "reqs": [],
+      "priv_reqs": []
+    },
+    "stick": {
+      "reqs": [
+        "joystick"
+      ],
       "priv_reqs": []
     }
   },
