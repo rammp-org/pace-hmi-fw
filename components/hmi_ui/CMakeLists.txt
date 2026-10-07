@@ -5,7 +5,8 @@ idf_component_register(SRCS "src/brightness_view.cpp"
                             "src/status_band_view.cpp"
                             "src/topbar_view.cpp"
                        INCLUDE_DIRS "include"
-                       REQUIRES lvgl
+                       REQUIRES hmi_models
+                                lvgl
                        PRIV_REQUIRES hmi_format
                                      rammp_rtps_messages
                                      ui)

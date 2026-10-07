@@ -1,31 +1,25 @@
 // split_main.py fragment of main.cpp (frag_seat: original lines 1833-2046); one TU, see main.cpp.
 #include "hmi_models/grid.hpp"
-// A page's focusable buttons in visual order, plus where the cursor is. Cells
-// are filled in at wiring time: the ui_* globals are null until ui_init runs.
-// A cell may be null where the layout has a hole -- the PIN pad's bottom row
-// starts at the middle column -- and the cursor steps over those.
-struct ButtonGrid {
-  lv_obj_t *cell[kGridMaxRows][kGridMaxCols];
-  int cols[kGridMaxRows]; // buttons in each row; rows may differ in length
-  int rows;
-  int row; // cursor
-  int col;
-};
+#include "hmi_ui/button_grid.hpp"
+using hmi::ui::ButtonGrid;
+using hmi::ui::grid_key_cb;
+using hmi::ui::grid_sync_cursor;
 
-static ButtonGrid seat_buttons_grid;
-static ButtonGrid seat_adjust_grid;
+// Down off any grid is the burger key; left off the adjustment page's first
+// column is "back", as "<" is.
+static ButtonGrid seat_buttons_grid{.off_bottom = nav_to_key};
+static ButtonGrid seat_adjust_grid{
+    .left_edge_is_back = true, .off_bottom = nav_to_key, .off_left = seat_show_buttons_page};
 
-// The cursor's movement is hmi::ui::grid_step (components/hmi_models); a ButtonGrid
-// is its view: the buttons, and the cursor the focus calls follow.
 static_assert(kGridMaxRows == hmi::ui::GRID_MAX_ROWS && kGridMaxCols == hmi::ui::GRID_MAX_COLS,
               "ButtonGrid and the cursor model must agree on the grid's size");
 
 // The grid as the cursor model sees it: row lengths, and a hole where a cell is
-// null. Left off the adjustment page's left edge is "back", as "<" is.
-static hmi::ui::GridShape grid_shape_of(const ButtonGrid *g) {
+// null.
+hmi::ui::GridShape hmi::ui::grid_shape_of(const ButtonGrid *g) {
   hmi::ui::GridShape shape{};
   shape.rows = g->rows;
-  shape.left_edge_is_back = g == &seat_adjust_grid;
+  shape.left_edge_is_back = g->left_edge_is_back;
   for (size_t r = 0; r < shape.cols.size(); r++) {
     shape.cols[r] = g->cols[r];
     for (size_t c = 0; c < shape.button[r].size(); c++) {
@@ -66,10 +60,10 @@ static void seat_angle_refresh();
 // consumes NEXT/PREV/ENTER/ESC itself and passes everything else through
 // lv_group_send_data. That is what lets a grid do its own 2D movement.
 //
-// user_data is the grid the button belongs to, so one callback serves both
-// pages. Leaving the screen is a menu row now, so LV_KEY_LEFT only moves the
+// user_data is the grid the button belongs to, so one callback serves every
+// grid. Leaving the screen is a menu row now, so LV_KEY_LEFT only moves the
 // cursor.
-static void grid_key_cb(lv_event_t *e) {
+void hmi::ui::grid_key_cb(lv_event_t *e) {
   auto *g = static_cast<ButtonGrid *>(lv_event_get_user_data(e));
   // The cursor is whichever cell holds focus, not wherever it was last left:
   // coming back up from the burger key, the group put focus on a cell without
@@ -104,10 +98,10 @@ static void grid_key_cb(lv_event_t *e) {
   const hmi::ui::GridStep step = hmi::ui::grid_step(grid_shape_of(g), {g->row, g->col}, key);
   switch (step.move) {
   case hmi::ui::GridMove::OFF_BOTTOM:
-    nav_to_key(); // below the bottom row is the burger key
+    g->off_bottom(); // below the bottom row is the burger key
     return;
   case hmi::ui::GridMove::OFF_LEFT:
-    seat_show_buttons_page();
+    g->off_left();
     return;
   case hmi::ui::GridMove::MOVED:
     break;
@@ -121,7 +115,7 @@ static void grid_key_cb(lv_event_t *e) {
 
 // Puts the cursor on `button`, so joystick movement carries on from wherever a
 // finger last landed instead of from where the joystick left off.
-static void grid_sync_cursor(ButtonGrid *g, lv_obj_t *button) {
+void hmi::ui::grid_sync_cursor(ButtonGrid *g, lv_obj_t *button) {
   for (int r = 0; r < g->rows; r++) {
     for (int c = 0; c < g->cols[r]; c++) {
       if (g->cell[r][c] != nullptr && g->cell[r][c] == button) {

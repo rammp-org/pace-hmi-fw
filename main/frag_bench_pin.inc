@@ -26,7 +26,7 @@ static_assert(kRdPinLen == 4, "the bench gate draws exactly four PIN dots");
 // The keypad, in the order it is drawn. The last row starts at the middle
 // column, so its left cell is a hole. kRdBack is the backspace key's marker.
 static constexpr int kRdBack = -1;
-static ButtonGrid rd_grid;
+static ButtonGrid rd_grid{.off_bottom = nav_to_key};
 
 // The digits typed so far, and the judgement on the fourth (components/hmi_models).
 // The dots are bound to the subject, which mirrors the model's digit count.
