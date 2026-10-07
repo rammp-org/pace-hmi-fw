@@ -4,33 +4,102 @@
 // it feeds the joystick's X with no inversion. ADC1_CH0 (GPIO16) is the
 // VERTICAL axis and reads *lower* moving up, so it feeds Y with invert_output
 // — after which +Y is up, as the rest of the code assumes. Twist reads higher
-// clockwise. Fixed here so every consumer (UI bars, the keypad, RTPS)
+// clockwise. Fixed in hmi::stick (components/stick: horizontal_config,
+// vertical_config, twist_config) so every consumer (UI bars, the keypad, RTPS)
 // sees correct axes without compensating itself; joystick_cal.cpp's step
 // prompts rely on the same directions.
-static espp::FloatRangeMapper::Config stick_horizontal_config(const JoystickCal &cal) {
-  const JoystickAxisCal &a = cal[JOY_HORIZONTAL];
-  return {.center = a.center_mv, .minimum = a.min_mv, .maximum = a.max_mv};
+//
+// The stick math itself (mapping, mount, keys, gate, speed scale) is
+// hmi::stick::StickPipeline. The ADC task runs one cycle of it per sample and
+// AdcStickIo below is everything that cycle reads and writes here, in the order
+// the code ran inline before it was extracted.
+#include "stick/stick_pipeline.hpp"
+
+static_assert(hmi::stick::SENSITIVITY_MIN == SETTINGS_STICK_SENSITIVITY_MIN &&
+                  hmi::stick::SENSITIVITY_MAX == SETTINGS_STICK_SENSITIVITY_MAX,
+              "hmi::stick clamps the stick sensitivity to the Settings range");
+static_assert(hmi::stick::DRIVE_SPEED_MIN == SETTINGS_DRIVE_SPEED_MIN &&
+                  hmi::stick::DRIVE_SPEED_MAX == SETTINGS_DRIVE_SPEED_MAX,
+              "hmi::stick clamps the drive speed to the Settings range");
+
+static hmi::stick::CalibrationMv stick_cal_mv(const JoystickCal &cal) {
+  const auto axis = [](const JoystickAxisCal &a) {
+    return hmi::stick::AxisCalMv{.min_mv = a.min_mv, .center_mv = a.center_mv, .max_mv = a.max_mv};
+  };
+  return {.horizontal = axis(cal[JOY_HORIZONTAL]),
+          .vertical = axis(cal[JOY_VERTICAL]),
+          .twist = axis(cal[JOY_TWIST])};
 }
 
-static espp::FloatRangeMapper::Config stick_vertical_config(const JoystickCal &cal) {
-  const JoystickAxisCal &a = cal[JOY_VERTICAL];
-  return {.center = a.center_mv, .minimum = a.min_mv, .maximum = a.max_mv, .invert_output = true};
+static hmi::stick::StickPipeline::Config stick_pipeline_config(const JoystickCal &cal) {
+  return {.calibration = stick_cal_mv(cal),
+          .center_deadzone_radius = kStickCenterDeadzoneRadius,
+          .range_deadzone = kStickRangeDeadzone,
+          .twist_center_deadband_mv = kTwistCenterDeadbandMv,
+          .twist_range_deadband_mv = kTwistRangeDeadbandMv,
+          .keys = {.up = LV_KEY_UP, .down = LV_KEY_DOWN, .right = LV_KEY_RIGHT, .left = LV_KEY_LEFT}};
 }
 
-static espp::FloatRangeMapper::Config stick_twist_config(const JoystickCal &cal) {
-  const JoystickAxisCal &a = cal[JOY_TWIST];
-  return {.center = a.center_mv,
-          .center_deadband = kTwistCenterDeadbandMv,
-          .minimum = a.min_mv,
-          .maximum = a.max_mv,
-          .range_deadband = kTwistRangeDeadbandMv};
-}
+// The ADC task's side of StickPipeline::cycle. Runs on the ADC task only; every
+// member is what the stick block of adc_task_fn did inline before.
+struct AdcStickIo {
+  espp::SimpleLowpassFilter &twist_lowpass;
 
-static void stick_apply_cal(espp::Joystick &stick, const JoystickCal &cal) {
-  stick.set_calibration(stick_horizontal_config(cal), stick_vertical_config(cal),
-                        kStickCenterDeadzoneRadius, kStickRangeDeadzone);
-  stick.set_z_calibration(stick_twist_config(cal));
-}
+  // A calibration run just finished: the pipeline switches to it between two
+  // samples, on the task that owns the stick.
+  std::optional<hmi::stick::CalibrationMv> take_new_calibration() {
+    if (auto cal = joystick_cal_take_new()) {
+      return stick_cal_mv(*cal);
+    }
+    return std::nullopt;
+  }
+  float smooth_twist_mv(float twist_mv) { return twist_lowpass(twist_mv); }
+  void note_raw_mv(float horizontal_mv, float vertical_mv, float twist_mv) {
+    joystick_cal_note_raw(horizontal_mv, vertical_mv, twist_mv);
+  }
+  // While a calibration run owns the stick nothing downstream may act on it:
+  // the user is being told to push it to every end in turn.
+  bool calibrating() { return joystick_cal_running(); }
+  bool swap() { return stick_swap.load(); }
+  bool invert_x() { return stick_invert_x.load(); }
+  bool invert_y() { return stick_invert_y.load(); }
+  int sensitivity() { return stick_sensitivity.load(); }
+  uint32_t joy_key() { return ::joy_key.load(); }
+  uint32_t remote_key() { return ::remote_key.load(); }
+  void set_joy_key(uint32_t key) { ::joy_key.store(key); }
+  void set_joy_flick(uint32_t key) { joy_flick.store(key); }
+  void show(const hmi::stick::Position &mounted) {
+    // lv_subject_set_int runs the bar's observer callback synchronously,
+    // which touches the widget, so it needs the LVGL lock. Tried, not
+    // waited for: the UI holds it for a whole frame (a full redraw is
+    // ~100 ms, more with Flip screen), and the stick's path to the MCB
+    // must not queue behind a render. A busy UI just gets the bars
+    // one cycle later.
+    std::unique_lock<std::recursive_mutex> lock(lvgl_mutex, std::try_to_lock);
+    if (lock.owns_lock()) {
+      lv_subject_set_int(&adc_x_subject, static_cast<int32_t>(mounted.x * 100.0f));
+      lv_subject_set_int(&adc_y_subject, static_cast<int32_t>(mounted.y * 100.0f));
+      lv_subject_set_int(&adc_twist_subject, static_cast<int32_t>(mounted.twist * 100.0f));
+    }
+  }
+  int drive_speed() { return ::drive_speed.load(); }
+  // The gate. The MCB gets a centred stick whenever the stick is doing something
+  // else: while a calibration run sweeps it (the pipeline does not read this
+  // then), and whenever it is walking the UI rather than driving -- any screen
+  // but Drive, or Drive with the menu open. Drive stays ACTIVE across the menu
+  // and the other screens, as the spec draws it, so this is what keeps a push
+  // meant for the next row from moving the chair. The bars keep moving.
+  bool stick_drives() { return ::stick_drives.load(); }
+  bool button_pressed() { return joy_button_pressed.load(); }
+  // The MCB gets the same calibrated -1..+1 values the bars show (+Y forward,
+  // deadzones applied), scaled by Settings "Speed sensitivity" and the gate, so
+  // it needs no calibration of its own. Quiet no-op until RTPS is up and a
+  // subscriber is discovered.
+  bool publish(const hmi::stick::Command &command, bool button) {
+    return rtps_comms_publish_adc(command.x, command.y, command.twist,
+                                  button ? rammp::Buttons::JOYSTICK : rammp::Buttons::NONE);
+  }
+};
 
 /////////////////////////////////////////////////////////////////////////////
 // TopBar RTPS indicator
