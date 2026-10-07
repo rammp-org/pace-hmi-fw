@@ -1,0 +1,111 @@
+#pragma once
+// The ErrorBanners that say why driving (or the seat) is not permitted: a refused request on the
+// Locked screen and the screens a menu refusal lands on, and a drive cut short on the Drive and
+// Seat screens.
+
+#include <cstdint>
+
+#include "lvgl.h"
+
+#include "hmi_ui/link_state.hpp"
+#include "hmi_ui/shared_subjects.hpp"
+
+namespace hmi::ui {
+
+/// Which request was refused: the value of the `refused` subject. main's kRefused* name the
+/// same values (main static_asserts it).
+enum Refused : int32_t {
+  REFUSED_NONE = 0,
+  REFUSED_DRIVE = 1, ///< a push barred before it was sent; the cause is read live
+  REFUSED_SEAT = 2,
+  // These three are the MIB's own doing, so they stay up for their whole window rather than
+  // clearing the moment the MCB is ready again: the chair being fine again is exactly what
+  // makes them worth reading.
+  REFUSED_DRIVE_NOT_GRANTED = 3, ///< asked to drive, never got ENABLED
+  REFUSED_DRIVE_STOPPED = 4,     ///< was driving, the MIB stopped it
+  REFUSED_EXIT = 5,              ///< asked to stop, the MIB is still driving
+  REFUSED_DRIVE_LOST = 6,        ///< was driving, then the link went; cause read live
+  /// Drive picked from the menu while the MCB could not drive. Like REFUSED_SEAT: no push
+  /// holds it up, so it stays its window unless the cause clears.
+  REFUSED_DRIVE_MENU = 7,
+};
+
+/// One instance for every refusal banner. `refused` records only THAT a request was refused;
+/// the banners work out WHY from the link and state subjects whenever any of them changes, so
+/// they always name the current cause. All words come from the shared spec
+/// (hmi_rtps_spec.hpp, through rammp's texts).
+class RefusalView {
+public:
+  struct Config {
+    const SharedSubjects *shared;             ///< `rtps_link`, `mib_state` and `locked` are read
+    lv_subject_t *error_text;                 ///< string: the MIB's error_message ("" = none)
+    lv_subject_t *error_footer;               ///< string: the MIB's error_footer ("" = none)
+    lv_subject_t *refused;                    ///< int: Refused; banners up unless REFUSED_NONE
+    bool (*wifi)();                           ///< the link is Wi-Fi (rtps_comms_net_link)
+    bool (*mcb_ready)();                      ///< link CONNECTED and the MIB IDLE or ENABLED
+    void (*play_refusal)(bool warning);       ///< the refusal sound (warning = louder)
+    void (*keep_overlay_fill)(lv_obj_t *obj); ///< main's overdraw exemption
+    bool (*button_held)();                    ///< the stick button, now (joy_button_held)
+    int64_t (*now_us)();                      ///< esp_timer_get_time
+    bool (*menu_open)();                      ///< the burger menu is open
+    /// The drive session's ENTRY_PUSH input; true when its row acted (a refusal was raised).
+    bool (*entry_push)();
+    uint32_t grace_ms; ///< a press shorter than this is a tap, not a push (kBarGraceMs)
+  };
+
+  constexpr explicit RefusalView(const Config &config) noexcept
+      : config_(config) {}
+
+  /// @brief Binds a banner that names a refused request (Locked screen and the menu's
+  ///        landing screens): on `refused` and every cause subject. Null skips the binding.
+  /// app_main (after `refused` and the cause subjects are initialised, V7).
+  void bind_refused_panel(lv_obj_t *panel);
+  /// @brief Binds a banner that says the drive was cut short (Drive and Seat screens), or that
+  ///        an exit was refused. Null skips the binding.
+  /// app_main (same order rule).
+  void bind_lost_panel(lv_obj_t *panel);
+  /// @brief Fills a banner with why driving is not permitted right now; the titles are the
+  ///        caller's (a refused push and a drive cut short read differently).
+  /// UI task, lvgl_mutex held.
+  void fill_drive_blocked(lv_obj_t *panel, const char *link_title, const char *mcb_title) const;
+  /// @brief Binds `cb` on `panel` (object-bound, with `user_data`) to every subject the cause
+  ///        depends on: link, MIB state, error text and footer. Also for other views' banners
+  ///        that word the same cause.
+  /// app_main or a screen's *_ensure (UI task).
+  void bind_to_cause(lv_obj_t *panel, lv_observer_cb_t cb, void *user_data);
+  /// @brief Shows or hides a banner; a banner rising on the screen in front sounds the refusal.
+  /// UI task, lvgl_mutex held.
+  void show(lv_obj_t *panel, bool up) const;
+  /// @brief Makes the dwell timer, paused: each refusal re-arms it (period, reset, resume), so
+  ///        a second push restarts the countdown rather than stacking a timer.
+  /// app_main, before lv_task starts.
+  void start_timer(uint32_t period_ms);
+  /// The dwell timer (null until start_timer): main's entry_refused_show re-arms it.
+  [[nodiscard]] lv_timer_t *timer() const { return timer_; }
+  /// @brief The dwell ran out (or the cause cleared): pause the timer, `refused` := NONE.
+  /// UI task, lvgl_mutex held.
+  void clear() const;
+  /// @brief One hold poll's refusal check: a push held past the grace on the Locked screen goes
+  ///        to the drive session (ENTRY_PUSH); a refusal whose cause cleared is cleared.
+  /// UI task (main's hold poll timer), lvgl_mutex held.
+  void poll();
+
+private:
+  struct Text {
+    const char *body;
+    const char *footer;
+  };
+  [[nodiscard]] Text link_text(LinkState link) const;
+  void fill_mib_reason(lv_obj_t *panel, const char *title, const char *fallback_body,
+                       const char *fallback_footer) const;
+  static void refused_panel_observer(lv_observer_t *observer, lv_subject_t *subject);
+  static void lost_panel_observer(lv_observer_t *observer, lv_subject_t *subject);
+  static void timer_cb(lv_timer_t *timer);
+
+  Config config_;
+  lv_timer_t *timer_ = nullptr;     ///< the dwell timer
+  int64_t pressed_at_us_ = 0;       ///< when the current press began; 0 = not pressed
+  bool refused_this_press_ = false; ///< this press already raised its refusal
+};
+
+} // namespace hmi::ui

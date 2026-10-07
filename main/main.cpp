@@ -631,8 +631,7 @@ extern "C" void app_main(void) {
   // taking any observer already on it with it, and bind_mcb_lost_panel below watches
   // this one so the drive screen can show a refused exit.
   lv_subject_init_int(&entry_refused_subject, 0);
-  entry_refused_timer = lv_timer_create(entry_refused_timer_cb, kDriveRefusedShowMs, nullptr);
-  lv_timer_pause(entry_refused_timer);
+  refusal_view.start_timer(kDriveRefusedShowMs);
 
   bind_mcb_lost_panel(ui_ErrorBanner4); // DriveScreen
   bind_mcb_lost_panel(ui_ErrorBanner1); // SeatScreen

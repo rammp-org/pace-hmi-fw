@@ -129,7 +129,14 @@ inline lv_subject_t rtps_link_subject{"rtps_link_subject"};
 inline lv_subject_t mib_state_subject{"mib_state_subject"};
 inline lv_subject_t locked_subject{"locked_subject"};
 inline lv_subject_t entry_refused_subject{"entry_refused_subject"};
-inline lv_timer_t *entry_refused_timer = &shim::refused_timer;
+// main's RefusalView owns the dwell timer since K1 step 3.2; frag_drive's entry_refused_show
+// re-arms it through refusal_view.timer(). Same timer object (and name) as before.
+namespace shim {
+struct RefusalViewShim {
+  [[nodiscard]] lv_timer_t *timer() const { return &refused_timer; }
+};
+} // namespace shim
+inline shim::RefusalViewShim refusal_view;
 
 inline std::int32_t lv_subject_get_int(lv_subject_t *subject) {
   const golden::World &w = golden::world();
