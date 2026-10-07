@@ -7,6 +7,4 @@ idf_component_register(SRCS "src/click_sound.cpp"
                        REQUIRES base_component base_peripheral drv2605 i2c logger
                        PRIV_REQUIRES esp_timer format)
 
-if(COMMAND fw_component_options)
-  fw_component_options(${COMPONENT_LIB})
-endif()
+fw_component_options(${COMPONENT_LIB})
