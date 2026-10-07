@@ -33,7 +33,6 @@
       "main/log_capture.cpp": 2,
       "main/log_view.cpp": 1,
       "main/lv_mem_psram.c": 5,
-      "main/main.cpp": 1,
       "main/remote_ui.cpp": 2,
       "main/rtps_comms.cpp": 1,
       "main/selftest.cpp": 11,
@@ -209,6 +208,13 @@
       "sleep_this_thread": {
         "main/main.cpp@fea0ceb4e1459da744a95a8ee41fcc9430c8cac6": [
           "3c30b477fff3fdf4933bb42884869c32c8587518"
+        ]
+      }
+    },
+    "components/hmi_ui/src/display_flip.cpp": {
+      "heap_raw": {
+        "main/main.cpp@f1eb6ce8e1d7311c18b9014104c91a6b1eb0f728": [
+          "72f926642a9f8eb85604f5c0c6366a3bd4fe5448"
         ]
       }
     }

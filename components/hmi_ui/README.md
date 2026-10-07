@@ -14,6 +14,7 @@ behaviour.
 | --- | --- |
 | `include/hmi_ui/shared_subjects.hpp` | `SharedSubjects`: the subjects main still defines (`main/frag_state.inc`) and several views read. main fills it once; it shrinks as each subject moves to its view (S7) |
 | `include/hmi_ui/link_state.hpp` | `LinkState`: the values the `rtps_link` subject carries, equal to main's `RtpsLinkState` (main static_asserts it) |
+| `include/hmi_ui/display_flip.hpp`, `src/display_flip.cpp` | `DisplayFlip`: DIRECT rendering into the DSI panel's two frame buffers, the 180-degree Settings "Flip screen" (PPA, CPU fallback) and the touch input that turns with it (from `main/frag_display_flip.inc`). Finds itself through the display's and the touch input's LVGL driver data. The PSRAM frame's `heap_caps_aligned_alloc` is legacy debt moved with `ratchet.py transfer` |
 | `include/hmi_ui/fps_meter.hpp`, `src/fps_meter.cpp` | `FpsMeter`: render time per frame and the once-a-second `[FPS]` debug line, `CONFIG_HMI_DEBUG_FPS` only (from `main/frag_fps.inc`) |
 | `include/hmi_ui/overdraw.hpp`, `src/overdraw.cpp` | `strip_screen_overdraw`, `strip_all_overdraw`: clear the background fills nobody can see (from `main/frag_overdraw.inc`; main keeps the log line) |
 | `include/hmi_ui/rtps_label_view.hpp`, `src/rtps_label_view.cpp` | `RtpsLabelView`: the TopBar's RTPS label (from `main/frag_rtps_label.inc`) |
@@ -45,7 +46,7 @@ behaviour.
 
 - Tasks: none of its own. Views run on the UI task (LVGL timers and observers) and on
   `app_main` during start-up.
-- Dependencies: `lvgl` (public: the headers use its types); private: `ui` (the export: widgets,
+- Dependencies: `lvgl`, `esp_driver_ppa` and espp `logger` (public: the headers use their types); private: `esp_mm` (cache sync), `esp_timer` (FPS), `ui` (the export: widgets,
   component children, theme colours), `rammp_rtps_messages` (`MIB::MibSystemState`). `main`
   requires the component (`PRIV_REQUIRES hmi_ui`).
 - Build: `fw_component_options` really applies here (C++23 and the warning set as errors).
