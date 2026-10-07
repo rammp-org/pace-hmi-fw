@@ -1062,68 +1062,8 @@ extern "C" void app_main(void) {
       },
   });
 
-  // BenchGateScreen: the PIN pad and its four dots.
-  //
-  // The checkboxes need no observer of their own - each one is CHECKED exactly
-  // when the entry has reached it, which lv_obj_bind_state_if_ge says directly.
-  lv_subject_init_int(&rd_pin_len_subject, 0);
-  lv_subject_init_string(&rd_pin_message_subject, rd_pin_message_buf, rd_pin_message_prev_buf,
-                         sizeof(rd_pin_message_buf), kRdPinPromptText);
-  lv_label_bind_text(ui_BenchIntro, &rd_pin_message_subject, nullptr);
-
-  // The dots. The export draws them as an empty outline with no CHECKED look of
-  // its own, so a filled one is added here in the theme's text colour -- and
-  // themeable rather than a literal, so it follows a day/dark switch.
-  lv_obj_t *rd_dots[kRdPinLen] = {ui_BenchPinDot1, ui_BenchPinDot2, ui_BenchPinDot3,
-                                  ui_BenchPinDot4};
-  static constexpr lv_style_selector_t kMainChecked =
-      static_cast<lv_style_selector_t>(LV_PART_MAIN) |
-      static_cast<lv_style_selector_t>(LV_STATE_CHECKED);
-  for (int i = 0; i < kRdPinLen; i++) {
-    ui_object_set_themeable_style_property(rd_dots[i], kMainChecked, LV_STYLE_BG_COLOR,
-                                           _ui_theme_color_text);
-    ui_object_set_themeable_style_property(rd_dots[i], kMainChecked, LV_STYLE_BG_OPA,
-                                           _ui_theme_alpha_text);
-    lv_obj_bind_state_if_ge(rd_dots[i], &rd_pin_len_subject, LV_STATE_CHECKED, i + 1);
-  }
-
-  // The pad, in the order it is drawn: three rows of three, then 0 and
-  // backspace under the middle and right columns. Each button carries its digit
-  // as user_data, and the grid gives the joystick the 2D walk the buttonmatrix
-  // used to bring with it.
-  rd_grid.rows = 4;
-  lv_obj_t *rd_keys[4][kGridMaxCols] = {
-      {ui_BenchKey1, ui_BenchKey2, ui_BenchKey3},
-      {ui_BenchKey4, ui_BenchKey5, ui_BenchKey6},
-      {ui_BenchKey7, ui_BenchKey8, ui_BenchKey9},
-      {nullptr, ui_BenchKey0, ui_BenchKeyBack},
-  };
-  const int rd_digits[4][kGridMaxCols] = {
-      {1, 2, 3},
-      {4, 5, 6},
-      {7, 8, 9},
-      {0, 0, kRdBack},
-  };
-  rd_group = lv_group_create();
-  for (int r = 0; r < rd_grid.rows; r++) {
-    rd_grid.cols[r] = kGridMaxCols;
-    for (int c = 0; c < kGridMaxCols; c++) {
-      lv_obj_t *key = rd_keys[r][c];
-      rd_grid.cell[r][c] = key;
-      if (key == nullptr) {
-        continue; // the hole under "7"
-      }
-      lv_group_add_obj(rd_group, key);
-      lv_obj_add_event_cb(key, rd_keypad_cb, LV_EVENT_CLICKED,
-                          reinterpret_cast<void *>(static_cast<intptr_t>(rd_digits[r][c])));
-      lv_obj_add_event_cb(key, grid_key_cb, LV_EVENT_KEY, &rd_grid);
-      // The cursor is the same focus ring as every other button; a press is
-      // the key's negative (the export's PRESSED style), carried to its label.
-      nav_focus_ring(key);
-      nav_mirror_states(key);
-      clear_click_focusable_recursive(key);
-    }
-  }
+  // BenchGateScreen: the PIN pad, its four dots and the line above them.
+  rd_group = bench_pin_view.init();
 
   // SettingsScreen: what outlives the screen, which is built on demand
   // (settings_screen_ensure). The seat values it steps are initialised further
