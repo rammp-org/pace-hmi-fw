@@ -113,4 +113,46 @@ menu "RAMMP HMI"
         default 1 if HMI_DEBUG_FPS_STRESS
         default 0
 
+    config HMI_DEBUG_HEAP_WATCH
+        bool "Debug: watch the internal heaps for a corrupt block (HEAPWATCH)"
+        default n
+        help
+            A static task walks every internal heap each
+            HMI_DEBUG_HEAP_WATCH_PERIOD_MS and checks each block lies inside its
+            heap; on the first bad one it prints HEAPWATCH lines (time, last
+            clean walk, the bad block and the blocks before it) through the ROM
+            console and aborts. At 2.5 s and 20 s it maps the blocks between
+            HMI_DEBUG_HEAP_WATCH_MAP_LO and _MAP_HI. See main/heap_watch.hpp.
+
+            A debug feature (CS-LAY-09), for the boot heap-corruption hunt: off
+            by default and never in sdkconfig.defaults, which ships.
+
+    config HMI_DEBUG_HEAP_WATCH_PERIOD_MS
+        int "Debug: heap watch period (ms)"
+        range 1 1000
+        default 5
+
+    config HMI_DEBUG_HEAP_WATCH_INTEGRITY_EVERY
+        int "Debug: also run heap_caps_check_integrity every N walks (0 = never)"
+        range 0 1000
+        default 0
+        help
+            With CONFIG_HEAP_POISONING_COMPREHENSIVE this names the overrun
+            block. It checks every free byte with interrupts off on its core,
+            so keep N such that it runs every 20 ms or more.
+
+    config HMI_DEBUG_HEAP_WATCH_MAP_LO
+        hex "Debug: heap watch map, first address"
+        default 0x4FF3AFC0
+
+    config HMI_DEBUG_HEAP_WATCH_MAP_HI
+        hex "Debug: heap watch map, end address"
+        default 0x4FF3B900
+
+    # Hidden: HMI_DEBUG_HEAP_WATCH as 0/1 (CS-TYP-05, as above).
+    config HMI_DEBUG_HEAP_WATCH_AS_INT
+        int
+        default 1 if HMI_DEBUG_HEAP_WATCH
+        default 0
+
 endmenu

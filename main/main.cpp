@@ -49,6 +49,7 @@
 #include "boot_logo.h"
 #include "fw_info.hpp"
 #include "github_ota.hpp"
+#include "heap_watch.hpp"
 #include "internet_ui.hpp"
 #include "joystick_cal.hpp"
 #include "log_capture.hpp"
@@ -126,6 +127,7 @@ static std::recursive_mutex lvgl_mutex;
 #include "frag_da7280.inc" // split_main.py
 // --
 extern "C" void app_main(void) {
+  heap_watch_start(); // debug only: CONFIG_HMI_DEBUG_HEAP_WATCH (static task, no heap)
   // First, so the LogScreen has everything printed from here on - including
   // what the tasks started below print.
   log_capture_start();
