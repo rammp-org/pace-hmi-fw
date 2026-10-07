@@ -1,5 +1,7 @@
 #include "remote_ui.hpp"
 
+#include "sdkconfig.h"
+
 #if CONFIG_HMI_REMOTE_UI
 
 #include <algorithm>
@@ -549,6 +551,11 @@ void remote_ui_start(const RemoteUiConfig &config) {
 }
 
 #else // CONFIG_HMI_REMOTE_UI
+
+// Kconfig makes HMI_BENCH_STICK_INJECT depend on HMI_REMOTE_UI. This stops an sdkconfig that
+// gets round it from building stick injection with no remote UI to drive or report it.
+static_assert(CONFIG_HMI_BENCH_STICK_INJECT_AS_INT == 0,
+              "CONFIG_HMI_BENCH_STICK_INJECT needs CONFIG_HMI_REMOTE_UI (hazard-fixes.md B1)");
 
 void remote_ui_start(const RemoteUiConfig &) {}
 

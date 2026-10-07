@@ -54,6 +54,23 @@ jobs:
           python3 tools/guards/init_order.py check --build build --variant default
           && python3 tools/guards/exports.py check --build build
 
+    # Bench stick injection never ships (CS-LAY-09, hazard-fixes B1): the default build's
+    # sdkconfig.h has it off and its ELF has no symbol of it. nm's output goes to a file first,
+    # so a missing or failing nm fails the step instead of passing as "no match". l0.yml's
+    # bench_inject build checks that the same pattern does match there.
+    - name: Release ELF has no stick injection
+      uses: espressif/esp-idf-ci-action@v1
+      with:
+        esp_idf_version: ${{ env.IDF_VERSION }}
+        path: "."
+        target: ${{ env.IDF_TARGET }}
+        command: >-
+          grep -qx "#define CONFIG_HMI_BENCH_STICK_INJECT_AS_INT 0" build/config/sdkconfig.h
+          && ! grep -q "^#define CONFIG_HMI_BENCH_STICK_INJECT 1" build/config/sdkconfig.h
+          && riscv32-esp-elf-nm -C build/${{ env.APP_NAME }}.elf > build/release_nm.txt
+          && test -s build/release_nm.txt
+          && ! grep -Ei "stick_?inject" build/release_nm.txt
+
     - name: Determine Size Delta
       uses: esp-cpp/esp-idf-size-delta@v1
       with:
