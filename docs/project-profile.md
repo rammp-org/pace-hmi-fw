@@ -32,6 +32,7 @@ yet measured or decided, and "none" means checked and absent.
   | --- | --- | --- |
   | default / release | `sdkconfig.defaults` | Ethernet is the default network setting; remote UI off |
   | bench test | `-D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.wifi.local"` (untracked) | `CONFIG_HMI_REMOTE_UI=y`, Wi-Fi SSID and password |
+  | debug drive timing | the bench test variant plus an overlay with `CONFIG_HMI_DEBUG_DRIVE_TIMING=y` (needs `CONFIG_HMI_REMOTE_UI`) | the drive code and each `lv_task_handler()` call timed on the LVGL task; remote UI `DRIVETIME` reports them (`main/drive_timing.hpp`) |
 
   CI builds only the default variant today.
 - Branch protection on `main` and `dev`: not recorded (CS-GIT-05). Until then approvals are by

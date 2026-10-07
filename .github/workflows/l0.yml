@@ -43,11 +43,13 @@ jobs:
         python3 tests/run.py check
 
     # Debug channels stay out of what ships (CS-LAY-09; plan H13): the remote UI can press
-    # the stick button, and an OTA test URL bypasses the release check.
+    # the stick button, and an OTA test URL bypasses the release check. The drive timing
+    # (DRIVETIME) is debug only.
     - name: Release defaults keep debug features off
       run: |
         ! grep -Eq '^CONFIG_HMI_REMOTE_UI=y' sdkconfig.defaults
         ! grep -Eq '^CONFIG_HMI_OTA_TEST_URL="[^"]+"' sdkconfig.defaults
+        ! grep -Eq '^CONFIG_HMI_DEBUG_DRIVE_TIMING(_AS_INT)?=(y|[1-9])' sdkconfig.defaults
 
   host-l1:
     # L1 host tests (tests/run.py). They need the espp headers, which the component

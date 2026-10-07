@@ -54,4 +54,33 @@ menu "RAMMP HMI"
             digest to compare it with. For your local sdkconfig only; empty in
             sdkconfig.defaults, which ships.
 
+    config HMI_DEBUG_DRIVE_TIMING
+        bool "Debug: time the drive code on the LVGL task (remote UI DRIVETIME)"
+        depends on HMI_REMOTE_UI
+        default n
+        help
+            Times the drive session's work on the LVGL task: the 250 ms drive
+            tick, each drive input (the unlock and exit holds, the burger key
+            on Drive, a profile button, the unlock's advance to Drive, the
+            entry refusal poll) and, for scale, each whole lv_task_handler()
+            call. Count, min, mean, p50, p99 and max per path, in CPU cycles
+            and in wall-clock microseconds (main/drive_timing.hpp), read with
+            the remote UI's DRIVETIME verb (scripts/hmi_ui.py drivetime).
+
+            It answers one question: whether the drive code costs enough on
+            the LVGL task, which holds lvgl_mutex while it runs, to move a
+            millisecond-scale RTPS round trip.
+
+            A debug feature (CS-LAY-09): off by default and never in
+            sdkconfig.defaults, which ships. Needs HMI_REMOTE_UI, its only
+            reader. Turn it on in a local sdkconfig overlay.
+
+    # Hidden: CONFIG_HMI_DEBUG_DRIVE_TIMING as 0/1. sdkconfig.h leaves an unset bool
+    # undefined; an int is always defined and becomes a constexpr with no preprocessor
+    # conditional (CS-TYP-05; the L0 ratchet's if_config count).
+    config HMI_DEBUG_DRIVE_TIMING_AS_INT
+        int
+        default 1 if HMI_DEBUG_DRIVE_TIMING
+        default 0
+
 endmenu
