@@ -1,0 +1,16 @@
+# L1 host app for the self-test check table, main/selftest_spec.hpp (cases SST-001.. in
+# tests/host/selftest_spec_parity/test_selftest_spec.cpp): the firmware table, its golden
+# rows and the host scripts' parse of it agree (TS-UNIT-04, CS-TYP-03).
+# spec-deviation(TS-UNIT-01): host-native g++ in WSL, not the IDF linux target (owner, 2026-10-06).
+- id: L1-SST
+  title: self-test check table matches its golden rows and the host scripts' copy
+  level: L1
+  path: tests/host/selftest_spec_parity
+  requirements: []
+  resources: [host]
+  timeout_s: 300
+  expected_s: 30
+  repeat: 1
+  pass_threshold: 1
+  safety: false
+  artifact: test

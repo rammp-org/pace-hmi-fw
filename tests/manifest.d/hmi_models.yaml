@@ -1,0 +1,17 @@
+# L1 host app for components/hmi_models (cases MOD-001..MOD-012 in test_hmi_models.cpp): the
+# joystick cursor walk of the button grids and the bench PIN entry, against golden tables
+# recorded from the pre-move code and against that code itself (legacy_ui.cpp, the oracle).
+# spec-deviation(TS-UNIT-01): host-native g++ in WSL, not the IDF linux target (owner, 2026-10-06).
+- id: L1-MOD
+  title: button grid cursor walk and bench PIN entry against goldens
+  level: L1
+  path: components/hmi_models/test
+  requirements: [REQ-MOD-01, REQ-MOD-02, REQ-MOD-03, REQ-MOD-04, REQ-MOD-05, REQ-MOD-06,
+                 REQ-MOD-07, REQ-MOD-08, REQ-MOD-09]
+  resources: [host]
+  timeout_s: 300
+  expected_s: 30
+  repeat: 1
+  pass_threshold: 1
+  safety: false
+  artifact: test

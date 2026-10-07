@@ -30,31 +30,42 @@ yet measured or decided, and "none" means checked and absent.
 
   | Variant | How | Differences |
   | --- | --- | --- |
-  | default / release | `sdkconfig.defaults` | Ethernet is the default network setting; remote UI off |
-  | bench test | `-D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.wifi.local"` (untracked) | `CONFIG_HMI_REMOTE_UI=y`, Wi-Fi SSID and password |
+  | default / release | `sdkconfig.defaults` | Ethernet is the default network setting; remote UI, DA7280 boot test and FPS report off |
+  | bench (CI) | `-D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;ci/sdkconfig.bench"` | `CONFIG_HMI_REMOTE_UI=y`, `CONFIG_HMI_BENCH_DA7280_TEST=y` (the DA7280 tests run at boot) |
+  | bench test (board) | `-D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.wifi.local"` (untracked) | `CONFIG_HMI_REMOTE_UI=y`, Wi-Fi SSID and password; DA7280 boot test off unless that file sets it |
+  | debug FPS | a local sdkconfig with `CONFIG_HMI_DEBUG_FPS=y` (and optionally `CONFIG_HMI_DEBUG_FPS_STRESS=y`) | per-second `[FPS]` report at debug level (tag `fps`); DriveScreen loaded at boot; stress invalidates the whole screen every LVGL cycle |
 
-  CI builds only the default variant today.
+  CI (`.github/workflows/build.yml`, `l0.yml`) builds the default and the bench (CI) variants;
+  `l0.yml` fails if `sdkconfig.defaults` turns on any of the debug or bench options above. The
+  debug FPS variant is not built in CI: its code is in `if constexpr` arms, compiled in every
+  build.
 - Branch protection on `main` and `dev`: not recorded (CS-GIT-05). Until then approvals are by
   review only.
 
 ## Components
 | Component | Concern (one sentence) | Safety-relevant | Builds for linux | D4 diagram |
 | --- | --- | --- | --- | --- |
-| `main` | everything not listed below (to be split, see `docs/plans/refactor.md`) | yes | no | none |
-| `components/joystick` | espp joystick plus a twist axis (a modified espp copy, no README) | yes | builds natively with host g++ (verified by the test audit) | none |
-| `components/m5stack-tab5` | vendored espp Tab5 BSP 1.2.0 (sha 615b8df), modified | no | no | none |
+| `main` | everything not listed below; `main.cpp` #includes 27 `frag_*.inc` (one TU, `tools/split_main.py`) | yes | no | none |
+| `components/fw_core` | the channel helpers, ThreadChecker, `Owned<T>`, `check()`, context tokens (not used by the firmware yet) | used by safety | host L1 (FWC-L1) | none |
+| `components/hmi_format` | pure screen-text formatting (speed, steppers, seat, clock, diagnostics) | no | host L1 (L1-FMT) | README |
+| `components/hmi_models` | pure UI models: the button-grid cursor walk and the bench PIN entry | no | host L1 (L1-MOD) | README |
+| `components/joystick` | espp joystick plus a twist axis (vendored espp 1.2.0, sha 615b8df; README + upstream.diff) | yes | host L1 (L1-JOY) | none |
+| `components/post` | the quick POST evaluator: boot facts in, a verdict per check and an overall state out (not wired yet; hazard-fixes C3) | yes (gates motion once C3 wires it) | host L1 (L1-POST) | README |
+| `components/m5stack-tab5` | vendored espp Tab5 BSP 1.2.0 (sha 615b8df), modified (VENDORED.md + upstream.diff) | no | no | none |
 | `components/ui` | SquareLine export, generated | no | n/a | none |
 | `rammp_rtps_messages` (submodule `external/rammp-rtps`) | shared RTPS message and topic spec | yes (wire format of motion commands) | header-only | none |
 
 ## Tasks and islands
-- Topology: not written yet. Today's tasks are inventoried in `docs/plans/refactor.md`.
+- Topology: a draft exists on `dev_ai_refactor_topology` (not merged, for review). Today's tasks are
+  inventoried in `docs/plans/refactor.md`.
 - Free stack at the end of a self-test run, board 2, 2026-10-06 (`rtps_selftest.py`; the self test
   reports free bytes, not a stress-test high-water mark): LVGL 11060 B, ADC 1496 B, RTPS 6112 B.
   The stress test (TS-TGT-03) has not been run, so CS-MEM-04 margins are unknown.
 - Watchdog: the task watchdog fired on `main` (CPU 0) at about 8 s into boot (board 2,
   2026-10-06, firmware b13b103). Which safety tasks the TWDT covers is unknown (CS-SAF-06).
 - Islands, context types, cycle periods: none yet.
-- Components allowed to hold locks (CS-OWN-08): none declared. Today `main` uses a global
+- Components allowed to hold locks (CS-OWN-08): `fw_core` (the channel helpers; the ratchet's
+  RULE_PLACEMENTS). Today `main` uses a global
   recursive `lvgl_mutex` (47 mentions in 10 files).
 - Ownership checks in release builds: not implemented.
 - Fan-out cap for scheduled agent runs: 8 (set by the user for the 2026-10-06 overnight run).
@@ -70,7 +81,7 @@ yet measured or decided, and "none" means checked and absent.
   | --- | --- |
   | RTPS topics and messages | `external/rammp-rtps`, `main/hmi_rtps_spec.hpp` |
   | Remote UI debug channel, TCP 3333 | `main/remote_ui.hpp`, `scripts/hmi_ui.py` |
-  | Self-test report lines and the `SelfTestReport` message | `main/selftest_spec.h`, `scripts/rammp_rtps.py` |
+  | Self-test report lines and the `SelfTestReport` message | `main/selftest_spec.hpp`, `scripts/rammp_rtps.py` |
   | `/storage/joystick_cal.txt` | `main/joystick_cal.cpp` (`version 1`) |
   | `/storage/settings.txt`, `fwinfo.txt`, `wifi.txt` | their `.cpp` files (unversioned) |
   | SquareLine widget names (UI contract) | `scripts/ui_contract.py` |
@@ -106,6 +117,12 @@ yet measured or decided, and "none" means checked and absent.
   | Component manager dies silently on long paths in a new worktree | copy `managed_components/` from the main checkout |
   | `rtps_selftest.py` and `rtps_mcb_sim.py` both publish MibStatus | never run them together (two publishers fail `rtps.mcb_period` and `rtps.mcb_loss`) |
 
+- Board runner: `tools/bench/run_bench.py` (B0-B5; lease file `C:/Users/halai/Offline_Documents/ATDev/rammp/.board-lease`;
+  last-good images in `C:/b/bench/good/`; results in `C:/b/bench/results/`). Flakiness seen on
+  2026-10-06: `time.render_max` outside 20 % in 1 of 6 runs on m3 (band widened to 30 %, owner P4).
+- Power: board 2 has NO battery; it is powered over PoE (owner, 2026-10-06). `pwr.vbat` therefore
+  does not read a battery: the ~8.4 V it reports, the occasional ~4.4 V reads and the top bar's
+  "78 %" are not battery state. Ignored for now (owner, P3).
 - Peer simulators: `scripts/rtps_mcb_sim.py --peer <ip> --bind-address 192.168.137.2`, with stdin
   commands `e`, `ok`, `x`, `s`. `scripts/rtps_selftest.py` acts as the MCB during a self-test run.
 - Debug channel: `scripts/hmi_ui.py` on TCP 3333 (screenshots, taps, keys, walk). Test builds
@@ -120,4 +137,9 @@ yet measured or decided, and "none" means checked and absent.
 ## Deviations
 | Rule ID | Location | Reason | Owner | Review date |
 | --- | --- | --- | --- | --- |
-| none recorded yet | | | | |
+| TS-UNIT-01, CS-HAL-04 | `tests/` (all L1 apps) | L1 runs as host-native g++ 13 in WSL with IDF's Unity sources, not the IDF `linux` target (not installed; no sudo in WSL) | owner | approved 2026-10-06 (Q6) |
+| CS-LAY (layout) | `main/frag_*.inc` | one-TU fragments of `main.cpp`, so the split cannot change static-init order, linkage or inlining; each fragment becomes a component later | owner | temporary |
+| AI-UNA-02 "never merge" | `dev_refactor` | the owner authorised merges into `dev_refactor` for the 2026-10-06 run (AI-DIS-01) | owner | per run |
+| CS-SAF-05 (two approvals) | safety-relevant changes | one human approver (the owner) until a second reviewer exists; nothing safety-relevant merges to `dev` meanwhile | owner | until a second reviewer is named |
+| CS-SAF-03 (open circuit) | joystick low rail | firmware cannot tell an open pot (0 mV) from full travel (calibrated min 6-11 mV on board 2); firmware-only for now, residual hazard documented in `docs/plans/hazard-fixes.md` | owner | revisit with an EE change |
+| CS-LNG-02 | `main` | `main` keeps IDF's gnu++26 and default warnings until its legacy counts are in the ratchet; new components use `fw_component_options` | owner | open |

@@ -1,0 +1,18 @@
+# L1 host app for the RTPS spec (cases RTPS-001..RTPS-065 in tests/host/rtps_spec): the
+# main/hmi_rtps_spec.hpp helpers (seat_raw/seat_units and the H8 hazard inputs, names, tags,
+# timing, banner limits), every rammp-rtps message through espp/cdr (round trips and hostile
+# bytes, TS-UNIT-07), and parity with the host codec scripts/rammp_rtps.py (TS-UNIT-04).
+# Characterisation: it pins today's behaviour, hazards included, so a fix shows up as a diff.
+# spec-deviation(TS-UNIT-01): host-native g++ in WSL, not the IDF linux target (owner, 2026-10-06).
+- id: L1-RTPS
+  title: RTPS spec helpers, message wire format, hostile decodes and host-codec parity
+  level: L1
+  path: tests/host/rtps_spec
+  requirements: []
+  resources: [host]
+  timeout_s: 900
+  expected_s: 240
+  repeat: 1
+  pass_threshold: 1
+  safety: true
+  artifact: test

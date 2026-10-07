@@ -26,6 +26,8 @@
  *   FOCUS                     where input stands: the joystick's focused object
  *                             (x,y,size,state) and each pointer's state
  *   PING                      OK, for a liveness check
+ *   TASKS                     every task's name, priority, core and stack, as one
+ *                             JSON line (tools/guards/task_dump.py, guard G10)
  *
  * One client at a time: a second connection is accepted and closed, so a
  * half-dead session cannot lock the channel out.

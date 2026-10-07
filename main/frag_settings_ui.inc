@@ -1,4 +1,5 @@
 // split_main.py fragment of main.cpp (frag_settings_ui: original lines 2152-2781); one TU, see main.cpp.
+#include "hmi_format/stepper.hpp"
 /////////////////////////////////////////////////////////////////////////////
 // SettingsScreen: pages of -/+ rows
 //
@@ -22,21 +23,11 @@
 // built on demand".
 /////////////////////////////////////////////////////////////////////////////
 
-// A row's fixed description, from either table.
-struct StepperSpec {
-  const char *short_name; // "S1", "M1"
-  const char *label;      // "Brightness"
-  int32_t min_value;
-  int32_t max_value;
-  int32_t step;
-  uint8_t decimals; // display only: 126 with 1 decimal shows "12.6"
-  const char *unit; // appended to the value; nullptr = none
-  // What each value reads, min_value first, for a row that picks between
-  // named options rather than a number; nullptr = a number.
-  const char *const *names = nullptr;
-  // Refused while the chair is driving (see setting_step).
-  bool locked_only = false;
-};
+// A row's fixed description, from either table, and how it is drawn: the
+// formatters live in components/hmi_format (REQ-FMT-02..05).
+using hmi::format::seat_format;
+using hmi::format::stepper_format;
+using hmi::format::StepperSpec;
 
 // Everything needed to drive one row, so a key callback or an observer gets it
 // all from one user_data pointer.
@@ -135,7 +126,7 @@ static uint8_t seat_axis_count; // actuators in the table
 // in, and drawing it would be claiming knowledge we do not have. Both buttons
 // stay greyed while a row reads this, because commanding an actuator whose
 // position is unknown is exactly what the request/response arrangement avoids.
-static constexpr int32_t kValueUnknown = INT32_MIN;
+static constexpr int32_t kValueUnknown = hmi::format::VALUE_UNKNOWN;
 
 // The rejection flash: which actuator was refused, and why. One subject rather
 // than two, because the pair is only ever meaningful together and a single
@@ -144,42 +135,6 @@ static lv_subject_t actuator_reject_subject;
 static constexpr int32_t kActuatorRejectNone = -1;
 static constexpr uint32_t kActuatorRejectFlashMs = 900;
 static uint8_t actuator_reject_id(int32_t packed) { return static_cast<uint8_t>(packed & 0xFF); }
-
-// Formats a raw value the way the row draws it: 126 with decimals=1 -> "12.6",
-// then the unit. Built a digit at a time rather than with a "%.*f" style
-// format: the value is an integer and must stay one, and LVGL's own printf
-// does not promise the '*' width specifier.
-static void stepper_format(const StepperSpec &spec, int32_t raw, char *out, size_t out_size) {
-  if (spec.names != nullptr && raw >= spec.min_value && raw <= spec.max_value) {
-    lv_snprintf(out, out_size, "%s", spec.names[raw - spec.min_value]);
-    return;
-  }
-  char number[16];
-  if (spec.decimals == 0) {
-    lv_snprintf(number, sizeof(number), "%d", static_cast<int>(raw));
-  } else {
-    int32_t scale = 1;
-    for (uint8_t i = 0; i < spec.decimals; i++) {
-      scale *= 10;
-    }
-    // Split on the magnitude and put the sign back by hand, so -5 with one
-    // decimal reads "-0.5" rather than the "0.5" an integer division would give.
-    const bool negative = raw < 0;
-    const int32_t magnitude = negative ? -raw : raw;
-    char digits[12];
-    const uint8_t count =
-        spec.decimals < sizeof(digits) - 1 ? spec.decimals : (uint8_t)(sizeof(digits) - 1);
-    int32_t frac = magnitude % scale;
-    for (int i = count - 1; i >= 0; i--) {
-      digits[i] = static_cast<char>('0' + frac % 10);
-      frac /= 10;
-    }
-    digits[count] = '\0';
-    lv_snprintf(number, sizeof(number), "%s%d.%s", negative ? "-" : "",
-                static_cast<int>(magnitude / scale), digits);
-  }
-  lv_snprintf(out, out_size, "%s%s", number, spec.unit != nullptr ? spec.unit : "");
-}
 
 static void set_display_flipped(bool on); // screen flip, beside direct_flush_cb
 
@@ -221,21 +176,6 @@ static void setting_store_observer(lv_observer_t *observer, lv_subject_t *subjec
 // table. Static because the observers below hold a pointer into it.
 static StepperSpec seat_axis_format[rammp::kSeatAxisCount];
 
-// A seat value with its unit, e.g. 126 on a "deg" axis -> "12.6 deg". The space
-// is why this is not stepper_format alone: that appends the unit tight against
-// the number, which suits a settings row but not a number this size.
-static void seat_format(const StepperSpec &spec, int32_t raw, char *out, size_t out_size) {
-  if (raw == kValueUnknown) {
-    lv_snprintf(out, out_size, "--");
-    return;
-  }
-  char number[16];
-  const StepperSpec bare{spec.short_name, spec.label,    spec.min_value, spec.max_value,
-                         spec.step,       spec.decimals, nullptr};
-  stepper_format(bare, raw, number, sizeof(number));
-  lv_snprintf(out, out_size, "%s %s", number, spec.unit != nullptr ? spec.unit : "");
-}
-
 // The adjustment page's two numbers: where the selected axis is, and how far it
 // goes. Written here rather than bound, because which subject they show changes
 // with the function button - see seat_angle_observer.
@@ -248,24 +188,13 @@ static void seat_angle_refresh() {
     return;
   }
   const StepperSpec &spec = seat_axis_format[seat_selected_axis];
-  const bool degrees = spec.unit != nullptr && strcmp(spec.unit, "deg") == 0;
   const int32_t raw = lv_subject_get_int(&seat_axis_value[seat_selected_axis]);
-  const StepperSpec bare{spec.short_name, spec.label,    spec.min_value, spec.max_value,
-                         spec.step,       spec.decimals, nullptr};
-  char number[16];
   char text[32];
-  if (raw == kValueUnknown) {
-    lv_snprintf(text, sizeof(text), "--");
-  } else {
-    stepper_format(bare, raw, number, sizeof(number));
-    lv_snprintf(text, sizeof(text), "%s%s", number, degrees ? "°" : "");
-  }
+  hmi::format::seat_reading_text(spec, raw, text);
   lv_label_set_text(ui_AngleLabel, text);
 
-  stepper_format(bare, spec.max_value, number, sizeof(number));
   char footer[40];
-  lv_snprintf(footer, sizeof(footer), degrees ? "of %s°" : "of %s %s", number,
-              spec.unit != nullptr ? spec.unit : "");
+  hmi::format::seat_range_text(spec, footer);
   lv_label_set_text(ui_MaxAngleLabel, footer);
 
   // A long reading ("-42.5°") at 264 px runs into the "of": shrink it, about
@@ -308,7 +237,7 @@ static void seat_angle_observer(lv_observer_t *, lv_subject_t *) { seat_angle_re
 static void seat_button_value_observer(lv_observer_t *observer, lv_subject_t *subject) {
   const auto *spec = static_cast<const StepperSpec *>(lv_observer_get_user_data(observer));
   char text[32];
-  seat_format(*spec, lv_subject_get_int(subject), text, sizeof(text));
+  seat_format(*spec, lv_subject_get_int(subject), text);
   lv_label_set_text(lv_observer_get_target_obj(observer), text);
 }
 
@@ -322,7 +251,7 @@ static void setting_value_observer(lv_observer_t *observer, lv_subject_t *subjec
     return;
   }
   char text[24];
-  stepper_format(row->spec, raw, text, sizeof(text));
+  stepper_format(row->spec, raw, text);
   lv_label_set_text(lv_observer_get_target_obj(observer), text);
 }
 

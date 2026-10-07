@@ -1,4 +1,5 @@
 // split_main.py fragment of main.cpp (frag_seat: original lines 1833-2046); one TU, see main.cpp.
+#include "hmi_models/grid.hpp"
 // A page's focusable buttons in visual order, plus where the cursor is. Cells
 // are filled in at wiring time: the ui_* globals are null until ui_init runs.
 // A cell may be null where the layout has a hole -- the PIN pad's bottom row
@@ -13,6 +14,26 @@ struct ButtonGrid {
 
 static ButtonGrid seat_buttons_grid;
 static ButtonGrid seat_adjust_grid;
+
+// The cursor's movement is hmi::ui::grid_step (components/hmi_models); a ButtonGrid
+// is its view: the buttons, and the cursor the focus calls follow.
+static_assert(kGridMaxRows == hmi::ui::GRID_MAX_ROWS && kGridMaxCols == hmi::ui::GRID_MAX_COLS,
+              "ButtonGrid and the cursor model must agree on the grid's size");
+
+// The grid as the cursor model sees it: row lengths, and a hole where a cell is
+// null. Left off the adjustment page's left edge is "back", as "<" is.
+static hmi::ui::GridShape grid_shape_of(const ButtonGrid *g) {
+  hmi::ui::GridShape shape{};
+  shape.rows = g->rows;
+  shape.left_edge_is_back = g == &seat_adjust_grid;
+  for (size_t r = 0; r < shape.cols.size(); r++) {
+    shape.cols[r] = g->cols[r];
+    for (size_t c = 0; c < shape.button[r].size(); c++) {
+      shape.button[r][c] = g->cell[r][c] != nullptr;
+    }
+  }
+  return shape;
+}
 
 // Which seat function the SeatAdjustmentPanel is showing. A subject rather than
 // an lv_label_set_text from the click handler, so the label is reached the same
@@ -62,45 +83,38 @@ static void grid_key_cb(lv_event_t *e) {
       }
     }
   }
+  hmi::ui::GridKey key{};
   switch (lv_event_get_key(e)) {
   case LV_KEY_UP:
-    g->row--;
+    key = hmi::ui::GridKey::UP;
     break;
   case LV_KEY_DOWN:
-    if (g->row + 1 >= g->rows) {
-      nav_to_key(); // below the bottom row is the burger key
-      return;
-    }
-    g->row++;
+    key = hmi::ui::GridKey::DOWN;
     break;
   case LV_KEY_LEFT:
-    // Left off the adjustment page's left edge is "back", as "<" is.
-    if (g == &seat_adjust_grid && g->col == 0) {
-      seat_show_buttons_page();
-      return;
-    }
-    g->col--;
+    key = hmi::ui::GridKey::LEFT;
     break;
   case LV_KEY_RIGHT:
-    g->col++;
+    key = hmi::ui::GridKey::RIGHT;
     break;
   default:
     return;
   }
-  // Clamp rather than wrap. On a control surface you steer by feel, and running
-  // off one edge to reappear at the opposite one is disorienting. The column is
-  // re-clamped after a row change too, since rows can be different lengths.
-  g->row = std::clamp(g->row, 0, g->rows - 1);
-  g->col = std::clamp(g->col, 0, g->cols[g->row] - 1);
-  // Step over a hole in the row, outward first and then back, so the cursor
-  // lands on the nearest real button whichever edge it came from.
-  while (g->cell[g->row][g->col] == nullptr && g->col < g->cols[g->row] - 1) {
-    g->col++;
+  // Clamped rather than wrapped, and a hole is stepped over: see grid_step.
+  const hmi::ui::GridStep step = hmi::ui::grid_step(grid_shape_of(g), {g->row, g->col}, key);
+  switch (step.move) {
+  case hmi::ui::GridMove::OFF_BOTTOM:
+    nav_to_key(); // below the bottom row is the burger key
+    return;
+  case hmi::ui::GridMove::OFF_LEFT:
+    seat_show_buttons_page();
+    return;
+  case hmi::ui::GridMove::MOVED:
+    break;
   }
-  while (g->cell[g->row][g->col] == nullptr && g->col > 0) {
-    g->col--;
-  }
-  if (g->cell[g->row][g->col] != nullptr) {
+  g->row = step.cursor.row;
+  g->col = step.cursor.col;
+  if (step.on_button) {
     lv_group_focus_obj(g->cell[g->row][g->col]);
   }
 }
