@@ -63,6 +63,10 @@ jobs:
         python3 tools/bench/ui_client.py selftest
         python3 tools/bench/run_bench.py selftest
 
+    # B3's comparison with the self-test baseline (pwr.* report-only, owner P3), on samples.
+    - name: Bench self-test comparison self test (CMP)
+      run: python3 tools/bench/compare_selftest.py selftest
+
     # check also fails the requirement-ID rules: a retired requirement cited by a test, an
     # ID declared twice or deleted from its series (tests/reqmatrix.py, TS-COV-01).
     - name: Test manifest and requirement IDs (TS-DEF-02, TS-COV-01)
