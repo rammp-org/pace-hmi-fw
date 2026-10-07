@@ -33,7 +33,7 @@ void hmi::ui::DriveBandView::bind_profile_button(lv_obj_t *button, ProfileButton
   }
   lv_obj_add_event_cb(button, profile_click_cb, LV_EVENT_CLICKED, slot);
   // The label takes the inverted colour with the button (pressed and checked).
-  config_.mirror_states(button);
+  config_.nav->mirror_states(button);
   lv_subject_add_observer_obj(config_.profile, profile_button_observer, button, slot);
 }
 

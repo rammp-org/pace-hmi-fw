@@ -28,7 +28,7 @@ static constinit hmi::ui::DriveBandView drive_band_view{{
         },
     // PUBLISH_DRIVE: the drive request as it stands, with the new profile (rows 29-34).
     .profile_clicked = [] { (void)drive_session_input(hmi::drive_session::Input::PROFILE_CLICK); },
-    .mirror_states = [](lv_obj_t *button) { nav_mirror_states(button); },
+    .nav = &ui_nav_port,
 }};
 
 // MibStatus.speed is metres per second; the label shows mph to one decimal.

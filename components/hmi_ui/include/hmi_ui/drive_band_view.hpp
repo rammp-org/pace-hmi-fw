@@ -6,6 +6,8 @@
 
 #include "lvgl.h"
 
+#include "hmi_ui/nav_port.hpp"
+
 namespace hmi::ui {
 
 /// One instance for the Drive screen. The profile buttons are touch-only (the stick is busy
@@ -24,8 +26,9 @@ public:
     /// The drive session's PROFILE_CLICK input (re-publishes the request with the new profile).
     /// UI task, lvgl_mutex held.
     void (*profile_clicked)();
-    /// nav's state mirroring: the button's label follows its pressed and checked states.
-    void (*mirror_states)(lv_obj_t *button);
+    /// main's navigation: `mirror_states` makes a button's label follow its pressed and
+    /// checked states.
+    const NavPort *nav;
   };
 
   constexpr explicit DriveBandView(const Config &config) noexcept
