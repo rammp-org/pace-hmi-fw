@@ -613,18 +613,15 @@ extern "C" void app_main(void) {
   // MCB at all. Locked still means nothing moves: the band reads LOCKED on every
   // screen and the stick only drives from Drive (stick_drives).
   topbar_view.start_clock();
-  lv_subject_add_observer_obj(&speed_tenths_subject, speed_label_observer, ui_SpeedValue, nullptr);
+  drive_band_view.bind_speed(ui_SpeedValue);
   lv_subject_init_int(&drive_profile_subject, static_cast<int32_t>(MIB::DriveProfile::NORMAL));
-  bind_drive_profile_button(ui_ModeManual, &kProfileHigh);
-  bind_drive_profile_button(ui_ModeAssist, &kProfileNormal);
-  bind_drive_profile_button(ui_ModeAuto, &kProfileLow);
-  lv_subject_add_observer(&drive_profile_subject, drive_mode_publish_observer, nullptr);
+  drive_band_view.bind_profile_buttons(ui_ModeManual, ui_ModeAssist, ui_ModeAuto);
+  drive_band_view.bind_profile_mirror();
   // Before the panels that observe it. lv_subject_init_int memzeroes the subject,
   // taking any observer already on it with it, and bind_mcb_lost_panel below watches
   // this one so the drive screen can show a refused exit.
   lv_subject_init_int(&entry_refused_subject, 0);
-  entry_refused_timer = lv_timer_create(entry_refused_timer_cb, kDriveRefusedShowMs, nullptr);
-  lv_timer_pause(entry_refused_timer);
+  refusal_view.start_timer(kDriveRefusedShowMs);
 
   bind_mcb_lost_panel(ui_ErrorBanner4); // DriveScreen
   bind_mcb_lost_panel(ui_ErrorBanner1); // SeatScreen
@@ -748,7 +745,7 @@ extern "C" void app_main(void) {
         // focus (Boot and Update have none), and only when it stays lost for
         // two checks in a row: a screen change or a row press in flight
         // passes through an empty group on its way to SCREEN_LOADED.
-        if (nav_chrome_of(lv_screen_active()) == nullptr || nav_press_timer != nullptr ||
+        if (!nav_view.has_chrome(lv_screen_active()) || nav_view.row_press_pending() ||
             ++lost < 2) {
           return;
         }

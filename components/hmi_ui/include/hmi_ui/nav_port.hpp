@@ -1,5 +1,6 @@
 #pragma once
-// What the views need from main's navigation (frag_nav), until nav moves into hmi_ui.
+// What the views need from navigation: NavView's API as plain function pointers (main fills one
+// table: NavView's static look functions, and the two calls on its one instance).
 
 #include "lvgl.h"
 

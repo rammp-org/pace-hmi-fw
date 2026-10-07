@@ -33,13 +33,12 @@ static hmi::stick::CalibrationMv stick_cal_mv(const JoystickCal &cal) {
           .twist = axis(cal[JOY_TWIST])};
 }
 
+// How far each axis travels is measured per unit (joystick_cal.cpp, the CALIBRATE button on
+// the JoystickTest screen); the dead zones are the stick's (hmi::stick::pipeline_config).
 static hmi::stick::StickPipeline::Config stick_pipeline_config(const JoystickCal &cal) {
-  return {.calibration = stick_cal_mv(cal),
-          .center_deadzone_radius = kStickCenterDeadzoneRadius,
-          .range_deadzone = kStickRangeDeadzone,
-          .twist_center_deadband_mv = kTwistCenterDeadbandMv,
-          .twist_range_deadband_mv = kTwistRangeDeadbandMv,
-          .keys = {.up = LV_KEY_UP, .down = LV_KEY_DOWN, .right = LV_KEY_RIGHT, .left = LV_KEY_LEFT}};
+  return hmi::stick::pipeline_config(
+      stick_cal_mv(cal),
+      {.up = LV_KEY_UP, .down = LV_KEY_DOWN, .right = LV_KEY_RIGHT, .left = LV_KEY_LEFT});
 }
 
 // The ADC task's side of StickPipeline::cycle. Runs on the ADC task only; every
@@ -129,10 +128,4 @@ read_twist_mv(espp::OneshotAdc &twist_adc, const espp::AdcConfig &twist_channel,
   }
   return twist_mv;
 }
-
-/////////////////////////////////////////////////////////////////////////////
-// TopBar RTPS indicator
-/////////////////////////////////////////////////////////////////////////////
-
-static constexpr uint32_t kRtpsPollMs = 250;
 

@@ -19,6 +19,8 @@ extraction (`test/golden_stick.inc`, frozen). They are not a reviewed specificat
 | REQ-STK-04 | The command is the mounted position times a scale: 0 while calibrating or while the gate (`stick_drives`) is closed, else drive speed / 10 (1..10, clamped). The 0 is a multiply. | STK-016..018, STK-033, STK-035 |
 | REQ-STK-05 | A cycle with any of the three reads missing publishes nothing and calls nothing else. | STK-005, STK-015 |
 | REQ-STK-06 | A cycle calls its `Io` in the order of the original code. | STK-003, STK-004 |
+| REQ-STK-08 | `pipeline_config` gives the HMI's mounting: center dead zone radius 0.10, range dead zone 0.05, twist dead bands 60 mV (center) and 40 mV (range), with the caller's calibration and key codes (the values main passed before they moved here). | STK-037 |
+| REQ-STK-09 | A stick-button release within SELECT_MAX_US (500 ms) of its press selects; every press more than COUNT_DEBOUNCE_US (30 ms) after the last counted press counts (only the counter is debounced). | STK-050..052 |
 
 ## Bench stick injection (`stick/bench_inject.hpp`, hazard-fixes.md §3 B1)
 

@@ -82,9 +82,8 @@ static void bind_chrome_views(lv_obj_t *band, lv_obj_t *bar) {
 //
 // "Select" -- the keypad's ENTER, which clicks whatever the joystick has
 // focused -- fires on RELEASE, and only for a press shorter than
-// kSelectMaxUs. The same button is held to stop driving and to start a
+// hmi::stick::SELECT_MAX_US. The same button is held to stop driving and to start a
 // calibration, and a select on the press edge would have clicked the focused
 // control (on the Drive screen: opened the menu) at the start of every hold.
-// kSelectMaxUs is a hold's grace period, so a press short enough to select
+// SELECT_MAX_US is a hold's grace period, so a press short enough to select
 // never starts a hold filling, and one long enough to fill never selects.
-static constexpr int64_t kSelectMaxUs = 500 * 1000; // == kBarGraceMs

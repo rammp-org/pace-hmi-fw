@@ -43,21 +43,3 @@ static void gpio48_panel_observer(lv_observer_t *observer, lv_subject_t *subject
 static constinit hmi::ui::StatusBandView status_band_view{{.shared = &ui_shared_subjects}};
 static void bind_status_panel(lv_obj_t *panel) { status_band_view.bind(panel); }
 
-/////////////////////////////////////////////////////////////////////////////
-// Joystick mapping
-//
-// How far each axis travels is measured per unit (joystick_cal.cpp, the
-// CALIBRATE button on the JoystickTest screen). What is done with that travel
-// is fixed here.
-/////////////////////////////////////////////////////////////////////////////
-
-// X/Y are one circular gimbal, so their per-axis deadbands are 0 and the
-// deadzone lives on the vector radius instead. The APEM HF44S10 has a square
-// gate, but the output stays CIRCULAR: a corner reads ~(0.71, 0.71) rather
-// than (1, 1), so the MCB never sees a speed above 1.
-static constexpr float kStickCenterDeadzoneRadius = 0.10f;
-static constexpr float kStickRangeDeadzone = 0.05f;
-// Twist is a separate pot on its own axis, so it carries its own deadbands.
-static constexpr float kTwistCenterDeadbandMv = 60.0f;
-static constexpr float kTwistRangeDeadbandMv = 40.0f;
-

@@ -1,4 +1,5 @@
 // split_main.py fragment of main.cpp (frag_stick_button: original lines 853-953); one TU, see main.cpp.
+#include "stick/button_edges.hpp"
 static void stick_button_edge(bool active) {
   // lv_subject_set_int runs the observers synchronously on this task, and they
   // touch widgets, so this needs the LVGL lock
@@ -11,19 +12,15 @@ static void stick_button_edge(bool active) {
   // same every-edge signal the panel follows
   joy_button_pressed.store(active);
 
+  // What the edge means (hmi::stick::ButtonEdges): a release that ends a short
+  // press selects; only the counter is debounced. One instance, on this task.
   const int64_t now = esp_timer_get_time();
-  static int64_t pressed_at_us = 0;
-  if (active) {
-    pressed_at_us = now;
-  } else if (now - pressed_at_us < kSelectMaxUs) {
+  static constinit hmi::stick::ButtonEdges edges;
+  const hmi::stick::ButtonEdges::Effect effect = edges.edge(active, now);
+  if (effect.select) {
     select_key.store(true);
   }
-
-  // only the counter is debounced. espp's GPIO glitch filters are ns-scale and
-  // do nothing against millisecond-scale mechanical bounce.
-  static int64_t last_press_us = 0;
-  if (active && (now - last_press_us) > 30000) {
-    last_press_us = now;
+  if (effect.count) {
     lv_subject_set_int(&button_count_subject, lv_subject_get_int(&button_count_subject) + 1);
   }
 }
@@ -72,17 +69,22 @@ static void refusal_feedback();
 // nothing moves: the stick only drives from Drive (stick_drives).
 /////////////////////////////////////////////////////////////////////////////
 
-static constexpr uint32_t kHoldMs = 1000; // hold time to fill a gesture widget
-// Dead time before a hold starts filling. The stick button doubles as select,
-// and a select is a press shorter than this (kSelectMaxUs), so a tap never
-// ticks a fill up and snaps it back.
-static constexpr uint32_t kBarGraceMs = 500;
-static constexpr int32_t kHoldMax = 100; // arc/bar range (LVGL's default)
+#include "hmi_ui/hold_gesture.hpp"
+static constexpr uint32_t kHoldMs = hmi::ui::HOLD_MS; // hold time to fill a gesture widget
+// Dead time before a hold starts filling; a select is a press shorter than this
+// (hmi::stick::SELECT_MAX_US, the same value).
+static constexpr uint32_t kBarGraceMs = hmi::ui::HOLD_GRACE_MS;
+static constexpr int32_t kHoldMax = hmi::ui::HOLD_MAX; // arc/bar range (LVGL's default)
 // Beat between the unlock landing and the Drive screen dissolving in, so the
 // unlocked padlock is legible rather than a flash.
 static constexpr uint32_t kUnlockAdvanceMs = 1000;
-// Poll cadence for the inputs. Matched to the ADC task's 33 ms period: joy_key
-// cannot change faster than that, so a shorter period would only burn LVGL task
-// time re-reading the same value.
-static constexpr uint32_t kHoldPollMs = 33;
+// Poll cadence for the inputs (matched to the ADC task's 33 ms period).
+static constexpr uint32_t kHoldPollMs = hmi::ui::HOLD_POLL_MS;
+// The gestures' timings are the drive table's (drive_session_table.hpp).
+static_assert(std::chrono::milliseconds{hmi::ui::HOLD_MS} == hmi::drive_session::kHoldFill);
+static_assert(std::chrono::milliseconds{hmi::ui::HOLD_GRACE_MS} == hmi::drive_session::kBarGrace);
+static_assert(std::chrono::milliseconds{hmi::ui::HOLD_POLL_MS} ==
+              hmi::drive_session::kHoldPollPeriod);
+static_assert(hmi::stick::SELECT_MAX_US == int64_t{hmi::ui::HOLD_GRACE_MS} * 1000,
+              "a press short enough to select never starts a hold filling");
 
