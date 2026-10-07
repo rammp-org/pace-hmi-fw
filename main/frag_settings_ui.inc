@@ -116,9 +116,9 @@ static lv_group_t *setting_group = nullptr;
 // warning panel depends on it.
 static lv_subject_t setting_page_subject;
 
-// Raw value per actuator, in the table's units. Static: the rows' observers
-// point at them, and the MCB keeps them current with no page up.
-static lv_subject_t seat_axis_value[rammp::kSeatAxisCount];
+// Raw value per actuator, in the table's units: seat_axis_value, defined with
+// the seat view (frag_seat). The rows' observers point at them, and the MCB
+// keeps them current with no page up.
 static uint8_t seat_axis_count; // actuators in the table
 
 // What a value reads before it is known - only ever an actuator the MCB has
@@ -170,75 +170,6 @@ static void setting_store_observer(lv_observer_t *observer, lv_subject_t *subjec
   default:
     break; // MENU_SLIDE: read where it is used, nothing to apply
   }
-}
-
-// How each seat axis' number is drawn, filled in at startup from the shared
-// table. Static because the observers below hold a pointer into it.
-static StepperSpec seat_axis_format[rammp::kSeatAxisCount];
-
-// The adjustment page's two numbers: where the selected axis is, and how far it
-// goes. Written here rather than bound, because which subject they show changes
-// with the function button - see seat_angle_observer.
-//
-// Spec 04b: the big one is the number, with "°" on an angle -- the word "deg"
-// at 264 px was most of the screen -- and the small one says "of 25°", or
-// "of 50.0 mm" on a length, where the unit has no symbol to shrink to.
-static void seat_angle_refresh() {
-  if (seat_selected_axis < 0) {
-    return;
-  }
-  const StepperSpec &spec = seat_axis_format[seat_selected_axis];
-  const int32_t raw = lv_subject_get_int(&seat_axis_value[seat_selected_axis]);
-  char text[32];
-  hmi::format::seat_reading_text(spec, raw, text);
-  lv_label_set_text(ui_AngleLabel, text);
-
-  char footer[40];
-  hmi::format::seat_range_text(spec, footer);
-  lv_label_set_text(ui_MaxAngleLabel, footer);
-
-  // A long reading ("-42.5°") at 264 px runs into the "of": shrink it, about
-  // its bottom-left corner, to fit what the "of" leaves.
-  const lv_font_t *font = lv_obj_get_style_text_font(ui_AngleLabel, LV_PART_MAIN);
-  const lv_font_t *small = lv_obj_get_style_text_font(ui_MaxAngleLabel, LV_PART_MAIN);
-  auto width_of = [](const char *s, const lv_font_t *f) {
-    lv_point_t size;
-    lv_text_get_size(&size, s, f, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-    return size.x;
-  };
-  const int32_t wide = width_of(text, font);
-  const int32_t room = 660 - width_of(footer, small) - 24;
-  const int32_t scale =
-      wide > room && wide > 0 ? LV_SCALE_NONE * std::max<int32_t>(room, 1) / wide : LV_SCALE_NONE;
-  lv_obj_set_style_transform_pivot_x(ui_AngleLabel, 0, LV_PART_MAIN);
-  lv_obj_set_style_transform_pivot_y(ui_AngleLabel, lv_pct(100), LV_PART_MAIN);
-  lv_obj_set_style_transform_scale(ui_AngleLabel, scale, LV_PART_MAIN);
-
-  // The preset the motion sits at is the selected one: the negative (spec
-  // 04b, "15°" filled).
-  for (lv_obj_t *preset :
-       {ui_SeatAdjustmentButton3, ui_SeatAdjustmentButton4, ui_SeatAdjustmentButton5}) {
-    const lv_obj_t *label = preset == ui_SeatAdjustmentButton3   ? ui_SeatAdjustmentButtonLabel3
-                            : preset == ui_SeatAdjustmentButton4 ? ui_SeatAdjustmentButtonLabel4
-                                                                 : ui_SeatAdjustmentButtonLabel5;
-    lv_obj_set_state(preset, LV_STATE_CHECKED,
-                     raw != kValueUnknown &&
-                         seat_preset_target(static_cast<size_t>(seat_selected_axis), label) == raw);
-  }
-}
-
-// One per axis, all pointed at ui_AngleLabel: whichever axis moves, the page
-// redraws the one it is showing. Cheaper than it looks - a sample only arrives
-// twice a second, and refreshing costs two lv_label_set_text.
-static void seat_angle_observer(lv_observer_t *, lv_subject_t *) { seat_angle_refresh(); }
-
-// The number under a function button. An observer for the same reason
-// setting_value_observer is one: the value is scaled by its decimals.
-static void seat_button_value_observer(lv_observer_t *observer, lv_subject_t *subject) {
-  const auto *spec = static_cast<const StepperSpec *>(lv_observer_get_user_data(observer));
-  char text[32];
-  seat_format(*spec, lv_subject_get_int(subject), text);
-  lv_label_set_text(lv_observer_get_target_obj(observer), text);
 }
 
 // The row's number. An observer rather than lv_label_bind_text because the
