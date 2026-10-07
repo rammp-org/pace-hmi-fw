@@ -128,7 +128,7 @@ What this means in practice:
 | `hmi_rtps_spec.hpp` | What only this HMI adds to the shared spec: timeouts, seat helpers, banner texts, the self-test topics |
 | `selftest.cpp/.hpp`, `selftest_spec.hpp` | The self-test: 54 checks, an overlay, and a report over RTPS and serial |
 | `remote_ui.cpp/.hpp` | Bench-only debug server on TCP 3333: screenshots, taps, keys, `TASKS` |
-| `settings.cpp/.hpp`, `settings_spec.h` | Persistent settings (`/storage/settings.txt`) from one X-macro table |
+| `settings.cpp/.hpp`, `settings_spec.hpp` | Persistent settings (`/storage/settings.txt`) from one typed spec table |
 | `storage.cpp/.hpp` | LittleFS paths, atomic write (tmp + rename), one-time legacy migration |
 | `joystick_cal.cpp/.hpp` | The calibration file and the guided calibration run |
 | `fw_info.cpp/.hpp` | SHA-256 of the running image, matched to a release |
@@ -660,7 +660,7 @@ in the last 2000 ms, otherwise NO_PEER. Only CONNECTED lets anything drive.
 | Area | How it works | Code |
 | --- | --- | --- |
 | Storage | LittleFS `storage` partition at `/storage`. `storage_write` writes `<name>.tmp`, then renames. A one-time migration moves files from the old layout | `storage.cpp` |
-| Settings | `SETTINGS_PARAM_TABLE` (11 values with min, max, default). Loaded once at boot. Written on change by `setting_store_observer`, which also updates the atomics the ADC task reads | `settings.cpp`, `settings_spec.h`, `frag_settings_ui.inc:143` |
+| Settings | `SETTINGS_PARAMS` (11 values with min, max, default). Loaded once at boot. Written on change by `setting_store_observer`, which also updates the atomics the ADC task reads | `settings.cpp`, `settings_spec.hpp`, `frag_settings_ui.inc:143` |
 | Files | `settings.txt`, `joystick_cal.txt` (versioned), `wifi.txt` (password in plain text), `fwinfo.txt` | |
 | OTA | Update screen → GitHub release list → `github_ota_start` thread:<br>- streams 64 KB blocks to the other slot<br>- checks the first block (magic, chip, project)<br>- computes SHA-256<br>- `esp_ota_end`<br>- compares with GitHub's digest **only if one exists**<br>- sets the boot partition<br>Restarts only when the MIB is not ENABLED. Rollback is on: the new image marks itself valid after 30 s of the LVGL task running | `github_ota.cpp`, `update_ui.cpp`, `components/ota_parse` |
 | Self-test | 54 checks in `selftest_spec.hpp` covering system, network, RTPS, memory, I2C, IMU, RTC, power, haptics, display, timing and joystick. Started from Skunk Works or by a RUN command over RTPS (any peer, H7). Runs on its own task; draws an overlay that takes over the joystick input. Reports over RTPS and as a `[SELFTEST]` table on serial | `selftest.cpp` |
