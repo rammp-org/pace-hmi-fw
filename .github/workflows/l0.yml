@@ -80,6 +80,7 @@ jobs:
         ! grep -Eq '^CONFIG_HMI_BENCH_DA7280_TEST(_AS_INT)?=(y|[1-9])' sdkconfig.defaults
         ! grep -Eq '^CONFIG_HMI_DEBUG_FPS(_STRESS)?(_AS_INT)?=(y|[1-9])' sdkconfig.defaults
         ! grep -Eq '^CONFIG_HMI_DEBUG_HEAP_WATCH(_AS_INT)?=(y|[1-9])' sdkconfig.defaults
+        ! grep -Eq '^CONFIG_HMI_DEBUG_LOG_FLOOD(_EXACT)?(_AS_INT)?=(y|[1-9])' sdkconfig.defaults
 
   host-l1:
     # L1 host tests (tests/run.py). They need the espp headers, which the component

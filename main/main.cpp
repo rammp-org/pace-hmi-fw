@@ -53,6 +53,7 @@
 #include "internet_ui.hpp"
 #include "joystick_cal.hpp"
 #include "log_capture.hpp"
+#include "log_flood.hpp"
 #include "log_view.hpp"
 #include "remote_ui.hpp"
 #include "rtps_comms.hpp"
@@ -133,6 +134,7 @@ extern "C" void app_main(void) {
   log_capture_start();
   espp::Logger logger({.tag = "M5Stack Tab5 Example", .level = espp::Logger::Verbosity::INFO});
   logger.info("Starting example!");
+  log_flood_start(); // debug only: CONFIG_HMI_DEBUG_LOG_FLOOD (static tasks, no heap)
   // Before anything reads /storage: the first boot of the two-slot layout brings the
   // calibration and settings over from where the old partition table kept them.
   storage_migrate_legacy();
