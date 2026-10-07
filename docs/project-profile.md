@@ -122,9 +122,14 @@ yet measured or decided, and "none" means checked and absent.
   2026-10-06: `time.render_max` outside 20 % in 1 of 6 runs on m3 (band widened to 30 %, owner P4).
 - Power: board 2 has NO battery; it is powered over PoE (owner, 2026-10-06). `pwr.vbat` therefore
   does not read a battery: the ~8.4 V it reports, the occasional ~4.4 V reads and the top bar's
-  "78 %" are not battery state. Ignored for now (owner, P3).
+  "78 %" are not battery state. Ignored for now (owner, P3): B3 (`compare_selftest.py`) shows the
+  pwr.* checks (value, verdict, baseline) but does not grade them until a battery is fitted.
 - Peer simulators: `scripts/rtps_mcb_sim.py --peer <ip> --bind-address 192.168.137.2`, with stdin
-  commands `e`, `ok`, `x`, `s`. `scripts/rtps_selftest.py` acts as the MCB during a self-test run.
+  commands `e`, `ok`, `x`, `s`, `p`/`r` (pause MibStatus), and the bench fault modes `ign N` / `drop N`
+  (ignore or drop the next N DISABLEs), `ongone keep|idle` (what the MIB does when the HMI goes
+  away), `mark <label>`; `--event-log PATH` writes a JSONL log of what it received and sent. Its
+  decision logic is `scripts/mcb_sim_logic.py` (`rtps_mcb_sim.py selftest`, cases SIM-001.., in
+  L0). `scripts/rtps_selftest.py` acts as the MCB during a self-test run.
 - Debug channel: `scripts/hmi_ui.py` on TCP 3333 (screenshots, taps, keys, walk). Test builds
   enable it with `CONFIG_HMI_REMOTE_UI=y`.
 
