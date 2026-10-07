@@ -39,9 +39,15 @@ void exact_trigger() {
       "HEAPFLOOD exact: these 128 bytes fill the stdout tee's buffer";
   std::copy(kText.begin(), kText.end(), fill.begin());
   fill.back() = '\n';
-  flockfile(stdout); // nobody else prints in between
-  std::fflush(stdout);
-  const size_t wrote = std::fwrite(fill.data(), 1, fill.size(), stdout);
+  flockfile(stdout);   // nobody else prints in between
+  std::fflush(stdout); // the tee's buffer is empty now
+  // In two halves: picolibc's fwrite writes a request of a whole buffer or more
+  // straight through (flush, then write), which leaves the buffer empty. Each
+  // half is smaller than the buffer, so both are copied in and nothing flushes:
+  // len == size afterwards.
+  constexpr size_t kHalf = kTeeBufferBytes / 2;
+  size_t wrote = std::fwrite(fill.data(), 1, kHalf, stdout);
+  wrote += std::fwrite(fill.data() + kHalf, 1, kTeeBufferBytes - kHalf, stdout);
   // vprintf: character by character, so __bufio_put stores this 'E' first.
   std::printf("E (%lu) heapflood: exact trigger after a %u-byte fwrite\n",
               static_cast<unsigned long>(esp_log_timestamp()), static_cast<unsigned>(wrote));
