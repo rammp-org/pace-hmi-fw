@@ -511,8 +511,7 @@ extern "C" void app_main(void) {
       theme != ui_theme_idx && (theme == UI_THEME_DEFAULT || theme == UI_THEME_DAY)) {
     ui_theme_set(theme);
   }
-  lv_subject_init_int(&brightness_subject, settings_brightness());
-  lv_subject_add_observer(&brightness_subject, brightness_observer, nullptr);
+  brightness_view.init(settings_brightness());
   // Theme: the row switches the UI's palette; rtps_poll_cb notices the switch
   // (however it was made) and saves it, and keeps this subject in step.
   lv_subject_init_int(&theme_subject, ui_theme_idx == UI_THEME_DAY ? 1 : 0);
@@ -543,8 +542,7 @@ extern "C" void app_main(void) {
     lv_subject_add_observer(subject, setting_store_observer,
                             reinterpret_cast<void *>(static_cast<intptr_t>(param)));
   }
-  brightness_save_timer = lv_timer_create(brightness_save_cb, kBrightnessSaveDelayMs, nullptr);
-  lv_timer_pause(brightness_save_timer);
+  brightness_view.start_save_timer(kBrightnessSaveDelayMs);
 
   // Bind the Settings-screen axis bars to the ADC subjects (observer pattern).
   // Bars show the calibrated joystick position as a percentage: -100..+100,
@@ -1253,7 +1251,7 @@ extern "C" void app_main(void) {
   tab5.mute(false);
   tab5.volume(60.0f);
 
-  // (brightness is the saved setting, applied when brightness_subject is bound)
+  // (brightness is the saved setting, applied when brightness_view.init adds its observer)
 
   // make a task to read out various data such as IMU, battery monitoring, etc.
   // and print it to screen
