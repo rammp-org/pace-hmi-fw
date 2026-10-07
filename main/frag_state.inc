@@ -155,3 +155,23 @@ static void nav_home();
 static void nav_focus_ring(lv_obj_t *obj);
 static void nav_update_stick_gate();
 
+// The subjects above that the hmi_ui views read (components/hmi_ui/shared_subjects.hpp).
+#include "hmi_ui/link_state.hpp"
+#include "hmi_ui/shared_subjects.hpp"
+static constexpr hmi::ui::SharedSubjects ui_shared_subjects{
+    .locked = &locked_subject,
+    .mib_state = &mib_state_subject,
+    .rtps_link = &rtps_link_subject,
+    .rtps_blink = &rtps_blink_subject,
+    .drive_text = &drive_text_subject,
+    .state_text = &state_text_subject,
+};
+// rtps_link_subject carries RtpsLinkState; the views read it as hmi::ui::LinkState.
+static constexpr bool same_link_state(RtpsLinkState a, hmi::ui::LinkState b) {
+  return static_cast<int32_t>(a) == static_cast<int32_t>(b);
+}
+static_assert(same_link_state(RtpsLinkState::NET_FAILED, hmi::ui::LinkState::NET_FAILED));
+static_assert(same_link_state(RtpsLinkState::LINK_DOWN, hmi::ui::LinkState::LINK_DOWN));
+static_assert(same_link_state(RtpsLinkState::NO_IP, hmi::ui::LinkState::NO_IP));
+static_assert(same_link_state(RtpsLinkState::NO_PEER, hmi::ui::LinkState::NO_PEER));
+static_assert(same_link_state(RtpsLinkState::CONNECTED, hmi::ui::LinkState::CONNECTED));

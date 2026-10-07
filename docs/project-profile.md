@@ -50,6 +50,7 @@ yet measured or decided, and "none" means checked and absent.
 | `components/hmi_format` | pure screen-text formatting (speed, steppers, seat, clock, diagnostics) | no | host L1 (L1-FMT) | README |
 | `components/hmi_models` | pure UI models: the button-grid cursor walk and the bench PIN entry | no | host L1 (L1-MOD) | README |
 | `components/joystick` | espp joystick plus a twist axis (vendored espp 1.2.0, sha 615b8df; README + upstream.diff) | yes | host L1 (L1-JOY) | none |
+| `components/post` | the quick POST evaluator: boot facts in, a verdict per check and an overall state out (not wired yet; hazard-fixes C3) | yes (gates motion once C3 wires it) | host L1 (L1-POST) | README |
 | `components/m5stack-tab5` | vendored espp Tab5 BSP 1.2.0 (sha 615b8df), modified (VENDORED.md + upstream.diff) | no | no | none |
 | `components/ui` | SquareLine export, generated | no | n/a | none |
 | `rammp_rtps_messages` (submodule `external/rammp-rtps`) | shared RTPS message and topic spec | yes (wire format of motion commands) | header-only | none |
@@ -121,9 +122,14 @@ yet measured or decided, and "none" means checked and absent.
   2026-10-06: `time.render_max` outside 20 % in 1 of 6 runs on m3 (band widened to 30 %, owner P4).
 - Power: board 2 has NO battery; it is powered over PoE (owner, 2026-10-06). `pwr.vbat` therefore
   does not read a battery: the ~8.4 V it reports, the occasional ~4.4 V reads and the top bar's
-  "78 %" are not battery state. Ignored for now (owner, P3).
+  "78 %" are not battery state. Ignored for now (owner, P3): B3 (`compare_selftest.py`) shows the
+  pwr.* checks (value, verdict, baseline) but does not grade them until a battery is fitted.
 - Peer simulators: `scripts/rtps_mcb_sim.py --peer <ip> --bind-address 192.168.137.2`, with stdin
-  commands `e`, `ok`, `x`, `s`. `scripts/rtps_selftest.py` acts as the MCB during a self-test run.
+  commands `e`, `ok`, `x`, `s`, `p`/`r` (pause MibStatus), and the bench fault modes `ign N` / `drop N`
+  (ignore or drop the next N DISABLEs), `ongone keep|idle` (what the MIB does when the HMI goes
+  away), `mark <label>`; `--event-log PATH` writes a JSONL log of what it received and sent. Its
+  decision logic is `scripts/mcb_sim_logic.py` (`rtps_mcb_sim.py selftest`, cases SIM-001.., in
+  L0). `scripts/rtps_selftest.py` acts as the MCB during a self-test run.
 - Debug channel: `scripts/hmi_ui.py` on TCP 3333 (screenshots, taps, keys, walk). Test builds
   enable it with `CONFIG_HMI_REMOTE_UI=y`.
 
@@ -137,7 +143,7 @@ yet measured or decided, and "none" means checked and absent.
 | Rule ID | Location | Reason | Owner | Review date |
 | --- | --- | --- | --- | --- |
 | TS-UNIT-01, CS-HAL-04 | `tests/` (all L1 apps) | L1 runs as host-native g++ 13 in WSL with IDF's Unity sources, not the IDF `linux` target (not installed; no sudo in WSL) | owner | approved 2026-10-06 (Q6) |
-| CS-LAY (layout) | `main/frag_*.inc` | one-TU fragments of `main.cpp`, so the split cannot change static-init order, linkage or inlining; each fragment becomes a component later | owner | temporary |
+| CS-LAY (layout) | `main/frag_*.inc` | one-TU fragments of `main.cpp`, so the split cannot change static-init order, linkage or inlining; they dissolve into components grouped by concern (CS-LAY-02; app-main-shrink.md V15), not one component per fragment | owner | temporary |
 | AI-UNA-02 "never merge" | `dev_refactor` | the owner authorised merges into `dev_refactor` for the 2026-10-06 run (AI-DIS-01) | owner | per run |
 | CS-SAF-05 (two approvals) | safety-relevant changes | one human approver (the owner) until a second reviewer exists; nothing safety-relevant merges to `dev` meanwhile | owner | until a second reviewer is named |
 | CS-SAF-03 (open circuit) | joystick low rail | firmware cannot tell an open pot (0 mV) from full travel (calibrated min 6-11 mV on board 2); firmware-only for now, residual hazard documented in `docs/plans/hazard-fixes.md` | owner | revisit with an EE change |

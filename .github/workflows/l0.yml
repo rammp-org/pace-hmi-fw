@@ -24,6 +24,8 @@ jobs:
       with:
         # Full history: ratchet.py check re-verifies transfer grants against their base commit.
         fetch-depth: 0
+        # scripts/rammp_rtps.py (the MCB sim self test below) reads the shared spec headers
+        submodules: recursive
 
     # ubuntu-latest (24.04) ships Python 3.12; both scripts are stdlib only.
     - name: Ratchet self test
@@ -49,10 +51,42 @@ jobs:
         python3 tools/guards/task_dump.py selftest
         python3 tools/guards/observer_census.py selftest
 
-    - name: Test manifest (TS-DEF-02)
+    # The simulated MCB's decisions and bench fault modes (docs/plans/hazard-fixes.md §3 B5):
+    # scripts/mcb_sim_logic.py, cases SIM-001.., no network and no tkinter.
+    - name: MCB sim self test (rtps_mcb_sim.py decision logic)
+      run: python3 scripts/rtps_mcb_sim.py selftest
+
+    # tools/bench without a board: the remote-UI client (timeouts, retry, log) against a
+    # localhost fake, and run_bench's step sequencing (waits after a reset) on a fake board.
+    - name: Bench runner self tests (ui_client UI-*, run_bench BENCH-*)
+      run: |
+        python3 tools/bench/ui_client.py selftest
+        python3 tools/bench/run_bench.py selftest
+
+    # B3's comparison with the self-test baseline (pwr.* report-only, owner P3), on samples.
+    - name: Bench self-test comparison self test (CMP)
+      run: python3 tools/bench/compare_selftest.py selftest
+
+    # check also fails the requirement-ID rules: a retired requirement cited by a test, an
+    # ID declared twice or deleted from its series (tests/reqmatrix.py, TS-COV-01).
+    - name: Test manifest and requirement IDs (TS-DEF-02, TS-COV-01)
       run: |
         python3 -m pip install --quiet pyyaml
+        python3 tests/run.py selftest --matrix
         python3 tests/run.py check
+
+    # Informational (docs/plans/hazard-fixes.md B4): the requirement -> test matrix and its
+    # gaps (requirements with no test, tests with no requirement). It lists; it does not gate.
+    - name: Requirement matrix (TS-COV-01, informational)
+      run: |
+        python3 tests/run.py report > /dev/null
+        cat results/requirements/requirements.md >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload the requirement matrix
+      uses: actions/upload-artifact@v7
+      with:
+        name: requirement-matrix
+        path: results/requirements/
 
     # Debug channels stay out of what ships (CS-LAY-09; plan H13): the remote UI can press
     # the stick button, and an OTA test URL bypasses the release check. The bench DA7280

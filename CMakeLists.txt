@@ -31,7 +31,10 @@ set(
   # e.g.
   #
   # `idf.py add-dependency "espp/task>=1.0"`
-  "main esptool_py"
+  #
+  # post is listed so it builds for the target before anything requires it (hazard-fixes C3
+  # wires it in; until then main does not REQUIRE it, and nothing links it).
+  "main esptool_py post"
   CACHE STRING
   "List of components to include"
   )
