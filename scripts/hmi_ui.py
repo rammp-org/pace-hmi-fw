@@ -14,6 +14,8 @@ instead of by someone looking at the display.
     python hmi_ui.py walk renders              # every screen, captured
     python hmi_ui.py watch --fps 2             # crude video into ./watch
     python hmi_ui.py raw "SWIPE 360 900 360 300 400"
+    python hmi_ui.py drivetime                 # the drive code's timing (DRIVETIME)
+    python hmi_ui.py drivetime reset --json t.json  # save it, then start the counts again
 
 --host takes the board's address; without it the script asks the network (an
 RTPS participant announces itself, so rtps_net.py's sweep finds the board) and
@@ -30,6 +32,7 @@ screen, the seat and actuator jogs included. Bench use only.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import pathlib
 import socket
@@ -134,6 +137,15 @@ class Hmi:
 
     def theme(self, index: int) -> str:
         return self.command(f"THEME {index}")
+
+    def drivetime(self, reset: bool = False) -> dict:
+        """The drive code's timing on the LVGL task (DRIVETIME; only in an image built
+        with CONFIG_HMI_DEBUG_DRIVE_TIMING). With reset, the board starts the counts
+        again after this report."""
+        reply = self.command("DRIVETIME RESET" if reset else "DRIVETIME")
+        if not reply.startswith("OK "):
+            raise RuntimeError(reply)
+        return json.loads(reply[3:])
 
     # --- the joystick, as a person would use it -------------------------------
 
@@ -242,6 +254,35 @@ def find_host() -> str:
 # --- commands ----------------------------------------------------------------
 
 
+def drivetime_table(report: dict) -> str:
+    """A DRIVETIME report as a table: CPU time in us (from cycles, sub-us), wall time in
+    us (esp_timer, 1 us steps). p50/p99 are bucket tops: at most 1.5x the true value."""
+    head = (f"{report['app']}  {report['cpu_mhz']} MHz  "
+            f"window {report['window_ms'] / 1000:.1f} s  resets {report['resets']}"
+            + ("" if report["consistent"] else "  (NOT a consistent snapshot)"))
+    cols = ("min", "mean", "p50", "p99", "max")
+    lines = [head,
+             f"{'path':<14}{'n':>8} | cpu us " + "".join(f"{c:>9}" for c in cols)
+             + " | wall us " + "".join(f"{c:>7}" for c in cols) + f" | {'cpu total us':>12}"]
+    for name, p in report["paths"].items():
+        cpu = "".join(f"{p['cpu_ns'][c] / 1000:9.2f}" for c in cols)
+        wall = "".join(f"{p['wall_us'][c]:7d}" for c in cols)
+        lines.append(f"{name:<14}{p['n']:>8} |        {cpu} |         {wall}"
+                     f" | {p['cpu_ns']['total_us']:>12}")
+    return "\n".join(lines)
+
+
+def cmd_drivetime(hmi: Hmi, action: str, out: pathlib.Path | None) -> int:
+    report = hmi.drivetime(reset=action == "reset")
+    if out is not None:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    print(drivetime_table(report))
+    if action == "reset":
+        print("(reset: the counts start again from the board's next sample)")
+    return 0
+
+
 def capture(hmi: Hmi, path: pathlib.Path, half: bool) -> pathlib.Path:
     width, height, pixels = hmi.shot(half)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -332,6 +373,12 @@ def main() -> int:
     watch.add_argument("out", nargs="?", default="watch", type=pathlib.Path)
     watch.add_argument("--fps", type=float, default=2.0)
 
+    drivetime = sub.add_parser(
+        "drivetime", help="the drive code's timing on the LVGL task (DRIVETIME)")
+    drivetime.add_argument("action", nargs="?", choices=["fetch", "reset"], default="fetch",
+                           help="fetch (default) or reset: report, then start the counts again")
+    drivetime.add_argument("--json", type=pathlib.Path, help="also save the report here")
+
     raw = sub.add_parser("raw", help="send one command verbatim")
     raw.add_argument("text")
 
@@ -367,6 +414,8 @@ def main() -> int:
             return cmd_walk(hmi, args.out, args.half)
         elif args.command == "watch":
             return cmd_watch(hmi, args.out, args.fps, args.half)
+        elif args.command == "drivetime":
+            return cmd_drivetime(hmi, args.action, args.json)
         elif args.command == "raw":
             print(hmi.command(args.text))
     return 0
