@@ -19,7 +19,7 @@
 //   2. `twist_lowpass` is the identity: the filter reads esp_timer, stays in main, and the
 //      vector's twist_mv is its output;
 //   3. calls out (joystick_cal_note_raw, lv_subject_set_int, rtps_comms_publish_adc) are fakes
-//      that record what they were given;
+//      that record what they were given (the publish fake returns g_publish_returns, true);
 //   4. the function-local `static bool engaged` and the app_main-local `static espp::Joystick
 //      stick` are harness state, so each scenario can start from power-on.
 // Keep it that way: this file is the "before" the extraction is measured against.
@@ -154,6 +154,10 @@ std::recursive_mutex lvgl_mutex;
 std::optional<JoystickCal> g_new_cal;
 bool g_calibrating = false;
 StickOutputs g_out{};
+// What the fake rtps_comms_publish_adc returns. The real one returns false until RTPS is up and
+// a peer has matched; the vectors all run with it up. A variable rather than a literal, so the
+// call's result is not a constant to static analysis (cppcheck knownConditionTrueFalse).
+bool g_publish_returns = true;
 
 std::optional<JoystickCal> joystick_cal_take_new() {
   return std::exchange(g_new_cal, std::nullopt);
@@ -183,16 +187,16 @@ bool rtps_comms_publish_adc(float x, float y, float twist, rammp::Buttons button
   g_out.cmd_y = std::bit_cast<std::uint32_t>(y);
   g_out.cmd_twist = std::bit_cast<std::uint32_t>(twist);
   g_out.buttons = static_cast<std::uint32_t>(buttons);
-  return true;
+  return g_publish_returns;
 }
 
 // The body of adc_task_fn after its reads (main.cpp:1481-1601), verbatim apart from the edits
 // listed at the top. Returns adc_published.
 bool adc_cycle_body(std::optional<float> vert_mv, std::optional<float> horiz_mv,
                     std::optional<float> twist_mv) {
-  espp::Joystick &stick = *g_stick; // was app_main's `static espp::Joystick stick`
   bool adc_published = false;
   if (vert_mv && horiz_mv && twist_mv) {
+    espp::Joystick &stick = *g_stick; // was app_main's `static espp::Joystick stick`
     // A calibration run just finished: switch to it here, between two
     // samples, on the task that owns the stick.
     if (auto cal = joystick_cal_take_new()) {
