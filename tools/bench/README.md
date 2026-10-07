@@ -124,6 +124,12 @@ image. Children run with `PYTHONDONTWRITEBYTECODE=1`.
 - **Low-water marks** (`mem.int_min`, `mem.dma_min`, `mem.stk_*`) depend on what ran since boot;
   the baseline was taken at 500 s uptime, B3 runs ~90 s after reset. Their band is one-sided:
   ≥80 % of the baseline (`floor80`).
+- **Reset pulse fixed 2026-10-07**: until then the RTS pulse never reached the chip, because
+  Windows' usbser.sys only sends the line state when DTR is written. B2 was capturing the boot
+  started by the esptool hard reset just before it (B0's table read, B1's flash), which is why
+  every B2 so far followed an esptool call. `board.capture` now rewrites DTR after each RTS
+  change, as esptool does, and the capture starts at the ROM banner
+  (`rst:0x17 (CHIP_USB_UART_RESET)`).
 - **ROM banner**: the reset capture starts in the 2nd-stage bootloader (the ROM banner is lost
   while the USB port re-opens), so a second boot is detected by a second `Calling app_main()`.
 - **RTPS sweep** seeds 64 addresses at a time (one listener for all 252 never reached the board).
