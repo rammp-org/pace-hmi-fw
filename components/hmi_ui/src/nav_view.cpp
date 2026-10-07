@@ -75,13 +75,17 @@ static constexpr lv_state_t kMirroredStates = static_cast<lv_state_t>(
     static_cast<uint32_t>(LV_STATE_PRESSED) | static_cast<uint32_t>(LV_STATE_CHECKED) |
     static_cast<uint32_t>(LV_STATE_FOCUSED));
 
+// Every widget under `obj`, in pre-order, takes `on` and drops the other mirrored states
+// (for_each_descendant: iterative, depth-limited, the order the recursion had).
 static void nav_mirror_to(lv_obj_t *obj, lv_state_t on) {
-  for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
-    lv_obj_t *child = lv_obj_get_child(obj, static_cast<int32_t>(i));
-    lv_obj_remove_state(child, static_cast<lv_state_t>(kMirroredStates & ~on));
-    lv_obj_add_state(child, on);
-    nav_mirror_to(child, on);
-  }
+  hmi::ui::for_each_descendant(
+      obj,
+      [](lv_obj_t *child, void *ctx) {
+        const lv_state_t state = *static_cast<const lv_state_t *>(ctx);
+        lv_obj_remove_state(child, static_cast<lv_state_t>(kMirroredStates & ~state));
+        lv_obj_add_state(child, state);
+      },
+      &on);
 }
 
 void hmi::ui::NavView::mirror_cb(lv_event_t *e) {
@@ -546,11 +550,9 @@ void hmi::ui::NavView::band_cb(lv_event_t *e) {
 // finger actually lands on -- clearing only Ground left the key dead in the
 // middle, which is the whole of it anyone aims at.
 static void nav_clear_clickable(lv_obj_t *obj) {
-  for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
-    lv_obj_t *child = lv_obj_get_child(obj, static_cast<int32_t>(i));
-    lv_obj_remove_flag(child, LV_OBJ_FLAG_CLICKABLE);
-    nav_clear_clickable(child);
-  }
+  hmi::ui::for_each_descendant(
+      obj, [](lv_obj_t *child, void *) { lv_obj_remove_flag(child, LV_OBJ_FLAG_CLICKABLE); },
+      nullptr);
 }
 
 void hmi::ui::NavView::claim_clicks(lv_obj_t *obj) {
