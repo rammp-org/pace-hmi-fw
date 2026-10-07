@@ -1,7 +1,7 @@
 {
   "metrics": {
     "app_main_lines": {
-      "main/main.cpp": 1007
+      "main/main.cpp": 937
     },
     "assert": {
       "components/joystick/src/joystick.cpp": 17,
@@ -44,7 +44,7 @@
       "main/remote_ui.cpp": 1
     },
     "lines": {
-      "main/main.cpp": 3910,
+      "main/main.cpp": 3879,
       "main/selftest.cpp": 1030
     },
     "locks": {
@@ -97,7 +97,7 @@
     },
     "static_state": {
       "main/github_ota.cpp": 1,
-      "main/main.cpp": 40,
+      "main/main.cpp": 39,
       "main/remote_ui.cpp": 2,
       "main/rtps_comms.cpp": 5
     },
