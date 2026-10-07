@@ -1,0 +1,5 @@
+# drive_session is safety-relevant (CS-SAF-01): functions at most 60 lines (CS-FIL-01).
+# Everything else comes from the repo root's .clang-tidy (the fw-standards config).
+InheritParentConfig: true
+CheckOptions:
+  - { key: readability-function-size.LineThreshold, value: 60 }

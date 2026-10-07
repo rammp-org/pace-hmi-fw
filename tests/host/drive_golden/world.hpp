@@ -1,0 +1,82 @@
+#pragma once
+// The stateful world the drive goldens run in (app-main-shrink.md V5).
+//
+// One model of what the drive code's callees do to the screen, the menu, the lock state and
+// the clock, shared by both ways in:
+//   - the main-unit shims (main_unit_shims.hpp): the lv_*, rtps and main-unit helpers that
+//     main/frag_drive.inc calls, each recording one line in the boundary log (golden 2) and,
+//     where it stands for a port method, one line in the port log (golden 1);
+//   - the fake port (fake_port.hpp, after the move): the DrivePort methods themselves.
+// Both logs carry a snapshot of the world after every scripted step, so where the drive code
+// samples, reads the clock or changes the screen shows up in the logs.
+//
+// Model (what the real callees do, in the order the drive code can observe):
+//   - the clock: every read returns `now` and then advances it by 1 us, so the number and
+//     order of reads is in the logs, and a deadline can be put between two reads (DRV-022);
+//   - an instant screen load (locked_screen_go) runs nav_arrive inside the load: the menu
+//     goes, and opens again over the new screen when the menu-on-arrival flag was set (the
+//     flag is consumed); then the stick gate is re-evaluated;
+//   - a faded load (Drive after the unlock, nav_home) lands later: it is pending until the
+//     script's FRAME step, which runs nav_arrive for it;
+//   - nav_home closes the menu (nav_close_menu re-evaluates the gate) and fades to Locked
+//     while locked, else to Drive.
+
+#include <cstdint>
+#include <string>
+#include <vector>
+
+namespace golden {
+
+enum class ScreenId : std::uint8_t { BOOT, LOCKED, DRIVE, SEAT, JOYSTICK };
+// MIB::MibSystemState's values (mib_message.hpp), plus an out-of-range one.
+enum class Mib : std::uint8_t { INITIALIZING = 0, IDLE = 1, ENABLED = 2, ERROR = 3, BOGUS = 9 };
+// MIB::DriveProfile's values.
+enum class Profile : std::uint8_t { LOW = 0, NORMAL = 1, HIGH = 2 };
+
+struct World {
+  std::int64_t now = 1'000'000;
+  bool link = false;
+  Mib mib = Mib::INITIALIZING;
+  ScreenId screen = ScreenId::LOCKED;
+  bool pending = false;
+  ScreenId pending_screen = ScreenId::LOCKED;
+  bool menu_open = false;
+  bool menu_on_arrival = false;
+  bool locked = true;
+  bool lock_waiting = false;
+  bool unlock_timer = false;
+  bool gate = false;
+  std::int32_t banner = 0;
+  std::uint32_t banner_ms = 0;
+  Profile profile = Profile::NORMAL;
+};
+
+World &world();
+void reset_world();
+
+// The two logs.
+std::vector<std::string> &port_log();
+std::vector<std::string> &raw_log();
+void port(const std::string &line);
+void raw(const std::string &line);
+void both(const std::string &line); // a script step or a snapshot: in both logs
+void clear_logs();
+
+// Names, for the logs.
+const char *screen_name(ScreenId s);
+const char *mib_name(Mib m);
+const char *profile_name(Profile p);
+std::string snapshot();
+
+// The model's operations (see the header comment).
+std::int64_t read_clock();
+void arrive(ScreenId s);       // nav_arrive on a screen
+void load_instant(ScreenId s); // an instant load: arrive inside it
+void load_faded(ScreenId s);   // a faded load: pending until FRAME
+void frame();                  // a pending faded load lands
+void nav_home();               // nav_home()
+void gate_update();            // nav_update_stick_gate(): the gate from lock, screen, menu
+void user_screen(ScreenId s);  // the user navigates (instant, menu closed)
+void user_menu(bool open);     // the user opens or closes the menu (gate re-evaluated)
+
+} // namespace golden

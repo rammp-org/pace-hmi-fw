@@ -15,13 +15,17 @@ static MIB::DriveProfile kProfileHigh = MIB::DriveProfile::HIGH;
 static MIB::DriveProfile kProfileNormal = MIB::DriveProfile::NORMAL;
 static MIB::DriveProfile kProfileLow = MIB::DriveProfile::LOW;
 
+// The drive session's input, defined in frag_drive.inc.
+static bool drive_session_input(hmi::drive_session::Input input);
+
 static void drive_profile_click_cb(lv_event_t *e) {
   const auto *mode = static_cast<const MIB::DriveProfile *>(lv_event_get_user_data(e));
   // Ask, do not assume: drive_profile_subject is what the MIB reports, and it is fed
   // from MibStatus.activeProfile. Setting it here would highlight a button the chair
   // may refuse, which is the one thing these three must not do.
   drive_profile_published.store(*mode);
-  drive_publish();
+  // PUBLISH_DRIVE: the drive request as it stands, with the new profile (rows 29-34).
+  (void)drive_session_input(hmi::drive_session::Input::PROFILE_CLICK);
 }
 
 // Highlights the button whose mode the MIB reports: CHECKED, which the design
