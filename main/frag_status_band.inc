@@ -26,7 +26,7 @@ void hmi::ui::JoystickView::pressed_observer(lv_observer_t *observer, lv_subject
   lv_obj_set_style_text_color(label,
                               lv_subject_get_int(subject)
                                   ? lv_palette_main(LV_PALETTE_BLUE)
-                                  : lv_color_hex(ui_get_theme_value(_ui_theme_color_text)),
+                                  : lv_color_hex(static_cast<uint32_t>(ui_get_theme_value(_ui_theme_color_text))),
                               LV_PART_MAIN);
 }
 
