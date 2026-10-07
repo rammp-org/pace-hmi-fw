@@ -641,13 +641,7 @@ extern "C" void app_main(void) {
   bind_entry_refused_panel(ui_ErrorBanner13); // AboutScreen
   // Diagnostics readings, and whether they are live: before the poll timer
   // that keeps the latter current, and before any RTPS sample can land.
-  for (auto &item : diag_value) {
-    for (auto &reading : item) {
-      lv_subject_init_int(&reading, kValueUnknown);
-    }
-  }
-  lv_subject_init_int(&diag_stale_subject, 1);
-  lv_subject_init_int(&diag_rate_subject, 0);
+  diag_view.init_subjects();
   lv_timer_create(rtps_poll_cb, kRtpsPollMs, nullptr);
 
   // Calibration on the JoystickScreen: holding Calibrate or the stick button
@@ -948,13 +942,7 @@ extern "C" void app_main(void) {
   // (settings_screen_ensure). The seat values it steps are initialised further
   // up, with the seat screen that shares them.
 
-  lv_subject_init_int(&actuator_reject_subject, kActuatorRejectNone);
-  actuator_reject_timer =
-      lv_timer_create(actuator_reject_clear_cb, kActuatorRejectFlashMs, nullptr);
-  lv_timer_pause(actuator_reject_timer);
-  press_flash_timer = lv_timer_create(press_flash_cb, kPressFlashMs, nullptr);
-  lv_timer_pause(press_flash_timer);
-  setting_group = lv_group_create();
+  setting_group = settings_view.init();
 
   // Initialised before the screen's warning panel ever binds to it.
   lv_subject_init_int(&setting_page_subject, SETTINGS_PAGE_DISPLAY);
@@ -964,13 +952,13 @@ extern "C" void app_main(void) {
 
   // SkunkWorksScreen: what outlives the screen, which is built on demand
   // (actions_screen_ensure).
-  actions_group = lv_group_create();
+  actions_group = actions_view.init();
 
   // DiagnosticsScreen: what outlives the screen, which is built on demand
   // (diagnostics_screen_ensure). The menu row goes through diagnostics_open
   // rather than a SquareLine screen-change action, which would build the
   // screen without any of that.
-  diag_group = lv_group_create();
+  diag_group = diag_view.init();
 
   // The overlay hardcodes LVGL's 14 px default font (lv_sysmon_create sets no
   // font at all), which is unreadable on a 1280x720 panel at arm's length.

@@ -66,7 +66,7 @@ hardware, a red outline is safety-relevant, and a dashed outline is generated co
 | `components/fw_core` | Channels (`Mailbox`, `Queue`, `AtomicValue`), `ThreadChecker`, `Owned<T>`, `check()`, context tokens. **Linked but unused** | for later | host L1 (FWC-L1) |
 | `components/hmi_format` | Pure text formatting: speed, steppers, clock, diagnostics, about, update, network | no | host L1 (L1-FMT) |
 | `components/hmi_models` | Pure UI models: the button-grid cursor walk and the bench PIN | no | host L1 (L1-MOD) |
-| `components/hmi_ui` | The UI island's views: TopBar clock, link and RTPS label, DriveBand status cells, backlight (more move in, app-main-shrink S4-S6) | no | bench B4 |
+| `components/hmi_ui` | The UI island's views: TopBar clock, link and RTPS label, DriveBand status cells, backlight, bench PIN, seat, settings rows, Skunk Works tiles, diagnostics (more move in, app-main-shrink S4-S6) | no | bench B4 |
 | `components/ota_parse` | Pure OTA parsing: release list, image header check, fwinfo, boot-confirm marker search | no | host L1 (L1-OTA) |
 | `components/joystick` | espp's joystick, vendored, plus a twist (Z) axis | yes | host L1 (L1-JOY) |
 | `components/m5stack-tab5` | espp's Tab5 board support, vendored and modified (two frame buffers, vsync present) | no | none |
@@ -128,7 +128,7 @@ What this means in practice:
 | `hmi_rtps_spec.hpp` | What only this HMI adds to the shared spec: timeouts, seat helpers, banner texts, the self-test topics |
 | `selftest.cpp/.hpp`, `selftest_spec.hpp` | The self-test: 54 checks, an overlay, and a report over RTPS and serial |
 | `remote_ui.cpp/.hpp` | Bench-only debug server on TCP 3333: screenshots, taps, keys, `TASKS` |
-| `settings.cpp/.hpp`, `settings_spec.h` | Persistent settings (`/storage/settings.txt`) from one X-macro table |
+| `settings.cpp/.hpp`, `settings_spec.hpp` | Persistent settings (`/storage/settings.txt`) from one typed spec table |
 | `storage.cpp/.hpp` | LittleFS paths, atomic write (tmp + rename), one-time legacy migration |
 | `joystick_cal.cpp/.hpp` | The calibration file and the guided calibration run |
 | `fw_info.cpp/.hpp` | SHA-256 of the running image, matched to a release |
@@ -499,11 +499,11 @@ and `frag_stick_config.inc:39`.
   On the Seat screen, losing the MCB sends you home with a banner on the next 250 ms
   tick (`frag_drive.inc:87-91`).
 - **The function page.** A 3×2 grid picks an axis from `RAMMP_SEAT_AXIS_TABLE`
-  (elevation, tilts, translation). A click opens the adjustment page (`frag_seat.inc:191`).
+  (elevation, tilts, translation). A click opens the adjustment page (`SeatView::click_cb`, `components/hmi_ui/src/seat_view.cpp:79`).
 - **The adjustment page.** "−"/"+" call `seat_step(axis, ∓1)` from the last known value,
   or from the axis minimum if it is unknown. Presets call `seat_request(axis, value)`.
   Both clamp and send one `SeatCommand{axis, absolute target}`, best-effort, once per
-  press (`frag_settings_ui.inc:303-315`).
+  press (`frag_settings_ui.inc:167-179`).
 - **Feedback.** MibStatus `currentSeatState` → `seat_apply_state` → the
   `seat_axis_value[4]` subjects, on the RTPS receive task under the lock.
 - **What the code does not check:**
@@ -530,10 +530,10 @@ and `frag_stick_config.inc:39`.
 | Locked | resident | `frag_lock`, `frag_hold`, refusal banner |
 | Drive | resident | `frag_drive`, `frag_drive_band` |
 | Joystick | resident | ADC bars, `joystick_cal.cpp`, calibrate hold |
-| Seat | resident | `frag_seat`, seat parts of `frag_settings_ui` |
-| BenchGate | resident | `frag_bench_pin` (PIN 1234 → Actuators page) |
+| Seat | resident | `hmi_ui` `SeatView`; the seat command path in `frag_settings_ui` |
+| BenchGate | resident | `hmi_ui` `BenchPinView`, PIN in `frag_bench_pin` (1234 → Actuators page) |
 | Log, Update, Internet, About | resident | `log_view.cpp`, `update_ui.cpp`, `internet_ui.cpp`, `about_ui.cpp` |
-| Settings, SkunkWorks, Diagnostics | on demand | `frag_settings_ui`, `frag_actions`, `frag_diag` |
+| Settings, SkunkWorks, Diagnostics | on demand | `hmi_ui` `SettingsView`, `ActionsView`, `DiagnosticsView`; their contents in `frag_settings_ui`, `frag_actions`, `frag_diag` |
 
 ### 10.2 Navigation
 
@@ -660,7 +660,7 @@ in the last 2000 ms, otherwise NO_PEER. Only CONNECTED lets anything drive.
 | Area | How it works | Code |
 | --- | --- | --- |
 | Storage | LittleFS `storage` partition at `/storage`. `storage_write` writes `<name>.tmp`, then renames. A one-time migration moves files from the old layout | `storage.cpp` |
-| Settings | `SETTINGS_PARAM_TABLE` (11 values with min, max, default). Loaded once at boot. Written on change by `setting_store_observer`, which also updates the atomics the ADC task reads | `settings.cpp`, `settings_spec.h`, `frag_settings_ui.inc:143` |
+| Settings | `SETTINGS_PARAMS` (11 values with min, max, default). Loaded once at boot. Written on change by `setting_store_observer`, which also updates the atomics the ADC task reads | `settings.cpp`, `settings_spec.hpp`, `frag_settings_ui.inc:143` |
 | Files | `settings.txt`, `joystick_cal.txt` (versioned), `wifi.txt` (password in plain text), `fwinfo.txt` | |
 | OTA | Update screen → GitHub release list → `github_ota_start` thread:<br>- streams 64 KB blocks to the other slot<br>- checks the first block (magic, chip, project)<br>- computes SHA-256<br>- `esp_ota_end`<br>- compares with GitHub's digest **only if one exists**<br>- sets the boot partition<br>Restarts only when the MIB is not ENABLED. Rollback is on: the new image marks itself valid after 30 s of the LVGL task running | `github_ota.cpp`, `update_ui.cpp`, `components/ota_parse` |
 | Self-test | 54 checks in `selftest_spec.hpp` covering system, network, RTPS, memory, I2C, IMU, RTC, power, haptics, display, timing and joystick. Started from Skunk Works or by a RUN command over RTPS (any peer, H7). Runs on its own task; draws an overlay that takes over the joystick input. Reports over RTPS and as a `[SELFTEST]` table on serial | `selftest.cpp` |
@@ -691,11 +691,11 @@ during boot).
 | `frag_refusal` | `mcb_ready`/`seat_ready`, refusal banners, drive timing constants | `entry_refused_*`, `entry_refusal_poll`, `kDriveAnswerUs`, `kDriveWaitUs` | LVGL (+ RTPS rx via observers) |
 | `frag_drive` | the drive session: ask, follow the MIB, deadlines, exit | `drive_screen_follow_state`, `drive_wait_poll`, `activate_drive`, `drive_exit_ask` | LVGL |
 | `frag_hold_poll` | calibrate gesture, gesture list, poll callback | `kHoldGestures`, `hold_poll_cb` | LVGL |
-| `frag_seat` | seat grids and their clicks | `grid_key_cb`, `seat_click_cb`, `grid_click_cb` | LVGL |
-| `frag_bench_pin` | bench PIN gate | `rd_keypad_cb`, `PinModel` | LVGL |
-| `frag_settings_ui` | Settings and Actuators pages; seat requests | `setting_page_open`, `setting_step`, `setting_store_observer`, `seat_request`, `seat_step` | LVGL |
-| `frag_actions` | Skunk Works tiles | `actions_open`, `kActionRun[]` | LVGL |
-| `frag_diag` | Diagnostics screen; also the menu constants | `diagnostics_open`, `diag_poll` | LVGL |
+| `frag_seat` | the `SeatView` instance (code in `hmi_ui`), `seat_axis_value` | `seat_show_buttons_page`, `seat_buttons_grid` | LVGL |
+| `frag_bench_pin` | the PIN and the `BenchPinView` instance (code in `hmi_ui`) | `rd_pin_reset`, `rd_focus` | LVGL |
+| `frag_settings_ui` | Settings and Actuators page contents, what a setting does, seat requests; the `SettingsView` instance (rows in `hmi_ui`) | `setting_page_open`, `setting_store_observer`, `seat_request`, `seat_step` | LVGL |
+| `frag_actions` | what the Skunk Works tiles do; the `ActionsView` instance (tiles in `hmi_ui`) | `kActionRun[]`, `actions_open` | LVGL |
+| `frag_diag` | the readings, `diag_poll`, the `DiagnosticsView` instance (rows in `hmi_ui`); also the menu constants | `diagnostics_open`, `diag_poll` | LVGL |
 | `frag_nav` | burger menu, focus groups, arrival, **the gate** | `nav_go`, `nav_arrive`, `nav_enter_screen`, `nav_update_stick_gate` | LVGL |
 | `frag_overdraw` | strip redundant background fills | `strip_all_overdraw` | LVGL |
 | `frag_screens_on_demand` | build/destroy Settings, SkunkWorks, Diagnostics | `*_ensure`, `*_destroy_cb` | LVGL |
@@ -740,9 +740,9 @@ planned in [plans/hazard-fixes.md](plans/hazard-fixes.md). Locations are for `cb
 | H5 | Re-lock on an unrequested stop or link loss sends no DISABLE; `drive_request` stays ENABLE and a profile tap re-sends it | `frag_drive.inc:64-83`; `frag_drive_band.inc:18-25` |
 | H6 | DriveCommand and SeatCommand are one-shot, best-effort, result ignored; a refused exit is not re-sent | `frag_drive.inc:16-18, 102-109`; `rtps_comms.cpp:125-152` |
 | H7 | Any RTPS peer can start a self test; its overlay blocks the exit hold while XYTwist keeps flowing | `rtps_comms.cpp:160-167`; `frag_hold_poll.inc:69-77`; `main.cpp:723-729` |
-| H8 | A NaN or huge seat value is UB in `seat_raw`; an unknown value steps from the axis minimum | `hmi_rtps_spec.hpp:90-95`; `frag_settings_ui.inc:293-315` |
+| H8 | A NaN or huge seat value is UB in `seat_raw`; an unknown value steps from the axis minimum | `hmi_rtps_spec.hpp:90-95`; `frag_settings_ui.inc:157-179` |
 | H9 | A failed ADC read publishes nothing instead of neutral | `main.cpp:1482-1601` |
-| H10 | No neutral-stick check before ENABLE or the gate; seat presses not gated on `seat_ready` | `frag_drive.inc:129-138`; `frag_seat.inc:162-214` |
+| H10 | No neutral-stick check before ENABLE or the gate; seat presses not gated on `seat_ready` | `frag_drive.inc:129-138`; `components/hmi_ui/src/seat_view.cpp:49-108` |
 | H11 | No task watchdog on the app tasks; the ADC task is below the UI (prio 5 vs 20) with a boot-dependent core and a thin stack | `main.cpp:1618-1621`; [§4.1](#41-the-tasks) |
 | H12 | A reset or panic is never shown; battery % and range are placeholders | `esp_reset_reason` unread; `ui_comp_topbar.c` |
 | H13 | The remote UI has no auth and can press the stick button (bench builds only) | `main.cpp:1679-1689`; `remote_ui.cpp` |

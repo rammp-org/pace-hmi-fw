@@ -1,0 +1,17 @@
+# topology host L1 app (TS-DEF-01). One entry for the app: its cases TOP-001..014 run together.
+# The must-not-compile cases (`make mnc`, TS-UNIT-06) are L0 and are not listed here.
+# spec-deviation(TS-UNIT-01): host-native g++ in WSL, not the IDF linux target (owner, 2026-10-06).
+# DRAFT: the topology is not wired into the firmware yet (docs/plans/refactor.md step 6).
+- id: TOP-L1
+  title: topology tables, validate() rules, Topology storage, handles and task settings
+  level: L1
+  path: components/topology/test
+  requirements: [REQ-TOP-01, REQ-TOP-02, REQ-TOP-03, REQ-TOP-04, REQ-TOP-05, REQ-TOP-06,
+                 REQ-TOP-07]
+  resources: [host]
+  timeout_s: 300
+  expected_s: 60
+  repeat: 1
+  pass_threshold: 1
+  safety: true
+  artifact: test

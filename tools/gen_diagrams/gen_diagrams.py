@@ -11,8 +11,8 @@
 
 Sources
 - D2: components/topology/include/topology.hpp (the TASKS, FOREIGN_TASKS, COMPONENTS and
-  CHANNELS rows, shape as in docs/plans/refactor.md §2.2). Until that file exists D2 is a
-  placeholder paragraph.
+  CHANNELS rows, shape as in components/topology/include/topology_types.hpp). Until that file
+  exists D2 is a placeholder paragraph.
 - D3: first-party components and their direct dependencies. The source is an ESP-IDF build's
   project_description.json, trimmed to a path-free snapshot that is committed as
   docs/diagrams/project_components.json, because L0 has no IDF build. `check` reads the
@@ -363,6 +363,7 @@ class ChannelRowT:
 class Topology:
     tasks: list[TaskRowT] = field(default_factory=list)
     foreign: list[str] = field(default_factory=list)
+    hosted: dict[str, bool] = field(default_factory=dict)  # adapter on a foreign task -> safety
     components: list[tuple[str, str]] = field(default_factory=list)  # (name, task enum)
     channels: list[ChannelRowT] = field(default_factory=list)
 
@@ -435,19 +436,25 @@ def parse_topology(text: str) -> Topology:
                      _enum(a[7], "Start"))
         )
     for a in _rows(text, "ForeignTaskRow"):
-        if len(a) != 2:
-            raise GenError(f"ForeignTaskRow needs 2 fields, got {len(a)}: {a}")
-        topo.foreign.append(_str(a[0]))
+        # name, start[, hosts[, safety]]; the name is a literal or ANY_TASK (the log hook)
+        if not 2 <= len(a) <= 4:
+            raise GenError(f"ForeignTaskRow needs 2 to 4 fields, got {len(a)}: {a}")
+        topo.foreign.append("*" if a[0] == "ANY_TASK" else _str(a[0]))
+        if len(a) >= 3:
+            topo.hosted[_enum(a[2], "Task")] = len(a) == 4 and a[3] == "true"
     for a in _rows(text, "ComponentRow"):
         if len(a) != 2:
             raise GenError(f"ComponentRow needs 2 fields, got {len(a)}: {a}")
         topo.components.append((_str(a[0]), _enum(a[1], "Task")))
     for a in _rows(text, "ChannelRow"):
-        if len(a) != 7:
-            raise GenError(f"ChannelRow needs 7 fields, got {len(a)}: {a}")
+        # id (Ch::X), name, kind, message, producer, consumer, rate or depth, full policy
+        if len(a) != 8:
+            raise GenError(f"ChannelRow needs 8 fields, got {len(a)}: {a}")
+        if _enum(a[0], "Ch") != _str(a[1]):
+            raise GenError(f"ChannelRow id {a[0]} and name {a[1]} differ")
         topo.channels.append(
-            ChannelRowT(_str(a[0]), _enum(a[1], "Kind"), _str(a[2]), _enum(a[3], "Task"),
-                        _enum(a[4], "Task"), a[5], _enum(a[6], "Full"))
+            ChannelRowT(_str(a[1]), _enum(a[2], "Kind"), _str(a[3]), _enum(a[4], "Task"),
+                        _enum(a[5], "Task"), a[6], _enum(a[7], "Full"))
         )
     if not topo.tasks or not topo.channels:
         raise GenError("topology.hpp: no TaskRow or no ChannelRow found")
@@ -461,7 +468,7 @@ def _title(enum_name: str) -> str:
 def _channel_edge(ch: ChannelRowT) -> tuple[str, str]:
     """(arrow, label) for a channel, per the legend."""
     msg = mermaid_label(ch.message)
-    rate = "" if ch.rate == "0" else f" · {ch.rate}"
+    rate = "" if ch.rate in ("0", "ON_CHANGE") else f" · {ch.rate}"
     if ch.kind == "QUEUE":
         return "==>", f"Queue#lt;{msg}#gt;{rate}"
     if ch.kind == "MAILBOX":
@@ -507,7 +514,8 @@ def render_d2(topo: Topology) -> tuple[str, int]:
     for task in sorted(adapters):
         row = tasks.get(task)
         label = row.name if row else task.lower()
-        css = ":::safety" if row and row.safety else ""
+        safety = row.safety if row else topo.hosted.get(task, False)
+        css = ":::safety" if safety else ""
         nid = claim(node_id("a", task))
         endpoint[task] = nid
         lines.append(f'  {nid}(["{mermaid_label(label)}"]){css}')
@@ -651,7 +659,8 @@ inline constexpr std::array TASKS{
   TaskRow{Task::STICK_BUTTON, "Button", Role::ADAPTER, 4096, 5, -1, true, Start::BOOT},
 };
 inline constexpr std::array FOREIGN_TASKS{
-  ForeignTaskRow{"rtps_worker", Start::BOOT}, ForeignTaskRow{"main", Start::BOOT},
+  ForeignTaskRow{"rtps_worker", Start::BOOT, Task::RTPS_RX, true},
+  ForeignTaskRow{ANY_TASK, Start::BOOT, Task::LOG_HOOK}, ForeignTaskRow{"main", Start::BOOT},
 };
 inline constexpr std::array COMPONENTS{
   ComponentRow{"hmi_ui", Task::UI}, ComponentRow{"stick", Task::CONTROL},
@@ -659,10 +668,10 @@ inline constexpr std::array COMPONENTS{
 };
 inline constexpr std::array CHANNELS{
   /* MCB -> HMI, "quoted, with a comma" */
-  ChannelRow{"MCB_TO_CONTROL", Kind::MAILBOX, "McbStatusMsg", Task::RTPS_RX, Task::CONTROL, MIB_STATUS_HZ, Full::OVERWRITE},
-  ChannelRow{"DRIVE_INTENT",   Kind::QUEUE,   "DriveIntentMsg", Task::UI, Task::CONTROL, DRIVE_INTENT_DEPTH, Full::RAISE_FAULT},
-  ChannelRow{"STICK_BUTTON",   Kind::ATOMIC,  "bool", Task::STICK_BUTTON, Task::CONTROL, 0, Full::OVERWRITE},
-  ChannelRow{"STICK_SETTINGS", Kind::MAILBOX, "StickSettingsMsg", Task::UI, Task::CONTROL, 0, Full::OVERWRITE},
+  ChannelRow{Ch::MCB_TO_CONTROL, "MCB_TO_CONTROL", Kind::MAILBOX, "McbStatusMsg", Task::RTPS_RX, Task::CONTROL, MIB_STATUS_HZ, Full::OVERWRITE},
+  ChannelRow{Ch::DRIVE_INTENT,   "DRIVE_INTENT",   Kind::QUEUE,   "DriveIntentMsg", Task::UI, Task::CONTROL, DRIVE_INTENT_DEPTH, Full::RAISE_FAULT},
+  ChannelRow{Ch::STICK_BUTTON,   "STICK_BUTTON",   Kind::ATOMIC,  "bool", Task::STICK_BUTTON, Task::CONTROL, 0, Full::OVERWRITE},
+  ChannelRow{Ch::STICK_SETTINGS, "STICK_SETTINGS", Kind::MAILBOX, "StickSettingsMsg", Task::UI, Task::CONTROL, ON_CHANGE, Full::OVERWRITE},
 };
 }
 """
@@ -726,7 +735,8 @@ def selftest() -> int:
            "three TaskRows, the commented-out one skipped")
     expect(topo.tasks[1].safety and not topo.tasks[0].safety, "safety flag read")
     expect(topo.tasks[2].role == "ADAPTER" and topo.tasks[2].name == "Button", "adapter row")
-    expect(topo.foreign == ["rtps_worker", "main"], "foreign tasks")
+    expect(topo.foreign == ["rtps_worker", "*", "main"], "foreign tasks, ANY_TASK as '*'")
+    expect(topo.hosted == {"RTPS_RX": True, "LOG_HOOK": False}, "hosted adapters and safety")
     expect(("stick", "CONTROL") in topo.components and len(topo.components) == 3, "components")
     expect([c.cid for c in topo.channels] ==
            ["MCB_TO_CONTROL", "DRIVE_INTENT", "STICK_BUTTON", "STICK_SETTINGS"], "channels")
@@ -737,19 +747,26 @@ def selftest() -> int:
         expect(False, "a short row is rejected")
     except GenError:
         expect(True, "a short row is rejected")
+    try:
+        parse_topology('TaskRow{Task::UI, "ui", Role::ISLAND, 1, 1, 1, false, Start::BOOT}; '
+                       'ChannelRow{Ch::A, "B", Kind::QUEUE, "M", Task::UI, Task::UI, 1, Full::RAISE_FAULT}')
+        expect(False, "a channel whose id and name differ is rejected")
+    except GenError:
+        expect(True, "a channel whose id and name differ is rejected")
 
     print("D2 render")
     d2, n2 = render_d2(topo)
     expect('subgraph i_CONTROL["Control island · control"]' in d2, "island subgraph title")
     expect('subgraph i_UI["UI island · ui"]' in d2, "two-letter task name kept upper case")
     expect('c_stick["stick"]:::safety' in d2, "component on a safety task marked")
-    expect('a_RTPS_RX(["rtps_rx"])' in d2, "foreign producer drawn as an adapter")
+    expect('a_RTPS_RX(["rtps_rx"]):::safety' in d2,
+           "hosted producer drawn as an adapter, safety from its FOREIGN_TASKS row")
     expect('a_STICK_BUTTON(["Button"]):::safety' in d2, "adapter row drawn as a safety stadium")
     expect("i_UI ==>|Queue#lt;DriveIntentMsg#gt; · DRIVE_INTENT_DEPTH| i_CONTROL" in d2,
            "queue is a thick arrow")
     expect("a_RTPS_RX -->|Mailbox#lt;McbStatusMsg#gt; · MIB_STATUS_HZ| i_CONTROL" in d2,
            "mailbox is a solid arrow")
-    expect("Mailbox#lt;StickSettingsMsg#gt; · on change" in d2, "rate 0 mailbox is on change")
+    expect("Mailbox#lt;StickSettingsMsg#gt; · on change" in d2, "ON_CHANGE mailbox is on change")
     expect(not validate_mermaid(d2.split("\n\n", 1)[1]), "D2 block valid")
     expect(n2 == 3 + 2 + 2, f"D2 node count 7 (got {n2})")
 

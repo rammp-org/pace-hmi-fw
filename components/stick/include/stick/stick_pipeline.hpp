@@ -25,7 +25,7 @@
 
 namespace hmi::stick {
 
-/// Settings ranges (main/settings_spec.h: STICK_SENSITIVITY and DRIVE_SPEED, 1..10). main
+/// Settings ranges (main/settings_spec.hpp: STICK_SENSITIVITY and DRIVE_SPEED, 1..10). main
 /// static_asserts that they still match.
 inline constexpr int SENSITIVITY_MIN = 1;
 inline constexpr int SENSITIVITY_MAX = 10;

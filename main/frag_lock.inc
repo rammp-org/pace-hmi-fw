@@ -128,7 +128,7 @@ static HoldGesture unlock_gesture{
 /////////////////////////////////////////////////////////////////////////////
 
 // SettingsScreen, defined with its rows further down. The actuators
-// page comes after the settings_spec.h pages.
+// page comes after the settings_spec.hpp pages.
 static constexpr int32_t kActuatorsPage = SETTINGS_PAGE_COUNT;
 static void setting_page_open(int32_t page);
 static void settings_screen_ensure();
