@@ -1,5 +1,7 @@
 #include "remote_ui.hpp"
 
+#include "sdkconfig.h"
+
 #if CONFIG_HMI_REMOTE_UI
 
 #include <algorithm>
@@ -8,9 +10,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -27,6 +32,7 @@
 #include "lwip/sockets.h"
 #include "riscv/rvruntime-frames.h"
 #include "soc/soc_caps.h"
+#include "stick_inject.hpp"
 #include "ui.h"
 
 namespace {
@@ -45,7 +51,15 @@ constexpr int kSwipeStepMs = 20;
 // board reset with nothing on the console.
 constexpr size_t kStackBytes = 16 * 1024;
 
-RemoteUiConfig cfg;
+// What remote_ui_start was given, plus the bench stick injection's channel ends
+// (remote_ui_attach_stick_inject, from app_main before the server task exists) and
+// the STICK INJECTED label (built by remote_ui_start, then LVGL task only).
+struct ServerConfig : RemoteUiConfig {
+  std::optional<StickInjectWriter> stick_inject;       // STICK's write end
+  std::optional<StickInjectActiveReader> stick_active; // read by the marker's timer
+  lv_obj_t *stick_marker = nullptr;
+};
+ServerConfig cfg;
 
 // Written by the server task, read by the LVGL task through the indev. Plain
 // atomics rather than a lock: the read callback runs inside lv_timer_handler
@@ -342,6 +356,60 @@ bool send_tasks(int sock) {
   return send_line(sock, out);
 }
 
+// STICK <h_mv> <v_mv> <twist_mv> <fail_mask> <seq> (hazard-fixes.md B1): this task only
+// parses (stick/bench_inject.hpp) and writes the mailbox; the ADC task swaps the reads in
+// and drops them 300 ms after the last STICK, so a client that stops sending, or goes,
+// hands the stick back by itself.
+bool handle_stick(int sock, std::string_view args) {
+  if constexpr (!BENCH_STICK_INJECT) {
+    return send_line(sock, "ERR STICK needs CONFIG_HMI_BENCH_STICK_INJECT");
+  } else {
+    const std::optional<hmi::stick::StickInjectMsg> msg = hmi::stick::parse_stick_inject(args);
+    if (!msg) {
+      return send_line(sock, "ERR usage: STICK <h_mv> <v_mv> <twist_mv> <fail_mask> <seq> "
+                             "(mV 0..3300, fail_mask 0..7)");
+    }
+    if (!cfg.stick_inject) {
+      return send_line(sock, "ERR stick injection not attached");
+    }
+    cfg.stick_inject->write(*msg);
+    return send_line(sock, "OK");
+  }
+}
+
+// LVGL task (an lv_timer): the STICK INJECTED label shows while the ADC task reports an
+// injection, brought to the front of the top layer (over the self-test overlay).
+void stick_marker_poll(lv_timer_t * /*timer*/) {
+  const bool on = cfg.stick_active->read();
+  if (on == !lv_obj_has_flag(cfg.stick_marker, LV_OBJ_FLAG_HIDDEN)) {
+    return;
+  }
+  if (on) {
+    lv_obj_remove_flag(cfg.stick_marker, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(cfg.stick_marker);
+  } else {
+    lv_obj_add_flag(cfg.stick_marker, LV_OBJ_FLAG_HIDDEN);
+  }
+}
+
+// The hidden marker and its 100 ms poll, built once by remote_ui_start under the LVGL lock
+// (as the pointer indev). Allocation fails only here, at start-up, where aborting is allowed:
+// a bench build that cannot show an injection must not run one.
+void start_stick_marker() {
+  cfg.stick_marker = lv_label_create(lv_layer_top());
+  if (cfg.stick_marker == nullptr || lv_timer_create(stick_marker_poll, 100, nullptr) == nullptr) {
+    std::abort();
+  }
+  lv_label_set_text_static(cfg.stick_marker, "STICK INJECTED");
+  lv_obj_set_style_bg_color(cfg.stick_marker, lv_palette_main(LV_PALETTE_RED), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(cfg.stick_marker, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_text_color(cfg.stick_marker, lv_color_white(), LV_PART_MAIN);
+  lv_obj_set_style_text_font(cfg.stick_marker, &lv_font_montserrat_34, LV_PART_MAIN);
+  lv_obj_set_style_pad_all(cfg.stick_marker, 12, LV_PART_MAIN);
+  lv_obj_align(cfg.stick_marker, LV_ALIGN_TOP_MID, 0, 8);
+  lv_obj_add_flag(cfg.stick_marker, LV_OBJ_FLAG_HIDDEN);
+}
+
 bool handle(int sock, const std::string &line) {
   const std::vector<std::string> words = split(line);
   if (words.empty()) {
@@ -452,6 +520,9 @@ bool handle(int sock, const std::string &line) {
     ui_theme_set(static_cast<uint8_t>(arg(words, 1) != 0 ? UI_THEME_DAY : UI_THEME_DEFAULT));
     return send_line(sock, "OK");
   }
+  if (verb == "STICK") {
+    return handle_stick(sock, std::string_view(line).substr(line.find(verb) + verb.size()));
+  }
   return send_line(sock, "ERR unknown command: " + verb);
 }
 
@@ -498,8 +569,8 @@ void server_task() {
     ::close(listener);
     return;
   }
-  ESP_LOGW(kTag, "remote UI listening on %u -- DEBUG ONLY, it can press anything on screen",
-           kRemoteUiPort);
+  ESP_LOGW(kTag, "remote UI listening on %u -- DEBUG ONLY, it can press anything on screen%s",
+           kRemoteUiPort, BENCH_STICK_INJECT ? " and STICK commands motion" : "");
 
   while (true) {
     const int client = ::accept(listener, nullptr, nullptr);
@@ -527,8 +598,13 @@ void server_task() {
 
 } // namespace
 
+void remote_ui_attach_stick_inject(StickInjectWriter writer, StickInjectActiveReader active) {
+  cfg.stick_inject = writer;
+  cfg.stick_active = active;
+}
+
 void remote_ui_start(const RemoteUiConfig &config) {
-  cfg = config;
+  static_cast<RemoteUiConfig &>(cfg) = config;
   {
     std::lock_guard<std::recursive_mutex> lock(*cfg.lvgl_mutex);
     // A second POINTER indev beside the GT911's, so real touch keeps working:
@@ -536,6 +612,9 @@ void remote_ui_start(const RemoteUiConfig &config) {
     pointer = lv_indev_create();
     lv_indev_set_type(pointer, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(pointer, pointer_read);
+    if (cfg.stick_active) {
+      start_stick_marker(); // bench stick injection only: STICK INJECTED, hidden
+    }
   }
   esp_pthread_cfg_t thread_cfg = esp_pthread_get_default_config();
   thread_cfg.stack_size = kStackBytes;
@@ -549,6 +628,11 @@ void remote_ui_start(const RemoteUiConfig &config) {
 }
 
 #else // CONFIG_HMI_REMOTE_UI
+
+// Kconfig makes HMI_BENCH_STICK_INJECT depend on HMI_REMOTE_UI. This stops an sdkconfig that
+// gets round it from building stick injection with no remote UI to drive or report it.
+static_assert(CONFIG_HMI_BENCH_STICK_INJECT_AS_INT == 0,
+              "CONFIG_HMI_BENCH_STICK_INJECT needs CONFIG_HMI_REMOTE_UI (hazard-fixes.md B1)");
 
 void remote_ui_start(const RemoteUiConfig &) {}
 

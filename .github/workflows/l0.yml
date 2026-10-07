@@ -91,12 +91,15 @@ jobs:
     # Debug channels stay out of what ships (CS-LAY-09; plan H13): the remote UI can press
     # the stick button, and an OTA test URL bypasses the release check. The bench DA7280
     # test buzzes the motor at boot; the FPS report (and its stress mode) is debug only.
+    # Bench stick injection (hazard-fixes B1) commands motion from the network. The Build
+    # workflow also checks the release ELF for injection symbols.
     - name: Release defaults keep debug features off
       run: |
         ! grep -Eq '^CONFIG_HMI_REMOTE_UI=y' sdkconfig.defaults
         ! grep -Eq '^CONFIG_HMI_OTA_TEST_URL="[^"]+"' sdkconfig.defaults
         ! grep -Eq '^CONFIG_HMI_BENCH_DA7280_TEST(_AS_INT)?=(y|[1-9])' sdkconfig.defaults
         ! grep -Eq '^CONFIG_HMI_DEBUG_FPS(_STRESS)?(_AS_INT)?=(y|[1-9])' sdkconfig.defaults
+        ! grep -Eq '^CONFIG_HMI_BENCH_STICK_INJECT(_AS_INT)?=(y|[1-9])' sdkconfig.defaults
 
   host-l1:
     # L1 host tests (tests/run.py). They need the espp headers, which the component
@@ -120,25 +123,45 @@ jobs:
           && UNITY_DIR=$IDF_PATH/components/unity/unity/src python3 tests/run.py run --all --seed 1
 
   bench-build:
-    # The bench variant: the remote UI debug channel on (ci/sdkconfig.bench). Its own
-    # build dir and sdkconfig, so the overlay is not shadowed by another config. Then guards
-    # G4 and G2 on its objects, inside the IDF image (they need its readelf/objdump/nm).
+    # The bench variants, one job each: bench (the remote UI debug channel on,
+    # ci/sdkconfig.bench) and bench_inject (bench plus stick injection,
+    # ci/sdkconfig.stick_inject). Each has its own build dir and sdkconfig, so an overlay is
+    # not shadowed by another config. Then guards G4 and G2 on its objects, inside the IDF
+    # image (they need its readelf/objdump/nm). bench_inject's ELF must have symbols matching
+    # the pattern build.yml keeps out of the release ELF: proof that the pattern matches the
+    # real injection code, so its absence there means something.
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: bench
+            defaults: "sdkconfig.defaults;ci/sdkconfig.bench"
+            inject: "0"
+          - variant: bench_inject
+            defaults: "sdkconfig.defaults;ci/sdkconfig.bench;ci/sdkconfig.stick_inject"
+            inject: "1"
     steps:
     - name: Checkout repo
       uses: actions/checkout@v7
       with:
         submodules: recursive
 
-    - name: Build bench variant
+    - name: Build ${{ matrix.variant }} variant
       uses: espressif/esp-idf-ci-action@v1
       with:
         esp_idf_version: ${{ env.IDF_VERSION }}
         path: "."
         target: ${{ env.IDF_TARGET }}
         command: >-
-          idf.py -B build_bench -D SDKCONFIG=build_bench/sdkconfig
-          -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;ci/sdkconfig.bench" build
-          && grep -q "^#define CONFIG_HMI_REMOTE_UI 1" build_bench/config/sdkconfig.h
-          && python3 tools/guards/init_order.py check --build build_bench --variant bench
-          && python3 tools/guards/exports.py check --build build_bench
+          idf.py -B build_${{ matrix.variant }} -D SDKCONFIG=build_${{ matrix.variant }}/sdkconfig
+          -D SDKCONFIG_DEFAULTS="${{ matrix.defaults }}" build
+          && grep -q "^#define CONFIG_HMI_REMOTE_UI 1" build_${{ matrix.variant }}/config/sdkconfig.h
+          && grep -qx "#define CONFIG_HMI_BENCH_STICK_INJECT_AS_INT ${{ matrix.inject }}"
+          build_${{ matrix.variant }}/config/sdkconfig.h
+          && python3 tools/guards/init_order.py check --build build_${{ matrix.variant }}
+          --variant ${{ matrix.variant }}
+          && python3 tools/guards/exports.py check --build build_${{ matrix.variant }}
+          && if [ "${{ matrix.inject }}" = 1 ]; then
+          riscv32-esp-elf-nm -C build_${{ matrix.variant }}/rammp-hmi-p4.elf
+          | grep -Eiq "stick_?inject"; fi

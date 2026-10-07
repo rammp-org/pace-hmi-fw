@@ -1,0 +1,8 @@
+# CI-only overlay for the bench_inject variant (CS-LAY-09: every build variant is built in L0).
+# Used on top of the bench overlay:
+#   SDKCONFIG_DEFAULTS="sdkconfig.defaults;ci/sdkconfig.bench;ci/sdkconfig.stick_inject"
+# Bench stick injection (hazard-fixes.md B1): the remote UI's STICK verb replaces the raw stick
+# reads, so this build COMMANDS MOTION from the network. Bench only, with a simulated MCB. A
+# separate overlay, so the plain bench variant (the one the board runner measures, stack
+# included) keeps the ADC task's release code path. Never in sdkconfig.defaults.
+CONFIG_HMI_BENCH_STICK_INJECT=y

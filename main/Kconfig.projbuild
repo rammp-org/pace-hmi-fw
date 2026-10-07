@@ -9,15 +9,48 @@ menu "RAMMP HMI"
             UI can be walked and captured from scripts/hmi_ui.py instead of by
             someone looking at the panel.
 
-            It cannot drive the chair: injected joystick directions only move
-            the UI's focus and never reach the stick values sent to the MCB.
-            It CAN press anything on screen -- ACTIVATE DRIVE, the seat and
-            actuator jog buttons -- and it has no authentication, so anything on
-            the same network can.
+            On its own it cannot drive the chair: injected joystick directions
+            only move the UI's focus and never reach the stick values sent to
+            the MCB (HMI_BENCH_STICK_INJECT below changes that). It CAN press
+            anything on screen -- ACTIVATE DRIVE, the seat and actuator jog
+            buttons -- and it has no authentication, so anything on the same
+            network can.
 
             Off by default for that reason. Turn it on in your local sdkconfig
             (which is not in git) while working on the UI, not in
             sdkconfig.defaults -- that one ships.
+
+    config HMI_BENCH_STICK_INJECT
+        bool "Bench: stick injection over the remote UI (STICK verb)"
+        depends on HMI_REMOTE_UI
+        default n
+        help
+            Adds the remote UI verb
+                STICK <h_mv> <v_mv> <twist_mv> <fail_mask> <seq>
+            which replaces the ADC task's three raw stick reads (millivolts,
+            before calibration) for 300 ms; a script refreshes it to hold a
+            value (scripts/hmi_ui.py stick). fail_mask makes reads fail (bit
+            0 horizontal, 1 vertical, 2 twist). Everything after the reads is
+            the real code: calibration, mapping, keys, the gate, XYTwist. A
+            red "STICK INJECTED" label shows on top of every screen while it
+            holds. A calibration run during an injection calibrates on the
+            injected values.
+
+            THIS COMMANDS MOTION: an injected deflection reaches the MCB
+            whenever the gate is open, from anything on the network (the
+            remote UI has no authentication). Bench only, with a simulated MCB
+            (hazard-fixes.md B1); never in sdkconfig.defaults, which ships (L0
+            checks it, and the Build workflow checks that the release ELF has
+            no injection symbol). ci/sdkconfig.stick_inject turns it on for
+            the bench_inject variant.
+
+    # Hidden: CONFIG_HMI_BENCH_STICK_INJECT as 0/1, always defined, so the C++
+    # reads it as a constexpr with no preprocessor conditional (CS-TYP-05; the
+    # L0 ratchet's if_config count). See HMI_BENCH_DA7280_TEST_AS_INT.
+    config HMI_BENCH_STICK_INJECT_AS_INT
+        int
+        default 1 if HMI_BENCH_STICK_INJECT
+        default 0
 
     config HMI_WIFI_SSID
         string "WiFi network name (SSID)"

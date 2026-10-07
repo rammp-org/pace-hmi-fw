@@ -1,13 +1,15 @@
 # L1 host app for components/stick (cases STK-001.. in components/stick/test/test_stick.cpp).
 # Golden vectors of the ADC task's stick math (refactor.md §3.2), replayed bit-exactly through
-# a verbatim copy of today's code and through the extracted pipeline.
+# a verbatim copy of today's code and through the extracted pipeline. STK-040..049: the bench
+# stick injection's parser, expiry and fail_mask (REQ-STK-07). STK-037: pipeline_config
+# (REQ-STK-08). STK-050..052: the stick button's edges (REQ-STK-09).
 # spec-deviation(TS-UNIT-01): host-native g++ in WSL, not the IDF linux target (owner, 2026-10-06).
 - id: L1-STK
   title: stick pipeline golden vectors, hazards pinned as-is (open/short pot, invalid cycle, gate)
   level: L1
   path: components/stick/test
   requirements: [REQ-STK-01, REQ-STK-02, REQ-STK-03, REQ-STK-04, REQ-STK-05, REQ-STK-06,
-                 REQ-STK-07, REQ-STK-08]
+                 REQ-STK-07, REQ-STK-08, REQ-STK-09]
   resources: [host]
   timeout_s: 300
   expected_s: 60
