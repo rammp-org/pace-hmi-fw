@@ -89,6 +89,10 @@
       "priv_reqs": [
         "espressif__cjson"
       ]
+    },
+    "post": {
+      "reqs": [],
+      "priv_reqs": []
     }
   },
   "dependencies": {
