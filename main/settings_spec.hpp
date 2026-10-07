@@ -1,7 +1,7 @@
 #pragma once
 
 /**
- * @file settings_spec.h
+ * @file settings_spec.hpp
  * @brief The settings shown on the SettingsScreen (Settings in the menu), as typed spec tables
  *        (CS-TYP-03): SETTINGS_PAGES and SETTINGS_PARAMS.
  *

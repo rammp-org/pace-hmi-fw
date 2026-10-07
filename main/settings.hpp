@@ -16,7 +16,7 @@
 
 #include <cstdint>
 
-#include "settings_spec.h"
+#include "settings_spec.hpp"
 
 // From the spec table. Never 0: a dark screen could not be turned back on.
 constexpr int kBrightnessMinPercent = SETTINGS_BRIGHTNESS_MIN;

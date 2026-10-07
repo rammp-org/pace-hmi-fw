@@ -11,7 +11,7 @@
 // the stick repeats), and touch works on the buttons.
 //
 // Two kinds of page, which differ only in what a step does:
-//   settings   settings_spec.h. The step sets the row's subject, clamped to
+//   settings   settings_spec.hpp. The step sets the row's subject, clamped to
 //              the range; whatever owns that subject applies and saves it.
 //   actuators  RAMMP_SEAT_AXIS_TABLE, reached through the PIN (DEBUG
 //              ACTUATORS). The HMI owns none of these values: a step publishes a
@@ -86,9 +86,9 @@ static const char *const *const kSettingParamNames[] = {
     kNetworkNames, // SETTINGS_PARAM_NETWORK
 };
 static_assert(std::size(kSettingParamNames) == SETTINGS_PARAM_COUNT,
-              "every settings_spec.h parameter needs its names (or nullptr) here");
+              "every settings_spec.hpp parameter needs its names (or nullptr) here");
 static_assert(std::size(kSettingParamValue) == SETTINGS_PARAM_COUNT,
-              "every settings_spec.h parameter needs its subject here");
+              "every settings_spec.hpp parameter needs its subject here");
 
 static constexpr int kSettingRowsMax = std::max<int>(rammp::kSeatAxisCount, SETTINGS_PARAM_COUNT);
 static SettingRow setting_rows[kSettingRowsMax];
