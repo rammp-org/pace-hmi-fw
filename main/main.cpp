@@ -566,10 +566,7 @@ extern "C" void app_main(void) {
   lv_subject_init_int(&rtps_link_subject, static_cast<int32_t>(RtpsLinkState::LINK_DOWN));
   lv_subject_init_int(&rtps_blink_subject, 1);
   // empty = no override, so the labels start on the enum names
-  lv_subject_init_string(&drive_text_subject, drive_text_buf, drive_text_prev_buf,
-                         sizeof(drive_text_buf), "");
-  lv_subject_init_string(&state_text_subject, state_text_buf, state_text_prev_buf,
-                         sizeof(state_text_buf), "");
+  status_band_view.init_texts();
   lv_subject_init_int(drive_band_view.speed_subject(), 0);
   lv_subject_init_string(&error_text_subject, error_text_buf, error_text_prev_buf,
                          sizeof(error_text_buf), "");
@@ -1306,9 +1303,9 @@ extern "C" void app_main(void) {
     // m/s on the wire, mph on the dial: the shared spec carries the real
     // quantity and the unit on the label is ours to pick.
     lv_subject_set_int(drive_band_view.speed_subject(), speed_display_tenths(status.speed));
-    // copy_string cuts each text to its subject's buffer (RAMMP_*_LEN). drive_text_subject
-    // stays empty: the MIB sends one wording, and the state label is where it belongs.
-    lv_subject_copy_string(&state_text_subject, status.status_text.c_str());
+    // copy_string cuts each text to its subject's buffer (RAMMP_*_LEN). drive_text stays
+    // empty: the MIB sends one wording, and the state label is where it belongs.
+    lv_subject_copy_string(status_band_view.state_text(), status.status_text.c_str());
     lv_subject_copy_string(&error_text_subject, status.error_message.c_str());
     lv_subject_copy_string(&error_footer_subject, status.error_footer.c_str());
     seat_apply_state(status.currentSeatState);

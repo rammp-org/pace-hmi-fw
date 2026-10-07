@@ -10,16 +10,6 @@ static lv_subject_t adc_twist_subject;
 // it replaced needed a drive status and a fault. Values are the MIB::MibSystemState
 // enum from messages/mib_message.hpp.
 static lv_subject_t mib_state_subject;
-// Optional label overrides from the MCB. Empty means "use the enum's name",
-// which is the normal path; a non-empty string replaces the text only, never
-// the colour. String subjects need their own storage plus a previous-value
-// buffer, same as the seat-function and haptic labels further down.
-static lv_subject_t drive_text_subject;
-static lv_subject_t state_text_subject;
-static char drive_text_buf[rammp::kMcbTextLen];
-static char drive_text_prev_buf[rammp::kMcbTextLen];
-static char state_text_buf[rammp::kMcbTextLen];
-static char state_text_prev_buf[rammp::kMcbTextLen];
 
 // The error banner's body and footer, as the MCB sends them. (The speed readout is
 // DriveBandView's own subject.)
@@ -153,8 +143,6 @@ static constexpr hmi::ui::SharedSubjects ui_shared_subjects{
     .mib_state = &mib_state_subject,
     .rtps_link = &rtps_link_subject,
     .rtps_blink = &rtps_blink_subject,
-    .drive_text = &drive_text_subject,
-    .state_text = &state_text_subject,
 };
 // rtps_link_subject carries RtpsLinkState; the views read it as hmi::ui::LinkState.
 static constexpr bool same_link_state(RtpsLinkState a, hmi::ui::LinkState b) {

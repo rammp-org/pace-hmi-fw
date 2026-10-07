@@ -41,5 +41,7 @@ static void gpio48_panel_observer(lv_observer_t *observer, lv_subject_t *subject
 
 // The one instance, for every DriveBand; bound from app_main and the screens built on demand.
 static constinit hmi::ui::StatusBandView status_band_view{{.shared = &ui_shared_subjects}};
+static_assert(hmi::ui::StatusBandView::TEXT_SIZE == rammp::kMcbTextLen,
+              "the band's text buffers are the shared spec's");
 static void bind_status_panel(lv_obj_t *panel) { status_band_view.bind(panel); }
 
