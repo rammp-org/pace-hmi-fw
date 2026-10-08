@@ -2,6 +2,7 @@
 # concern, the file map and the requirements.
 idf_component_register(SRCS "src/about_view.cpp"
                             "src/actions_view.cpp"
+                            "src/app_state.cpp"
                             "src/bench_pin_view.cpp"
                             "src/brightness_view.cpp"
                             "src/button_grid.cpp"

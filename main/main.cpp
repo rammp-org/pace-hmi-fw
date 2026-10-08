@@ -75,12 +75,142 @@ using namespace std::chrono_literals;
 
 static std::recursive_mutex lvgl_mutex;
 
-#include "frag_fps.inc" // split_main.py
-// --
-#include "frag_state.inc" // split_main.py
-// --
-#include "frag_haptics.inc" // split_main.py
-// --
+#include "hmi_ui/fps_meter.hpp"
+#include "hmi_ui/resident_chrome.hpp"
+#include "hmi_ui/rtps_ui_bridge.hpp"
+#include "hmi_ui/ui_build.hpp"
+#include "hmi_ui/ui_island.hpp"
+// ---------------------------------------------------------------------------
+// Frame-rate instrumentation: a debug feature, off unless CONFIG_HMI_DEBUG_FPS
+// (CS-LAY-09), and never in sdkconfig.defaults, which ships.
+//
+// Reports over serial rather than the LVGL perf overlay, so throughput can be
+// measured without eyes on the panel. RENDER_START/RENDER_READY fire only when
+// LVGL actually rasterizes, so these numbers are real frame cost -- REFR_*
+// would tick even on an idle screen and read as a meaningless "infinite fps".
+//
+// kFpsStress forces a full-screen invalidation every LVGL cycle. Without it a
+// static SquareLine screen invalidates nothing and renders nothing, which
+// measures the redraw path not at all. With it we get sustained worst case
+// (CONFIG_HMI_DEBUG_FPS_STRESS).
+//
+// The once-a-second report goes through its own espp::Logger at debug level,
+// tag "fps" (CS-LOG-01/03): developer detail, and only in this debug build.
+// The counters are hmi::ui::FpsMeter's members.
+// ---------------------------------------------------------------------------
+static constexpr bool kFpsInstrument = CONFIG_HMI_DEBUG_FPS_AS_INT != 0;
+static constexpr bool kFpsStress = CONFIG_HMI_DEBUG_FPS_STRESS_AS_INT != 0;
+
+// The one meter. Attached and reported only when kFpsInstrument.
+static constinit hmi::ui::FpsMeter fps_meter;
+// What is left here, and why it stays in main for now: mib_state, rtps_link and locked, which
+// several views read (SharedSubjects) and the drive port reads by name, pinned by its frozen
+// goldens (tests/host/drive_golden), with the tables over them. The rest of the shared state
+// is components/hmi_ui's app_state (S7 moves each piece on to its owner).
+#include "hmi_ui/app_state.hpp"
+// The MIB's state, as reported over RTPS. The joystick is a slave here: this holds
+// whatever the MIB last said, and every DriveBand on every screen follows it. One
+// subject, because MibSystemState answers both of a panel's labels - where the message
+// it replaced needed a drive status and a fault. Values are the MIB::MibSystemState
+// enum from messages/mib_message.hpp.
+static lv_subject_t mib_state_subject;
+
+// Link health behind those two, polled from rtps_comms (RtpsLinkState). Drives
+// the TopBar's RTPS indicator, and greys the status labels when it is not
+// CONNECTED - a value we can no longer vouch for must not keep showing.
+static lv_subject_t rtps_link_subject;
+
+// Lock state. Declared up here with the other subjects because the unlock
+// gesture and the nav layer both read it; the rest of the lock/unlock machinery
+// lives in its own section further down, after the haptic and audio helpers it
+// needs.
+//
+// 1 = locked, 0 = unlocked. The single source of truth for both padlock images
+// and both labels, so a future "lock on request" is one set_locked(true) call
+// and every bound widget follows.
+static lv_subject_t locked_subject;
+// An indev can own exactly one group, so the joystick's group follows the
+// active screen. The swap happens on LV_EVENT_SCREEN_LOADED, so it covers
+// every route between the screens.
+// "This object covers what is behind it" (components/hmi_ui overdraw.hpp).
+#include "hmi_ui/overdraw.hpp"
+static constexpr lv_obj_flag_t kOverlayFlag = hmi::ui::OVERLAY_FLAG;
+using hmi::ui::keep_overlay_fill;
+
+// Defined with the burger menu (see "The burger menu, and moving around with
+// the joystick"); declared here for the screens and gestures above it.
+static void nav_use_group(lv_group_t *g, const lv_obj_t *screen);
+static void nav_arrive(const lv_obj_t *screen);
+static void nav_mirror_states(lv_obj_t *obj);
+static void nav_to_key();
+static void nav_home();
+static void nav_focus_ring(lv_obj_t *obj);
+static void nav_update_stick_gate();
+
+// The subjects above that the hmi_ui views read (components/hmi_ui/shared_subjects.hpp).
+#include "hmi_ui/link_state.hpp"
+#include "hmi_ui/nav_port.hpp"
+#include "hmi_ui/nav_view.hpp"
+#include "hmi_ui/shared_subjects.hpp"
+static constexpr hmi::ui::SharedSubjects ui_shared_subjects{
+    .locked = &locked_subject,
+    .mib_state = &mib_state_subject,
+    .rtps_link = &rtps_link_subject,
+    .rtps_blink = &rtps_blink_subject,
+};
+// rtps_link_subject carries RtpsLinkState; the views read it as hmi::ui::LinkState.
+static constexpr bool same_link_state(RtpsLinkState a, hmi::ui::LinkState b) {
+  return static_cast<int32_t>(a) == static_cast<int32_t>(b);
+}
+static_assert(same_link_state(RtpsLinkState::NET_FAILED, hmi::ui::LinkState::NET_FAILED));
+static_assert(same_link_state(RtpsLinkState::LINK_DOWN, hmi::ui::LinkState::LINK_DOWN));
+static_assert(same_link_state(RtpsLinkState::NO_IP, hmi::ui::LinkState::NO_IP));
+static_assert(same_link_state(RtpsLinkState::NO_PEER, hmi::ui::LinkState::NO_PEER));
+static_assert(same_link_state(RtpsLinkState::CONNECTED, hmi::ui::LinkState::CONNECTED));
+// Navigation for the hmi_ui views (components/hmi_ui/nav_port.hpp): NavView's API. The look
+// is NavView's own (static); the two calls that need the one instance go through it.
+static constexpr hmi::ui::NavPort ui_nav_port{
+    .to_key = nav_to_key,
+    .use_group = nav_use_group,
+    .focus_ring = hmi::ui::NavView::focus_ring,
+    .mirror_states = hmi::ui::NavView::mirror_states,
+};
+// The user's haptic and sound cues (hmi::feedback::Feedback). app_main builds
+// them (app-main-shrink V6) and points this at them before any task starts; the
+// rest of the unit cues through haptic_play below, and through play_click,
+// play_refusal and refusal_feedback (after app_main, with load_audio).
+static hmi::feedback::Feedback *feedback = nullptr;
+using hmi::feedback::kHapticBuzzSlots;
+// The self test reports whether the DA7280 answered the boot scan.
+using hmi::feedback::kDa7280Address;
+
+// HAPTIC TEST settings row -> kHapticBuzzDuration of vibration; the unlock and
+// hold clicks; a refusal's double click. Returns false (having logged) if there
+// is no motor or the I2C burst fails, so callers can leave their own UI alone.
+static bool haptic_play(espp::Drv2605::Waveform w, uint8_t slots) {
+  return feedback != nullptr && feedback->haptics().play(w, slots);
+}
+
+// How the click sound reaches the speaker and the LVGL task, for app_main's Feedback.
+static hmi::feedback::ClickSound::Config click_sound_config() {
+  return {
+      .sounds_on = applied_settings.sounds_on(),
+      .play =
+          [](std::span<const uint8_t> samples) { espp::M5StackTab5::get().play_audio(samples); },
+      .now_ms = [] { return lv_tick_get(); },
+      // The second click of a refusal: a one-shot LVGL timer, so it runs on the
+      // LVGL task like the first.
+      .click_later =
+          [](uint32_t delay_ms, hmi::feedback::ClickSound &sound) {
+            lv_timer_t *second = lv_timer_create(
+                [](lv_timer_t *timer) {
+                  static_cast<hmi::feedback::ClickSound *>(lv_timer_get_user_data(timer))->click();
+                },
+                delay_ms, &sound);
+            lv_timer_set_repeat_count(second, 1);
+          },
+  };
+}
 #include "hmi_ui/status_band_view.hpp"
 #include "hmi_ui/ui_build.hpp"
 // The "FPS counter" Skunk Works slot -> LVGL's built-in perf overlay (hmi::ui::PerfOverlay).
@@ -103,10 +233,126 @@ static_assert(hmi::ui::StatusBandView::TEXT_SIZE == rammp::kMcbTextLen,
 static void bind_status_panel(lv_obj_t *panel) { status_band_view.bind(panel); }
 
 // --
-#include "frag_stick_config.inc" // split_main.py
-// --
-#include "frag_rtps_label.inc" // split_main.py
-// --
+// AXIS WIRING: the gimbal pots are cross-wired relative to the channel names.
+// ADC1_CH1 (GPIO17) is the HORIZONTAL axis and reads higher to the right, so
+// it feeds the joystick's X with no inversion. ADC1_CH0 (GPIO16) is the
+// VERTICAL axis and reads *lower* moving up, so it feeds Y with invert_output
+// — after which +Y is up, as the rest of the code assumes. Twist reads higher
+// clockwise. Fixed in hmi::stick (components/stick: horizontal_config,
+// vertical_config, twist_config) so every consumer (UI bars, the keypad, RTPS)
+// sees correct axes without compensating itself; joystick_cal.cpp's step
+// prompts rely on the same directions.
+//
+// The stick math itself (mapping, mount, keys, gate, speed scale) is
+// hmi::stick::StickPipeline. The ADC task runs one cycle of it per sample and
+// AdcStickIo below is everything that cycle reads and writes here, in the order
+// the code ran inline before it was extracted. stick_inject.hpp includes it, and
+// adds StickSlot: the pipeline, or with CONFIG_HMI_BENCH_STICK_INJECT the bench
+// stick injection in front of it.
+#include "control/stick_island.hpp"
+#include "stick_inject.hpp"
+
+static_assert(hmi::stick::SENSITIVITY_MIN == SETTINGS_STICK_SENSITIVITY_MIN &&
+                  hmi::stick::SENSITIVITY_MAX == SETTINGS_STICK_SENSITIVITY_MAX,
+              "hmi::stick clamps the stick sensitivity to the Settings range");
+static_assert(hmi::stick::DRIVE_SPEED_MIN == SETTINGS_DRIVE_SPEED_MIN &&
+                  hmi::stick::DRIVE_SPEED_MAX == SETTINGS_DRIVE_SPEED_MAX,
+              "hmi::stick clamps the drive speed to the Settings range");
+
+static hmi::stick::CalibrationMv stick_cal_mv(const JoystickCal &cal) {
+  const auto axis = [](const JoystickAxisCal &a) {
+    return hmi::stick::AxisCalMv{.min_mv = a.min_mv, .center_mv = a.center_mv, .max_mv = a.max_mv};
+  };
+  return {.horizontal = axis(cal[JOY_HORIZONTAL]),
+          .vertical = axis(cal[JOY_VERTICAL]),
+          .twist = axis(cal[JOY_TWIST])};
+}
+
+// How far each axis travels is measured per unit (joystick_cal.cpp, the CALIBRATE button on
+// the JoystickTest screen); the dead zones are the stick's (hmi::stick::pipeline_config).
+static hmi::stick::StickPipeline::Config stick_pipeline_config(const JoystickCal &cal) {
+  return hmi::stick::pipeline_config(
+      stick_cal_mv(cal),
+      {.up = LV_KEY_UP, .down = LV_KEY_DOWN, .right = LV_KEY_RIGHT, .left = LV_KEY_LEFT});
+}
+
+// The ADC task's side of StickPipeline::cycle. Runs on the ADC task only; every
+// member is what the stick block of adc_task_fn did inline before.
+struct AdcStickIo {
+  espp::SimpleLowpassFilter &twist_lowpass;
+
+  // A calibration run just finished: the pipeline switches to it between two
+  // samples, on the task that owns the stick.
+  std::optional<hmi::stick::CalibrationMv> take_new_calibration() {
+    if (auto cal = joystick_cal_take_new()) {
+      return stick_cal_mv(*cal);
+    }
+    return std::nullopt;
+  }
+  float smooth_twist_mv(float twist_mv) { return twist_lowpass(twist_mv); }
+  void note_raw_mv(float horizontal_mv, float vertical_mv, float twist_mv) {
+    joystick_cal_note_raw(horizontal_mv, vertical_mv, twist_mv);
+  }
+  // While a calibration run owns the stick nothing downstream may act on it:
+  // the user is being told to push it to every end in turn.
+  bool calibrating() { return joystick_cal_running(); }
+  bool swap() { return applied_settings.stick_swap(); }
+  bool invert_x() { return applied_settings.stick_invert_x(); }
+  bool invert_y() { return applied_settings.stick_invert_y(); }
+  int sensitivity() { return applied_settings.stick_sensitivity(); }
+  uint32_t joy_key() { return ::joy_key.load(); }
+  uint32_t remote_key() { return ::remote_key.load(); }
+  void set_joy_key(uint32_t key) { ::joy_key.store(key); }
+  void set_joy_flick(uint32_t key) { joy_flick.store(key); }
+  void show(const hmi::stick::Position &mounted) {
+    // lv_subject_set_int runs the bar's observer callback synchronously,
+    // which touches the widget, so it needs the LVGL lock. Tried, not
+    // waited for: the UI holds it for a whole frame (a full redraw is
+    // ~100 ms, more with Flip screen), and the stick's path to the MCB
+    // must not queue behind a render. A busy UI just gets the bars
+    // one cycle later.
+    std::unique_lock<std::recursive_mutex> lock(lvgl_mutex, std::try_to_lock);
+    if (lock.owns_lock()) {
+      lv_subject_set_int(joystick_view.x(), static_cast<int32_t>(mounted.x * 100.0f));
+      lv_subject_set_int(joystick_view.y(), static_cast<int32_t>(mounted.y * 100.0f));
+      lv_subject_set_int(joystick_view.twist(), static_cast<int32_t>(mounted.twist * 100.0f));
+    }
+  }
+  int drive_speed() { return applied_settings.drive_speed(); }
+  // The gate. The MCB gets a centred stick whenever the stick is doing something
+  // else: while a calibration run sweeps it (the pipeline does not read this
+  // then), and whenever it is walking the UI rather than driving -- any screen
+  // but Drive, or Drive with the menu open. Drive stays ACTIVE across the menu
+  // and the other screens, as the spec draws it, so this is what keeps a push
+  // meant for the next row from moving the chair. The bars keep moving.
+  bool stick_drives() { return ::stick_drives.load(); }
+  bool button_pressed() { return joy_button_pressed.load(); }
+  // The MCB gets the same calibrated -1..+1 values the bars show (+Y forward,
+  // deadzones applied), scaled by Settings "Speed sensitivity" and the gate, so
+  // it needs no calibration of its own. Quiet no-op until RTPS is up and a
+  // subscriber is discovered.
+  bool publish(const hmi::stick::Command &command, bool button) {
+    return rtps_comms_publish_adc(command.x, command.y, command.twist,
+                                  button ? rammp::Buttons::JOYSTICK : rammp::Buttons::NONE);
+  }
+  // After every cycle, valid or not: the self test measures the loop's cadence and
+  // how often a read fails, as well as the values. A no-op unless a run is
+  // capturing.
+  void note_cycle(bool valid, float horizontal_mv, float vertical_mv, float twist_mv,
+                  bool published) {
+    selftest_note_adc(valid, horizontal_mv, vertical_mv, twist_mv, published,
+                      joy_button_pressed.load());
+  }
+};
+#include "hmi_ui/rtps_label_view.hpp"
+
+// The one instance, for every TopBar; bound from app_main and the screens built on demand.
+static constinit hmi::ui::RtpsLabelView rtps_label_view{{.shared = &ui_shared_subjects}};
+static void bind_rtps_label(lv_obj_t *bar) { rtps_label_view.bind(bar); }
+
+/////////////////////////////////////////////////////////////////////////////
+// DriveScreen: speed readout and the error banner
+/////////////////////////////////////////////////////////////////////////////
 #include "hmi_format/speed.hpp"
 #include "hmi_ui/drive_band_view.hpp"
 /////////////////////////////////////////////////////////////////////////////
@@ -146,12 +392,156 @@ static_assert(hmi::format::SPEED_MAX_TENTHS == rammp::kSpeedMaxTenths,
               "hmi_format's speed clamp must be the shared spec's");
 
 // --
-#include "frag_rtps_poll.inc" // split_main.py
-// --
-#include "frag_brightness.inc" // split_main.py
-// --
-#include "frag_clock.inc" // split_main.py
-// --
+// Runs on the LVGL task, so the subject writes are already covered by the lock
+// lv_task_handler() is called under. Staleness has to be polled - nothing
+// happens when a sample fails to arrive - so the blink phase rides along here
+// rather than owning a second timer.
+// Defined with the other draw-side helpers below; re-run whenever the theme
+// changes, because _ui_switch_theme re-applies every registered themeable
+// property -- including the BG_OPA this cleared -- and would otherwise put all
+// the redundant fills straight back.
+static void strip_all_overdraw();
+
+// Every change of the link state goes to the serial log, and so to the
+// LogScreen: the TopBar shows where the link is now, the log keeps when it
+// changed. Warnings on the way down, info on the way up.
+static void log_link_change(RtpsLinkState state) {
+  static espp::Logger link_logger({.tag = "rtps_link", .level = espp::Logger::Verbosity::INFO});
+  static std::optional<RtpsLinkState> last;
+  if (last == state) {
+    return;
+  }
+  const std::string meaning = rtps_comms_link_state_meaning(state);
+  if (!last) {
+    link_logger.info("{} ({})", rtps_comms_link_state_name(state), meaning);
+  } else if (state > *last) {
+    link_logger.info("{} -> {} ({})", rtps_comms_link_state_name(*last),
+                     rtps_comms_link_state_name(state), meaning);
+  } else {
+    link_logger.warn("{} -> {} ({})", rtps_comms_link_state_name(*last),
+                     rtps_comms_link_state_name(state), meaning);
+  }
+  last = state;
+}
+
+static void diag_poll();       // DiagnosticsScreen, further down
+static void drive_wait_poll(); // DriveScreen entry, further down
+
+#include "hmi_ui/ui_poll.hpp"
+// The poll is the drive session's tick (drive_session_table.hpp kTickPeriod).
+static_assert(std::chrono::milliseconds{hmi::ui::UiPoll::PERIOD_MS} ==
+              hmi::drive_session::kTickPeriod);
+static constexpr uint32_t kRtpsPollMs = hmi::ui::UiPoll::PERIOD_MS;
+
+// The one instance; app_main starts its timer.
+static constinit hmi::ui::UiPoll ui_poll{{
+    .shared = &ui_shared_subjects,
+    .theme = setting_subjects.value(SETTINGS_PARAM_THEME),
+    .link_state = [] { return static_cast<hmi::ui::LinkState>(rtps_comms_link_state()); },
+    .link_seen =
+        [](hmi::ui::LinkState state) { log_link_change(static_cast<RtpsLinkState>(state)); },
+    .diag_poll = [] { diag_poll(); },        // diagnostics staleness rides the same tick
+    .drive_tick = [] { drive_wait_poll(); }, // and so does the wait for the MCB to drive
+    // The theme switch restored the redundant background fills, so take them out again. The
+    // switch itself is the Settings Theme row (or a CALL FUNCTION event reaching
+    // ui_events.cpp's theme_toggle, or the remote UI); this is where firmware first sees the
+    // result, so it is saved from here.
+    .theme_switched =
+        [](uint8_t theme) {
+          strip_all_overdraw();
+          settings_set_theme(theme);
+        },
+}};
+
+static void rtps_poll_cb(lv_timer_t *) { ui_poll.poll(); }
+
+/////////////////////////////////////////////////////////////////////////////
+// Backlight
+//
+// One brightness setting, 5..100 %, whoever changes it: the RTPS brightness
+// command, the Tab5's side button, and the Brightness row of Settings.
+// Saved a second after it stops changing, so a run
+// of steps is one flash write rather than one per step.
+/////////////////////////////////////////////////////////////////////////////
+
+static constexpr uint32_t kBrightnessSaveDelayMs = 1000;
+#include "hmi_ui/brightness_view.hpp"
+
+// The one instance. Its subject is the Settings row's (SettingSubjects): the row steps it too.
+static constinit hmi::ui::BrightnessView brightness_view{{
+    .subject = setting_subjects.value(SETTINGS_PARAM_BRIGHTNESS),
+    .min_percent = kBrightnessMinPercent,
+    .max_percent = kBrightnessMaxPercent,
+    .backlight = [](float percent) { espp::M5StackTab5::get().brightness(percent); },
+    .save = settings_set_brightness,
+}};
+
+// Any task. Clamped, so nothing can turn the screen fully off.
+static void brightness_set(int percent) {
+  std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
+  brightness_view.set(percent);
+}
+
+// The Tab5's side button: the next of 25/50/75/100 % above the current level.
+static void brightness_step() {
+  std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
+  brightness_view.step();
+}
+#include "hmi_format/topbar.hpp"
+#include "hmi_ui/topbar_view.hpp"
+
+/////////////////////////////////////////////////////////////////////////////
+// TopBar clock
+//
+// The MIB sends Unix time plus its UTC offset in every MibStatus. It sets the
+// system clock and the RTC, so the time keeps running through a lost link, and
+// across a reboot without the MIB. Clock1 on every TopBar shows the system
+// clock. No TZ is set, so the system clock simply holds the local wall time the
+// MIB reported and nothing converts again.
+/////////////////////////////////////////////////////////////////////////////
+
+// The system clock's validity: set by hmi::housekeeping::SystemClock (app_main's
+// system_clock), read by the TopBar. The time sync itself is the housekeeping
+// component's.
+static std::atomic<bool> clock_valid{false};
+
+// An RTC that lost power reads 2000; anything before 2025 is not a real time
+// (components/hmi_format, REQ-FMT-06).
+using hmi::format::clock_plausible;
+
+// The TopBar's link label: what RTPS runs over. The design's "BT · WI-FI" is only
+// a placeholder; it is set from the setting before rtps_comms_start, then from the
+// link it brought up (WiFi with no network known runs Ethernet).
+// NetLink -> hmi_format's Link (REQ-FMT-07): anything but WiFi reads Ethernet.
+static const char *link_text(NetLink link) {
+  return hmi::format::link_text(link == NetLink::WIFI ? hmi::format::Link::WIFI
+                                                      : hmi::format::Link::ETHERNET);
+}
+
+// The one instance, for every TopBar; bound from app_main and the screens built on demand.
+static constinit hmi::ui::TopBarView topbar_view{{.clock_valid = &clock_valid}};
+static void bind_topbar_labels(lv_obj_t *bar) { topbar_view.bind(bar); }
+
+// The hmi_ui chrome views of one screen, in the order app_main has always bound them: the
+// DriveBand's status cells, then the TopBar's RTPS label, then its clock and link. The screens
+// built on demand bind the same three in their *_ensure().
+static void bind_chrome_views(lv_obj_t *band, lv_obj_t *bar) {
+  bind_status_panel(band);
+  bind_rtps_label(bar);
+  bind_topbar_labels(bar);
+}
+
+// One edge of the stick button, from the GPIO or from the remote UI channel --
+// one path, so what a script presses is the real handling. Touches subjects,
+// never widgets directly. Any task.
+//
+// "Select" -- the keypad's ENTER, which clicks whatever the joystick has
+// focused -- fires on RELEASE, and only for a press shorter than
+// hmi::stick::SELECT_MAX_US. The same button is held to stop driving and to start a
+// calibration, and a select on the press edge would have clicked the focused
+// control (on the Drive screen: opened the menu) at the start of every hold.
+// SELECT_MAX_US is a hold's grace period, so a press short enough to select
+// never starts a hold filling, and one long enough to fill never selects.
 // The stick button's edges (hmi::ui::StickButton): the pressed panel, the level the ADC task
 // publishes, the select key and the press counter.
 #include "hmi_ui/stick_button.hpp"
@@ -596,14 +986,333 @@ static constinit hmi::ui::SeatView seat_view{{
 static constinit ButtonGrid &seat_buttons_grid = seat_view.buttons_grid();
 static void seat_show_buttons_page() { seat_view.show_buttons_page(); }
 // --
-#include "frag_bench_pin.inc" // split_main.py
-// --
-#include "frag_settings_ui.inc" // split_main.py
-// --
-#include "frag_actions.inc" // split_main.py
-// --
-#include "frag_diag.inc" // split_main.py
-// --
+#include "hmi_models/pin.hpp"
+#include "hmi_ui/bench_pin_view.hpp"
+/////////////////////////////////////////////////////////////////////////////
+// BenchGateScreen: the 4-digit PIN
+//
+// Spec V2 draws the pad as eleven discrete buttons (1-9, 0, backspace) rather
+// than the one lv_keyboard the old screen used, so LVGL brings neither the key
+// text nor the 2D arrow walk with it: each button carries its digit in
+// user_data, and the joystick walks them through the same ButtonGrid the seat
+// pages use. The bottom row has no left-hand key, which is the hole
+// grid_key_cb steps over.
+//
+// The four dots above are the only readout. They are not clickable, they just
+// show how many digits are in; the export gives them no CHECKED look, so the
+// wiring adds one in the theme's text colour.
+//
+// The PIN is a build-time constant. It gates a bench screen, not anything
+// safety-related, so it is a "not by accident" barrier rather than a secret:
+// anyone holding the firmware image has it either way.
+/////////////////////////////////////////////////////////////////////////////
+
+static constexpr char kRdPin[] = "1234";
+static constexpr int kRdPinLen = sizeof(kRdPin) - 1;
+static_assert(kRdPinLen == hmi::ui::BenchPinView::PIN_LEN, "the model judges a four-digit PIN");
+
+// The one instance.
+static constinit hmi::ui::BenchPinView bench_pin_view{{
+    .pin = std::string_view(kRdPin, kRdPinLen),
+    .accepted = [] { setting_page_open(kActuatorsPage); },
+    .off_bottom = nav_to_key,
+    .style_key =
+        [](lv_obj_t *key) {
+          nav_focus_ring(key);
+          nav_mirror_states(key);
+          clear_click_focusable_recursive(key);
+        },
+}};
+static void rd_pin_reset() { bench_pin_view.reset(); }
+static void rd_focus(int index) { bench_pin_view.focus(index); }
+#include "hmi_format/stepper.hpp"
+#include "hmi_ui/settings_view.hpp"
+/////////////////////////////////////////////////////////////////////////////
+// SettingsScreen: pages of -/+ rows
+//
+// One screen for every setting that is a few numbers. A page is a title, a
+// line of instructions and some rows; each row is the export's
+// SettingRow component (Parameter1 is only the template, deleted at boot): short
+// label, label, value, and - / + buttons that grey out at the ends of the
+// range. Up/down move between rows, left/right step the focused one (holding
+// the stick repeats), and touch works on the buttons.
+//
+// Two kinds of page, which differ only in what a step does:
+//   settings   settings_spec.hpp. The step sets the row's subject, clamped to
+//              the range; whatever owns that subject applies and saves it.
+//   actuators  RAMMP_SEAT_AXIS_TABLE, reached through the PIN (DEBUG
+//              ACTUATORS). The HMI owns none of these values: a step publishes a
+//              SeatCommand, and a row's number changes only when MibStatus says
+//              so. That keeps a limit or an interlock one decision made in one
+//              place, instead of two boards disagreeing about where the seat is.
+//
+// Memory: the screen and its rows exist only while it is up - see "Screens
+// built on demand".
+/////////////////////////////////////////////////////////////////////////////
+
+// A row's fixed description, from either table, and how it is drawn: the
+// formatters live in components/hmi_format (REQ-FMT-02..05).
+using hmi::format::seat_format;
+using hmi::format::stepper_format;
+using hmi::format::StepperSpec;
+
+// Raw value per actuator, in the table's units: seat_axis_value, defined with
+// the seat view (frag_seat). The rows' observers point at them, and the MCB
+// keeps them current with no page up.
+static uint8_t seat_axis_count; // actuators in the table
+
+// What a value reads before it is known - only ever an actuator the MCB has
+// not reported yet. Not zero: zero is a position an actuator can genuinely be
+// in, and drawing it would be claiming knowledge we do not have. Both buttons
+// stay greyed while a row reads this, because commanding an actuator whose
+// position is unknown is exactly what the request/response arrangement avoids.
+static constexpr int32_t kValueUnknown = hmi::format::VALUE_UNKNOWN;
+
+static void set_display_flipped(bool on); // screen flip, beside direct_flush_cb
+
+// Applies and saves one of the Settings rows that has no observer of its
+// own (brightness and theme do). user_data is its SETTINGS_PARAM_*.
+static void setting_store_observer(lv_observer_t *observer, lv_subject_t *subject) {
+  const int param =
+      static_cast<int>(reinterpret_cast<intptr_t>(lv_observer_get_user_data(observer)));
+  const int value = lv_subject_get_int(subject);
+  settings_set(param, value);
+  if (param == SETTINGS_PARAM_FLIP) {
+    set_display_flipped(value != 0);
+    return;
+  }
+  // The stick's and the sounds' atomics; MENU_SLIDE is read where it is used, nothing to
+  // apply.
+  (void)applied_settings.apply(param, value);
+}
+
+// Seat values come from the MIB and nowhere else: a press publishes a request, and the
+// number on screen moves only when the next MibStatus says the seat moved. The wire
+// carries whole units, the screens raw integers, so each field is converted here.
+static void seat_apply_state(const MIB::seatState &seat) {
+  for (uint8_t i = 0; i < seat_axis_count; i++) {
+    const rammp::SeatAxisSpec &spec = rammp::kSeatAxes[i];
+    lv_subject_set_int(&seat_axis_value[i],
+                       rammp::seat_raw(spec, rammp::seat_field(seat, spec.id)));
+  }
+}
+
+// One seat request: an absolute target, clamped to the axis' range, so a lost or repeated
+// message cannot drift the seat.
+static void seat_request(rammp::SeatAxis axis, int32_t target) {
+  const rammp::SeatAxisSpec &spec = rammp::kSeatAxes[rammp::index_of(axis)];
+  rtps_comms_publish_seat(
+      axis, rammp::seat_units(spec, std::clamp(target, spec.min_value, spec.max_value)));
+}
+
+// One step up or down from where the MCB last said the axis is.
+static void seat_step(size_t row, int direction) {
+  const rammp::SeatAxisSpec &spec = rammp::kSeatAxes[row];
+  const int32_t now = lv_subject_get_int(&seat_axis_value[row]);
+  const int32_t from = now == kValueUnknown ? spec.min_value : now;
+  seat_request(spec.id, from + direction * spec.step);
+}
+
+// The one instance. The pages' contents (the settings tables, the actuator
+// rows, setting_page_open) and what a setting does when it changes
+// (setting_store_observer) stay in main.
+static constinit hmi::ui::SettingsView settings_view{{
+    .nav = &ui_nav_port,
+    .locked = &locked_subject,
+    .subjects = &setting_subjects,
+    .seat_values = seat_axis_value,
+    .screen_ensure = settings_screen_ensure,
+    .actuators_page = kActuatorsPage,
+    .seat_step = seat_step,
+    .refuse = refusal_feedback,
+}};
+static void setting_focus(int index) { settings_view.focus(index); }
+static constexpr lv_event_cb_t setting_focus_cb = hmi::ui::SettingsView::focus_cb;
+static void setting_rows_clear() { settings_view.rows_clear(); }
+
+// ErrorBanner6. Raised only on a page that needs the MCB - the
+// actuators - and then exactly as on the drive and seat screens: while the
+// link is down or the MCB's state is not OK.
+static void setting_warning_observer(lv_observer_t *observer, lv_subject_t *) {
+  lv_obj_t *panel = lv_observer_get_target_obj(observer);
+  if (lv_subject_get_int(settings_view.page()) != kActuatorsPage || seat_ready()) {
+    banner_show(panel, false);
+    return;
+  }
+  fill_drive_blocked_panel(panel, rammp::kHmiLinkLostTitle, rammp::kHmiMcbFaultTitle);
+  banner_show(panel, true);
+}
+
+// Fills the screen for `page` and shows it (SettingsView). LVGL task (a click handler).
+static void setting_page_open(int32_t page) { settings_view.open_page(page); }
+#include "hmi_ui/actions_view.hpp"
+/////////////////////////////////////////////////////////////////////////////
+// SkunkWorksScreen: a grid of one-press actions
+//
+// The menu's Skunk Works row. One tile per entry in actions_spec.h: the spec
+// gives each its title, subtitle and whether it needs the MCB; kActionRun below
+// says what it does. The stick walks the tiles as a grid; the stick button (or
+// a tap) runs the focused one.
+//
+// A button that needs the MCB greys out while mcb_ready() is false, so it says
+// nothing would happen before anyone presses it - and the local actions stay
+// reachable, which a full-screen banner would not allow.
+//
+// Like the SettingsScreen, the screen and its tiles exist only
+// while it is up - see "Screens built on demand".
+/////////////////////////////////////////////////////////////////////////////
+
+// What each action does. LVGL task (a click).
+static void action_haptic_test() {
+  haptic_play(espp::Drv2605::Waveform::ALERT_1000MS, kHapticBuzzSlots);
+}
+
+static void action_self_test() { selftest_request(SelfTestTrigger::LOCAL, 0); }
+
+// An RTPS command: the request a "+" press on the actuators page makes. The
+// seat moves only if the MCB agrees, and a refusal flashes on that page.
+static void action_seat_up() { seat_step(rammp::index_of(rammp::SeatAxis::ELEVATION), +1); }
+
+static void action_restart_hmi() {
+  static espp::Logger action_logger({.tag = "actions", .level = espp::Logger::Verbosity::INFO});
+  action_logger.warn("restart requested from the actions screen");
+  esp_restart();
+}
+
+// In actions_spec.h order.
+static void (*const kActionRun[])() = {
+    action_haptic_test, // ACTION_HAPTIC_TEST
+    action_self_test,   // ACTION_SELF_TEST
+    action_seat_up,     // ACTION_SEAT_UP
+    fps_toggle,         // ACTION_FPS_COUNTER
+    action_restart_hmi, // ACTION_RESTART_HMI
+};
+static_assert(std::size(kActionRun) == ACTION_COUNT,
+              "every actions_spec.h entry needs its function here");
+
+static constexpr hmi::ui::ActionsView::Tile kActionSpecs[] = {
+#define ACTIONS_ROW(name_, title_, subtitle_, mcb_) {title_, subtitle_, (mcb_) != 0},
+    ACTIONS_TABLE(ACTIONS_ROW)
+#undef ACTIONS_ROW
+};
+static_assert(ACTION_COUNT <= hmi::ui::ActionsView::TILES_MAX, "more actions than tiles");
+
+// A tile the MCB could not act on right now (hmi::ui::ActionsView::UNAVAILABLE);
+// frag_nav greys its gated menu rows the same way.
+static constexpr lv_state_t kActionUnavailable = hmi::ui::ActionsView::UNAVAILABLE;
+static constexpr lv_style_selector_t kActionUnavailableStyle =
+    hmi::ui::ActionsView::UNAVAILABLE_STYLE;
+
+// Greys an MCB action while the MCB could not act on it. Bound to every
+// subject mcb_ready() reads, so it follows the link and the state both.
+static void action_ready_observer(lv_observer_t *observer, lv_subject_t *) {
+  lv_obj_set_state(lv_observer_get_target_obj(observer), kActionUnavailable, !mcb_ready());
+}
+
+// The one instance; the tiles' actions stay out here, and so does the group
+// (frag_nav reads it).
+static constinit hmi::ui::ActionsView actions_view{{
+    .nav = &ui_nav_port,
+    .tiles = kActionSpecs,
+    .run = kActionRun,
+    .count = ACTION_COUNT,
+    .screen_ensure = actions_screen_ensure,
+    .bind_ready = bind_to_drive_blocked_cause,
+    .ready_observer = action_ready_observer,
+    .refuse = refusal_feedback,
+}};
+static void actions_open() { actions_view.open(); }
+static void actions_clear() { actions_view.clear(); }
+static void action_focus(int index) { actions_view.focus(index); }
+#include "hmi_format/diag.hpp"
+#include "hmi_ui/diagnostics_view.hpp"
+/////////////////////////////////////////////////////////////////////////////
+// DiagnosticsScreen: live readings from the MCB
+//
+// Opened from the DIAGNOSTICS settings row, left by pulling and holding. One
+// row per entry in RAMMP_DIAG_TABLE (messages/joystick_message.hpp): short label, label,
+// and up to three readings, each under its unit. The MCB publishes them all on
+// rammp::kMcbDiagnostics every rammp::kDiagPeriod; they land in
+// diag_value (subjects, set under the LVGL lock by the RTPS handler in
+// app_main) and the rows observe them.
+//
+// DiagnosticsFreqLabel shows how fast they are arriving ("2.0 Hz - Live").
+// Once nothing has arrived for rammp::kDiagTimeout - or nothing ever has -
+// every row's text and the label turn red and blink: readings the MCB stopped
+// sending must not sit there looking current.
+//
+// The red comes through LV_STATE_USER_1. The labels' text colours are themed
+// for DEFAULT and FOCUSED, and a style on a higher state outranks both without
+// touching anything the theme manager re-applies on a theme change.
+//
+// Built on demand like the settings and actions screens (see "Screens built
+// on demand").
+/////////////////////////////////////////////////////////////////////////////
+
+static_assert(rammp::kDiagFields == 3, "the DiagnosticComponent has exactly three readings");
+
+// The one instance. It owns the readings (the RTPS handler writes them through
+// RtpsUiBridge), the stale and rate subjects and the rows' group; main's 250 ms poll
+// (rtps_poll_cb) keeps the stale and rate subjects current through diag_poll.
+static constinit hmi::ui::DiagnosticsView diag_view{{
+    .nav = &ui_nav_port,
+    .stats =
+        [](int64_t *last_us, int32_t *rate_tenths_hz) {
+          const RtpsDiagStats stats = rtps_comms_diag_stats();
+          *last_us = stats.last_us;
+          *rate_tenths_hz = stats.rate_tenths_hz;
+        },
+    .timeout_us =
+        std::chrono::duration_cast<std::chrono::microseconds>(rammp::kDiagTimeout).count(),
+    .blink = &rtps_blink_subject,
+    .screen_ensure = diagnostics_screen_ensure,
+    .row_focus_cb = setting_focus_cb,
+}};
+static void diag_freq_observer(lv_observer_t *observer, lv_subject_t *) {
+  diag_view.paint_freq(lv_observer_get_target_obj(observer));
+}
+static void diag_poll() { diag_view.poll(); }
+static void diag_focus(int index) { diag_view.focus(index); }
+static void diag_rows_clear() { diag_view.rows_clear(); }
+static void diagnostics_open() { diag_view.open(); }
+
+/////////////////////////////////////////////////////////////////////////////
+// The burger menu, and moving around with the joystick
+//
+// Spec V2 gives every screen but BootScreen the same chrome: a TopBar across
+// the top, a DriveBand under it, a MenuKey in the bottom 162 px, and a
+// MenuOverlay that exactly covers the 720x921 body between them and starts
+// hidden. Tapping the key slides the overlay up over the body; the TopBar, the
+// band and the key itself do not move, which is what the spec means by
+// "sticky".
+//
+// The joystick reaches all of it. Every screen's focus group ends with that
+// screen's burger key: push down past the last row (or key, or log line) and
+// the key is focused; push up from it and you are back where you were. The
+// stick button presses whatever is focused -- a row, a button, the key. In the
+// open menu, up and down walk the rows, and left (or the key) closes it.
+//
+// The Drive screen is the exception, because there the stick drives: nothing
+// on it takes focus but its key, which has no focus ring, so a short press of
+// the stick button opens the menu and a hold still stops the chair
+// (drive_exit_gesture). The button selects on RELEASE, and only for a press
+// shorter than a hold's grace, so a hold never also clicks.
+//
+// What the cursor looks like: rows (menu, settings, diagnostics) go negative,
+// the spec's own "selected"; buttons get a ring in the theme's focus colour,
+// because on a button the negative already means pressed -- a drive mode
+// filled is the one selected, and the key filled white is "menu open".
+//
+// Every screen carries its own instance of all four pieces of chrome, so
+// nav_attach_chrome is called once per screen -- from app_main for the screens
+// ui_init builds, and from the *_screen_ensure() functions for the ones built
+// on demand.
+//
+// This lives in main.cpp rather than a ui_nav.cpp: every destination is a
+// file-static here (the *_open functions, the focus groups, the PIN gate), and
+// a header exporting all of them to one caller would be more coupling than the
+// split removes.
+/////////////////////////////////////////////////////////////////////////////
 // How long an updated image runs before it keeps itself (github_ota_boot_confirm).
 static constexpr uint32_t kOtaConfirmAfterMs = 30'000;
 
@@ -727,12 +1436,82 @@ static void nav_attach_chrome(lv_obj_t *key, lv_obj_t *overlay, lv_obj_t *band) 
 static void screen_loaded_cb(lv_event_t *e) { nav_arrive(lv_event_get_target_obj(e)); }
 static const char *active_screen_name() { return NavView::screen_name(lv_screen_active()); }
 // --
-#include "frag_overdraw.inc" // split_main.py
-// --
-#include "frag_screens_on_demand.inc" // split_main.py
-// --
-#include "frag_display_flip.inc" // split_main.py
-// --
+#include "hmi_ui/overdraw.hpp"
+// ---------------------------------------------------------------------------
+// Overdraw
+//
+// What a full-screen redraw costs is mostly content, not the frame buffer: the
+// render benchmark (kFpsInstrument) measured 86 ms for a busy screen against
+// 19.5 ms for an empty one. The biggest share of that content was fills
+// nobody could see, which is what strip_screen_overdraw takes out.
+// ---------------------------------------------------------------------------
+static espp::Logger logger_overdraw({.tag = "overdraw", .level = espp::Logger::Verbosity::INFO});
+
+// The unit's names for the pass (screens_on_demand, rtps_poll's theme switch,
+// app_main's boot pass), with the overlay flag frag_state marks overlays with.
+static uint32_t strip_screen_overdraw(const lv_obj_t *screen) {
+  return hmi::ui::strip_screen_overdraw(screen, kOverlayFlag);
+}
+
+static void strip_all_overdraw() {
+  logger_overdraw.info("cleared {} redundant background fills",
+                       hmi::ui::strip_all_overdraw(kOverlayFlag));
+}
+/////////////////////////////////////////////////////////////////////////////
+// Screens built on demand (hmi::ui::OnDemandScreens)
+/////////////////////////////////////////////////////////////////////////////
+#include "hmi_ui/on_demand_screens.hpp"
+
+// The one instance.
+static constinit hmi::ui::OnDemandScreens on_demand_screens{{
+    .bind_chrome =
+        [](lv_obj_t *band, lv_obj_t *bar, lv_obj_t *key, lv_obj_t *overlay) {
+          bind_status_panel(band);
+          bind_rtps_label(bar);
+          bind_topbar_labels(bar);
+          nav_attach_chrome(key, overlay, band);
+        },
+    .settings_bound =
+        [] {
+          bind_to_drive_blocked_cause(ui_ErrorBanner6, setting_warning_observer);
+          lv_subject_add_observer_obj(settings_view.page(), setting_warning_observer,
+                                      ui_ErrorBanner6, nullptr);
+        },
+    .diagnostics_bound =
+        [] {
+          for (lv_subject_t *subject : {diag_view.rate(), diag_view.stale(), &rtps_blink_subject}) {
+            lv_subject_add_observer_obj(subject, diag_freq_observer, ui_DiagnosticsFreqLabel,
+                                        nullptr);
+          }
+        },
+    .settings_left = setting_rows_clear,
+    .actions_left = actions_clear,
+    .diagnostics_left = diag_rows_clear,
+    .screen_loaded = screen_loaded_cb,
+    .strip_overdraw = [](const lv_obj_t *screen) { (void)strip_screen_overdraw(screen); },
+}};
+
+static void settings_screen_ensure() { on_demand_screens.ensure_settings(); }
+static void actions_screen_ensure() { on_demand_screens.ensure_actions(); }
+static void diagnostics_screen_ensure() { on_demand_screens.ensure_diagnostics(); }
+#include "hmi_ui/display_flip.hpp"
+// DIRECT rendering and the screen flip are hmi::ui::DisplayFlip (components/hmi_ui).
+// logger_nav is the nav code's; it stays here so the static-init order is unchanged.
+static espp::Logger logger_nav({.tag = "nav", .level = espp::Logger::Verbosity::INFO});
+static espp::Logger logger_flip({.tag = "flip", .level = espp::Logger::Verbosity::INFO});
+
+// The board's swap, for the flush: present_frame waits for vsync. Its result
+// was never used; a missed swap shows as one late frame.
+static void present_on_panel(const uint8_t *frame) {
+  (void)espp::M5StackTab5::get().present_frame(frame);
+}
+
+// The one DisplayFlip. app_main hands it the panel buffers and the touch input.
+static constinit hmi::ui::DisplayFlip display_flip{
+    {.log = &logger_flip, .present = present_on_panel, .refuse = refusal_feedback}};
+
+// Settings "Flip screen" (frag_settings_ui's observer, and the boot-time apply).
+static void set_display_flipped(bool on) { display_flip.set_flipped(on); }
 // One LVGL cycle, for the UI island: lv_task_handler under the LVGL lock (CS-UI: only the
 // UI task touches LVGL; RTPS handlers and the side button take the same lock).
 static void lvgl_cycle() {
@@ -1546,5 +2325,22 @@ extern "C" void app_main(void) {
   //! [m5stack tab5 example]
 }
 
-#include "frag_audio.inc" // split_main.py
-// --
+// The click sound's samples: click.wav, embedded by main/CMakeLists.txt
+// (EMBED_TXTFILES). The sound itself is hmi::feedback::ClickSound.
+static bool load_audio(size_t &out_size, size_t &out_sample_rate) {
+  extern const uint8_t click_wav_start[] asm("_binary_click_wav_start");
+  extern const uint8_t click_wav_end[] asm("_binary_click_wav_end");
+  return feedback->sound().load({click_wav_start, click_wav_end}, out_size, out_sample_rate);
+}
+
+// The click: a touch landing, the stick button selecting, a hold completing.
+// Silent with Settings "Sounds" off. Every caller passes the one Tab5, which is
+// the speaker the Feedback plays on.
+static void play_click(espp::M5StackTab5 & /*tab5*/) { feedback->sound().play_click(); }
+
+// "Can't do that", heard. `warning` is a banner coming up: it sounds even with
+// Sounds off. LVGL task, or under lvgl_mutex.
+static void play_refusal(bool warning) { feedback->sound().play_refusal(warning); }
+
+// A refused press: the DRV2605's double click, which says the same by touch.
+static void refusal_feedback() { feedback->refusal(); }
