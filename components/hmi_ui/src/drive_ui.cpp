@@ -5,6 +5,8 @@
 
 #include "ui.h"
 
+#include "drive_session_table.hpp"
+#include "hmi_ui/drive_port.hpp"
 #include "hmi_ui/hold_gesture.hpp"
 
 // Locking and unlocking the HMI are the drive session's actions, performed by the drive
@@ -93,4 +95,15 @@ void hmi::ui::DriveUi::unlock_timer_start() {
 
 void hmi::ui::DriveUi::locked_screen_go() {
   _ui_screen_change(&ui_LockedScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0, &ui_LockedScreen_screen_init);
+}
+
+// Only the stick may drive, and only on the Drive screen with the menu shut:
+// everywhere else the same stick is walking focus around, and a push meant for
+// the next row must not also move the chair. The ADC task reads this and sends
+// the MCB a centred stick whenever it is false.
+// The rule is the drive session's pure stick_drives (drive_session_table.hpp).
+void hmi::ui::DriveUi::update_stick_gate() const {
+  config_.stick_drives->store(hmi::drive_session::stick_drives(
+      lv_subject_get_int(config_.shared->locked) != 0, drive_screen_of(lv_screen_active()),
+      *config_.menu_open != nullptr));
 }

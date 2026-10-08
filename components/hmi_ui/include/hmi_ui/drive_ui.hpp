@@ -35,7 +35,9 @@ public:
     bool (*publish_drive)(rammp::DriveRequest request, MIB::DriveProfile profile);
     /// The drive session's input (main's one DriveAdapter); true when its row acted.
     bool (*input)(hmi::drive_session::Input input);
-    void (*gate_update)();      ///< main's nav_update_stick_gate
+    /// The stick gate: whether the stick may drive the chair now. Written here (the UI task),
+    /// read by the ADC task, which sends the MCB a centred stick whenever it is false.
+    std::atomic<bool> *stick_drives;
     void (*nav_home)();         ///< NavView::home
     void (*refusal_feedback)(); ///< "can't do that", heard and felt
     void (*haptic_click)();     ///< the STRONG_CLICK the unlock lands with
@@ -76,7 +78,11 @@ public:
   bool publish_drive(rammp::DriveRequest request, MIB::DriveProfile profile) const {
     return config_.publish_drive(request, profile);
   }
-  void update_stick_gate() const { config_.gate_update(); }
+  /// @brief Writes the stick gate from the lock, the screen and the menu as they are now
+  ///        (drive_session's stick_drives). Called at exactly the GATE_TRIGGERS sites
+  ///        (drive_session_table.hpp): the drive session's GATE_UPDATE and NavView's
+  ///        `gate_update`.
+  void update_stick_gate() const;
   void nav_home() const { config_.nav_home(); }
   void refusal_feedback() const { config_.refusal_feedback(); }
   void haptic_click() const { config_.haptic_click(); }

@@ -10,16 +10,8 @@ static constexpr uint32_t kOtaConfirmAfterMs = 30'000;
 using hmi::ui::NavDest;
 using hmi::ui::NavView;
 
-// Only the stick may drive, and only on the Drive screen with the menu shut:
-// everywhere else the same stick is walking focus around, and a push meant for
-// the next row must not also move the chair. The ADC task reads this and sends
-// the MCB a centred stick whenever it is false.
-// The rule is the drive session's pure stick_drives (drive_session_table.hpp).
-static void nav_update_stick_gate() {
-  stick_drives.store(hmi::drive_session::stick_drives(lv_subject_get_int(&locked_subject) != 0,
-                                                      hmi::ui::drive_screen_of(lv_screen_active()),
-                                                      nav_menu_open != nullptr));
-}
+// The stick gate's writer is DriveUi's (update_stick_gate); NavView reaches it through this.
+static void nav_update_stick_gate() { drive_ui.update_stick_gate(); }
 
 static void nav_use_group(lv_group_t *g, const lv_obj_t *screen);
 static lv_group_t *nav_fallback_group(); // the view's, defined after it

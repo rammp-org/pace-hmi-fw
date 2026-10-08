@@ -145,7 +145,7 @@ static constinit hmi::ui::DriveUi drive_ui{{
     .profile = &drive_profile_published,
     .publish_drive = rtps_comms_publish_drive,
     .input = drive_session_input,
-    .gate_update = nav_update_stick_gate,
+    .stick_drives = &stick_drives,
     .nav_home = nav_home,
     .refusal_feedback = refusal_feedback,
     .haptic_click = [] { haptic_play(espp::Drv2605::Waveform::STRONG_CLICK, 1); },
