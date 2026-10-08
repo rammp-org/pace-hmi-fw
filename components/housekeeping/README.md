@@ -1,7 +1,7 @@
 # housekeeping
 
-Reads the board's IMU, battery monitor and RTC on one slow task (CS-LAY-02). Namespace
-`hmi::housekeeping`.
+Reads the board's IMU, battery monitor and RTC on one slow task, and keeps the system clock
+and the RTC to the MCB's time (CS-LAY-02). Namespace `hmi::housekeeping`.
 
 The housekeeping island of [docs/plans/app-main-shrink.md](../../docs/plans/app-main-shrink.md)
 §3: today's "Data Display Task", lifted out of `app_main` clean then move (V2). The code is
@@ -10,6 +10,7 @@ first cycle's `t0`) are members.
 
 | File | What |
 | --- | --- |
+| `system_clock.hpp`, `system_clock.cpp` | `SystemClock`: the system clock set from the RTC at boot (`set`), and from the MCB's time in every MibStatus (`note_mcb_time`, on the RTPS receive task) when it is plausible and ours is unset or off by more than `max_drift_s`, then the RTC written. The validity flag stays main's (the TopBar reads it). From `main/frag_clock.inc`. Built once, an `app_main` local |
 | `housekeeping.hpp`, `housekeeping.cpp` | `Housekeeping`: the IMU's Kalman orientation filter (`orientation_filter()`, for `M5StackTab5::initialize_imu`), and the task that every `period` reads the RTC and the battery monitor and updates the IMU. Built once, an `app_main` local (app-main-shrink V6) |
 
 What it leaves behind is what the self test reads, with no bus traffic of its own: the IMU's
@@ -37,8 +38,8 @@ The orientation filter runs inside `Imu::update`, which only this task calls.
 
 ## Dependencies
 
-`m5stack-tab5` (the BSP: IMU, INA226, RTC), espp `filters` (Kalman) and `task`; ESP-IDF
-`esp_timer`.
+`m5stack-tab5` (the BSP: IMU, INA226, RTC), espp `filters` (Kalman), `logger` and `task`,
+`rammp_rtps_messages` (`MIB::MibStatus`), `hmi_format` (`clock_plausible`); ESP-IDF `esp_timer`.
 
 ## Ratchet
 

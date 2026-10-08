@@ -28,6 +28,7 @@
 #include "feedback/da7280_bench.hpp"
 #include "feedback/feedback.hpp"
 #include "housekeeping/housekeeping.hpp"
+#include "housekeeping/system_clock.hpp"
 
 #include "simple_lowpass_filter.hpp"
 
@@ -740,6 +741,10 @@ extern "C" void app_main(void) {
     }
   }
 
+  // The system clock and the RTC, kept to the MCB's time (housekeeping). Lives as long
+  // as app_main, which never returns once RTPS runs.
+  hmi::housekeeping::SystemClock system_clock({.valid = &clock_valid, .max_drift_s = 2});
+
   logger.info("Initializing RTC...");
   // initialize the RTC
   if (!tab5.initialize_rtc()) {
@@ -757,7 +762,7 @@ extern "C" void app_main(void) {
   // power reads a date long gone; the clock then shows --:-- until the MCB
   // sends the time.
   if (clock_plausible(current_time)) {
-    clock_set(current_time);
+    system_clock.set(current_time);
     logger.info("RTC time {:%Y-%m-%d %H:%M:%S}", current_time);
   } else {
     logger.warn("RTC not set ({:%Y-%m-%d}); the clock waits for the MCB", current_time);
@@ -985,8 +990,8 @@ extern "C" void app_main(void) {
   // lv_subject_set_int runs the observers synchronously on this task and they
   // touch widgets.
   // RTPS handlers run on the RTPS task: subjects only, under the LVGL lock.
-  rtps_comms_on_mib_status([](const MIB::MibStatus &status) {
-    clock_note_mcb_time(status); // no LVGL: sets the system clock and the RTC
+  rtps_comms_on_mib_status([&system_clock](const MIB::MibStatus &status) {
+    system_clock.note_mcb_time(status); // no LVGL: sets the system clock and the RTC
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
     rtps_ui_bridge.apply_mib_status(status);
   });
