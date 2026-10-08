@@ -100,6 +100,14 @@ struct AdcStickIo {
     return rtps_comms_publish_adc(command.x, command.y, command.twist,
                                   button ? rammp::Buttons::JOYSTICK : rammp::Buttons::NONE);
   }
+  // After every cycle, valid or not: the self test measures the loop's cadence and
+  // how often a read fails, as well as the values. A no-op unless a run is
+  // capturing.
+  void note_cycle(bool valid, float horizontal_mv, float vertical_mv, float twist_mv,
+                  bool published) {
+    selftest_note_adc(valid, horizontal_mv, vertical_mv, twist_mv, published,
+                      joy_button_pressed.load());
+  }
 };
 
 // The twist pot's reading for the Read ADC task: `oversample` oneshot reads on

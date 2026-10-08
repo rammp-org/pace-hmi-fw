@@ -134,6 +134,117 @@ static void lvgl_cycle() {
   lv_task_handler();
 }
 
+namespace hmi::control {
+namespace {
+
+/// @brief What the control island's cycle reads and how often: compile-time constants (a
+/// template argument of StickIsland), so they stay constants in the task's code, as they were
+/// when the task was app_main's lambda. Held at run time, the period alone grew the task's
+/// frame by 16 B, and the twist read lost its constant-propagated clone (another 16 B).
+struct Cycle {
+  /// The wait after each cycle, in ms.
+  int period_ms;
+  /// The twist pot's channel, read oneshot.
+  espp::AdcConfig twist_channel;
+  /// How many oneshot reads of the twist each cycle averages.
+  int twist_oversample;
+};
+
+/// @brief The control island: the "Read ADC" task. Every `period` it reads the joystick's
+/// three pots (X/Y on the continuous ADC, the twist oneshot and oversampled) and runs one
+/// cycle of the stick pipeline on them: calibration, mapping, keys, gate and the XYTwist
+/// publish, all on this task (app-main-shrink V10). Built once, an app_main local (V6): the
+/// constructor brings the ADC drivers up, start() builds the stick on its calibration and
+/// starts the task.
+/// @tparam Stick The stick pipeline (main's StickSlot): `bool cycle(Io &, const RawReadsMv &)`.
+/// @tparam Io What one cycle talks to (main's AdcStickIo): built every cycle on the twist's
+///         lowpass, and told about every cycle, valid or not, through note_cycle().
+/// @tparam kCycle The cycle's period and twist read (Cycle).
+template <typename Stick, typename Io, Cycle kCycle> class StickIsland {
+public:
+  struct Config {
+    /// The task, as a literal copy of today's, espp's defaults written out.
+    espp::Task::BaseConfig task;
+    /// The task's log level.
+    espp::Logger::Verbosity task_log_level;
+    /// The continuous ADC: channels[0] is the vertical axis, channels[1] the horizontal one.
+    espp::ContinuousAdc::Config adc;
+    /// The twist's lowpass, after the average.
+    espp::SimpleLowpassFilter::Config twist_lowpass;
+  };
+
+  /// @brief Brings the continuous ADC up and starts it, then the twist's oneshot ADC; starts
+  /// no task of its own.
+  /// @param config See Config.
+  explicit StickIsland(const Config &config)
+      : channels_(config.adc.channels)
+      , twist_lowpass_config_(config.twist_lowpass)
+      , adc_(config.adc)
+      , task_({.callback = [this](std::mutex &m, std::condition_variable &cv) -> bool {
+                 // see the AXIS WIRING note at the calibrations: CH1 is horizontal, CH0 is
+                 // vertical
+                 auto vert_mv = adc_.get_mv(channels_[0]);  // ADC1_CH0 (GPIO16)
+                 auto horiz_mv = adc_.get_mv(channels_[1]); // ADC1_CH1 (GPIO17)
+                 // twist pot on ADC2 (GPIO52), sampled oneshot and averaged
+                 const std::optional<float> twist_mv =
+                     read_twist_mv(*twist_adc_, kCycle.twist_channel, kCycle.twist_oversample);
+
+                 // raw mV -> calibrated stick -> the keypad key, the bars and XYTwist:
+                 // hmi::stick::StickPipeline (components/stick), fed through Io. Only a
+                 // cycle with all three reads does anything; otherwise nothing is published.
+                 Io stick_io{*twist_lowpass_};
+                 const bool adc_published = stick_->cycle(
+                     stick_io,
+                     {.horizontal_mv = horiz_mv, .vertical_mv = vert_mv, .twist_mv = twist_mv});
+                 // Every cycle, valid or not. X is the horizontal channel, as everywhere above.
+                 stick_io.note_cycle(vert_mv && horiz_mv && twist_mv, horiz_mv.value_or(0.0f),
+                                     vert_mv.value_or(0.0f), twist_mv.value_or(0.0f),
+                                     adc_published);
+
+                 // NOTE: sleeping in this way allows the sleep to exit early when the
+                 // task is being stopped / destroyed
+                 {
+                   std::unique_lock<std::mutex> lk(m);
+                   cv.wait_for(lk, std::chrono::milliseconds(kCycle.period_ms));
+                 }
+                 // don't want to stop the task
+                 return false;
+               },
+               .task_config = config.task,
+               .log_level = config.task_log_level}) {
+    adc_.start();
+    twist_adc_.emplace(espp::OneshotAdc::Config{.unit = kCycle.twist_channel.unit,
+                                                .channels = {kCycle.twist_channel}});
+  }
+  StickIsland(const StickIsland &) = delete;
+  StickIsland &operator=(const StickIsland &) = delete;
+  StickIsland(StickIsland &&) = delete;
+  StickIsland &operator=(StickIsland &&) = delete;
+  ~StickIsland() = default;
+
+  /// @brief Builds the stick on @p stick_config (its calibration), then the twist's lowpass,
+  /// and starts the task (app_main, after the calibration is loaded).
+  /// @param stick_config The stick pipeline's configuration.
+  /// @return Whether the task started.
+  bool start(const typename Stick::Config &stick_config) {
+    stick_.emplace(stick_config);
+    twist_lowpass_.emplace(twist_lowpass_config_);
+    return task_.start();
+  }
+
+private:
+  std::vector<espp::AdcConfig> channels_;
+  espp::SimpleLowpassFilter::Config twist_lowpass_config_;
+  espp::ContinuousAdc adc_;
+  std::optional<espp::OneshotAdc> twist_adc_;
+  std::optional<Stick> stick_;
+  std::optional<espp::SimpleLowpassFilter> twist_lowpass_;
+  espp::Task task_;
+};
+
+} // namespace
+} // namespace hmi::control
+
 extern "C" void app_main(void) {
   // First, so the LogScreen has everything printed from here on - including
   // what the tasks started below print.
@@ -924,19 +1035,42 @@ extern "C" void app_main(void) {
   // The twist channel is sampled oneshot rather than through the continuous
   // driver: mixing both units via ADC_CONV_BOTH_UNIT produced a stream of
   // invalid DMA frames on the P4 (log spam that starved LVGL's first frame).
-  std::vector<espp::AdcConfig> channels{
-      {.unit = ADC_UNIT_1, .channel = ADC_CHANNEL_0, .attenuation = ADC_ATTEN_DB_12},
-      {.unit = ADC_UNIT_1, .channel = ADC_CHANNEL_1, .attenuation = ADC_ATTEN_DB_12}};
-  static const espp::AdcConfig twist_channel{
-      .unit = ADC_UNIT_2, .channel = ADC_CHANNEL_3, .attenuation = ADC_ATTEN_DB_12};
-  // this initailizes the DMA and filter task for the continuous adc
-  espp::ContinuousAdc adc({.sample_rate_hz = 1 * 1000,
-                           .channels = channels,
-                           .convert_mode = ADC_CONV_SINGLE_UNIT_1,
-                           .window_size_bytes = 1024,
-                           .log_level = espp::Logger::Verbosity::WARN});
-  adc.start();
-  static espp::OneshotAdc twist_adc({.unit = ADC_UNIT_2, .channels = {twist_channel}});
+  // The control island ("Read ADC"): the ADC drivers come up here, the task starts
+  // once the calibration is loaded, below.
+  static constexpr hmi::control::Cycle kStickCycle{
+      // 30 Hz: ADC read, LVGL bars, RTPS publish
+      .period_ms = 33,
+      .twist_channel = {.unit = ADC_UNIT_2,
+                        .channel = ADC_CHANNEL_3,
+                        .attenuation = ADC_ATTEN_DB_12},
+      // Twist is the noisy axis (~50 mV peak-to-peak at rest, where X/Y read ~1
+      // mV): each cycle averages this many oneshot reads of it, which costs no
+      // lag, then lowpasses the result to iron out what is left. 80 ms is short
+      // enough that the chair does not feel late to turn.
+      .twist_oversample = 8,
+  };
+  hmi::control::StickIsland<StickSlot, AdcStickIo, kStickCycle> stick_island({
+      .task =
+          {
+              .name = "Read ADC",
+              // espp's defaults, written out. Priority 0 runs at IDF's pthread default
+              // (5), and unpinned the task is pinned by its first FPU use (core 0 on the
+              // board): H11 is the fix, not this.
+              .stack_size_bytes = 4096,
+              .priority = 0,
+              .core_id = -1,
+          },
+      .task_log_level = espp::Logger::Verbosity::INFO,
+      // this initailizes the DMA and filter task for the continuous adc
+      .adc = {.sample_rate_hz = 1 * 1000,
+              .channels =
+                  {{.unit = ADC_UNIT_1, .channel = ADC_CHANNEL_0, .attenuation = ADC_ATTEN_DB_12},
+                   {.unit = ADC_UNIT_1, .channel = ADC_CHANNEL_1, .attenuation = ADC_ATTEN_DB_12}},
+              .convert_mode = ADC_CONV_SINGLE_UNIT_1,
+              .window_size_bytes = 1024,
+              .log_level = espp::Logger::Verbosity::WARN},
+      .twist_lowpass = {.time_constant = 0.08f},
+  });
 
   // Joystick calibration: where each axis rests and the two ends of its travel,
   // in raw mV. Measured per unit by CALIBRATE on the JoystickTest screen and
@@ -948,59 +1082,10 @@ extern "C" void app_main(void) {
       .min_mv = 0.0f, .center_mv = 1650.0f, .max_mv = 3300.0f};
   const JoystickCal joystick_cal = joystick_cal_load({kIdealAxis, kIdealAxis, kIdealAxis});
   // The stick pipeline (components/stick): the joystick mapping on this
-  // calibration, the key trigger and the gate. Owned by the ADC task below.
-  // Named `stick`, as the espp::Joystick it wraps was: the same lazy static,
-  // built at the same point (tools/guards init_order baseline). A StickSlot is
-  // the StickPipeline itself, or with CONFIG_HMI_BENCH_STICK_INJECT the bench
-  // stick injection in front of its reads (stick_inject.hpp).
-  static StickSlot stick(stick_pipeline_config(joystick_cal));
-
-  // customization knobs: sampling/LVGL/RTPS cadence, and how often the serial
-  // line is printed. The log is divided down because 30 lines/s is the
-  // console-flood pattern that starved LVGL once before.
-  static constexpr auto kAdcUpdatePeriod = 33ms; // 30 Hz: ADC read, LVGL bars, RTPS publish
-  // Twist is the noisy axis (~50 mV peak-to-peak at rest, where X/Y read ~1
-  // mV): each cycle averages this many oneshot reads of it, which costs no
-  // lag, then lowpasses the result to iron out what is left. 80 ms is short
-  // enough that the chair does not feel late to turn.
-  static constexpr int kTwistOversample = 8;
-  static espp::SimpleLowpassFilter twist_lowpass({.time_constant = 0.08f});
-  auto adc_task_fn = [&adc, &channels](std::mutex &m, std::condition_variable &cv) {
-    // see the AXIS WIRING note at the calibrations: CH1 is horizontal, CH0 is
-    // vertical
-    auto vert_mv = adc.get_mv(channels[0]);  // ADC1_CH0 (GPIO16)
-    auto horiz_mv = adc.get_mv(channels[1]); // ADC1_CH1 (GPIO17)
-    // twist pot on ADC2 (GPIO52), sampled oneshot — see comment at the
-    // channel definitions above — and averaged (kTwistOversample)
-    const std::optional<float> twist_mv = read_twist_mv(twist_adc, twist_channel, kTwistOversample);
-
-    // raw mV -> calibrated stick -> the keypad key, the bars and XYTwist:
-    // hmi::stick::StickPipeline (components/stick), fed through AdcStickIo
-    // (frag_stick_config.inc) in the order this ran inline before. Only a
-    // cycle with all three reads does anything; otherwise nothing is published.
-    AdcStickIo stick_io{.twist_lowpass = twist_lowpass};
-    const bool adc_published = stick.cycle(
-        stick_io, {.horizontal_mv = horiz_mv, .vertical_mv = vert_mv, .twist_mv = twist_mv});
-    // Every cycle, valid or not: the self test measures the loop's cadence and
-    // how often a read fails, as well as the values. A no-op unless a run is
-    // capturing. X is the horizontal channel, as everywhere above.
-    selftest_note_adc(vert_mv && horiz_mv && twist_mv, horiz_mv.value_or(0.0f),
-                      vert_mv.value_or(0.0f), twist_mv.value_or(0.0f), adc_published,
-                      joy_button_pressed.load());
-
-    // NOTE: sleeping in this way allows the sleep to exit early when the
-    // task is being stopped / destroyed
-    {
-      std::unique_lock<std::mutex> lk(m);
-      cv.wait_for(lk, kAdcUpdatePeriod);
-    }
-    // don't want to stop the task
-    return false;
-  };
-  auto adc_task = espp::Task({.callback = adc_task_fn,
-                              .task_config = {.name = "Read ADC"},
-                              .log_level = espp::Logger::Verbosity::INFO});
-  adc_task.start();
+  // calibration, the key trigger and the gate, owned by the island's task. A
+  // StickSlot is the StickPipeline itself, or with CONFIG_HMI_BENCH_STICK_INJECT
+  // the bench stick injection in front of its reads (stick_inject.hpp).
+  stick_island.start(stick_pipeline_config(joystick_cal));
 
   // bring up W5500 Ethernet + RTPS last so a missing cable / module can't
   // delay the HMI; on failure the UI keeps running without comms
