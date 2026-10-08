@@ -60,6 +60,25 @@ branch: `storage`, `settings`, `ota`, `remote_ui`.
 5. MCB team answer (D3: XYTwist timeout, DISABLE semantics).
 6. fw-standards branch `ai/cmake-include-order`.
 
+## Owner decisions at the pause (2026-10-07), to act on when resuming
+
+| # | Question | Decision |
+| --- | --- | --- |
+| P1 | The decisions taken on the owner's delegation (table above) | **Approved, all of them** |
+| P2 | Topology TASKS rows vs today's task configs | **Decide later**: keep literal TaskConfigs in the islands; no topology wiring for now |
+| P3 | POST limits (D4 placeholders) | **Measure first**: bench characterisation across boards 1-3 to propose values (board 2 only on this bench today) |
+| P4 | Hazard fixes C1-C4 and the seat path | **Not yet**: finish the refactor only; hazards in a later session |
+| P5 | fw-standards branch `ai/cmake-include-order` | **Merge into fw-standards `dev`** (approved) |
+| P6 | Scope when resuming | **Plan scope**: finish app_main ≤300 (StickIsland, adapters, RtpsUiBridge, §4 view inits), bench and merge the modules and K1 branches, refresh the docs; rtps_comms and selftest stay in main |
+| P7 | Agent budget | **2 Opus lanes + Sonnet bench** |
+
+### Resume checklist
+1. Modules branch `dev_ai_refactor_modules` bb37381: confirm CI green (bench_inject init_order is CI-only), build the Wi-Fi bench image, Sonnet bench run, merge, ratchet update.
+2. K1 branch `dev_ai_refactor_shrink_k1` f806197: confirm CI, bench (G10 task dump, mem.stk_lvgl, self-test IMU/battery), merge. Then pop stash@{0} in C:\w\k1 ("StickIsland step a, unbuilt"), build, check the ADC frames (-fstack-usage: 208 B invoker + 240 B read_twist_mv), and continue: components/control, adapters, RtpsUiBridge, §4 view inits.
+3. fw-standards: merge `ai/cmake-include-order` into `dev` and push (P5).
+4. Regenerate D3 (housekeeping) after the merges; refresh how-the-firmware-works.md and this report.
+5. POST limits characterisation (P3) when the bench has time; boards 1 and 3 aren't on the bench, so propose from board 2 and mark the rest as to-measure.
+
 ## Findings worth knowing
 
 - Burger key while driving: the gate stays open until the MIB stops (12 non-zero XYTwist in
