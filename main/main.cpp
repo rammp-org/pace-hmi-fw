@@ -335,27 +335,13 @@ static void chrome_bind() {
 // app_main, UI build 4: the error banners, the diagnostics subjects and the 250 ms poll.
 static void banners_bind() {
   // Before the panels that observe it. lv_subject_init_int memzeroes the subject,
-  // taking any observer already on it with it, and bind_mcb_lost_panel below watches
+  // taking any observer already on it with it, and the lost panels bound below watch
   // this one so the drive screen can show a refused exit.
   lv_subject_init_int(&entry_refused_subject, 0);
   refusal_view.start_timer(kDriveRefusedShowMs);
 
-  bind_mcb_lost_panel(ui_ErrorBanner4); // DriveScreen
-  bind_mcb_lost_panel(ui_ErrorBanner1); // SeatScreen
-  // Initialised before the bind: the panel's observer reads it on its first
-  // run. LockedScreen's banner, because a refused unlock is what it reports
-  // (entry_refusal_poll).
-  bind_entry_refused_panel(ui_ErrorBanner2); // LockedScreen
-  // A refusal from the menu (Seat Functions, no MCB) can happen on any screen,
-  // so the screens whose banner has no other job say it too. Diagnostics and
-  // Skunk Works keep theirs down on purpose; Drive, Seat and Settings have
-  // their own causes to show.
-  bind_entry_refused_panel(ui_ErrorBanner5);  // LogScreen
-  bind_entry_refused_panel(ui_ErrorBanner10); // JoystickScreen
-  bind_entry_refused_panel(ui_ErrorBanner11); // BenchGateScreen
-  bind_entry_refused_panel(ui_ErrorBanner9);  // UpdateScreen
-  bind_entry_refused_panel(ui_ErrorBanner12); // InternetScreen
-  bind_entry_refused_panel(ui_ErrorBanner13); // AboutScreen
+  // The resident screens' error banners (RefusalView).
+  refusal_view.bind_resident_banners();
   // Diagnostics readings, and whether they are live: before the poll timer
   // that keeps the latter current, and before any RTPS sample can land.
   diag_view.init_subjects();

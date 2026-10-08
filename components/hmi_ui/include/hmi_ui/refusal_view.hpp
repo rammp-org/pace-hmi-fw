@@ -107,6 +107,11 @@ public:
   ///        an exit was refused. Null skips the binding.
   /// app_main (same order rule).
   void bind_lost_panel(lv_obj_t *panel);
+  /// @brief The error banners of the screens ui_init builds: the link-lost panel on Drive and
+  ///        Seat, the refused-entry panel on Locked and on every screen whose banner has no
+  ///        other job (Log, Joystick, BenchGate, Update, Internet, About).
+  /// app_main, after the entry-refused subject is initialised, before lv_task starts.
+  void bind_resident_banners();
   /// @brief Fills a banner with why driving is not permitted right now; the titles are the
   ///        caller's (a refused push and a drive cut short read differently).
   /// UI task, lvgl_mutex held.

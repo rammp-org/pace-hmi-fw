@@ -144,6 +144,25 @@ void hmi::ui::RefusalView::refused_panel_observer(lv_observer_t *observer, lv_su
   shown(true);
 }
 
+void hmi::ui::RefusalView::bind_resident_banners() {
+  bind_lost_panel(ui_ErrorBanner4); // DriveScreen
+  bind_lost_panel(ui_ErrorBanner1); // SeatScreen
+  // Initialised before the bind: the panel's observer reads it on its first
+  // run. LockedScreen's banner, because a refused unlock is what it reports
+  // (entry_refusal_poll).
+  bind_refused_panel(ui_ErrorBanner2); // LockedScreen
+  // A refusal from the menu (Seat Functions, no MCB) can happen on any screen,
+  // so the screens whose banner has no other job say it too. Diagnostics and
+  // Skunk Works keep theirs down on purpose; Drive, Seat and Settings have
+  // their own causes to show.
+  bind_refused_panel(ui_ErrorBanner5);  // LogScreen
+  bind_refused_panel(ui_ErrorBanner10); // JoystickScreen
+  bind_refused_panel(ui_ErrorBanner11); // BenchGateScreen
+  bind_refused_panel(ui_ErrorBanner9);  // UpdateScreen
+  bind_refused_panel(ui_ErrorBanner12); // InternetScreen
+  bind_refused_panel(ui_ErrorBanner13); // AboutScreen
+}
+
 void hmi::ui::RefusalView::bind_refused_panel(lv_obj_t *panel) {
   config_.keep_overlay_fill(panel);
   if (panel == nullptr) {
