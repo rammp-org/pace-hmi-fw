@@ -14,8 +14,6 @@ struct SharedSubjects {
   lv_subject_t *mib_state;  ///< int: MIB::MibSystemState, as the MIB last reported it
   lv_subject_t *rtps_link;  ///< int: LinkState (link_state.hpp)
   lv_subject_t *rtps_blink; ///< int: 0/1 blink phase, flipped by main's poll timer
-  lv_subject_t *drive_text; ///< string: the MIB's wording for the DRIVE cell; empty = none
-  lv_subject_t *state_text; ///< string: the MIB's wording for the STATE cell; empty = none
 };
 
 } // namespace hmi::ui

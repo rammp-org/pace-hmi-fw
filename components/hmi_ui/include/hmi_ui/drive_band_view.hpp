@@ -12,13 +12,12 @@ namespace hmi::ui {
 
 /// One instance for the Drive screen. The profile buttons are touch-only (the stick is busy
 /// driving here): a tap asks the MIB for that profile, and the button the MIB reports is drawn
-/// CHECKED. Reads the `profile` and `speed_tenths` subjects, both initialised before any bind
-/// (V7).
+/// CHECKED. Owns its two subjects (CS-UI-05): the profile the MIB reports and the speed in
+/// tenths of mph. main's MibStatus handler writes them, and app_main initialises each before
+/// its binds (V7).
 class DriveBandView {
 public:
   struct Config {
-    lv_subject_t *profile;      ///< int: the MIB::DriveProfile the MIB reports
-    lv_subject_t *speed_tenths; ///< int: the speed in tenths of mph (hmi_format)
     /// The MIB::DriveProfile values of the three buttons, in bind order: Manual, Assist, Auto.
     std::array<int32_t, 3> profiles;
     /// Mirrors a profile out to the ADC task (main's drive_profile_published). Any context.
@@ -34,9 +33,15 @@ public:
   constexpr explicit DriveBandView(const Config &config) noexcept
       : config_(config) {}
 
+  /// int: the MIB::DriveProfile the MIB reports (main initialises it, its MibStatus handler
+  /// writes it under lvgl_mutex).
+  [[nodiscard]] lv_subject_t *profile_subject() { return &profile_; }
+  /// int: the speed in tenths of mph (hmi_format), written the same way.
+  [[nodiscard]] lv_subject_t *speed_subject() { return &speed_tenths_; }
+
   /// @brief Binds the speed label to `speed_tenths` ("N.N", object-bound observer).
   /// app_main, before lv_task starts.
-  void bind_speed(lv_obj_t *label) const;
+  void bind_speed(lv_obj_t *label);
 
   /// @brief Binds the three profile buttons, in this order: Manual, Assist, Auto (the
   ///        `profiles` order). Each gets its click callback, nav's state mirroring and an
@@ -64,6 +69,8 @@ private:
   static void speed_label_observer(lv_observer_t *observer, lv_subject_t *subject);
 
   Config config_;
+  lv_subject_t profile_{};      ///< int: MIB::DriveProfile
+  lv_subject_t speed_tenths_{}; ///< int: tenths of mph
   std::array<ProfileButton, 3> buttons_{};
 };
 

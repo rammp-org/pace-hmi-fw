@@ -91,3 +91,9 @@ uint32_t strip_all_overdraw(lv_obj_flag_t overlay) {
 }
 
 } // namespace hmi::ui
+
+// Kept out of the overdraw pass, and kept opaque whatever the theme says.
+void hmi::ui::keep_overlay_fill(lv_obj_t *obj) {
+  lv_obj_add_flag(obj, OVERLAY_FLAG);
+  lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, LV_PART_MAIN);
+}

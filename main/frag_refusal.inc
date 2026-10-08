@@ -90,12 +90,15 @@ static constexpr hmi::ui::RefusalTexts kRefusalTexts{
     .mcb_fault_title = rammp::kHmiMcbFaultTitle,
 };
 
+// The MIB's texts' buffers are the shared spec's.
+static_assert(hmi::ui::RefusalView::ERROR_TEXT_SIZE == rammp::kErrorTextLen &&
+                  hmi::ui::RefusalView::ERROR_FOOTER_SIZE == rammp::kErrorFooterLen,
+              "RefusalView's error text buffers are the shared spec's");
+
 // The one instance, for every refusal banner.
 static constinit hmi::ui::RefusalView refusal_view{{
     .shared = &ui_shared_subjects,
     .texts = &kRefusalTexts,
-    .error_text = &error_text_subject,
-    .error_footer = &error_footer_subject,
     .refused = &entry_refused_subject,
     .wifi = [] { return rtps_comms_net_link() == NetLink::WIFI; },
     .mcb_ready = mcb_ready,

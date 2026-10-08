@@ -98,7 +98,7 @@ lv_group_t *hmi::ui::BenchPinView::init() {
       {ui_BenchKey7, ui_BenchKey8, ui_BenchKey9},
       {nullptr, ui_BenchKey0, ui_BenchKeyBack},
   };
-  lv_group_t *group = lv_group_create();
+  group_ = lv_group_create();
   for (int r = 0; r < grid_.rows; r++) {
     grid_.cols[r] = GRID_MAX_COLS;
     for (int c = 0; c < GRID_MAX_COLS; c++) {
@@ -107,7 +107,7 @@ lv_group_t *hmi::ui::BenchPinView::init() {
       if (key == nullptr) {
         continue; // the hole under "7"
       }
-      lv_group_add_obj(group, key);
+      lv_group_add_obj(group_, key);
       lv_obj_add_event_cb(key, keypad_cb, LV_EVENT_CLICKED, this);
       lv_obj_add_event_cb(key, grid_key_cb, LV_EVENT_KEY, &grid_);
       // The cursor is the same focus ring as every other button; a press is
@@ -115,5 +115,5 @@ lv_group_t *hmi::ui::BenchPinView::init() {
       config_.style_key(key);
     }
   }
-  return group;
+  return group_;
 }

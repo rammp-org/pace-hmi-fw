@@ -29,7 +29,7 @@ hmi::ui::BannerLines hmi::ui::RefusalView::link_text(LinkState link) const {
 // titles are the caller's, because the same cause reads differently as a
 // refused push and as a drive cut short; so is visibility.
 void hmi::ui::RefusalView::fill_drive_blocked(lv_obj_t *panel, const char *link_title,
-                                              const char *mcb_title) const {
+                                              const char *mcb_title) {
   lv_obj_t *title = ui_comp_get_child(panel, UI_COMP_ERRORBANNER_BANNERTITLE);
   lv_obj_t *body = ui_comp_get_child(panel, UI_COMP_ERRORBANNER_BANNERBOX_BANNERMESSAGE);
   lv_obj_t *footer = ui_comp_get_child(panel, UI_COMP_ERRORBANNER_BANNERBOX_BANNERFOOTER);
@@ -45,7 +45,7 @@ void hmi::ui::RefusalView::fill_drive_blocked(lv_obj_t *panel, const char *link_
   } else {
     const auto state =
         static_cast<MIB::MibSystemState>(lv_subject_get_int(config_.shared->mib_state));
-    const char *error_text = lv_subject_get_string(config_.error_text);
+    const char *error_text = lv_subject_get_string(&error_text_);
     lv_label_set_text(title, mcb_title);
     if (error_text[0] != '\0') {
       lv_label_set_text(body, error_text);
@@ -53,7 +53,7 @@ void hmi::ui::RefusalView::fill_drive_blocked(lv_obj_t *panel, const char *link_
       lv_label_set_text_fmt(body, config_.texts->mcb_no_text_fmt, static_cast<unsigned>(state),
                             config_.texts->state_name(state));
     }
-    lv_label_set_text(footer, lv_subject_get_string(config_.error_footer));
+    lv_label_set_text(footer, lv_subject_get_string(&error_footer_));
   }
 }
 
@@ -62,13 +62,12 @@ void hmi::ui::RefusalView::fill_drive_blocked(lv_obj_t *panel, const char *link_
 // the link up, where fill_drive_blocked's "what is wrong with the link" half has
 // nothing to say.
 void hmi::ui::RefusalView::fill_mib_reason(lv_obj_t *panel, const char *title,
-                                           const char *fallback_body,
-                                           const char *fallback_footer) const {
+                                           const char *fallback_body, const char *fallback_footer) {
   lv_obj_t *title_label = ui_comp_get_child(panel, UI_COMP_ERRORBANNER_BANNERTITLE);
   lv_obj_t *body = ui_comp_get_child(panel, UI_COMP_ERRORBANNER_BANNERBOX_BANNERMESSAGE);
   lv_obj_t *footer = ui_comp_get_child(panel, UI_COMP_ERRORBANNER_BANNERBOX_BANNERFOOTER);
-  const char *error_text = lv_subject_get_string(config_.error_text);
-  const char *error_footer = lv_subject_get_string(config_.error_footer);
+  const char *error_text = lv_subject_get_string(&error_text_);
+  const char *error_footer = lv_subject_get_string(&error_footer_);
 
   lv_label_set_text(title_label, title);
   lv_label_set_text(body, error_text[0] != '\0' ? error_text : fallback_body);
@@ -80,8 +79,8 @@ void hmi::ui::RefusalView::fill_mib_reason(lv_obj_t *panel, const char *title,
 // on all of them.
 void hmi::ui::RefusalView::bind_to_cause(lv_obj_t *panel, lv_observer_cb_t cb, void *user_data) {
   config_.keep_overlay_fill(panel);
-  for (lv_subject_t *subject : {config_.shared->rtps_link, config_.shared->mib_state,
-                                config_.error_text, config_.error_footer}) {
+  for (lv_subject_t *subject :
+       {config_.shared->rtps_link, config_.shared->mib_state, &error_text_, &error_footer_}) {
     lv_subject_add_observer_obj(subject, cb, panel, user_data);
   }
 }
@@ -101,7 +100,7 @@ void hmi::ui::RefusalView::show(lv_obj_t *panel, bool up) const {
 // refused, and hides itself the moment
 // the MCB is ready again, so it never claims a fault that has already cleared.
 void hmi::ui::RefusalView::refused_panel_observer(lv_observer_t *observer, lv_subject_t *) {
-  const auto *view = static_cast<const RefusalView *>(lv_observer_get_user_data(observer));
+  auto *view = static_cast<RefusalView *>(lv_observer_get_user_data(observer));
   lv_obj_t *panel = lv_observer_get_target_obj(observer);
   // Every show and hide goes through here. On the Locked screen the banner
   // takes the top of the body, which is where the padlock is, and half a
@@ -160,7 +159,7 @@ void hmi::ui::RefusalView::bind_refused_panel(lv_obj_t *panel) {
 // A state neither board knows counts as not OK (mcb_ready compares against OK), so it raises the
 // banner rather than silently hiding it.
 void hmi::ui::RefusalView::lost_panel_observer(lv_observer_t *observer, lv_subject_t *) {
-  const auto *view = static_cast<const RefusalView *>(lv_observer_get_user_data(observer));
+  auto *view = static_cast<RefusalView *>(lv_observer_get_user_data(observer));
   lv_obj_t *panel = lv_observer_get_target_obj(observer);
   // A refused exit: the MIB is still driving, so the screen stays and says why.
   if (lv_subject_get_int(view->config_.refused) == REFUSED_EXIT &&
@@ -243,4 +242,11 @@ void hmi::ui::RefusalView::poll() {
     // inside the window does not bring the panel back without a new push.
     clear();
   }
+}
+
+void hmi::ui::RefusalView::init_error_texts() {
+  lv_subject_init_string(&error_text_, error_text_buf_.data(), error_text_prev_buf_.data(),
+                         error_text_buf_.size(), "");
+  lv_subject_init_string(&error_footer_, error_footer_buf_.data(), error_footer_prev_buf_.data(),
+                         error_footer_buf_.size(), "");
 }

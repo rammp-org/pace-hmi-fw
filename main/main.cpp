@@ -537,18 +537,8 @@ extern "C" void app_main(void) {
   }
   brightness_view.start_save_timer(kBrightnessSaveDelayMs);
 
-  // Bind the Settings-screen axis bars to the ADC subjects (observer pattern).
-  // Bars show the calibrated joystick position as a percentage: -100..+100,
-  // centered at 0; RTPS carries the same values as -1..+1 (see the ADC task).
-  lv_subject_init_int(&adc_x_subject, 0);
-  lv_subject_init_int(&adc_y_subject, 0);
-  lv_subject_init_int(&adc_twist_subject, 0);
-  lv_bar_set_range(ui_XAxisBar, -100, 100);
-  lv_bar_set_range(ui_YAxisBar, -100, 100);
-  lv_bar_set_range(ui_TwistBar, -100, 100);
-  lv_bar_bind_value(ui_XAxisBar, &adc_x_subject);
-  lv_bar_bind_value(ui_YAxisBar, &adc_y_subject);
-  lv_bar_bind_value(ui_TwistBar, &adc_twist_subject);
+  // The Joystick screen's axis bars, bound to the ADC task's percentages (JoystickView).
+  joystick_view.init_bars();
 
   // MCB status labels. The joystick is a slave: until the MCB says otherwise
   // the chair is not accepting drive commands, so INACTIVE/OK is the honest
@@ -566,15 +556,9 @@ extern "C" void app_main(void) {
   lv_subject_init_int(&rtps_link_subject, static_cast<int32_t>(RtpsLinkState::LINK_DOWN));
   lv_subject_init_int(&rtps_blink_subject, 1);
   // empty = no override, so the labels start on the enum names
-  lv_subject_init_string(&drive_text_subject, drive_text_buf, drive_text_prev_buf,
-                         sizeof(drive_text_buf), "");
-  lv_subject_init_string(&state_text_subject, state_text_buf, state_text_prev_buf,
-                         sizeof(state_text_buf), "");
-  lv_subject_init_int(&speed_tenths_subject, 0);
-  lv_subject_init_string(&error_text_subject, error_text_buf, error_text_prev_buf,
-                         sizeof(error_text_buf), "");
-  lv_subject_init_string(&error_footer_subject, error_footer_buf, error_footer_prev_buf,
-                         sizeof(error_footer_buf), "");
+  status_band_view.init_texts();
+  lv_subject_init_int(drive_band_view.speed_subject(), 0);
+  refusal_view.init_error_texts();
   // Every screen ui_init built, in the screen order of the header list above.
   // The three built on demand bind their own chrome in *_screen_ensure(), and
   // BenchMotorsScreen is destroyed a few lines after ui_init, so neither is
@@ -614,7 +598,8 @@ extern "C" void app_main(void) {
   // screen and the stick only drives from Drive (stick_drives).
   topbar_view.start_clock();
   drive_band_view.bind_speed(ui_SpeedValue);
-  lv_subject_init_int(&drive_profile_subject, static_cast<int32_t>(MIB::DriveProfile::NORMAL));
+  lv_subject_init_int(drive_band_view.profile_subject(),
+                      static_cast<int32_t>(MIB::DriveProfile::NORMAL));
   drive_band_view.bind_profile_buttons(ui_ModeManual, ui_ModeAssist, ui_ModeAuto);
   drive_band_view.bind_profile_mirror();
   // Before the panels that observe it. lv_subject_init_int memzeroes the subject,
@@ -659,14 +644,8 @@ extern "C" void app_main(void) {
                           play_click(espp::M5StackTab5::get());
                         }});
 
-  // GPIO48 test button. The count has a built-in binding; the tint the press
-  // used to show went with the panel behind it, so the observer paints the
-  // count's own text colour instead (torn down with the object).
-  lv_subject_init_int(&button_count_subject, 0);
-  lv_subject_init_int(&button_pressed_subject, 0);
-  lv_label_bind_text(ui_ButtonCounter, &button_count_subject, "%d");
-  lv_subject_add_observer_obj(&button_pressed_subject, gpio48_panel_observer, ui_ButtonCounter,
-                              nullptr);
+  // GPIO48 test button: the count and its colour (JoystickView).
+  joystick_view.init_button();
 
   // GPIO48, pulled up and shorted to ground on press (board-wide convention),
   // so active LOW. Constructed after the subjects are initialized, because the
@@ -720,22 +699,15 @@ extern "C" void app_main(void) {
           play_click(espp::M5StackTab5::get());
         }
       }});
-  joystick_indev = joystick_keypad.get_input_device();
-  // The fallback group, for the screens whose content nothing focuses: Drive,
-  // Update and Boot. It holds nothing, so the stick's LVGL half is idle there
-  // while hold_poll still reads the same latch for the exit hold.
-  joystick_group = lv_group_create();
-  // The burger menu's rows. Filled per overlay when the menu opens, because
-  // every screen carries its own instance of all seven.
-  menu_group = lv_group_create();
-  lv_indev_set_group(joystick_indev, joystick_group);
+  // The joystick's indev, nav's fallback group and the burger menu's rows (NavView).
+  nav_view.init_groups(joystick_keypad.get_input_device());
   // A backstop for the stick losing its cursor: if its group ever has nothing
   // focused while the screen has settled, hand it back to the screen that is
   // up, as a fresh arrival would. Logged, because it means some path left the
   // group behind and that path wants fixing too.
   lv_timer_create(
       [](lv_timer_t *) {
-        lv_group_t *g = lv_indev_get_group(joystick_indev);
+        lv_group_t *g = lv_indev_get_group(nav_view.indev());
         static int lost = 0;
         if (g != nullptr && lv_group_get_focused(g) != nullptr) {
           lost = 0;
@@ -936,7 +908,7 @@ extern "C" void app_main(void) {
   });
 
   // BenchGateScreen: the PIN pad, its four dots and the line above them.
-  rd_group = bench_pin_view.init();
+  (void)bench_pin_view.init();
 
   // SettingsScreen: what outlives the screen, which is built on demand
   // (settings_screen_ensure). The seat values it steps are initialised further
@@ -1300,15 +1272,16 @@ extern "C" void app_main(void) {
     lv_subject_set_int(&mib_state_subject, static_cast<int32_t>(status.systemState));
     // What the MIB is actually driving with: the three profile buttons highlight from
     // this, so they follow the chair even when something else changed it.
-    lv_subject_set_int(&drive_profile_subject, static_cast<int32_t>(status.activeProfile));
+    lv_subject_set_int(drive_band_view.profile_subject(),
+                       static_cast<int32_t>(status.activeProfile));
     // m/s on the wire, mph on the dial: the shared spec carries the real
     // quantity and the unit on the label is ours to pick.
-    lv_subject_set_int(&speed_tenths_subject, speed_display_tenths(status.speed));
-    // copy_string cuts each text to its subject's buffer (RAMMP_*_LEN). drive_text_subject
-    // stays empty: the MIB sends one wording, and the state label is where it belongs.
-    lv_subject_copy_string(&state_text_subject, status.status_text.c_str());
-    lv_subject_copy_string(&error_text_subject, status.error_message.c_str());
-    lv_subject_copy_string(&error_footer_subject, status.error_footer.c_str());
+    lv_subject_set_int(drive_band_view.speed_subject(), speed_display_tenths(status.speed));
+    // copy_string cuts each text to its subject's buffer (RAMMP_*_LEN). drive_text stays
+    // empty: the MIB sends one wording, and the state label is where it belongs.
+    lv_subject_copy_string(status_band_view.state_text(), status.status_text.c_str());
+    lv_subject_copy_string(refusal_view.error_text(), status.error_message.c_str());
+    lv_subject_copy_string(refusal_view.error_footer(), status.error_footer.c_str());
     seat_apply_state(status.currentSeatState);
   });
   rtps_comms_on_diagnostics([](const rammp::Diagnostics &diag) {
