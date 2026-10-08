@@ -23,7 +23,7 @@ extern "C" {
 #define SIM_ADC_PERIOD_MS 33
 
 /** Creates the keypad indev and starts the 33 ms sampling timer. */
-void sim_input_init(lv_display_t * display);
+void sim_input_init(lv_display_t *display);
 
 /** Calibrated stick position, [-1, 1], same convention as espp::Joystick. */
 float sim_input_x(void);
@@ -34,7 +34,7 @@ float sim_input_twist(void);
 bool sim_input_button(void);
 
 /** The LVGL group the joystick indev drives; swapped per screen. */
-void sim_input_set_group(lv_group_t * group);
+void sim_input_set_group(lv_group_t *group);
 
 /** Raw millivolts as the MCB would see them, for the ADC subjects. */
 uint16_t sim_input_x_mv(void);
