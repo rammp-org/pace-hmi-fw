@@ -72,7 +72,7 @@ static constinit hmi::ui::NavView nav_view{{
     .refuse_seat =
         [] {
           refusal_feedback();
-          drive_port.show_refused(kRefusedSeat, kDriveRefusedShowMs);
+          drive_port.show_refused(hmi::ui::REFUSED_SEAT, hmi::ui::DRIVE_REFUSED_SHOW_MS);
         },
     .drive_row = [] { return drive_session_input(hmi::drive_session::Input::MENU_ROW_DRIVE); },
     .drive_key = [] { (void)drive_session_input(hmi::drive_session::Input::MENU_KEY_DRIVE); },

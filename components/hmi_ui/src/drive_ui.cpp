@@ -8,6 +8,7 @@
 #include "drive_session_table.hpp"
 #include "hmi_ui/drive_port.hpp"
 #include "hmi_ui/hold_gesture.hpp"
+#include "hmi_ui/link_state.hpp"
 
 // Locking and unlocking the HMI are the drive session's actions, performed by the drive
 // adapter (components/drive_adapter, through DrivePort) in the order set_locked() used to
@@ -21,6 +22,24 @@
 // back to the Locked screen from wherever you were -- a hard cut, per the
 // spec's rule that the move between LOCKED and ACTIVE is instant -- so a
 // re-lock can never strand you on a screen that assumes the chair may move.
+
+// Is the MCB currently telling us the chair is fit to drive, or to move the
+// seat? Requires a live
+// link as well as an OK state: if the status is stale we do not KNOW the state,
+// and "unknown" is not "known good" on a device that moves someone.
+bool hmi::ui::mcb_ready(const SharedSubjects &shared) {
+  const auto state = static_cast<MIB::MibSystemState>(lv_subject_get_int(shared.mib_state));
+  return static_cast<LinkState>(lv_subject_get_int(shared.rtps_link)) == LinkState::CONNECTED &&
+         (state == MIB::MibSystemState::IDLE || state == MIB::MibSystemState::ENABLED);
+}
+
+// The MIB disables manual seat control while it is driving, so the seat screen asks for
+// more than mcb_ready(): IDLE exactly. INITIALIZING and ERROR are barred by both.
+bool hmi::ui::seat_ready(const SharedSubjects &shared) {
+  return static_cast<LinkState>(lv_subject_get_int(shared.rtps_link)) == LinkState::CONNECTED &&
+         static_cast<MIB::MibSystemState>(lv_subject_get_int(shared.mib_state)) ==
+             MIB::MibSystemState::IDLE;
+}
 
 void hmi::ui::DriveUi::init_lock() {
   // Where the shackle sits at rest, so the 01b rise can be undone exactly.

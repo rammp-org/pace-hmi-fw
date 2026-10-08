@@ -123,7 +123,120 @@ static void diagnostics_screen_ensure();
 static void diagnostics_open();
 
 // --
-#include "frag_refusal.inc" // split_main.py
+// Is the MCB fit to drive, or to move the seat (DriveUi's readiness checks, hmi_ui). The
+// views and the rest of the unit reach them through these.
+static bool mcb_ready() { return hmi::ui::mcb_ready(ui_shared_subjects); }
+static bool seat_ready() { return hmi::ui::seat_ready(ui_shared_subjects); }
+
+/////////////////////////////////////////////////////////////////////////////
+// Saying why driving is not permitted (hmi::ui::RefusalView)
+//
+// One cause, several ErrorBanners. On the Locked screen, and on the screens a
+// menu refusal can happen over: why a request to drive, or to open Seat
+// Functions, was refused - the unlock hold is gated in applies(), so a refused
+// one otherwise does nothing at all. On the DriveScreen and the SeatScreen: why
+// it was cut short, by the link dropping or the MCB faulting. All word the
+// cause from hmi_rtps_spec.hpp.
+/////////////////////////////////////////////////////////////////////////////
+#include "hmi_ui/refusal_view.hpp"
+
+// Which push was refused, so the panel can say which (hmi::ui::Refused); its dwells are
+// hmi::ui::DRIVE_REFUSED_SHOW_MS and EXIT_REFUSED_SHOW_MS (refused.hpp).
+static lv_subject_t entry_refused_subject; // hmi::ui::Refused; panel up unless REFUSED_NONE
+
+static_assert(sizeof(rammp::kHmiEthFailedText) <= rammp::kErrorTextLen &&
+                  sizeof(rammp::kHmiLinkDownText) <= rammp::kErrorTextLen &&
+                  sizeof(rammp::kHmiWifiFailedText) <= rammp::kErrorTextLen &&
+                  sizeof(rammp::kHmiWifiDownText) <= rammp::kErrorTextLen &&
+                  sizeof(rammp::kHmiNoIpText) <= rammp::kErrorTextLen &&
+                  sizeof(rammp::kHmiNoPeerText) <= rammp::kErrorTextLen,
+              "refusal body outgrows the banner it shares with MCB faults");
+static_assert(sizeof(rammp::kHmiEthFailedFooter) <= rammp::kErrorFooterLen &&
+                  sizeof(rammp::kHmiLinkDownFooter) <= rammp::kErrorFooterLen &&
+                  sizeof(rammp::kHmiWifiFailedFooter) <= rammp::kErrorFooterLen &&
+                  sizeof(rammp::kHmiWifiDownFooter) <= rammp::kErrorFooterLen &&
+                  sizeof(rammp::kHmiNoIpFooter) <= rammp::kErrorFooterLen &&
+                  sizeof(rammp::kHmiNoPeerFooter) <= rammp::kErrorFooterLen,
+              "refusal footer outgrows the banner it shares with MCB faults");
+
+// The drive session's input, defined with the drive adapter below.
+static bool drive_session_input(hmi::drive_session::Input input);
+
+// The banners' words, from the shared spec.
+static constexpr hmi::ui::RefusalTexts kRefusalTexts{
+    .eth_failed = {rammp::kHmiEthFailedText, rammp::kHmiEthFailedFooter},
+    .wifi_failed = {rammp::kHmiWifiFailedText, rammp::kHmiWifiFailedFooter},
+    .link_down = {rammp::kHmiLinkDownText, rammp::kHmiLinkDownFooter},
+    .wifi_down = {rammp::kHmiWifiDownText, rammp::kHmiWifiDownFooter},
+    .no_ip = {rammp::kHmiNoIpText, rammp::kHmiNoIpFooter},
+    .no_peer = {rammp::kHmiNoPeerText, rammp::kHmiNoPeerFooter},
+    .mcb_no_text_fmt = rammp::kHmiMcbNoTextFmt,
+    .state_name = [](MIB::MibSystemState state) { return rammp::to_string(state); },
+    .drive_stopped = {rammp::kHmiDriveStoppedTitle, rammp::kHmiDriveStoppedText,
+                      rammp::kHmiDriveStoppedFooter},
+    .drive_not_granted = {rammp::kHmiDriveNotGrantedTitle, rammp::kHmiDriveNotGrantedText,
+                          rammp::kHmiDriveNotGrantedFooter},
+    .exit_refused = {rammp::kHmiExitRefusedTitle, rammp::kHmiExitRefusedText,
+                     rammp::kHmiExitRefusedFooter},
+    .link_refused_title = rammp::kHmiLinkRefusedTitle,
+    .mcb_refused_title = rammp::kHmiMcbRefusedTitle,
+    .seat_link_refused_title = rammp::kHmiSeatLinkRefusedTitle,
+    .seat_mcb_refused_title = rammp::kHmiSeatMcbRefusedTitle,
+    .drive_lost_link_title = rammp::kHmiDriveLostLinkTitle,
+    .drive_lost_mcb_title = rammp::kHmiDriveLostMcbTitle,
+    .link_lost_title = rammp::kHmiLinkLostTitle,
+    .mcb_fault_title = rammp::kHmiMcbFaultTitle,
+};
+
+// The MIB's texts' buffers are the shared spec's.
+static_assert(hmi::ui::RefusalView::ERROR_TEXT_SIZE == rammp::kErrorTextLen &&
+                  hmi::ui::RefusalView::ERROR_FOOTER_SIZE == rammp::kErrorFooterLen,
+              "RefusalView's error text buffers are the shared spec's");
+
+// The one instance, for every refusal banner.
+static constinit hmi::ui::RefusalView refusal_view{{
+    .shared = &ui_shared_subjects,
+    .texts = &kRefusalTexts,
+    .refused = &entry_refused_subject,
+    .wifi = [] { return rtps_comms_net_link() == NetLink::WIFI; },
+    .mcb_ready = mcb_ready,
+    .play_refusal = [](bool warning) { play_refusal(warning); },
+    .keep_overlay_fill = keep_overlay_fill,
+    .button_held = joy_button_held,
+    .now_us = [] { return esp_timer_get_time(); },
+    .menu_open = [] { return nav_menu_open != nullptr; },
+    // A push is decided by the drive session (rows 38-39: locked, on the Locked
+    // screen, no menu, MCB not ready).
+    .entry_push = [] { return drive_session_input(hmi::drive_session::Input::ENTRY_PUSH); },
+    .grace_ms = kBarGraceMs,
+}};
+
+// What the rest of the unit calls (settings, the hold poll, app_main).
+static void banner_show(lv_obj_t *panel, bool up) { refusal_view.show(panel, up); }
+static void fill_drive_blocked_panel(lv_obj_t *panel, const char *link_title,
+                                     const char *mcb_title) {
+  refusal_view.fill_drive_blocked(panel, link_title, mcb_title);
+}
+static void bind_to_drive_blocked_cause(lv_obj_t *panel, lv_observer_cb_t cb) {
+  refusal_view.bind_to_cause(panel, cb, nullptr);
+}
+static void entry_refusal_poll() { refusal_view.poll(); }
+
+// The MIB decides whether the chair drives: the joystick asks with a DriveCommand and
+// shows the DriveScreen only once MibStatus says ENABLED. Two windows, because saying
+// "that was refused" and giving up on the request are different jobs:
+//
+//  - kDriveAnswer is when to speak. One MibStatus period plus a margin, so a sample
+//    already in flight when the request went out cannot be mistaken for a refusal.
+//    This is as early as a refusal can honestly be known, and waiting longer just
+//    reads as the HMI ignoring the user.
+//  - kDriveWait is when to stop asking, so a silent MIB is not left with a live
+//    request. The warning is long since up by then.
+// Both are the drive table's (drive_session_table.hpp), the drive adapter's default
+// windows; here they are held to the RTPS spec they come from.
+static_assert(hmi::drive_session::kDriveAnswer ==
+              rammp::kMibStatusPeriod + std::chrono::milliseconds{250});
+static_assert(hmi::drive_session::kDriveWait == rammp::kMibStatusTimeout);
 // --
 // The drive session: lock, ask, unlock, drive, ask to stop. The decisions live in
 // components/drive_session (DriveSession, checked against the AS-IS table in
@@ -157,7 +270,7 @@ static_assert(hmi::drive_adapter::DrivePort<hmi::ui::DrivePort<hmi::ui::DriveUi>
 
 // The drive session's adapter: the session, its deadlines and latches, and the logger for a
 // corrupted state, made at start-up with the rest (CS-SAF-04). Its windows are the table's
-// kDriveAnswer and kDriveWait (pinned to the RTPS spec in frag_refusal.inc).
+// kDriveAnswer and kDriveWait (pinned to the RTPS spec with the refusal banners above).
 static hmi::drive_adapter::DriveAdapter<hmi::ui::DrivePort<hmi::ui::DriveUi>> drive_adapter{
     {.view = drive_port}};
 
@@ -416,7 +529,7 @@ static void banners_bind() {
   // taking any observer already on it with it, and the lost panels bound below watch
   // this one so the drive screen can show a refused exit.
   lv_subject_init_int(&entry_refused_subject, 0);
-  refusal_view.start_timer(kDriveRefusedShowMs);
+  refusal_view.start_timer(hmi::ui::DRIVE_REFUSED_SHOW_MS);
 
   // The resident screens' error banners (RefusalView).
   refusal_view.bind_resident_banners();

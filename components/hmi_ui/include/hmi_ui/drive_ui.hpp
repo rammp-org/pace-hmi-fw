@@ -17,6 +17,15 @@
 
 namespace hmi::ui {
 
+/// @brief Is the MCB telling us the chair is fit to drive: the link CONNECTED and the MIB
+///        IDLE or ENABLED. Reads `mib_state`, then `rtps_link`.
+/// UI task (or app_main), lvgl_mutex held.
+[[nodiscard]] bool mcb_ready(const SharedSubjects &shared);
+/// @brief Is the seat free to move: the link CONNECTED and the MIB IDLE exactly. Reads
+///        `rtps_link`, then `mib_state`.
+/// UI task (or app_main), lvgl_mutex held.
+[[nodiscard]] bool seat_ready(const SharedSubjects &shared);
+
 /// One instance (main's, constinit): the drive UI's state, and DrivePort's `Ui`. Every call runs
 /// on the UI task with lvgl_mutex held (an LVGL timer, event or observer, or an input of the
 /// drive adapter), or in app_main while it builds the UI before lv_task starts.
