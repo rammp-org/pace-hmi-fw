@@ -1,7 +1,7 @@
 # Refactor progress (living report)
 
-Updated by the orchestrator after each merge into `dev_refactor`. Last update: 2026-10-07,
-`dev_refactor` at bc90c3c. Nothing has gone to `dev` or `main`; no PR was opened.
+Updated by the orchestrator after each merge into `dev_refactor`. Last update: 2026-10-07 (PAUSED at the owner's request),
+`dev_refactor` at 24e4571. Nothing has gone to `dev` or `main`; no PR was opened.
 
 ## Where it stands
 
@@ -32,8 +32,8 @@ branch: `storage`, `settings`, `ota`, `remote_ui`.
 
 | Lane | Next |
 | --- | --- |
-| K1 agent | `app_main` ≤300: lift lv_task, IMU, ADC tasks into islands (configs copied literally), adapters, RtpsUiBridge, delete the dead demo screen (own behaviour commit) |
-| modules agent | remote_ui acceptance (orchestrator), final image, bench, merge |
+| K1 agent (paused) | branch `dev_ai_refactor_shrink_k1` f806197 (CI pending, not benched): demo screen deleted (behaviour commit), housekeeping island (components/housekeeping) and UiIsland lifted; `app_main` 742 → 559 on the branch. Next: StickIsland, adapters, RtpsUiBridge, §4 view inits; then bench and merge |
+| modules agent (paused) | branch `dev_ai_refactor_modules` c3c7856 (storage, settings, ota, remote_ui moved; reviewer acceptance done). Next: selftest deviation row, merge dev_refactor, final image, bench, merge |
 | bench (Sonnet) | graded run of each image before merge |
 
 ## Decisions taken on your delegation (review these)
