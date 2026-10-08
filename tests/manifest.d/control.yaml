@@ -1,0 +1,17 @@
+# L1 host app for components/control (cases CTL-0nn in components/control/test): the motion
+# guard and the per-cycle sequence of hazard fix C4 (docs/plans/hazard-c4-spec.md §7), on fake
+# time, with the real stick pipeline and the host allocation guard (TS-DET-08).
+# spec-deviation(TS-UNIT-01): host-native g++ in WSL, not the IDF linux target (owner, 2026-10-06).
+- id: L1-CTL
+  title: motion guard verdicts, stale latches, counters and the per-cycle sequence (C4)
+  level: L1
+  path: components/control/test
+  requirements: [REQ-CTL-01, REQ-CTL-03, REQ-CTL-04, REQ-CTL-05, REQ-CTL-06, REQ-CTL-07,
+                 REQ-CTL-08, REQ-CTL-10, REQ-CTL-11, REQ-CTL-12]
+  resources: [host]
+  timeout_s: 300
+  expected_s: 60
+  repeat: 1
+  pass_threshold: 1
+  safety: true
+  artifact: test
