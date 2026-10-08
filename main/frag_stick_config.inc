@@ -16,6 +16,7 @@
 // adds StickSlot: the pipeline, or with CONFIG_HMI_BENCH_STICK_INJECT the bench
 // stick injection in front of it.
 #include "stick_inject.hpp"
+#include "control/stick_island.hpp"
 
 static_assert(hmi::stick::SENSITIVITY_MIN == SETTINGS_STICK_SENSITIVITY_MIN &&
                   hmi::stick::SENSITIVITY_MAX == SETTINGS_STICK_SENSITIVITY_MAX,

@@ -3,6 +3,7 @@ idf_component_register(SRC_DIRS "."
                        PRIV_REQUIRES
                          adc
                          button
+                         control
                          drv2605
                          feedback
                          file_system
