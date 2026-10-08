@@ -38,7 +38,9 @@ Surprises worth knowing:
 1. The ADC cycle is 35.0 ms, not the 33 ms in the comment. 25 cycles is 0.87 s, below the B2
    ask of "about 1 s". 30 cycles fixes that.
 2. Two old runs (image `a6ff6de`, 6 Oct 23:46 and 23:53) had 984 B of ADC stack free. The
-   placeholder 1024 B would have failed them. That is the limit doing its job. Two stress runs
+   placeholder 1024 B would have failed them. That is the limit doing its job: `a6ff6de` was
+  the known leaves-view regression (GCC inlined a cold Logger path into the ADC frame), fixed
+  by a `noinline` `read_twist_mv`. Two stress runs
    sit at 1188 B. Everything else is 1348 B or more.
 3. Every run used the same stick calibration (X 1507, Y 1510, twist 1477 mV). So the "rest
    offset" numbers describe one stick at rest against one calibration. They say little about
