@@ -186,3 +186,42 @@ TEST_CASE("CAL-110 seeded random bytes are rejected with a decode error or read 
     }
   }
 }
+
+TEST_CASE("CAL-410 valid() boundaries: min -0.1 / 0; span 999.9 / 1000 each way; max 3050 / "
+          "3050.1; NaN or inf in any of the 9 numbers",
+          "[cal][record][valid]") {
+  // Hazard fix C2 (hazard-c2-spec.md §6, §8.4). Expected: invalid / valid; invalid / valid;
+  // valid / invalid; invalid.
+  const AxisCal ok{300.0f, 1500.0f, 2600.0f};
+  TEST_ASSERT_TRUE(hmi::cal::valid({ok, ok, ok}));
+  struct Case {
+    AxisCal axis;
+    bool valid;
+  };
+  const Case cases[] = {
+      {{-0.1f, 1500.0f, 2600.0f}, false},  {{0.0f, 1500.0f, 2600.0f}, true},
+      {{500.1f, 1500.0f, 2600.0f}, false}, {{500.0f, 1500.0f, 2600.0f}, true},
+      {{300.0f, 1500.0f, 2499.9f}, false}, {{300.0f, 1500.0f, 2500.0f}, true},
+      {{300.0f, 1500.0f, 3050.0f}, true},  {{300.0f, 1500.0f, 3050.1f}, false},
+  };
+  for (std::size_t axis = 0; axis < hmi::cal::kAxisCount; ++axis) {
+    for (const Case &c : cases) {
+      Record r{ok, ok, ok};
+      r[axis] = c.axis;
+      TEST_ASSERT_EQUAL(c.valid, hmi::cal::valid(r));
+    }
+    for (const float bad :
+         {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity(),
+          -std::numeric_limits<float>::infinity()}) {
+      for (int field = 0; field < 3; ++field) {
+        Record r{ok, ok, ok};
+        (field == 0 ? r[axis].min_mv : field == 1 ? r[axis].center_mv : r[axis].max_mv) = bad;
+        TEST_ASSERT_FALSE(hmi::cal::valid(r));
+      }
+    }
+  }
+  // Board 2's saved record passes (max 2971 mV, 79 mV to spare).
+  TEST_ASSERT_TRUE(
+      hmi::cal::valid({AxisCal{11.0f, 1507.0f, 2971.0f}, AxisCal{6.0f, 1510.0f, 2962.0f},
+                       AxisCal{10.0f, 1477.0f, 2960.0f}}));
+}

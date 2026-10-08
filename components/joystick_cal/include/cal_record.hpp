@@ -78,6 +78,14 @@ enum class DecodeError {
 /// file comment.
 [[nodiscard]] bool plausible(const Record &record);
 
+/// Hazard fix C2 (docs/plans/hazard-c2-spec.md §6, REQ-CAL-09): whether a record may be used.
+/// Valid exactly when all nine numbers are finite and, per axis, min >= 0,
+/// center - min >= kFullTravelMv, max - center >= kFullTravelMv and
+/// max + CAL_OVERSHOOT_MV <= HIGH_RAIL_MV (that is, max <= 3050 mV; stick/stick_monitor.hpp).
+/// Not used by the firmware yet: C2's behaviour commit replaces plausible() with it at load and
+/// at the end of a run.
+[[nodiscard]] bool valid(const Record &record);
+
 /// The file's text for `record`, numbers to 0.1 mV.
 [[nodiscard]] std::string encode(const Record &record);
 

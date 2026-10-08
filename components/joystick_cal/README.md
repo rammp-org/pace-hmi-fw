@@ -7,7 +7,7 @@ timer, the button), the file I/O and the log lines.
 
 | Header | What |
 | --- | --- |
-| `cal_record.hpp` | `Record`, `encode`/`decode` (file format version 1), `describe`, `plausible` |
+| `cal_record.hpp` | `Record`, `encode`/`decode` (file format version 1), `describe`, `plausible`; `valid` (hazard fix C2, REQ-CAL-09 to come: finite, min ≥ 0, ≥ 1000 mV each way, max ≤ 3050 mV; tested by CAL-410, not used by the firmware until C2's behaviour commit) |
 | `cal_run.hpp` | `CalibrationRun` (the run model), `kTransitions` (its table), `decide()` |
 
 **Safety-relevant** (CS-SAF-01): the record sets the stick's travel. Status: draft (plan step

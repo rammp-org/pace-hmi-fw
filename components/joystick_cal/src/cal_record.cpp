@@ -4,9 +4,11 @@
 #include "cal_record.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 #include "format.hpp"
+#include "stick/stick_monitor.hpp"
 
 namespace hmi::cal {
 
@@ -56,6 +58,15 @@ std::string describe(const Record &record) {
 bool plausible(const Record &record) {
   return std::all_of(record.begin(), record.end(), [](const AxisCal &a) {
     return a.center_mv - a.min_mv >= kFullTravelMv && a.max_mv - a.center_mv >= kFullTravelMv;
+  });
+}
+
+bool valid(const Record &record) {
+  return std::all_of(record.begin(), record.end(), [](const AxisCal &a) {
+    return std::isfinite(a.min_mv) && std::isfinite(a.center_mv) && std::isfinite(a.max_mv) &&
+           a.min_mv >= 0.0f && a.center_mv - a.min_mv >= kFullTravelMv &&
+           a.max_mv - a.center_mv >= kFullTravelMv &&
+           a.max_mv + hmi::stick::CAL_OVERSHOOT_MV <= hmi::stick::HIGH_RAIL_MV;
   });
 }
 
