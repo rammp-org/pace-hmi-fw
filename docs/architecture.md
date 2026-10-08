@@ -162,6 +162,7 @@ First-party components (`main` and `components/*` except `joystick`, `m5stack-ta
 
 ```mermaid
 flowchart LR
+  c_board["board"]
   c_control["control"]:::safety
   c_drive_adapter["drive_adapter"]:::safety
   c_drive_session["drive_session"]:::safety
@@ -190,6 +191,8 @@ flowchart LR
   g_Espressif_registry["Espressif registry · 7"]
   g_joltwallet["joltwallet · 1"]
   g_LVGL["LVGL · 1"]
+  c_board -.-> c_m5stack_tab5
+  c_board -.-> g_espp
   c_control -.-> g_espp
   c_drive_adapter -.-> c_drive_session
   c_drive_adapter -.-> g_espp
@@ -202,6 +205,7 @@ flowchart LR
   c_hmi_ui -.-> c_drive_session
   c_hmi_ui -.-> c_hmi_format
   c_hmi_ui -.-> c_hmi_models
+  c_hmi_ui -.-> c_hmi_rtps_spec
   c_hmi_ui -.-> c_ota_parse
   c_hmi_ui -.-> c_rammp_rtps_messages
   c_hmi_ui -.-> c_settings
@@ -216,6 +220,7 @@ flowchart LR
   c_housekeeping -.-> g_ESP_IDF
   c_housekeeping -.-> g_espp
   c_joystick_cal -.-> g_espp
+  c_main -.-> c_board
   c_main -.-> c_control
   c_main -.-> c_drive_adapter
   c_main -.-> c_drive_session

@@ -31,6 +31,7 @@
 #include "keypad_input.hpp"
 
 #include "about_ui.hpp"
+#include "board/adapters.hpp"
 #include "boot_logo.h"
 #include "drive_adapter.hpp"
 #include "drive_session.hpp"
@@ -530,59 +531,9 @@ static void lvgl_cycle() {
 
 // ---------------------------------------------------------------------------
 // Adapters: the callbacks the board's own tasks run (app-main-shrink §3). Each
-// stays on the task that calls it today; app_main builds and registers them.
+// stays on the task that calls it today; app_main builds and registers them. The
+// touch click and the side button are components/board's (hmi::board).
 // ---------------------------------------------------------------------------
-
-// The touch adapter, on the BSP's touch task: a click on each press (a release
-// and a new touch before it clicks again), and every change logged at debug level.
-// NOTE: since we're directly using the touchpad data, and not using the
-// TouchpadInput + LVGL, we'll need to ensure the touchpad data is
-// converted into proper screen coordinates instead of simply using the
-// raw values.
-class TouchClick {
-public:
-  TouchClick(espp::M5StackTab5 &tab5, espp::Logger &logger)
-      : tab5_(tab5)
-      , logger_(logger) {}
-
-  void operator()(const espp::TouchpadData &touch) {
-    // The first touch only sets the reference, as the function-local static did.
-    if (!previous_touchpad_data_) {
-      previous_touchpad_data_ = tab5_.touchpad_convert(touch);
-    }
-    auto touchpad_data = tab5_.touchpad_convert(touch);
-    if (touchpad_data != *previous_touchpad_data_) {
-      logger_.debug("Touch: {}", touchpad_data);
-      previous_touchpad_data_ = touchpad_data;
-
-      // play a click sound only on the press transition (release + re-touch
-      // required before it plays again)
-      bool is_pressed = touchpad_data.num_touch_points > 0;
-      if (is_pressed && !was_pressed_) {
-        play_click(tab5_);
-      }
-      was_pressed_ = is_pressed;
-    }
-  }
-
-private:
-  espp::M5StackTab5 &tab5_;
-  espp::Logger &logger_;
-  std::optional<espp::TouchpadData> previous_touchpad_data_;
-  bool was_pressed_ = false;
-};
-
-// The side button's adapter, on the BSP's button task: brightness control.
-struct SideButton {
-  espp::Logger &logger;
-
-  void operator()(const espp::Interrupt::Event &state) const {
-    logger.info("Button state: {}", state.active);
-    if (state.active) {
-      brightness_step();
-    }
-  }
-};
 
 // The joystick's LVGL keypad read, on the LVGL task (espp's KeypadInput calls it): UiApp's.
 static void joystick_keypad_read(bool *up, bool *down, bool *left, bool *right, bool *enter,
@@ -724,7 +675,7 @@ extern "C" void app_main(void) {
     logger.info("FPS instrumentation enabled (stress={})", kFpsStress);
   }
 
-  TouchClick touch_click(tab5, logger);
+  hmi::board::TouchClick touch_click({.tab5 = tab5, .log = logger, .click = kCuesPort.click});
 
   // The housekeeping island (IMU, battery, RTC). Built here because the IMU takes its
   // orientation filter; its task starts after the click sound is loaded, below.
@@ -810,7 +761,8 @@ extern "C" void app_main(void) {
 
   // Brightness control with button
   logger.info("Initializing button...");
-  if (!tab5.initialize_button(SideButton{.logger = logger})) {
+  if (!tab5.initialize_button(
+          hmi::board::SideButton{.logger = logger, .on_press = brightness_step})) {
     logger.warn("Failed to initialize button");
   }
 
