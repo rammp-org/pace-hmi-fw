@@ -82,16 +82,16 @@ only D2 and D3 today.
 
 The safe state for every requirement is "overall not PASS": no motion once C3 wires this in.
 
-## Limits waiting for owner values (hazard-fixes D4)
+## Limits (hazard-fixes §9 D4, approved by the owner 2026-10-08)
 
-Each limit is a placeholder on the strict side of what is known. They are marked `D4:` in
-`post/checks.hpp`.
+Each limit is a named constant in `post/checks.hpp`, marked `D4 approved 2026-10-08` there
+(post-limits-proposal.md; hazard-c3-spec.md §3).
 
-| Constant | Placeholder | Source |
+| Constant | Value | Source |
 | --- | --- | --- |
-| `WINDOW_MIN_SAMPLES` | 25 cycles (~0.8 s) | B2 asks for about 1 s of rest statistics |
+| `WINDOW_MIN_SAMPLES` | 30 cycles (1.05 s at the measured 35 ms cycle) | B2 asks for about 1 s of rest statistics |
 | `ADC_VALID_MIN_PERMILLE` | 990 (99.0 %) | self test `joy.valid`; this means no failed read in a window under 100 cycles |
-| `EXPECTED_I2C` | 0x10 0x28 0x32 0x36 0x40 0x41 0x43 0x44 0x55 0x5a 0x68 | board 2's boot scan, every bench boot on 2026-10-06; required vs board-optional not split yet |
+| `EXPECTED_I2C` | 0x10 0x28 0x32 0x36 0x40 0x41 0x43 0x44 0x55 0x5a 0x68 | board 2's boot scan, every bench boot on 2026-10-06; board 1 has no 0x5a (decision C5: measure boards 1 and 3 first) |
 | `MEM_INT_MIN_B`, `MEM_INT_BLOCK_B` | 12 KiB each | self test `mem.int_min`, `mem.int_block` |
 | `MEM_DMA_MIN_B` | 1536 B | self test `mem.dma_min` |
 | `MEM_PSRAM_FREE_B` | 8 MiB | self test `mem.psram_free` |
