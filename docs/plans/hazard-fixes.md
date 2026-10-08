@@ -143,3 +143,36 @@ shared file: B1 merges before B2's boot hook.
 | --- | --- | --- |
 | A lazily built `static espp::Logger` on a fault path (CS-SAF-04) | `components/fw_core/src/port_freertos.cpp:17` (`log_error`) | Construct at start-up before fw_core is used in a safety island |
 | clang-tidy is not in CI (cppcheck only), so the 60-line limit holds only via `idf.py clang-check`, which needs a clang-toolchain build | `.github/workflows/static_analysis.yml` | Add a clang-toolchain clang-check job |
+
+## 9. Owner decisions (2026-10-08): the MCB is the authority on driving
+
+Naming: MIB (Meebot interface board) is the MCB (main control board, the motor driver) for
+Meebot. These decisions supersede C1's v2 rows 1-2 ("stay LOCKED on an unrequested ENABLED").
+
+| # | Decision |
+| --- | --- |
+| M1 | The MCB decides whether the system drives. MCB reports ENABLED → the Tab5 enters the Drive screen at once; MCB leaves ENABLED (for any reason, including on its own) → the Tab5 exits the Drive screen. H1 is accepted by design under guards G1-G5. |
+| G1 | Neutral first: on entering Drive, stick output stays 0 until the stick has been in the dead band for ≥ 300 ms (H10). |
+| G2 | Follow only a fresh MibStatus (< 2 s old) on a CONNECTED link; stale → output 0 (C4). |
+| G3 | No stick output before POST pass (C3) and with a stick fault (C2); the Drive screen shows the reason. |
+| G4 | The MCB wins over the HMI's stop: when the user presses stop (burger key, exit hold) the HMI sends DISABLE, re-sends it every 250 ms, shows a warning, raises "MCB did not stop" after 5 s and re-sends at 1 Hz while the MCB reports ENABLED. While the MCB reports ENABLED the HMI stays on the Drive screen and **the stick keeps driving**. Owner-accepted risk: if a DISABLE is lost or ignored, the HMI's stop does not stop the chair; only the MCB can. |
+| G5 | Joystick calibration: while a calibration is in progress the HMI does not switch screens and outputs 0. If the joystick has never been calibrated (no valid saved calibration), the HMI outputs 0 and the Drive screen shows "The joystick must be calibrated first". |
+| D4 | Values approved: re-send 250 ms; fault at 5 s, then 1 Hz; neutral 300 ms; UI heartbeat 200 ms; MibStatus fresh < 2 s; POST limits per post-limits-proposal.md (WINDOW_MIN_SAMPLES 30). Each is a named constant. |
+| Review | Spec per fix: each fix's spec commit is approved by the owner before code is written; code by a different agent; bench; merge to dev_refactor. Order C1 → C3 → C4 → C2 → seat path (lane D: C1, C3, seat; lane S: C4, C2). |
+
+### To verify with the MCB team (D3)
+
+1. Assumed: the MCB stops the motors on its own when XYTwist stops arriving (HMI reset, link
+   loss). After how many ms?
+2. Required by M1: the MCB enables only on a deliberate request. Can it ever report or become
+   ENABLED without receiving an ENABLE (its own reset, a glitch, another participant)?
+3. After a DISABLE, how long can MibStatus keep reporting ENABLED (ramp-down)? This sets G4's
+   5 s fault timer.
+4. What exactly does DISABLE do (immediate stop?), and does it stay disabled until a new ENABLE,
+   across an MCB or HMI reset?
+
+Message to forward: "For the HMI safety review: (1) If the MCB stops receiving XYTwist (HMI
+reset or link loss), does it stop the motors on its own, and after how many ms? (2) Can the MCB
+ever report or become ENABLED without receiving an ENABLE? (3) After a DISABLE, how long can
+MibStatus keep reporting ENABLED? (4) Does DISABLE stop at once and stay disabled until a new
+ENABLE, including across an MCB or HMI reset?"
