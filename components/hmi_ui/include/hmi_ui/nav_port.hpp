@@ -2,7 +2,7 @@
 // What the views need from navigation: NavView's API (UiApp fills one table: NavView's static
 // look functions, and the two calls on its one instance, bound to it).
 
-#include "hmi_ui/fn.hpp"
+#include "drive_ui/fn.hpp"
 #include "lvgl.h"
 
 namespace hmi::ui {

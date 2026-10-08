@@ -5,13 +5,12 @@
 #include <cstdint>
 #include <span>
 
-#include "hmi_ui/fn.hpp"
+#include "drive_ui/fn.hpp"
+#include "drive_ui/hold_range.hpp"
 #include "lvgl.h"
 
 namespace hmi::ui {
 
-/// The fill's range (LVGL's default for an arc or bar).
-inline constexpr int32_t HOLD_MAX = 100;
 /// How long a hold takes to fill, after the gesture's grace period.
 inline constexpr uint32_t HOLD_MS = 1000;
 /// Dead time before a hold starts filling. The stick button doubles as select, and a select is

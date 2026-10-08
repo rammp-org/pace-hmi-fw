@@ -1,7 +1,7 @@
 // StickButton: what one edge of the stick button does to the UI (moved from
 // main/frag_stick_button.inc, stick_button_edge; the LVGL lock stays with main's caller).
 
-#include "hmi_ui/stick_button.hpp"
+#include "drive_ui/stick_button.hpp"
 
 #include <cstdint>
 
@@ -10,7 +10,7 @@
 void hmi::ui::StickButton::edge(bool active) {
   // the panel follows every edge, so contact bounce can't strand it blue: the
   // last edge always wins
-  lv_subject_set_int(config_.view->pressed(), active);
+  lv_subject_set_int(config_.pressed, active);
   // undebounced on purpose: the MCB wants the raw line state, and this is the
   // same every-edge signal the panel follows
   config_.level->store(active);
@@ -23,6 +23,6 @@ void hmi::ui::StickButton::edge(bool active) {
     config_.select->store(true);
   }
   if (effect.count) {
-    lv_subject_set_int(config_.view->count(), lv_subject_get_int(config_.view->count()) + 1);
+    lv_subject_set_int(config_.count, lv_subject_get_int(config_.count) + 1);
   }
 }

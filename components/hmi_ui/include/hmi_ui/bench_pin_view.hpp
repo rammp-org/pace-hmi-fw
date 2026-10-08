@@ -7,9 +7,9 @@
 
 #include "lvgl.h"
 
+#include "drive_ui/fn.hpp"
 #include "hmi_models/pin.hpp"
 #include "hmi_ui/button_grid.hpp"
-#include "hmi_ui/fn.hpp"
 
 namespace hmi::ui {
 

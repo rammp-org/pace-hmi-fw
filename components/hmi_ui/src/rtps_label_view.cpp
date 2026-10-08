@@ -7,7 +7,7 @@
 #include "ui.h"
 
 #include "components/ui_comp_topbar.h"
-#include "hmi_ui/link_state.hpp"
+#include "drive_ui/link_state.hpp"
 
 // Bound to rtps_link_subject and rtps_blink_subject both; reads both regardless
 // of which one fired.

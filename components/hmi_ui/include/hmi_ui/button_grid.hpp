@@ -3,8 +3,8 @@
 
 #include "lvgl.h"
 
+#include "drive_ui/fn.hpp"
 #include "hmi_models/grid.hpp"
-#include "hmi_ui/fn.hpp"
 
 namespace hmi::ui {
 

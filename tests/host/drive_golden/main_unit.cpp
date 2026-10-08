@@ -1,4 +1,4 @@
-// The drive code of the firmware, compiled on the host: hmi_ui's DrivePort (drive_port.hpp,
+// The drive code of the firmware, compiled on the host: drive_ui's DrivePort (drive_port.hpp,
 // moved from main/frag_drive.inc's MainDriveView), verbatim, over the recording shims
 // (main_unit_shims.hpp) through MainUnitUi, with its session probed for row coverage
 // (probe.hpp), and one DriveAdapter over it (components/drive_adapter), made as main.cpp
@@ -14,7 +14,7 @@
 // The fragment's session is a probed one (probe.hpp). Test-only, after drive_session.hpp.
 #define DriveSession ProbedSession
 #include "drive_adapter.hpp"
-#include "hmi_ui/drive_port.hpp"
+#include "drive_ui/drive_port.hpp"
 #undef DriveSession
 
 #include "adapter_peer.hpp"

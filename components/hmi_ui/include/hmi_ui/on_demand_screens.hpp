@@ -1,7 +1,7 @@
 #pragma once
 // The screens built when opened and destroyed once left: Settings, Skunk Works, Diagnostics.
 
-#include "hmi_ui/fn.hpp"
+#include "drive_ui/fn.hpp"
 #include "lvgl.h"
 
 namespace hmi::ui {
