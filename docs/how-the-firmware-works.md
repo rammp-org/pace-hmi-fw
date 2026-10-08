@@ -133,7 +133,7 @@ What this means in practice:
 | `joystick_cal.cpp/.hpp` | The calibration file and the guided calibration run |
 | `fw_info.cpp/.hpp` | SHA-256 of the running image, matched to a release |
 | `github_ota.cpp/.hpp` | GitHub release list, image download and install, rollback |
-| `about_ui`, `internet_ui`, `update_ui`, `log_view` | The About, Internet, Firmware update and Log screens |
+| `about_ui`, `internet_ui`, `update_ui`, `log_view` | What main does for the About, Internet, Firmware update and Log views (in `components/hmi_ui`): the adapters over fw_info, rtps_comms, github_ota and log_capture, the worker threads, the LVGL hand-back, the restart after an update; one instance of each view |
 | `log_capture.cpp/.hpp` | Copies stdout and stderr into a PSRAM ring for the Log screen |
 | `lv_mem_psram.c` | LVGL's allocator: every LVGL allocation goes to PSRAM, leaving internal DMA RAM for the W5500 |
 | `actions_spec.h` | X-macro table of the Skunk Works tiles |
@@ -532,7 +532,7 @@ and `frag_stick_config.inc:39`.
 | Joystick | resident | ADC bars, `joystick_cal.cpp`, calibrate hold |
 | Seat | resident | `hmi_ui` `SeatView`; the seat command path in `frag_settings_ui` |
 | BenchGate | resident | `hmi_ui` `BenchPinView`, PIN in `frag_bench_pin` (1234 → Actuators page) |
-| Log, Update, Internet, About | resident | `log_view.cpp`, `update_ui.cpp`, `internet_ui.cpp`, `about_ui.cpp` |
+| Log, Update, Internet, About | resident | `hmi_ui` `LogView`, `UpdateView`, `InternetView`, `AboutView`; main's side in `log_view.cpp`, `update_ui.cpp`, `internet_ui.cpp`, `about_ui.cpp` |
 | Settings, SkunkWorks, Diagnostics | on demand | `hmi_ui` `SettingsView`, `ActionsView`, `DiagnosticsView`; their contents in `frag_settings_ui`, `frag_actions`, `frag_diag` |
 
 ### 10.2 Navigation
@@ -665,7 +665,7 @@ in the last 2000 ms, otherwise NO_PEER. Only CONNECTED lets anything drive.
 | OTA | Update screen → GitHub release list → `github_ota_start` thread:<br>- streams 64 KB blocks to the other slot<br>- checks the first block (magic, chip, project)<br>- computes SHA-256<br>- `esp_ota_end`<br>- compares with GitHub's digest **only if one exists**<br>- sets the boot partition<br>Restarts only when the MIB is not ENABLED. Rollback is on: the new image marks itself valid after 30 s of the LVGL task running | `github_ota.cpp`, `update_ui.cpp`, `components/ota_parse` |
 | Self-test | 54 checks in `selftest_spec.hpp` covering system, network, RTPS, memory, I2C, IMU, RTC, power, haptics, display, timing and joystick. Started from Skunk Works or by a RUN command over RTPS (any peer, H7). Runs on its own task; draws an overlay that takes over the joystick input. Reports over RTPS and as a `[SELFTEST]` table on serial | `selftest.cpp` |
 | Remote UI | Bench builds only (`CONFIG_HMI_REMOTE_UI`), TCP 3333, no authentication (H13). Commands: SHOT, TAP, PRESS, RELEASE, SWIPE, KEY, BTN, THEME, SCREEN, FOCUS, PING, TASKS. Input goes through the same atomics as the real stick and button. With `CONFIG_HMI_BENCH_STICK_INJECT` also STICK: an `fw_core` mailbox to the ADC task, which swaps its three raw reads for the injected mV (or failed reads) until 300 ms after the last STICK; a red "STICK INJECTED" label shows meanwhile. This one reaches XYTwist | `remote_ui.cpp`, `stick_inject.hpp`, `components/stick` (`bench_inject.hpp`), `scripts/hmi_ui.py` |
-| Log | stdout and stderr are copied into a 500-line PSRAM ring; the Log screen rebuilds from it | `log_capture.cpp`, `log_view.cpp` |
+| Log | stdout and stderr are copied into a 500-line PSRAM ring; the Log screen rebuilds from it | `log_capture.cpp`, `log_view.cpp`, `components/hmi_ui/src/log_view.cpp` |
 | Haptics, sound | DRV2605 waveforms (`haptic_play`, no lock of its own); a WAV click through `tab5.play_audio`. Several tasks reach the audio path (H16) | `frag_haptics.inc`, `frag_audio.inc` |
 
 ## 13. Fragment index

@@ -43,6 +43,13 @@ idf_component_register(SRC_DIRS "."
                          ota_parse
                        EMBED_TXTFILES click.wav)
 
+# CS-LNG-02: main builds at the project's one C++ level, gnu++23, like every
+# first-party component (fw_component_options). IDF's own -std=gnu++26 comes first
+# on the command line and GCC takes the last -std, so this wins. Only the language
+# level: main keeps IDF's default warnings until a later step (profile deviation).
+# C++ only: main also has C sources (lv_mem_psram.c, boot_logo.c).
+target_compile_options(${COMPONENT_LIB} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-std=gnu++23>)
+
 # The commit the About screen shows beside the version. Read when CMake
 # configures, like the version itself (PROJECT_VER, from git describe), and
 # ESP-IDF reconfigures when HEAD moves, so the two stay in step.

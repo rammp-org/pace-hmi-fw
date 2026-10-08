@@ -4,9 +4,9 @@
 // the timer is shared - so the period has to be set on every raise, not once.
 static void entry_refused_show(int32_t which, uint32_t show_ms) {
   lv_subject_set_int(&entry_refused_subject, which);
-  lv_timer_set_period(entry_refused_timer, show_ms);
-  lv_timer_reset(entry_refused_timer);
-  lv_timer_resume(entry_refused_timer);
+  lv_timer_set_period(refusal_view.timer(), show_ms);
+  lv_timer_reset(refusal_view.timer());
+  lv_timer_resume(refusal_view.timer());
 }
 
 // The drive session: lock, ask, unlock, drive, ask to stop. The decisions live in

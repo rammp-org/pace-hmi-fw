@@ -110,6 +110,16 @@ Command command(Position p, float scale) {
   return {.x = p.x * scale, .y = p.y * scale, .twist = p.twist * scale};
 }
 
+// frag_stick_config.inc (stick_pipeline_config) with frag_status_band.inc's constants
+StickPipeline::Config pipeline_config(const CalibrationMv &cal, const KeyCodes &keys) {
+  return {.calibration = cal,
+          .center_deadzone_radius = CENTER_DEADZONE_RADIUS,
+          .range_deadzone = RANGE_DEADZONE,
+          .twist_center_deadband_mv = TWIST_CENTER_DEADBAND_MV,
+          .twist_range_deadband_mv = TWIST_RANGE_DEADBAND_MV,
+          .keys = keys};
+}
+
 // main.cpp:1441-1447 (the `static espp::Joystick stick`)
 StickPipeline::StickPipeline(const Config &config)
     : config_(config)

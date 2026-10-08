@@ -170,6 +170,19 @@ private:
   bool key_engaged_ = false;
 };
 
+/// The HMI's stick as mounted (were kStick* / kTwist* in main/frag_status_band.inc). X/Y are
+/// one circular gimbal, so their per-axis dead bands are 0 and the dead zone lives on the vector
+/// radius instead. The APEM HF44S10 has a square gate, but the output stays CIRCULAR: a corner
+/// reads ~(0.71, 0.71) rather than (1, 1), so the MCB never sees a speed above 1. Twist is a
+/// separate pot on its own axis, so it carries its own dead bands, in millivolts.
+inline constexpr float CENTER_DEADZONE_RADIUS = 0.10f;
+inline constexpr float RANGE_DEADZONE = 0.05f;
+inline constexpr float TWIST_CENTER_DEADBAND_MV = 60.0f;
+inline constexpr float TWIST_RANGE_DEADBAND_MV = 40.0f;
+
+/// The pipeline's configuration for this HMI: `cal` and `keys` with the dead zones above.
+[[nodiscard]] StickPipeline::Config pipeline_config(const CalibrationMv &cal, const KeyCodes &keys);
+
 template <typename Io> inline bool StickPipeline::cycle(Io &io, const RawReadsMv &raw) {
   if (!(raw.vertical_mv && raw.horizontal_mv && raw.twist_mv)) {
     return false;
