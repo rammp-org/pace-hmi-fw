@@ -31,6 +31,8 @@
 #include "keypad_input.hpp"
 
 #include "about_ui.hpp"
+#include "board/board.hpp"
+#include "board/board_port.hpp"
 #include "boot_logo.h"
 #include "drive_adapter.hpp"
 #include "drive_session.hpp"
@@ -293,12 +295,6 @@ static void action_restart_hmi() {
   esp_restart();
 }
 
-// The board's swap, for the flush: present_frame waits for vsync. Its result
-// was never used; a missed swap shows as one late frame.
-static void present_on_panel(const uint8_t *frame) {
-  (void)espp::M5StackTab5::get().present_frame(frame);
-}
-
 // The system clock's validity: set by hmi::housekeeping::SystemClock (app_main's
 // system_clock), read by the TopBar. The time sync itself is the housekeeping
 // component's.
@@ -366,8 +362,8 @@ static constexpr hmi::ui::SelfTestPort kSelfTestPort{
 };
 
 static constexpr hmi::ui::BoardPort kBoardPort{
-    .backlight = [](float percent) { espp::M5StackTab5::get().brightness(percent); },
-    .present = present_on_panel,
+    .backlight = hmi::board::backlight,
+    .present = hmi::board::present,
     .restart = action_restart_hmi,
 };
 
@@ -530,59 +526,9 @@ static void lvgl_cycle() {
 
 // ---------------------------------------------------------------------------
 // Adapters: the callbacks the board's own tasks run (app-main-shrink §3). Each
-// stays on the task that calls it today; app_main builds and registers them.
+// stays on the task that calls it today; app_main builds and registers them. The
+// touch click and the side button are components/board's (hmi::board).
 // ---------------------------------------------------------------------------
-
-// The touch adapter, on the BSP's touch task: a click on each press (a release
-// and a new touch before it clicks again), and every change logged at debug level.
-// NOTE: since we're directly using the touchpad data, and not using the
-// TouchpadInput + LVGL, we'll need to ensure the touchpad data is
-// converted into proper screen coordinates instead of simply using the
-// raw values.
-class TouchClick {
-public:
-  TouchClick(espp::M5StackTab5 &tab5, espp::Logger &logger)
-      : tab5_(tab5)
-      , logger_(logger) {}
-
-  void operator()(const espp::TouchpadData &touch) {
-    // The first touch only sets the reference, as the function-local static did.
-    if (!previous_touchpad_data_) {
-      previous_touchpad_data_ = tab5_.touchpad_convert(touch);
-    }
-    auto touchpad_data = tab5_.touchpad_convert(touch);
-    if (touchpad_data != *previous_touchpad_data_) {
-      logger_.debug("Touch: {}", touchpad_data);
-      previous_touchpad_data_ = touchpad_data;
-
-      // play a click sound only on the press transition (release + re-touch
-      // required before it plays again)
-      bool is_pressed = touchpad_data.num_touch_points > 0;
-      if (is_pressed && !was_pressed_) {
-        play_click(tab5_);
-      }
-      was_pressed_ = is_pressed;
-    }
-  }
-
-private:
-  espp::M5StackTab5 &tab5_;
-  espp::Logger &logger_;
-  std::optional<espp::TouchpadData> previous_touchpad_data_;
-  bool was_pressed_ = false;
-};
-
-// The side button's adapter, on the BSP's button task: brightness control.
-struct SideButton {
-  espp::Logger &logger;
-
-  void operator()(const espp::Interrupt::Event &state) const {
-    logger.info("Button state: {}", state.active);
-    if (state.active) {
-      brightness_step();
-    }
-  }
-};
 
 // The joystick's LVGL keypad read, on the LVGL task (espp's KeypadInput calls it): UiApp's.
 static void joystick_keypad_read(bool *up, bool *down, bool *left, bool *right, bool *enter,
@@ -648,18 +594,17 @@ extern "C" void app_main(void) {
   espp::M5StackTab5 &tab5 = espp::M5StackTab5::get();
   logger.info("Running on M5Stack Tab5");
 
-  // first let's get the internal i2c bus and probe for all devices on the bus
-  logger.info("Probing internal I2C bus...");
+  // The board's bring-up on the BSP (components/board): each step logs to `logger` as it
+  // did here, and a step that returns false has logged why. Lives as long as app_main.
+  hmi::board::Board board({
+      .tab5 = tab5,
+      .log = logger,
+      .brightness_step = brightness_step,
+      .click = kCuesPort.click,
+  });
+  board.probe_internal_i2c();
   auto &i2c = tab5.internal_i2c();
-  std::vector<uint8_t> found_addresses;
-  // 0x08..0x77 only: the rest are reserved, and a glitched ACK there once put
-  // 0x01 in this list, which the self test then reported as a lost device.
-  for (uint8_t address = 0x08; address <= 0x77; address++) {
-    if (i2c.probe_device(address)) {
-      found_addresses.push_back(address);
-    }
-  }
-  logger.info("Found devices at addresses: {::#02x}", found_addresses);
+  const std::vector<uint8_t> &found_addresses = board.i2c_devices();
 
   // The haptic and sound cues: the DRV2605 comes up here (the HAPTIC TEST slot,
   // the unlock and hold clicks, a refusal); the click's samples load after the
@@ -672,35 +617,7 @@ extern "C" void app_main(void) {
   // driver class, DRO mode): bench only, CONFIG_HMI_BENCH_DA7280_TEST.
   hmi::feedback::run_da7280_bench(logger, i2c, found_addresses);
 
-  // Initialize the IO expanders
-  logger.info("Initializing IO expanders...");
-  if (!tab5.initialize_io_expanders()) {
-    logger.error("Failed to initialize IO expanders!");
-    return;
-  }
-
-  // EXT5V_EN (0x43 P2) is asserted by the expander's default output mask; read it
-  // back to confirm the M5-Bus / 2.54-10P / HY2.0-4P 5V rail is live
-  auto ext_5v = tab5.get_io_expander_output(0x43, 2);
-  logger.info("EXT_5V_EN: {}", ext_5v ? (*ext_5v ? "enabled" : "DISABLED") : "read failed");
-
-  logger.info("Initializing lcd...");
-  // initialize the LCD
-  if (!tab5.initialize_lcd()) {
-    logger.error("Failed to initialize LCD!");
-    return;
-  }
-
-  // Query LCD controller
-  const char *controller_name = tab5.get_display_controller_name();
-  logger.info(controller_name);
-
-  // initialize the display with full-screen draw buffers (the vendored BSP in
-  // components/m5stack-tab5 allocates them in PSRAM)
-  logger.info("Initializing display...");
-  auto pixel_buffer_size = tab5.display_width() * tab5.display_height();
-  if (!tab5.initialize_display(pixel_buffer_size)) {
-    logger.error("Failed to initialize display!");
+  if (!board.start_io_expanders() || !board.start_display()) {
     return;
   }
 
@@ -724,8 +641,6 @@ extern "C" void app_main(void) {
     logger.info("FPS instrumentation enabled (stress={})", kFpsStress);
   }
 
-  TouchClick touch_click(tab5, logger);
-
   // The housekeeping island (IMU, battery, RTC). Built here because the IMU takes its
   // orientation filter; its task starts after the click sound is loaded, below.
   hmi::housekeeping::Housekeeping housekeeping({
@@ -741,78 +656,19 @@ extern "C" void app_main(void) {
       .rate_noise = 0.1f,
   });
 
-  logger.info("Initializing IMU...");
-  // initialize the IMU
-  if (!tab5.initialize_imu(housekeeping.orientation_filter())) {
-    logger.error("Failed to initialize IMU!");
+  if (!board.start_imu(housekeeping.orientation_filter())) {
     return;
   }
-
-  // initialize the uSD card
-  using SdCardConfig = espp::M5StackTab5::SdCardConfig;
-  SdCardConfig sdcard_config{};
-  if (!tab5.initialize_sdcard(sdcard_config)) {
-    logger.warn("Failed to initialize uSD card, there may not be a uSD card inserted!");
-  } else {
-    uint32_t size_mb = 0;
-    uint32_t free_mb = 0;
-    if (tab5.get_sd_card_info(&size_mb, &free_mb)) {
-      logger.info("uSD card size: {} MB, free space: {} MB", size_mb, free_mb);
-    } else {
-      logger.warn("Failed to get uSD card info");
-    }
-  }
+  board.start_sdcard();
 
   // The system clock and the RTC, kept to the MCB's time (housekeeping). Lives as long
   // as app_main, which never returns once RTPS runs.
   hmi::housekeeping::SystemClock system_clock({.valid = &clock_valid, .max_drift_s = 2});
 
-  logger.info("Initializing RTC...");
-  // initialize the RTC
-  if (!tab5.initialize_rtc()) {
-    logger.error("Failed to initialize RTC!");
+  if (!board.start_rtc(system_clock) || !board.start_battery() || !board.start_audio()) {
     return;
   }
-
-  auto current_time = std::tm{};
-  if (!tab5.get_rtc_time(current_time)) {
-    logger.error("Failed to get RTC time");
-    return;
-  }
-
-  // The RTC holds the MCB's local time (no TZ is set: the system clock simply holds
-  // the local wall time the MCB reported). One that lost power reads a date long
-  // gone (hmi_format clock_plausible, REQ-FMT-06); the clock then shows --:-- until
-  // the MCB sends the time.
-  if (hmi::format::clock_plausible(current_time)) {
-    system_clock.set(current_time);
-    logger.info("RTC time {:%Y-%m-%d %H:%M:%S}", current_time);
-  } else {
-    logger.warn("RTC not set ({:%Y-%m-%d}); the clock waits for the MCB", current_time);
-  }
-
-  logger.info("Initializing battery management...");
-  // initialize battery monitoring
-  if (!tab5.initialize_battery_monitoring()) {
-    logger.error("Failed to initialize battery monitoring!");
-    return;
-  }
-
-  // enable charging
-  tab5.set_charging_enabled(true);
-
-  logger.info("Initializing sound...");
-  // initialize the sound
-  if (!tab5.initialize_audio()) {
-    logger.error("Failed to initialize sound!");
-    return;
-  }
-
-  // Brightness control with button
-  logger.info("Initializing button...");
-  if (!tab5.initialize_button(SideButton{.logger = logger})) {
-    logger.warn("Failed to initialize button");
-  }
+  board.start_side_button();
 
   logger.info("Setting up LVGL UI...");
   // Load the SquareLine Studio UI. This creates every screen and makes
@@ -864,10 +720,7 @@ extern "C" void app_main(void) {
 
   ui_app.build_on_demand_parts();
 
-  logger.info("Initializing touch...");
-  if (!tab5.initialize_touch(
-          [&touch_click](const espp::TouchpadData &touch) { touch_click(touch); })) {
-    logger.error("Failed to initialize touch!");
+  if (!board.start_touch()) {
     return;
   }
   if (auto touchpad = tab5.touchpad_input()) {
@@ -909,12 +762,7 @@ extern "C" void app_main(void) {
   }
   logger.info("Loaded {} bytes of audio", wav_size);
 
-  logger.info("Setting audio sample rate to {} Hz", wav_sample_rate);
-  tab5.audio_sample_rate(wav_sample_rate);
-
-  // unmute the audio and set the volume to 60%
-  tab5.mute(false);
-  tab5.volume(60.0f);
+  board.start_speaker(wav_sample_rate);
 
   // (brightness is the saved setting, applied when the BrightnessView adds its observer)
 
