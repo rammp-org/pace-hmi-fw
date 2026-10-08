@@ -62,6 +62,7 @@ yet measured or decided, and "none" means checked and absent.
 | Component | Concern (one sentence) | Safety-relevant | Builds for linux | D4 diagram |
 | --- | --- | --- | --- | --- |
 | `main` | everything not listed below; `main.cpp` #includes 26 `frag_*.inc` (one TU, `tools/split_main.py`) | yes | no | none |
+| `components/board` | the HMI's Tab5 board: its bring-up on the BSP (`espp::M5StackTab5`) in `app_main`'s order and log lines, and the adapters the BSP's touch and button tasks call (`TouchClick`, `SideButton`) | no (brings the board up and clicks; drives nothing, and a failed step stops `app_main` as before) | no (BSP; bench B2) | README |
 | `components/control` | the control island: the "Read ADC" task that reads the joystick's three pots and runs the stick pipeline each cycle (`StickIsland`) | yes (topology marks the `control` task safety; it feeds the motion command) | no (ADC drivers; no host test) | none |
 | `components/drive_adapter` | the drive session's adapter on the UI task: samples the inputs, hands the session one input, performs the actions it returns through a port | yes (sends the DriveCommand requests and performs the relocks) | host L1 (DAD-L1, GLD-L1) | none |
 | `components/drive_session` | the drive session: the transition table for lock, ask the MIB to drive, unlock, drive, ask to stop, and the stick gate | yes (decides when the HMI asks for motion or a stop) | host L1 (DRV-L1) | none (table in TABLE.md) |
