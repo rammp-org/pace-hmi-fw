@@ -305,8 +305,8 @@ Test IDs `CTL-0nn` are cases of the new host app `components/control/test`.
 | REQ-CTL-12 | The ADC task subscribes to the TWDT at its first cycle and resets it at the end of every cycle, valid or not. | CTL-019, B5j |
 | REQ-CTL-13 | `Read ADC` runs at priority 21, pinned to core 0, with a 6144 B stack. | G10, B3 |
 | REQ-CTL-14 | Only if O1 = yes: after any non-OK verdict, the verdict is `REARM_PENDING` until the mounted position has been exactly 0 on all three axes for ≥ `NEUTRAL_REARM_MS`. | CTL-020, CTL-021 |
-| REQ-UI-16 | The UI task stores the heartbeat after every completed cycle, subscribes to the TWDT at its first cycle and resets it after every cycle. | B3 (`ctl.ui_age_max`), B5i |
-| REQ-UI-17 | Only if O7 = yes: when `ui_stalls_drive` goes up, the Drive screen shows "Display stalled: stick paused" for 3 s. | B5i |
+| REQ-UI-23 | The UI task stores the heartbeat after every completed cycle, subscribes to the TWDT at its first cycle and resets it after every cycle. | B3 (`ctl.ui_age_max`), B5i |
+| REQ-UI-24 | Only if O7 = yes: when `ui_stalls_drive` goes up, the Drive screen shows "Display stalled: stick paused" for 3 s. | B5i |
 
 Conditional rows are last, so dropping them leaves no gap in the series.
 
@@ -382,7 +382,7 @@ accept it.
 | `components/control/include/control/stick_island.hpp` | calls `cycle.hpp`; owns the guard like the twist lowpass |
 | `components/control/test/`, `tests/manifest.d/control.yaml` (new) | L1-CTL |
 | `components/control/README.md` | REQ-CTL rows, the Tasks row (6144 / 21 / 0) |
-| `components/hmi_ui` (`app_state`, `ui_island`, README) | `ui_heartbeat_ms`, `ui_wdt_ok`, the watchdog port; REQ-UI-16 (17) |
+| `components/hmi_ui` (`app_state`, `ui_island`, README) | `ui_heartbeat_ms`, `ui_wdt_ok`, the watchdog port; REQ-UI-23 (24) |
 | `main/rtps_comms.cpp/.hpp` | `mcb_state`, `mcb_rx_ms`; one lock-free accessor in the order of §3.2 |
 | `main/main.cpp` | clock and watchdog ports; `AdcStickIo::stick_drives()` → `gate_open(...)`; the `Read ADC` config literal |
 | `main/selftest*.cpp`, `selftest_spec.hpp`, PC copy in `scripts/` | `ctl.wdt`, `ctl.ui_age_max`, `ctl.ui_stalls_drive` |
@@ -423,7 +423,7 @@ baseline IDs), and the README requirement rows.
 | O4 | Subscribe `rtps_pub` too? It is not safety, and the panic would reset mid-drive for it. | no; revisit with the `net` island |
 | O5 | TWDT timeout 2 s (not in D4). | 2 s, confirmed by the soak |
 | O6 | Add the bench-only `STALL` verbs, so the trip and the reset reason are seen on the board? | yes |
-| O7 | Show "Display stalled: stick paused" after a stall while driving (CS-SAF-03 says shown)? Or leave it to C3's fault indicator? | yes, REQ-UI-17 |
+| O7 | Show "Display stalled: stick paused" after a stall while driving (CS-SAF-03 says shown)? Or leave it to C3's fault indicator? | yes, REQ-UI-24 |
 | O8 | MCB team (D3 Q1): the XYTwist timeout T_mcb. It is the only stop for an ADC stall, a panic or a link loss. Propose asking for ≤ 500 ms. | ask now; it bounds this fix |
 | O9 | `ContinuousAdc T` (X/Y producer, espp, priority 5, unpinned) can starve and serve old X/Y without a failed read. Handle in C2 (rate check)? | yes, in C2 |
 | O10 | With the UI alive and the ADC task dead, should the UI send DISABLE (an ADC heartbeat check in C1's table)? It would give the HMI a stop path that does not need the ADC task. | lane D to cost it |
