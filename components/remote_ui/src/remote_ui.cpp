@@ -17,8 +17,10 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
+#include "bench_verbs.hpp"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_private/freertos_idf_additions_priv.h"
@@ -52,12 +54,14 @@ constexpr int kSwipeStepMs = 20;
 constexpr size_t kStackBytes = 16 * 1024;
 
 // What remote_ui_start was given, plus the bench stick injection's channel ends
-// (remote_ui_attach_stick_inject, from app_main before the server task exists) and
-// the STICK INJECTED label (built by remote_ui_start, then LVGL task only).
+// (remote_ui_attach_stick_inject, from app_main before the server task exists), the
+// bench verbs' hooks (remote_ui_attach_bench_verbs, likewise) and the STICK INJECTED
+// label (built by remote_ui_start, then LVGL task only).
 struct ServerConfig : RemoteUiConfig {
   std::optional<StickInjectWriter> stick_inject;       // STICK's write end
   std::optional<StickInjectActiveReader> stick_active; // read by the marker's timer
   lv_obj_t *stick_marker = nullptr;
+  hmi::bench_verbs::Hooks bench_verbs; // the hazard bench verbs' hooks (bench_verbs.hpp)
 };
 ServerConfig cfg;
 
@@ -384,6 +388,31 @@ bool handle_stick(int sock, std::string_view args) {
   }
 }
 
+// The hazard fixes' bench verbs (STATE, PERMIT, CAL UNSAVED, POST RERUN, CRASH, STALL;
+// bench_verbs.hpp, hazard-decisions.md H1): only in a stick-injection build, like STICK. This
+// task parses and answers; every value and every change goes through the hooks app_main
+// attached, and an empty hook answers "not wired". CRASH aborts here, after its reply: a PANIC
+// reset (C3 B5''-21).
+bool handle_bench_verb(int sock, const hmi::bench_verbs::Parsed &parsed) {
+  if constexpr (!BENCH_STICK_INJECT) {
+    return send_line(sock, "ERR bench verbs need CONFIG_HMI_BENCH_STICK_INJECT");
+  } else {
+    if (!parsed.request) {
+      return send_line(sock, "ERR " + std::string(parsed.usage));
+    }
+    const hmi::bench_verbs::Request &request = *parsed.request;
+    if (request.verb == hmi::bench_verbs::Verb::CRASH) {
+      static_cast<void>(send_line(sock, "OK crashing"));
+      std::abort();
+    }
+    std::optional<std::string> screen;
+    if (request.verb == hmi::bench_verbs::Verb::STATE) {
+      screen = screen_now();
+    }
+    return send_line(sock, hmi::bench_verbs::answer(request, cfg.bench_verbs, std::move(screen)));
+  }
+}
+
 // LVGL task (an lv_timer): the STICK INJECTED label shows while the ADC task reports an
 // injection, brought to the front of the top layer (over the self-test overlay).
 void stick_marker_poll(lv_timer_t * /*timer*/) {
@@ -528,6 +557,9 @@ bool handle(int sock, const std::string &line) {
   if (verb == "STICK") {
     return handle_stick(sock, std::string_view(line).substr(line.find(verb) + verb.size()));
   }
+  if (const hmi::bench_verbs::Parsed parsed = hmi::bench_verbs::parse(line); parsed.bench_verb) {
+    return handle_bench_verb(sock, parsed);
+  }
   return send_line(sock, "ERR unknown command: " + verb);
 }
 
@@ -607,6 +639,8 @@ void remote_ui_attach_stick_inject(StickInjectWriter writer, StickInjectActiveRe
   cfg.stick_inject = writer;
   cfg.stick_active = active;
 }
+
+void remote_ui_attach_bench_verbs(const hmi::bench_verbs::Hooks &hooks) { cfg.bench_verbs = hooks; }
 
 void remote_ui_start(const RemoteUiConfig &config) {
   static_cast<RemoteUiConfig &>(cfg) = config;

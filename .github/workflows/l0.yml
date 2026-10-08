@@ -140,8 +140,8 @@ jobs:
     # ci/sdkconfig.stick_inject). Each has its own build dir and sdkconfig, so an overlay is
     # not shadowed by another config. Then guards G4 and G2 on its objects, inside the IDF
     # image (they need its readelf/objdump/nm). bench_inject's ELF must have symbols matching
-    # the pattern build.yml keeps out of the release ELF: proof that the pattern matches the
-    # real injection code, so its absence there means something.
+    # each pattern build.yml keeps out of the release ELF (stick injection, the hazard bench
+    # verbs): proof that each pattern matches the real code, so its absence there means something.
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -176,4 +176,6 @@ jobs:
           && python3 tools/guards/exports.py check --build build_${{ matrix.variant }}
           && if [ "${{ matrix.inject }}" = 1 ]; then
           riscv32-esp-elf-nm -C build_${{ matrix.variant }}/rammp-hmi-p4.elf
-          | grep -Eiq "stick_?inject"; fi
+          > build_${{ matrix.variant }}/inject_nm.txt
+          && grep -Eiq "stick_?inject" build_${{ matrix.variant }}/inject_nm.txt
+          && grep -Eiq "bench_?verb" build_${{ matrix.variant }}/inject_nm.txt; fi

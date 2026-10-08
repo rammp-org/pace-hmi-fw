@@ -1,0 +1,18 @@
+# L1 host app for components/remote_ui's bench verbs (cases RUI-001..RUI-008 in
+# components/remote_ui/test/test_bench_verbs.cpp): the parser of STATE, PERMIT, CAL UNSAVED,
+# POST RERUN, CRASH and STALL, the STATE line and the hook dispatch (bench_verbs.hpp), from the
+# hazard specs (C1 §6, C3 REQ-RUI-06, C4 REQ-RUI-07). That a release ELF has none of it is the
+# Build workflow's symbol check, not this app.
+# spec-deviation(TS-UNIT-01): host-native g++ in WSL, not the IDF linux target (owner, 2026-10-06).
+- id: L1-RUI
+  title: remote UI bench verbs (parser, STATE line, hooks) for the hazard bench steps
+  level: L1
+  path: components/remote_ui/test
+  requirements: [REQ-RUI-05, REQ-RUI-06, REQ-RUI-07]
+  resources: [host]
+  timeout_s: 300
+  expected_s: 30
+  repeat: 1
+  pass_threshold: 1
+  safety: false
+  artifact: test

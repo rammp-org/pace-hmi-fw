@@ -33,6 +33,12 @@
  *                             (0..3300), the reads that fail (bit 0 horizontal, 1
  *                             vertical, 2 twist), a sequence number. Holds 300 ms;
  *                             refresh it to hold longer (stick/bench_inject.hpp)
+ *   STATE                     the hazard bench verbs (CONFIG_HMI_BENCH_STICK_INJECT
+ *   PERMIT POST|STICK <v>     only, else ERR): one JSON line of the HMI's state;
+ *   CAL UNSAVED               set the POST gate or stick health; forget the
+ *   POST RERUN                calibration until reboot; rerun POST; abort (a PANIC
+ *   CRASH                     reset); stall the UI, ADC or ContinuousAdc task.
+ *   STALL UI|ADC|CADC <ms>    bench_verbs.hpp has the line formats and the hooks
  *
  * One client at a time: a second connection is accepted and closed, so a
  * half-dead session cannot lock the channel out.
