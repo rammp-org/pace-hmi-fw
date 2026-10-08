@@ -31,7 +31,6 @@
 #include "keypad_input.hpp"
 
 #include "about_ui.hpp"
-#include "board/adapters.hpp"
 #include "board/board.hpp"
 #include "boot_logo.h"
 #include "drive_adapter.hpp"
@@ -602,7 +601,12 @@ extern "C" void app_main(void) {
 
   // The board's bring-up on the BSP (components/board): each step logs to `logger` as it
   // did here, and a step that returns false has logged why. Lives as long as app_main.
-  hmi::board::Board board({.tab5 = tab5, .log = logger, .brightness_step = brightness_step});
+  hmi::board::Board board({
+      .tab5 = tab5,
+      .log = logger,
+      .brightness_step = brightness_step,
+      .click = kCuesPort.click,
+  });
   board.probe_internal_i2c();
   auto &i2c = tab5.internal_i2c();
   const std::vector<uint8_t> &found_addresses = board.i2c_devices();
@@ -641,8 +645,6 @@ extern "C" void app_main(void) {
     fps_meter.attach(display);
     logger.info("FPS instrumentation enabled (stress={})", kFpsStress);
   }
-
-  hmi::board::TouchClick touch_click({.tab5 = tab5, .log = logger, .click = kCuesPort.click});
 
   // The housekeeping island (IMU, battery, RTC). Built here because the IMU takes its
   // orientation filter; its task starts after the click sound is loaded, below.
@@ -723,10 +725,7 @@ extern "C" void app_main(void) {
 
   ui_app.build_on_demand_parts();
 
-  logger.info("Initializing touch...");
-  if (!tab5.initialize_touch(
-          [&touch_click](const espp::TouchpadData &touch) { touch_click(touch); })) {
-    logger.error("Failed to initialize touch!");
+  if (!board.start_touch()) {
     return;
   }
   if (auto touchpad = tab5.touchpad_input()) {
@@ -768,12 +767,7 @@ extern "C" void app_main(void) {
   }
   logger.info("Loaded {} bytes of audio", wav_size);
 
-  logger.info("Setting audio sample rate to {} Hz", wav_sample_rate);
-  tab5.audio_sample_rate(wav_sample_rate);
-
-  // unmute the audio and set the volume to 60%
-  tab5.mute(false);
-  tab5.volume(60.0f);
+  board.start_speaker(wav_sample_rate);
 
   // (brightness is the saved setting, applied when the BrightnessView adds its observer)
 

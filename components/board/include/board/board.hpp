@@ -2,9 +2,11 @@
 // The HMI's bring-up of the Tab5 on its BSP (app-main-shrink, owner 2026-10-08). Moved from
 // main.cpp's app_main: each step is that code, in that order, with its log lines.
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
+#include "board/adapters.hpp"
 #include "housekeeping/system_clock.hpp"
 #include "logger.hpp"
 #include "m5stack-tab5.hpp"
@@ -21,9 +23,10 @@ public:
     espp::M5StackTab5 &tab5;   ///< The BSP (app_main's first M5StackTab5::get()).
     espp::Logger &log;         ///< app_main's boot log: every step reports there, as before.
     void (*brightness_step)(); ///< The side button's press (main: brightness_step). Not null.
+    void (*click)();           ///< A touch's click (main: play_click). Not null.
   };
 
-  /// @brief Stores the Config; touches no hardware.
+  /// @brief Stores the Config and builds the touch adapter; touches no hardware.
   /// @param config See Config.
   explicit Board(const Config &config);
   Board(const Board &) = delete;
@@ -73,11 +76,20 @@ public:
   /// only a warning.
   void start_side_button();
 
+  /// @brief The touch controller, each touch going to the TouchClick adapter (BSP touch task).
+  /// @return Whether the touch came up.
+  bool start_touch();
+
+  /// @brief The speaker for the click: its sample rate, unmuted, the volume at 60%.
+  /// @param sample_rate The click's sample rate (the cues' load_audio).
+  void start_speaker(size_t sample_rate);
+
 private:
   espp::M5StackTab5 &tab5_;
   espp::Logger &logger_;
   void (*brightness_step_)();
   std::vector<uint8_t> i2c_devices_;
+  TouchClick touch_click_;
 };
 
 } // namespace hmi::board

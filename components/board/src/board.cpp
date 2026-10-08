@@ -2,7 +2,6 @@
 
 #include <ctime>
 
-#include "board/adapters.hpp"
 #include "hmi_format/topbar.hpp"
 
 namespace hmi::board {
@@ -10,7 +9,8 @@ namespace hmi::board {
 Board::Board(const Config &config)
     : tab5_(config.tab5)
     , logger_(config.log)
-    , brightness_step_(config.brightness_step) {}
+    , brightness_step_(config.brightness_step)
+    , touch_click_({.tab5 = config.tab5, .log = config.log, .click = config.click}) {}
 
 void Board::probe_internal_i2c() {
   // first let's get the internal i2c bus and probe for all devices on the bus
@@ -147,6 +147,24 @@ void Board::start_side_button() {
   if (!tab5_.initialize_button(SideButton{.logger = logger_, .on_press = brightness_step_})) {
     logger_.warn("Failed to initialize button");
   }
+}
+
+bool Board::start_touch() {
+  logger_.info("Initializing touch...");
+  if (!tab5_.initialize_touch([this](const espp::TouchpadData &touch) { touch_click_(touch); })) {
+    logger_.error("Failed to initialize touch!");
+    return false;
+  }
+  return true;
+}
+
+void Board::start_speaker(size_t sample_rate) {
+  logger_.info("Setting audio sample rate to {} Hz", sample_rate);
+  tab5_.audio_sample_rate(sample_rate);
+
+  // unmute the audio and set the volume to 60%
+  tab5_.mute(false);
+  tab5_.volume(60.0f);
 }
 
 } // namespace hmi::board
