@@ -132,6 +132,95 @@ static void lvgl_cycle() {
   lv_task_handler();
 }
 
+// ---------------------------------------------------------------------------
+// Adapters: the callbacks the board's own tasks run (app-main-shrink §3). Each
+// stays on the task that calls it today; app_main builds and registers them.
+// ---------------------------------------------------------------------------
+
+// The touch adapter, on the BSP's touch task: a click on each press (a release
+// and a new touch before it clicks again), and every change logged at debug level.
+// NOTE: since we're directly using the touchpad data, and not using the
+// TouchpadInput + LVGL, we'll need to ensure the touchpad data is
+// converted into proper screen coordinates instead of simply using the
+// raw values.
+class TouchClick {
+public:
+  TouchClick(espp::M5StackTab5 &tab5, espp::Logger &logger)
+      : tab5_(tab5)
+      , logger_(logger) {}
+
+  void operator()(const espp::TouchpadData &touch) {
+    // The first touch only sets the reference, as the function-local static did.
+    if (!previous_touchpad_data_) {
+      previous_touchpad_data_ = tab5_.touchpad_convert(touch);
+    }
+    auto touchpad_data = tab5_.touchpad_convert(touch);
+    if (touchpad_data != *previous_touchpad_data_) {
+      logger_.debug("Touch: {}", touchpad_data);
+      previous_touchpad_data_ = touchpad_data;
+
+      // play a click sound only on the press transition (release + re-touch
+      // required before it plays again)
+      bool is_pressed = touchpad_data.num_touch_points > 0;
+      if (is_pressed && !was_pressed_) {
+        play_click(tab5_);
+      }
+      was_pressed_ = is_pressed;
+    }
+  }
+
+private:
+  espp::M5StackTab5 &tab5_;
+  espp::Logger &logger_;
+  std::optional<espp::TouchpadData> previous_touchpad_data_;
+  bool was_pressed_ = false;
+};
+
+// The side button's adapter, on the BSP's button task: brightness control.
+struct SideButton {
+  espp::Logger &logger;
+
+  void operator()(const espp::Interrupt::Event &state) const {
+    logger.info("Button state: {}", state.active);
+    if (state.active) {
+      brightness_step();
+    }
+  }
+};
+
+// The joystick's LVGL keypad read, on the LVGL task: moves the cursor through each
+// screen's focus group. It drains the latch the ADC task fills, so one flick of
+// the stick = one PRESSED cycle = one LV_EVENT_KEY.
+static void joystick_keypad_read(bool *up, bool *down, bool *left, bool *right, bool *enter,
+                                 bool *escape) {
+  // While the self-test overlay is up it owns the stick: nothing reaches
+  // the screens behind it, and the stick button closes it once the run
+  // has finished. This read runs on the LVGL task, under its lock.
+  if (selftest_ui_visible()) {
+    *left = *right = *up = *down = *enter = *escape = false;
+    if (select_key.exchange(false)) {
+      selftest_ui_dismiss();
+    }
+    return;
+  }
+  uint32_t key = joy_key.load(); // held, so LVGL can repeat it
+  const uint32_t flick = joy_flick.exchange(0);
+  if (key == 0) {
+    key = flick; // pressed for this one read, released on the next
+  }
+  *left = key == LV_KEY_LEFT;
+  *right = key == LV_KEY_RIGHT;
+  *up = key == LV_KEY_UP;
+  *down = key == LV_KEY_DOWN;
+  *enter = select_key.exchange(false); // one-shot
+  *escape = false;
+  if (*enter) {
+    // The stick button's select, heard like a finger landing on the
+    // screen (the touch callback clicks on the press).
+    play_click(espp::M5StackTab5::get());
+  }
+}
+
 extern "C" void app_main(void) {
   // First, so the LogScreen has everything printed from here on - including
   // what the tasks started below print.
@@ -243,27 +332,7 @@ extern "C" void app_main(void) {
     logger.info("FPS instrumentation enabled (stress={})", kFpsStress);
   }
 
-  auto touch_callback = [&](const auto &touch) {
-    // NOTE: since we're directly using the touchpad data, and not using the
-    // TouchpadInput + LVGL, we'll need to ensure the touchpad data is
-    // converted into proper screen coordinates instead of simply using the
-    // raw values.
-    static auto previous_touchpad_data = tab5.touchpad_convert(touch);
-    auto touchpad_data = tab5.touchpad_convert(touch);
-    if (touchpad_data != previous_touchpad_data) {
-      logger.debug("Touch: {}", touchpad_data);
-      previous_touchpad_data = touchpad_data;
-
-      // play a click sound only on the press transition (release + re-touch
-      // required before it plays again)
-      static bool was_pressed = false;
-      bool is_pressed = touchpad_data.num_touch_points > 0;
-      if (is_pressed && !was_pressed) {
-        play_click(tab5);
-      }
-      was_pressed = is_pressed;
-    }
-  };
+  TouchClick touch_click(tab5, logger);
 
   // The housekeeping island (IMU, battery, RTC). Built here because the IMU takes its
   // orientation filter; its task starts after the click sound is loaded, below.
@@ -344,13 +413,7 @@ extern "C" void app_main(void) {
 
   // Brightness control with button
   logger.info("Initializing button...");
-  auto button_callback = [&](const auto &state) {
-    logger.info("Button state: {}", state.active);
-    if (state.active) {
-      brightness_step();
-    }
-  };
-  if (!tab5.initialize_button(button_callback)) {
+  if (!tab5.initialize_button(SideButton{.logger = logger})) {
     logger.warn("Failed to initialize button");
   }
 
@@ -581,35 +644,7 @@ extern "C" void app_main(void) {
   // latch the ADC task fills, so one flick of the stick = one PRESSED cycle =
   // one LV_EVENT_KEY. Touch keeps working; indevs coexist.
   logger.info("Adding joystick keypad input device...");
-  static espp::KeypadInput joystick_keypad(
-      {.read = [](bool *up, bool *down, bool *left, bool *right, bool *enter, bool *escape) {
-        // While the self-test overlay is up it owns the stick: nothing reaches
-        // the screens behind it, and the stick button closes it once the run
-        // has finished. This read runs on the LVGL task, under its lock.
-        if (selftest_ui_visible()) {
-          *left = *right = *up = *down = *enter = *escape = false;
-          if (select_key.exchange(false)) {
-            selftest_ui_dismiss();
-          }
-          return;
-        }
-        uint32_t key = joy_key.load(); // held, so LVGL can repeat it
-        const uint32_t flick = joy_flick.exchange(0);
-        if (key == 0) {
-          key = flick; // pressed for this one read, released on the next
-        }
-        *left = key == LV_KEY_LEFT;
-        *right = key == LV_KEY_RIGHT;
-        *up = key == LV_KEY_UP;
-        *down = key == LV_KEY_DOWN;
-        *enter = select_key.exchange(false); // one-shot
-        *escape = false;
-        if (*enter) {
-          // The stick button's select, heard like a finger landing on the
-          // screen (the touch callback clicks on the press).
-          play_click(espp::M5StackTab5::get());
-        }
-      }});
+  static espp::KeypadInput joystick_keypad({.read = joystick_keypad_read});
   // The joystick's indev, nav's fallback group and the burger menu's rows (NavView).
   nav_view.init_groups(joystick_keypad.get_input_device());
   // A backstop for the stick losing its cursor: if its group ever has nothing
@@ -854,7 +889,8 @@ extern "C" void app_main(void) {
   }
 
   logger.info("Initializing touch...");
-  if (!tab5.initialize_touch(touch_callback)) {
+  if (!tab5.initialize_touch(
+          [&touch_click](const espp::TouchpadData &touch) { touch_click(touch); })) {
     logger.error("Failed to initialize touch!");
     return;
   }
