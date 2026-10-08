@@ -28,6 +28,8 @@ idf_component_register(SRCS "src/about_view.cpp"
                             "src/status_band_view.cpp"
                             "src/stick_button.cpp"
                             "src/topbar_view.cpp"
+                            "src/ui_app.cpp"
+                            "src/ui_app_build.cpp"
                             "src/ui_build.cpp"
                             "src/ui_island.cpp"
                             "src/ui_poll.cpp"
@@ -39,6 +41,7 @@ idf_component_register(SRCS "src/about_view.cpp"
                                 esp_driver_ppa
                                 hmi_format
                                 hmi_models
+                                hmi_rtps_spec
                                 logger
                                 lvgl
                                 ota_parse

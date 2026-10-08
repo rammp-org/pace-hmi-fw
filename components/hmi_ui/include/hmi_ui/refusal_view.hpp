@@ -119,7 +119,7 @@ public:
   void clear() const;
   /// @brief One hold poll's refusal check: a push held past the grace on the Locked screen goes
   ///        to the drive session (ENTRY_PUSH); a refusal whose cause cleared is cleared.
-  /// UI task (main's hold poll timer), lvgl_mutex held.
+  /// UI task (UiApp's hold poll timer), lvgl_mutex held.
   void poll();
 
 private:

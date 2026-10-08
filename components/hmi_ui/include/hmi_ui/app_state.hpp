@@ -5,10 +5,8 @@
 ///
 /// Each piece is waiting for its owner (app-main-shrink.md S7): the view instances and subjects
 /// for their views, the atomics for topology channels (T-H4a). Until then they are these global
-/// names, which the code that reads them uses as it always has. Not here: `locked_subject`,
-/// `mib_state_subject` and `rtps_link_subject`, which the drive port reads by name and its goldens
-/// pin (tests/host/drive_golden), and main's tables over them (`ui_shared_subjects`,
-/// `ui_nav_port`).
+/// names, which the code that reads them uses as it always has. Not here: the locked, MIB state
+/// and link subjects and the tables over them (SharedSubjects, NavPort), which are UiApp's.
 ///
 /// Every variable is constant-initialised (no global constructor, G4).
 

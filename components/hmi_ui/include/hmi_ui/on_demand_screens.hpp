@@ -22,15 +22,16 @@ public:
     /// The chrome every screen carries, bound in this order: the DriveBand's status cells,
     /// the TopBar's RTPS label, its clock and link labels, then the burger key and menu.
     Fn<void(lv_obj_t *band, lv_obj_t *bar, lv_obj_t *key, lv_obj_t *overlay)> bind_chrome;
-    /// Settings' warning banner, bound to the cause and to the page (main's).
+    /// Settings' warning banner, bound to the cause and to the page (UiApp's).
     Fn<void()> settings_bound;
-    /// Diagnostics' frequency label, bound to its subjects (main's).
+    /// Diagnostics' frequency label, bound to its subjects (UiApp's).
     Fn<void()> diagnostics_bound;
     /// Each screen's rows, cleared as it is left (before its destruction is queued).
     Fn<void()> settings_left;
     Fn<void()> actions_left;
     Fn<void()> diagnostics_left;
-    lv_event_cb_t screen_loaded; ///< main's SCREEN_LOADED handler (NavView arrival)
+    lv_event_cb_t screen_loaded;                    ///< the SCREEN_LOADED handler (NavView arrival)
+    void *screen_loaded_data;                       ///< its user data
     void (*strip_overdraw)(const lv_obj_t *screen); ///< the redundant background fills
   };
 

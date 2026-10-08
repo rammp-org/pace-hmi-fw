@@ -35,8 +35,8 @@ public:
   struct Config {
     std::string_view pin;             ///< the PIN (a build constant); PIN_LEN digits
     Fn<void()> accepted;              ///< the right PIN: main opens the actuators page
-    Fn<void()> off_bottom;            ///< down off the pad: main's nav_to_key
-    void (*style_key)(lv_obj_t *key); ///< main's focus ring and pressed look, for each key
+    Fn<void()> off_bottom;            ///< down off the pad: NavView::to_key
+    void (*style_key)(lv_obj_t *key); ///< nav's focus ring and pressed look, for each key
   };
 
   constexpr explicit BenchPinView(const Config &config) noexcept

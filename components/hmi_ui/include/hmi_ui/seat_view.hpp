@@ -18,20 +18,20 @@ namespace hmi::ui {
 /// The seat screen's two pages and their joystick walks. Picking a function button names its
 /// motion on the adjustment page and shows the page over the buttons; "<", or left from the
 /// page's first column, hides it again. The page's "-"/"+" and three presets ask main to move
-/// the axis: the seat command path (main's seat_step and seat_request, safety-relevant) stays
+/// the axis: the seat command path (UiApp's seat_step and seat_request, safety-relevant) stays
 /// in main, and nothing here changes a seat value. The numbers on both pages show only what
-/// the MCB reports, through main's value subjects.
+/// the MCB reports, through UiApp's value subjects.
 class SeatView {
 public:
   static constexpr size_t AXES = rammp::kSeatAxisCount;
 
   struct Config {
     const NavPort *nav;
-    lv_subject_t *values;                     ///< main's seat_axis_value[AXES]; int, raw units
-    Fn<void(size_t row, int direction)> step; ///< main's seat_step: one step from the MCB's value
-    Fn<void(rammp::SeatAxis axis, int32_t target)> request; ///< main's seat_request (absolute)
-    Fn<void()> show_buttons_page; ///< main's seat_show_buttons_page (the grids' off_left)
-    void (*keep_overlay_fill)(lv_obj_t *obj); ///< main's overdraw exemption
+    lv_subject_t *values;                     ///< UiApp's seat_axis_value_[AXES]; int, raw units
+    Fn<void(size_t row, int direction)> step; ///< UiApp's seat_step: one step from the MCB's value
+    Fn<void(rammp::SeatAxis axis, int32_t target)> request; ///< UiApp's seat_request (absolute)
+    Fn<void()> show_buttons_page; ///< this view's show_buttons_page (the grids' off_left)
+    void (*keep_overlay_fill)(lv_obj_t *obj); ///< the overdraw exemption
   };
 
   constexpr explicit SeatView(const Config &config) noexcept
@@ -56,7 +56,7 @@ public:
   ///        selected axis; nothing before a function button has picked one.
   /// UI task (or the RTPS receive task under lvgl_mutex, through the value observers).
   void angle_refresh();
-  /// The function buttons' grid (main's nav resets its cursor on arrival).
+  /// The function buttons' grid (UiApp's arrival resets its cursor on arrival).
   constexpr ButtonGrid &buttons_grid() noexcept { return buttons_grid_; }
 
 private:

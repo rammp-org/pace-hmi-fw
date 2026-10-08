@@ -27,18 +27,18 @@ namespace hmi::ui {
 /// UI task (or app_main), lvgl_mutex held.
 [[nodiscard]] bool seat_ready(const SharedSubjects &shared);
 
-/// One instance (main's, constinit): the drive UI's state, and DrivePort's `Ui`. Every call runs
+/// One instance (UiApp's): the drive UI's state, and DrivePort's `Ui`. Every call runs
 /// on the UI task with lvgl_mutex held (an LVGL timer, event or observer, or an input of the
 /// drive adapter), or in app_main while it builds the UI before lv_task starts.
 class DriveUi {
 public:
   struct Config {
     const SharedSubjects *shared;     ///< `locked`, `mib_state` and `rtps_link` are read
-    lv_subject_t *refused;            ///< int: Refused; RefusalView's `refused` (main's subject)
+    lv_subject_t *refused;            ///< int: Refused; RefusalView's `refused` (UiApp's subject)
     Fn<lv_timer_t *()> refused_timer; ///< RefusalView's dwell timer (after its start_timer)
-    lv_obj_t **menu_open;             ///< main's nav_menu_open: the overlay up, else null
-    bool *menu_on_arrival;            ///< main's nav_menu_on_arrival: open it on the next load
-    /// The drive profile the user picked, mirrored for the ADC task (main's
+    lv_obj_t **menu_open;             ///< app_state's nav_menu_open: the overlay up, else null
+    bool *menu_on_arrival;            ///< app_state's nav_menu_on_arrival: open it on the next load
+    /// The drive profile the user picked, mirrored for the ADC task (app_state's
     /// drive_profile_published).
     const std::atomic<MIB::DriveProfile> *profile;
     /// The DriveCommand (main's rtps_comms_publish_drive). Result ignored (H6).

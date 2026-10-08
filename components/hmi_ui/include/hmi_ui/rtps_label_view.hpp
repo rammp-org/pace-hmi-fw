@@ -18,7 +18,7 @@ public:
   static constexpr uint32_t STATUS_ORANGE = 0xFF8C00;
 
   struct Config {
-    const SharedSubjects *shared; ///< main's subjects; `rtps_link` and `rtps_blink` are read
+    const SharedSubjects *shared; ///< UiApp's subjects; `rtps_link` and `rtps_blink` are read
   };
 
   constexpr explicit RtpsLabelView(const Config &config) noexcept

@@ -48,12 +48,12 @@ struct HoldGesture {
 class HoldEngine {
 public:
   struct Config {
-    /// Confirmation feedback when a hold completes, the same for every gesture (main's
+    /// Confirmation feedback when a hold completes, the same for every gesture (UiApp's
     /// STRONG_CLICK haptic and click sound). Must not block the UI task.
     Fn<void()> confirm;
     /// The self-test overlay is up: it owns the stick, so every fill is cancelled.
     bool (*overlay_up)();
-    /// Runs before the gestures on each poll without the overlay (main's refusal check, which
+    /// Runs before the gestures on each poll without the overlay (RefusalView::poll, which
     /// shadows the unlock gesture on the same input and cadence).
     Fn<void()> before_poll;
   };
@@ -66,7 +66,7 @@ public:
   /// UI task, lvgl_mutex held.
   void poll(HoldGesture *g) const;
 
-  /// @brief One poll of every gesture, in order (main's hold poll timer, every HOLD_POLL_MS).
+  /// @brief One poll of every gesture, in order (UiApp's hold poll timer, every HOLD_POLL_MS).
   ///        With the overlay up, cancels any fill instead and polls nothing.
   /// UI task, lvgl_mutex held.
   void poll_all(std::span<HoldGesture *const> gestures) const;

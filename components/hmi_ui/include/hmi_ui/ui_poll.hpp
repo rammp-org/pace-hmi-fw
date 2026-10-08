@@ -23,15 +23,16 @@ public:
   static constexpr uint32_t PERIOD_MS = 250;
 
   struct Config {
-    const SharedSubjects *shared; ///< main's subjects; `rtps_link`, `rtps_blink` are written
+    const SharedSubjects *shared; ///< UiApp's subjects; `rtps_link`, `rtps_blink` are written
     lv_subject_t *theme;          ///< int: the Settings Theme row, 0 dark, 1 day
     /// The link's state now (rtps_comms_link_state). UI task.
     LinkState (*link_state)();
     /// Called with the state on every tick, before the subject is set: main logs a change.
     void (*link_seen)(LinkState state);
-    /// Diagnostics staleness (main's diag_poll). UI task, lvgl_mutex held.
+    /// Diagnostics staleness (DiagnosticsView::poll). UI task, lvgl_mutex held.
     Fn<void()> diag_poll;
-    /// The drive adapter's tick (main's drive_wait_poll). UI task, lvgl_mutex held.
+    /// The drive adapter's tick (main's DriveAdapter, through UiApp's DriveInputs). UI task,
+    /// lvgl_mutex held.
     void (*drive_tick)();
     /// The theme was switched (by any route): main takes the redundant background fills out
     /// again and saves the setting. Called after the link subject is re-notified and before the
