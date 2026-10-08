@@ -15,7 +15,8 @@ stays ENABLED, the screen stays where it is) when:
 - the MCB reports anything but ENABLED. The stick goes to 0 on the next ADC cycle (≤ 40 ms),
   before the screen leaves Drive (UI tick, ≤ 250 ms).
 
-Output comes back by itself when the cause clears (O1 proposes 300 ms of neutral first). A
+Output comes back when the cause clears and the stick has then read neutral for 300 ms (C1's
+neutral latch: the C4 verdict is a condition of C1's output permit). A
 display frozen for 2 s, or a frozen stick task, reboots the HMI. After the reboot C3's rules
 apply (reset reason shown, no output before POST and link).
 
@@ -46,25 +47,23 @@ apply (reset reason shown, no output before POST and link).
 | --- | --- |
 | ADC-side guard: UI heartbeat, MibStatus age, link, MCB state | the drive table, DISABLE re-sends, "MCB did not stop" (C1, lane D) |
 | TWDT on the ADC and UI tasks; trip = panic reset | POST gate, boot DISABLE, reset reason shown (C3) |
-| ADC task priority, core, stack; the G10 row | stick plausibility, literal-0 gate, NaN (C2) |
-| guard observability (self test) | G1 neutral-first on entering Drive (wherever C1/C3 put it) |
+| ADC task priority, core, stack; the G10 row | stick plausibility, NaN (C2) |
+| guard observability (self test) | G1 neutral-first, the output permit and its literal 0 (C1 §3) |
 | | the islands work (the full H4 fix: `control` owns the gate) |
 
 ## 2. Conditions and constants
 
 ### 2.1 The gate after C4
 
-The command stays `mounted × scale` (REQ-STK-04, unchanged). The scale is 0 when any of these
-holds, else drive speed / 10:
+C4 adds no gate of its own. Its verdict is **condition 2 of C1's output permit** (C1 §3.1, the
+one permit of the four fixes): when the verdict is not OK the command is C1's literal
+(+0.0, +0.0, +0.0) (REQ-STK-10), whatever the other conditions say. A non-OK verdict clears C1's
+neutral latch, so output resumes only after the stick has read neutral for `kNeutralHold`
+(300 ms, G1; REQ-STK-12). C1 provides the hook (verdict always OK until C4); C4 fills it.
 
-- a calibration run is in progress (today);
-- `stick_drives` is false (the UI's gate; C1 defines when it is true);
-- **the C4 verdict is not OK** (new, this spec);
-- later terms from C3 (POST) and C2 (stick fault) join the same composition.
-
-C4 joins through `AdcStickIo::stick_drives()`, which returns `gate_open(stick_drives, verdict)`.
-The pipeline's `Io` contract is unchanged, so the STK goldens and call-order tests stay as they
-are.
+The pipeline's `Io` contract is C1's (`output_permit`), unchanged by C4, so the STK goldens and
+call-order tests stay as C1 and C3 leave them. In C1's hold reason every C4 reason shows as
+`MOTION_GUARD` (C1 §3.3, Drive notice "Waiting for the MCB"); `guard_reason` (§3.1) says which.
 
 ### 2.2 The C4 conditions
 
@@ -77,12 +76,12 @@ Each row forces the output to 0. The reason is a code the ADC task publishes.
 | C4-b | net failed, no link, or no IP | `rtps_comms` (existing atomics) | `LINK_DOWN` |
 | C4-c | newest MibStatus age ≥ 2000 ms, or none since boot | `rtps_worker`, in `on_mib_status` | `MIB_STALE` |
 | C4-d | newest MibStatus `systemState` ≠ ENABLED (INITIALIZING, IDLE, ERROR, any other byte) | `rtps_worker`, in `on_mib_status` | `MCB_NOT_ENABLED` |
-| C4-f | only if O1 = yes: after any of the above, until the stick has read neutral for 300 ms | the ADC task | `REARM_PENDING` |
 
 - C4-b plus C4-c is exactly "link not CONNECTED" as `rtps_comms_link_state()` defines it, built
   from lock-free values instead of its 64-bit atomic (§3.3).
-- Several can hold at once. The reported reason is the first in the order e, a, b, c, d, f. The
+- Several can hold at once. The reported reason is the first in the order e, a, b, c, d. The
   order only picks the reported code; every one of them forces 0.
+- The re-arm after a trip is C1's neutral latch (§2.1); C4 has no re-arm state of its own.
 
 ### 2.3 Constants
 
@@ -98,7 +97,6 @@ Each is a named constant (D4). New ones live in `components/control/include/cont
 | `ADC_TASK_PRIORITY` | 21 (today 0 → 5) | proposed (O2) |
 | `ADC_TASK_CORE` | 0 (today -1, first FPU use) | proposed |
 | `ADC_TASK_STACK_BYTES` | 6144 (today 4096) | proposed |
-| `NEUTRAL_REARM_MS` | 300, G1's value (one constant if G1's exists) | only if O1 = yes |
 
 "Fresh" means age < limit; "stale" means age ≥ limit. Ages are whole ms. Truncation can only
 make a source look older, never younger past a limit.
@@ -125,9 +123,10 @@ drive phase, the "MCB did not stop" fault.
   runs, C4 lets the stick drive. It adds no "user stop → 0" rule.
 - **M1 holds.** MCB leaves ENABLED → C4 forces 0 within one cycle; the UI follows on its tick.
 - **G2 is implemented here** on the ADC side. The UI side of G2 (leave Drive when stale) is C1's.
-- **C1 interaction.** C1 owns `stick_drives` and the DISABLE re-sends. C4 only ANDs into the
-  gate. Neither reads the other's state. When both land, the gate is open only if C1 says Drive
-  and C4 says OK.
+- **C1 interaction.** C1 owns `stick_drives`, the output permit and the DISABLE re-sends. C4
+  only fills the permit's condition 2. Neither reads the other's state. When both land, output
+  is allowed only if C1's gate is open, C4's verdict is OK and every other permit condition
+  holds.
 
 ## 3. Data flow
 
@@ -151,7 +150,8 @@ One writer each.
 | `ui_stalls_drive` | `uint32_t` | Read ADC | each `UI_STALE` onset while `stick_drives` is true, only goes up | relaxed | UI, self test | relaxed |
 
 Stamps are `esp_timer_get_time() / 1000` truncated to `uint32_t`, from one clock function main
-supplies to both writers and the reader (an injected clock, CS-CON-05). The guard takes `now` as
+supplies to both writers and the reader (an injected clock, CS-CON-05). It is the same ADC-side
+clock as C1's permit and C2's monitor (C1 §3.4). The guard takes `now` as
 a parameter, so tests use fake time.
 
 ### 3.2 Rules on the ADC path
@@ -269,7 +269,9 @@ G10 baseline `tools/guards/baselines/tasks.json` (a declared table; this spec is
 | `Read ADC` | stack_bytes | 4096 | 6144 |
 | `Read ADC` | source | `main/main.cpp:1619 …BaseConfig defaults…` | the new `StickIsland` config literal in `main/main.cpp` |
 
-No other row changes. `lv_task` stays 20 / core 1 / 16384. `ContinuousAdc Task` stays 5 / `"fpu"`.
+No other row changes. `lv_task` stays 20 / core 1 / 16384. `ContinuousAdc Task` stays 5 / `"fpu"`
+unless the owner decides to pin or raise it (O9 with C2 O14); then its row changes in this
+commit too, and C2's C2-16 measures the result.
 The name stays `Read ADC` (the census, logs and bench match it; the topology's `control` name
 is for the islands work).
 
@@ -281,7 +283,8 @@ The topology draft says 22 (O2).
 
 **Stack 6144 B.** CS-MEM-04: at least 1.5 × the stress high-water mark. Worst clean run:
 1188 B free of 4096 (stress-tasks, b677b01), so 2908 B used; × 1.5 = 4362 B. 6144 B leaves
-room for C4's frame growth, the TWDT reset and C2. It matches the topology draft. Cost: 2 KB
+room for C3's POST accumulator (C3 may take this stack change first, C3 Q13), C4's frame
+growth, the TWDT reset and C2 (invoker frame ≤ 288 B, C2 §10.3). It matches the topology draft. Cost: 2 KB
 of internal RAM (worst `mem.dma_min` seen: 80 KB).
 
 ## 6. Requirements
@@ -292,7 +295,7 @@ Test IDs `CTL-0nn` are cases of the new host app `components/control/test`.
 | ID | Requirement | Tests |
 | --- | --- | --- |
 | REQ-CTL-01 | Every ADC cycle evaluates the guard once, after the three reads and before the pipeline, on valid, invalid and calibrating cycles alike; that cycle's gate uses that verdict. | CTL-013, CTL-014 |
-| REQ-CTL-02 | A cycle whose verdict is not OK sends a command of 0, whatever `stick_drives` says. XYTwist is still published on every valid cycle (neutral, not silence); the button bit is unchanged. | CTL-012, CTL-015 |
+| REQ-CTL-02 | A cycle whose verdict is not OK withholds C1's output permit (condition 2): the command is the literal 0 of REQ-STK-10, whatever the other conditions say. XYTwist is still published on every valid cycle (neutral, not silence); the button bit is unchanged. | CTL-012, CTL-015 |
 | REQ-CTL-03 | `UI_STALE`: the UI heartbeat's age is ≥ `UI_HEARTBEAT_MAX_AGE_MS` (200), or it was never written. | CTL-002, CTL-004 |
 | REQ-CTL-04 | `MIB_STALE`: the newest MibStatus's age is ≥ `MIB_STATUS_MAX_AGE_MS` (2000), or none arrived since boot. `rtps_comms` stamps it on the receive task, state first, before any handler or lock. | CTL-003, CTL-004 |
 | REQ-CTL-05 | `LINK_DOWN`: net failed, no link, or no IP. With REQ-CTL-04 this is "not CONNECTED". | CTL-005 |
@@ -300,13 +303,14 @@ Test IDs `CTL-0nn` are cases of the new host app `components/control/test`.
 | REQ-CTL-07 | Ages are `uint32` ms modulo 2^32. A source seen stale stays stale until its stamp changes; a stamp ahead of the clock is stale. | CTL-008, CTL-009, CTL-010 |
 | REQ-CTL-08 | `WDT_MISSING`: if the ADC or UI task failed to subscribe to the TWDT, the verdict is never OK. | CTL-011 |
 | REQ-CTL-09 | The guard reads none of: `drive_request`, `DISABLE_PENDING`, the exit hold, the burger key, the drive phase (G4). | CTL-016, review |
-| REQ-CTL-10 | The reported reason follows the order e, a, b, c, d (f); onset counters per reason and `ui_stalls_drive` only go up; `ui_age_max_ms` is the largest heartbeat age seen since the first heartbeat. All are written by the ADC task only. | CTL-007, CTL-017 |
+| REQ-CTL-10 | The reported reason follows the order e, a, b, c, d; onset counters per reason and `ui_stalls_drive` only go up; `ui_age_max_ms` is the largest heartbeat age seen since the first heartbeat. All are written by the ADC task only. | CTL-007, CTL-017 |
 | REQ-CTL-11 | The guard and the gate allocate nothing, log nothing, take no lock and make no indirect call; every shared value is an atomic with `is_always_lock_free` asserted. | CTL-018, static_assert, SU, review |
 | REQ-CTL-12 | The ADC task subscribes to the TWDT at its first cycle and resets it at the end of every cycle, valid or not. | CTL-019, B5j |
 | REQ-CTL-13 | `Read ADC` runs at priority 21, pinned to core 0, with a 6144 B stack. | G10, B3 |
-| REQ-CTL-14 | Only if O1 = yes: after any non-OK verdict, the verdict is `REARM_PENDING` until the mounted position has been exactly 0 on all three axes for ≥ `NEUTRAL_REARM_MS`. | CTL-020, CTL-021 |
-| REQ-UI-23 | The UI task stores the heartbeat after every completed cycle, subscribes to the TWDT at its first cycle and resets it after every cycle. | B3 (`ctl.ui_age_max`), B5i |
-| REQ-UI-24 | Only if O7 = yes: when `ui_stalls_drive` goes up, the Drive screen shows "Display stalled: stick paused" for 3 s. | B5i |
+| REQ-CTL-14 | After any non-OK verdict, output resumes only through C1's neutral latch: the non-OK verdict clears it, and it sets again only after `kNeutralHold` of neutral cycles (REQ-STK-12). | CTL-020, CTL-021 |
+| REQ-UI-24 | The UI task stores the heartbeat after every completed cycle, subscribes to the TWDT at its first cycle and resets it after every cycle. | B3 (`ctl.ui_age_max`), B5i |
+| REQ-UI-25 | Only if O7 = yes: when `ui_stalls_drive` goes up, the Drive screen shows "Display stalled: stick paused" for 3 s. | B5i |
+| REQ-RUI-07 | Only if O6 = yes: the bench verbs `STALL UI <ms>` and `STALL ADC <ms>` exist only with `CONFIG_HMI_BENCH_STICK_INJECT` (as C1's REQ-RUI-05); a release ELF has none of their symbols. | B5i, B5j, release symbol check |
 
 Conditional rows are last, so dropping them leaves no gap in the series.
 
@@ -332,19 +336,19 @@ simulation of both tasks on fake time, with the UI stall injected.
 | CTL-009 | seen stale at age 2000, then now + 2^32 with the same stamp; then a new stamp | still `MIB_STALE`; then OK |
 | CTL-010 | stamp 1 ms ahead of now | stale |
 | CTL-011 | `adc_wdt_ok` false; `ui_wdt_ok` false (all else fresh) | `WDT_MISSING` each |
-| CTL-012 | **UI stall.** Simulated UI writes every 8 ms, ADC cycles every 35 ms through `StickPipeline::cycle` with full forward and `stick_drives` stuck true. UI stops at t0 | before t0 the command equals full forward × speed; every cycle starting ≥ t0 + 200 ms publishes x = y = twist = 0; the first 0 by t0 + 240 ms; publishes continue at the ADC rate |
-| CTL-013 | as CTL-012, UI resumes at t1 | output returns on the first cycle after t1 (or per CTL-020 with O1) |
+| CTL-012 | **UI stall.** Simulated UI writes every 8 ms, ADC cycles every 35 ms through `StickPipeline::cycle` with full forward and `stick_drives` stuck true; C1's other permit conditions held true and the neutral latch set. UI stops at t0 | before t0 the command equals full forward × speed; every cycle starting ≥ t0 + 200 ms publishes x = y = twist = 0; the first 0 by t0 + 240 ms; publishes continue at the ADC rate |
+| CTL-013 | as CTL-012, UI resumes at t1 | output stays 0 while the stick is held forward; it returns only after the stick has read neutral for `kNeutralHold` after t1 (C1's latch, CTL-020) |
 | CTL-014 | UI stall during invalid-read cycles and during a calibration run | the guard still advances: onset counted, latch set |
 | CTL-015 | MCB → IDLE mid-drive, `stick_drives` still true (UI has not ticked) | the first cycle after the IDLE stamp publishes 0 |
 | CTL-016 | G4: MCB ENABLED and fresh, UI alive, `stick_drives` true, the world has sent DISABLE (exit) | the output follows the stick (C4 does not stop it) |
 | CTL-017 | counters: two stalls, one with `stick_drives` false | `guard_trips[UI_STALE]` = 2, `ui_stalls_drive` = 1, `ui_age_max_ms` = longest age |
 | CTL-018 | 1000 cycles of guard + pipeline + gate under the host allocation guard, armed | 0 allocations (TS-DET-08) |
 | CTL-019 | per-cycle sequence with a fake watchdog port, incl. invalid-read cycles; a failing subscribe | subscribe once, reset once per cycle after publish; failing subscribe → `WDT_MISSING` forever |
-| CTL-020 | O1 only: trip, then the stick neutral 299 ms vs 300 ms | `REARM_PENDING`; OK |
-| CTL-021 | O1 only: neutral broken at 200 ms, then 300 ms neutral | the 300 ms restarts |
+| CTL-020 | trip, cause cleared, then the stick neutral 299 ms vs 300 ms (through C1's permit) | output 0, hold reason CENTRE_FIRST; output follows the stick |
+| CTL-021 | as CTL-020, neutral broken at 200 ms, then 300 ms neutral | the 300 ms restarts |
 
-Unchanged and must still pass byte for byte: `L1-STK` (goldens not regenerated), the drive
-session oracle and goldens.
+Unchanged and must still pass byte for byte: `L1-STK` (goldens not regenerated; C1's and C3's
+declared exceptions stand), the drive session oracle and goldens as C1 and C3 leave them.
 
 ## 8. Bench checks (scripted verdicts)
 
@@ -359,7 +363,7 @@ then (bench only).
 | B3 | self test | `mem.stk_adc` ≥ 2048 B (1.5 × rule on 6144 B); `time.adc_avg` 34.5..35.5 ms; `time.adc_max` ≤ 40 ms; new checks: `ctl.wdt` = 1, `ctl.ui_age_max` ≤ 1000 ms, `ctl.ui_stalls_drive` = 0; all other bands unchanged |
 | B3 after stress | the stress-tasks run, then B3 | `mem.stk_adc` ≥ 2048 B (CS-MEM-04 is the stress value) |
 | G10 | `task_dump.py fetch`, then `check` against the new baseline | exit 0; `Read ADC` prio 21, core 0, stack 6144 (−16 B allowed), `coproc_pinned` true |
-| B5, B5a..e | existing | verdicts unchanged |
+| B5, B5a..e | as C1 left them (C1 E10: B5c-e become graded B5'' checks) | verdicts unchanged by C4 |
 | B5f | MCB state, ADC side. Inject neutral, sim `a`, Drive, inject full forward, XYTwist y > 0.5 for 1 s, sim `i` | every XYTwist received > 120 ms after the first IDLE MibStatus publish is 0, in **10 of 10** repeats (the UI tick alone would meet 120 ms in about 0.07 % of 10-run sets) |
 | B5g | stale MibStatus. As B5f, then sim `p` | every XYTwist after last publish + 2120 ms is 0; XYTwist still arrives at ≥ 25 Hz in [+2.12 s, +4 s]; 3 of 3 repeats |
 | B5h | G4 holds. Sim `ign 50`, Drive, forward, exit hold | the sim stays ENABLED and XYTwist y > 0.5 for 5 s after the hold |
@@ -377,14 +381,14 @@ accept it.
 
 | File | Change |
 | --- | --- |
-| `components/control/include/control/motion_guard.hpp` (new) | constants, `Verdict`, `MotionGuard` (stale latches, counters), `gate_open()`; pure C++, no IDF |
+| `components/control/include/control/motion_guard.hpp` (new) | constants, `Verdict`, `MotionGuard` (stale latches, counters); pure C++, no IDF |
 | `components/control/include/control/cycle.hpp` (new) | the per-cycle sequence (guard, pipeline, `note_cycle`, watchdog reset) as a template with no espp/IDF types, so the host test drives it |
 | `components/control/include/control/stick_island.hpp` | calls `cycle.hpp`; owns the guard like the twist lowpass |
 | `components/control/test/`, `tests/manifest.d/control.yaml` (new) | L1-CTL |
 | `components/control/README.md` | REQ-CTL rows, the Tasks row (6144 / 21 / 0) |
-| `components/hmi_ui` (`app_state`, `ui_island`, README) | `ui_heartbeat_ms`, `ui_wdt_ok`, the watchdog port; REQ-UI-23 (24) |
+| `components/hmi_ui` (`app_state`, `ui_island`, README) | `ui_heartbeat_ms`, `ui_wdt_ok`, the watchdog port; REQ-UI-24 (25); the MOTION_GUARD notice text in `hmi_rtps_spec` |
 | `main/rtps_comms.cpp/.hpp` | `mcb_state`, `mcb_rx_ms`; one lock-free accessor in the order of §3.2 |
-| `main/main.cpp` | clock and watchdog ports; `AdcStickIo::stick_drives()` → `gate_open(...)`; the `Read ADC` config literal |
+| `main/main.cpp` | clock and watchdog ports; the verdict as condition 2 of `AdcStickIo::output_permit` (C1 §3.4); the `Read ADC` config literal |
 | `main/selftest*.cpp`, `selftest_spec.hpp`, PC copy in `scripts/` | `ctl.wdt`, `ctl.ui_age_max`, `ctl.ui_stalls_drive` |
 | `sdkconfig.defaults` | the TWDT lines of §4.2 |
 | `tools/guards/baselines/tasks.json` | the §5 row and its `about` text |
@@ -400,12 +404,12 @@ Refactor commits (R) change no behaviour; behaviour commits (B) each cite this s
 | --- | --- | --- | --- |
 | 1 | R | `motion_guard.hpp`, `cycle.hpp`, L1-CTL (unused by the firmware) | L1 only |
 | 2 | R | the writers: UI heartbeat, `mcb_state`/`mcb_rx_ms` (written, not yet read) | B2, B3 unchanged |
-| 3 | B | the ADC gate uses the guard; observability; the 3 self-test checks (declared) | B2, B3, B5..B5h |
+| 3 | B | the permit's condition 2 uses the guard; observability; the 3 self-test checks (declared) | B2, B3, B5..B5h |
 | 4 | B | `Read ADC` 21 / core 0 / 6144 B and the G10 row (declared) | SU, G10, B3, B3 after stress |
 | 5 | B | TWDT phase 1: subscriptions, resets, timeout 2 s, idle checks off, panic off | soak |
 | 6 | B | TWDT phase 2: `CONFIG_ESP_TASK_WDT_PANIC=y`, after a clean soak | B2, B3, B5i/j if O6 |
-| 7 | test | O6 only: bench `STALL` injection (`depends on HMI_REMOTE_UI`, compiled out otherwise); may come before 5 | B5i, B5j |
-| 8 | B | O1, O7 if approved | CTL-020/021, B5i |
+| 7 | test | O6 only: bench `STALL` injection (under `CONFIG_HMI_BENCH_STICK_INJECT` like every bench verb, REQ-RUI-07; compiled out otherwise); may come before 5 | B5i, B5j, release symbol check |
+| 8 | B | O7 if approved | B5i |
 | 9 | docs | the docs rows | — |
 
 The implementer never edits the STK goldens, the drive table, the topology draft or an expected
@@ -417,13 +421,13 @@ baseline IDs), and the README requirement rows.
 
 | # | Question | Recommendation |
 | --- | --- | --- |
-| O1 | After a C4 trip, wait for 300 ms of neutral stick before output resumes (G1's rule)? Without it, a stick held deflected jumps back when a stall ends. | yes (REQ-CTL-14) |
+| O1 | Merged into the decision sheet's neutral-wait question (with C1 Q12 and C2 O8): joining C1's permit makes C1's neutral latch the re-arm after a trip (REQ-CTL-14). | yes |
 | O2 | ADC priority 21 (this spec) or 22 (topology draft; ties with `esp_timer` on core 0)? | 21; align the draft |
 | O3 | Turn the idle-task checks off, or keep them and first fix the 8 s boot hog on `main`? | off |
 | O4 | Subscribe `rtps_pub` too? It is not safety, and the panic would reset mid-drive for it. | no; revisit with the `net` island |
 | O5 | TWDT timeout 2 s (not in D4). | 2 s, confirmed by the soak |
 | O6 | Add the bench-only `STALL` verbs, so the trip and the reset reason are seen on the board? | yes |
-| O7 | Show "Display stalled: stick paused" after a stall while driving (CS-SAF-03 says shown)? Or leave it to C3's fault indicator? | yes, REQ-UI-24 |
+| O7 | Show "Display stalled: stick paused" after a stall while driving (CS-SAF-03 says shown)? Or leave it to C3's fault indicator? | yes, REQ-UI-25 |
 | O8 | MCB team (D3 Q1): the XYTwist timeout T_mcb. It is the only stop for an ADC stall, a panic or a link loss. Propose asking for ≤ 500 ms. | ask now; it bounds this fix |
-| O9 | `ContinuousAdc T` (X/Y producer, espp, priority 5, unpinned) can starve and serve old X/Y without a failed read. Handle in C2 (rate check)? | yes, in C2 |
+| O9 | `ContinuousAdc T` (X/Y producer, espp, priority 5, unpinned) can starve and serve old X/Y without a failed read. Handle in C2 (rate check)? Pinning or raising it is C2's O14; if approved, its G10 row changes in C4's commit 4. | yes, in C2 |
 | O10 | With the UI alive and the ADC task dead, should the UI send DISABLE (an ADC heartbeat check in C1's table)? It would give the HMI a stop path that does not need the ADC task. | lane D to cost it |

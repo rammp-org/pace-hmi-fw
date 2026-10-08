@@ -190,7 +190,7 @@ of blocking check.
 | FAIL | a LATCHED check | FAILED: "Start-up check failed: <text>" + what to do | red |
 | NOT_RUN | — | NOT_RUN "Start-up check not run", from the budget on (before it: CHECKING) | red from the budget |
 
-- Texts per check (Q9; one table, `hmi_ui/post_texts.hpp`): REST and STILL checks "Centre the
+- Texts per check (Q9; one table in `hmi_rtps_spec`, beside C1's notice texts, C1 §3.3): REST and STILL checks "Centre the
   joystick"; `joy.button_idle` "Release the joystick button"; `joy.cal_saved` "The joystick
   must be calibrated first" (G5's words); `joy.cal_span` "Joystick calibration too small:
   calibrate again"; `sys.clean_reset` "Restarted after a fault: <reason>. Turn the HMI off and
@@ -199,6 +199,8 @@ of blocking check.
   "Start-up check timed out:". Each FAIL text ends "Turn the HMI off and on" unless stated.
 - The Drive notice (C1 §2.7) uses the same text for POST_NOT_PASSED. C1's "Start-up check not
   run" stays for NOT_RUN.
+- C2 adds the stick FAULT to this indicator, below every POST state (the permit's order, C1
+  §3.1): with the gate PASS, a stick FAULT shows C2's text (C2 REQ-UI-26).
 
 ### 2.9 Reset reason (H12)
 
@@ -301,7 +303,7 @@ Removed rows: none. Every other C1 row is unchanged, in order and in action orde
 
 | Item | Change |
 | --- | --- |
-| `TICK_SEQUENCE` | TICK_FOLLOW, **TICK_BOOT_STOP**, TICK_EXIT_DUE, TICK_STOP_FAULT_DUE, TICK_STOP_RESEND, TICK_WARN_DUE, TICK_GIVEUP_DUE. FOLLOW on Env 1; the six others on Env 2 (C1's rule). BOOT_STOP right after FOLLOW: the first CONNECTED tick sends DISABLE and does not enter |
+| `TICK_SEQUENCE` | TICK_FOLLOW, **TICK_BOOT_STOP**, TICK_EXIT_DUE, TICK_STOP_FAULT_DUE, TICK_STOP_RESEND, TICK_WARN_DUE, TICK_GIVEUP_DUE. FOLLOW on Env 1; the six others on Env 2 (C1's rule). BOOT_STOP right after FOLLOW: the first CONNECTED tick sends DISABLE and does not enter. (C2b, if approved, adds TICK_STICK_FAULT after TICK_STOP_RESEND, C2 §5.3) |
 | `PHASE_INVARIANTS` | BOOT_STOP_DONE must be true in UNLOCKING, DRIVING, EXITING, EXIT_REFUSED (only rows 1-2 leave the locked phases, and both need it) |
 | `ACTION_EFFECTS` | MARK_BOOT_STOP sets BOOT_STOP_DONE |
 | `INPUT_PRECONDITIONS` | TICK_BOOT_STOP: all phases, always |
@@ -329,14 +331,15 @@ Format: the README tables (`tests/reqmatrix.py`). A retired row stays, starts wi
 2026-10-xx, superseded by REQ-...`, lists no tests; no test may cite it. C1's IDs are written
 by C1's commits and retired here by C3's, so history matches the code at each commit.
 
-### 5.1 Retired (all introduced by C1)
+### 5.1 Retired
 
 | ID | Successor | Why |
 | --- | --- | --- |
-| REQ-DRV-22 | REQ-DRV-35 | entry also needs the boot DISABLE done |
-| REQ-DRV-30 | REQ-DRV-38 | the profile tap's ENABLE also needs POST_OK |
-| REQ-DRV-32 | REQ-DRV-36 | seven tick sub-steps |
-| REQ-DRV-33 | REQ-DRV-37 | every ENABLE row also needs POST_OK |
+| REQ-DRV-08 | REQ-DRV-42 | the unlock hold also needs POST_OK (row 18) and has a POST refusal (row 52) |
+| REQ-DRV-22 (C1) | REQ-DRV-35 | entry also needs the boot DISABLE done |
+| REQ-DRV-30 (C1) | REQ-DRV-38 | the profile tap's ENABLE also needs POST_OK |
+| REQ-DRV-32 (C1) | REQ-DRV-36 | seven tick sub-steps |
+| REQ-DRV-33 (C1) | REQ-DRV-37 | every ENABLE row also needs POST_OK |
 
 ### 5.2 New
 
@@ -349,6 +352,7 @@ by C1's commits and retired here by C3's, so history matches the code at each co
 | REQ-DRV-39 | drive_session | On the first tick with a CONNECTED link, LOCKED sends one DISABLE and marks the boot stop done; ASKING only marks it. It is never sent again until reset. The mark is set in every unlocked phase (rows 50-51) |
 | REQ-DRV-40 | drive_session | The unlock hold applies only with POST passed. A completed unlock hold with the MCB ready and POST not passed stays LOCKED: ring at rest, REFUSED_POST banner, refusal feedback (row 52) |
 | REQ-DRV-41 | drive_session | From LOCKED with the MCB ready and POST not passed, an entry push on the Locked screen with no menu, and the menu's DRIVE row, show the REFUSED_POST banner with refusal feedback (rows 53-54) |
+| REQ-DRV-42 | drive_session | A completed unlock hold in LOCKED asks for ENABLE and arms the warn and give-up deadlines when the MCB is ready and POST passed (row 18); refuses on the spot when the MCB is not ready (row 19); refuses with REFUSED_POST when it is ready and POST has not passed (row 52). In ASKING it does nothing (row 20) |
 | REQ-POST-14 | post | The rest-window accumulator starts at the first cycle with all three reads valid, counts every cycle after it, and emits one `StickWindow` per `WINDOW_MIN_SAMPLES` cycles, then starts a new one. Axis mean, min and max are over the valid cycles, rounded to whole mV; `button_idle` is true only if the button read released on every cycle of the window. A NaN read counts as a failed read |
 | REQ-POST-15 | post | The runner stores PENDING at its first tick. It gathers the boot facts once, at the first window; merges every new window into the latched report; and stores the gate PASS or FAIL as the latched overall state. The gate never moves back. It is the gate's only writer |
 | REQ-POST-16 | post | A LATCHED check still PENDING `POST_BUDGET_MS` after the first tick makes the gate FAIL ("timed out", that check blocking). A LIVE check has no budget |
@@ -366,8 +370,8 @@ by C1's commits and retired here by C3's, so history matches the code at each co
 
 Unchanged: C1's other new IDs; REQ-POST-01..13 (the evaluator, with the new window value).
 
-**ID clash to fix in C4 (flag).** The C4 spec uses REQ-UI-16 and REQ-UI-17, which C1 already
-uses. C4 lands after C1 and C3, so C4 renumbers to REQ-UI-24 onward.
+IDs across the four fixes (reconciled 2026-10-08): C4 uses REQ-UI-24/25, C2 REQ-UI-26/27 and
+REQ-RUI-08; C2b uses REQ-DRV-43..45 and rows 55-57.
 
 ## 6. Tests that prove it
 
@@ -455,7 +459,7 @@ The indicator view, the seat gate and the About row are checked on the bench (§
 | F6 | every C1 B5'' step's start condition `PERMIT POST pass` becomes "STATE post = PASS" | POST passes by itself |
 
 Unchanged: the STK goldens (`golden_stick.inc`), the self test and its count marker, the G10
-task baseline, the profile's other budgets.
+task baseline (unless Q13 takes C4's `Read ADC` stack row), the profile's other budgets.
 
 ## 7. Bench checks (B5'', C3 rows)
 
@@ -496,8 +500,8 @@ send time and the first poll that shows the result.
 | `components/post/README.md`, `test/`, `tests/manifest.d/post.yaml` | REQ-POST-14..20, POST-034..050 |
 | `components/drive_session/...` (types, table, fingerprint, session, TABLE.md, README, tests) | §4 |
 | `components/drive_adapter/...` | seven tick steps |
-| `components/hmi_ui` (`drive_port`, `topbar_view`, `refusal_view`, `ui_app` seat gate, `about_view`, UI poll order, `post_texts.hpp`) | §2.8-2.10, §4.5 |
-| `components/hmi_rtps_spec` | REFUSED_POST banner words |
+| `components/hmi_ui` (`drive_port`, `topbar_view`, `refusal_view`, `ui_app` seat gate, `about_view`, UI poll order) | §2.8-2.10, §4.5 |
+| `components/hmi_rtps_spec` | REFUSED_POST banner words; the per-check texts (§2.8) |
 | `components/stick` | button bit (Q11) |
 | `components/control/include/control/stick_island.hpp` | hand the reads passed to the pipeline to the Io once per cycle (refactor) |
 | `main/main.cpp` | the `post_gate` atomic as the C1 hook's writer target; the window mailbox; the accumulator (owned by `Read ADC`); the IDF facts port; `I2cSet` from the boot scan; the runner object |
@@ -531,8 +535,9 @@ Then the bench run on board 2 (C1's B5'' and C3's), then the merge to `dev_refac
 
 - **ADC stack.** The accumulator and the mailbox write add to `Read ADC`'s frame before C4
   raises the stack to 6144 B. Worst free today 1188 B against `STK_ADC_MIN_B` 1024 B. The
-  accumulator call is `noinline` with a frame ≤ 64 B, checked by `-fstack-usage` (C4's SU step).
-  If it does not fit, take C4's stack change into C3 (Q13).
+  accumulator call is `noinline` with a frame ≤ 64 B, checked by `-fstack-usage` (C4 §8's SU
+  step, which C3 runs first because it lands before C4). If it does not fit, take C4's stack
+  change into C3 (Q13).
 - **ADC warm-up.** If the continuous ADC still fails a read after its first valid cycle, every
   boot latches `adc.valid` FAIL. B5''-16's five boots and TS-POST-06's nightly boots measure it.
 - **Board 1.** It has no 0x5a: it fails POST until Q6 is decided.
@@ -547,7 +552,7 @@ Then the bench run on board 2 (C1's B5'' and C3's), then the merge to `dev_refac
 - The evaluator's logic, `CHECKS` rows, kinds and order; `OVERALL_TRANSITIONS`.
 - C1's rows other than 1, 2, 18, 31, 32; their order and action order.
 - C1's permit rule, neutral latch and hold-reason order; `stick_drives()`; `GATE_TRIGGERS`.
-- The self test (`main/selftest.cpp`); the G10 task table; XYTwist and DriveCommand on the wire.
+- The self test (`main/selftest.cpp`); the G10 task table (except Q13); XYTwist and DriveCommand on the wire.
 - No allocation on the ADC path; no LVGL call off the UI task; the ADC task never waits on the
   mailbox or `lvgl_mutex`.
 - A release build has no bench verb and no injection.
@@ -581,12 +586,10 @@ Then the bench run on board 2 (C1's B5'' and C3's), then the merge to `dev_refac
     Proposed: yes.
 12. **Q12 Bench evidence.** Accept `POST RERUN` (bench builds only) as the evidence for "stick
     bumped at boot", since a real boot's POST finishes before the remote UI is up?
-13. **Q13 ADC stack.** Take C4's 6144 B stack (and its G10 row) into C3 if the accumulator grows
-    the frame by more than 64 B?
-14. **Q14 C1 notice order.** C1 §2.7 lists "POST not passed" before "not calibrated"; C1 §3.3's
-    hold-reason order is the reverse. C3 follows §3.3 (not calibrated first, so a fresh device
-    says "calibrate first"). Fix C1 §2.7 to match?
-15. **Q15 For C4.** C4 renumbers its REQ-UI-16/17 (clash with C1) and joins C1's permit as one
-    more condition instead of `stick_drives`' multiply; its O1 re-arm then comes from C1's
-    neutral latch.
+13. **Q13 ADC stack.** Take C4's 6144 B stack (C4 §5: the `Read ADC` row of `tasks.json`,
+    stack 4096 → 6144) into C3 if the accumulator grows the frame by more than 64 B? C4's
+    commit 4 then changes only priority and core.
+14. **Q14 C1 notice order.** Resolved in the reconciliation: C1 §2.7 now follows §3.3's order.
+15. **Q15 For C4.** Resolved in the reconciliation: C4 uses REQ-UI-24/25 and joins C1's permit
+    as condition 2; its O1 re-arm is C1's neutral latch.
 16. **Out of scope, noted.** H12's battery "78%" and range "19 mi" placeholders stay.

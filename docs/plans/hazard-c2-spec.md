@@ -123,7 +123,7 @@ calibrated): 3150 mV.
 | SUSPECT | the newest sample was implausible | literal 0 | silent | CHECK | STICK_CHECK |
 | RECOVERING | plausible again, counting good samples | literal 0 | live | CHECK | STICK_CHECK |
 | FAULT | latched | literal 0 | silent | FAULT | STICK_FAULT |
-| CALIBRATING | a calibration run owns the stick; detection paused | literal 0 | silent (today's rule) | CHECK | CALIBRATING (C1, first) |
+| CALIBRATING | a calibration run owns the stick; detection paused | literal 0 | silent (today's rule) | CHECK | CALIBRATING (C1; before the stick reasons) |
 
 - Literal 0 is (+0.0, +0.0, +0.0), not a multiply (C1's REQ-STK-10).
 - "Silent": the stick's key is 0, no flick, the key trigger is released. The remote UI's key
@@ -131,7 +131,8 @@ calibrated): 3150 mV.
 - The stick button bit reaches XYTwist unchanged in every state. It is a separate GPIO, and the
   exit hold runs on it, so the user can still stop (O12).
 - The bars keep showing the mapped position whenever the three means exist (a diagnostic).
-- CHECK is a new `StickHealth` value. C1's `NOT_MONITORED` is no longer written by any build.
+- CHECK is the `StickHealth` value C1 reserves for C2 (C1 §3.2; hold reason STICK_CHECK, already
+  in C1's order). C1's `NOT_MONITORED` is no longer written by any build.
 
 ### 3.2 Inputs (one per ADC cycle)
 
@@ -243,12 +244,13 @@ stateDiagram-v2
 
 ### 3.7 How it composes with C1's permit
 
-C1's permit sends the stick only when: the gate, no calibration, a measured calibration, POST
-PASS, stick health allows, and the neutral latch. After C2, stick health allows only in OK.
-Any other state clears C1's neutral latch. So **every** return to OK (after a glitch, after
-boot, after a recalibration) needs the stick centred for 300 ms before the chair moves. The
-monitor does not repeat that rule; it relies on C1's REQ-STK-12, and STK-078 tests the two
-together.
+C1's permit (C1 §3.1, the one permit of the four fixes) sends the stick only when: the gate,
+C4's verdict OK, no calibration, a measured calibration, POST PASS, stick health not FAULT, stick
+health not CHECK, and the neutral latch. C2 fills conditions 6 and 7; after C2, stick health
+allows only in OK. Any other state clears C1's neutral latch. So **every** return to OK (after
+a glitch, after boot, after a recalibration) needs the stick centred for 300 ms before the chair
+moves. The monitor does not repeat that rule; it relies on C1's REQ-STK-12, and STK-084 tests
+the two together.
 
 H9 lives in the pipeline: a cycle with a missing mean publishes literal 0 with the button bit,
 sets the stick key to 0 (remote key still overrides), releases the key trigger, and calls nothing
@@ -287,7 +289,7 @@ their boot log line `loaded …joystick_cal.txt: …` before flashing C2 (O1).
 | FAULT (3rd bad sample) | output stays 0. **If O6 = yes:** on the next UI tick (≤ 250 ms) the drive table stops as for an exit hold: DISABLE, then C1's re-sends every 250 ms, "MCB did not stop" at 5 s, 1 Hz after. Banner "Joystick fault". Persistent indicator on every screen |
 | MCB obeys the DISABLE | it leaves ENABLED; the Tab5 leaves Drive (M1). Locked screen, the indicator stays |
 | MCB ignores it (G4) | the Tab5 stays on Drive (M1). **The stick output stays 0** (G3). The re-sends continue as C1 specifies |
-| MCB re-enables later (on its own) | the Tab5 enters Drive (M1), output 0 (FAULT), and row 50/51 asks it to stop again |
+| MCB re-enables later (on its own) | the Tab5 enters Drive (M1), output 0 (FAULT), and C2b's row 55/56 asks it to stop again |
 | user releases the stick, fault gone | nothing resumes: FAULT is latched |
 
 ### 5.2 Conflict with G4, flagged
@@ -300,23 +302,34 @@ win**: the stick never drives in FAULT, even if the MCB keeps ENABLED. The user'
 The DISABLE is a request (M1). It is not needed to stop the chair: the literal 0 already does.
 It is there so the MCB does not stay ENABLED behind a broken stick.
 
-### 5.3 C2b: drive-table rows (lane D, after C1's 49 rows)
+### 5.3 C2b: drive-table rows (lane D, after C1's 49 and C3's 54 rows)
 
-Only if O6 (rows 50-51) and O7 (row 52) are approved. Appended, so every row keeps its number.
+Only if O6 (rows 55-56) and O7 (row 57) are approved. Appended after C3's rows 50-54, so every
+row keeps its number.
 
 | # | From | Input | Guard | To | Actions |
 | --- | --- | --- | --- | --- | --- |
-| 50 | UNLOCKING | TICK_STICK_FAULT | `+STICK_FAULT` | EXITING | as row 21 (exit hold: SEND_DISABLE, latch the exit, clear the menu flag, arm the deadline, ARM_STOP_TIMER), then SHOW_STICK_FAULT |
-| 51 | DRIVING | TICK_STICK_FAULT | `+STICK_FAULT` | EXITING | as row 50 |
-| 52 | LOCKED | UNLOCK_HOLD_DONE | `+STICK_FAULT` | LOCKED | SHOW_REFUSAL(STICK_FAULT); row 18 gains `!STICK_FAULT` |
+| 55 | UNLOCKING | TICK_STICK_FAULT | `+STICK_FAULT` | EXITING | as row 21 (exit hold: SEND_DISABLE, latch the exit, clear the menu flag, arm the deadline, ARM_STOP_TIMER), then SHOW_STICK_FAULT |
+| 56 | DRIVING | TICK_STICK_FAULT | `+STICK_FAULT` | EXITING | as row 55 |
+| 57 | LOCKED | UNLOCK_HOLD_DONE | `+RDY +POST_OK +STICK_FAULT` | LOCKED | RING_REST, SHOW_REFUSED_STICK, REFUSAL_FEEDBACK (mirrors rows 19 and 52); row 18 gains `!STICK_FAULT` |
 
 - New Env guard `STICK_FAULT`: the stick-health atomic reads FAULT at the sample. SUSPECT,
   RECOVERING, INIT and CHECK do not set it (transients never stop the MCB).
-- New tick sub-step `TICK_STICK_FAULT`, placed in `TICK_SEQUENCE` right after TICK_FOLLOW, so a
-  relock in FOLLOW wins and the stop timer of rows 44-49 starts on the same tick.
+- New tick sub-step `TICK_STICK_FAULT`, placed in `TICK_SEQUENCE` after TICK_STOP_RESEND:
+  TICK_FOLLOW, TICK_BOOT_STOP, TICK_EXIT_DUE, TICK_STOP_FAULT_DUE, TICK_STOP_RESEND,
+  **TICK_STICK_FAULT**, TICK_WARN_DUE, TICK_GIVEUP_DUE. A relock in FOLLOW still wins, and the
+  stop timer of rows 44-49 is armed on the same tick. After STOP_RESEND, not before it: Env 2 is
+  sampled before rows 55-56 send their DISABLE, so a re-send step after them would see an old
+  last-DISABLE time and send a second DISABLE in the same tick.
+- Row 57's guard is exclusive with row 19 (`!RDY`) and C3's row 52 (`+RDY !POST_OK`): MCB not
+  ready, then POST, then the stick fault, in the permit's order. Row 18 becomes
+  `+RDY +POST_OK !STICK_FAULT`.
 - EXITING and EXIT_REFUSED: no row (already stopping). ASKING: no row (the MCB decides; if it
-  grants, row 1-2 enter Drive and row 50 stops it).
-- The fingerprint changes; the oracle gains the STICK_FAULT dimension (×2).
+  grants, row 1-2 enter Drive and row 55 stops it).
+- Counts after C1 + C3 + C2b: inputs 14 → 15, guards 23 → 24 (env 16 → 17), actions 41 → 43
+  (SHOW_STICK_FAULT, SHOW_REFUSED_STICK), rows 54 → 57; `kMaxActions` stays 12 (row 55 has 6).
+- The fingerprint changes; the oracle gains the STICK_FAULT dimension (×2). C3's "booted"
+  preamble (C3 F1) applies to C2b's goldens. GLD-115 covers all 57 rows.
 
 ## 6. Calibration: the way out and its validation
 
@@ -339,48 +352,50 @@ Only if O6 (rows 50-51) and O7 (row 52) are approved. Appended, so every row kee
 
 Format: the README tables (`tests/reqmatrix.py`). A retired row stays, starts with
 `RETIRED 2026-10-xx, superseded by REQ-...`, lists no tests, and no test may cite it. IDs below
-assume C1 and C4 land as specified (C1: REQ-STK-10..14, REQ-CAL-08, REQ-UI-16..18,
-REQ-DRV-22..34, REQ-DAD-07..10, REQ-RUI-05; C4: REQ-CTL-01..14). C1 and C4 both claim
-REQ-UI-16/17 (O13); C2 skips to REQ-UI-21 to stay clear of either fix.
+assume C1, C3 and C4 land as specified (C1: REQ-STK-10..14, REQ-CAL-08, REQ-UI-16..18,
+REQ-DRV-22..34, REQ-DAD-07..10, REQ-RUI-05; C3: REQ-DRV-35..42, REQ-POST-14..20, REQ-STK-15,
+REQ-UI-19..23, REQ-RUI-06; C4: REQ-CTL-01..14, REQ-UI-24/25, REQ-RUI-07). Reconciled
+2026-10-08: C2 starts at REQ-STK-16, REQ-UI-26, REQ-RUI-08, REQ-DRV-43.
 
 ### 7.1 Retired
 
 | ID | Successor | Why |
 | --- | --- | --- |
-| REQ-STK-05 | REQ-STK-16 | an invalid cycle now publishes neutral (H9) |
-| REQ-STK-07 | REQ-STK-25 | the injection mask grows (NaN, stale, one cycle) |
-| REQ-STK-13 (C1) | REQ-STK-27 | the hold reason gains STICK_CHECK |
-| REQ-STK-14 (C1) | REQ-STK-26 | stick health: only OK allows |
+| REQ-STK-05 | REQ-STK-17 | an invalid cycle now publishes neutral (H9) |
+| REQ-STK-07 | REQ-STK-26 | the injection mask grows (NaN, stale, one cycle) |
+| REQ-STK-14 (C1) | REQ-STK-27 | stick health: only OK allows |
 | REQ-CAL-02 | REQ-CAL-09 | validation gains the upper bound and finiteness |
-| REQ-RUI-05 (C1), the `PERMIT STICK` part only | REQ-RUI-06 | the monitor is now the only writer of stick health |
+| REQ-RUI-05 (C1) | REQ-RUI-08 | `PERMIT STICK` goes: the monitor is now the only writer of stick health. REQ-RUI-08 restates the rest of REQ-RUI-05 |
+| REQ-DRV-36 (C3) | REQ-DRV-45 | (C2b, O6) eight tick sub-steps |
+| REQ-DRV-42 (C3) | REQ-DRV-44 | (C2b, O7) the unlock hold gains the stick-fault refusal |
 
 ### 7.2 New
 
 | ID | Component | Requirement |
 | --- | --- | --- |
-| REQ-STK-15 | stick | A sample is plausible exactly when §2.2 P1-P6 hold, with the high limit `min(HIGH_RAIL_MV, cal max + CAL_OVERSHOOT_MV)` per axis from the calibration in use. 0 mV up to the calibrated min is plausible (D2 residual). The reason is the first failing check in P1..P6 order, axes horizontal, vertical, twist |
-| REQ-STK-16 | stick | A cycle with any mean missing publishes (+0.0, +0.0, +0.0) with the button bit, sets the stick key to 0 (the remote key still overrides), releases the key trigger, and calls nothing else |
-| REQ-STK-17 | stick | The monitor follows `STICK_MONITOR_TRANSITIONS` exactly, one input per cycle chosen as in §3.2; any other combination changes nothing; a state or input outside its enum gives FAULT, latched, reason `INTERNAL` |
-| REQ-STK-18 | stick | The window holds the last `FAULT_WINDOW_CYCLES` samples judged in INIT (after S), OK, SUSPECT and RECOVERING. `F` counts this sample. CALIBRATING and FAULT feed nothing; leaving CALIBRATING empties it |
-| REQ-STK-19 | stick | Outside OK the command is literal 0. Outside OK and RECOVERING the stick key is 0, nothing flicks and the key trigger is released. The button bit reaches XYTwist unchanged in every state, invalid cycles included |
-| REQ-STK-20 | stick | INIT lasts until X and Y have each delivered a window; with none from either by `START_MAX_MS` after the first cycle, FAULT with reason `NO_SAMPLES` |
-| REQ-STK-21 | stick | FAULT is latched. It is left only through a calibration run that ends after a newly validated record was handed over (→ RECOVERING, latch cleared), or by a reset. A run that ends otherwise returns to FAULT |
-| REQ-STK-22 | stick | RECOVERING becomes OK after `RECOVER_CLEAN_CYCLES` consecutive plausible samples. Any state other than OK clears C1's neutral latch, so output resumes only after the stick has read neutral for `kNeutralHold` |
-| REQ-STK-23 | stick | The ADC task alone writes, as lock-free atomics: the state, the stick health, the last reason (kind and axis), the fault reason, counters (suspect onsets, faults, implausible samples per kind; only go up) and `xy_age_max_ms` (largest X/Y sequence age seen since the first window) |
-| REQ-STK-24 | stick | The monitor allocates nothing, logs nothing, takes no lock and makes no indirect call; its step is a `switch` on `enum class` values; every shared value has `is_always_lock_free` asserted |
-| REQ-STK-25 | stick | `STICK <h> <v> <tw> <mask> <seq>`: mV 0..3300, mask 0..255, seq 0..2^32−1, else rejected. Mask bits: 0-2 the read fails (h, v, twist), 3-5 the value is NaN (h, v, twist), 6 X/Y sequences frozen, 7 the faults of bits 0-6 apply to the first cycle that drains this message only. Otherwise an injected sample is fresh each cycle, twist 8 of 8 reads good, each max equal to its value. Expiry and refresh as REQ-STK-07 |
-| REQ-STK-26 | stick | Stick health OK allows output; CHECK, FAULT and NOT_MONITORED withhold. Health is OK exactly in state OK, FAULT in FAULT, CHECK otherwise |
-| REQ-STK-27 | stick | The hold reason is the first of GATE_SHUT, CALIBRATING, NOT_CALIBRATED, POST_NOT_PASSED, STICK_FAULT, STICK_CHECK, CENTRE_FIRST, else NONE |
+| REQ-STK-16 | stick | A sample is plausible exactly when §2.2 P1-P6 hold, with the high limit `min(HIGH_RAIL_MV, cal max + CAL_OVERSHOOT_MV)` per axis from the calibration in use. 0 mV up to the calibrated min is plausible (D2 residual). The reason is the first failing check in P1..P6 order, axes horizontal, vertical, twist |
+| REQ-STK-17 | stick | A cycle with any mean missing publishes (+0.0, +0.0, +0.0) with the button bit, sets the stick key to 0 (the remote key still overrides), releases the key trigger, and calls nothing else |
+| REQ-STK-18 | stick | The monitor follows `STICK_MONITOR_TRANSITIONS` exactly, one input per cycle chosen as in §3.2; any other combination changes nothing; a state or input outside its enum gives FAULT, latched, reason `INTERNAL` |
+| REQ-STK-19 | stick | The window holds the last `FAULT_WINDOW_CYCLES` samples judged in INIT (after S), OK, SUSPECT and RECOVERING. `F` counts this sample. CALIBRATING and FAULT feed nothing; leaving CALIBRATING empties it |
+| REQ-STK-20 | stick | Outside OK the command is literal 0. Outside OK and RECOVERING the stick key is 0, nothing flicks and the key trigger is released. The button bit reaches XYTwist unchanged in every monitor state, invalid cycles included (before POST pass, C3's REQ-STK-15 applies if C3 Q11 = yes) |
+| REQ-STK-21 | stick | INIT lasts until X and Y have each delivered a window; with none from either by `START_MAX_MS` after the first cycle, FAULT with reason `NO_SAMPLES` |
+| REQ-STK-22 | stick | FAULT is latched. It is left only through a calibration run that ends after a newly validated record was handed over (→ RECOVERING, latch cleared), or by a reset. A run that ends otherwise returns to FAULT |
+| REQ-STK-23 | stick | RECOVERING becomes OK after `RECOVER_CLEAN_CYCLES` consecutive plausible samples. Any state other than OK clears C1's neutral latch, so output resumes only after the stick has read neutral for `kNeutralHold` |
+| REQ-STK-24 | stick | The ADC task alone writes, as lock-free atomics: the state, the stick health, the last reason (kind and axis), the fault reason, counters (suspect onsets, faults, implausible samples per kind; only go up) and `xy_age_max_ms` (largest X/Y sequence age seen since the first window) |
+| REQ-STK-25 | stick | The monitor allocates nothing, logs nothing, takes no lock and makes no indirect call; its step is a `switch` on `enum class` values; every shared value has `is_always_lock_free` asserted |
+| REQ-STK-26 | stick | `STICK <h> <v> <tw> <mask> <seq>`: mV 0..3300, mask 0..255, seq 0..2^32−1, else rejected. Mask bits: 0-2 the read fails (h, v, twist), 3-5 the value is NaN (h, v, twist), 6 X/Y sequences frozen, 7 the faults of bits 0-6 apply to the first cycle that drains this message only. Otherwise an injected sample is fresh each cycle, twist 8 of 8 reads good, each max equal to its value. Expiry and refresh as REQ-STK-07 |
+| REQ-STK-27 | stick | Stick health OK allows output; CHECK, FAULT and NOT_MONITORED withhold. Health is OK exactly in state OK, FAULT in FAULT, CHECK otherwise |
 | REQ-CTL-15 | control | Each cycle the island reads both X/Y windows (mean, max, sequence) in one call, the twist's reads (mean, max, count), samples `calibrating` once, steps the monitor once, then runs the pipeline with the same `calibrating`. On valid and invalid cycles alike |
 | REQ-CTL-16 | control | The vendored `ContinuousAdc` keeps espp's mean per window and adds, per channel, the window's largest conversion in mV and a `uint32` sequence that advances only for a window holding at least one conversion of that channel. Its `README.md` lists every change from espp |
 | REQ-CAL-09 | joystick_cal | A record is valid exactly when all nine numbers are finite and, per axis, min ≥ 0, centre − min ≥ `kFullTravelMv`, max − centre ≥ `kFullTravelMv`, and max + `CAL_OVERSHOOT_MV` ≤ `HIGH_RAIL_MV`. Boot uses only a valid saved record; a run hands over only a valid record |
 | REQ-CAL-10 | joystick_cal | A generation counter (lock-free atomic) goes up by 1 each time a validated record is handed to the ADC task, and at no other time |
-| REQ-DRV-35 | drive_session | (O6) On a tick, UNLOCKING or DRIVING with STICK_FAULT stops as the exit hold does and shows the STICK_FAULT banner (rows 50-51) |
-| REQ-DRV-36 | drive_session | (O7) The unlock hold with STICK_FAULT sends nothing and shows the refusal (row 52) |
+| REQ-DRV-43 | drive_session | (O6) On a tick, UNLOCKING or DRIVING with STICK_FAULT stops as the exit hold does and shows the STICK_FAULT banner (rows 55-56) |
+| REQ-DRV-44 | drive_session | (O7) A completed unlock hold in LOCKED asks for ENABLE and arms the warn and give-up deadlines when the MCB is ready, POST passed and the stick is not in FAULT (row 18); refuses on the spot when the MCB is not ready (row 19); refuses with REFUSED_POST when POST has not passed (row 52); with the stick in FAULT it sends nothing, the ring rests and the stick-fault refusal shows (row 57). In ASKING it does nothing (row 20) |
+| REQ-DRV-45 | drive_session | (O6) A tick decides TICK_FOLLOW on the Env at its start, then TICK_BOOT_STOP, TICK_EXIT_DUE, TICK_STOP_FAULT_DUE, TICK_STOP_RESEND, TICK_STICK_FAULT, TICK_WARN_DUE, TICK_GIVEUP_DUE, in that order, on one Env sampled after TICK_FOLLOW's actions |
 | REQ-DAD-11 | drive_adapter | The Env's STICK_FAULT is the stick-health atomic read at the sample |
-| REQ-UI-21 | hmi_ui | While stick health is FAULT, C3's persistent fault indicator shows "Joystick fault" on every screen, and the Joystick screen names the reason in words |
-| REQ-UI-22 | hmi_ui | The UI task logs each change of the stick state once, with the reason and the counters; the ADC task logs nothing |
-| REQ-RUI-06 | remote_ui | Bench builds only: `STATE` adds the stick state, reason, fault reason, counters and `xy_age_max_ms`; `PERMIT STICK` is removed; a release ELF has none of these symbols |
+| REQ-UI-26 | hmi_ui | While stick health is FAULT, C3's persistent fault indicator shows C2's FAULT text (O11) on every screen but Boot, below every POST state (C3 §2.8), and the Joystick screen names the reason in words |
+| REQ-UI-27 | hmi_ui | The UI task logs each change of the stick state once, with the reason and the counters; the ADC task logs nothing |
+| REQ-RUI-08 | remote_ui | Bench builds only (`CONFIG_HMI_BENCH_STICK_INJECT`): `STATE`, `PERMIT POST` and `CAL UNSAVED` as REQ-RUI-05 said; `STATE` adds the stick state, reason, fault reason, counters and `xy_age_max_ms`; `PERMIT STICK` is gone; `STALL CADC <ms>` only if O14 = yes; a release ELF has none of these symbols |
 
 ## 8. Tests (written from this spec)
 
@@ -396,7 +411,7 @@ No expected value is generated from the new code (CORE never-list). New cases jo
 | STK-071 | table invariants | one row per listed combination; no two rows match one combination; every non-FAULT state has a row leaving it; FAULT is left only by CAL_START; LATCH only on rows into FAULT; UNLATCH only on row 24 |
 | STK-072 | corrupted state 99 and input 99 | FAULT, latched, reason `INTERNAL` |
 
-### 8.2 Classification (REQ-STK-15)
+### 8.2 Classification (REQ-STK-16)
 
 Board-2 calibration unless stated. "OK" = plausible.
 
@@ -412,7 +427,7 @@ Board-2 calibration unless stated. "OK" = plausible.
 | STK-080 | X sequence unchanged 299 ms then 300 ms (Y fresh); same for Y; a change resets; 2^32−1 → 0 counts as a change | OK, `STALE` H; same for V; OK; OK |
 | STK-081 | two failures at once (missing V and HIGH twist) | reason `MISSING` V (order) |
 
-### 8.3 Behaviour (REQ-STK-16..27), on 35 ms fake cycles
+### 8.3 Behaviour (REQ-STK-17..27), on 35 ms fake cycles
 
 | ID | Case | Expected |
 | --- | --- | --- |
@@ -435,10 +450,10 @@ Board-2 calibration unless stated. "OK" = plausible.
 | STK-098 | **rail while driving**: forward held, then horizontal 3300 mV for 1 s, then centred | deflected before; +0.0 from the first rail cycle; FAULT on the 3rd; 0 after centring (latched) |
 | STK-099 | counters and reasons over a scripted mix | each counter equals the scripted count; last reason and fault reason as scripted; counters never go down |
 | STK-100 | 10,000 cycles of monitor + pipeline under the armed allocation guard | 0 allocations (TS-DET-08) |
-| STK-101 | hold reason over all combinations including STICK_CHECK | first in REQ-STK-27 order |
+| STK-101 | hold reason with the monitor writing stick health: each monitor state with each other permit condition | first in C1's REQ-STK-13 order (STICK_FAULT in FAULT, STICK_CHECK in INIT, SUSPECT, RECOVERING, CALIBRATING behind CALIBRATING) |
 | STK-102 | health per state | OK only in OK; FAULT in FAULT; CHECK otherwise; NOT_MONITORED withholds |
-| STK-103 | injection: mask bits 3-5 (NaN), 6 (stale: sequences frozen while set), 7 (one cycle) | as REQ-STK-25; with bit 7 the second cycle draining the same message is plausible |
-| STK-104 | hostile `STICK` arguments with the new range (mask 255 accepted, 256 rejected, plus TS-UNIT-07's set) | as REQ-STK-25 |
+| STK-103 | injection: mask bits 3-5 (NaN), 6 (stale: sequences frozen while set), 7 (one cycle) | as REQ-STK-26; with bit 7 the second cycle draining the same message is plausible |
+| STK-104 | hostile `STICK` arguments with the new range (mask 255 accepted, 256 rejected, plus TS-UNIT-07's set) | as REQ-STK-26 |
 
 ### 8.4 Calibration and island
 
@@ -456,26 +471,30 @@ Board-2 calibration unless stated. "OK" = plausible.
 
 | ID | Case | Expected |
 | --- | --- | --- |
-| DRV-120 | oracle with the STICK_FAULT dimension | rows 50-52 or no change |
-| DSO-020 | rows 50-51 carry row 21's actions then SHOW_STICK_FAULT; `TICK_SEQUENCE` has TICK_STICK_FAULT second; row 18 reads `!STICK_FAULT` | as written |
-| GLD-120 | DRIVING; stick FAULT; tick | `P(D), N:STOPPING, B:STICK_FAULT`; MCB IDLE; tick: `L, lock(1), gate, P(D)` |
-| GLD-121 | DRIVING; stick FAULT; MCB stays ENABLED; ticks to 7 s | as C1's GLD-105 (re-sends, MCB_DID_NOT_STOP at 5 s), never `L` |
-| GLD-122 | LOCKED; stick FAULT; unlock hold | refusal STICK_FAULT, no `P` |
+| DRV-101..117 (updated) | by-input oracle with the STICK_FAULT dimension | the table's row or no change |
+| DRV-118 | TICK_STICK_FAULT by input | rows 55-56 or no change |
+| DRV-116 (updated) | a tick runs eight sub-steps in order on two Envs | a stick FAULT tick sends exactly one DISABLE |
+| DSO-001, 004, 005, 006, 012, 018 (updated) | sizes (§5.3 counts), invariants, fingerprint, `TICK_SEQUENCE` | the new values |
+| DSO-024 | rows 55-56 carry row 21's actions then SHOW_STICK_FAULT; TICK_STICK_FAULT follows TICK_STOP_RESEND; row 18 reads `!STICK_FAULT`; row 57's guard is exclusive with rows 19 and 52 | as written |
+| GLD-126 | booted; DRIVING; stick FAULT; tick; MCB IDLE; tick | 1st tick `P(D), N:STOPPING, B:STICK_FAULT`; 2nd tick C1's relock from EXITING (as GLD-107: `menu(0), ring_rest, L, lock(1), gate, P(D), N:NONE`, no banner) |
+| GLD-127 | booted; DRIVING; stick FAULT; MCB stays ENABLED; ticks to 7 s | as C1's GLD-105 (re-sends, MCB_DID_NOT_STOP at 5 s), never `L` |
+| GLD-128 | booted; LOCKED; stick FAULT; unlock hold | `ring_rest`, the stick-fault refusal; no `P` |
+| GLD-115 (updated) | scenarios and seeded walks with the stick-fault step kind | all 57 rows taken |
 
 ### 8.6 Existing tests and data that change (owner approval, each)
 
 | # | What | Why |
 | --- | --- | --- |
-| E1 | `golden_stick.inc` is **not edited**. STK-001/002 replay it with health OK. The 8 invalid rows (1869-1875, 1877) now expect: published, +0.0 ×3, key 0, bars not set. All other rows stay bit-exact (C1's E9 exceptions still apply) | REQ-STK-16 |
+| E1 | `golden_stick.inc` is **not edited**. STK-001/002 replay it with health OK. The 8 invalid rows (1869-1875, 1877) now expect: published, +0.0 ×3, key 0, bars not set. All other rows stay bit-exact (C1's E9 exceptions still apply) | REQ-STK-17 |
 | E2 | 73 golden rows carry a read above the proposed limits (46 grid, 24 sweep, the 3 `SHORT_*` rows). In the pipeline replay they stay as frozen; through the monitor they would be 0. STK-098 covers that path. Numbers for HIGH 3150 / overshoot 100; they move if O1 moves | the frozen table pins the mapping, not the monitor |
 | E3 | STK-005, STK-015 retired (successor STK-095) | H9 fixed |
 | E4 | STK-010, 011, 012, 014: assertions unchanged; names change from "today …" to "RESIDUAL (D2) …" | the low rail stays a residual |
 | E5 | STK-013: assertion unchanged (the mapping still clamps); name says the monitor withholds it (STK-098) | |
 | E6 | STK-049's last part (a failed read publishes nothing) now expects a neutral publish | H9 |
-| E7 | STK-041 (mask 8 rejected) and STK-046 (masks 0..7) follow REQ-STK-25 | |
+| E7 | STK-041 (mask 8 rejected) and STK-046 (masks 0..7) follow REQ-STK-26 | |
 | E8 | CAL-013, CAL-107 retired (successor CAL-410); CAL-011, 012, 106, 015, 016 call `valid()` (same expectations) | REQ-CAL-09 |
-| E9 | C1's STK-066 and STK-067 replaced by STK-101 and STK-102; C1's `PERMIT STICK` verb and bench step B5''-12 removed (C2's rows replace it) | the monitor is the only writer |
-| E10 | self test: three new checks (`joy.health`, `joy.bad_samples`, `joy.xy_age_max`); the B2 count marker and the B3 baseline IDs move (declared) | observability |
+| E9 | C1's STK-067 replaced by STK-102 (STK-066 stays: C1's hold-reason order already has STICK_CHECK); C1's `PERMIT STICK` verb and bench step B5''-12 removed (C2's rows replace it) | the monitor is the only writer |
+| E10 | self test: three new checks (`joy.health`, `joy.bad_samples`, `joy.xy_age_max`); the B2 count marker moves 57 → 60 (after C4's 54 → 57) and the B3 baseline IDs move (declared) | observability |
 
 ## 9. Bench checks (B5'' C2 rows; scripted verdicts)
 
@@ -560,7 +579,7 @@ check pass. The declared changes are E1-E10, the self-test rows and the fingerpr
 
 - **No allocation, no logging, no lock added.** The monitor is plain inline code on plain values.
   The vendored `ContinuousAdc` read takes its existing `data_mutex_` **once** for both channels
-  (today: twice, once per `get_mv`). Logging happens on the UI task (REQ-UI-22).
+  (today: twice, once per `get_mv`). Logging happens on the UI task (REQ-UI-27).
 - **Frames** (`-fstack-usage`, as C4's SU step): the `Read ADC` invoker frame ≤ 288 B (C4
   allows 256 B; `RawSample` adds about 40 B; this raises C4's bound by 32 B, declared);
   `read_twist_mv` ≤ 256 B (240 B today, plus max and count); each new function on the path
@@ -570,8 +589,8 @@ check pass. The declared changes are E1-E10, the self-test rows and the fingerpr
   50 instructions of monitor, five relaxed atomic stores. Expected well under 10 µs at 360 MHz.
   Measured, not assumed: B3 `time.adc_avg` stays in 34.5-35.5 ms and `time.adc_max` ≤ 40 ms
   (C4's bands), before and after commit 7.
-- **Clock.** The monitor takes `now` as a parameter: C4's injected `uint32` ms clock. Host tests
-  use fake time.
+- **Clock.** The monitor takes `now` as a parameter: the ADC-side injected `uint32` ms clock
+  (C1 §3.4, C4 §3.1). Host tests use fake time.
 - **The `ContinuousAdc` task** is espp's (priority 5, unpinned). Its change (max, sequence) runs
   there, once per window, not on the ADC path.
 
@@ -594,16 +613,16 @@ check pass. The declared changes are E1-E10, the self-test rows and the fingerpr
 | O3 | `XY_STALE_MS` 300, `START_MAX_MS` 1000. | approve; confirm with `joy.xy_age_max` |
 | O4 | Vendor espp's `adc` to get the window max and a sequence (REQ-CTL-16)? Alternatives: an upstream espp PR first (slower), or check only the window means (no "before averaging" for X/Y, and no stale detection at all). | vendor now, offer it upstream |
 | O5 | Twist: all 8 oneshot reads must succeed. Strict, with no partial-failure data. Or allow 1 of 8 to fail? | 8 of 8; loosen only if the soak shows partials |
-| O6 | Stick FAULT while driving: also send DISABLE through the exit-hold path (C2b rows 50-51)? And confirm **G3 wins over G4**: the stick stays at 0 while the MCB stays ENABLED after that stop. | yes, both |
-| O7 | Refuse the unlock hold while the stick is in FAULT (row 52)? | yes |
+| O6 | Stick FAULT while driving: also send DISABLE through the exit-hold path (C2b rows 55-56)? And confirm **G3 wins over G4**: the stick stays at 0 while the MCB stays ENABLED after that stop. | yes, both |
+| O7 | Refuse the unlock hold while the stick is in FAULT (row 57)? | yes |
 | O8 | A single glitch stops the chair until the stick is centred 300 ms (C1's latch clears on any non-OK state). The alternative (resume without re-centring after SUSPECT) breaks "clearing never resumes without neutral". | accept the stop |
 | O9 | The latch is RAM only; a reboot clears it. Persist "stick fault since the last calibration" in flash? | not in C2; revisit with field data |
 | O10 | Stick keys stay live in RECOVERING and when never calibrated (touch also works). | yes |
 | O11 | Texts: "Joystick fault: recalibrate to clear" (FAULT, indicator), "Checking the joystick" (INIT, SUSPECT, RECOVERING). | approve or reword |
 | O12 | The stick button bit passes in every state (separate GPIO; the exit hold needs it). Also ask the MCB team what it does with that bit (add to D3). | yes |
-| O13 | C1's spec and C4's spec both claim REQ-UI-16 and REQ-UI-17. Renumber C4's to 19-20? (C2 uses 21-22.) | renumber C4 |
-| O14 | `ContinuousAdc` starvation (C4 O9): C2 detects it in ≤ 340 ms; it does not prevent it. Pin or raise that task, and add the bench `STALL CADC` verb (C2-16)? | add the verb; decide pinning with C4's measurements |
-| O15 | Bench additions: mask bits 3-7 and `STATE` fields (REQ-STK-25, REQ-RUI-06). | yes |
+| O13 | Resolved in the reconciliation: C4 uses REQ-UI-24/25, C2 REQ-UI-26/27. | — |
+| O14 | `ContinuousAdc` starvation (C4 O9): C2 detects it in ≤ 340 ms; it does not prevent it. Pin or raise that task, and add the bench `STALL CADC` verb (C2-16)? If pinned or raised, its G10 row changes in C4's commit 4 (C4 §5). | add the verb; decide pinning with C4's measurements |
+| O15 | Bench additions: mask bits 3-7 and `STATE` fields (REQ-STK-26, REQ-RUI-08). | yes |
 | O16 | The residual hazard text (§0) for the risk file and the user manual; the EE fix (D2) stays open. | approve the wording |
 
 ## 12. Found while writing this spec
@@ -613,4 +632,4 @@ check pass. The declared changes are E1-E10, the self-test rows and the fingerpr
 | X/Y update about every 128 ms (one `ContinuousAdc` window), while XYTwist goes out every 35 ms: each X/Y value is sent 3-4 times, and the stick lags by up to ~128 ms plus the window's averaging | `main.cpp` StickIsland config (`window_size_bytes = 1024`, 1 kHz × 2) | not C2's to change; a 256 B window would give ~32 ms. Measure with `joy.xy_age_max` |
 | Before the first window, espp's `get_mv` returns 0 mV for X/Y (`values_` starts at 0): for ~128 ms after start the stick maps to full left / full forward | espp `ContinuousAdc::init` | the gate hides it today; C2's INIT holds output and keys |
 | A frozen X/Y looks perfectly still to POST's `STILL_*` checks | `components/post` | C2's stale check covers it once POST and C2 both run |
-| C1 and C4 specs collide on REQ-UI-16/17 | the two spec branches | O13 |
+| C1 and C4 specs collide on REQ-UI-16/17 | the two spec branches | O13; resolved in the reconciliation |

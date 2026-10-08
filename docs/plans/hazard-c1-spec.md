@@ -28,8 +28,8 @@ What changes for the user:
   stick does nothing.
 - A calibration can only be started while locked. The Tab5 never changes screen during one.
 - Every return to Locked sends one DISABLE (H5).
-- Until C3 lands, a normal (non-bench) build cannot drive with the stick: POST has not run
-  (§3.4, open question Q4).
+- C1 and C3 are implemented and merged together (C3 §0): C1's POST hook alone would block the
+  stick in every normal build (§3.2).
 
 What the HMI does in each situation:
 
@@ -152,7 +152,7 @@ goes stale. That is G4's "while the MCB reports ENABLED".
 | 38-41 (refusal banners) | unchanged | |
 
 G1 and G3 are not table guards: they live on the ADC task (§3), because they need the stick's
-position every 33 ms. G2 is already in the table: `DRIVING_OK` and `MCB_READY` need
+position every ADC cycle (33 ms wait, 35 ms measured). G2 is already in the table: `DRIVING_OK` and `MCB_READY` need
 `LINK_CONNECTED`, and CONNECTED means a MibStatus less than 2 s old (rtps_comms). §2.9 makes the
 sample exact.
 
@@ -192,7 +192,7 @@ It clears at the relock; the fault stays in the log (Q7).
   change the re-send schedule: the next re-send is the retry.
 - The Drive notice: after every input and tick, the adapter combines `stop_notice` with the
   stick's hold reason (§3.3) and calls `view.show_notice(n)` when it changed. Order: MCB did
-  not stop > Stopping > POST not passed > stick fault > not calibrated > centre the stick > none.
+  not stop > Stopping > the hold reason in §3.3's order > none.
 
 ### 2.8 Calibration and G5
 
@@ -228,46 +228,68 @@ guard).
 ### 3.1 The rule
 
 Every ADC cycle, the command is the mounted position × the speed scale only when all of these
-hold; otherwise it is a literal (+0.0, +0.0, +0.0), not a multiply:
+hold; otherwise it is a literal (+0.0, +0.0, +0.0), not a multiply. This is the **one** permit
+for all four fixes: C3, C4 and C2 fill their conditions here and add no other gate. The order
+is the hold-reason order (§3.3).
 
 1. the gate (`stick_drives`, unchanged);
-2. no calibration running;
-3. a measured calibration is in use (G5): loaded valid from flash, or completed this boot (Q5);
-4. POST gate is PASS (G3, filled by C3);
-5. stick health is not FAULT (G3, filled by C2);
-6. the neutral latch is set (G1).
+2. the motion guard's verdict is OK (G2 on the ADC side, filled by C4: UI heartbeat, link,
+   MibStatus age, MCB state);
+3. no calibration running;
+4. a measured calibration is in use (G5): loaded valid from flash, or completed this boot (Q5);
+5. POST gate is PASS (G3, filled by C3);
+6. stick health is not FAULT (G3, filled by C2);
+7. stick health is not CHECK (filled by C2: the monitor is starting, or a sample was
+   implausible and it has not recovered);
+8. the neutral latch is set (G1).
 
 The neutral latch: set once every valid cycle for at least `kNeutralHold` (300 ms, by the ADC
 task's clock) had x = y = twist = 0.0 after mapping, that is inside the stick's own dead zones
 (XY radius 0.10, twist ± 60 mV, REQ-STK-08). A NaN is never neutral. A non-neutral or invalid
-cycle before 300 ms restarts the wait. Any of 1-5 failing clears the latch. So **every** change
+cycle before 300 ms restarts the wait. Any of 1-7 failing clears the latch. So **every** change
 from "held" to "allowed" (entering Drive, a menu closed, POST passing, a fault clearing) needs
-the stick centred first. Once set, the latch stays while 1-5 hold. The stick button bit still
+the stick centred first. Once set, the latch stays while 1-7 hold. The stick button bit still
 reaches XYTwist as today (STK-017). Neutral XYTwist keeps flowing while held.
 
 ### 3.2 The G3 hooks before C3 and C2 (flagged, Q4)
 
 | Hook | Type | C1 value until its fix lands | Effect in C1 |
 | --- | --- | --- | --- |
+| Motion guard | the C4 verdict (`OK` or one of C4's reasons) | `OK` (not fitted) | **passes**: until C4, G2 acts through the table only (rows 3-6 shut the gate on the UI tick) |
 | POST gate | `PostGate{NOT_RUN, PENDING, PASS, FAIL}` in an atomic | `NOT_RUN` | **blocks**: no stick output in a normal build until C3 wires POST. Drive notice "Start-up check not run". CS-SAF-03: no motion after a reset until POST passes |
-| Stick health | `StickHealth{NOT_MONITORED, OK, FAULT}` in an atomic | `NOT_MONITORED` | **passes**: no detector exists before C2 (as today; H3 stays open until C2). Logged once at boot: "stick fault detection not fitted (C2)" |
+| Stick health | `StickHealth{NOT_MONITORED, OK, CHECK, FAULT}` in an atomic | `NOT_MONITORED` | **passes**: no detector exists before C2 (as today; H3 stays open until C2). Logged once at boot: "stick fault detection not fitted (C2)". Only C2's monitor writes CHECK |
 
-Only C3 writes the POST gate and only C2 writes stick health. In C1 the only other writer is the
-bench verb `PERMIT` (bench builds only, §5).
+Only C3 writes the POST gate, only C4 the verdict and only C2 stick health. In C1 the only other
+writer is the bench verb `PERMIT` (bench builds only, §5).
 
 ### 3.3 Hold reason
 
-The ADC task stores the first failing condition each cycle in an atomic for the UI:
-`GATE_SHUT`, `CALIBRATING`, `NOT_CALIBRATED`, `POST_NOT_PASSED`, `STICK_FAULT`, `CENTRE_FIRST`,
-or `NONE`. The Drive notice uses it (§2.7). Texts (in `hmi_rtps_spec`, the owner approves the
-words): "MCB did not stop", "Stopping: waiting for the MCB", "Start-up check not run" (C3
-replaces it with the failing check), "Joystick fault", "The joystick must be calibrated first",
-"Centre the joystick to drive" (Q9).
+The ADC task stores the first failing condition each cycle in an atomic for the UI, in §3.1's
+order: `GATE_SHUT`, `MOTION_GUARD`, `CALIBRATING`, `NOT_CALIBRATED`, `POST_NOT_PASSED`,
+`STICK_FAULT`, `STICK_CHECK`, `CENTRE_FIRST`, or `NONE`. The Drive notice uses it (§2.7). This
+is the only hold-reason list; C3, C4 and C2 use it as it stands.
+
+Texts (all in `hmi_rtps_spec`, beside the existing warning texts; the owner approves the words,
+Q9). Each text has one owner spec:
+
+| Notice or hold reason | Text | Owner |
+| --- | --- | --- |
+| stop fault | "MCB did not stop" | C1 |
+| stopping | "Stopping: waiting for the MCB" | C1 |
+| `GATE_SHUT`, `CALIBRATING` | none (the Drive screen is not up, or the calibration screen is) | — |
+| `MOTION_GUARD` | "Waiting for the MCB" | C4 |
+| `NOT_CALIBRATED` | "The joystick must be calibrated first" (G5's words) | C1 |
+| `POST_NOT_PASSED` | "Start-up check not run" for NOT_RUN; the blocking check's text otherwise | C1 (NOT_RUN), C3 §2.8 (the rest) |
+| `STICK_FAULT` | "Joystick fault" until C2; C2's text from then | C2 (O11) |
+| `STICK_CHECK` | "Checking the joystick" | C2 (O11) |
+| `CENTRE_FIRST` | "Centre the joystick to drive" | C1 |
 
 ### 3.4 Where it lives
 
 A pure class `hmi::stick::OutputPermit` (components/stick): inputs, the mounted position, valid
-or not, and `now_us`; out: allowed and the hold reason. `StickPipeline::cycle` asks its Io
+or not, and `now_ms`; out: allowed and the hold reason. `now_ms` is the ADC task's clock: a
+`uint32_t` ms count from one clock function that `main` injects; durations are taken modulo
+2^32. C4's guard and C2's monitor take the same clock (C4 §3.1). `StickPipeline::cycle` asks its Io
 `output_permit(mounted)` where it asks `stick_drives()` today, and sends literal zeros when it is
 false. Main's `AdcStickIo` owns the `OutputPermit` and calls it; `note_cycle(valid = false)`
 restarts the neutral wait.
@@ -318,10 +340,10 @@ Unchanged: REQ-DRV-01, 04, 06, 07, 08, 12-17, 19; REQ-DAD-02..05; REQ-STK-01..03
 | REQ-DAD-09 | drive_adapter | Every DriveCommand publish result is checked; a failure is counted and logged at most once a second, and the re-send schedule does not change |
 | REQ-DAD-10 | drive_adapter | After every input and tick, the Drive notice (§2.7 order) is handed to the port once per change |
 | REQ-STK-10 | stick | When the output permit is withheld, the command is exactly (+0.0, +0.0, +0.0), whatever the position (NaN and negatives included) |
-| REQ-STK-11 | stick | The output permit is the gate AND no calibration AND a measured calibration AND POST PASS AND stick health not FAULT AND the neutral latch |
+| REQ-STK-11 | stick | The output permit is the gate AND the motion guard's verdict OK AND no calibration AND a measured calibration AND POST PASS AND stick health allowing output AND the neutral latch |
 | REQ-STK-12 | stick | The neutral latch sets after ≥ `kNeutralHold` of valid cycles all at x = y = twist = 0.0; a non-neutral, NaN or invalid cycle restarts the wait; any other permit condition failing clears it; once set it stays while they hold |
-| REQ-STK-13 | stick | The hold reason is the first failing condition in the order GATE_SHUT, CALIBRATING, NOT_CALIBRATED, POST_NOT_PASSED, STICK_FAULT, CENTRE_FIRST, else NONE |
-| REQ-STK-14 | stick | POST gate NOT_RUN, PENDING and FAIL withhold output; PASS allows. Stick health FAULT withholds; NOT_MONITORED and OK allow |
+| REQ-STK-13 | stick | The hold reason is the first failing condition in the order GATE_SHUT, MOTION_GUARD, CALIBRATING, NOT_CALIBRATED, POST_NOT_PASSED, STICK_FAULT, STICK_CHECK, CENTRE_FIRST, else NONE |
+| REQ-STK-14 | stick | POST gate NOT_RUN, PENDING and FAIL withhold output; PASS allows. Stick health FAULT (reason STICK_FAULT) and CHECK (reason STICK_CHECK) withhold; NOT_MONITORED and OK allow. The motion guard's verdict allows only OK; until C4 it is always OK |
 | REQ-CAL-08 | joystick_cal | `joystick_cal_measured()` is true when the calibration in use was loaded valid from flash or completed in this boot, false while the compiled-in defaults are in use |
 | REQ-UI-16 | hmi_ui | The calibrate hold applies only while locked, on the Joystick screen, with no menu |
 | REQ-UI-17 | hmi_ui | The Drive screen shows the Drive notice in its own slot, separate from the refusal banner, within 250 ms of a change |
@@ -400,8 +422,8 @@ The walks only check row coverage and invariants; their logs are never frozen.
 | STK-061 | 33 ms cycles, centred from t=0: zero until the first cycle at ≥ 300 ms, the stick's value from then |
 | STK-062 | a non-neutral cycle at 200 ms restarts the wait; a NaN cycle counts as non-neutral |
 | STK-063 | an invalid cycle restarts the wait |
-| STK-064 | each of conditions 1-5 failing for one cycle clears the latch; output 0 until centred 300 ms again |
-| STK-065 | once latched, full deflection keeps its output while 1-5 hold |
+| STK-064 | each of conditions 1-7 failing for one cycle clears the latch; output 0 until centred 300 ms again |
+| STK-065 | once latched, full deflection keeps its output while 1-7 hold |
 | STK-066 | hold reason order over all combinations (REQ-STK-13) |
 | STK-067 | POST gate and stick health values (REQ-STK-14) |
 | CAL-401 | `joystick_cal_measured()`: true after a valid load, true after a completed run (saved or not), false on defaults |
@@ -475,8 +497,8 @@ calibrated max; "centre" = the calibrated centres.
 | `components/drive_adapter/include/drive_adapter.hpp`, README, tests | §2.7, U3 removed |
 | `components/hmi_ui/include/hmi_ui/drive_port.hpp`, `drive_ui.*`, `ui_app.*` | §2.9, calibrate applies (REQ-UI-16), the Drive notice slot and view |
 | `components/hmi_rtps_spec` | the notice texts |
-| `components/stick` | `OutputPermit`, literal zeros, hold reason, the hooks' types |
-| `main/main.cpp`, `main/joystick_cal.*` | `AdcStickIo::output_permit`, the three atomics, `joystick_cal_measured()`, boot log lines |
+| `components/stick` | `OutputPermit`, literal zeros, hold reason, the hooks' types (motion guard verdict, POST gate, stick health) |
+| `main/main.cpp`, `main/joystick_cal.*` | `AdcStickIo::output_permit`, the hook atomics, the ADC clock function, `joystick_cal_measured()`, boot log lines |
 | `components/remote_ui` | `STATE`, `PERMIT`, `CAL UNSAVED` |
 | `tests/host/drive_golden` | GLD-101..116, the filtered log, retire GLD-001/002/004 |
 | `tools/bench/scenario_hazards.py` (or a new `scenario_c1.py`) | B5'' |
@@ -527,7 +549,10 @@ Then the bench run on board 2, then the merge to `dev_refactor`.
 - DriveCommand and XYTwist on the wire; the RTPS spec.
 - A release build contains no bench verb and no injection.
 - Seat path, self-test overlay (H7), POST wiring (C3), staleness on the ADC task (C4) and stick
-  fault detection (C2): out of scope.
+  fault detection (C2): out of scope. C1 only provides their hooks (§3.2).
+
+Reconciled with C3, C4 and C2 on 2026-10-08: see `hazard-fixes.md`, Reconciliation log, and the
+owner's decision sheet `hazard-decisions.md`.
 
 ## 8. Open questions for the owner
 
@@ -538,9 +563,9 @@ Then the bench run on board 2, then the merge to `dev_refactor`.
 3. **Q3 Stop and link loss.** A stale link ends the user's stop (relock, one DISABLE). If the
    link returns with the MCB still ENABLED, the HMI re-enters Drive (M1) with no stop warning.
    The v2 alternative kept re-sending through the link loss. §9 is silent. Proposed: end it.
-4. **Q4 Hooks before C3/C2.** POST hook NOT_RUN blocks: a normal build cannot drive with the
-   stick between C1 and C3. Stick hook NOT_MONITORED passes until C2 (no detector exists). Agree
-   with both?
+4. **Q4 Hooks before C4/C2.** C1 and C3 merge together, so the POST hook's NOT_RUN block never
+   ships alone. The motion-guard hook passes until C4, and the stick hook NOT_MONITORED passes
+   until C2 (no detector exists). Agree?
 5. **Q5 Calibration.** Does a calibration completed this boot but not saved to flash count as
    calibrated? Proposed: yes. Should the unlock hold refuse to send ENABLE when not calibrated
    or before POST? §9 does not say; proposed: not in C1.
