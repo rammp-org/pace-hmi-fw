@@ -45,6 +45,7 @@ idf_component_register(SRC_DIRS "."
                          fw_core
                          drive_adapter
                          drive_session
+                         drive_ui
                          ota_parse
                        EMBED_TXTFILES click.wav)
 

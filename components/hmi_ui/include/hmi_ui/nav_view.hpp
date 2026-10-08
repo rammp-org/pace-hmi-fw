@@ -7,8 +7,8 @@
 
 #include "lvgl.h"
 
-#include "hmi_ui/fn.hpp"
-#include "hmi_ui/shared_subjects.hpp"
+#include "drive_ui/fn.hpp"
+#include "drive_ui/shared_subjects.hpp"
 
 namespace hmi::ui {
 

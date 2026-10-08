@@ -1,14 +1,14 @@
 // DriveUi: the padlock and the advance to Drive (moved from main/frag_lock.inc and app_main's
 // lock wiring); the port that performs the drive session's actions is drive_port.hpp.
 
-#include "hmi_ui/drive_ui.hpp"
+#include "drive_ui/drive_ui.hpp"
 
 #include "ui.h"
 
 #include "drive_session_table.hpp"
-#include "hmi_ui/drive_port.hpp"
-#include "hmi_ui/hold_gesture.hpp"
-#include "hmi_ui/link_state.hpp"
+#include "drive_ui/drive_port.hpp"
+#include "drive_ui/hold_range.hpp"
+#include "drive_ui/link_state.hpp"
 
 // Locking and unlocking the HMI are the drive session's actions, performed by the drive
 // adapter (components/drive_adapter, through DrivePort) in the order set_locked() used to

@@ -6,8 +6,8 @@
 
 #include "lvgl.h"
 
+#include "drive_ui/fn.hpp"
 #include "hmi_ui/drive_band_view.hpp"
-#include "hmi_ui/fn.hpp"
 #include "hmi_ui/refusal_view.hpp"
 #include "hmi_ui/status_band_view.hpp"
 #include "messages/joystick_message.hpp"

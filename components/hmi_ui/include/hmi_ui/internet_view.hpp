@@ -9,8 +9,8 @@
 
 #include "lvgl.h"
 
+#include "drive_ui/link_state.hpp"
 #include "hmi_format/topbar.hpp"
-#include "hmi_ui/link_state.hpp"
 
 namespace hmi::ui {
 

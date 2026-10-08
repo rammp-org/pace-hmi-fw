@@ -22,7 +22,7 @@ the top of `ratchet.py`.
 | `static_state` | non-const function-local statics and static data members (CS-CMP-03) |
 | `mutable_globals` | mutable namespace-scope variables (CS-CMP-03) |
 | `locks` | mutexes, lock guards, semaphores (CS-OWN-08); allowed in the fw_core channel helpers and as the espp Task callback's own `(std::mutex &m, std::condition_variable &cv)` with `std::unique_lock<std::mutex> lock(m); cv.wait_for(lock, …)` (exact idiom) |
-| `lv_outside_ui` | `lv_*` outside a UI path: `components/hmi_ui/`, `components/ui/`, the main unit, `log_view`, `joystick_cal`, the frozen `main/{about,internet,update}_ui.{cpp,hpp}`, `components/remote_ui/src/remote_ui.cpp` and `components/remote_ui/include/remote_ui.hpp` (moved from `main/remote_ui.*` with their status; no other file there), and legacy `main/sample_ui_*` |
+| `lv_outside_ui` | `lv_*` outside a UI path: `components/hmi_ui/`, `components/drive_ui/` (owner, 2026-10-08), `components/ui/`, the main unit, `log_view`, `joystick_cal`, the frozen `main/{about,internet,update}_ui.{cpp,hpp}`, `components/remote_ui/src/remote_ui.cpp` and `components/remote_ui/include/remote_ui.hpp` (moved from `main/remote_ui.*` with their status; no other file there), and legacy `main/sample_ui_*` |
 | `if_config` | `#if…CONFIG_` forbidden, except in a component's `include/**/config.hpp` (CS-TYP-05) |
 | others | `std_thread`, `xtaskcreate`, `vtaskdelay`, `sleep_this_thread`, `esp_timer_create`, `log_direct`, `heap_raw`, `typedef`, `assert`, `esp_error_check`, `c_cast`: forbidden |
 

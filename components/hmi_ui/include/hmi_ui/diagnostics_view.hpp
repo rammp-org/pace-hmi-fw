@@ -5,7 +5,7 @@
 
 #include "lvgl.h"
 
-#include "hmi_ui/fn.hpp"
+#include "drive_ui/fn.hpp"
 #include "hmi_ui/nav_port.hpp"
 #include "messages/joystick_message.hpp"
 

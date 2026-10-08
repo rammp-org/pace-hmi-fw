@@ -22,12 +22,13 @@ public:
   void init_button();
 
   /// int: the calibrated X, Y and twist, percent.
-  [[nodiscard]] lv_subject_t *x() { return &x_; }
-  [[nodiscard]] lv_subject_t *y() { return &y_; }
-  [[nodiscard]] lv_subject_t *twist() { return &twist_; }
-  /// int: the button's press count (debounced), and its level (every edge).
-  [[nodiscard]] lv_subject_t *count() { return &count_; }
-  [[nodiscard]] lv_subject_t *pressed() { return &pressed_; }
+  [[nodiscard]] constexpr lv_subject_t *x() { return &x_; }
+  [[nodiscard]] constexpr lv_subject_t *y() { return &y_; }
+  [[nodiscard]] constexpr lv_subject_t *twist() { return &twist_; }
+  /// int: the button's press count (debounced), and its level (every edge). Constant, so
+  /// StickButton's Config takes them at compile time (UiApp is constinit).
+  [[nodiscard]] constexpr lv_subject_t *count() { return &count_; }
+  [[nodiscard]] constexpr lv_subject_t *pressed() { return &pressed_; }
 
 private:
   // The count's colour: there's no built-in binding for a style property. UI task, or the

@@ -10,7 +10,7 @@
 
 #include "settings_spec.hpp"
 
-#include "hmi_ui/fn.hpp"
+#include "drive_ui/fn.hpp"
 
 namespace hmi::ui {
 

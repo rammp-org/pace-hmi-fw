@@ -32,6 +32,19 @@
       "reqs": [],
       "priv_reqs": []
     },
+    "drive_ui": {
+      "reqs": [
+        "drive_adapter",
+        "drive_session",
+        "lvgl__lvgl",
+        "rammp_rtps_messages",
+        "stick"
+      ],
+      "priv_reqs": [
+        "esp_timer",
+        "ui"
+      ]
+    },
     "feedback": {
       "reqs": [
         "espp__base_component",
@@ -69,8 +82,8 @@
     },
     "hmi_ui": {
       "reqs": [
-        "drive_adapter",
         "drive_session",
+        "drive_ui",
         "esp_driver_ppa",
         "espp__logger",
         "espp__task",
@@ -117,6 +130,7 @@
         "control",
         "drive_adapter",
         "drive_session",
+        "drive_ui",
         "esp_app_format",
         "esp_driver_ppa",
         "esp_eth",

@@ -1,4 +1,6 @@
 # hmi_ui: the repo's config, unchanged. Not a 60-line safety component (CS-FIL-01): the views
-# show the chair's state and faults but command nothing (docs/plans/refactor.md §2.3, hmi_ui
-# row). Inheriting rather than copying keeps the naming and the 120-line limit in one place.
+# show the chair's state and faults but command no driving. The DriveCommand, the stick gate and
+# the stick button's edges are components/drive_ui's (60-line limit), split out 2026-10-08; the
+# seat command path still here is parked for the owner (README). Inheriting rather than copying
+# keeps the naming and the 120-line limit in one place.
 InheritParentConfig: true

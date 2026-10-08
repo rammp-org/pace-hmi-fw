@@ -9,7 +9,7 @@
 // this code as it is over a recording Ui. What `Ui` provides is listed on DrivePort.
 //
 // Included where the one DriveAdapter is made (main) and by the goldens. It needs `ui` (the
-// export's screens and helpers) and `esp_timer`, which hmi_ui requires privately: an includer
+// export's screens and helpers) and `esp_timer`, which drive_ui requires privately: an includer
 // requires them too.
 
 #include <array>
@@ -25,9 +25,9 @@
 
 #include "drive_adapter.hpp"
 #include "drive_session.hpp"
-#include "hmi_ui/hold_gesture.hpp"
-#include "hmi_ui/link_state.hpp"
-#include "hmi_ui/refused.hpp"
+#include "drive_ui/hold_range.hpp"
+#include "drive_ui/link_state.hpp"
+#include "drive_ui/refused.hpp"
 
 namespace hmi::ui {
 

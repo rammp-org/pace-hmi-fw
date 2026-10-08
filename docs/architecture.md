@@ -166,6 +166,7 @@ flowchart LR
   c_control["control"]:::safety
   c_drive_adapter["drive_adapter"]:::safety
   c_drive_session["drive_session"]:::safety
+  c_drive_ui["drive_ui"]:::safety
   c_feedback["feedback"]
   c_fw_core["fw_core"]
   c_hmi_format["hmi_format"]
@@ -198,13 +199,20 @@ flowchart LR
   c_control -.-> g_espp
   c_drive_adapter -.-> c_drive_session
   c_drive_adapter -.-> g_espp
+  c_drive_ui -.-> c_drive_adapter
+  c_drive_ui -.-> c_drive_session
+  c_drive_ui -.-> c_rammp_rtps_messages
+  c_drive_ui -.-> c_stick
+  c_drive_ui -.-> c_ui
+  c_drive_ui -.-> g_ESP_IDF
+  c_drive_ui -.-> g_LVGL
   c_feedback -.-> g_ESP_IDF
   c_feedback -.-> g_espp
   c_fw_core -.-> g_ESP_IDF
   c_fw_core -.-> g_espp
   c_hmi_rtps_spec -.-> c_rammp_rtps_messages
-  c_hmi_ui -.-> c_drive_adapter
   c_hmi_ui -.-> c_drive_session
+  c_hmi_ui -.-> c_drive_ui
   c_hmi_ui -.-> c_hmi_format
   c_hmi_ui -.-> c_hmi_models
   c_hmi_ui -.-> c_hmi_rtps_spec
@@ -226,6 +234,7 @@ flowchart LR
   c_main -.-> c_control
   c_main -.-> c_drive_adapter
   c_main -.-> c_drive_session
+  c_main -.-> c_drive_ui
   c_main -.-> c_feedback
   c_main -.-> c_fw_core
   c_main -.-> c_hmi_format

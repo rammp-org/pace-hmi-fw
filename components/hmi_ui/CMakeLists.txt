@@ -9,7 +9,6 @@ idf_component_register(SRCS "src/about_view.cpp"
                             "src/diagnostics_view.cpp"
                             "src/display_flip.cpp"
                             "src/drive_band_view.cpp"
-                            "src/drive_ui.cpp"
                             "src/fps_meter.cpp"
                             "src/hold_gesture.cpp"
                             "src/internet_view.cpp"
@@ -26,7 +25,6 @@ idf_component_register(SRCS "src/about_view.cpp"
                             "src/setting_subjects.cpp"
                             "src/settings_view.cpp"
                             "src/status_band_view.cpp"
-                            "src/stick_button.cpp"
                             "src/topbar_view.cpp"
                             "src/ui_app.cpp"
                             "src/ui_app_build.cpp"
@@ -36,8 +34,8 @@ idf_component_register(SRCS "src/about_view.cpp"
                             "src/update_view.cpp"
                             "src/widget_tree.cpp"
                        INCLUDE_DIRS "include"
-                       REQUIRES drive_adapter
-                                drive_session
+                       REQUIRES drive_session
+                                drive_ui
                                 esp_driver_ppa
                                 hmi_format
                                 hmi_models
