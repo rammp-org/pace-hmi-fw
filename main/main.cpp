@@ -186,8 +186,7 @@ public:
                  auto vert_mv = adc_.get_mv(channels_[0]);  // ADC1_CH0 (GPIO16)
                  auto horiz_mv = adc_.get_mv(channels_[1]); // ADC1_CH1 (GPIO17)
                  // twist pot on ADC2 (GPIO52), sampled oneshot and averaged
-                 const std::optional<float> twist_mv =
-                     read_twist_mv(*twist_adc_, kCycle.twist_channel, kCycle.twist_oversample);
+                 const std::optional<float> twist_mv = read_twist_mv(*twist_adc_);
 
                  // raw mV -> calibrated stick -> the keypad key, the bars and XYTwist:
                  // hmi::stick::StickPipeline (components/stick), fed through Io. Only a
@@ -233,6 +232,35 @@ public:
   }
 
 private:
+  // The twist pot's reading for the Read ADC task: kCycle.twist_oversample oneshot reads
+  // on ADC2, averaged; nullopt if none succeeded.
+  //
+  // Out of line on purpose (noinline). OneshotAdc::read_mv brings espp Logger's
+  // error paths with it, and once GCC also inlined Logger::get_time there (an fmt
+  // buffer of ~500 B) the ADC task's own frame grew from 256 to 736 B, and every
+  // call it makes (RTPS publish, the bars' observers) sat that much deeper: the
+  // bench's mem.stk_adc fell ~500 B (B3, image a6ff6de, 2026-10-07). Here that cold
+  // path holds stack only while the twist is read. Which way the inliner goes
+  // depends on the rest of the unit, so this pins it instead of relying on it. The
+  // channel and the count are kCycle's constants, as they were the arguments' (GCC
+  // cloned the free function for them; with them as runtime values the frame was 16 B
+  // larger).
+  [[gnu::noinline]] static std::optional<float> read_twist_mv(espp::OneshotAdc &twist_adc) {
+    std::optional<float> twist_mv;
+    float sum = 0.0f;
+    int reads = 0;
+    for (int i = 0; i < kCycle.twist_oversample; ++i) {
+      if (auto mv = twist_adc.read_mv(kCycle.twist_channel)) {
+        sum += static_cast<float>(*mv);
+        ++reads;
+      }
+    }
+    if (reads > 0) {
+      twist_mv = sum / static_cast<float>(reads);
+    }
+    return twist_mv;
+  }
+
   std::vector<espp::AdcConfig> channels_;
   espp::SimpleLowpassFilter::Config twist_lowpass_config_;
   espp::ContinuousAdc adc_;
