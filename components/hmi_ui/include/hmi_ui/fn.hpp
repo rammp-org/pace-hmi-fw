@@ -16,24 +16,19 @@ template <class Signature> class Fn;
 ///        no allocation, no captures. Calling an empty Fn calls a null function, as a null
 ///        function pointer would.
 ///
-/// A plain function converts implicitly, so a Config written with function pointers and
-/// captureless lambdas reads as it did:
 /// @code
-///   ButtonGrid grid{.off_bottom = [] { ... }};
-///   ButtonGrid grid{.off_bottom = Fn<void()>::bind<&NavView::to_key>(&nav)};
+///   ButtonGrid grid{.off_bottom = Fn<void()>{[] { ... }}};
+///   ButtonGrid grid{.off_bottom = bind<&NavView::to_key>(&nav)};
 /// @endcode
 template <class R, class... Args> class Fn<R(Args...)> {
 public:
   using Plain = R (*)(Args...);
 
   constexpr Fn() noexcept = default;
-  /// Empty, as a null function pointer. Implicit on purpose (explicit(false)), like a pointer's.
-  explicit(false) constexpr Fn(std::nullptr_t) noexcept {}
-  /// A plain function, or a captureless lambda (anything that converts to one). Implicit, as a
-  /// function pointer's conversions are.
+  /// A plain function, or a captureless lambda (anything that converts to one).
   template <class F, class = std::enable_if_t<std::is_convertible_v<F, Plain> &&
                                               !std::is_same_v<std::remove_cvref_t<F>, Fn>>>
-  explicit(false) constexpr Fn(F function) noexcept
+  constexpr explicit Fn(F function) noexcept
       : plain_(static_cast<Plain>(function)) {}
 
   /// @brief `Method` (a member function of T, const or not) called on `object`.

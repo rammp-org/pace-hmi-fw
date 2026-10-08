@@ -510,11 +510,11 @@ private:
   // while it is up - see "Screens built on demand".
   // What each Skunk Works tile does, in actions_spec.h order.
   std::array<Fn<void()>, ACTION_COUNT> action_run_{
-      config_.cues->haptic_test,                           // ACTION_HAPTIC_TEST
-      config_.selftest->run,                               // ACTION_SELF_TEST
+      Fn<void()>{config_.cues->haptic_test},               // ACTION_HAPTIC_TEST
+      Fn<void()>{config_.selftest->run},                   // ACTION_SELF_TEST
       hmi::ui::bind<&UiApp::action_seat_up>(this),         // ACTION_SEAT_UP
       hmi::ui::bind<&PerfOverlay::toggle>(&perf_overlay_), // ACTION_FPS_COUNTER
-      config_.board->restart,                              // ACTION_RESTART_HMI
+      Fn<void()>{config_.board->restart},                  // ACTION_RESTART_HMI
   };
   ActionsView actions_view_{{
       .nav = &nav_port_,
