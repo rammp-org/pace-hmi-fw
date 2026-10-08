@@ -27,12 +27,13 @@ public:
   using Plain = R (*)(Args...);
 
   constexpr Fn() noexcept = default;
-  constexpr Fn(std::nullptr_t) noexcept {} // NOLINT(google-explicit-constructor)
+  /// Empty, as a null function pointer. Implicit on purpose (explicit(false)), like a pointer's.
+  explicit(false) constexpr Fn(std::nullptr_t) noexcept {}
   /// A plain function, or a captureless lambda (anything that converts to one). Implicit, as a
   /// function pointer's conversions are.
   template <class F, class = std::enable_if_t<std::is_convertible_v<F, Plain> &&
                                               !std::is_same_v<std::remove_cvref_t<F>, Fn>>>
-  constexpr Fn(F function) noexcept // NOLINT(google-explicit-constructor)
+  explicit(false) constexpr Fn(F function) noexcept
       : plain_(static_cast<Plain>(function)) {}
 
   /// @brief `Method` (a member function of T, const or not) called on `object`.
