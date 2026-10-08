@@ -46,6 +46,18 @@ Nothing here changes a §9 decision.
 10. POST runs on the UI task (CS-SAF-04 deviation until the islands work).
 11. A spike shorter than one X/Y window (~128 ms) is seen only through its maximum; dips are not.
 
+## Answers (owner, 2026-10-08)
+
+- **All 42 questions: the recommendation ("rec")**, accepted in one answer. Explicitly confirmed:
+  C1 (a) an unclean reset latches a POST FAIL until a clean reset; C3 (a) calibration only while
+  locked.
+- **D9: (b)**: with a latched stick FAULT, refuse the unlock hold (D9a, row 57) **and** the
+  Locked-screen entry push and the menu's DRIVE row (D9b: two more C2b rows, numbered after 57,
+  same pattern as C3's rows 53-54, with the fault named in the refusal).
+- C5 (board 1, I2C 0x5a): measure boards 1 and 3 first (M5), then decide.
+- D3 (rail limits): approved as proposed, to revisit after the owner's measurements M2-M4.
+- Any single answer can be changed later by ID.
+
 ## 2. How to answer
 
 Answer by ID: "rec" takes the recommendation. Rec = the spec agents' recommendation. "Blocks"
