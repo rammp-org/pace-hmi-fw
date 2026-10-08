@@ -1,25 +1,36 @@
 # Refactor progress (living report)
 
-Updated by the orchestrator after each merge into `dev_refactor`. Last update: 2026-10-07 (PAUSED at the owner's request),
-`dev_refactor` at ec219e4. Nothing has gone to `dev` or `main`; no PR was opened.
+Updated by the orchestrator after each merge into `dev_refactor`. Last update: 2026-10-08 13:00,
+`dev_refactor` at 63359b1. Nothing has gone to `dev` or `main`; no PR was opened.
 
 ## Where it stands
 
-**Refactor plan: about 75% done. Full fw-standards compliance: about 65%.**
+**Refactor plan: about 90% done. fw-standards rules fully met: about 52% (strict count,
+docs/plans/compliance-gaps.md; the earlier 65% was plan progress, not a rule count).**
 
-| Area | Done | State |
-| --- | --- | --- |
-| Phase A: overnight drafts | 100% | stick, drive (table correction approved), settings, cal, topology, oracle: merged, each board-benched |
-| Phase B: test tooling | 100% | sim fault modes + B5a-e, quick POST evaluator, oracle by input, requirement matrix, stick injection |
-| Infrastructure | 100% | ratchet package, guard tools (G2/G4/G10/G11), fw flags really applied, gnu++23 everywhere first-party, bench reset fix |
-| `main.cpp` unit (main.cpp + fragments) | ~70% | 3,983 → **1,896** code lines (target ≤1,000, CS-FIL-01) |
-| `app_main` | ~40% | 1,007 → **742** lines (target ≤300, CS-LAY-01); task lifts in progress |
-| `main/` holds only main.cpp (CS-LAY-01) | ~50% | storage, settings, ota, remote_ui moved (branch, in review); rtps_comms, selftest, log_capture and the 4 `*_ui.cpp` adapters stay by documented deviation until the islands/channels rework |
-| Boot-panic bug | done | root cause (picolibc stdio off-by-one in the log tee) proven by A/B on the board; fix merged |
-| Hazard fixes C1-C4, seat | ~5% | specs and tooling ready; each needs your approval (CS-SAF-05) |
+| Area | State |
+| --- | --- |
+| Fragments | **none left** (26 → 0): drive cluster in hmi_ui (DrivePort, DriveUi, StickButton, PerfOverlay), shared state in hmi_ui/app_state, views and wiring in hmi_ui's UiApp |
+| `main.cpp` | 3,983 → **637** code lines (CS-FIL-01 ≤1,000 met); 1,052 physical lines; mutable globals 143 → 6 |
+| `app_main` | 1,007 → **230** lines (≤300 met) |
+| `main/` | main.cpp, rtps_comms, selftest (+ selftest_platform), log_capture, the *_ui and log_view adapters, joystick_cal adapter: CS-LAY-01 deviation rows (P6); main implements hmi_ui's ports (LinkPort, DriveInputs, CuesPort, SelfTestPort, BoardPort, MainScreens) |
+| Components | storage, settings, ota, remote_ui, control, housekeeping, hmi_rtps_spec added |
+| Bench | every merge benched first on board 2: all graded steps PASS, B5e RECORD, G10 task dump PASS |
+| POST limits (P3) | proposal: docs/plans/post-limits-proposal.md (keep 12, WINDOW_MIN_SAMPLES 25 → 30) |
+| Compliance tooling | pre-commit on all files in CI, include-boundary check, host allocation guard, requirement coverage 97 → 108 of 137 |
+| Hazard fixes C1-C4, seat | ~5%: owner review pending |
+| Docs | how-the-firmware-works.md not refreshed for tonight's moves (an agent's read was denied); D3 regenerated |
 
-Other counts in the main unit: mutable globals 143 → 73, function-local statics 40 → 28,
-direct prints 6 → 0.
+## Owner decisions waiting (2026-10-08)
+
+1. Hazards C1-C4 and the seat path.
+2. Leaner main.cpp: board bring-up out of app_main into a component, and/or rtps_comms and selftest out of main (P6 says they stay).
+3. hmi_ui is now safety-relevant (DrivePort sends DriveCommand): its README/.clang-tidy say it commands nothing (120-line limit). 60-line limit or a split.
+4. drive_session_table.hpp code citations point at deleted fragments; they feed the fingerprint (a table change).
+5. Proposed deviation rows in docs/project-profile.md ("Proposed, awaiting owner approval"); the approved CS-LAY-01 row still says the wire spec is in main.
+6. From the audit: topology wiring, CODEOWNERS and branch protection, selftest rework vs deviation, SquareLine export location, clang-tidy backlog, release flow.
+7. Two actions denied for an agent and not worked around: `idf.py reconfigure` for D3, reading how-the-firmware-works.md.
+8. Bench network: the board is on the hotspot (WiFi). BENCH_NET lan/routed modes exist for Ethernet; on Ethernet G10 reports w5500_tsk (not in the WiFi-captured table).
 
 ## Components now (V15: by concern)
 
