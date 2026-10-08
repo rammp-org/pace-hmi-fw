@@ -9,15 +9,17 @@ NAME := drive_golden
 HERE := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 REPO ?= $(abspath $(HERE)/../../..)
 
-# The code under test: main/frag_drive.inc, compiled verbatim by main_unit.cpp, and
+# The code under test: hmi_ui's DrivePort (components/hmi_ui/include/hmi_ui/drive_port.hpp,
+# moved from main/frag_drive.inc), compiled verbatim by main_unit.cpp, and
 # components/drive_adapter's DriveAdapter, instantiated there and in fake_port.cpp.
 SRCS_UNDER_TEST := $(HERE)/main_unit.cpp $(HERE)/fake_port.cpp \
                    $(REPO)/components/drive_session/src/drive_session.cpp
 TEST_SRCS       := $(HERE)/world.cpp $(HERE)/scripts.cpp $(HERE)/test_drive_golden.cpp
 COVER_SRCS      := $(HERE)/main_unit.cpp $(HERE)/fake_port.cpp
-# shim/ first: its logger.hpp stands in for espp's.
+# shim/ first: its logger.hpp stands in for espp's, its lvgl.h, ui.h, esp_timer.h and
+# messages/*.hpp for the firmware's (main_unit_shims.hpp).
 INCLUDES        := $(HERE)/shim $(HERE) $(REPO)/components/drive_adapter/include \
-                   $(REPO)/components/drive_session/include $(REPO)/main
+                   $(REPO)/components/drive_session/include $(REPO)/components/hmi_ui/include
 
 include $(REPO)/tests/host/common.mk
 

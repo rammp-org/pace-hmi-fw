@@ -13,6 +13,8 @@
 #   THIRD_PARTY_SRCS optional: third-party C++ sources the app links (e.g. espp's logger.cpp);
 #                    same standard and sanitizers, but their warnings are not ours (-w)
 #   COVER_SRCS       optional: sources reported by `make coverage` (default SRCS_UNDER_TEST)
+#   ALLOC_GUARD      optional: 1 links the allocation guard (alloc_guard.hpp, TS-DET-08):
+#                    alloc_guard.cpp plus -Wl,--wrap on the allocators
 #
 # Targets:
 #   make test        build and run; exit code 0 = PASS; prints Unity's summary line
@@ -38,6 +40,8 @@ ifeq ($(origin CXX),default)
 CXX := g++
 endif
 
+, := ,
+
 WARN_FLAGS := -Wall -Wextra -Werror -Wshadow -Wconversion -Wsign-conversion
 SAN_FLAGS  := -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all
 BASE_FLAGS := -O0 -g $(SAN_FLAGS) -MMD -MP
@@ -59,6 +63,11 @@ CFLAGS_UNITY := -std=gnu11 $(BASE_FLAGS) -w
 
 obj_of    = $(patsubst /%,$(OUT)/obj/%.o,$(abspath $(1)))
 CXX_SRCS := $(SRCS_UNDER_TEST) $(TEST_SRCS) $(HOST_DIR)/test_main.cpp
+GUARD_LDFLAGS :=
+ifeq ($(ALLOC_GUARD),1)
+CXX_SRCS      += $(HOST_DIR)/alloc_guard.cpp
+GUARD_LDFLAGS := $(foreach f,malloc calloc realloc aligned_alloc posix_memalign memalign strdup strndup,-Wl$(,)--wrap=$(f))
+endif
 TP_OBJS  := $(call obj_of,$(THIRD_PARTY_SRCS))
 OBJS     := $(call obj_of,$(CXX_SRCS)) $(TP_OBJS) $(OUT)/obj/unity.c.o
 BIN      := $(OUT)/test_$(NAME)
@@ -85,7 +94,7 @@ clean:
 $(TP_OBJS): CXX_WARN := -w
 
 $(BIN): $(OBJS)
-	$(CXX) $(SAN_FLAGS) $(COV_FLAGS) $(OBJS) -o $@
+	$(CXX) $(SAN_FLAGS) $(COV_FLAGS) $(OBJS) $(GUARD_LDFLAGS) -o $@
 
 $(OUT)/obj/%.o: /%
 	@mkdir -p $(dir $@)

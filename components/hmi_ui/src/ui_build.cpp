@@ -96,4 +96,15 @@ void perf_overlay_font() {
   }
 }
 
+// Wired as an action rather than through a SquareLine CALL FUNCTION event so it needs no
+// round trip through the design tool (moved from main/frag_status_band.inc, fps_toggle).
+void PerfOverlay::toggle() {
+  shown_ = !shown_;
+  if (shown_) {
+    lv_sysmon_show_performance(lv_display_get_default());
+  } else {
+    lv_sysmon_hide_performance(lv_display_get_default());
+  }
+}
+
 } // namespace hmi::ui

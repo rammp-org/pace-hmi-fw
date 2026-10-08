@@ -29,7 +29,7 @@
     },
     "if_config": {},
     "lines": {
-      "main/main.cpp": 1472,
+      "main/main.cpp": 1278,
       "main/selftest.cpp": 1030
     },
     "locks": {
@@ -58,7 +58,7 @@
       "main/joystick_cal.cpp": 15,
       "main/log_capture.cpp": 8,
       "main/log_view.cpp": 1,
-      "main/main.cpp": 38,
+      "main/main.cpp": 34,
       "main/rtps_comms.cpp": 32,
       "main/selftest.cpp": 25,
       "main/update_ui.cpp": 4
@@ -68,7 +68,7 @@
       "main/rtps_comms.cpp": 5
     },
     "static_state": {
-      "main/main.cpp": 7,
+      "main/main.cpp": 5,
       "main/rtps_comms.cpp": 5
     },
     "std_thread": {

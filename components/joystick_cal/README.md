@@ -15,7 +15,7 @@ timer, the button), the file I/O and the log lines.
 
 ## Requirements (as-is; each covered by L1 cases)
 
-| ID | Requirement | Cases |
+| ID | Requirement | Tests |
 | --- | --- | --- |
 | REQ-CAL-01 | The file is `version 1` then `horizontal`, `vertical`, `twist` lines of `min center max` mV; anything else falls back to the defaults and is logged once with its reason | CAL-004..010, CAL-101..105, CAL-110 |
 | REQ-CAL-02 | A record is used only if every axis has at least 1000 mV each way from rest (inclusive) | CAL-011, CAL-012, CAL-106 |

@@ -8,7 +8,7 @@ yet measured or decided, and "none" means checked and absent.
 ## Identity and toolchain
 - Project: `rammp-hmi-p4` (repo rammp-org/pace-hmi-fw), the joystick HMI of a powered wheelchair.
   It talks RTPS to the MIB/MCB.
-- Namespace: none yet for application code (CS-NAM-02 gap). The shared RTPS spec uses `rammp::`.
+- Namespace: first-party components use `hmi::<component>` (`hmi::control`, `hmi::drive_session`, `hmi::stick`, `hmi::topo`, `hmi::cal`, ...; the UI and format code `hmi::ui` and `hmi::format`; the channel helpers `hmi::fw`). `main/` and its `frag_*.inc` are still in the global namespace (CS-NAM-02: they join `hmi::` as they move into components). The shared RTPS spec uses `rammp::`.
 - Target: ESP32-P4, chip rev v1.3 (board 2 boot log), on the M5Stack Tab5. Wi-Fi comes from the
   Tab5's ESP32-C6 over SDIO (esp_hosted 2.12; the C6 reports esp_hosted 1.4.1). Ethernet is an
   optional W5500 on SPI.
@@ -61,18 +61,27 @@ yet measured or decided, and "none" means checked and absent.
 ## Components
 | Component | Concern (one sentence) | Safety-relevant | Builds for linux | D4 diagram |
 | --- | --- | --- | --- | --- |
-| `main` | everything not listed below; `main.cpp` #includes 27 `frag_*.inc` (one TU, `tools/split_main.py`) | yes | no | none |
+| `main` | everything not listed below; `main.cpp` #includes 26 `frag_*.inc` (one TU, `tools/split_main.py`) | yes | no | none |
+| `components/control` | the control island: the "Read ADC" task that reads the joystick's three pots and runs the stick pipeline each cycle (`StickIsland`) | yes (topology marks the `control` task safety; it feeds the motion command) | no (ADC drivers; no host test) | none |
+| `components/drive_adapter` | the drive session's adapter on the UI task: samples the inputs, hands the session one input, performs the actions it returns through a port | yes (sends the DriveCommand requests and performs the relocks) | host L1 (DAD-L1, GLD-L1) | none |
+| `components/drive_session` | the drive session: the transition table for lock, ask the MIB to drive, unlock, drive, ask to stop, and the stick gate | yes (decides when the HMI asks for motion or a stop) | host L1 (DRV-L1) | none (table in TABLE.md) |
 | `components/feedback` | plays the user's haptic and sound cues: the DRV2605 motor, the click and refusal sounds, the bench-only DA7280 test | no (cues only; what is shown about a fault is decided by its callers, and a cue failing changes nothing else) | no (board drivers; bench B3 hap.*) | README |
 | `components/fw_core` | the channel helpers, ThreadChecker, `Owned<T>`, `check()`, context tokens (not used by the firmware yet) | used by safety | host L1 (FWC-L1) | none |
 | `components/hmi_format` | pure screen-text formatting (speed, steppers, seat, clock, diagnostics) | no | host L1 (L1-FMT) | README |
 | `components/hmi_models` | pure UI models: the button-grid cursor walk and the bench PIN entry | no | host L1 (L1-MOD) | README |
 | `components/hmi_ui` | the UI island: every LVGL view the UI task draws (so far the TopBar clock, link and RTPS label, the DriveBand status cells, the backlight, the bench PIN, seat, settings rows, Skunk Works tiles and diagnostics, the display flip, FPS and overdraw, and the About, Internet, Firmware update and Log screens) | no (shows the chair's state and faults, commands nothing) | no (LVGL-bound; bench B4) | README |
+| `components/housekeeping` | the housekeeping island: reads the IMU, battery monitor and RTC on one slow task and keeps the system clock and RTC to the MCB's time | no (topology: not safety) | no (board drivers; no host test) | none |
 | `components/joystick` | espp joystick plus a twist axis (vendored espp 1.2.0, sha 615b8df; README + upstream.diff) | yes | host L1 (L1-JOY) | none |
+| `components/joystick_cal` | the joystick calibration: the record and its text file, the plausibility check, and the calibration run as a plain C++ model | yes (the record sets the stick's travel) | host L1 (L1-CAL) | README |
+| `components/ota_parse` | pure parsers for what an update reads: GitHub's release list, an image's first block, `fwinfo.txt`, the confirms-its-boot marker | no (never commands motion) | host L1 (L1-OTA) | none |
 | `components/post` | the quick POST evaluator: boot facts in, a verdict per check and an overall state out (not wired yet; hazard-fixes C3) | yes (gates motion once C3 wires it) | host L1 (L1-POST) | README |
 | `components/m5stack-tab5` | vendored espp Tab5 BSP 1.2.0 (sha 615b8df), modified (VENDORED.md + upstream.diff) | no | no | none |
 | `components/ota` | the firmware image: identity and release match, the GitHub release list, download, install and rollback confirm | no (never commands motion; the restart after an install is main's, gated on the chair not driving) | no (HTTPS, flash) | README |
+| `components/remote_ui` | the bench debug channel: a TCP server on port 3333 for screenshots, taps, keys and (with stick injection) the stick; a no-op unless `CONFIG_HMI_REMOTE_UI` | no in release builds (absent); in bench builds it can move the stick, on the simulated MCB only | no (LVGL and sockets; bench) | none |
 | `components/settings` | the persisted user settings: spec table, settings.txt, getters and setters | no (two values feed the stick through main's atomics) | host L1 (L1-SET) | README |
+| `components/stick` | `StickPipeline`: the three pots' raw millivolts in, the keypad key and the XYTwist motion command out | yes (turns the joystick into the motion command) | host L1 (L1-STK) | none |
 | `components/storage` | files on the storage partition: paths, atomic write, legacy migration | no | no (flash) | README |
+| `components/topology` | the tables of every task, component and channel, the compile-time `validate()`, and the `Topology` that creates the channels (draft, not wired in) | yes (the tables are the safety review surface; CS-OWN-13) | host L1 (TOP-L1) | README |
 | `components/ui` | SquareLine export, generated | no | n/a | none |
 | `rammp_rtps_messages` (submodule `external/rammp-rtps`) | shared RTPS message and topic spec | yes (wire format of motion commands) | header-only | none |
 
@@ -109,8 +118,8 @@ yet measured or decided, and "none" means checked and absent.
 
 - Non-espp dependencies: LVGL 9.5.0, espressif/w5500, esp_wifi_remote, esp_hosted ~2.12, cjson,
   esp-dsp, littlefs (via espp file_system). The espp alternatives considered: not recorded.
-- Vendored copies in `components/`: `m5stack-tab5`, `joystick`. Neither has a README listing its
-  upstream version and changes (CS-LAY-05).
+- Vendored copies in `components/`: `m5stack-tab5` (README.md, VENDORED.md, upstream.diff) and
+  `joystick` (README.md, upstream.diff). Each lists its upstream version and changes (CS-LAY-05).
 
 ## Bench
 - PC: Windows 11 laptop. ESP-IDF via `C:\Espressif\tools\Microsoft.v6.0.PowerShell_profile.ps1`;
@@ -173,3 +182,17 @@ yet measured or decided, and "none" means checked and absent.
 | CS-SAF-05 (two approvals) | safety-relevant changes | one human approver (the owner) until a second reviewer exists; nothing safety-relevant merges to `dev` meanwhile | owner | until a second reviewer is named |
 | CS-SAF-03 (open circuit) | joystick low rail | firmware cannot tell an open pot (0 mV) from full travel (calibrated min 6-11 mV on board 2); firmware-only for now, residual hazard documented in `docs/plans/hazard-fixes.md` | owner | revisit with an EE change |
 | CS-LNG-02 | `main` | `main` builds at gnu++23 like all first-party code (since `dev_ai_refactor_main23`), but keeps IDF's default warnings. The CS-LNG-02 warning set (`-Wconversion`, `-Wshadow`, ...) comes in a later step, as the legacy counts in the ratchet come down. Components use `fw_component_options` | owner | open (warnings only) |
+
+### Proposed, awaiting owner approval
+
+Not approved and not in force. Each row comes from `docs/plans/compliance-gaps.md` (the
+"Documented deviations" section and rows CS-FLW-02, CS-LAY-01) and states a deviation that
+already exists in the code; the owner decides whether to approve it as a deviation or to
+remove the cause. Moving a row into the table above is the owner's edit.
+
+| Rule ID | Location | Reason | Owner | Review date |
+| --- | --- | --- | --- | --- |
+| CS-LAY-01 (main/ holds main.cpp only) | `main/selftest_platform.cpp`, `main/selftest_platform.hpp`, `main/joystick_cal.cpp`, `main/joystick_cal.hpp`, `main/hmi_rtps_spec.hpp`, `main/rtps_comms.hpp`, `main/log_capture.hpp`, `main/actions_spec.h`, `main/lv_mem_psram.c`, `main/boot_logo.c`, `main/boot_logo.h`, `main/click.wav` | files that sit in `main/` beside the files the CS-LAY-01 row above already lists, and that the row does not name. The reasons would be those of their partners: `selftest_platform.*` goes with `selftest.*`; `hmi_rtps_spec.hpp`, `rtps_comms.hpp`, `log_capture.hpp` with `rtps_comms` and `log_capture`; `joystick_cal.*` is the view of the `joystick_cal` component (LVGL subjects, timer, button, file I/O). `actions_spec.h`, `lv_mem_psram.c`, `boot_logo.*` and `click.wav` have no stated reason yet: the owner decides a deviation or a move | owner (proposed) | proposed: until the islands/channels rework |
+| CS-FIL-01, CS-UI-02, CS-CON-01, CS-MEM-01 (and the other selftest legacy) | `main/selftest.cpp` | the CS-LAY-01 row above covers only the folder rule. `selftest.cpp` is 1030 lines with 136 `lv_*` calls, 30 locks, 11 raw allocations, 6 `vTaskDelay` and 1 `xTaskCreate` (counts at the audit, 4d82b9f). Either a deviation until the table-driven rework, or the rework (audit decision 3) | owner (proposed) | proposed: until the selftest rework |
+| CS-FLW-02 (loops bounded) | `components/ota_parse/src/fw_record.cpp:11` (`find_fw_record`) | one pass per line of `fwinfo.txt`, bounded by the file's length only (no line or line-count limit). Pinned as-is by test OTA-087; the bound is a behaviour change, parked (component README "Hazards"). The code already carries a `spec-deviation(CS-FLW-02)` comment | owner (proposed) | proposed: until the bound is approved as a behaviour change |
+| CS-FLW-02 (loops bounded) | `components/ota_parse/src/release_list.cpp:68` (`parse_releases`) | the release and asset counts are not checked against a maximum; they are bounded by the JSON's length only. Pinned as-is by tests OTA-017 and OTA-018; the cap is a parked behaviour change (component README "Hazards"). The code already carries a `spec-deviation(CS-FLW-02)` comment | owner (proposed) | proposed: until the cap is approved as a behaviour change |

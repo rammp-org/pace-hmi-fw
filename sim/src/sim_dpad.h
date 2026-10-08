@@ -26,7 +26,7 @@ extern "C" {
 #endif
 
 /** Builds the control into `parent`, which the bench supplies. */
-void sim_dpad_init(lv_obj_t * parent);
+void sim_dpad_init(lv_obj_t *parent);
 
 /** True while that direction is held. ORed with the arrow keys. */
 bool sim_dpad_up(void);

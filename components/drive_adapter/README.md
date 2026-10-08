@@ -15,7 +15,8 @@ the drive table review (CS-SAF-05, two approvals; D1: the owner is the only appr
 | Part | File |
 | --- | --- |
 | `DriveAdapter<View>`, the `DrivePort` concept, `DriveSample`, `DriveBanner` | `include/drive_adapter.hpp` |
-| The firmware's port, `MainDriveView` (the LVGL and rtps_comms calls) and the one instance | `main/frag_drive.inc` |
+| The firmware's port, `hmi::ui::DrivePort<DriveUi>` (the LVGL and rtps_comms calls; moved from `main/frag_drive.inc`'s MainDriveView) | `components/hmi_ui/include/hmi_ui/drive_port.hpp` |
+| The one instance | `main/main.cpp` |
 | The adapter's own contract (DAD-001..006) | `test/` |
 | The goldens: the drive code before the move vs after, at the port and at the lv_/rtps boundary (GLD-001..004) | `tests/host/drive_golden` |
 
@@ -36,7 +37,7 @@ Contract for every method: **called on the LVGL task (`lv_task`) with `lvgl_mute
 from inside one of the adapter's inputs; it must not call back into the adapter (a call that
 does is dropped and logged, see REQ-DAD-03).
 
-| Method | Action(s) | MainDriveView does |
+| Method | Action(s) | DrivePort (hmi_ui) does |
 | --- | --- | --- |
 | `sample()` | every input | `rtps_link_subject`, `mib_state_subject`, `lv_screen_active()`, `nav_menu_open`, in that order |
 | `now_us()` | every input; SEND_ENABLE; ARM_EXIT_DEADLINE; U3 | `esp_timer_get_time()` |

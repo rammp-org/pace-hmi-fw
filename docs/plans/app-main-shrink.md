@@ -1,9 +1,11 @@
 # Plan: shrink app_main, turn the fragments into real units
 
-Status: draft for the owner. Measured on `dev_refactor` 33f8d53 and the draft `dev_ai_refactor_drive`
-6c431e4 (`C:\w\drive`). Targets (owner): `app_main` ≤300 lines (CS-LAY-01), `main.cpp` ≤1000
-(CS-FIL-01), the fragments dissolve into components grouped by concern (V15); first, the drive adapter leaves the `main.cpp` unit
-so `tools/l0/ratchet.py` passes. Today on the drive branch: `FAIL lines main/main.cpp: 4135 > 3984`.
+Status: being carried out. The tables below were measured on `dev_refactor` 33f8d53 and the draft
+`dev_ai_refactor_drive` 6c431e4 (`C:\w\drive`) and are kept as that snapshot. Targets (owner):
+`app_main` ≤300 lines (CS-LAY-01), `main.cpp` ≤1000 (CS-FIL-01), the fragments dissolve into
+components grouped by concern (V15). On `dev_refactor` 5966b99 (after the K1 merge): `app_main` 240
+lines (met), the `main.cpp` unit 1472 code lines (not yet ≤1000), `tools/l0/ratchet.py check` passes;
+26 `main/frag_*.inc` fragments (1847 lines) are still included by `main.cpp`.
 
 Map script: `%TEMP%\claude\appmain-deps\deps.py <repo> [--detail --pairs --kinds --json f]`.
 It strips comments, strings and preprocessor lines with ratchet's lexer, collects namespace-scope

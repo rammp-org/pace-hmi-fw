@@ -22,6 +22,12 @@ inline constexpr uint32_t HOLD_POLL_MS = 33;
 
 class HoldEngine;
 
+/// @brief Is a pointer (touch) down on `target` while `screen` is the active screen: the touch
+///        half of a hold, polled at the gesture's cadence rather than tracked from press
+///        events, so there is no event to miss. False when `target` is null.
+/// UI task, lvgl_mutex held.
+[[nodiscard]] bool touch_held_on(const lv_obj_t *screen, const lv_obj_t *target);
+
 /// One gesture. `progress`, `holding` and `engine` carry defaults so a definition names only
 /// the fields a gesture differs in (-Wmissing-field-initializers accepts a defaulted member).
 struct HoldGesture {

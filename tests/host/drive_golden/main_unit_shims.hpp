@@ -1,9 +1,12 @@
 #pragma once
-// What main/frag_drive.inc needs from the rest of the main.cpp unit, LVGL, rtps_comms and
-// esp_timer, as recording shims over the stateful world (world.hpp). Included once, by
-// main_unit.cpp, right before the fragment itself.
+// What the drive code (hmi_ui's DrivePort, drive_port.hpp, moved from main/frag_drive.inc)
+// needs from the rest of the firmware, LVGL, rtps_comms and esp_timer, as recording shims over
+// the stateful world (world.hpp), and MainUnitUi, the Ui the port is instantiated over here:
+// each of its methods is the shim of the main-unit name the code called before the move.
+// Included first by main_unit.cpp; the headers drive_port.hpp includes (lvgl.h, ui.h,
+// esp_timer.h, messages/*.hpp) are shim/ stand-ins that include this file.
 //
-// Every call the fragment makes across this boundary appends one line to the boundary log
+// Every call the port makes across this boundary appends one line to the boundary log
 // (golden 2), with its arguments and what it returned. A call that stands for a DrivePort
 // method also appends that method to the port log (golden 1):
 //   esp_timer_get_time                      -> now_us
@@ -20,7 +23,7 @@
 //   _ui_screen_change(ui_DriveScreen, FADE) -> go_drive_screen
 //   lv_subject_set_int(entry_refused_subject, which) -> show_banner(<which>)
 //   refusal_feedback                        -> refusal_feedback
-// The variables the fragment writes (nav_menu_on_arrival, lock_waiting, unlock_advance_timer)
+// The variables the port writes (nav_menu_on_arrival, lock_waiting, unlock_advance_timer)
 // and reads (nav_menu_open) are proxies, so their writes and reads are logged too.
 
 #include <atomic>
@@ -58,6 +61,7 @@ struct lv_subject_t {
 struct lv_timer_t {
   const char *name;
 };
+struct lv_anim_t; // hmi_ui/hold_gesture.hpp (HOLD_MAX) names it; the port never uses one
 using lv_anim_exec_xcb_t = void (*)(void *, std::int32_t);
 enum lv_screen_load_anim_t { LV_SCREEN_LOAD_ANIM_NONE = 0, LV_SCREEN_LOAD_ANIM_FADE_ON = 9 };
 
@@ -242,23 +246,8 @@ inline bool rtps_comms_publish_drive(rammp::DriveRequest request, MIB::DriveProf
 }
 
 // --- the rest of the main.cpp unit ------------------------------------------------------------
-// Constants, values as in main/ (frag_stick_button, frag_hold, frag_refusal).
-inline constexpr std::int32_t kHoldMax = 100;
-inline constexpr std::int32_t kShackleRisePx = 30;
-inline constexpr std::uint32_t kUnlockDissolveMs = 280;
-inline constexpr std::uint32_t kBarGraceMs = 500;
-inline constexpr std::uint32_t kDriveRefusedShowMs = 3000;
-inline constexpr std::uint32_t kExitRefusedShowMs = 2000;
-enum : std::int32_t {
-  kRefusedNone = 0,
-  kRefusedDrive = 1,
-  kRefusedSeat = 2,
-  kRefusedDriveNotGranted = 3,
-  kRefusedDriveStopped = 4,
-  kRefusedExit = 5,
-  kRefusedDriveLost = 6,
-  kRefusedDriveMenu = 7,
-};
+// The constants the port uses (HOLD_MAX, SHACKLE_RISE_PX, UNLOCK_DISSOLVE_MS, REFUSED_*, the
+// dwells) come from hmi_ui's own headers, as in the firmware.
 // frag_refusal.inc: kMibStatusPeriod + 250 ms, kMibStatusTimeout (hmi_rtps_spec.hpp).
 inline constexpr std::int64_t kDriveAnswerUs = 750'000;
 inline constexpr std::int64_t kDriveWaitUs = 2'000'000;
@@ -357,15 +346,33 @@ inline bool haptic_play(espp::Drv2605::Waveform w, std::uint8_t slots) {
   return true;
 }
 
-// frag_hold.inc's gesture record and the stick button, for drive_exit_gesture.
-struct HoldGesture {
-  lv_subject_t progress{};
-  bool *armed;
-  bool (*is_held)();
-  bool (*applies)();
-  void (*completed)();
-  std::uint32_t grace_ms = 0;
-  bool holding = false;
+// The Ui DrivePort is instantiated over (the firmware's is hmi::ui::DriveUi): each method is
+// the shim above of the name the drive code used in the main.cpp unit, so the boundary log
+// reads as it did.
+struct MainUnitUi {
+  lv_subject_t *rtps_link_subject() const { return &::rtps_link_subject; }
+  lv_subject_t *mib_state_subject() const { return &::mib_state_subject; }
+  lv_subject_t *locked_subject() const { return &::locked_subject; }
+  lv_subject_t *entry_refused_subject() const { return &::entry_refused_subject; }
+  lv_timer_t *refused_timer() const { return refusal_view.timer(); }
+  shim::MenuOpenProxy &nav_menu_open() const { return ::nav_menu_open; }
+  shim::MenuOnArrivalProxy &nav_menu_on_arrival() const { return ::nav_menu_on_arrival; }
+  shim::LockWaitingProxy &lock_waiting() const { return ::lock_waiting; }
+  shim::UnlockTimerProxy &unlock_advance_timer() const { return ::unlock_advance_timer; }
+  std::int32_t shackle_rest_y() const { return ::shackle_rest_y; }
+  std::int32_t shackle_rest_h() const { return ::shackle_rest_h; }
+  MIB::DriveProfile drive_profile() const { return drive_profile_published.load(); }
+  bool publish_drive(rammp::DriveRequest request, MIB::DriveProfile profile) const {
+    return rtps_comms_publish_drive(request, profile);
+  }
+  void lock_visual_wait() const { ::lock_visual_wait(); }
+  void lock_visual_rest() const { ::lock_visual_rest(); }
+  void unlock_timer_start() const { ::unlock_timer_start(); }
+  void unlock_timer_cancel() const { ::unlock_timer_cancel(); }
+  void locked_screen_go() const { ::locked_screen_go(); }
+  void update_stick_gate() const { ::nav_update_stick_gate(); }
+  void nav_home() const { ::nav_home(); }
+  void refusal_feedback() const { ::refusal_feedback(); }
+  void haptic_click() const { (void)haptic_play(espp::Drv2605::Waveform::STRONG_CLICK, 1); }
+  static constexpr lv_anim_exec_xcb_t ring_spin_cb = &::ring_spin_cb;
 };
-inline bool joy_button_armed = true;
-inline bool joy_button_held() { return false; }
