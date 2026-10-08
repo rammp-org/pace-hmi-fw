@@ -48,6 +48,12 @@ that never regenerate goldens from the new code.
 
 ## 4. Phase C: the fixes (each: spec commit → 2 approvals → code commit by another agent)
 
+The v2 rules below are history. Where they differ, §9 and the four specs win
+(`hazard-c1-spec.md`, `hazard-c3-spec.md`, `hazard-c4-spec.md`, `hazard-c2-spec.md`), and the
+order, lanes and effort are in `hazard-decisions.md` §4. Examples: v2's `DISABLE_PENDING` and
+POST phases are gone (C1 §2, C3 §1); B5'' "sim ENABLED at boot → no unlock" became "enters Drive,
+output 0" (M1).
+
 ### C1 = H1 + H5 + H6 (drive table)
 
 | Rule | Rows |
@@ -108,6 +114,8 @@ Unpinned FPU tasks (Read ADC, ContinuousAdc, rtps_*) get a boot-dependent core: 
 | Not bench-testable | H4 (UI stall): host fault-injection test |
 
 ## 6. Lanes (agents) and effort (AI time; reviews on top)
+
+Superseded for Phase C by `hazard-decisions.md` §4 (order C1+C3 → C4 → C2 → C2b → seat, §9).
 
 | Step | Lane | Effort |
 | --- | --- | --- |
@@ -176,3 +184,36 @@ reset or link loss), does it stop the motors on its own, and after how many ms? 
 ever report or become ENABLED without receiving an ENABLE? (3) After a DISABLE, how long can
 MibStatus keep reporting ENABLED? (4) Does DISABLE stop at once and stay disabled until a new
 ENABLE, including across an MCB or HMI reset?"
+
+## 10. Reconciliation log (2026-10-08, the four specs against each other and §9)
+
+No §9 decision changed. Open questions moved to `hazard-decisions.md`.
+
+1. One permit: C4's verdict is condition 2 of C1's output permit instead of a factor in `stick_drives` (C4 §2.1, REQ-CTL-02; `gate_open()` gone).
+2. C4's own re-arm (C4-f, `REARM_PENDING`, `NEUTRAL_REARM_MS`) removed: C1's neutral latch re-arms; REQ-CTL-14 restated, CTL-020/021 unconditional; C4 O1 merged with C1 Q12 and C2 O8.
+3. One hold-reason list (C1 §3.3, REQ-STK-13): GATE_SHUT, MOTION_GUARD, CALIBRATING, NOT_CALIBRATED, POST_NOT_PASSED, STICK_FAULT, STICK_CHECK, CENTRE_FIRST, NONE; C1 provides the C4 hook (OK until C4) and `StickHealth::CHECK` for C2.
+4. C2 no longer retires REQ-STK-13 and drops its own order requirement; C2 E9 replaces only STK-067 (STK-066 stays).
+5. C1 §2.7 Drive-notice order now follows §3.3 (not calibrated before POST); C3 Q14 resolved.
+6. C4 called REQ-STK-04 "unchanged" (`mounted × scale`); C1 retires it, so C4 now cites C1's literal 0 (REQ-STK-10).
+7. Text owners: one table in C1 §3.3; every new text in `hmi_rtps_spec` (C3's `hmi_ui/post_texts.hpp` moved there); new C4 notice text "Waiting for the MCB" for MOTION_GUARD (to approve).
+8. REQ-UI: C3 holds 19-23, so C4 23/24 → 24/25 and C2 21/22 → 26/27.
+9. REQ-STK: C3 holds 15, so C2 15-26 → 16-27 (its 27 dropped, see 4).
+10. REQ-RUI: C3 holds 06; C4 adds 07 for its STALL verbs (O6); C2 06 → 08 and retires REQ-RUI-05 whole, not "the PERMIT STICK part only".
+11. REQ-DRV: C2b's 35/36 clashed with C3 → 43/44; C2b adds 45 (eight tick sub-steps), retiring C3's 36.
+12. C3 changed row 18 without retiring REQ-DRV-08 → C3 retires it for REQ-DRV-42; C2b retires 42 for 44.
+13. Rows: C2b 50-52 → 55-57 (after C3's 50-54); C2 §5.1 "row 50/51" → 55/56.
+14. C2b row 57: guard `+RDY +POST_OK +STICK_FAULT`, actions RING_REST, SHOW_REFUSED_STICK, REFUSAL_FEEDBACK, exclusive with rows 19 and 52 like C3's refusals.
+15. C2b's TICK_STICK_FAULT moves from "right after FOLLOW" to after TICK_STOP_RESEND: Env 2 predates its DISABLE, so the earlier slot sent two DISABLEs on the fault tick (against C2's own golden).
+16. Test IDs: C2b DSO-020 → 024, GLD-120..122 → 126..128, DRV-120 → 118; C2b updates DRV-101..117, DRV-116, DSO-001/004-006/012/018 and GLD-115 (57 rows) and uses C3's booted preamble; GLD-126's relock line is in C1's log format.
+17. C2 §3.7 cited STK-078 (a classification case) for monitor + latch; now STK-084.
+18. C4 §8 kept B5a..e "unchanged"; C1 E10 changes B5c-e, so C4 now says "as C1 left them".
+19. Self-test count marker: C4 54 → 57, C2 57 → 60 (C2 only said "moves").
+20. Task table: C4's 6144 B rationale now names C3's accumulator; C3 Q13 names the exact `tasks.json` row and C3's "G10 unchanged" notes it; `ContinuousAdc Task` stays 5/fpu unless pinning is approved (C4 O9 = C2 O14), then in C4 commit 4.
+21. C3 runs C4's `-fstack-usage` SU step itself, since C3 lands before C4.
+22. One ADC-side clock (`uint32` ms, injected) for C1's permit (was `now_us`), C4's guard and C2's monitor.
+23. C4's STALL verbs gated by `CONFIG_HMI_BENCH_STICK_INJECT` like every bench verb (was `HMI_REMOTE_UI`).
+24. C2's stick FAULT on C3's TopBar indicator ranks below every POST state (C3 §2.8, REQ-UI-26).
+25. C2's button-bit rule defers to C3's REQ-STK-15 before POST pass.
+26. C1 Q4 restated: C1 and C3 merge together, so the NOT_RUN block never ships alone; the motion-guard hook added.
+27. C1 "every 33 ms" → the ADC cycle (33 ms wait, 35 ms measured), as C3 and C4 use.
+28. §4 and §6 here marked superseded by the specs and `hazard-decisions.md` §4.
