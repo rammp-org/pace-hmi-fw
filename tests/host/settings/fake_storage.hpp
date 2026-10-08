@@ -1,7 +1,8 @@
 #pragma once
-// Fake of main/storage.hpp for the settings host app (TS-UNIT-03): storage_path() points into a
-// temporary folder made on first use, and storage_write() records each call, writes the file
-// there (so a later settings_load() reads it back) and can be scripted to fail.
+// Fake of components/storage/include/storage.hpp for the settings host app (TS-UNIT-03):
+// storage_path() points into a temporary folder made on first use, and storage_write() records each
+// call, writes the file there (so a later settings_load() reads it back) and can be scripted to
+// fail.
 
 #include <string>
 

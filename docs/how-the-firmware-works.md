@@ -62,12 +62,15 @@ hardware, a red outline is safety-relevant, and a dashed outline is generated co
 
 | Path | What it is | Safety | Tests |
 | --- | --- | --- | --- |
-| `main/` | The application: `main.cpp` + 27 fragments (one TU), plus separate `.cpp` files for screens, network, OTA, self-test, storage | yes | none on target; bench B0–B5 |
+| `main/` | The application: `main.cpp` + 27 fragments (one TU), plus separate `.cpp` files for the screens' main side, network, self-test, the log ring | yes | none on target; bench B0–B5 |
 | `components/fw_core` | Channels (`Mailbox`, `Queue`, `AtomicValue`), `ThreadChecker`, `Owned<T>`, `check()`, context tokens. **Linked but unused** | for later | host L1 (FWC-L1) |
 | `components/hmi_format` | Pure text formatting: speed, steppers, clock, diagnostics, about, update, network | no | host L1 (L1-FMT) |
 | `components/hmi_models` | Pure UI models: the button-grid cursor walk and the bench PIN | no | host L1 (L1-MOD) |
 | `components/hmi_ui` | The UI island's views: TopBar clock, link and RTPS label, DriveBand status cells, backlight, bench PIN, seat, settings rows, Skunk Works tiles, diagnostics (more move in, app-main-shrink S4-S6) | no | bench B4 |
 | `components/ota_parse` | Pure OTA parsing: release list, image header check, fwinfo, boot-confirm marker search | no | host L1 (L1-OTA) |
+| `components/ota` | The firmware image: SHA-256 of the running image matched to a release (fw_info), the GitHub release list, download and install, rollback confirm (github_ota) | no | bench B2/B4; install not on the bench |
+| `components/settings` | Persistent user settings (`/storage/settings.txt`) from one typed spec table | no | host L1 (L1-SET) |
+| `components/storage` | Files on the storage partition: LittleFS paths, atomic write (tmp + rename), one-time legacy migration | no | bench B2 |
 | `components/joystick` | espp's joystick, vendored, plus a twist (Z) axis | yes | host L1 (L1-JOY) |
 | `components/m5stack-tab5` | espp's Tab5 board support, vendored and modified (two frame buffers, vsync present) | no | none |
 | `components/ui` | The SquareLine Studio export. **Generated** by `tools/build_ui.py`; never edit it | no | `scripts/ui_contract.py` |
@@ -128,11 +131,7 @@ What this means in practice:
 | `hmi_rtps_spec.hpp` | What only this HMI adds to the shared spec: timeouts, seat helpers, banner texts, the self-test topics |
 | `selftest.cpp/.hpp`, `selftest_spec.hpp` | The self-test: 54 checks, an overlay, and a report over RTPS and serial |
 | `remote_ui.cpp/.hpp` | Bench-only debug server on TCP 3333: screenshots, taps, keys, `TASKS` |
-| `settings.cpp/.hpp`, `settings_spec.hpp` | Persistent settings (`/storage/settings.txt`) from one typed spec table |
-| `storage.cpp/.hpp` | LittleFS paths, atomic write (tmp + rename), one-time legacy migration |
 | `joystick_cal.cpp/.hpp` | The calibration file and the guided calibration run |
-| `fw_info.cpp/.hpp` | SHA-256 of the running image, matched to a release |
-| `github_ota.cpp/.hpp` | GitHub release list, image download and install, rollback |
 | `about_ui`, `internet_ui`, `update_ui`, `log_view` | What main does for the About, Internet, Firmware update and Log views (in `components/hmi_ui`): the adapters over fw_info, rtps_comms, github_ota and log_capture, the worker threads, the LVGL hand-back, the restart after an update; one instance of each view |
 | `log_capture.cpp/.hpp` | Copies stdout and stderr into a PSRAM ring for the Log screen |
 | `lv_mem_psram.c` | LVGL's allocator: every LVGL allocation goes to PSRAM, leaving internal DMA RAM for the W5500 |

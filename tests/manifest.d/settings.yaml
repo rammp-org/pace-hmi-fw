@@ -1,4 +1,4 @@
-# L1 host app for main/settings.cpp (cases SET-001..SET-064 in tests/host/settings/): the
+# L1 host app for components/settings/src/settings.cpp (cases SET-001..SET-064 in tests/host/settings/): the
 # settings.txt codec, clamps and save-on-change characterised as they behave today, board 2's
 # real file round-tripped, hostile inputs (TS-UNIT-07), the spec-table invariants (TS-UNIT-04).
 # spec-deviation(TS-UNIT-01): host-native g++ in WSL, not the IDF linux target (owner, 2026-10-06).

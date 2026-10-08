@@ -101,7 +101,7 @@ It looks the `.bin`'s SHA-256 up among the releases and, when one matches, adds 
 - **Never while driving**: an install that finishes while the chair drives restarts the HMI only once the MIB reports it has stopped.
 - GitHub allows 60 unauthenticated API requests an hour per address; the list is fetched each time the screen opens.
 - **Testing an image before publishing it**: set `CONFIG_HMI_OTA_TEST_URL` in your local `sdkconfig` (for example `http://<PC>:8070/rammp-hmi-p4.bin`, served with `python -m http.server 8070 --directory build`), and the list starts with a **Test image** entry that installs whatever that URL serves.
-- Code: `main/github_ota.cpp` (the release list, the download, the checks, rollback) and `main/update_ui.cpp` (the three pages). Flash layout: `partitions.csv`, two 6 MB app slots.
+- Code: `components/ota/src/github_ota.cpp` (the release list, the download, the checks, rollback) and `main/update_ui.cpp` (the three pages). Flash layout: `partitions.csv`, two 6 MB app slots.
 
 ## Network
 

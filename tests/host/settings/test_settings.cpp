@@ -1,5 +1,5 @@
-// Characterisation tests for main/settings.cpp: the settings.txt codec, the clamps and the
-// save-on-change, pinned as they behave TODAY (dev_refactor fa3f13a, plan step 8).
+// Characterisation tests for components/settings/src/settings.cpp: the settings.txt codec, the
+// clamps and the save-on-change, pinned as they behave TODAY (dev_refactor fa3f13a, plan step 8).
 //
 // These are golden expectations of current behaviour, not approval of it. A case whose name
 // says "today" pins behaviour that is questionable (plan §1 G8, CS-CFG-02, TS-UNIT-07): a bad

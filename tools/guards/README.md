@@ -105,7 +105,7 @@ The plan asks for the task dump "in the self-test JSON". Two things stand in the
 
 So the dump rides the bench-only remote UI instead (orchestrator decision, recorded under V11 in
 the plan). `TASKS` answers one JSON line, and `task_dump.py fetch --into selftest.json` merges
-it into the self-test JSON file on the PC. `take_tasks`/`send_tasks` in `main/remote_ui.cpp`
+it into the self-test JSON file on the PC. `take_tasks`/`send_tasks` in `components/remote_ui/src/remote_ui.cpp`
 (compiled only with `CONFIG_HMI_REMOTE_UI`) walk the task list with `uxTaskGetSnapshotAll`
 while holding the kernel lock (`prvTakeKernelLock`, IDF's wrapper for `xKernelLock`; see
 below), then read name, priority, core (`xTaskGetCoreID`), the created stack size and the high-water

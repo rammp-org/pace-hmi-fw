@@ -15,7 +15,7 @@ The dump: the bench build's remote UI answers `TASKS` with one JSON line,
 "complete":true}` (core -1 = unpinned; stack_bytes = the created size less 0-15 B of the
 port's 16 B alignment of the stack end; stack_free = the high-water mark; coproc_pinned = the
 port's enable bit for the FPU or PIE is set, i.e. the task has used one and the port pinned
-it). That verb is in main/remote_ui.cpp (bench builds, CONFIG_HMI_REMOTE_UI; see README).
+it). That verb is in components/remote_ui/src/remote_ui.cpp (bench builds, CONFIG_HMI_REMOTE_UI; see README).
 A dump's older "coproc" field (a837c08 firmware: "the save area was ever touched", true for
 every task that ran) means nothing and is ignored.
 
