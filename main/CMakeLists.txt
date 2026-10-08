@@ -14,6 +14,7 @@ idf_component_register(SRC_DIRS "."
                          joystick
                          joystick_cal
                          stick
+                         ota
                          settings
                          storage
                          lvgl

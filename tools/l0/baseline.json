@@ -26,8 +26,6 @@
       "main/selftest.cpp": 2
     },
     "heap_raw": {
-      "main/fw_info.cpp": 1,
-      "main/github_ota.cpp": 3,
       "main/internet_ui.cpp": 1,
       "main/log_capture.cpp": 2,
       "main/log_view.cpp": 1,
@@ -45,8 +43,6 @@
       "main/selftest.cpp": 1030
     },
     "locks": {
-      "main/fw_info.cpp": 5,
-      "main/github_ota.cpp": 11,
       "main/internet_ui.cpp": 2,
       "main/internet_ui.hpp": 1,
       "main/joystick_cal.cpp": 11,
@@ -70,8 +66,6 @@
     },
     "mutable_globals": {
       "main/about_ui.cpp": 1,
-      "main/fw_info.cpp": 2,
-      "main/github_ota.cpp": 3,
       "main/hmi_rtps_spec.hpp": 5,
       "main/internet_ui.cpp": 11,
       "main/joystick_cal.cpp": 15,
@@ -89,14 +83,11 @@
       "main/rtps_comms.cpp": 5
     },
     "static_state": {
-      "main/github_ota.cpp": 1,
       "main/main.cpp": 33,
       "main/remote_ui.cpp": 2,
       "main/rtps_comms.cpp": 5
     },
     "std_thread": {
-      "main/fw_info.cpp": 1,
-      "main/github_ota.cpp": 1,
       "main/internet_ui.cpp": 1,
       "main/remote_ui.cpp": 1,
       "main/update_ui.cpp": 1
@@ -208,6 +199,74 @@
       "heap_raw": {
         "main/main.cpp@f1eb6ce8e1d7311c18b9014104c91a6b1eb0f728": [
           "72f926642a9f8eb85604f5c0c6366a3bd4fe5448"
+        ]
+      }
+    },
+    "components/ota/src/fw_info.cpp": {
+      "heap_raw": {
+        "main/fw_info.cpp@9a007cd0b39a68fc7547054f0ba4654055dd47b4": [
+          "447c87de2babbb737d7482c1ab6990b7debe0d3f"
+        ]
+      },
+      "locks": {
+        "main/fw_info.cpp@9a007cd0b39a68fc7547054f0ba4654055dd47b4": [
+          "7cd6d5f2de52911c0148fcc71fec693e58f87618",
+          "a700c2d21a4bbd9ea23d8bb0a444872f4f149c38",
+          "a700c2d21a4bbd9ea23d8bb0a444872f4f149c38",
+          "a700c2d21a4bbd9ea23d8bb0a444872f4f149c38",
+          "a700c2d21a4bbd9ea23d8bb0a444872f4f149c38"
+        ]
+      },
+      "mutable_globals": {
+        "main/fw_info.cpp@9a007cd0b39a68fc7547054f0ba4654055dd47b4": [
+          "7b0d2fbe4c152aad1b67f44db71502d7e474a388",
+          "7cd6d5f2de52911c0148fcc71fec693e58f87618"
+        ]
+      },
+      "std_thread": {
+        "main/fw_info.cpp@9a007cd0b39a68fc7547054f0ba4654055dd47b4": [
+          "d918ac14491b37a41bd3cb5c59250107e18c0fa6"
+        ]
+      }
+    },
+    "components/ota/src/github_ota.cpp": {
+      "heap_raw": {
+        "main/github_ota.cpp@9a007cd0b39a68fc7547054f0ba4654055dd47b4": [
+          "8e9e0af485fe83dcf394ede5b3b14dd7ccab03ff",
+          "c314d14f0510e95706ac8213041899e725d31211",
+          "d20ed1d5c5591e2292740c345ded87f586e20586"
+        ]
+      },
+      "locks": {
+        "main/github_ota.cpp@9a007cd0b39a68fc7547054f0ba4654055dd47b4": [
+          "ac7e29ecaa758d7868ff6e6f4150883b8112f11c",
+          "ac7e29ecaa758d7868ff6e6f4150883b8112f11c",
+          "ac7e29ecaa758d7868ff6e6f4150883b8112f11c",
+          "ac7e29ecaa758d7868ff6e6f4150883b8112f11c",
+          "ac7e29ecaa758d7868ff6e6f4150883b8112f11c",
+          "ac7e29ecaa758d7868ff6e6f4150883b8112f11c",
+          "ac7e29ecaa758d7868ff6e6f4150883b8112f11c",
+          "ac7e29ecaa758d7868ff6e6f4150883b8112f11c",
+          "ac7e29ecaa758d7868ff6e6f4150883b8112f11c",
+          "ac7e29ecaa758d7868ff6e6f4150883b8112f11c",
+          "ba0bcefc754ac0fa1846e53e1a0fa79115634281"
+        ]
+      },
+      "mutable_globals": {
+        "main/github_ota.cpp@9a007cd0b39a68fc7547054f0ba4654055dd47b4": [
+          "39667fa4d6da3b4c7c3731e2670cecabb3106c1c",
+          "ba0bcefc754ac0fa1846e53e1a0fa79115634281",
+          "f274e4436be3c37cdaaeba442fcd3173f4a6a51d"
+        ]
+      },
+      "static_state": {
+        "main/github_ota.cpp@9a007cd0b39a68fc7547054f0ba4654055dd47b4": [
+          "2cfcd3fa975dc36239d9b5647edc947439cd7e3e"
+        ]
+      },
+      "std_thread": {
+        "main/github_ota.cpp@9a007cd0b39a68fc7547054f0ba4654055dd47b4": [
+          "8f48e79ab4370359e2f0e8e17d1c332660451ce3"
         ]
       }
     },

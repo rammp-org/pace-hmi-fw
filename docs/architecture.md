@@ -82,7 +82,7 @@ flowchart LR
 ```
 
 Sources for D1: `main/rtps_comms.cpp` (Wi-Fi or W5500, one link), `main/hmi_rtps_spec.hpp`
-(`kMibStatusPeriod` 500 ms, bench topics), the stick task's 33 ms ADC period, `main/github_ota.cpp`,
+(`kMibStatusPeriod` 500 ms, bench topics), the stick task's 33 ms ADC period, `components/ota/src/github_ota.cpp`,
 `main/remote_ui.cpp` (`CONFIG_HMI_REMOTE_UI`), `components/storage`, and the Bench section of
 [project-profile.md](project-profile.md).
 

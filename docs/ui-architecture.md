@@ -262,12 +262,12 @@ flowchart LR
   setting is a table line, its names in `kSettingParamNames`, its subject in
   `kSettingParamValue`, and a `case` in `setting_store_observer` if it needs applying.
 - **Skunk Works** tiles come from `main/actions_spec.h`, one line each.
-- **About** is `main/about_ui.cpp`, fed by `main/fw_info.cpp`: a low-priority thread hashes
+- **About** is `main/about_ui.cpp`, fed by `components/ota/src/fw_info.cpp`: a low-priority thread hashes
   the running image at boot (~0.5 s for 4 MB) and looks that hash up in
   `/storage/fwinfo.txt`, which only `scripts/fw_verify.py` on the PC writes, and only for a
   `.bin` whose digest is a GitHub release's. A line there can only match the image it was
   written for, so the file is never wrong about the running firmware.
-- **Firmware update** is `main/update_ui.cpp` over `main/github_ota.cpp`, laid out like
+- **Firmware update** is `main/update_ui.cpp` over `components/ota/src/github_ota.cpp`, laid out like
   Internet: the release list is the screen's body, and one release and the install running
   are two panels over it. The list comes from GitHub's REST API on a worker thread each time
   the screen opens; the rows are `ReleaseRow`s made into `UpdateList`. An install runs on a

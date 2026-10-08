@@ -4,7 +4,7 @@ Pure parsers for what a firmware update reads from outside: GitHub's release lis
 HTTPS), the first block of a downloaded image, `fwinfo.txt` from `/storage`, and the
 confirms-its-boot marker in the image bytes.
 
-No ESP-IDF, no HTTP, no logging. `main/github_ota.cpp` and `main/fw_info.cpp` do the I/O and
+No ESP-IDF, no HTTP, no logging. `components/ota/src/github_ota.cpp` and `components/ota/src/fw_info.cpp` do the I/O and
 call these. The code moved here from `main/` (dev_refactor 54347bb) and gives the same answers,
 as the tests below show: every golden runs against the moved code and a verbatim copy of the
 old (`test/legacy_ota_parse.cpp`).
@@ -28,7 +28,7 @@ All in `ota_parse/ota_parse.hpp`, namespace `hmi::ota`:
 | What | For |
 | --- | --- |
 | `parse_releases`, `Release`, `readable_notes`, `kNotesMaxChars` | the release list |
-| `check_first_block`, `AppDesc`, the `k*` layout constants | the image's first block; `main/github_ota.cpp` asserts the layout against ESP-IDF's structs |
+| `check_first_block`, `AppDesc`, the `k*` layout constants | the image's first block; `components/ota/src/github_ota.cpp` asserts the layout against ESP-IDF's structs |
 | `find_fw_record`, `FwRecord` | `fwinfo.txt`, from any `std::istream` |
 | `MarkerSearch` | the marker, fed chunk by chunk |
 
@@ -52,6 +52,6 @@ separate, reviewed change.
 | OTA-H8 | In `fwinfo.txt` any kind but exactly `prerelease` reads as a release. | OTA-084 |
 
 Outside this component, also parked: the release-list body is read without a size limit
-(`main/github_ota.cpp`, the read loop in `github_releases_fetch`, and `json.reserve` takes the
+(`components/ota/src/github_ota.cpp`, the read loop in `github_releases_fetch`, and `json.reserve` takes the
 server's Content-Length unchecked), and `psa_hash_setup` / `psa_hash_update` results are not
 checked in `install()`.

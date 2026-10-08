@@ -3,7 +3,7 @@
 #
 # The sources under test are components/ota_parse/src. legacy_ota_parse.cpp is the pre-move
 # code from main/, kept as the oracle the goldens were recorded from; every golden runs
-# against both. It includes main/github_ota.hpp and main/fw_info.hpp for its structs (both
+# against both. It includes github_ota.hpp and fw_info.hpp (components/ota) for its structs (both
 # are plain C++), and espp's fmt (header-only) as the firmware formats its messages.
 # cJSON is the firmware's own copy (managed_components/espressif__cjson), built as C with gcc
 # and the sanitizers, with the Kconfig default nesting limit (CONFIG_CJSON_NESTING_LIMIT=1000).
@@ -24,7 +24,7 @@ TEST_SRCS       := $(HERE)/test_ota_parse.cpp \
                    $(HERE)/subject_component.cpp \
                    $(HERE)/subject_legacy.cpp \
                    $(HERE)/legacy_ota_parse.cpp
-INCLUDES        := $(HERE) $(COMP)/include $(REPO)/main
+INCLUDES        := $(HERE) $(COMP)/include $(REPO)/components/ota/include
 SYS_INCLUDES    := $(CJSON_DIR) $(FMT_DIR)/include $(FMT_DIR)/detail/fmt/include
 COVER_SRCS      := $(SRCS_UNDER_TEST)
 
