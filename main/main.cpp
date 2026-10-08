@@ -81,13 +81,70 @@ static std::recursive_mutex lvgl_mutex;
 // --
 #include "frag_haptics.inc" // split_main.py
 // --
-#include "frag_status_band.inc" // split_main.py
+#include "hmi_ui/status_band_view.hpp"
+#include "hmi_ui/ui_build.hpp"
+// The "FPS counter" Skunk Works slot -> LVGL's built-in perf overlay (hmi::ui::PerfOverlay).
+static constinit hmi::ui::PerfOverlay perf_overlay;
+static void fps_toggle() { perf_overlay.toggle(); }
+
+/////////////////////////////////////////////////////////////////////////////
+// MCB status panel
+//
+// One view (hmi::ui::StatusBandView) serves both labels on every DriveBand
+// instance. It sets the text (from the shared spec, so the MCB's logs and
+// these labels use the same words) and the colour — a style property, which
+// has no built-in binding, hence an observer rather than lv_label_bind_text.
+/////////////////////////////////////////////////////////////////////////////
+
+// The one instance, for every DriveBand; bound from app_main and the screens built on demand.
+static constinit hmi::ui::StatusBandView status_band_view{{.shared = &ui_shared_subjects}};
+static_assert(hmi::ui::StatusBandView::TEXT_SIZE == rammp::kMcbTextLen,
+              "the band's text buffers are the shared spec's");
+static void bind_status_panel(lv_obj_t *panel) { status_band_view.bind(panel); }
+
 // --
 #include "frag_stick_config.inc" // split_main.py
 // --
 #include "frag_rtps_label.inc" // split_main.py
 // --
-#include "frag_drive_band.inc" // split_main.py
+#include "hmi_format/speed.hpp"
+#include "hmi_ui/drive_band_view.hpp"
+/////////////////////////////////////////////////////////////////////////////
+// DriveScreen: drive-mode selection and the speed readout (hmi::ui::DriveBandView)
+//
+// Three plain LVGL buttons, so they are already touch-clickable; all this adds
+// is what a tap means and which one looks selected. Deliberately touch-only:
+// the joystick is busy driving on this screen, and stealing left/right for menu
+// navigation is exactly the class of bug that made pulling back exit the
+// screen.
+/////////////////////////////////////////////////////////////////////////////
+
+// The drive session's input, defined with the drive adapter below.
+static bool drive_session_input(hmi::drive_session::Input input);
+
+// The one instance; bound from app_main.
+static constinit hmi::ui::DriveBandView drive_band_view{{
+    .profiles = {static_cast<int32_t>(MIB::DriveProfile::HIGH),
+                 static_cast<int32_t>(MIB::DriveProfile::NORMAL),
+                 static_cast<int32_t>(MIB::DriveProfile::LOW)},
+    // The ADC task cannot take the LVGL lock, so the profile reaches it through an atomic.
+    .store_profile =
+        [](int32_t profile) {
+          drive_profile_published.store(static_cast<MIB::DriveProfile>(profile));
+        },
+    // PUBLISH_DRIVE: the drive request as it stands, with the new profile (rows 29-34).
+    .profile_clicked = [] { (void)drive_session_input(hmi::drive_session::Input::PROFILE_CLICK); },
+    .nav = &ui_nav_port,
+}};
+
+// MibStatus.speed is metres per second; the label shows mph to one decimal.
+// Any task: pure arithmetic, no LVGL (components/hmi_format, REQ-FMT-01).
+using hmi::format::speed_display_tenths;
+static_assert(hmi::format::MPH_PER_MPS == rammp::kMphPerMps,
+              "hmi_format's mph per m/s must be the shared spec's");
+static_assert(hmi::format::SPEED_MAX_TENTHS == rammp::kSpeedMaxTenths,
+              "hmi_format's speed clamp must be the shared spec's");
+
 // --
 #include "frag_rtps_poll.inc" // split_main.py
 // --
