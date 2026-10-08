@@ -316,32 +316,10 @@ static void chrome_bind() {
   // chrome do not all get bound shows a frozen readout, and lining the three
   // calls up separately is how one gets forgotten.
   topbar_view.init(link_text(static_cast<NetLink>(settings_get(SETTINGS_PARAM_NETWORK))));
-  struct ScreenChrome {
-    lv_obj_t *bar;
-    lv_obj_t *band;
-    lv_obj_t *key;
-    lv_obj_t *overlay;
-    bool band_goes_home;
-  };
-  const ScreenChrome kChrome[] = {
-      // DRIVE goes "home", which while locked IS this screen; on it, the cell
-      // only closes the menu. The unlock hold, or the menu's Drive row, is the way in.
-      {ui_TopBar1, ui_DriveBand1, ui_MenuKey1, ui_MenuOverlay1, true},
-      // DriveScreen too: DRIVE is how you back out of the menu without
-      // picking a row, and it has to do that on the screen it goes back to.
-      {ui_TopBar2, ui_DriveBand2, ui_MenuKey2, ui_MenuOverlay2, true},
-      {ui_TopBar3, ui_DriveBand4, ui_MenuKey3, ui_MenuOverlay3, true},     // JoystickScreen
-      {ui_TopBar4, ui_DriveBand3, ui_MenuKey4, ui_MenuOverlay4, true},     // SeatScreen
-      {ui_TopBar5, ui_DriveBand11, ui_MenuKey11, ui_MenuOverlay11, true},  // BenchGateScreen
-      {ui_TopBar6, ui_DriveBand5, ui_MenuKey6, ui_MenuOverlay6, true},     // LogScreen
-      {ui_TopBar11, ui_DriveBand10, ui_MenuKey10, ui_MenuOverlay10, true}, // UpdateScreen
-      {ui_TopBar12, ui_DriveBand12, ui_MenuKey12, ui_MenuOverlay12, true}, // InternetScreen
-      {ui_TopBar13, ui_DriveBand13, ui_MenuKey13, ui_MenuOverlay13, true}, // AboutScreen
-  };
-  for (const ScreenChrome &c : kChrome) {
+  hmi::ui::for_each_resident_chrome([](const hmi::ui::ScreenChrome &c) {
     bind_chrome_views(c.band, c.bar);
     nav_attach_chrome(c.key, c.overlay, c.band_goes_home ? c.band : nullptr);
-  }
+  });
   // The menu stays reachable while locked: Log, Diagnostics, Settings and
   // the bench tools are all useful with the chair not driving -- and without an
   // MCB at all. Locked still means nothing moves: the band reads LOCKED on every
