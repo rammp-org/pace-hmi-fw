@@ -93,9 +93,12 @@ FRAG_INCLUDE_RE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*"(frag_[A-Za-z0-9_]+\.
 # UI files may call lv_* (CS-UI: only the UI task touches LVGL).
 # main/*_ui.* is frozen to the files that existed on 2026-10-06 (app-main-shrink V3): new UI
 # code goes to components/hmi_ui/ (CS-UI-02), not to a new main/foo_ui.cpp.
+# main/remote_ui.* moves to components/remote_ui (V15) and keeps its UI-path status there for
+# exactly those two files (reviewed): no other file in that component may call lv_*.
 MAIN_UI_FILES = ("about_ui", "internet_ui", "remote_ui", "update_ui")
 UI_FILE_RES = [
     re.compile(r"^main/(?:" + "|".join(MAIN_UI_FILES) + r")\.(?:cpp|hpp)$"),
+    re.compile(r"^components/remote_ui/(?:src/remote_ui\.cpp|include/remote_ui\.hpp)$"),
     re.compile(r"^components/hmi_ui/"),
     re.compile(r"^main/log_view\.(?:cpp|hpp|h)$"),
     re.compile(r"^main/joystick_cal\.(?:cpp|hpp|h)$"),
@@ -1381,15 +1384,19 @@ def _selftest_task_idiom(expect: Expect) -> None:
 
 
 def _selftest_ui_paths(expect: Expect) -> None:
-    """lv_* allowed in components/hmi_ui/ and today's main/*_ui files; a new main/foo_ui.cpp is not UI."""
+    """lv_* allowed in components/hmi_ui/, today's main/*_ui files and remote_ui's own two files;
+    a new main/foo_ui.cpp is not UI, nor is any other file of components/remote_ui."""
     code = "void f() {\n  lv_obj_t *o = lv_obj_create(nullptr);\n}\n"
-    for path in ("main/about_ui.cpp", "main/about_ui.hpp", "main/internet_ui.cpp", "main/remote_ui.cpp",
+    for path in ("main/about_ui.cpp", "main/about_ui.hpp", "main/internet_ui.cpp",
+                 "components/remote_ui/src/remote_ui.cpp", "components/remote_ui/include/remote_ui.hpp",
                  "main/update_ui.hpp", "main/log_view.cpp", "main/joystick_cal.cpp", UNIT,
                  "components/hmi_ui/src/drive_view.cpp", "components/hmi_ui/include/hmi_ui/drive_view.hpp"):
         expect(f"UI path may call lv_: {path}", measure(path, code)["lv_outside_ui"], 0)
     for path in ("main/foo_ui.cpp", "main/foo_ui.hpp", "main/about_ui.h", "main/settings_ui.cpp",
                  "main/xabout_ui.cpp", "components/hmi_ui_extra/src/x.cpp", "components/other/src/x_ui.cpp",
-                 "components/other/hmi_ui/x.cpp", "main/hmi_ui/x.cpp"):
+                 "components/other/hmi_ui/x.cpp", "main/hmi_ui/x.cpp",
+                 "components/remote_ui/src/other.cpp", "components/remote_ui/include/stick_inject.hpp",
+                 "components/remote_ui/src/remote_ui.hpp", "components/remote_ui/remote_ui.cpp"):
         expect(f"not a UI path, lv_ still forbidden: {path}", measure(path, code)["lv_outside_ui"], 2)
     zero = dict.fromkeys(METRICS, 0)
     expect("a new main/foo_ui.cpp with lv_ fails",
