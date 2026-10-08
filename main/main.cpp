@@ -29,7 +29,6 @@
 #include "feedback/feedback.hpp"
 
 #include "kalman_filter.hpp"
-#include "madgwick_filter.hpp"
 #include "simple_lowpass_filter.hpp"
 
 #include "ui.h"
@@ -264,8 +263,6 @@ extern "C" void app_main(void) {
   static espp::KalmanFilter<2> kf;
   kf.set_process_noise(rate_noise);
   kf.set_measurement_noise(angle_noise);
-  static constexpr float beta = 0.5f; // higher = more accelerometer, lower = more gyro
-  static espp::MadgwickFilter f(beta);
 
   using Imu = espp::M5StackTab5::Imu;
   auto kalman_filter_fn = [](float dt, const Imu::Value &accel,
@@ -282,21 +279,6 @@ extern "C" void app_main(void) {
     orientation.roll = roll;
     orientation.pitch = pitch;
     orientation.yaw = 0.0f;
-    return orientation;
-  };
-
-  auto madgwick_filter_fn = [](float dt, const Imu::Value &accel,
-                               const Imu::Value &gyro) -> Imu::Value {
-    // Apply Madgwick filter
-    f.update(dt, accel.x, accel.y, accel.z, espp::deg_to_rad(gyro.x), espp::deg_to_rad(gyro.y),
-             espp::deg_to_rad(gyro.z));
-    float roll, pitch, yaw;
-    f.get_euler(roll, pitch, yaw);
-    // return the computed orientation
-    Imu::Value orientation{};
-    orientation.roll = espp::deg_to_rad(roll);
-    orientation.pitch = espp::deg_to_rad(pitch);
-    orientation.yaw = espp::deg_to_rad(yaw);
     return orientation;
   };
 
@@ -375,78 +357,9 @@ extern "C" void app_main(void) {
   }
 
   logger.info("Setting up LVGL UI...");
-  // set the background color to white
-  lv_obj_t *bg = lv_obj_create(lv_screen_active());
-  lv_obj_set_size(bg, tab5.display_width(), tab5.display_height());
-  lv_obj_set_style_bg_color(bg, lv_color_make(255, 255, 255), 0);
-
-  // add text in the center of the screen
-  lv_obj_t *label = lv_label_create(lv_screen_active());
-  static std::string label_text = "\n\n\n\nTouch the screen!";
-  lv_label_set_text(label, label_text.c_str());
-  lv_obj_align(label, LV_ALIGN_TOP_LEFT, 0, 0);
-  lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_LEFT, 0);
-
-  // Create style for line 0 (blue line, used for kalman filter)
-  static lv_style_t style_line0;
-  lv_style_init(&style_line0);
-  lv_style_set_line_width(&style_line0, 8);
-  lv_style_set_line_color(&style_line0, lv_palette_main(LV_PALETTE_BLUE));
-  lv_style_set_line_rounded(&style_line0, true);
-
-  // make a line for showing the direction of "down"
-  lv_obj_t *line0 = lv_line_create(lv_screen_active());
-  static lv_point_precise_t line_points0[] = {{0, 0},
-                                              {tab5.display_width(), tab5.display_height()}};
-  lv_line_set_points(line0, line_points0, 2);
-  lv_obj_add_style(line0, &style_line0, 0);
-
-  // Create style for line 1 (red line, used for madgwick filter)
-  static lv_style_t style_line1;
-  lv_style_init(&style_line1);
-  lv_style_set_line_width(&style_line1, 8);
-  lv_style_set_line_color(&style_line1, lv_palette_main(LV_PALETTE_RED));
-  lv_style_set_line_rounded(&style_line1, true);
-
-  // make a line for showing the direction of "down"
-  lv_obj_t *line1 = lv_line_create(lv_screen_active());
-  static lv_point_precise_t line_points1[] = {{0, 0},
-                                              {tab5.display_width(), tab5.display_height()}};
-  lv_line_set_points(line1, line_points1, 2);
-  lv_obj_add_style(line1, &style_line1, 0);
-
-  static auto rotate_display = [&]() {
-    std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
-    static auto rotation = LV_DISPLAY_ROTATION_0;
-    rotation = static_cast<lv_display_rotation_t>((static_cast<int>(rotation) + 1) % 4);
-    lv_display_t *disp = lv_display_get_default();
-    lv_disp_set_rotation(disp, rotation);
-    // update the size of the screen
-    lv_obj_set_size(bg, tab5.rotated_display_width(), tab5.rotated_display_height());
-  };
-
-  // add a button in the top left which (when pressed) will rotate the display
-  // through 0, 90, 180, 270 degrees
-  lv_obj_t *btn = lv_btn_create(lv_screen_active());
-  lv_obj_set_size(btn, 50, 50);
-  lv_obj_align(btn, LV_ALIGN_TOP_LEFT, 0, 0);
-  lv_obj_t *label_btn = lv_label_create(btn);
-  lv_label_set_text(label_btn, LV_SYMBOL_REFRESH);
-  // center the text in the button
-  lv_obj_align(label_btn, LV_ALIGN_CENTER, 0, 0);
-  lv_obj_add_event_cb(
-      btn, [](auto event) { rotate_display(); }, LV_EVENT_PRESSED, nullptr);
-
-  // disable scrolling on the screen (so that it doesn't behave weirdly when
-  // rotated and drawing with your finger)
-  lv_obj_set_scrollbar_mode(lv_screen_active(), LV_SCROLLBAR_MODE_OFF);
-  lv_obj_clear_flag(lv_screen_active(), LV_OBJ_FLAG_SCROLLABLE);
-
   // Load the SquareLine Studio UI. This creates every screen and makes
-  // ui_BootScreen the active one; the demo widgets above stay on the (now
-  // hidden) default screen. To go back to the demo screen at runtime, keep a
-  // pointer to it (lv_screen_active() before this call) and lv_screen_load()
-  // it again.
+  // ui_BootScreen the active one; the default screen LVGL started on stays
+  // behind it, empty.
   logger.info("Loading SquareLine UI...");
   // The Tab5 panel is natively 720x1280 portrait, which is what the UI is drawn
   // for. DIRECT rendering needs rotation 0; Flip screen turns the picture in
@@ -1015,151 +928,44 @@ extern "C" void app_main(void) {
 
   // (brightness is the saved setting, applied when brightness_view.init adds its observer)
 
-  // make a task to read out various data such as IMU, battery monitoring, etc.
-  // and print it to screen
+  // A task to read the IMU, the battery monitor and the RTC every 20 ms. The self test reads
+  // what it leaves behind: the IMU's accelerometer and the battery status (imu_accel_mg,
+  // battery_mv), with no bus traffic of its own.
   logger.info("Starting data display task...");
-  espp::Task imu_task(
-      {.callback = [&](std::mutex &m, std::condition_variable &cv) -> bool {
-         // sleep first in case we don't get IMU data and need to exit early
-         {
-           std::unique_lock<std::mutex> lock(m);
-           cv.wait_for(lock, 20ms);
-         }
-         static auto &tab5 = espp::M5StackTab5::get();
-         static auto imu = tab5.imu();
+  espp::Task imu_task({.callback = [](std::mutex &m, std::condition_variable &cv) -> bool {
+                         // sleep first in case we don't get IMU data and need to exit early
+                         {
+                           std::unique_lock<std::mutex> lock(m);
+                           cv.wait_for(lock, 20ms);
+                         }
+                         static auto &tab5 = espp::M5StackTab5::get();
+                         static auto imu = tab5.imu();
 
-         //////////////////////////////////////////////////////////////////////////
-         // Update the Date/Time from the RTC
-         //////////////////////////////////////////////////////////////////////////
-         std::tm rtc_time;
-         std::string rtc_text = "";
-         if (tab5.get_rtc_time(rtc_time)) {
-           rtc_text = fmt::format("\n{:%Y-%m-%d %H:%M:%S}\n", rtc_time);
-         }
+                         // The RTC and the battery monitor, read as they were when their values
+                         // were drawn.
+                         std::tm rtc_time;
+                         (void)tab5.get_rtc_time(rtc_time);
+                         (void)tab5.read_battery_status();
 
-         //////////////////////////////////////////////////////////////////////////
-         // Update the battery status
-         //////////////////////////////////////////////////////////////////////////
-         auto battery_status = tab5.read_battery_status();
-         std::string battery_text =
-             fmt::format("\nBattery: {:0.2f} V, {:0.1f} mA, {:0.1f} %, Charging: {}\n",
-                         battery_status.voltage_v, battery_status.current_ma,
-                         battery_status.charge_percent, battery_status.is_charging ? "Yes" : "No");
+                         auto now = esp_timer_get_time(); // time in microseconds
+                         static auto t0 = now;
+                         auto t1 = now;
+                         float dt = (t1 - t0) / 1'000'000.0f; // convert us to s
+                         t0 = t1;
 
-         auto now = esp_timer_get_time(); // time in microseconds
-         static auto t0 = now;
-         auto t1 = now;
-         float dt = (t1 - t0) / 1'000'000.0f; // convert us to s
-         t0 = t1;
-
-         //////////////////////////////////////////////////////////////////////////
-         // Update the IMU data
-         //////////////////////////////////////////////////////////////////////////
-         std::error_code ec;
-         // update the imu data
-         if (!imu->update(dt, ec)) {
-           return false;
-         }
-         // get accel
-         auto accel = imu->get_accelerometer();
-         auto gyro = imu->get_gyroscope();
-         auto temp = imu->get_temperature();
-         auto orientation = imu->get_orientation();
-         auto gravity_vector = imu->get_gravity_vector();
-         // invert the axes
-         gravity_vector.y = -gravity_vector.y;
-         gravity_vector.x = -gravity_vector.x;
-
-         // now update the gravity vector line to show the direction of "down"
-         // taking into account the configured rotation of the display
-         auto rotation = lv_display_get_rotation(lv_display_get_default());
-         if (rotation == LV_DISPLAY_ROTATION_90) {
-           std::swap(gravity_vector.x, gravity_vector.y);
-           gravity_vector.x = -gravity_vector.x;
-         } else if (rotation == LV_DISPLAY_ROTATION_180) {
-           gravity_vector.x = -gravity_vector.x;
-           gravity_vector.y = -gravity_vector.y;
-         } else if (rotation == LV_DISPLAY_ROTATION_270) {
-           std::swap(gravity_vector.x, gravity_vector.y);
-           gravity_vector.y = -gravity_vector.y;
-         }
-
-         // separator for imu
-         std::string imu_text = "\nIMU Data:\n";
-         imu_text += fmt::format("Accel: {:02.2f} {:02.2f} {:02.2f}\n", accel.x, accel.y, accel.z);
-         imu_text += fmt::format("Gyro: {:03.2f} {:03.2f} {:03.2f}\n", espp::deg_to_rad(gyro.x),
-                                 espp::deg_to_rad(gyro.y), espp::deg_to_rad(gyro.z));
-         imu_text += fmt::format("Angle: {:03.2f} {:03.2f}\n", espp::rad_to_deg(orientation.roll),
-                                 espp::rad_to_deg(orientation.pitch));
-         imu_text += fmt::format("Temp: {:02.1f} C\n", temp);
-
-         // use the pitch to to draw a line on the screen indiating the
-         // direction from the center of the screen to "down"
-         int x0 = tab5.rotated_display_width() / 2;
-         int y0 = tab5.rotated_display_height() / 2;
-
-         int x1 = x0 + 50 * gravity_vector.x;
-         int y1 = y0 + 50 * gravity_vector.y;
-
-         static lv_point_precise_t line_points0[2] = {};
-         line_points0[0].x = x0;
-         line_points0[0].y = y0;
-         line_points0[1].x = x1;
-         line_points0[1].y = y1;
-
-         // Now show the madgwick filter
-         auto madgwick_orientation = madgwick_filter_fn(dt, accel, gyro);
-         float roll = madgwick_orientation.roll;
-         float pitch = madgwick_orientation.pitch;
-         [[maybe_unused]] float yaw = madgwick_orientation.yaw;
-         float vx = sin(pitch);
-         float vy = -cos(pitch) * sin(roll);
-         [[maybe_unused]] float vz = -cos(pitch) * cos(roll);
-
-         // invert the axes
-         vx = -vx;
-         vy = -vy;
-
-         // now update the line to show the direction of "down" based on the
-         // configured rotation of the display
-         if (rotation == LV_DISPLAY_ROTATION_90) {
-           std::swap(vx, vy);
-           vx = -vx;
-         } else if (rotation == LV_DISPLAY_ROTATION_180) {
-           vx = -vx;
-           vy = -vy;
-         } else if (rotation == LV_DISPLAY_ROTATION_270) {
-           std::swap(vx, vy);
-           vy = -vy;
-         }
-
-         x1 = x0 + 50 * vx;
-         y1 = y0 + 50 * vy;
-
-         static lv_point_precise_t line_points1[2] = {};
-         line_points1[0].x = x0;
-         line_points1[0].y = y0;
-         line_points1[1].x = x1;
-         line_points1[1].y = y1;
-
-         std::string text = fmt::format("{}\n\n\n\n\n", label_text);
-         text += battery_text;
-         text += rtc_text;
-         text += imu_text;
-
-         std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
-         lv_label_set_text(label, text.c_str());
-         lv_line_set_points(line0, line_points0, 2);
-         lv_line_set_points(line1, line_points1, 2);
-
-         return false;
-       },
-       .task_config = {
-           .name = "Data Display Task",
-           .stack_size_bytes = 6 * 1024,
-           .priority = 10,
-           .core_id = 1,
-       }});
+                         // update the imu data
+                         std::error_code ec;
+                         if (!imu->update(dt, ec)) {
+                           return false;
+                         }
+                         return false;
+                       },
+                       .task_config = {
+                           .name = "Data Display Task",
+                           .stack_size_bytes = 6 * 1024,
+                           .priority = 10,
+                           .core_id = 1,
+                       }});
   imu_task.start();
 
   // guards the joystick range-mapping math (center/range deadbands, circular
