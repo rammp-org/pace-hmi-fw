@@ -1,4 +1,4 @@
-# tools/bench: the board-test runner (plan §6, B0–B5, B4b and B5a–B5e)
+# tools/bench: the board-test runner (plan §6, B0–B5, B4b, B5a–B5e, and the hazard fixes' B5'' steps)
 
 Board 2 (Tab5, ESP32-P4), USB serial number `80:F1:B2:D1:51:A6`, on the Windows hotspot
 192.168.137.0/24 (PC = 192.168.137.2). No motors exist: the MCB is `scripts/rtps_mcb_sim.py`.
@@ -65,6 +65,41 @@ before each UI action the step writes a `mark` into it and grades only what foll
 `scenario_hazards.py`'s docstring. Not covered here: the sim's `ongone` policy (an HMI reset
 needs a serial reset; it belongs with C3's boot steps).
 
+## Hazard fixes C1, C3, C4, C2: B5''-1..22, B5f..B5j, C2-1..16
+`hazard_steps.py` (scenarios in `scenario_c1.py`, `scenario_c3.py`, `scenario_c4.py`,
+`scenario_c2.py`; rig in `hazard_rig.py`; grading helpers in `hazard_grade.py`), from
+docs/plans/hazard-c1-spec.md §6, hazard-c3-spec.md §7, hazard-c4-spec.md §8 and
+hazard-c2-spec.md §9. Each step's pass criteria are in its scenario file's table.
+- **Not in the default list.** They need a stick-injection image with the fixes' bench verbs
+  (STATE, PERMIT, CAL UNSAVED, POST RERUN, CRASH, STALL: components/remote_ui/
+  include/bench_verbs.hpp). `run_bench.py ... --hazard c1,c3` names the fixes the image has:
+  their steps run after B5e, retired ones left out (with c3, B5''-15 gives way to B5''-18b,
+  C3 F5; with c2, B5''-12 goes, C2 E9), every step's start reads STATE post = PASS instead of
+  sending PERMIT POST pass (C3 F6), and B2 requires C3's POST markers. `--steps` can name
+  them too (`B5pp-6b` for `B5''-6b`). `hazard_steps.py --list` lists them.
+- **Stick injection only after the sole-sim proof** (hazard-fixes.md §3 B1): before the first
+  hazard step, no stray RTPS peer process on this PC and an RTPS sweep of the bench subnet
+  finds no responder but the board; else every hazard step is INVALID and nothing is
+  injected. After the run's sim starts, no other peer process may appear.
+- **One remote-UI connection** carries the stick (STICK every 100 ms; the board lets go 300 ms
+  after the last) and the step's commands, one at a time; taps are PRESS/RELEASE so nothing
+  holds the connection. A refresh gap over 0.28 s in a step (other than the STALL steps) makes
+  it NOT_RUN: its "no motion" checks could pass on the real stick at rest.
+- **Evidence:** the sim's event log (DriveCommands, SeatCommands, every MibStatus publish,
+  marks), every XYTwist sample with its time (`sim_child.py jsave`), STATE polled every
+  100 ms, and the serial log for B5''-16, -18b, -21, B5i, B5j (the port from B0, or
+  `--port`). One clock: time.monotonic(), system-wide on Windows (15.6 ms resolution on the
+  venv's Python 3.11). "Within X" runs from the mark before the command to the first STATE
+  poll that shows the result (C3 §7).
+- **Verdicts:** PASS / FAIL on the graded checks; NOT_RUN when the image lacks a verb or a
+  STATE field the step needs (the hook another change wires has not landed: "not wired"), or
+  the rig could not do its part. Banners are not in STATE: recorded as not verified.
+- **Clean-up:** every step ends Locked with the stick centred (graded); a step that latches
+  POST FAIL restarts the HMI (Restart HMI tile, a clean reset); a C2 step that latches a stick
+  FAULT runs an injected calibration with the board's own calibrated values (C2 §9).
+- Their graders are tested without a board on hand-written traces built from the specs
+  (`hazard_selftest.py`, BENCH-015..046 in `run_bench.py selftest`).
+
 ## Rules the code enforces
 - Never erases. `common.esptool()` refuses any erase option. The only write is
   `esptool --chip esp32p4 -p <port> -b 460800 --before default-reset --after hard-reset write-flash @flash_args`.
@@ -112,6 +147,8 @@ needs a serial reset; it belongs with C3's boot steps).
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\bench\hotspot.ps1 status|restart
 python tools\bench\ui_client.py selftest     # UI-001.., a localhost fake remote UI (in L0)
 python tools\bench\run_bench.py selftest     # BENCH-001.., step sequencing on a fake board (in L0)
+%PY% tools\bench\hazard_steps.py --ip A --hazard c1,c3 [--steps B5pp-6] [--port COM7]
+%PY% tools\bench\hazard_steps.py --list
 ```
 `--tree` (default: this worktree) is where `scripts/` is run from: run the tree that built the
 image. Children run with `PYTHONDONTWRITEBYTECODE=1`.
@@ -119,7 +156,10 @@ image. Children run with `PYTHONDONTWRITEBYTECODE=1`.
 ## Decisions to revisit
 - **No "joystick self test passed" line exists** in the baseline boot. B2 uses the nearest
   boot-time evidence: `Adding joystick keypad input device...` and
-  `selftest/I ready: 54 checks (selftest_spec.h)` (text equal to the baseline).
+  `selftest/I ready: <n> checks (selftest_spec.h)`, <n> read from the tree's
+  `main/selftest_spec.hpp` (54 today; 57 with C4, 60 with C2: the counts declared in
+  `boot-expected.json`, anything else is a problem). With the idle-task watchdog checks off in
+  the tree's `sdkconfig.defaults` (C4), no `task_wdt` line may appear at all.
 - **Marker order** is the baseline log's (settings → joystick → selftest ready → joy_cal →
   Network: WiFi → Got IP), not the order the plan lists them in.
 - **Task watchdog at ~8 s** (IDLE0 starved, `main` on CPU 0) is in the baseline. The same trip is
