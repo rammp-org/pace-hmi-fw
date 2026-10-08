@@ -2,6 +2,7 @@
 # (CS-LAY-02). README.md says what is in it.
 idf_component_register(SRCS "src/adapters.cpp"
                             "src/board.cpp"
+                            "src/board_port.cpp"
                        INCLUDE_DIRS "include"
                        REQUIRES housekeeping logger m5stack-tab5
                        PRIV_REQUIRES hmi_format)

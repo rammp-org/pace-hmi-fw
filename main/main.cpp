@@ -32,6 +32,7 @@
 
 #include "about_ui.hpp"
 #include "board/board.hpp"
+#include "board/board_port.hpp"
 #include "boot_logo.h"
 #include "drive_adapter.hpp"
 #include "drive_session.hpp"
@@ -294,12 +295,6 @@ static void action_restart_hmi() {
   esp_restart();
 }
 
-// The board's swap, for the flush: present_frame waits for vsync. Its result
-// was never used; a missed swap shows as one late frame.
-static void present_on_panel(const uint8_t *frame) {
-  (void)espp::M5StackTab5::get().present_frame(frame);
-}
-
 // The system clock's validity: set by hmi::housekeeping::SystemClock (app_main's
 // system_clock), read by the TopBar. The time sync itself is the housekeeping
 // component's.
@@ -367,8 +362,8 @@ static constexpr hmi::ui::SelfTestPort kSelfTestPort{
 };
 
 static constexpr hmi::ui::BoardPort kBoardPort{
-    .backlight = [](float percent) { espp::M5StackTab5::get().brightness(percent); },
-    .present = present_on_panel,
+    .backlight = hmi::board::backlight,
+    .present = hmi::board::present,
     .restart = action_restart_hmi,
 };
 
