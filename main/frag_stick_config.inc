@@ -127,7 +127,7 @@ read_twist_mv(espp::OneshotAdc &twist_adc, const espp::AdcConfig &twist_channel,
   int reads = 0;
   for (int i = 0; i < oversample; ++i) {
     if (auto mv = twist_adc.read_mv(twist_channel)) {
-      sum += *mv;
+      sum += static_cast<float>(*mv);
       ++reads;
     }
   }
