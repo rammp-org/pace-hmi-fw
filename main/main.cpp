@@ -665,6 +665,109 @@ static void on_demand_parts_init() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Board and service wiring: app_main's Configs and bring-up steps, by concern.
+// ---------------------------------------------------------------------------
+
+// app_main: what the self test reads and drives (selftest.cpp), from the board and the unit.
+// @p found_addresses is the boot I2C probe's list; @p direct_render whether DIRECT rendering
+// came up.
+static SelfTestPlatform selftest_config(const std::vector<uint8_t> &found_addresses,
+                                        bool direct_render) {
+  return {
+      .lvgl_mutex = &lvgl_mutex,
+      .imu_accel_mg = []() -> std::optional<int32_t> {
+        // the cached reading the data display task keeps fresh, so no bus traffic
+        auto imu = espp::M5StackTab5::get().imu();
+        if (!imu) {
+          return std::nullopt;
+        }
+        const auto a = imu->get_accelerometer();
+        return static_cast<int32_t>(
+            std::lround(std::sqrt(a.x * a.x + a.y * a.y + a.z * a.z) * 1000.0f));
+      },
+      .rtc_seconds = []() -> std::optional<int64_t> {
+        std::tm now{};
+        if (!espp::M5StackTab5::get().get_rtc_time(now)) {
+          return std::nullopt;
+        }
+        return static_cast<int64_t>(std::mktime(&now));
+      },
+      .battery_mv = []() -> std::optional<int32_t> {
+        const auto battery = espp::M5StackTab5::get().get_battery_status();
+        // is_present only says the INA226 answered. Whether the reading is a
+        // pack at all is the self test's call (pwr.vbat in selftest_spec.hpp),
+        // so the raw voltage goes through and can be seen in its detail.
+        if (!battery.is_present) {
+          return std::nullopt;
+        }
+        return static_cast<int32_t>(std::lround(battery.voltage_v * 1000.0f));
+      },
+      // 0..100: app_main sets 75.0f
+      .backlight_percent = []() -> int32_t {
+        return static_cast<int32_t>(std::lround(espp::M5StackTab5::get().brightness()));
+      },
+      .i2c_probe =
+          [](uint8_t address) {
+            return espp::M5StackTab5::get().internal_i2c().probe_device(address);
+          },
+      .boot_i2c_devices = found_addresses,
+      .drv2605_status = [] { return feedback->haptics().status(); },
+      .drv2605_play = [](std::string &detail) { return feedback->haptics().play_click(detail); },
+      .da7280_found = std::find(found_addresses.begin(), found_addresses.end(), kDa7280Address) !=
+                      found_addresses.end(),
+      .direct_render = direct_render,
+      .joystick_cal_centers_mv = []() -> std::optional<std::array<float, 3>> {
+        if (!joystick_cal_saved()) {
+          return std::nullopt;
+        }
+        const JoystickCal cal = joystick_cal_current();
+        return std::array<float, 3>{cal[JOY_HORIZONTAL].center_mv, cal[JOY_VERTICAL].center_mv,
+                                    cal[JOY_TWIST].center_mv};
+      },
+  };
+}
+
+// app_main: the remote UI's hooks into the same latches the ADC task and the GPIO48 callback
+// write (remote_ui.cpp).
+static RemoteUiConfig remote_ui_config() {
+  return {
+      .lvgl_mutex = &lvgl_mutex,
+      .set_key =
+          [](uint32_t key) {
+            remote_key.store(key);
+            joy_key.store(key);
+          },
+      .press_select = [] { select_key.store(true); },
+      .set_button = [](bool down) { stick_button_edge(down); },
+      .screen_name = [] { return active_screen_name(); },
+  };
+}
+
+// app_main: LVGL in DIRECT render mode over the DSI panel's two frame buffers (see the
+// comment at the call). @return whether it came up; if not, the BSP's flush stays.
+static bool start_direct_render(espp::M5StackTab5 &tab5, espp::Logger &logger) {
+  void *fb0 = nullptr;
+  void *fb1 = nullptr;
+  esp_err_t fb_err = esp_lcd_dpi_panel_get_frame_buffer(tab5.lcd_panel_handle(), 2, &fb0, &fb1);
+  const size_t fb_bytes = tab5.display_width() * tab5.display_height() * sizeof(uint16_t);
+  // DIRECT mode renders into screen-sized frame buffers and direct_flush_cb
+  // assumes the panel's native orientation, so it is incompatible with LVGL
+  // software rotation. Assert here rather than depend on the
+  // lv_display_set_rotation(ROTATION_0) call much further down.
+  assert(lv_display_get_rotation(lv_display_get_default()) == LV_DISPLAY_ROTATION_0 &&
+         "DIRECT render mode requires rotation 0");
+  if (fb_err == ESP_OK && fb0 && fb1) {
+    display_flip.use_panel_buffers(lv_display_get_default(), fb0, fb1, fb_bytes,
+                                   tab5.display_width(), tab5.display_height());
+    logger.info("LVGL rendering directly into the DSI frame buffers (DIRECT mode)");
+    return true;
+  }
+  logger.error("Could not get DPI frame buffers ({}); leaving BSP flush in place",
+               esp_err_to_name(fb_err));
+  return false;
+}
+
 extern "C" void app_main(void) {
   // First, so the LogScreen has everything printed from here on - including
   // what the tasks started below print.
@@ -741,29 +844,9 @@ extern "C" void app_main(void) {
   // Display hardcodes RENDER_MODE_PARTIAL; DIRECT is what lets LVGL treat them
   // as real frame buffers (tracking dirty areas across both) so a flush is a
   // vsync-gated flip (see direct_flush_cb) rather than a copy. DIRECT requires
-  // rotation 0, which is what this panel runs at.
-  bool direct_render = false; // reported by the self test
-  {
-    void *fb0 = nullptr;
-    void *fb1 = nullptr;
-    esp_err_t fb_err = esp_lcd_dpi_panel_get_frame_buffer(tab5.lcd_panel_handle(), 2, &fb0, &fb1);
-    const size_t fb_bytes = tab5.display_width() * tab5.display_height() * sizeof(uint16_t);
-    // DIRECT mode renders into screen-sized frame buffers and direct_flush_cb
-    // assumes the panel's native orientation, so it is incompatible with LVGL
-    // software rotation. Assert here rather than depend on the
-    // lv_display_set_rotation(ROTATION_0) call much further down.
-    assert(lv_display_get_rotation(lv_display_get_default()) == LV_DISPLAY_ROTATION_0 &&
-           "DIRECT render mode requires rotation 0");
-    if (fb_err == ESP_OK && fb0 && fb1) {
-      display_flip.use_panel_buffers(lv_display_get_default(), fb0, fb1, fb_bytes,
-                                     tab5.display_width(), tab5.display_height());
-      direct_render = true;
-      logger.info("LVGL rendering directly into the DSI frame buffers (DIRECT mode)");
-    } else {
-      logger.error("Could not get DPI frame buffers ({}); leaving BSP flush in place",
-                   esp_err_to_name(fb_err));
-    }
-  }
+  // rotation 0, which is what this panel runs at. The self test reports whether it
+  // came up.
+  const bool direct_render = start_direct_render(tab5, logger);
 
   // run the LVGL refresh timer at 60 fps — the espp lv_conf.h compiles in a
   // 33 ms (30 fps) default period; the lv_task loop below already calls
@@ -920,58 +1003,7 @@ extern "C" void app_main(void) {
   // or by a PC over RTPS (scripts/rtps_selftest.py) — which is why this comes
   // before rtps_comms_start: selftest_init registers the self-test RTPS
   // handlers.
-  selftest_init({
-      .lvgl_mutex = &lvgl_mutex,
-      .imu_accel_mg = []() -> std::optional<int32_t> {
-        // the cached reading the data display task keeps fresh, so no bus traffic
-        auto imu = espp::M5StackTab5::get().imu();
-        if (!imu) {
-          return std::nullopt;
-        }
-        const auto a = imu->get_accelerometer();
-        return static_cast<int32_t>(
-            std::lround(std::sqrt(a.x * a.x + a.y * a.y + a.z * a.z) * 1000.0f));
-      },
-      .rtc_seconds = []() -> std::optional<int64_t> {
-        std::tm now{};
-        if (!espp::M5StackTab5::get().get_rtc_time(now)) {
-          return std::nullopt;
-        }
-        return static_cast<int64_t>(std::mktime(&now));
-      },
-      .battery_mv = []() -> std::optional<int32_t> {
-        const auto battery = espp::M5StackTab5::get().get_battery_status();
-        // is_present only says the INA226 answered. Whether the reading is a
-        // pack at all is the self test's call (pwr.vbat in selftest_spec.hpp),
-        // so the raw voltage goes through and can be seen in its detail.
-        if (!battery.is_present) {
-          return std::nullopt;
-        }
-        return static_cast<int32_t>(std::lround(battery.voltage_v * 1000.0f));
-      },
-      // 0..100: app_main sets 75.0f
-      .backlight_percent = []() -> int32_t {
-        return static_cast<int32_t>(std::lround(espp::M5StackTab5::get().brightness()));
-      },
-      .i2c_probe =
-          [](uint8_t address) {
-            return espp::M5StackTab5::get().internal_i2c().probe_device(address);
-          },
-      .boot_i2c_devices = found_addresses,
-      .drv2605_status = [] { return feedback->haptics().status(); },
-      .drv2605_play = [](std::string &detail) { return feedback->haptics().play_click(detail); },
-      .da7280_found = std::find(found_addresses.begin(), found_addresses.end(), kDa7280Address) !=
-                      found_addresses.end(),
-      .direct_render = direct_render,
-      .joystick_cal_centers_mv = []() -> std::optional<std::array<float, 3>> {
-        if (!joystick_cal_saved()) {
-          return std::nullopt;
-        }
-        const JoystickCal cal = joystick_cal_current();
-        return std::array<float, 3>{cal[JOY_HORIZONTAL].center_mv, cal[JOY_VERTICAL].center_mv,
-                                    cal[JOY_TWIST].center_mv};
-      },
-  });
+  selftest_init(selftest_config(found_addresses, direct_render));
 
   on_demand_parts_init();
 
@@ -1136,17 +1168,7 @@ extern "C" void app_main(void) {
   // because it drives everything above it: input goes into the same latches the
   // ADC task and the GPIO48 callback write, so what a script exercises is the
   // real handling and not a parallel path.
-  remote_ui_start({
-      .lvgl_mutex = &lvgl_mutex,
-      .set_key =
-          [](uint32_t key) {
-            remote_key.store(key);
-            joy_key.store(key);
-          },
-      .press_select = [] { select_key.store(true); },
-      .set_button = [](bool down) { stick_button_edge(down); },
-      .screen_name = [] { return active_screen_name(); },
-  });
+  remote_ui_start(remote_ui_config());
 
   // loop forever
   while (true) {
