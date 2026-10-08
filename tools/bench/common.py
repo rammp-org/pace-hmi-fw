@@ -31,6 +31,10 @@ BOARD_MAC = "80:F1:B2:D1:51:A6"
 # 192.168.137.2 and the board on WiFi. BENCH_NET="lan:<pc ip>/<prefix>", e.g.
 # "lan:192.168.9.226/24": the board on Ethernet (its saved Connection setting, N1 = 0)
 # in the same LAN as that PC address; no tethering is checked or restarted.
+# BENCH_NET="routed:<pc ip>@<board subnet>", e.g. "routed:100.92.133.114@10.0.0.0/24": the
+# board on Ethernet in a subnet the PC reaches through a router (a Tailscale subnet route);
+# RTPS is unicast to the board, the sweep covers the board's subnet, and the round-trip
+# times include the route (grade them against the reference image on the same route).
 NET = os.environ.get("BENCH_NET", "hotspot")
 
 
@@ -43,7 +47,14 @@ def _net(spec: str) -> tuple[str, str, str, tuple[str, ...]]:
         if iface.network.prefixlen < 22:
             raise SystemExit(f"BENCH_NET={spec}: the RTPS sweep covers at most a /22")
         return str(iface.ip), str(iface.network), "Ethernet", ()
-    raise SystemExit(f"BENCH_NET={spec!r}: expected 'hotspot' or 'lan:<pc ip>/<prefix>'")
+    if spec.startswith("routed:") and "@" in spec:
+        pc, subnet = spec[7:].split("@", 1)
+        net = ipaddress.IPv4Network(subnet)
+        if net.prefixlen < 22:
+            raise SystemExit(f"BENCH_NET={spec}: the RTPS sweep covers at most a /22")
+        return str(ipaddress.IPv4Address(pc)), str(net), "Ethernet", ()
+    raise SystemExit(f"BENCH_NET={spec!r}: expected 'hotspot', 'lan:<pc ip>/<prefix>' or "
+                     "'routed:<pc ip>@<board subnet>'")
 
 
 PC_IP, SUBNET, LINK, SWEEP_SKIP = _net(NET)
