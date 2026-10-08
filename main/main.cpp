@@ -497,7 +497,7 @@ static void on_demand_parts_init() {
 
   // SkunkWorksScreen: what outlives the screen, which is built on demand
   // (actions_screen_ensure).
-  actions_group = actions_view.init();
+  (void)actions_view.init();
 
   // DiagnosticsScreen: what outlives the screen, which is built on demand
   // (diagnostics_screen_ensure). The menu row goes through diagnostics_open

@@ -50,6 +50,8 @@ public:
   /// @return the group, for the joystick
   /// app_main, before lv_task starts.
   lv_group_t *init();
+  /// The tiles' group (init()), for the joystick.
+  [[nodiscard]] lv_group_t *group() const { return group_; }
   /// @brief Builds the tiles and shows the screen.
   /// UI task (a menu pick or a hold gesture).
   void open();
