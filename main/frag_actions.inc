@@ -51,8 +51,6 @@ static constexpr hmi::ui::ActionsView::Tile kActionSpecs[] = {
 };
 static_assert(ACTION_COUNT <= hmi::ui::ActionsView::TILES_MAX, "more actions than tiles");
 
-static lv_group_t *actions_group = nullptr;
-
 // A tile the MCB could not act on right now (hmi::ui::ActionsView::UNAVAILABLE);
 // frag_nav greys its gated menu rows the same way.
 static constexpr lv_state_t kActionUnavailable = hmi::ui::ActionsView::UNAVAILABLE;

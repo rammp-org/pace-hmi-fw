@@ -119,8 +119,6 @@ static void fill_drive_blocked_panel(lv_obj_t *panel, const char *link_title,
                                      const char *mcb_title) {
   refusal_view.fill_drive_blocked(panel, link_title, mcb_title);
 }
-static void bind_entry_refused_panel(lv_obj_t *panel) { refusal_view.bind_refused_panel(panel); }
-static void bind_mcb_lost_panel(lv_obj_t *panel) { refusal_view.bind_lost_panel(panel); }
 static void bind_to_drive_blocked_cause(lv_obj_t *panel, lv_observer_cb_t cb) {
   refusal_view.bind_to_cause(panel, cb, nullptr);
 }

@@ -697,6 +697,38 @@ void hmi::ui::NavView::arrive(const lv_obj_t *screen) {
   config_.arrived(screen);
 }
 
+void hmi::ui::NavView::start_input(lv_indev_t *indev) {
+  // The joystick's indev, nav's fallback group and the burger menu's rows.
+  init_groups(indev);
+  // A backstop for the stick losing its cursor: if its group ever has nothing
+  // focused while the screen has settled, hand it back to the screen that is
+  // up, as a fresh arrival would. Logged, because it means some path left the
+  // group behind and that path wants fixing too.
+  lv_timer_create(backstop_cb, BACKSTOP_MS, this);
+  lv_indev_set_long_press_time(indev, LONG_PRESS_MS);
+  lv_indev_set_long_press_repeat_time(indev, LONG_PRESS_REPEAT_MS);
+}
+
+void hmi::ui::NavView::backstop_cb(lv_timer_t *timer) {
+  auto *view = static_cast<NavView *>(lv_timer_get_user_data(timer));
+  lv_group_t *g = lv_indev_get_group(view->indev_);
+  if (g != nullptr && lv_group_get_focused(g) != nullptr) {
+    view->lost_checks_ = 0;
+    return;
+  }
+  // Only screens with the burger key, which always has something to
+  // focus (Boot and Update have none), and only when it stays lost for
+  // two checks in a row: a screen change or a row press in flight
+  // passes through an empty group on its way to SCREEN_LOADED.
+  if (!view->has_chrome(lv_screen_active()) || view->row_press_pending() ||
+      ++view->lost_checks_ < 2) {
+    return;
+  }
+  view->lost_checks_ = 0;
+  view->config_.cursor_lost(lv_screen_active());
+  view->arrive(lv_screen_active());
+}
+
 void hmi::ui::NavView::init_groups(lv_indev_t *indev) {
   indev_ = indev;
   fallback_group_ = lv_group_create();

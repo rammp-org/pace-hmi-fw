@@ -16,13 +16,13 @@ static constinit hmi::ui::OnDemandScreens on_demand_screens{{
     .settings_bound =
         [] {
           bind_to_drive_blocked_cause(ui_ErrorBanner6, setting_warning_observer);
-          lv_subject_add_observer_obj(&setting_page_subject, setting_warning_observer,
+          lv_subject_add_observer_obj(settings_view.page(), setting_warning_observer,
                                       ui_ErrorBanner6, nullptr);
         },
     .diagnostics_bound =
         [] {
           for (lv_subject_t *subject :
-               {&diag_rate_subject, &diag_stale_subject, &rtps_blink_subject}) {
+               {diag_view.rate(), diag_view.stale(), &rtps_blink_subject}) {
             lv_subject_add_observer_obj(subject, diag_freq_observer, ui_DiagnosticsFreqLabel,
                                         nullptr);
           }

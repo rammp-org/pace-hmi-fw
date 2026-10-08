@@ -5,8 +5,9 @@ in RAM, and `/storage/settings.txt`.
 
 A value lives in RAM from the table's default; `settings_load` reads the file once at boot, and
 a setter saves the whole file when a value changes. The code moved here from `main/` unchanged
-(app-main-shrink V15, CS-LAY-01); what each setting does when it changes (the theme, the flip,
-the stick's atomics) stays with its owner in main (`setting_store_observer`).
+(app-main-shrink V15, CS-LAY-01). `AppliedSettings` holds what other tasks read of the settings
+as atomics (the stick's mapping and scale, the sounds); what the other settings do when they
+change (the theme, the flip) stays with their owners in main (`setting_store_observer`).
 
 ## Requirements
 
@@ -25,6 +26,7 @@ SET-001..SET-064), written against this code before the move.
 | Header | What |
 | --- | --- |
 | `settings.hpp` | `settings_load`, `settings_get`, `settings_set`, `settings_theme` / `settings_set_theme`, `settings_brightness` / `settings_set_brightness`, `kBrightnessMinPercent`, `kBrightnessMaxPercent` |
+| `settings_applied.hpp` | `hmi::settings::AppliedSettings`: the stick sensitivity, drive speed, stick inversion and swap, and sounds, as atomics the Read ADC, touch and LVGL tasks read without the LVGL lock; `apply(param, value)` from the rows' observer (UI task). From `main/frag_state.inc` |
 | `settings_spec.hpp` | `SETTINGS_PARAMS`, `SETTINGS_PAGES`, `SETTINGS_PARAM_*`, `SETTINGS_PAGE_*` and the ranges: the spec table (CS-TYP-03) |
 
 The headers keep their names, so main's callers only gained the component dependency.
@@ -35,4 +37,4 @@ The headers keep their names, so main's callers only gained the component depend
   `ratchet.py transfer`, not changed).
 - Dependencies (private): `storage`, espp `logger`.
 - Not safety-relevant in itself; two of its values (stick sensitivity, drive speed) feed the
-  stick through main's atomics.
+  stick through `AppliedSettings` (main's instance, read by the Read ADC task).

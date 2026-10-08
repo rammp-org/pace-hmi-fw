@@ -11,10 +11,10 @@
 namespace hmi::ui {
 
 /// One row per entry in RAMMP_DIAG_TABLE: short label, label, and up to three readings, each
-/// under its unit. The readings are main's subjects (set under lvgl_mutex by the RTPS
-/// handler); DiagnosticsFreqLabel shows how fast they arrive. Once nothing has arrived for
-/// rammp::kDiagTimeout, or nothing ever has, every row's text and the label turn red and
-/// blink: readings the MCB stopped sending must not sit there looking current. The screen is
+/// under its unit. The readings are the view's subjects (CS-UI-05), set under lvgl_mutex by the
+/// RTPS handler (RtpsUiBridge); DiagnosticsFreqLabel shows how fast they arrive. Once nothing has
+/// arrived for rammp::kDiagTimeout, or nothing ever has, every row's text and the label turn red
+/// and blink: readings the MCB stopped sending must not sit there looking current. The screen is
 /// built on demand; the rows exist only while it is up.
 class DiagnosticsView {
 public:
@@ -23,10 +23,11 @@ public:
 
   struct Config {
     const NavPort *nav;
-    /// main's readings, raw, [item][reading]; VALUE_UNKNOWN until the MCB sends one
-    lv_subject_t (*values)[rammp::kDiagFields];
-    lv_subject_t *stale;     ///< int: 1 = nothing within rammp::kDiagTimeout, or ever
-    lv_subject_t *rate;      ///< int: arrival rate, tenths of a Hz
+    /// main's RTPS arrival statistics: when the latest sample landed (esp_timer us, 0 = never)
+    /// and the arrival rate in tenths of a Hz. UI task.
+    void (*stats)(int64_t *last_us, int32_t *rate_tenths_hz);
+    /// No sample for this long (us) = stale (main's rammp::kDiagTimeout).
+    int64_t timeout_us;
     lv_subject_t *blink;     ///< int: 0/1 blink phase
     void (*screen_ensure)(); ///< builds the screen if it is not up (main's on-demand code)
     void (*row_focus_cb)(lv_event_t *e); ///< main's FOCUSED/DEFOCUSED look for a row
@@ -39,6 +40,19 @@ public:
   ///        poll timer that keeps the latter current, and before any RTPS sample can land.
   /// app_main, before lv_task starts and before RTPS starts.
   void init_subjects();
+  /// @brief Keeps the stale and rate subjects current: staleness has to be polled, since
+  ///        nothing happens when a sample fails to arrive.
+  /// UI task (main's 250 ms poll).
+  void poll();
+  /// The readings, raw, [item][reading]; VALUE_UNKNOWN until the MCB sends one. Written by
+  /// the RTPS handler under lvgl_mutex.
+  [[nodiscard]] constexpr lv_subject_t (*values())[rammp::kDiagFields] { return values_; }
+  /// int: 1 = nothing within rammp::kDiagTimeout, or ever.
+  [[nodiscard]] constexpr lv_subject_t *stale() { return &stale_; }
+  /// int: arrival rate, tenths of a Hz.
+  [[nodiscard]] constexpr lv_subject_t *rate() { return &rate_; }
+  /// The rows' group (init()), for the joystick.
+  [[nodiscard]] lv_group_t *group() const { return group_; }
   /// @brief Creates the rows' group (what outlives the screen).
   /// @return the group, for the joystick
   /// app_main, before lv_task starts.
@@ -56,7 +70,7 @@ public:
   /// @brief Paints DiagnosticsFreqLabel: the rate, or "No data" in blinking red while stale.
   /// @param label the label
   /// UI task (observers on the rate, stale and blink subjects).
-  void paint_freq(lv_obj_t *label) const;
+  void paint_freq(lv_obj_t *label);
 
 private:
   struct Field {
@@ -70,6 +84,9 @@ private:
   lv_opa_t blink_opa() const;
 
   Config config_;
+  lv_subject_t values_[rammp::kDiagCount][rammp::kDiagFields]{};
+  lv_subject_t stale_{};
+  lv_subject_t rate_{};
   Field fields_[rammp::kDiagCount][rammp::kDiagFields]{}; ///< what each value observer shows
   lv_obj_t *rows_[rammp::kDiagCount]{};
   int row_count_ = 0; ///< rows on screen; 0 while it is not up

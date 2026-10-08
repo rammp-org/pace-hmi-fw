@@ -16,6 +16,7 @@
 // adds StickSlot: the pipeline, or with CONFIG_HMI_BENCH_STICK_INJECT the bench
 // stick injection in front of it.
 #include "stick_inject.hpp"
+#include "control/stick_island.hpp"
 
 static_assert(hmi::stick::SENSITIVITY_MIN == SETTINGS_STICK_SENSITIVITY_MIN &&
                   hmi::stick::SENSITIVITY_MAX == SETTINGS_STICK_SENSITIVITY_MAX,
@@ -61,10 +62,10 @@ struct AdcStickIo {
   // While a calibration run owns the stick nothing downstream may act on it:
   // the user is being told to push it to every end in turn.
   bool calibrating() { return joystick_cal_running(); }
-  bool swap() { return stick_swap.load(); }
-  bool invert_x() { return stick_invert_x.load(); }
-  bool invert_y() { return stick_invert_y.load(); }
-  int sensitivity() { return stick_sensitivity.load(); }
+  bool swap() { return applied_settings.stick_swap(); }
+  bool invert_x() { return applied_settings.stick_invert_x(); }
+  bool invert_y() { return applied_settings.stick_invert_y(); }
+  int sensitivity() { return applied_settings.stick_sensitivity(); }
   uint32_t joy_key() { return ::joy_key.load(); }
   uint32_t remote_key() { return ::remote_key.load(); }
   void set_joy_key(uint32_t key) { ::joy_key.store(key); }
@@ -83,7 +84,7 @@ struct AdcStickIo {
       lv_subject_set_int(joystick_view.twist(), static_cast<int32_t>(mounted.twist * 100.0f));
     }
   }
-  int drive_speed() { return ::drive_speed.load(); }
+  int drive_speed() { return applied_settings.drive_speed(); }
   // The gate. The MCB gets a centred stick whenever the stick is doing something
   // else: while a calibration run sweeps it (the pipeline does not read this
   // then), and whenever it is walking the UI rather than driving -- any screen
@@ -100,32 +101,12 @@ struct AdcStickIo {
     return rtps_comms_publish_adc(command.x, command.y, command.twist,
                                   button ? rammp::Buttons::JOYSTICK : rammp::Buttons::NONE);
   }
+  // After every cycle, valid or not: the self test measures the loop's cadence and
+  // how often a read fails, as well as the values. A no-op unless a run is
+  // capturing.
+  void note_cycle(bool valid, float horizontal_mv, float vertical_mv, float twist_mv,
+                  bool published) {
+    selftest_note_adc(valid, horizontal_mv, vertical_mv, twist_mv, published,
+                      joy_button_pressed.load());
+  }
 };
-
-// The twist pot's reading for the Read ADC task: `oversample` oneshot reads on
-// ADC2, averaged; nullopt if none succeeded.
-//
-// Out of line on purpose (noinline). OneshotAdc::read_mv brings espp Logger's
-// error paths with it, and once GCC also inlined Logger::get_time there (an fmt
-// buffer of ~500 B) the ADC task's own frame grew from 256 to 736 B, and every
-// call it makes (RTPS publish, the bars' observers) sat that much deeper: the
-// bench's mem.stk_adc fell ~500 B (B3, image a6ff6de, 2026-10-07). Here that cold
-// path holds stack only while the twist is read. Which way the inliner goes
-// depends on the rest of the unit, so this pins it instead of relying on it.
-[[gnu::noinline]] static std::optional<float>
-read_twist_mv(espp::OneshotAdc &twist_adc, const espp::AdcConfig &twist_channel, int oversample) {
-  std::optional<float> twist_mv;
-  float sum = 0.0f;
-  int reads = 0;
-  for (int i = 0; i < oversample; ++i) {
-    if (auto mv = twist_adc.read_mv(twist_channel)) {
-      sum += *mv;
-      ++reads;
-    }
-  }
-  if (reads > 0) {
-    twist_mv = sum / static_cast<float>(reads);
-  }
-  return twist_mv;
-}
-

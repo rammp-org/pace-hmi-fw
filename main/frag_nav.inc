@@ -35,13 +35,13 @@ static void nav_enter_screen(const lv_obj_t *screen) {
     nav_use_group(bench_pin_view.group(), screen);
     rd_focus(0);
   } else if (screen == ui_SettingsScreen) {
-    nav_use_group(setting_group, screen);
+    nav_use_group(settings_view.group(), screen);
     setting_focus(0);
   } else if (screen == ui_SkunkWorksScreen) {
-    nav_use_group(actions_group, screen);
+    nav_use_group(actions_view.group(), screen);
     action_focus(0);
   } else if (screen == ui_DiagnosticsScreen) {
-    nav_use_group(diag_group, screen);
+    nav_use_group(diag_view.group(), screen);
     diag_focus(0);
   } else if (screen == ui_InternetScreen) {
     internet_ui_on_load(); // its own groups, one per page
@@ -66,9 +66,10 @@ static void nav_enter_screen(const lv_obj_t *screen) {
 }
 
 // The one instance (hmi::ui::NavView): every screen's key and menu, and arriving.
+static void nav_cursor_lost(const lv_obj_t *screen); // logs on logger_nav, defined after it
 static constinit hmi::ui::NavView nav_view{{
     .shared = &ui_shared_subjects,
-    .menu_slide = &menu_slide_subject,
+    .menu_slide = setting_subjects.value(SETTINGS_PARAM_MENU_SLIDE),
     .menu_open = &nav_menu_open,
     .menu_on_arrival = &nav_menu_on_arrival,
     .gate_update = nav_update_stick_gate,
@@ -110,6 +111,7 @@ static constinit hmi::ui::NavView nav_view{{
             rd_pin_reset();
           }
         },
+    .cursor_lost = nav_cursor_lost,
 }};
 
 // The calls the rest of the unit makes (and NavPort's table).

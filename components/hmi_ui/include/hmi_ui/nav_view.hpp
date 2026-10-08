@@ -65,6 +65,9 @@ public:
     void (*enter_screen)(const lv_obj_t *screen);
     /// After the arrival's gate update (main: the bench PIN is asked again on every visit).
     void (*arrived)(const lv_obj_t *screen);
+    /// The lost-cursor backstop is about to re-enter `screen` (main logs it: some path left
+    /// the group behind, and that path wants fixing too).
+    void (*cursor_lost)(const lv_obj_t *screen);
   };
 
   /// p21 "HOME BUTTON": a dissolve from any screen back to Drive.
@@ -76,6 +79,13 @@ public:
   static constexpr uint32_t MENU_SLIDE_MS = 280;
   /// p21 "ROW PRESS": the row holds negative this long before anything moves.
   static constexpr uint32_t ROW_PRESS_MS = 300;
+  /// How often the lost-cursor backstop looks.
+  static constexpr uint32_t BACKSTOP_MS = 500;
+  /// hold-to-repeat feel. LVGL's defaults (400 ms then every 100 ms) are tuned for a keyboard
+  /// and run the settings list far too fast for a joystick you steer with; these are the two
+  /// knobs if it feels wrong on the bench.
+  static constexpr uint32_t LONG_PRESS_MS = 500;
+  static constexpr uint32_t LONG_PRESS_REPEAT_MS = 250;
 
   constexpr explicit NavView(const Config &config) noexcept
       : config_(config) {}
@@ -87,6 +97,12 @@ public:
   ///        (filled per overlay when the menu opens). The indev starts on the fallback group.
   /// app_main, before lv_task starts.
   void init_groups(lv_indev_t *indev);
+  /// @brief init_groups(@p indev), then the lost-cursor backstop (every BACKSTOP_MS: a stick
+  ///        whose group has had nothing focused for two checks in a row, on a screen with
+  ///        chrome and no row press in flight, is handed back to the screen that is up, as a
+  ///        fresh arrival would), then the joystick's hold-to-repeat times.
+  /// app_main, before lv_task starts.
+  void start_input(lv_indev_t *indev);
   /// The joystick's keypad indev (null before init_groups).
   [[nodiscard]] lv_indev_t *indev() const { return indev_; }
   /// The fallback group, for the screens with at most a button or two of their own.
@@ -164,13 +180,17 @@ private:
   Config config_;
   std::array<Chrome, 16> chrome_{}; ///< each screen's key and overlay, as attach_chrome wires them
   std::array<Row, NAV_DEST_COUNT> rows_{}; ///< the rows' callback data (the same for every overlay)
-  lv_indev_t *indev_ = nullptr;            ///< the joystick's keypad indev
-  lv_group_t *fallback_group_ = nullptr;   ///< the screens with little of their own to focus
-  lv_group_t *menu_group_ = nullptr;       ///< the open menu's rows
-  lv_group_t *screen_group_ = nullptr;     ///< the group the screen underneath uses
-  lv_timer_t *press_timer_ = nullptr;      ///< a picked row waiting out ROW_PRESS_MS
-  int drop_row_ = -1;                      ///< the row the destination's overlay replays on arrival
-  bool menu_sub_ = false; ///< which level the open menu shows: false = the top rows
+  // The lost-cursor backstop's timer; user data is the view. UI task.
+  static void backstop_cb(lv_timer_t *timer);
+
+  lv_indev_t *indev_ = nullptr;          ///< the joystick's keypad indev
+  int lost_checks_ = 0;                  ///< backstop checks in a row with nothing focused
+  lv_group_t *fallback_group_ = nullptr; ///< the screens with little of their own to focus
+  lv_group_t *menu_group_ = nullptr;     ///< the open menu's rows
+  lv_group_t *screen_group_ = nullptr;   ///< the group the screen underneath uses
+  lv_timer_t *press_timer_ = nullptr;    ///< a picked row waiting out ROW_PRESS_MS
+  int drop_row_ = -1;                    ///< the row the destination's overlay replays on arrival
+  bool menu_sub_ = false;                ///< which level the open menu shows: false = the top rows
 };
 
 } // namespace hmi::ui

@@ -18,7 +18,7 @@ static bool haptic_play(espp::Drv2605::Waveform w, uint8_t slots) {
 // How the click sound reaches the speaker and the LVGL task, for app_main's Feedback.
 static hmi::feedback::ClickSound::Config click_sound_config() {
   return {
-      .sounds_on = sounds_on,
+      .sounds_on = applied_settings.sounds_on(),
       .play = [](std::span<const uint8_t> samples) { espp::M5StackTab5::get().play_audio(samples); },
       .now_ms = [] { return lv_tick_get(); },
       // The second click of a refusal: a one-shot LVGL timer, so it runs on the

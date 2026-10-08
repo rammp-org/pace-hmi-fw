@@ -17,11 +17,16 @@ idf_component_register(SRCS "src/about_view.cpp"
                             "src/on_demand_screens.cpp"
                             "src/overdraw.cpp"
                             "src/refusal_view.cpp"
+                            "src/resident_chrome.cpp"
                             "src/rtps_label_view.cpp"
+                            "src/rtps_ui_bridge.cpp"
                             "src/seat_view.cpp"
+                            "src/setting_subjects.cpp"
                             "src/settings_view.cpp"
                             "src/status_band_view.cpp"
                             "src/topbar_view.cpp"
+                            "src/ui_build.cpp"
+                            "src/ui_island.cpp"
                             "src/ui_poll.cpp"
                             "src/update_view.cpp"
                             "src/widget_tree.cpp"
@@ -33,6 +38,8 @@ idf_component_register(SRCS "src/about_view.cpp"
                                 lvgl
                                 ota_parse
                                 rammp_rtps_messages
+                                settings
+                                task
                        PRIV_REQUIRES esp_mm
                                      esp_timer
                                      ui)

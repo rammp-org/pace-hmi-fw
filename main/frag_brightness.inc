@@ -1,10 +1,9 @@
 // split_main.py fragment of main.cpp (frag_brightness: original lines 718-766); one TU, see main.cpp.
 #include "hmi_ui/brightness_view.hpp"
-static lv_subject_t brightness_subject; // backlight %, kBrightnessMin..MaxPercent
 
-// The one instance. brightness_subject stays out here: the Settings row steps it too.
+// The one instance. Its subject is the Settings row's (SettingSubjects): the row steps it too.
 static constinit hmi::ui::BrightnessView brightness_view{{
-    .subject = &brightness_subject,
+    .subject = setting_subjects.value(SETTINGS_PARAM_BRIGHTNESS),
     .min_percent = kBrightnessMinPercent,
     .max_percent = kBrightnessMaxPercent,
     .backlight = [](float percent) { espp::M5StackTab5::get().brightness(percent); },

@@ -13,6 +13,7 @@ behaviour.
 | File | What |
 | --- | --- |
 | `include/hmi_ui/nav_port.hpp` | `NavPort`: main's navigation calls the views need, until nav moves here. main fills one constexpr table |
+| `include/hmi_ui/setting_subjects.hpp`, `src/setting_subjects.cpp` | `SettingSubjects`: one subject per settings_spec.hpp parameter, what each Settings row shows and steps; `init` starts them from the saved settings, applies the theme and hands the rest to main's `setting_store_observer` (from `main/frag_state.inc`, `frag_brightness.inc` and app_main) |
 | `include/hmi_ui/settings_view.hpp`, `src/settings_view.cpp` | `SettingsView`: the SettingsScreen's -/+ rows, their limits, press flash and the actuator rejection flash (from `main/frag_settings_ui.inc` and app_main's wiring). The pages' contents, `setting_store_observer` (settings, flip, the ADC task's atomics) and the seat command path stay in main |
 | `include/hmi_ui/shared_subjects.hpp` | `SharedSubjects`: the subjects main still defines (`main/frag_state.inc`) and several views read. main fills it once; it shrinks as each subject moves to its view (S7) |
 | `include/hmi_ui/diagnostics_view.hpp`, `src/diagnostics_view.cpp` | `DiagnosticsView`: the DiagnosticsScreen's rows, the rate label and the stale warning (from `main/frag_diag.inc`); main keeps the readings, `diag_poll` and the group |
@@ -27,9 +28,9 @@ behaviour.
 | `include/hmi_ui/display_flip.hpp`, `src/display_flip.cpp` | `DisplayFlip`: DIRECT rendering into the DSI panel's two frame buffers, the 180-degree Settings "Flip screen" (PPA, CPU fallback) and the touch input that turns with it (from `main/frag_display_flip.inc`). Finds itself through the display's and the touch input's LVGL driver data. The PSRAM frame's `heap_caps_aligned_alloc` is legacy debt moved with `ratchet.py transfer` |
 | `include/hmi_ui/drive_band_view.hpp`, `src/drive_band_view.cpp` | `DriveBandView`: the Drive screen's speed readout and its three drive-profile buttons (from `main/frag_drive_band.inc`) |
 | `include/hmi_ui/fps_meter.hpp`, `src/fps_meter.cpp` | `FpsMeter`: render time per frame and the once-a-second `[FPS]` debug line, `CONFIG_HMI_DEBUG_FPS` only (from `main/frag_fps.inc`) |
-| `include/hmi_ui/log_view.hpp`, `src/log_view.cpp` | `LogView`, `LogLineLevel`: the LogScreen (from `main/log_view.cpp`); the lines come from main's log capture through its Config |
 | `include/hmi_ui/hold_gesture.hpp`, `src/hold_gesture.cpp` | `HoldGesture`, `HoldEngine`: the push-and-hold gestures (unlock, drive exit, calibrate) and the engine that fills and completes them (from `main/frag_hold.inc`) |
 | `include/hmi_ui/joystick_view.hpp`, `src/joystick_view.cpp` | `JoystickView`: the Joystick test screen's axis bars and GPIO48 button count, and their subjects (from `main/frag_status_band.inc`, `frag_state.inc` and app_main) |
+| `include/hmi_ui/log_view.hpp`, `src/log_view.cpp` | `LogView`, `LogLineLevel`: the LogScreen (from `main/log_view.cpp`); the lines come from main's log capture through its Config |
 | `include/hmi_ui/nav_view.hpp`, `src/nav_view.cpp` | `NavView`: the burger key and its menu on every screen, the joystick's focus groups, nav_go and arriving on a screen (from `main/frag_nav.inc`). The stick gate's writes stay main's (`gate_update`), at the same trigger points; main's per-screen arrival wiring is its `enter_screen` |
 | `include/hmi_ui/on_demand_screens.hpp`, `src/on_demand_screens.cpp` | `OnDemandScreens`: Settings, Skunk Works and Diagnostics built when opened and destroyed once left, at most one at a time (from `main/frag_screens_on_demand.inc`) |
 | `include/hmi_ui/overdraw.hpp`, `src/overdraw.cpp` | `strip_screen_overdraw`, `strip_all_overdraw`: clear the background fills nobody can see (from `main/frag_overdraw.inc`; main keeps the log line) |
@@ -40,6 +41,10 @@ behaviour.
 | `include/hmi_ui/widget_tree.hpp`, `src/widget_tree.cpp` | `for_each_descendant` (iterative, pre-order, bounded), `set_focused_recursive`, `clear_click_focusable_recursive`: helpers for rows and buttons whose look spans their children (from `main/frag_settings_ui.inc`) |
 | `include/hmi_ui/update_view.hpp`, `src/update_view.cpp` | `UpdateView`, `ReleaseList`, `InstallStage`, `InstallStatus`: the UpdateScreen's three pages (from `main/update_ui.cpp`); the release list, the install, the worker thread, the hand-back to the LVGL task and the restart after an install (with its may_restart guard) are main's (`main/update_ui.cpp`) |
 | `include/hmi_ui/topbar_view.hpp`, `src/topbar_view.cpp` | `TopBarView`: the TopBar's clock and link labels (from `main/frag_clock.inc`). Setting the clock from the MCB is not UI and stays in main |
+| `include/hmi_ui/resident_chrome.hpp`, `src/resident_chrome.cpp` | `ScreenChrome`, `for_each_resident_chrome`: the TopBar, band, burger key and overlay of every screen ui_init builds, one list so none is forgotten (from app_main's wiring); main binds its views and nav on each |
+| `include/hmi_ui/rtps_ui_bridge.hpp`, `src/rtps_ui_bridge.cpp` | `RtpsUiBridge`: what an MCB status or a diagnostics sample changes in the UI (subjects only), on the RTPS receive task with `lvgl_mutex` held by main's handlers (from app_main's RTPS callbacks) |
+| `include/hmi_ui/ui_build.hpp`, `src/ui_build.cpp` | `build_screens`, `finish_build`, `perf_overlay_font`: the UI build's steps that need only what they are passed (every screen ui_init builds less the on-demand ones, the boot logo; the perf overlay hidden, the overdraw pass, the boot screen's exit; the overlay's font). Called by app_main in its order (from main.cpp's wiring) |
+| `include/hmi_ui/ui_island.hpp`, `src/ui_island.cpp` | `UiIsland`: the task that runs LVGL (today's `lv_task`): one LVGL cycle every 8 ms at most, then it yields at least a tick (from app_main). The cycle itself, `lv_task_handler` under `lvgl_mutex`, is main's `lvgl_cycle`, passed in its Config, so the island takes no lock |
 | `include/hmi_ui/ui_poll.hpp`, `src/ui_poll.cpp` | `UiPoll`: the island's 250 ms tick: link indicator and blink, diagnostics staleness, the drive adapter's tick, theme switch (from `main/frag_rtps_poll.inc`) |
 
 ## Rules for code here
@@ -77,12 +82,17 @@ behaviour.
 
 ## Tasks and dependencies
 
-- Tasks: none of its own. Views run on the UI task (LVGL timers and observers) and on
-  `app_main` during start-up.
+- Tasks: `UiIsland` runs the UI task, `lv_task` (16 KB, priority 20, core 1, 8 ms). Views run
+  on it (LVGL timers and observers) and on `app_main` during start-up. `UiIsland::Config::task`
+  is that row as a literal, copied from the code it replaced, so the G10 task dump
+  (`tools/guards/baselines/tasks.json`) is unchanged. The topology's `ui` row
+  (`components/topology`, CS-CON-02) is the target design; taking the config from
+  `topo.task_config(...)` is a later step, made once the owner has reviewed the TASKS rows,
+  and it comes with its own G10 baseline.
 - Dependencies, public (the headers use their types): `lvgl`, `hmi_format` (texts,
   `StepperSpec`), `hmi_models` (`grid.hpp`, `pin.hpp`), `rammp_rtps_messages`
   (`MIB::MibSystemState`, the seat axis table), `ota_parse` (`hmi::ota::Release`),
-  `esp_driver_ppa` and espp `logger`. Private: `ui` (the export: widgets, component children,
+  `esp_driver_ppa`, espp `logger` and `task` (`UiIsland`), and `settings` (the spec table and the saved values). Private: `ui` (the export: widgets, component children,
   theme colours), `esp_mm` (the flip's cache sync), `esp_timer` (the FPS meter). `main`
   requires the component (`PRIV_REQUIRES hmi_ui`).
 - Build: `fw_component_options(${COMPONENT_LIB})` (C++23 and the fw warning set as errors),

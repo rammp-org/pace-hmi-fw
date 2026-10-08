@@ -7,6 +7,7 @@
 
 #include "hmi_format/stepper.hpp"
 #include "hmi_ui/nav_port.hpp"
+#include "hmi_ui/setting_subjects.hpp"
 
 namespace hmi::ui {
 
@@ -29,9 +30,13 @@ public:
 
   struct Config {
     const NavPort *nav;
-    lv_subject_t *page;     ///< main's setting_page_subject: the page that is up
-    lv_subject_t *locked;   ///< int: 1 = locked; a locked_only row refuses a step while 0
-    int32_t actuators_page; ///< the page number of the actuator rows
+    lv_subject_t *locked;      ///< int: 1 = locked; a locked_only row refuses a step while 0
+    SettingSubjects *subjects; ///< what each settings row shows and steps
+    /// main's seat_axis_value[rammp::kSeatAxisCount]: what each actuator row shows (raw units,
+    /// as the MCB last reported them).
+    lv_subject_t *seat_values;
+    void (*screen_ensure)(); ///< builds the screen if it is not up (main's on-demand code)
+    int32_t actuators_page;  ///< the page number of the actuator rows
     void (*seat_step)(size_t row, int direction); ///< main's: one actuator step, a request
     void (*refuse)();                             ///< the refusal cue
   };
@@ -44,6 +49,16 @@ public:
   /// @return the group, for the joystick
   /// app_main, before lv_task starts.
   lv_group_t *init();
+  /// The rows' group (init()), for the joystick.
+  [[nodiscard]] lv_group_t *group() const { return group_; }
+  /// int: the page that is up, a SETTINGS_PAGE_* or Config::actuators_page. A subject because
+  /// main's warning panel depends on it; main initialises it before that panel binds.
+  [[nodiscard]] constexpr lv_subject_t *page() { return &page_; }
+  /// @brief Fills the screen for @p page and shows it: the actuator rows (DEBUG ACTUATORS),
+  ///        or the settings_spec.hpp rows of that page.
+  /// @param page a SETTINGS_PAGE_* or Config::actuators_page
+  /// UI task (a click handler).
+  void open_page(int32_t page);
   /// @brief Empties the screen: deletes the rows (their observers and events go with them)
   ///        and ends a press flash first.
   /// UI task.
@@ -94,6 +109,7 @@ private:
   void step(const Row *row, int direction);
 
   Config config_;
+  lv_subject_t page_{};
   Row rows_[ROWS_MAX]{};
   int row_count_ = 0; ///< rows on the page that is up; 0 while the screen is not
   int cursor_ = 0;    ///< which row the joystick is on

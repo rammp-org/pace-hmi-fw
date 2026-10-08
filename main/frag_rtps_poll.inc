@@ -43,7 +43,7 @@ static constexpr uint32_t kRtpsPollMs = hmi::ui::UiPoll::PERIOD_MS;
 // The one instance; app_main starts its timer.
 static constinit hmi::ui::UiPoll ui_poll{{
     .shared = &ui_shared_subjects,
-    .theme = &theme_subject,
+    .theme = setting_subjects.value(SETTINGS_PARAM_THEME),
     .link_state = [] { return static_cast<hmi::ui::LinkState>(rtps_comms_link_state()); },
     .link_seen = [](hmi::ui::LinkState state) { log_link_change(static_cast<RtpsLinkState>(state)); },
     .diag_poll = [] { diag_poll(); },               // diagnostics staleness rides the same tick

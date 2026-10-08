@@ -12,47 +12,14 @@
 // MIB reported and nothing converts again.
 /////////////////////////////////////////////////////////////////////////////
 
-static constexpr int64_t kClockMaxDriftS = 2; // disagree by more and the MCB wins
-
+// The system clock's validity: set by hmi::housekeeping::SystemClock (app_main's
+// system_clock), read by the TopBar. The time sync itself is the housekeeping
+// component's.
 static std::atomic<bool> clock_valid{false};
 
 // An RTC that lost power reads 2000; anything before 2025 is not a real time
 // (components/hmi_format, REQ-FMT-06).
 using hmi::format::clock_plausible;
-
-// Any task.
-static void clock_set(const std::tm &local) {
-  std::tm copy = local;
-  const timeval tv{.tv_sec = mktime(&copy), .tv_usec = 0};
-  settimeofday(&tv, nullptr);
-  clock_valid = true;
-}
-
-// RTPS receive task.
-static void clock_note_mcb_time(const MIB::MibStatus &status) {
-  if (status.epoch_s <= 0) {
-    return; // 0: the MCB does not know the time
-  }
-  // epoch_s is UTC; the TopBar shows the wall clock where the chair is, so the
-  // MIB's own offset comes off the wire with it. TZ is unset, which makes
-  // localtime_r and mktime the identity, so the system clock holds local time.
-  const time_t mcb =
-      static_cast<time_t>(status.epoch_s + static_cast<int64_t>(status.utc_offset_min) * 60);
-  std::tm t{};
-  if (localtime_r(&mcb, &t) == nullptr || !clock_plausible(t)) {
-    return;
-  }
-  if (clock_valid && std::llabs(static_cast<int64_t>(mcb - time(nullptr))) <= kClockMaxDriftS) {
-    return;
-  }
-  clock_set(t);
-  static espp::Logger clock_logger({.tag = "clock", .level = espp::Logger::Verbosity::INFO});
-  if (espp::M5StackTab5::get().set_rtc_time(t)) {
-    clock_logger.info("set from the MCB: {:%Y-%m-%d %H:%M:%S}", t);
-  } else {
-    clock_logger.warn("set from the MCB, but the RTC write failed");
-  }
-}
 
 // The TopBar's link label: what RTPS runs over. The design's "BT · WI-FI" is only
 // a placeholder; it is set from the setting before rtps_comms_start, then from the
