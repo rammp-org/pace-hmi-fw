@@ -12,7 +12,8 @@
 #   ui            SquareLine export, generated (CS-LAY-04)
 #   m5stack-tab5  vendored Tab5 BSP (CS-LAY-05)
 #   joystick      vendored from espp (CS-LAY-05)
-set(HMI_NOT_FIRST_PARTY ui m5stack-tab5 joystick)
+#   espp_adc      vendored espp adc (CS-LAY-05; hazard fix C2, components/espp_adc/README.md)
+set(HMI_NOT_FIRST_PARTY ui m5stack-tab5 joystick espp_adc)
 
 # hmi_is_first_party(<out-var> <component-dir> <source-dir>)
 # Pure (no IDF calls), so `cmake -P` can test it.

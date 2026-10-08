@@ -14,10 +14,11 @@
     },
     "control": {
       "reqs": [
-        "espp__adc",
         "espp__filters",
         "espp__logger",
-        "espp__task"
+        "espp__task",
+        "espp_adc",
+        "hmi_rtps_spec"
       ],
       "priv_reqs": []
     },
@@ -117,7 +118,8 @@
     },
     "joystick_cal": {
       "reqs": [
-        "espp__format"
+        "espp__format",
+        "stick"
       ],
       "priv_reqs": []
     },
@@ -139,7 +141,6 @@
         "esp_netif",
         "esp_partition",
         "esp_wifi",
-        "espp__adc",
         "espp__base_component",
         "espp__base_peripheral",
         "espp__bmi270",
@@ -172,6 +173,7 @@
         "espp__thread_pool",
         "espp__timer",
         "espp__touch",
+        "espp_adc",
         "espressif__cjson",
         "espressif__esp-dsp",
         "espressif__esp_hosted",
@@ -282,7 +284,6 @@
     "esp_partition": "idf",
     "esp_timer": "idf",
     "esp_wifi": "idf",
-    "espp__adc": "managed",
     "espp__base_component": "managed",
     "espp__base_peripheral": "managed",
     "espp__bmi270": "managed",
@@ -315,6 +316,7 @@
     "espp__thread_pool": "managed",
     "espp__timer": "managed",
     "espp__touch": "managed",
+    "espp_adc": "vendored",
     "espressif__cjson": "managed",
     "espressif__esp-dsp": "managed",
     "espressif__esp_hosted": "managed",

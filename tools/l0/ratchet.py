@@ -14,7 +14,7 @@ CS-MEM-01, CS-NAM-01, CS-TYP-04/05, CS-CMP-03, CS-ERR-04).
                                         (see "transfer" below and tools/l0/README.md)
 
 Scope: main/** and components/** except components/ui (generated),
-components/m5stack-tab5 (vendored), any test/ or generated/ folder, and
+components/m5stack-tab5 and components/espp_adc (vendored), any test/ or generated/ folder, and
 main/boot_logo.[ch] (generated pixel data). components/joystick and
 main/sample_ui_* are in scope as legacy.
 
@@ -83,7 +83,7 @@ SHOULD_FUNCTION = 60
 LIMIT_APP_MAIN = 300  # CS-LAY-01
 APP_MAIN = "app_main"
 
-EXCLUDED_COMPONENTS = {"ui", "m5stack-tab5"}
+EXCLUDED_COMPONENTS = {"ui", "m5stack-tab5", "espp_adc"}
 EXCLUDED_DIRS = {"test", "generated"}
 EXCLUDED_FILES = {"main/boot_logo.c", "main/boot_logo.h"}
 UNIT = "main/main.cpp"
@@ -1634,7 +1634,8 @@ def selftest() -> int:
         expect("split invariant", after[UNIT], before[UNIT])
 
         # Scope: excluded components, test/ and generated/ folders, boot_logo.
-        for rel in ("components/ui/x.c", "components/m5stack-tab5/src/x.cpp", "components/c/test/t.cpp",
+        for rel in ("components/ui/x.c", "components/m5stack-tab5/src/x.cpp",
+                    "components/espp_adc/include/x.hpp", "components/c/test/t.cpp",
                     "components/c/generated/g.cpp", "main/boot_logo.c"):
             expect(f"out of scope {rel}", in_scope(rel), False)
         for rel in ("components/joystick/src/joystick.cpp", "main/sample_ui_home.c", "components/c/include/c.hpp"):

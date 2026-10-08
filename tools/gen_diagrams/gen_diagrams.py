@@ -44,7 +44,7 @@ SNAPSHOT_CMD = "python tools/gen_diagrams/gen_diagrams.py write --build-dir <idf
 
 # components/* that are not first-party: drawn only as dependency targets.
 GENERATED_COMPONENTS = frozenset({"ui"})
-VENDORED_COMPONENTS = frozenset({"m5stack-tab5", "joystick"})
+VENDORED_COMPONENTS = frozenset({"m5stack-tab5", "joystick", "espp_adc"})
 
 CLASSDEFS = (
     "  classDef hw fill:#d9dde3,stroke:#7a8590,color:#111\n"

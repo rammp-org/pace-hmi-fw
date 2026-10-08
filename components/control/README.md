@@ -79,7 +79,7 @@ task is espp's (`ContinuousAdc`, priority 5).
 
 ## Dependencies
 
-espp `adc` (continuous and oneshot), `filters` (the lowpass), `logger`, `task`;
+espp `adc`, vendored as `components/espp_adc` (continuous and oneshot), `filters` (the lowpass), `logger`, `task`;
 `hmi_rtps_spec` (the MibStatus timeout and the ENABLED state the guard checks against). The
 stick pipeline (`components/stick`) and main's Io come in as template arguments.
 
