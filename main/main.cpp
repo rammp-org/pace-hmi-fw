@@ -300,6 +300,7 @@ static void diagnostics_open();
 // --
 // Is the MCB fit to drive, or to move the seat (DriveUi's readiness checks, hmi_ui). The
 // views and the rest of the unit reach them through these.
+#include "hmi_ui/drive_ui.hpp"
 static bool mcb_ready() { return hmi::ui::mcb_ready(ui_shared_subjects); }
 static bool seat_ready() { return hmi::ui::seat_ready(ui_shared_subjects); }
 
