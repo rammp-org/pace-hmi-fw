@@ -162,15 +162,15 @@ First-party components (`main` and `components/*` except `joystick`, `m5stack-ta
 
 ```mermaid
 flowchart LR
-  c_drive_adapter["drive_adapter"]
-  c_drive_session["drive_session"]
+  c_drive_adapter["drive_adapter"]:::safety
+  c_drive_session["drive_session"]:::safety
   c_feedback["feedback"]
   c_fw_core["fw_core"]
   c_hmi_format["hmi_format"]
   c_hmi_models["hmi_models"]
   c_hmi_ui["hmi_ui"]
   c_joystick["joystick (vendored)"]:::safety
-  c_joystick_cal["joystick_cal"]
+  c_joystick_cal["joystick_cal"]:::safety
   c_m5stack_tab5["m5stack-tab5 (vendored)"]
   c_main["main"]:::safety
   c_ota["ota"]
@@ -178,7 +178,7 @@ flowchart LR
   c_post["post"]:::safety
   c_rammp_rtps_messages["rammp_rtps_messages (submodule)"]:::safety
   c_settings["settings"]
-  c_stick["stick"]
+  c_stick["stick"]:::safety
   c_storage["storage"]
   c_ui["ui"]:::gen
   g_ESP_IDF["ESP-IDF · 17"]
