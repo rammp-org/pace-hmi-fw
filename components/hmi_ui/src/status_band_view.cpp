@@ -6,7 +6,7 @@
 #include "ui.h"
 
 #include "components/ui_comp_driveband.h"
-#include "hmi_ui/link_state.hpp"
+#include "drive_ui/link_state.hpp"
 
 void hmi::ui::StatusBandView::drive_observer_cb(lv_observer_t *observer, lv_subject_t *) {
   static_cast<StatusBandView *>(lv_observer_get_user_data(observer))

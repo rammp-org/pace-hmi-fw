@@ -13,7 +13,7 @@
 #include "messages/mib_message.hpp"
 
 #include "drive_session.hpp"
-#include "hmi_ui/link_state.hpp"
+#include "drive_ui/link_state.hpp"
 
 namespace hmi::ui {
 

@@ -7,8 +7,8 @@
 
 #include "lvgl.h"
 
+#include "drive_ui/link_state.hpp"
 #include "hmi_ui/firmware_info.hpp"
-#include "hmi_ui/link_state.hpp"
 
 namespace hmi::ui {
 

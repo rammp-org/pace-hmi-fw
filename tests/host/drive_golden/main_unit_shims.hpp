@@ -1,5 +1,5 @@
 #pragma once
-// What the drive code (hmi_ui's DrivePort, drive_port.hpp, moved from main/frag_drive.inc)
+// What the drive code (drive_ui's DrivePort, drive_port.hpp, moved from main/frag_drive.inc)
 // needs from the rest of the firmware, LVGL, rtps_comms and esp_timer, as recording shims over
 // the stateful world (world.hpp), and MainUnitUi, the Ui the port is instantiated over here:
 // each of its methods is the shim of the main-unit name the code called before the move.
@@ -246,7 +246,7 @@ inline bool rtps_comms_publish_drive(rammp::DriveRequest request, MIB::DriveProf
 
 // --- the rest of the main.cpp unit ------------------------------------------------------------
 // The constants the port uses (HOLD_MAX, SHACKLE_RISE_PX, UNLOCK_DISSOLVE_MS, REFUSED_*, the
-// dwells) come from hmi_ui's own headers, as in the firmware.
+// dwells) come from drive_ui's own headers, as in the firmware.
 // frag_refusal.inc: kMibStatusPeriod + 250 ms, kMibStatusTimeout (hmi_rtps_spec.hpp).
 inline constexpr std::int64_t kDriveAnswerUs = 750'000;
 inline constexpr std::int64_t kDriveWaitUs = 2'000'000;

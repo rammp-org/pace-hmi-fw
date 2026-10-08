@@ -13,9 +13,9 @@
 #include "ui.h"
 
 #include "drive_session_table.hpp"
+#include "drive_ui/drive_port.hpp"
 #include "hmi_format/speed.hpp"
 #include "hmi_format/stepper.hpp"
-#include "hmi_ui/drive_port.hpp"
 #include "hmi_ui/widget_tree.hpp"
 #include "settings.hpp"
 #include "stick/button_edges.hpp"

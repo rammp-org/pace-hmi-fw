@@ -5,8 +5,8 @@
 #include <cstdint>
 #include <span>
 
-#include "hmi_ui/fn.hpp"
-#include "hmi_ui/hold_range.hpp"
+#include "drive_ui/fn.hpp"
+#include "drive_ui/hold_range.hpp"
 #include "lvgl.h"
 
 namespace hmi::ui {

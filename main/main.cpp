@@ -52,9 +52,9 @@
 #include "esp_lcd_mipi_dsi.h"
 #include "esp_system.h"
 
+#include "drive_ui/drive_port.hpp"
 #include "hmi_format/topbar.hpp"
 #include "hmi_ui/app_state.hpp"
-#include "hmi_ui/drive_port.hpp"
 #include "hmi_ui/fps_meter.hpp"
 #include "hmi_ui/ui_app.hpp"
 #include "hmi_ui/ui_build.hpp"
@@ -403,7 +403,7 @@ static constinit hmi::ui::UiApp ui_app{{
 // components/drive_session (DriveSession, checked against the AS-IS table in
 // drive_session_table.hpp and its TABLE.md); sampling, the deadlines and performing the
 // actions live in components/drive_adapter (DriveAdapter); each action's LVGL and RTPS call is
-// hmi_ui's DrivePort (drive_port.hpp), over the drive UI (DriveUi: the padlock and the advance
+// drive_ui's DrivePort (drive_port.hpp), over the drive UI (DriveUi: the padlock and the advance
 // to Drive). Every input arrives on the LVGL task: the 250 ms poll, the hold completions, the
 // nav callbacks and the unlock timer.
 //

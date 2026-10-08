@@ -1,7 +1,7 @@
 // StickButton: what one edge of the stick button does to the UI (moved from
 // main/frag_stick_button.inc, stick_button_edge; the LVGL lock stays with main's caller).
 
-#include "hmi_ui/stick_button.hpp"
+#include "drive_ui/stick_button.hpp"
 
 #include <cstdint>
 
