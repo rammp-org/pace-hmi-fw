@@ -298,6 +298,7 @@ void play(const Step &step, const Target &t) {
   case Op::PROFILE:
     both(std::format("> profile {}", profile_name(static_cast<Profile>(step.arg))));
     w.profile = static_cast<Profile>(step.arg);
+    w.profile_picked = true;
     t.set_profile(w.profile);
     log_result(t.input(Input::PROFILE_CLICK));
     break;

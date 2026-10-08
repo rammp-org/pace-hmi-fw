@@ -81,8 +81,9 @@ struct FakeView {
     g_port.add(Call::NOW);
     return g_port.now;
   }
-  void publish(bool enable) const {
+  bool publish(bool enable) const {
     g_port.add(enable ? Call::PUBLISH_ENABLE : Call::PUBLISH_DISABLE);
+    return true;
   }
   void ring_wait() const { g_port.add(Call::RING_WAIT); }
   void ring_rest() const { g_port.add(Call::RING_REST); }

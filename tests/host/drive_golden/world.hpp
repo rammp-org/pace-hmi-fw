@@ -49,6 +49,12 @@ struct World {
   std::int32_t banner = 0;
   std::uint32_t banner_ms = 0;
   Profile profile = Profile::NORMAL;
+  // The filtered log's conventions (hazard-c1-spec.md §5.2): a fixed clock (a read does not
+  // advance it), and the profile written into P(...) once the scenario has picked one.
+  bool clock_fixed = false;
+  bool profile_picked = false;
+  // The adapter's logged errors (the safe state's report), counted.
+  unsigned errors = 0;
 };
 
 World &world();
@@ -61,6 +67,13 @@ void port(const std::string &line);
 void raw(const std::string &line);
 void both(const std::string &line); // a script step or a snapshot: in both logs
 void clear_logs();
+
+// The filtered log (hazard-c1-spec.md §5.2): only what the hand-written C1/C3 goldens compare,
+// one token per call: P(D|E[,profile]) publish, L Locked screen, Dv Drive screen, B:x banner,
+// N:x Drive notice, lock(0|1), gate, ring_rest, ring_wait, open, menu(0|1) (menu on arrival).
+// Script steps and snapshots are not in it.
+std::vector<std::string> &filtered_log();
+void filtered(const std::string &token);
 
 // Names, for the logs.
 const char *screen_name(ScreenId s);

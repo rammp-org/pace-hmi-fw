@@ -35,6 +35,7 @@ public:
     const std::string line = std::format("log.error[{}] {}", tag_, text);
     golden::port(line);
     golden::raw(line);
+    ++golden::world().errors;
   }
 
 private:

@@ -259,9 +259,10 @@ enum class Action : std::uint8_t {
   REFUSAL_FEEDBACK,        // refusal_feedback(): refusal haptic and sound
 };
 inline constexpr std::size_t kActionCount = 36;
-// 11: the relock rows use 10, and DriveSession::SAFE_STATE_ACTIONS 11 (it also clears the
-// menu-on-arrival flag before it loads the Locked screen).
-inline constexpr std::size_t kMaxActions = 11;
+// 12: the relock rows use 10, and DriveSession::SAFE_STATE_ACTIONS 11 (it also clears the
+// menu-on-arrival flag before it loads the Locked screen); one more slot for the hazard fixes
+// (docs/plans/hazard-c1-spec.md §2.1). The padding is NONE and is not in the fingerprint.
+inline constexpr std::size_t kMaxActions = 12;
 using Actions = std::array<Action, kMaxActions>;
 
 constexpr Actions acts(std::initializer_list<Action> l) noexcept {

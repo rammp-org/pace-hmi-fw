@@ -24,8 +24,9 @@ the drive table review (CS-SAF-05, two approvals; D1: the owner is the only appr
 
 `input(in)`: read the clock (`now_us`), sample the port (`sample`), build the session's `Env`
 (each deadline against that `now`), `step`, then perform each action in order. `tick()`: the
-same for TICK_FOLLOW; then one more clock read and sample shared by TICK_EXIT_DUE, TABLE.md U3's
-locked exit deadline, TICK_WARN_DUE and TICK_GIVEUP_DUE (two Envs per tick, DRV-022).
+same for TICK_FOLLOW (`TICK_SEQUENCE[0]`); then one more clock read and sample shared by the
+other sub-steps of `TICK_SEQUENCE`, in its order (TICK_EXIT_DUE, TICK_WARN_DUE, TICK_GIVEUP_DUE),
+with TABLE.md U3's locked exit deadline right after TICK_EXIT_DUE (two Envs per tick, DRV-022).
 `exit_hold_done()` while locked is TABLE.md U3, kept as it was and outside the table (parked
 for the owner). The adapter keeps the deadlines (`wait_warn`, `wait_until`, `exit_until`), the
 exit latches, the time of the last ask and the DriveCommand request; the session keeps the
@@ -41,7 +42,7 @@ does is dropped and logged, see REQ-DAD-03).
 | --- | --- | --- |
 | `sample()` | every input | `rtps_link_subject`, `mib_state_subject`, `lv_screen_active()`, `nav_menu_open`, in that order |
 | `now_us()` | every input; SEND_ENABLE; ARM_EXIT_DEADLINE; U3 | `esp_timer_get_time()` |
-| `publish(enable)` | SEND_ENABLE, SEND_DISABLE, PUBLISH_DRIVE | `rtps_comms_publish_drive(request, drive_profile_published)` (result ignored: H6) |
+| `publish(enable)` | SEND_ENABLE, SEND_DISABLE, PUBLISH_DRIVE | `rtps_comms_publish_drive(request, drive_profile_published)`; returns its result, which the adapter does not use yet (H6) |
 | `ring_wait()`, `ring_rest()` | RING_WAIT, RING_REST | `lock_visual_wait()`, `lock_visual_rest()` |
 | `lock_open_visual()` | LOCK_OPEN_VISUAL | ring full, shackle up, STRONG_CLICK |
 | `unlock_timer_start/cancel/forget()` | START_UNLOCK_TIMER, CANCEL_UNLOCK_TIMER, UNLOCK_TIMER_DONE | `unlock_timer_start()`, `unlock_timer_cancel()`, `unlock_advance_timer = nullptr` |

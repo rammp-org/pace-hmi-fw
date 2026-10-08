@@ -12,6 +12,7 @@ namespace {
 World g_world;
 std::vector<std::string> g_port;
 std::vector<std::string> g_raw;
+std::vector<std::string> g_filtered;
 
 hmi::drive_session::Screen session_screen(ScreenId s) {
   using hmi::drive_session::Screen;
@@ -45,7 +46,11 @@ void both(const std::string &line) {
 void clear_logs() {
   g_port.clear();
   g_raw.clear();
+  g_filtered.clear();
 }
+
+std::vector<std::string> &filtered_log() { return g_filtered; }
+void filtered(const std::string &token) { g_filtered.push_back(token); }
 
 const char *screen_name(ScreenId s) {
   switch (s) {
@@ -101,7 +106,7 @@ std::string snapshot() {
                      int{w.unlock_timer}, int{w.gate}, w.banner, w.banner_ms);
 }
 
-std::int64_t read_clock() { return g_world.now++; }
+std::int64_t read_clock() { return g_world.clock_fixed ? g_world.now : g_world.now++; }
 
 void gate_update() {
   g_world.gate = hmi::drive_session::stick_drives(g_world.locked, session_screen(g_world.screen),

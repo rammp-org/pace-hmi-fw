@@ -8,7 +8,8 @@
 //
 // Every call the port makes across this boundary appends one line to the boundary log
 // (golden 2), with its arguments and what it returned. A call that stands for a DrivePort
-// method also appends that method to the port log (golden 1):
+// method also appends that method to the port log (golden 1), and, when it is one the C1/C3
+// goldens compare, its token to the filtered log (world.hpp):
 //   esp_timer_get_time                      -> now_us
 //   lv_subject_get_int(rtps_link_subject)   -> sample (the first of drive_env's four reads)
 //   rtps_comms_publish_drive(r, profile)    -> publish(r)
@@ -165,9 +166,11 @@ inline void lv_subject_set_int(lv_subject_t *subject, std::int32_t value) {
   golden::World &w = golden::world();
   if (subject == &locked_subject) {
     golden::port(std::format("set_locked({})", int{value != 0}));
+    golden::filtered(std::format("lock({})", int{value != 0}));
     w.locked = value != 0;
   } else if (subject == &entry_refused_subject) {
     golden::port(std::format("show_banner({})", shim::banner_name(value)));
+    golden::filtered(std::format("B:{}", shim::banner_name(value)));
     w.banner = value;
   }
 }
@@ -194,6 +197,7 @@ inline bool lv_anim_delete(const void *var, lv_anim_exec_xcb_t exec_cb) {
   golden::raw(std::format("lv_anim_delete({}, {})", shim::name_of(var),
                           exec_cb == &ring_spin_cb ? "ring_spin_cb" : "?"));
   golden::port("lock_open_visual");
+  golden::filtered("open");
   return true;
 }
 inline void lv_arc_set_rotation(lv_obj_t *obj, std::int32_t rotation) {
@@ -219,6 +223,7 @@ inline void _ui_screen_change(lv_obj_t **target, lv_screen_load_anim_t fademode,
       *target == ui_DriveScreen ? golden::ScreenId::DRIVE : golden::ScreenId::LOCKED;
   if (*target == ui_DriveScreen && fade) {
     golden::port("go_drive_screen");
+    golden::filtered("Dv");
   }
   if (fade) {
     golden::load_faded(s);
@@ -241,6 +246,10 @@ inline bool rtps_comms_publish_drive(rammp::DriveRequest request, MIB::DriveProf
   golden::raw(std::format("rtps_comms_publish_drive({}, {})", shim::request_name(request),
                           shim::profile_name(profile)));
   golden::port(std::format("publish({})", shim::request_name(request)));
+  const char *r = request == rammp::DriveRequest::ENABLE ? "E" : "D";
+  golden::filtered(golden::world().profile_picked
+                       ? std::format("P({},{})", r, shim::profile_name(profile))
+                       : std::format("P({})", r));
   return true;
 }
 
@@ -271,6 +280,7 @@ struct MenuOnArrivalProxy {
   MenuOnArrivalProxy &operator=(bool v) {
     golden::raw(std::format("nav_menu_on_arrival = {}", int{v}));
     golden::port(std::format("menu_on_arrival({})", int{v}));
+    golden::filtered(std::format("menu({})", int{v}));
     golden::world().menu_on_arrival = v;
     return *this;
   }
@@ -302,11 +312,13 @@ inline shim::UnlockTimerProxy unlock_advance_timer;
 inline void lock_visual_wait() {
   golden::raw("lock_visual_wait");
   golden::port("ring_wait");
+  golden::filtered("ring_wait");
   golden::world().lock_waiting = true;
 }
 inline void lock_visual_rest() {
   golden::raw("lock_visual_rest");
   golden::port("ring_rest");
+  golden::filtered("ring_rest");
   golden::world().lock_waiting = false;
 }
 inline void unlock_timer_cancel() {
@@ -323,10 +335,12 @@ inline void nav_update_stick_gate() {
   golden::gate_update();
   golden::raw(std::format("nav_update_stick_gate -> gate={}", int{golden::world().gate}));
   golden::port(std::format("gate_update -> gate={}", int{golden::world().gate}));
+  golden::filtered("gate");
 }
 inline void locked_screen_go() {
   golden::raw("locked_screen_go");
   golden::port("go_locked_screen");
+  golden::filtered("L");
   golden::load_instant(golden::ScreenId::LOCKED);
 }
 inline void nav_home() {

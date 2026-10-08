@@ -79,8 +79,9 @@ struct FakeDriveView {
     port(std::format("now_us -> {}", t));
     return t;
   }
-  void publish(bool enable) const {
+  bool publish(bool enable) const {
     port(std::format("publish({})", enable ? "ENABLE" : "DISABLE"));
+    return true;
   }
   void ring_wait() const {
     port("ring_wait");

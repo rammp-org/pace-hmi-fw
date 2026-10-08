@@ -21,6 +21,7 @@
 #include <atomic>
 #include <chrono>
 #include <concepts>
+#include <cstddef>
 #include <cstdint>
 
 #include "drive_session.hpp"
@@ -53,7 +54,7 @@ template <class View>
 concept DrivePort = requires(View &view, bool flag, DriveBanner banner) {
   { view.sample() } -> std::same_as<DriveSample>;
   { view.now_us() } -> std::same_as<std::int64_t>;
-  view.publish(flag);
+  { view.publish(flag) } -> std::same_as<bool>;
   view.ring_wait();
   view.ring_rest();
   view.lock_open_visual();
@@ -109,21 +110,26 @@ public:
     return acted;
   }
 
-  /// @brief The 250 ms tick (rtps_poll_cb): TICK_FOLLOW on an Env sampled at the start; then
-  ///        one more clock read and Env for the three deadline checks, with TABLE.md U3's
-  ///        locked exit deadline between the first two (TICK_SEQUENCE, DRV-022).
+  /// @brief The 250 ms tick (rtps_poll_cb): TICK_FOLLOW (`TICK_SEQUENCE[0]`) on an Env
+  ///        sampled at the start; then one more clock read and Env for the other sub-steps of
+  ///        `TICK_SEQUENCE`, in its order, with TABLE.md U3's locked exit deadline right after
+  ///        TICK_EXIT_DUE (DRV-022).
   void tick() {
     using hmi::drive_session::Input;
+    using hmi::drive_session::TICK_SEQUENCE;
+    static_assert(TICK_SEQUENCE[0] == Input::TICK_FOLLOW, "the tick starts with follow-state");
     if (!enter()) {
       return;
     }
-    (void)apply(Input::TICK_FOLLOW, env(view_.now_us()));
+    (void)apply(TICK_SEQUENCE[0], env(view_.now_us()));
     const std::int64_t now = view_.now_us();
     const hmi::drive_session::Env e = env(now);
-    (void)apply(Input::TICK_EXIT_DUE, e);
-    exit_due_while_locked(now); // U3
-    (void)apply(Input::TICK_WARN_DUE, e);
-    (void)apply(Input::TICK_GIVEUP_DUE, e);
+    for (std::size_t i = 1; i < TICK_SEQUENCE.size(); ++i) {
+      (void)apply(TICK_SEQUENCE[i], e);
+      if (TICK_SEQUENCE[i] == Input::TICK_EXIT_DUE) {
+        exit_due_while_locked(now); // U3
+      }
+    }
     busy_ = false;
   }
 
@@ -198,7 +204,8 @@ private:
            perform_screen(action) || perform_banner(action));
   }
 
-  void publish() { view_.publish(request_enable_.load()); }
+  // The result is not used yet (H6, the hazard fixes' C1 checks it).
+  void publish() { (void)view_.publish(request_enable_.load()); }
   void ask(bool enable) {
     request_enable_.store(enable);
     publish();

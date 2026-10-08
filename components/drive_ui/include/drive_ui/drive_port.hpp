@@ -99,10 +99,11 @@ public:
     };
   }
   [[nodiscard]] int64_t now_us() const { return esp_timer_get_time(); }
-  // The DriveCommand, with the profile the user picked (one-shot, result ignored: H6).
-  void publish(bool enable) const {
-    ui_->publish_drive(enable ? rammp::DriveRequest::ENABLE : rammp::DriveRequest::DISABLE,
-                       ui_->drive_profile());
+  // The DriveCommand, with the profile the user picked (one-shot). Returns whether it was
+  // handed to RTPS; the adapter does not use it yet (H6).
+  [[nodiscard]] bool publish(bool enable) const {
+    return ui_->publish_drive(enable ? rammp::DriveRequest::ENABLE : rammp::DriveRequest::DISABLE,
+                              ui_->drive_profile());
   }
   void ring_wait() const { ui_->lock_visual_wait(); }
   void ring_rest() const { ui_->lock_visual_rest(); }
