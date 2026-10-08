@@ -10,6 +10,7 @@ idf_component_register(SRC_DIRS "."
                          filters
                          hmi_format
                          hmi_models
+                         hmi_rtps_spec
                          hmi_ui
                          housekeeping
                          input_drivers

@@ -1,4 +1,4 @@
-# Host L1 app: the RTPS spec, main/hmi_rtps_spec.hpp, and the rammp-rtps messages on the wire,
+# Host L1 app: the RTPS spec, components/hmi_rtps_spec/include/hmi_rtps_spec.hpp, and the rammp-rtps messages on the wire,
 # characterised (cases RTPS-001.. in test_rtps_spec.cpp, test_rtps_cdr.cpp, test_rtps_parity.cpp;
 # TS-UNIT-04, TS-UNIT-07, CS-SAF-03). Rules in tests/host/common.mk.
 # `make test` | `make coverage` | `make clean`.
@@ -11,13 +11,14 @@ NAME := rtps_spec
 HERE := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 REPO ?= $(abspath $(HERE)/../../..)
 
-SPEC_HDR := $(REPO)/main/hmi_rtps_spec.hpp
+SPEC_INC := $(REPO)/components/hmi_rtps_spec/include
+SPEC_HDR := $(SPEC_INC)/hmi_rtps_spec.hpp
 MSG_INC  := $(REPO)/external/rammp-rtps/components/rammp_rtps_messages/include
 TEST_SRCS := $(HERE)/test_rtps_spec.cpp $(HERE)/test_rtps_cdr.cpp $(HERE)/test_rtps_parity.cpp
 # the code under test is headers only: coverage is reported for the spec header, through the
 # object of the one test file that exercises it (see rtps-cov-links)
 COVER_SRCS := $(SPEC_HDR)
-INCLUDES = $(REPO)/main $(MSG_INC) $(HERE) $(OUT)/gen
+INCLUDES = $(SPEC_INC) $(MSG_INC) $(HERE) $(OUT)/gen
 SYS_INCLUDES = $(REPO)/managed_components/espp__cdr/detail/cdr/include \
                $(REPO)/managed_components/espp__cdr/include \
                $(REPO)/managed_components/espp__reflect_cpp/detail/reflect-cpp/include

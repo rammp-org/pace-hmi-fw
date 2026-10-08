@@ -3,7 +3,7 @@
 
 ``messages/joystick_message.hpp`` (the shared rammp-rtps spec, a git submodule) holds
 the topics, type names, enums and tables every RAMMP device shares, and
-``main/hmi_rtps_spec.hpp`` what only this HMI adds (timing, limits, bench topics).
+``components/hmi_rtps_spec/include/hmi_rtps_spec.hpp`` what only this HMI adds (timing, limits, bench topics).
 This module parses both headers at import time and mirrors its message structs,
 encoded the way espp/cdr encodes them (XCDR1).
 
@@ -25,7 +25,7 @@ import re
 import struct
 from typing import Dict, List, NamedTuple
 
-HEADER_RELATIVE_PATH = os.path.join("main", "hmi_rtps_spec.hpp")
+HEADER_RELATIVE_PATH = os.path.join("components", "hmi_rtps_spec", "include", "hmi_rtps_spec.hpp")
 SHARED_HEADER_RELATIVE_PATH = os.path.join(
     "external", "rammp-rtps", "components", "rammp_rtps_messages", "include", "messages",
     "joystick_message.hpp")
@@ -85,7 +85,7 @@ def find_header(relative: str = HEADER_RELATIVE_PATH) -> str:
         directory = parent
 
 
-#: this HMI's additions (timing, display limits, bench topics), beside selftest_spec.hpp
+#: this HMI's additions (timing, display limits, bench topics): components/hmi_rtps_spec
 HEADER_PATH = find_header()
 #: the shared messages, topics and tables (the rammp-rtps submodule)
 SHARED_HEADER_PATH = find_header(SHARED_HEADER_RELATIVE_PATH)
@@ -95,7 +95,7 @@ MIB_HEADER_PATH = find_header(MIB_HEADER_RELATIVE_PATH)
 
 def _read_spec(path: str) -> str:
     with open(path, encoding="utf-8") as spec_file:
-        return spec_file.read().split("#if 0", 1)[0]  # the legacy codecs are #if 0'd out
+        return spec_file.read()
 
 
 _HEADER_TEXT = ("\n".join(_read_spec(path) for path in
@@ -396,8 +396,8 @@ SELFTEST_RESULT_NAMES = _group("SELFTEST_RESULT_")
 INT32_MIN = -(2 ** 31)
 INT32_MAX = 2 ** 31 - 1
 
-#: the self test's check table: every check, its limits and why (beside HEADER_PATH)
-SELFTEST_SPEC_PATH = os.path.join(os.path.dirname(HEADER_PATH), "selftest_spec.hpp")
+#: the self test's check table: every check, its limits and why (main/, with the self test)
+SELFTEST_SPEC_PATH = find_header(os.path.join("main", "selftest_spec.hpp"))
 # Check{Id::ID, "name", "unit", lo, hi, Need::..., "what it proves"},  (the kChecks rows)
 _SELFTEST_ROW_RE = re.compile(
     r'^\s*Check\{\s*Id::([A-Z0-9_]+)\s*,\s*"([^"]*)"\s*,\s*"([^"]*)"\s*,\s*([^,]+?)\s*,'

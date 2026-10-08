@@ -1,5 +1,5 @@
 # L1 host app for the RTPS spec (cases RTPS-001..RTPS-065 in tests/host/rtps_spec): the
-# main/hmi_rtps_spec.hpp helpers (seat_raw/seat_units and the H8 hazard inputs, names, tags,
+# components/hmi_rtps_spec helpers (seat_raw/seat_units and the H8 hazard inputs, names, tags,
 # timing, banner limits), every rammp-rtps message through espp/cdr (round trips and hostile
 # bytes, TS-UNIT-07), and parity with the host codec scripts/rammp_rtps.py (TS-UNIT-04).
 # Characterisation: it pins today's behaviour, hazards included, so a fix shows up as a diff.

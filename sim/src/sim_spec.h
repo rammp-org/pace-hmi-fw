@@ -1,8 +1,9 @@
 /*
  * The constants the desktop sim needs from the RTPS spec (messages/joystick_message.hpp
- * and messages/mib_message.hpp in external/rammp-rtps, and main/hmi_rtps_spec.hpp), which is C++
- * and so cannot be included from this C build. A hand-kept mirror, like
- * sim_nav.c is of main.cpp: keep the values in step with the spec.
+ * and messages/mib_message.hpp in external/rammp-rtps, and
+ * components/hmi_rtps_spec/include/hmi_rtps_spec.hpp), which is C++ and so cannot be included from
+ * this C build. A hand-kept mirror, like sim_nav.c is of main.cpp: keep the values in step with the
+ * spec.
  */
 #ifndef SIM_SPEC_H
 #define SIM_SPEC_H
@@ -12,7 +13,7 @@
 #define RAMMP_SYSTEM_STATE_PERIOD_MS 500   /* rammp::kMibStatusPeriod */
 #define RAMMP_SYSTEM_STATE_TIMEOUT_MS 2000 /* rammp::kMibStatusTimeout */
 
-#define RAMMP_SPEED_MAX_TENTHS 99  /* rammp::kSpeedMaxTenths (main/hmi_rtps_spec.hpp) */
+#define RAMMP_SPEED_MAX_TENTHS 99  /* rammp::kSpeedMaxTenths (hmi_rtps_spec.hpp) */
 #define RAMMP_MCB_TEXT_LEN 16      /* rammp::kMcbTextLen */
 #define RAMMP_ERROR_TEXT_LEN 64    /* rammp::kErrorTextLen */
 #define RAMMP_ERROR_FOOTER_LEN 32  /* rammp::kErrorFooterLen */

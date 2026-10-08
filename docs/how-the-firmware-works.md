@@ -66,6 +66,7 @@ hardware, a red outline is safety-relevant, and a dashed outline is generated co
 | `components/fw_core` | Channels (`Mailbox`, `Queue`, `AtomicValue`), `ThreadChecker`, `Owned<T>`, `check()`, context tokens. **Linked but unused** | for later | host L1 (FWC-L1) |
 | `components/hmi_format` | Pure text formatting: speed, steppers, clock, diagnostics, about, update, network | no | host L1 (L1-FMT) |
 | `components/hmi_models` | Pure UI models: the button-grid cursor walk and the bench PIN | no | host L1 (L1-MOD) |
+| `components/hmi_rtps_spec` | What only this HMI adds to the shared RTPS spec (`hmi_rtps_spec.hpp`): timeouts, seat helpers, banner texts, the self-test topics | in part (seat units, MIB timeouts) | host L1 (L1-RTPS) |
 | `components/hmi_ui` | The UI island's views: TopBar clock, link and RTPS label, DriveBand status cells, backlight, bench PIN, seat, settings rows, Skunk Works tiles, diagnostics (more move in, app-main-shrink S4-S6) | no | bench B4 |
 | `components/ota_parse` | Pure OTA parsing: release list, image header check, fwinfo, boot-confirm marker search | no | host L1 (L1-OTA) |
 | `components/ota` | The firmware image: SHA-256 of the running image matched to a release (fw_info), the GitHub release list, download and install, rollback confirm (github_ota) | no | bench B2/B4; install not on the bench |
@@ -128,7 +129,6 @@ What this means in practice:
 | File | Job |
 | --- | --- |
 | `rtps_comms.cpp/.hpp` | Network link (W5500 Ethernet or Wi-Fi via the C6) and the one RTPS participant: all publishers and subscribers |
-| `hmi_rtps_spec.hpp` | What only this HMI adds to the shared spec: timeouts, seat helpers, banner texts, the self-test topics |
 | `selftest.cpp/.hpp`, `selftest_spec.hpp` | The self-test: 54 checks, an overlay, and a report over RTPS and serial |
 | `remote_ui.cpp/.hpp` | Bench-only debug server on TCP 3333: screenshots, taps, keys, `TASKS` |
 | `joystick_cal.cpp/.hpp` | The calibration file and the guided calibration run |
@@ -739,7 +739,7 @@ planned in [plans/hazard-fixes.md](plans/hazard-fixes.md). Locations are for `cb
 | H5 | Re-lock on an unrequested stop or link loss sends no DISABLE; `drive_request` stays ENABLE and a profile tap re-sends it | `frag_drive.inc:64-83`; `frag_drive_band.inc:18-25` |
 | H6 | DriveCommand and SeatCommand are one-shot, best-effort, result ignored; a refused exit is not re-sent | `frag_drive.inc:16-18, 102-109`; `rtps_comms.cpp:125-152` |
 | H7 | Any RTPS peer can start a self test; its overlay blocks the exit hold while XYTwist keeps flowing | `rtps_comms.cpp:160-167`; `frag_hold_poll.inc:69-77`; `main.cpp:723-729` |
-| H8 | A NaN or huge seat value is UB in `seat_raw`; an unknown value steps from the axis minimum | `hmi_rtps_spec.hpp:90-95`; `frag_settings_ui.inc:157-179` |
+| H8 | A NaN or huge seat value is UB in `seat_raw`; an unknown value steps from the axis minimum | `components/hmi_rtps_spec/include/hmi_rtps_spec.hpp:90-95`; `frag_settings_ui.inc:157-179` |
 | H9 | A failed ADC read publishes nothing instead of neutral | `main.cpp:1482-1601` |
 | H10 | No neutral-stick check before ENABLE or the gate; seat presses not gated on `seat_ready` | `frag_drive.inc:129-138`; `components/hmi_ui/src/seat_view.cpp:49-108` |
 | H11 | No task watchdog on the app tasks; the ADC task is below the UI (prio 5 vs 20) with a boot-dependent core and a thin stack | `main.cpp:1618-1621`; [§4.1](#41-the-tasks) |

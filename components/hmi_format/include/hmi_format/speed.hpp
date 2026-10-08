@@ -7,7 +7,7 @@
 
 namespace hmi::format {
 
-/// mph in one m/s (the same value as rammp::kMphPerMps, main/hmi_rtps_spec.hpp).
+/// mph in one m/s (the same value as rammp::kMphPerMps, components/hmi_rtps_spec).
 inline constexpr float MPH_PER_MPS = 2.236936f;
 /// The fastest the label shows, in tenths of a mph: 9.9 mph, the widest it fits (the same value
 /// as rammp::kSpeedMaxTenths).
