@@ -101,7 +101,7 @@ yet measured or decided, and "none" means checked and absent.
   | Interface | Where documented |
   | --- | --- |
   | RTPS topics and messages | `external/rammp-rtps`, `main/hmi_rtps_spec.hpp` |
-  | Remote UI debug channel, TCP 3333 | `main/remote_ui.hpp`, `scripts/hmi_ui.py` |
+  | Remote UI debug channel, TCP 3333 | `components/remote_ui/include/remote_ui.hpp`, `scripts/hmi_ui.py` |
   | Self-test report lines and the `SelfTestReport` message | `main/selftest_spec.hpp`, `scripts/rammp_rtps.py` |
   | `/storage/joystick_cal.txt` | `main/joystick_cal.cpp` (`version 1`) |
   | `/storage/settings.txt`, `fwinfo.txt`, `wifi.txt` | their `.cpp` files (unversioned) |

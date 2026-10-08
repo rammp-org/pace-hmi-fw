@@ -16,7 +16,7 @@ moves are unchanged; only the I/O under them is replaced) gives every command:
   with only its reply lost, and a second tap on a toggle (the burger key) undoes it.
   They raise RemoteUiError after the reconnect, as does a retry that fails too. The
   reconnect itself releases whatever was held: the board's remote UI lets go of the
-  touch, the key and the button when a client goes (main/remote_ui.cpp);
+  touch, the key and the button when a client goes (components/remote_ui/src/remote_ui.cpp);
 - a JSON line in the step's log: the command, when it was sent and answered (wall
   clock), its duration, the gap since the previous answer (time spent on the PC, not
   on the wire), the attempt, and the reply or the error. `stats()` sums it up for the
@@ -216,7 +216,7 @@ def ping(host: str, within: float, port: int = 3333, every: float = 1.0) -> tupl
 
 
 class FakeRemoteUi:
-    """A localhost stand-in for main/remote_ui.cpp: one client at a time, line in, line out.
+    """A localhost stand-in for components/remote_ui/src/remote_ui.cpp: one client at a time, line in, line out.
     `stall` maps a verb to how many of its next commands get no answer (the connection
     stays open, as on a stalled Wi-Fi link)."""
 

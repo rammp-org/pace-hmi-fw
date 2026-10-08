@@ -93,9 +93,9 @@ FRAG_INCLUDE_RE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*"(frag_[A-Za-z0-9_]+\.
 # UI files may call lv_* (CS-UI: only the UI task touches LVGL).
 # main/*_ui.* is frozen to the files that existed on 2026-10-06 (app-main-shrink V3): new UI
 # code goes to components/hmi_ui/ (CS-UI-02), not to a new main/foo_ui.cpp.
-# main/remote_ui.* moves to components/remote_ui (V15) and keeps its UI-path status there for
+# main/remote_ui.* moved to components/remote_ui (V15) and keeps its UI-path status there for
 # exactly those two files (reviewed): no other file in that component may call lv_*.
-MAIN_UI_FILES = ("about_ui", "internet_ui", "remote_ui", "update_ui")
+MAIN_UI_FILES = ("about_ui", "internet_ui", "update_ui")
 UI_FILE_RES = [
     re.compile(r"^main/(?:" + "|".join(MAIN_UI_FILES) + r")\.(?:cpp|hpp)$"),
     re.compile(r"^components/remote_ui/(?:src/remote_ui\.cpp|include/remote_ui\.hpp)$"),
@@ -1394,7 +1394,7 @@ def _selftest_ui_paths(expect: Expect) -> None:
         expect(f"UI path may call lv_: {path}", measure(path, code)["lv_outside_ui"], 0)
     for path in ("main/foo_ui.cpp", "main/foo_ui.hpp", "main/about_ui.h", "main/settings_ui.cpp",
                  "main/xabout_ui.cpp", "components/hmi_ui_extra/src/x.cpp", "components/other/src/x_ui.cpp",
-                 "components/other/hmi_ui/x.cpp", "main/hmi_ui/x.cpp",
+                 "components/other/hmi_ui/x.cpp", "main/hmi_ui/x.cpp", "main/remote_ui.cpp",
                  "components/remote_ui/src/other.cpp", "components/remote_ui/include/stick_inject.hpp",
                  "components/remote_ui/src/remote_ui.hpp", "components/remote_ui/remote_ui.cpp"):
         expect(f"not a UI path, lv_ still forbidden: {path}", measure(path, code)["lv_outside_ui"], 2)

@@ -29,13 +29,10 @@
       "main/log_capture.cpp": 2,
       "main/log_view.cpp": 1,
       "main/lv_mem_psram.c": 5,
-      "main/remote_ui.cpp": 2,
       "main/rtps_comms.cpp": 1,
       "main/selftest.cpp": 11
     },
-    "if_config": {
-      "main/remote_ui.cpp": 1
-    },
+    "if_config": {},
     "lines": {
       "main/main.cpp": 1947,
       "main/selftest.cpp": 1030
@@ -46,8 +43,6 @@
       "main/joystick_cal.cpp": 11,
       "main/log_capture.cpp": 7,
       "main/main.cpp": 23,
-      "main/remote_ui.cpp": 10,
-      "main/remote_ui.hpp": 1,
       "main/rtps_comms.cpp": 36,
       "main/selftest.cpp": 30,
       "main/selftest.hpp": 1,
@@ -55,7 +50,6 @@
       "main/update_ui.hpp": 1
     },
     "log_direct": {
-      "main/remote_ui.cpp": 5,
       "main/selftest.cpp": 5
     },
     "lv_outside_ui": {
@@ -70,24 +64,20 @@
       "main/log_capture.cpp": 8,
       "main/log_view.cpp": 1,
       "main/main.cpp": 95,
-      "main/remote_ui.cpp": 6,
       "main/rtps_comms.cpp": 32,
       "main/selftest.cpp": 25,
       "main/update_ui.cpp": 4
     },
     "sleep_this_thread": {
       "main/main.cpp": 1,
-      "main/remote_ui.cpp": 5,
       "main/rtps_comms.cpp": 5
     },
     "static_state": {
       "main/main.cpp": 28,
-      "main/remote_ui.cpp": 2,
       "main/rtps_comms.cpp": 5
     },
     "std_thread": {
       "main/internet_ui.cpp": 1,
-      "main/remote_ui.cpp": 1,
       "main/update_ui.cpp": 1
     },
     "typedef": {
@@ -265,6 +255,79 @@
       "std_thread": {
         "main/github_ota.cpp@9a007cd0b39a68fc7547054f0ba4654055dd47b4": [
           "8f48e79ab4370359e2f0e8e17d1c332660451ce3"
+        ]
+      }
+    },
+    "components/remote_ui/include/remote_ui.hpp": {
+      "locks": {
+        "main/remote_ui.hpp@493cffe044b3963f2408a9cd011dd06f21765f61": [
+          "45f5cb0d466cc51f2361c3aeb57ab2f33997cd86"
+        ]
+      }
+    },
+    "components/remote_ui/src/remote_ui.cpp": {
+      "heap_raw": {
+        "main/remote_ui.cpp@493cffe044b3963f2408a9cd011dd06f21765f61": [
+          "0180c46eb8f40be71d2597c33636497cac73c6de",
+          "990454deb951fe013247362818c1fb58f4b63d30"
+        ]
+      },
+      "if_config": {
+        "main/remote_ui.cpp@493cffe044b3963f2408a9cd011dd06f21765f61": [
+          "8190ce35dd61a57bfa940becab81a1cb9dfccced"
+        ]
+      },
+      "locks": {
+        "main/remote_ui.cpp@493cffe044b3963f2408a9cd011dd06f21765f61": [
+          "fcafe10565d4c17cfb1aaa7f7bd6003273eb4487",
+          "fcafe10565d4c17cfb1aaa7f7bd6003273eb4487",
+          "fcafe10565d4c17cfb1aaa7f7bd6003273eb4487",
+          "fcafe10565d4c17cfb1aaa7f7bd6003273eb4487",
+          "fcafe10565d4c17cfb1aaa7f7bd6003273eb4487",
+          "fcafe10565d4c17cfb1aaa7f7bd6003273eb4487",
+          "fcafe10565d4c17cfb1aaa7f7bd6003273eb4487",
+          "fcafe10565d4c17cfb1aaa7f7bd6003273eb4487",
+          "fcafe10565d4c17cfb1aaa7f7bd6003273eb4487",
+          "fcafe10565d4c17cfb1aaa7f7bd6003273eb4487"
+        ]
+      },
+      "log_direct": {
+        "main/remote_ui.cpp@493cffe044b3963f2408a9cd011dd06f21765f61": [
+          "2ebaee4f6ca387509b1228b161a4f28afccf3f7a",
+          "8d69c432c55e0645e29fbe4c051045dc5febd781",
+          "8d69c432c55e0645e29fbe4c051045dc5febd781",
+          "98d5c9823148e6715a29540cbea552a8f23d7771",
+          "b81ffa6dae4a65104e730dc223f7cb481150f89c"
+        ]
+      },
+      "mutable_globals": {
+        "main/remote_ui.cpp@493cffe044b3963f2408a9cd011dd06f21765f61": [
+          "14fbae54067216760580ee115ff21fd49e7484d1",
+          "17f675b6628c5a5074e0fcd819f318e55fe50ac9",
+          "31dabda6039126f13e46ae673144db20cd296dcc",
+          "65120d4f85d5737e0d463e53d76765903ae52323",
+          "9abb0e30c79d793bfef1b156056b0cf138d91953",
+          "cc7f1a96e4591879b41875b4c85fe54df3e120bd"
+        ]
+      },
+      "sleep_this_thread": {
+        "main/remote_ui.cpp@493cffe044b3963f2408a9cd011dd06f21765f61": [
+          "338fb29c7d9844f0e6e8ae9152e6d2ce2177938e",
+          "746b1c0ec64837a8434bf53745bc544819cb1041",
+          "a93b64288c5af382c7f10e8cb141543a614b40f1",
+          "a93b64288c5af382c7f10e8cb141543a614b40f1",
+          "efe5040ff6537cbecddf36f83d90e0020615cbfa"
+        ]
+      },
+      "static_state": {
+        "main/remote_ui.cpp@493cffe044b3963f2408a9cd011dd06f21765f61": [
+          "429c005a60e554a8c109ed27216e9d17df8bcd92",
+          "78f20a1105777f9d4666af304b17fa8979691bff"
+        ]
+      },
+      "std_thread": {
+        "main/remote_ui.cpp@493cffe044b3963f2408a9cd011dd06f21765f61": [
+          "64dba51fbbe8609822b62ebd0aff5a06baeafd4a"
         ]
       }
     },
