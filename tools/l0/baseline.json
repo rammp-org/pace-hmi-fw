@@ -1,7 +1,7 @@
 {
   "metrics": {
     "app_main_lines": {
-      "main/main.cpp": 761
+      "main/main.cpp": 742
     },
     "assert": {
       "components/joystick/src/joystick.cpp": 17,
@@ -26,41 +26,30 @@
       "main/selftest.cpp": 2
     },
     "heap_raw": {
-      "main/fw_info.cpp": 1,
-      "main/github_ota.cpp": 3,
-      "main/log_capture.cpp": 2,
+      "main/log_capture.cpp": 1,
       "main/log_view.cpp": 1,
       "main/lv_mem_psram.c": 5,
-      "main/remote_ui.cpp": 2,
       "main/rtps_comms.cpp": 1,
       "main/selftest.cpp": 11
     },
-    "if_config": {
-      "main/remote_ui.cpp": 1
-    },
+    "if_config": {},
     "lines": {
-      "main/main.cpp": 1947,
+      "main/main.cpp": 1896,
       "main/selftest.cpp": 1030
     },
     "locks": {
-      "main/fw_info.cpp": 5,
-      "main/github_ota.cpp": 11,
       "main/internet_ui.cpp": 2,
       "main/internet_ui.hpp": 1,
       "main/joystick_cal.cpp": 11,
       "main/log_capture.cpp": 7,
       "main/main.cpp": 23,
-      "main/remote_ui.cpp": 10,
-      "main/remote_ui.hpp": 1,
       "main/rtps_comms.cpp": 36,
       "main/selftest.cpp": 30,
       "main/selftest.hpp": 1,
-      "main/settings.cpp": 11,
       "main/update_ui.cpp": 2,
       "main/update_ui.hpp": 1
     },
     "log_direct": {
-      "main/remote_ui.cpp": 5,
       "main/selftest.cpp": 5
     },
     "lv_outside_ui": {
@@ -69,36 +58,26 @@
     },
     "mutable_globals": {
       "main/about_ui.cpp": 1,
-      "main/fw_info.cpp": 2,
-      "main/github_ota.cpp": 3,
       "main/hmi_rtps_spec.hpp": 5,
       "main/internet_ui.cpp": 4,
       "main/joystick_cal.cpp": 15,
       "main/log_capture.cpp": 8,
       "main/log_view.cpp": 1,
-      "main/main.cpp": 95,
-      "main/remote_ui.cpp": 6,
+      "main/main.cpp": 73,
       "main/rtps_comms.cpp": 32,
       "main/selftest.cpp": 25,
-      "main/settings.cpp": 2,
       "main/update_ui.cpp": 4
     },
     "sleep_this_thread": {
       "main/main.cpp": 1,
-      "main/remote_ui.cpp": 5,
       "main/rtps_comms.cpp": 5
     },
     "static_state": {
-      "main/github_ota.cpp": 1,
       "main/main.cpp": 28,
-      "main/remote_ui.cpp": 2,
       "main/rtps_comms.cpp": 5
     },
     "std_thread": {
-      "main/fw_info.cpp": 1,
-      "main/github_ota.cpp": 1,
       "main/internet_ui.cpp": 1,
-      "main/remote_ui.cpp": 1,
       "main/update_ui.cpp": 1
     },
     "typedef": {
@@ -208,6 +187,170 @@
       "heap_raw": {
         "main/main.cpp@f1eb6ce8e1d7311c18b9014104c91a6b1eb0f728": [
           "72f926642a9f8eb85604f5c0c6366a3bd4fe5448"
+        ]
+      }
+    },
+    "components/ota/src/fw_info.cpp": {
+      "heap_raw": {
+        "main/fw_info.cpp@9a007cd0b39a68fc7547054f0ba4654055dd47b4": [
+          "447c87de2babbb737d7482c1ab6990b7debe0d3f"
+        ]
+      },
+      "locks": {
+        "main/fw_info.cpp@9a007cd0b39a68fc7547054f0ba4654055dd47b4": [
+          "7cd6d5f2de52911c0148fcc71fec693e58f87618",
+          "a700c2d21a4bbd9ea23d8bb0a444872f4f149c38",
+          "a700c2d21a4bbd9ea23d8bb0a444872f4f149c38",
+          "a700c2d21a4bbd9ea23d8bb0a444872f4f149c38",
+          "a700c2d21a4bbd9ea23d8bb0a444872f4f149c38"
+        ]
+      },
+      "mutable_globals": {
+        "main/fw_info.cpp@9a007cd0b39a68fc7547054f0ba4654055dd47b4": [
+          "7b0d2fbe4c152aad1b67f44db71502d7e474a388",
+          "7cd6d5f2de52911c0148fcc71fec693e58f87618"
+        ]
+      },
+      "std_thread": {
+        "main/fw_info.cpp@9a007cd0b39a68fc7547054f0ba4654055dd47b4": [
+          "d918ac14491b37a41bd3cb5c59250107e18c0fa6"
+        ]
+      }
+    },
+    "components/ota/src/github_ota.cpp": {
+      "heap_raw": {
+        "main/github_ota.cpp@9a007cd0b39a68fc7547054f0ba4654055dd47b4": [
+          "8e9e0af485fe83dcf394ede5b3b14dd7ccab03ff",
+          "c314d14f0510e95706ac8213041899e725d31211",
+          "d20ed1d5c5591e2292740c345ded87f586e20586"
+        ]
+      },
+      "locks": {
+        "main/github_ota.cpp@9a007cd0b39a68fc7547054f0ba4654055dd47b4": [
+          "ac7e29ecaa758d7868ff6e6f4150883b8112f11c",
+          "ac7e29ecaa758d7868ff6e6f4150883b8112f11c",
+          "ac7e29ecaa758d7868ff6e6f4150883b8112f11c",
+          "ac7e29ecaa758d7868ff6e6f4150883b8112f11c",
+          "ac7e29ecaa758d7868ff6e6f4150883b8112f11c",
+          "ac7e29ecaa758d7868ff6e6f4150883b8112f11c",
+          "ac7e29ecaa758d7868ff6e6f4150883b8112f11c",
+          "ac7e29ecaa758d7868ff6e6f4150883b8112f11c",
+          "ac7e29ecaa758d7868ff6e6f4150883b8112f11c",
+          "ac7e29ecaa758d7868ff6e6f4150883b8112f11c",
+          "ba0bcefc754ac0fa1846e53e1a0fa79115634281"
+        ]
+      },
+      "mutable_globals": {
+        "main/github_ota.cpp@9a007cd0b39a68fc7547054f0ba4654055dd47b4": [
+          "39667fa4d6da3b4c7c3731e2670cecabb3106c1c",
+          "ba0bcefc754ac0fa1846e53e1a0fa79115634281",
+          "f274e4436be3c37cdaaeba442fcd3173f4a6a51d"
+        ]
+      },
+      "static_state": {
+        "main/github_ota.cpp@9a007cd0b39a68fc7547054f0ba4654055dd47b4": [
+          "2cfcd3fa975dc36239d9b5647edc947439cd7e3e"
+        ]
+      },
+      "std_thread": {
+        "main/github_ota.cpp@9a007cd0b39a68fc7547054f0ba4654055dd47b4": [
+          "8f48e79ab4370359e2f0e8e17d1c332660451ce3"
+        ]
+      }
+    },
+    "components/remote_ui/include/remote_ui.hpp": {
+      "locks": {
+        "main/remote_ui.hpp@493cffe044b3963f2408a9cd011dd06f21765f61": [
+          "45f5cb0d466cc51f2361c3aeb57ab2f33997cd86"
+        ]
+      }
+    },
+    "components/remote_ui/src/remote_ui.cpp": {
+      "heap_raw": {
+        "main/remote_ui.cpp@493cffe044b3963f2408a9cd011dd06f21765f61": [
+          "0180c46eb8f40be71d2597c33636497cac73c6de",
+          "990454deb951fe013247362818c1fb58f4b63d30"
+        ]
+      },
+      "if_config": {
+        "main/remote_ui.cpp@493cffe044b3963f2408a9cd011dd06f21765f61": [
+          "8190ce35dd61a57bfa940becab81a1cb9dfccced"
+        ]
+      },
+      "locks": {
+        "main/remote_ui.cpp@493cffe044b3963f2408a9cd011dd06f21765f61": [
+          "fcafe10565d4c17cfb1aaa7f7bd6003273eb4487",
+          "fcafe10565d4c17cfb1aaa7f7bd6003273eb4487",
+          "fcafe10565d4c17cfb1aaa7f7bd6003273eb4487",
+          "fcafe10565d4c17cfb1aaa7f7bd6003273eb4487",
+          "fcafe10565d4c17cfb1aaa7f7bd6003273eb4487",
+          "fcafe10565d4c17cfb1aaa7f7bd6003273eb4487",
+          "fcafe10565d4c17cfb1aaa7f7bd6003273eb4487",
+          "fcafe10565d4c17cfb1aaa7f7bd6003273eb4487",
+          "fcafe10565d4c17cfb1aaa7f7bd6003273eb4487",
+          "fcafe10565d4c17cfb1aaa7f7bd6003273eb4487"
+        ]
+      },
+      "log_direct": {
+        "main/remote_ui.cpp@493cffe044b3963f2408a9cd011dd06f21765f61": [
+          "2ebaee4f6ca387509b1228b161a4f28afccf3f7a",
+          "8d69c432c55e0645e29fbe4c051045dc5febd781",
+          "8d69c432c55e0645e29fbe4c051045dc5febd781",
+          "98d5c9823148e6715a29540cbea552a8f23d7771",
+          "b81ffa6dae4a65104e730dc223f7cb481150f89c"
+        ]
+      },
+      "mutable_globals": {
+        "main/remote_ui.cpp@493cffe044b3963f2408a9cd011dd06f21765f61": [
+          "14fbae54067216760580ee115ff21fd49e7484d1",
+          "17f675b6628c5a5074e0fcd819f318e55fe50ac9",
+          "31dabda6039126f13e46ae673144db20cd296dcc",
+          "65120d4f85d5737e0d463e53d76765903ae52323",
+          "9abb0e30c79d793bfef1b156056b0cf138d91953",
+          "cc7f1a96e4591879b41875b4c85fe54df3e120bd"
+        ]
+      },
+      "sleep_this_thread": {
+        "main/remote_ui.cpp@493cffe044b3963f2408a9cd011dd06f21765f61": [
+          "338fb29c7d9844f0e6e8ae9152e6d2ce2177938e",
+          "746b1c0ec64837a8434bf53745bc544819cb1041",
+          "a93b64288c5af382c7f10e8cb141543a614b40f1",
+          "a93b64288c5af382c7f10e8cb141543a614b40f1",
+          "efe5040ff6537cbecddf36f83d90e0020615cbfa"
+        ]
+      },
+      "static_state": {
+        "main/remote_ui.cpp@493cffe044b3963f2408a9cd011dd06f21765f61": [
+          "429c005a60e554a8c109ed27216e9d17df8bcd92",
+          "78f20a1105777f9d4666af304b17fa8979691bff"
+        ]
+      },
+      "std_thread": {
+        "main/remote_ui.cpp@493cffe044b3963f2408a9cd011dd06f21765f61": [
+          "64dba51fbbe8609822b62ebd0aff5a06baeafd4a"
+        ]
+      }
+    },
+    "components/settings/src/settings.cpp": {
+      "locks": {
+        "main/settings.cpp@3a213687bf738a5f44a8183c4b46952cd573c6aa": [
+          "26db70a436045e93e5701ed76edb2037bfbfd87d",
+          "26db70a436045e93e5701ed76edb2037bfbfd87d",
+          "26db70a436045e93e5701ed76edb2037bfbfd87d",
+          "26db70a436045e93e5701ed76edb2037bfbfd87d",
+          "26db70a436045e93e5701ed76edb2037bfbfd87d",
+          "26db70a436045e93e5701ed76edb2037bfbfd87d",
+          "26db70a436045e93e5701ed76edb2037bfbfd87d",
+          "26db70a436045e93e5701ed76edb2037bfbfd87d",
+          "26db70a436045e93e5701ed76edb2037bfbfd87d",
+          "43eea135d299f54e0d2ba2a99b7e88b1236aaac3",
+          "43eea135d299f54e0d2ba2a99b7e88b1236aaac3"
+        ]
+      },
+      "mutable_globals": {
+        "main/settings.cpp@3a213687bf738a5f44a8183c4b46952cd573c6aa": [
+          "43eea135d299f54e0d2ba2a99b7e88b1236aaac3",
+          "877989c5b59fc70e4b2389c626a26e845dc3c615"
         ]
       }
     }

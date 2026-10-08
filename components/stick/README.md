@@ -28,7 +28,7 @@ Bench only: the firmware uses it only behind `CONFIG_HMI_BENCH_STICK_INJECT` (wh
 `CONFIG_HMI_REMOTE_UI`), selected at compile time (`StickSlot`), so a release build compiles none of it. The
 remote UI's `STICK` verb parses a `StickInjectMsg` and writes it to an `fw_core` mailbox; the ADC
 task drains it and swaps its three raw reads for the injected ones before `StickPipeline::cycle`
-(`main/stick_inject.hpp`). Everything after the reads is the real code.
+(`components/remote_ui/include/stick_inject.hpp`). Everything after the reads is the real code.
 
 | ID | Requirement | Tests |
 | --- | --- | --- |

@@ -18,6 +18,36 @@
     "guard variable for fmt::v12::format_facet<std::locale>::id"
   ],
   "objects": {
+    "feedback/src/da7280_bench.cpp.obj": {
+      "init_functions": 1,
+      "objects": [],
+      "reads_external": [],
+      "lazy_statics": [],
+      "calls": [],
+      "shared": [
+        "guard variable for fmt::v12::format_facet<std::locale>::id"
+      ]
+    },
+    "feedback/src/feedback.cpp.obj": {
+      "init_functions": 1,
+      "objects": [],
+      "reads_external": [],
+      "lazy_statics": [],
+      "calls": [],
+      "shared": [
+        "guard variable for fmt::v12::format_facet<std::locale>::id"
+      ]
+    },
+    "feedback/src/haptics.cpp.obj": {
+      "init_functions": 1,
+      "objects": [],
+      "reads_external": [],
+      "lazy_statics": [],
+      "calls": [],
+      "shared": [
+        "guard variable for fmt::v12::format_facet<std::locale>::id"
+      ]
+    },
     "fw_core/src/error.cpp.obj": {
       "init_functions": 0,
       "objects": [],
@@ -40,7 +70,47 @@
         "guard variable for fmt::v12::format_facet<std::locale>::id"
       ]
     },
+    "hmi_ui/src/display_flip.cpp.obj": {
+      "init_functions": 1,
+      "objects": [],
+      "reads_external": [],
+      "lazy_statics": [],
+      "calls": [],
+      "shared": [
+        "guard variable for fmt::v12::format_facet<std::locale>::id"
+      ]
+    },
+    "hmi_ui/src/fps_meter.cpp.obj": {
+      "init_functions": 1,
+      "objects": [],
+      "reads_external": [],
+      "lazy_statics": [],
+      "calls": [],
+      "shared": [
+        "guard variable for fmt::v12::format_facet<std::locale>::id"
+      ]
+    },
     "joystick/src/joystick.cpp.obj": {
+      "init_functions": 1,
+      "objects": [],
+      "reads_external": [],
+      "lazy_statics": [],
+      "calls": [],
+      "shared": [
+        "guard variable for fmt::v12::format_facet<std::locale>::id"
+      ]
+    },
+    "joystick_cal/src/cal_record.cpp.obj": {
+      "init_functions": 1,
+      "objects": [],
+      "reads_external": [],
+      "lazy_statics": [],
+      "calls": [],
+      "shared": [
+        "guard variable for fmt::v12::format_facet<std::locale>::id"
+      ]
+    },
+    "joystick_cal/src/cal_run.cpp.obj": {
       "init_functions": 1,
       "objects": [],
       "reads_external": [],
@@ -151,58 +221,6 @@
         "guard variable for fmt::v12::format_facet<std::locale>::id"
       ]
     },
-    "main/about_ui.cpp.obj": {
-      "init_functions": 1,
-      "objects": [],
-      "reads_external": [],
-      "lazy_statics": [],
-      "calls": [],
-      "shared": [
-        "guard variable for fmt::v12::format_facet<std::locale>::id"
-      ]
-    },
-    "main/fw_info.cpp.obj": {
-      "init_functions": 1,
-      "objects": [
-        "(anonymous namespace)::info",
-        "(anonymous namespace)::info_mutex",
-        "(anonymous namespace)::logger"
-      ],
-      "reads_external": [],
-      "lazy_statics": [],
-      "calls": [
-        "FwInfo::~FwInfo()",
-        "__cxa_atexit",
-        "espp::Logger::~Logger()",
-        "pthread_mutex_init",
-        "std::mutex::~mutex()"
-      ],
-      "shared": [
-        "guard variable for fmt::v12::format_facet<std::locale>::id"
-      ]
-    },
-    "main/github_ota.cpp.obj": {
-      "init_functions": 1,
-      "objects": [
-        "(anonymous namespace)::installing",
-        "(anonymous namespace)::logger",
-        "(anonymous namespace)::status",
-        "(anonymous namespace)::status_mutex"
-      ],
-      "reads_external": [],
-      "lazy_statics": [],
-      "calls": [
-        "GithubRelease::~GithubRelease()",
-        "OtaStatus::~OtaStatus()",
-        "__cxa_atexit",
-        "espp::Logger::~Logger()",
-        "pthread_mutex_init",
-        "std::mutex::~mutex()"
-      ],
-      "shared": [
-        "guard variable for fmt::v12::format_facet<std::locale>::id"
-      ]
-    },
     "main/internet_ui.cpp.obj": {
       "init_functions": 1,
       "objects": [
@@ -217,7 +235,7 @@
         "espp::Logger::~Logger()",
         "pthread_mutex_init",
         "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::~basic_string()",
-        "std::vector<WifiNetworkFound, std::allocator<WifiNetworkFound> >::~vector()"
+        "std::vector<hmi::ui::WifiNetwork, std::allocator<hmi::ui::WifiNetwork> >::~vector()"
       ],
       "shared": [
         "guard variable for fmt::v12::format_facet<std::locale>::id"
@@ -263,14 +281,11 @@
     "main/main.cpp.obj": {
       "init_functions": 1,
       "objects": [
-        "audio_bytes",
-        "drv2605_read_register",
+        "drive_adapter",
         "logger_flip",
         "logger_nav",
         "logger_overdraw",
-        "lvgl_mutex",
-        "seat_axis_format",
-        "setting_rows"
+        "lvgl_mutex"
       ],
       "reads_external": [],
       "lazy_statics": [
@@ -289,41 +304,24 @@
         "guard variable for app_main::{lambda(std::mutex&, std::condition_variable&)#2}::operator()(std::mutex&, std::condition_variable&) const::t0",
         "guard variable for app_main::{lambda(std::mutex&, std::condition_variable&)#2}::operator()(std::mutex&, std::condition_variable&) const::tab5",
         "guard variable for clock_note_mcb_time(MIB::MibStatus const&)::clock_logger",
-        "guard variable for init_haptic(espp::Logger&, espp::I2c&)::drv2605",
-        "guard variable for init_haptic(espp::Logger&, espp::I2c&)::drv2605_i2c_device",
-        "guard variable for log_link_change(RtpsLinkState)::link_logger",
-        "guard variable for rtps_poll_cb(_lv_timer_t*)::last_theme"
+        "guard variable for log_link_change(RtpsLinkState)::link_logger"
       ],
       "calls": [
         "__cxa_atexit",
         "espp::Logger::Logger(espp::Logger::Config const&)",
         "espp::Logger::~Logger()",
+        "hmi::drive_adapter::DriveAdapter<(anonymous namespace)::MainDriveView>::~DriveAdapter()",
         "pthread_mutex_init",
         "pthread_mutexattr_destroy",
         "pthread_mutexattr_init",
         "pthread_mutexattr_settype",
-        "std::function<bool (unsigned char, unsigned char, unsigned char*, unsigned int)>::~function()",
-        "std::recursive_mutex::~recursive_mutex()",
-        "std::vector<unsigned char, std::allocator<unsigned char> >::~vector()"
+        "std::recursive_mutex::~recursive_mutex()"
       ],
       "shared": [
         "guard variable for espp::M5StackTab5::get()::instance",
         "guard variable for fmt::v12::detail::get_classic_locale()::locale",
         "guard variable for fmt::v12::format_facet<std::locale>::id"
       ]
-    },
-    "main/remote_ui.cpp.obj": {
-      "init_functions": 1,
-      "objects": [
-        "(anonymous namespace)::cfg"
-      ],
-      "reads_external": [],
-      "lazy_statics": [],
-      "calls": [
-        "RemoteUiConfig::~RemoteUiConfig()",
-        "__cxa_atexit"
-      ],
-      "shared": []
     },
     "main/rtps_comms.cpp.obj": {
       "init_functions": 1,
@@ -399,7 +397,82 @@
         "guard variable for fmt::v12::format_facet<std::locale>::id"
       ]
     },
-    "main/settings.cpp.obj": {
+    "main/update_ui.cpp.obj": {
+      "init_functions": 1,
+      "objects": [
+        "(anonymous namespace)::logger",
+        "(anonymous namespace)::releases"
+      ],
+      "reads_external": [],
+      "lazy_statics": [],
+      "calls": [
+        "__cxa_atexit",
+        "espp::Logger::~Logger()",
+        "pthread_mutex_init",
+        "std::vector<hmi::ota::Release, std::allocator<hmi::ota::Release> >::~vector()"
+      ],
+      "shared": [
+        "guard variable for fmt::v12::format_facet<std::locale>::id"
+      ]
+    },
+    "ota/src/fw_info.cpp.obj": {
+      "init_functions": 1,
+      "objects": [
+        "(anonymous namespace)::info",
+        "(anonymous namespace)::info_mutex",
+        "(anonymous namespace)::logger"
+      ],
+      "reads_external": [],
+      "lazy_statics": [],
+      "calls": [
+        "FwInfo::~FwInfo()",
+        "__cxa_atexit",
+        "espp::Logger::~Logger()",
+        "pthread_mutex_init",
+        "std::mutex::~mutex()"
+      ],
+      "shared": [
+        "guard variable for fmt::v12::format_facet<std::locale>::id"
+      ]
+    },
+    "ota/src/github_ota.cpp.obj": {
+      "init_functions": 1,
+      "objects": [
+        "(anonymous namespace)::installing",
+        "(anonymous namespace)::logger",
+        "(anonymous namespace)::status",
+        "(anonymous namespace)::status_mutex"
+      ],
+      "reads_external": [],
+      "lazy_statics": [],
+      "calls": [
+        "GithubRelease::~GithubRelease()",
+        "OtaStatus::~OtaStatus()",
+        "__cxa_atexit",
+        "espp::Logger::~Logger()",
+        "pthread_mutex_init",
+        "std::mutex::~mutex()"
+      ],
+      "shared": [
+        "guard variable for fmt::v12::format_facet<std::locale>::id"
+      ]
+    },
+    "remote_ui/src/remote_ui.cpp.obj": {
+      "init_functions": 1,
+      "objects": [
+        "(anonymous namespace)::cfg"
+      ],
+      "reads_external": [],
+      "lazy_statics": [],
+      "calls": [
+        "(anonymous namespace)::ServerConfig::~ServerConfig()",
+        "__cxa_atexit"
+      ],
+      "shared": [
+        "guard variable for fmt::v12::format_facet<std::locale>::id"
+      ]
+    },
+    "settings/src/settings.cpp.obj": {
       "init_functions": 1,
       "objects": [
         "(anonymous namespace)::logger",
@@ -417,7 +490,17 @@
         "guard variable for fmt::v12::format_facet<std::locale>::id"
       ]
     },
-    "main/storage.cpp.obj": {
+    "stick/src/stick_pipeline.cpp.obj": {
+      "init_functions": 1,
+      "objects": [],
+      "reads_external": [],
+      "lazy_statics": [],
+      "calls": [],
+      "shared": [
+        "guard variable for fmt::v12::format_facet<std::locale>::id"
+      ]
+    },
+    "storage/src/storage.cpp.obj": {
       "init_functions": 1,
       "objects": [
         "(anonymous namespace)::logger"
@@ -433,29 +516,11 @@
         "guard variable for espp::FileSystem::get()::instance",
         "guard variable for fmt::v12::format_facet<std::locale>::id"
       ]
-    },
-    "main/update_ui.cpp.obj": {
-      "init_functions": 1,
-      "objects": [
-        "(anonymous namespace)::logger",
-        "(anonymous namespace)::releases"
-      ],
-      "reads_external": [],
-      "lazy_statics": [],
-      "calls": [
-        "__cxa_atexit",
-        "espp::Logger::~Logger()",
-        "pthread_mutex_init",
-        "std::vector<GithubRelease, std::allocator<GithubRelease> >::~vector()"
-      ],
-      "shared": [
-        "guard variable for fmt::v12::format_facet<std::locale>::id"
-      ]
     }
   },
   "source": {
-    "build": "C:\\b\\final_bench",
-    "project": "C:/Users/halai/Offline_Documents/ATDev/rammp/pace-hmi-fw-refactor",
-    "objects_scanned": 105
+    "build": "C:/b/g4_bench",
+    "project": "C:/w/g4review",
+    "objects_scanned": 138
   }
 }

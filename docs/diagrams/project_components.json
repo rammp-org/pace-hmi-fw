@@ -130,10 +130,32 @@
         "lwip",
         "m5stack-tab5",
         "mbedtls",
+        "ota",
         "ota_parse",
         "rammp_rtps_messages",
+        "settings",
         "stick",
+        "storage",
         "ui"
+      ]
+    },
+    "ota": {
+      "reqs": [],
+      "priv_reqs": [
+        "app_update",
+        "bootloader_support",
+        "esp_app_format",
+        "esp_http_client",
+        "esp_partition",
+        "esp_timer",
+        "espp__format",
+        "espp__logger",
+        "espressif__cjson",
+        "mbedtls",
+        "ota_parse",
+        "pthread",
+        "spi_flash",
+        "storage"
       ]
     },
     "ota_parse": {
@@ -146,11 +168,27 @@
       "reqs": [],
       "priv_reqs": []
     },
+    "settings": {
+      "reqs": [],
+      "priv_reqs": [
+        "espp__logger",
+        "storage"
+      ]
+    },
     "stick": {
       "reqs": [
         "joystick"
       ],
       "priv_reqs": []
+    },
+    "storage": {
+      "reqs": [],
+      "priv_reqs": [
+        "esp_partition",
+        "espp__file_system",
+        "espp__logger",
+        "joltwallet__littlefs"
+      ]
     }
   },
   "dependencies": {
@@ -207,12 +245,15 @@
     "espressif__usb": "managed",
     "espressif__w5500": "managed",
     "freertos": "idf",
+    "joltwallet__littlefs": "managed",
     "joystick": "vendored",
     "lvgl__lvgl": "managed",
     "lwip": "idf",
     "m5stack-tab5": "vendored",
     "mbedtls": "idf",
+    "pthread": "idf",
     "rammp_rtps_messages": "external",
+    "spi_flash": "idf",
     "ui": "generated"
   }
 }

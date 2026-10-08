@@ -4,7 +4,7 @@
     python scripts/fw_verify.py --bin precompiled/rammp-hmi-p4.bin --port COM6
     python scripts/fw_verify.py --no-write            # only say what it is
 
-The Tab5 hashes its own firmware at boot (main/fw_info.cpp), but it cannot ask
+The Tab5 hashes its own firmware at boot (components/ota/src/fw_info.cpp), but it cannot ask
 GitHub whether that hash is a published release. This does, on the PC:
 
 1. SHA-256 of the .bin -- the same number `sha256sum` prints, and the digest
@@ -44,7 +44,7 @@ import urllib.request
 
 REPO = "rammp-org/pace-hmi-fw"
 ASSET = "rammp-hmi-p4.bin"
-RECORD = "/fwinfo.txt"  # /storage/fwinfo.txt on the board; see main/fw_info.hpp
+RECORD = "/fwinfo.txt"  # /storage/fwinfo.txt on the board; see components/ota/include/fw_info.hpp
 KEEP_LINES = 8          # one per release image vouched for; the oldest go first
 SECTOR = 4096
 ROOT = pathlib.Path(__file__).resolve().parent.parent

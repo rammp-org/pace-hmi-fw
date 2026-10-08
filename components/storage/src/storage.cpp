@@ -3,7 +3,8 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
-#include <iterator>
+#include <sstream>
+#include <string>
 #include <system_error>
 
 #include "esp_littlefs.h"
@@ -63,7 +64,9 @@ void storage_migrate_legacy() {
       continue;
     }
     std::ifstream in(entry.path(), std::ios::binary);
-    const std::string contents{std::istreambuf_iterator<char>(in), {}};
+    std::ostringstream buffer;
+    buffer << in.rdbuf(); // the whole file; `in` keeps its own state, as the iterator left it
+    const std::string contents = buffer.str();
     const std::string name = entry.path().filename().string();
     if (in.good() || in.eof()) {
       copied += storage_write(name, contents) ? 1 : 0;

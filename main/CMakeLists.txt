@@ -16,6 +16,10 @@ idf_component_register(SRC_DIRS "."
                          joystick
                          joystick_cal
                          stick
+                         ota
+                         remote_ui
+                         settings
+                         storage
                          lvgl
                          m5stack-tab5
                          ui

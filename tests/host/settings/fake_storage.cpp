@@ -1,4 +1,4 @@
-// Fake of main/storage.cpp for the settings host app; see fake_storage.hpp.
+// Fake of components/storage/src/storage.cpp for the settings host app; see fake_storage.hpp.
 
 #include "fake_storage.hpp"
 

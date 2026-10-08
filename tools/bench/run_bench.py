@@ -12,7 +12,8 @@ B2's tethering rule), SKIP (declared by the command line: B1's flash without
 --flash, or a step not in --steps), NOT_RUN (an earlier step left nothing to
 test against, e.g. no IP from B2: not a verdict on the firmware).
 
-B0  port by MAC; tethering On; the PC holds 192.168.137.2; no stray rtps_mcb_*/
+B0  port by MAC; tethering On (BENCH_NET=lan: not applicable); the PC holds
+    common.PC_IP (192.168.137.2 on the hotspot); no stray rtps_mcb_*/
     selftest process; an RTPS sweep of the subnet finds at most one peer (the
     board); the board's partition table == the build's; with --flash, the build
     is a bench build (CONFIG_HMI_REMOTE_UI 1) with all images. Any false: INVALID,
@@ -122,6 +123,8 @@ class Run:
         return r.returncode, (r.stdout + r.stderr).strip()
 
     def restart_hotspot_once(self) -> str:
+        if not common.HOTSPOT:
+            return f"not restarted: BENCH_NET={common.NET} has no hotspot"
         if self.hotspot_restarts >= 1:
             return "not restarted: the one restart of this run is used"
         self.hotspot_restarts += 1
@@ -141,8 +144,11 @@ class Run:
             check("port", True, f"{self.port} = {common.BOARD_MAC}")
         except board.NoBoard as e:
             check("port", False, str(e))
-        code, out = self.hotspot("status")
-        check("tethering", code == 0 and "STATE On" in out, out)
+        if common.HOTSPOT:
+            code, out = self.hotspot("status")
+            check("tethering", code == 0 and "STATE On" in out, out)
+        else:
+            check("tethering", True, f"not applicable: BENCH_NET={common.NET}")
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
                 s.bind((common.PC_IP, 0))
@@ -177,7 +183,7 @@ class Run:
         sys.path.insert(0, str(self.a.tree / "scripts"))
         import rtps_net
         hosts = [str(h) for h in ipaddress.IPv4Network(common.SUBNET).hosts()
-                 if str(h) not in (common.PC_IP, "192.168.137.1")]
+                 if str(h) not in (common.PC_IP, *common.SWEEP_SKIP)]
         # In chunks: one listener seeding all 252 addresses spends its window on
         # ARP for empty addresses and never reached the board (seen 02:05).
         found: set[str] = set()

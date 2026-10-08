@@ -1,6 +1,6 @@
 #pragma once
-// Test-only stand-in for main/storage.cpp (espp::FileSystem on the `storage` partition):
-// storage_path() and storage_write() on a fresh folder under the host's temp directory.
+// Test-only stand-in for components/storage/src/storage.cpp (espp::FileSystem on the `storage`
+// partition): storage_path() and storage_write() on a fresh folder under the host's temp directory.
 
 #include <string>
 #include <string_view>

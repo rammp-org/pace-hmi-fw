@@ -6,6 +6,7 @@
 #include <iterator>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <thread>
@@ -190,8 +191,8 @@ esp_err_t mark_next_boot_valid() {
     return ESP_ERR_NOT_FOUND;
   }
   std::array<esp_ota_select_entry_t, 2> entry{};
-  int newest = -1;
-  for (int i = 0; i < 2; i++) {
+  std::optional<size_t> newest; // the sector with the higher valid ota_seq
+  for (size_t i = 0; i < entry.size(); i++) {
     if (esp_partition_read(otadata, i * kOtaDataSector, &entry[i], sizeof(entry[i])) != ESP_OK) {
       return ESP_FAIL;
     }
@@ -199,20 +200,20 @@ esp_err_t mark_next_boot_valid() {
         entry[i].ota_seq != UINT32_MAX &&
         entry[i].crc == esp_rom_crc32_le(UINT32_MAX, reinterpret_cast<uint8_t *>(&entry[i].ota_seq),
                                          sizeof(entry[i].ota_seq));
-    if (valid && (newest < 0 || entry[i].ota_seq > entry[newest].ota_seq)) {
+    if (valid && (!newest || entry[i].ota_seq > entry[*newest].ota_seq)) {
       newest = i;
     }
   }
-  if (newest < 0) {
+  if (!newest) {
     return ESP_ERR_INVALID_STATE;
   }
-  entry[newest].ota_state = ESP_OTA_IMG_VALID;
+  entry[*newest].ota_state = ESP_OTA_IMG_VALID;
   // A reset between the erase and the write leaves this sector blank, and the
   // bootloader falls back to the other one: the image running now.
-  esp_err_t err = esp_partition_erase_range(otadata, newest * kOtaDataSector, kOtaDataSector);
+  esp_err_t err = esp_partition_erase_range(otadata, *newest * kOtaDataSector, kOtaDataSector);
   if (err == ESP_OK) {
-    err = esp_partition_write(otadata, newest * kOtaDataSector, &entry[newest],
-                              sizeof(entry[newest]));
+    err = esp_partition_write(otadata, *newest * kOtaDataSector, &entry[*newest],
+                              sizeof(entry[*newest]));
   }
   return err;
 }
@@ -263,6 +264,150 @@ std::string check_first_block(const uint8_t *data, size_t fill) {
   return err;
 }
 
+// What the download leaves for the checks after it.
+struct Downloaded {
+  size_t done = 0;                  // bytes received
+  int64_t started_us = 0;           // when the transfer started
+  std::array<uint8_t, 32> digest{}; // SHA-256 of what was received
+  bool hashed = false;              // `digest` holds the whole SHA-256
+};
+
+// The transfer itself: reads into `block` and writes each full block (and the
+// tail) to `ota`, hashing what arrives into `sha` and feeding it to `marker`;
+// the first block is checked before anything is written. Returns why it
+// stopped, or "" when all `total` bytes are written.
+std::string receive(Http &http, esp_ota_handle_t ota, size_t total, uint8_t *block,
+                    psa_hash_operation_t &sha, hmi::ota::MarkerSearch &marker, size_t &done) {
+  size_t fill = 0; // bytes in `block`
+  bool header_checked = false;
+  // The first block holds the header: nothing is written before it is checked.
+  auto write_block = [&]() -> std::string {
+    if (!header_checked) {
+      if (std::string err = check_first_block(block, fill); !err.empty()) {
+        return err;
+      }
+      header_checked = true;
+    }
+    if (esp_err_t err = esp_ota_write(ota, block, fill); err != ESP_OK) {
+      return fmt::format("Writing flash failed ({})", esp_err_to_name(err));
+    }
+    fill = 0;
+    return "";
+  };
+  std::string failed;
+  while (failed.empty()) {
+    uint8_t *data = block + fill;
+    const int n = esp_http_client_read(http.client, reinterpret_cast<char *>(data),
+                                       static_cast<int>(kBlockBytes - fill));
+    if (n < 0) {
+      failed = "The download broke off";
+      break;
+    }
+    if (n == 0) {
+      if (!esp_http_client_is_complete_data_received(http.client) || done != total) {
+        failed = fmt::format("The download stopped at {} of {} KB", done / 1024, total / 1024);
+      } else if (fill > 0) {
+        failed = write_block(); // the tail
+      }
+      break;
+    }
+    const size_t len = static_cast<size_t>(n);
+    psa_hash_update(&sha, data, len);
+    marker.feed(std::span<const uint8_t>(data, len));
+    fill += len;
+    done += len;
+    if (fill == kBlockBytes) {
+      failed = write_block();
+    }
+    set_done(done);
+  }
+  return failed;
+}
+
+// Streams the release's image from `http` into `ota` (receive), hashing it and
+// looking for `marker` as it comes. Returns "" when all `total` bytes are
+// written, else why not, with the write aborted.
+std::string download(Http &http, esp_ota_handle_t ota, size_t total, hmi::ota::MarkerSearch &marker,
+                     Downloaded &got) {
+  if (psa_crypto_init() != PSA_SUCCESS) {
+    esp_ota_abort(ota);
+    return "PSA crypto did not start";
+  }
+  psa_hash_operation_t sha = PSA_HASH_OPERATION_INIT;
+  psa_hash_setup(&sha, PSA_ALG_SHA_256);
+
+  // Written a whole block at a time: esp_ota_write erases what each write
+  // covers, and a 64 KB-aligned 64 KB range is one block erase where the same
+  // bytes in reads' sizes are sixteen sector erases (measured: 78 KB/s).
+  std::unique_ptr<uint8_t, decltype(&free)> block(
+      static_cast<uint8_t *>(heap_caps_malloc(kBlockBytes, MALLOC_CAP_SPIRAM)), free);
+  if (!block) {
+    esp_ota_abort(ota);
+    psa_hash_abort(&sha);
+    return "No memory for the download";
+  }
+  size_t done = 0; // bytes received
+  const int64_t started_us = esp_timer_get_time();
+  const std::string failed = receive(http, ota, total, block.get(), sha, marker, done);
+  size_t digest_len = 0;
+  got.hashed =
+      psa_hash_finish(&sha, got.digest.data(), got.digest.size(), &digest_len) == PSA_SUCCESS &&
+      digest_len == got.digest.size();
+  got.done = done;
+  got.started_us = started_us;
+  if (!failed.empty()) {
+    esp_ota_abort(ota);
+    return failed;
+  }
+  return "";
+}
+
+// After the download: the image's own check, the digest against GitHub's, the
+// next boot, and whether the new image confirms its own boot. Returns why it
+// stopped, or "" when the image is written and verified.
+std::string finish(const GithubRelease &release, const esp_partition_t *slot, esp_ota_handle_t ota,
+                   const hmi::ota::MarkerSearch &marker, const Downloaded &got) {
+  const int64_t ms = (esp_timer_get_time() - got.started_us) / 1000;
+  set_stage(
+      OtaStage::VERIFYING,
+      fmt::format("Downloaded {} KB in {:.1f} s ({:.0f} KB/s). Checking...", got.done / 1024,
+                  static_cast<double>(ms) / 1000.0,
+                  ms > 0 ? static_cast<double>(got.done) / 1.024 / static_cast<double>(ms) : 0.0));
+
+  // esp_ota_end checks the image itself: its segments and its own SHA-256.
+  if (esp_err_t err = esp_ota_end(ota); err != ESP_OK) {
+    return err == ESP_ERR_OTA_VALIDATE_FAILED
+               ? "The image is damaged: it failed its own check"
+               : fmt::format("Finishing the write failed ({})", esp_err_to_name(err));
+  }
+  const std::string sha256 = got.hashed ? hex(got.digest.data(), got.digest.size()) : "";
+  if (!release.sha256.empty()) {
+    if (sha256 != release.sha256) {
+      return "The file is not the one GitHub published (SHA-256 differs)";
+    }
+    set_stage(OtaStage::VERIFYING, "SHA-256 matches GitHub's digest");
+  }
+
+  if (esp_err_t err = esp_ota_set_boot_partition(slot); err != ESP_OK) {
+    return fmt::format("Could not select the new image ({})", esp_err_to_name(err));
+  }
+  if (marker.found()) {
+    set_stage(OtaStage::VERIFYING,
+              "It confirms its own boot: a reset before it does brings this firmware back");
+  } else if (esp_err_t err = mark_next_boot_valid(); err == ESP_OK) {
+    set_stage(OtaStage::VERIFYING,
+              "An older release: installed as confirmed, it will not roll back by itself");
+  } else {
+    logger.warn("Could not mark the older image valid ({}): its first reset rolls it back",
+                esp_err_to_name(err));
+  }
+  if (!sha256.empty() && sha256 == release.sha256) {
+    // What About shows: this image is the release's file, byte for byte.
+    fw_info_record_release(sha256, release.tag, release.prerelease);
+  }
+  return "";
+}
+
 // Everything between choosing the release and setting the next boot. Returns
 // why it stopped, or "" when the image is written and verified.
 std::string install(const GithubRelease &release) {
@@ -300,116 +445,12 @@ std::string install(const GithubRelease &release) {
   set_stage(OtaStage::DOWNLOADING,
             fmt::format("Downloading {} ({} KB) to {}", release.tag, total / 1024, slot->label));
 
-  if (psa_crypto_init() != PSA_SUCCESS) {
-    esp_ota_abort(ota);
-    return "PSA crypto did not start";
-  }
-  psa_hash_operation_t sha = PSA_HASH_OPERATION_INIT;
-  psa_hash_setup(&sha, PSA_ALG_SHA_256);
-
   hmi::ota::MarkerSearch marker(kHmiConfirmsItsBoot);
-
-  // Written a whole block at a time: esp_ota_write erases what each write
-  // covers, and a 64 KB-aligned 64 KB range is one block erase where the same
-  // bytes in reads' sizes are sixteen sector erases (measured: 78 KB/s).
-  std::unique_ptr<uint8_t, decltype(&free)> block(
-      static_cast<uint8_t *>(heap_caps_malloc(kBlockBytes, MALLOC_CAP_SPIRAM)), free);
-  if (!block) {
-    esp_ota_abort(ota);
-    psa_hash_abort(&sha);
-    return "No memory for the download";
+  Downloaded got;
+  if (std::string err = download(http, ota, total, marker, got); !err.empty()) {
+    return err;
   }
-  size_t fill = 0; // bytes in `block`
-  size_t done = 0; // bytes received
-  bool header_checked = false;
-  // The first block holds the header: nothing is written before it is checked.
-  auto write_block = [&]() -> std::string {
-    if (!header_checked) {
-      if (std::string err = check_first_block(block.get(), fill); !err.empty()) {
-        return err;
-      }
-      header_checked = true;
-    }
-    if (esp_err_t err = esp_ota_write(ota, block.get(), fill); err != ESP_OK) {
-      return fmt::format("Writing flash failed ({})", esp_err_to_name(err));
-    }
-    fill = 0;
-    return "";
-  };
-  const int64_t started_us = esp_timer_get_time();
-  std::string failed;
-  while (failed.empty()) {
-    uint8_t *data = block.get() + fill;
-    const int n = esp_http_client_read(http.client, reinterpret_cast<char *>(data),
-                                       static_cast<int>(kBlockBytes - fill));
-    if (n < 0) {
-      failed = "The download broke off";
-      break;
-    }
-    if (n == 0) {
-      if (!esp_http_client_is_complete_data_received(http.client) || done != total) {
-        failed = fmt::format("The download stopped at {} of {} KB", done / 1024, total / 1024);
-      } else if (fill > 0) {
-        failed = write_block(); // the tail
-      }
-      break;
-    }
-    const size_t len = static_cast<size_t>(n);
-    psa_hash_update(&sha, data, len);
-    marker.feed(std::span<const uint8_t>(data, len));
-    fill += len;
-    done += len;
-    if (fill == kBlockBytes) {
-      failed = write_block();
-    }
-    set_done(done);
-  }
-  std::array<uint8_t, 32> digest{};
-  size_t digest_len = 0;
-  const bool hashed =
-      psa_hash_finish(&sha, digest.data(), digest.size(), &digest_len) == PSA_SUCCESS &&
-      digest_len == digest.size();
-  if (!failed.empty()) {
-    esp_ota_abort(ota);
-    return failed;
-  }
-  const int64_t ms = (esp_timer_get_time() - started_us) / 1000;
-  set_stage(OtaStage::VERIFYING,
-            fmt::format("Downloaded {} KB in {:.1f} s ({:.0f} KB/s). Checking...", done / 1024,
-                        ms / 1000.0, ms > 0 ? done / 1.024 / ms : 0.0));
-
-  // esp_ota_end checks the image itself: its segments and its own SHA-256.
-  if (esp_err_t err = esp_ota_end(ota); err != ESP_OK) {
-    return err == ESP_ERR_OTA_VALIDATE_FAILED
-               ? "The image is damaged: it failed its own check"
-               : fmt::format("Finishing the write failed ({})", esp_err_to_name(err));
-  }
-  const std::string sha256 = hashed ? hex(digest.data(), digest.size()) : "";
-  if (!release.sha256.empty()) {
-    if (sha256 != release.sha256) {
-      return "The file is not the one GitHub published (SHA-256 differs)";
-    }
-    set_stage(OtaStage::VERIFYING, "SHA-256 matches GitHub's digest");
-  }
-
-  if (esp_err_t err = esp_ota_set_boot_partition(slot); err != ESP_OK) {
-    return fmt::format("Could not select the new image ({})", esp_err_to_name(err));
-  }
-  if (marker.found()) {
-    set_stage(OtaStage::VERIFYING,
-              "It confirms its own boot: a reset before it does brings this firmware back");
-  } else if (esp_err_t err = mark_next_boot_valid(); err == ESP_OK) {
-    set_stage(OtaStage::VERIFYING,
-              "An older release: installed as confirmed, it will not roll back by itself");
-  } else {
-    logger.warn("Could not mark the older image valid ({}): its first reset rolls it back",
-                esp_err_to_name(err));
-  }
-  if (!sha256.empty() && sha256 == release.sha256) {
-    // What About shows: this image is the release's file, byte for byte.
-    fw_info_record_release(sha256, release.tag, release.prerelease);
-  }
-  return "";
+  return finish(release, slot, ota, marker, got);
 }
 
 void start_thread(const char *name, size_t stack, void (*fn)()) {
@@ -459,7 +500,7 @@ GithubReleases github_releases_fetch() {
     if (n == 0) {
       break;
     }
-    json.append(buf.get(), n);
+    json.append(buf.get(), static_cast<size_t>(n)); // n > 0 here
   }
   out.releases = parse_releases(json, out.error);
   out.ok = out.error.empty();

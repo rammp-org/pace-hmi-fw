@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """See the Tab5's screen from a PC, and drive it.
 
-The other end is main/remote_ui.cpp, behind CONFIG_HMI_REMOTE_UI. It hands out
+The other end is components/remote_ui/src/remote_ui.cpp, behind CONFIG_HMI_REMOTE_UI. It hands out
 the frame the panel is showing and injects touch, joystick and button input, so
 every screen, menu row and button can be exercised and captured from here
 instead of by someone looking at the display.
@@ -290,7 +290,7 @@ def cmd_walk(hmi: Hmi, out: pathlib.Path, half: bool) -> int:
     return 0
 
 
-# What main/stick_inject.hpp and components/stick/include/stick/bench_inject.hpp
+# What components/remote_ui/include/stick_inject.hpp and components/stick/include/stick/bench_inject.hpp
 # accept: an injection holds this long after the last STICK, mV 0..3300, mask 0..7.
 STICK_EXPIRY_MS = 300
 STICK_MAX_MV = 3300

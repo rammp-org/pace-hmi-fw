@@ -152,7 +152,7 @@ bool send_shot(int sock, int step) {
     out_w = buf->header.w / step;
     out_h = buf->header.h / step;
     static size_t copy_px = 0;
-    const size_t px = static_cast<size_t>(out_w) * out_h;
+    const size_t px = static_cast<size_t>(out_w) * static_cast<size_t>(out_h);
     if (px > copy_px) {
       heap_caps_free(copy);
       copy = static_cast<uint16_t *>(heap_caps_malloc(px * 2, MALLOC_CAP_SPIRAM));
@@ -163,8 +163,8 @@ bool send_shot(int sock, int step) {
     }
     for (int32_t y = 0; y < out_h; y++) {
       const auto *src = reinterpret_cast<const uint16_t *>(
-          buf->data + static_cast<size_t>(y) * step * buf->header.stride);
-      uint16_t *dst = copy + static_cast<size_t>(y) * out_w;
+          buf->data + static_cast<size_t>(y) * static_cast<size_t>(step) * buf->header.stride);
+      uint16_t *dst = copy + static_cast<size_t>(y) * static_cast<size_t>(out_w);
       if (step == 1) {
         memcpy(dst, src, static_cast<size_t>(out_w) * 2);
         continue;
@@ -174,7 +174,7 @@ bool send_shot(int sock, int step) {
       }
     }
   }
-  const size_t bytes = static_cast<size_t>(out_w) * out_h * 2;
+  const size_t bytes = static_cast<size_t>(out_w) * static_cast<size_t>(out_h) * 2;
   return send_line(sock, "FRAME " + std::to_string(out_w) + " " + std::to_string(out_h) + " " +
                              std::to_string(bytes)) &&
          send_all(sock, copy, bytes);
