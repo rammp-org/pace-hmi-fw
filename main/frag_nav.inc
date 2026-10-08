@@ -35,7 +35,7 @@ static void nav_enter_screen(const lv_obj_t *screen) {
     nav_use_group(bench_pin_view.group(), screen);
     rd_focus(0);
   } else if (screen == ui_SettingsScreen) {
-    nav_use_group(setting_group, screen);
+    nav_use_group(settings_view.group(), screen);
     setting_focus(0);
   } else if (screen == ui_SkunkWorksScreen) {
     nav_use_group(actions_view.group(), screen);

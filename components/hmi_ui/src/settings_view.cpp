@@ -6,12 +6,94 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 
 #include "hmi_format/stepper.hpp"
 #include "hmi_ui/widget_tree.hpp"
+#include "messages/joystick_message.hpp"
+#include "settings_spec.hpp"
 #include "ui.h"
 
 #include "components/ui_comp_settingrow.h"
+
+namespace {
+
+struct SettingPageText {
+  const char *title;
+  const char *instructions;
+};
+
+constexpr SettingPageText kActuatorsPageText{"DEBUG ACTUATORS",
+                                             "Up/down to pick, left/right or -/+ to move."};
+
+// What the named rows read, in SETTINGS_PARAM_* order; nullptr = a number.
+constexpr const char *kThemeNames[] = {"Dark", "Day"};
+constexpr const char *kOnOffNames[] = {"Off", "On"};
+constexpr const char *kMirrorNames[] = {"Normal", "Mirror"};
+constexpr const char *kSwapNames[] = {"Normal", "Swap"};
+// NetLink order. Not a Settings row: Internet Settings draws it as two buttons.
+constexpr const char *kNetworkNames[] = {"Ethernet", "WiFi"};
+constexpr const char *const *kSettingParamNames[] = {
+    nullptr,       // SETTINGS_PARAM_BRIGHTNESS
+    kThemeNames,   // SETTINGS_PARAM_THEME
+    kOnOffNames,   // SETTINGS_PARAM_MENU_SLIDE
+    kOnOffNames,   // SETTINGS_PARAM_FLIP
+    nullptr,       // SETTINGS_PARAM_STICK_SENSITIVITY
+    nullptr,       // SETTINGS_PARAM_DRIVE_SPEED
+    kMirrorNames,  // SETTINGS_PARAM_STICK_INVERT_X
+    kMirrorNames,  // SETTINGS_PARAM_STICK_INVERT_Y
+    kSwapNames,    // SETTINGS_PARAM_STICK_SWAP
+    kOnOffNames,   // SETTINGS_PARAM_SOUNDS
+    kNetworkNames, // SETTINGS_PARAM_NETWORK
+};
+static_assert(std::size(kSettingParamNames) == SETTINGS_PARAM_COUNT,
+              "every settings_spec.hpp parameter needs its names (or nullptr) here");
+
+constexpr int kSettingRowsMax = std::max<int>(rammp::kSeatAxisCount, SETTINGS_PARAM_COUNT);
+static_assert(kSettingRowsMax <= hmi::ui::SettingsView::ROWS_MAX,
+              "a page has more rows than the view");
+
+} // namespace
+
+void hmi::ui::SettingsView::open_page(int32_t page) {
+  config_.screen_ensure(); // built on demand: see "Screens built on demand"
+  rows_clear();
+  const SettingPageText text =
+      page == config_.actuators_page
+          ? kActuatorsPageText
+          : SettingPageText{SETTINGS_PAGES[static_cast<size_t>(page)].title,
+                            SETTINGS_PAGES[static_cast<size_t>(page)].instructions};
+  lv_label_set_text(ui_SettingsTitle, text.title);
+  // text.instructions has nowhere to go yet: the spec-V2 body is a title and
+  // the rows, with no line between them. Phase 5 adds one when it lays this
+  // screen out properly.
+  if (page == config_.actuators_page) {
+    const auto &specs = rammp::kSeatAxes;
+    for (size_t i = 0; i < rammp::kSeatAxisCount; i++) {
+      row_add({specs[i].short_name, specs[i].label, specs[i].min_value, specs[i].max_value,
+               specs[i].step, specs[i].decimals, nullptr},
+              &config_.seat_values[i], true);
+    }
+  } else {
+    for (int i = 0; i < SETTINGS_PARAM_COUNT; i++) {
+      const SettingsParamSpec &param = SETTINGS_PARAMS[static_cast<size_t>(i)];
+      if (param.page == page) {
+        format::StepperSpec spec{param.short_name, param.label,    param.min_value, param.max_value,
+                                 param.step,       param.decimals, param.unit};
+        spec.names = kSettingParamNames[i];
+        // Remapping the stick changes which way a push drives the chair, and
+        // the speed how far, so neither is done mid-drive.
+        spec.locked_only = i == SETTINGS_PARAM_STICK_INVERT_X ||
+                           i == SETTINGS_PARAM_STICK_INVERT_Y || i == SETTINGS_PARAM_STICK_SWAP ||
+                           i == SETTINGS_PARAM_DRIVE_SPEED;
+        row_add(spec, config_.subjects->value(i), false);
+      }
+    }
+  }
+  lv_subject_set_int(&page_, page);
+  _ui_screen_change(&ui_SettingsScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
+                    &ui_SettingsScreen_screen_init);
+}
 
 lv_group_t *hmi::ui::SettingsView::init() {
   // The rejection flash: which actuator was refused, and why. One subject rather
@@ -124,7 +206,7 @@ void hmi::ui::SettingsView::step(const Row *row, int direction) {
     return;
   }
   press_flash(button);
-  if (lv_subject_get_int(config_.page) == config_.actuators_page) {
+  if (lv_subject_get_int(&page_) == config_.actuators_page) {
     // A request: the value moves only when the MCB's state sample says so.
     config_.seat_step(static_cast<size_t>(row->index), direction < 0 ? -1 : 1);
     return;

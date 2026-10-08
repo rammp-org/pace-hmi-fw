@@ -461,10 +461,10 @@ static void on_demand_parts_init() {
   // (settings_screen_ensure). The seat values it steps are initialised further
   // up, with the seat screen that shares them.
 
-  setting_group = settings_view.init();
+  (void)settings_view.init();
 
   // Initialised before the screen's warning panel ever binds to it.
-  lv_subject_init_int(&setting_page_subject, SETTINGS_PAGE_DISPLAY);
+  lv_subject_init_int(settings_view.page(), SETTINGS_PAGE_DISPLAY);
 
   // Which page is up is chosen in the burger menu: Settings' level has a row
   // per page (nav_go), so the screen needs no chooser of its own.

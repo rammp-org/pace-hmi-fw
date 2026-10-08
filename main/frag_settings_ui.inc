@@ -30,44 +30,6 @@ using hmi::format::seat_format;
 using hmi::format::stepper_format;
 using hmi::format::StepperSpec;
 
-struct SettingPageText {
-  const char *title;
-  const char *instructions;
-};
-
-static constexpr SettingPageText kActuatorsPageText{"DEBUG ACTUATORS",
-                                                    "Up/down to pick, left/right or -/+ to move."};
-
-// What the named rows read, in SETTINGS_PARAM_* order; nullptr = a number.
-static constexpr const char *kThemeNames[] = {"Dark", "Day"};
-static constexpr const char *kOnOffNames[] = {"Off", "On"};
-static constexpr const char *kMirrorNames[] = {"Normal", "Mirror"};
-static constexpr const char *kSwapNames[] = {"Normal", "Swap"};
-// NetLink order. Not a Settings row: Internet Settings draws it as two buttons.
-static constexpr const char *kNetworkNames[] = {"Ethernet", "WiFi"};
-static const char *const *const kSettingParamNames[] = {
-    nullptr,       // SETTINGS_PARAM_BRIGHTNESS
-    kThemeNames,   // SETTINGS_PARAM_THEME
-    kOnOffNames,   // SETTINGS_PARAM_MENU_SLIDE
-    kOnOffNames,   // SETTINGS_PARAM_FLIP
-    nullptr,       // SETTINGS_PARAM_STICK_SENSITIVITY
-    nullptr,       // SETTINGS_PARAM_DRIVE_SPEED
-    kMirrorNames,  // SETTINGS_PARAM_STICK_INVERT_X
-    kMirrorNames,  // SETTINGS_PARAM_STICK_INVERT_Y
-    kSwapNames,    // SETTINGS_PARAM_STICK_SWAP
-    kOnOffNames,   // SETTINGS_PARAM_SOUNDS
-    kNetworkNames, // SETTINGS_PARAM_NETWORK
-};
-static_assert(std::size(kSettingParamNames) == SETTINGS_PARAM_COUNT,
-              "every settings_spec.hpp parameter needs its names (or nullptr) here");
-
-static constexpr int kSettingRowsMax = std::max<int>(rammp::kSeatAxisCount, SETTINGS_PARAM_COUNT);
-static_assert(kSettingRowsMax <= hmi::ui::SettingsView::ROWS_MAX, "a page has more rows than the view");
-static lv_group_t *setting_group = nullptr;
-// Which page is up: a SETTINGS_PAGE_* or kActuatorsPage. A subject because the
-// warning panel depends on it.
-static lv_subject_t setting_page_subject;
-
 // Raw value per actuator, in the table's units: seat_axis_value, defined with
 // the seat view (frag_seat). The rows' observers point at them, and the MCB
 // keeps them current with no page up.
@@ -130,8 +92,10 @@ static void seat_step(size_t row, int direction) {
 // (setting_store_observer) stay in main.
 static constinit hmi::ui::SettingsView settings_view{{
     .nav = &ui_nav_port,
-    .page = &setting_page_subject,
     .locked = &locked_subject,
+    .subjects = &setting_subjects,
+    .seat_values = seat_axis_value,
+    .screen_ensure = settings_screen_ensure,
     .actuators_page = kActuatorsPage,
     .seat_step = seat_step,
     .refuse = refusal_feedback,
@@ -145,7 +109,7 @@ static void setting_rows_clear() { settings_view.rows_clear(); }
 // link is down or the MCB's state is not OK.
 static void setting_warning_observer(lv_observer_t *observer, lv_subject_t *) {
   lv_obj_t *panel = lv_observer_get_target_obj(observer);
-  if (lv_subject_get_int(&setting_page_subject) != kActuatorsPage || seat_ready()) {
+  if (lv_subject_get_int(settings_view.page()) != kActuatorsPage || seat_ready()) {
     banner_show(panel, false);
     return;
   }
@@ -153,44 +117,6 @@ static void setting_warning_observer(lv_observer_t *observer, lv_subject_t *) {
   banner_show(panel, true);
 }
 
-// Fills the screen for `page` and shows it. LVGL task (a click handler).
-static void setting_page_open(int32_t page) {
-  settings_screen_ensure(); // built on demand: see "Screens built on demand"
-  setting_rows_clear();
-  const SettingPageText text =
-      page == kActuatorsPage
-          ? kActuatorsPageText
-          : SettingPageText{SETTINGS_PAGES[static_cast<size_t>(page)].title,
-                            SETTINGS_PAGES[static_cast<size_t>(page)].instructions};
-  lv_label_set_text(ui_SettingsTitle, text.title);
-  // text.instructions has nowhere to go yet: the spec-V2 body is a title and
-  // the rows, with no line between them. Phase 5 adds one when it lays this
-  // screen out properly.
-  if (page == kActuatorsPage) {
-    const auto &specs = rammp::kSeatAxes;
-    for (uint8_t i = 0; i < seat_axis_count; i++) {
-      settings_view.row_add({specs[i].short_name, specs[i].label, specs[i].min_value, specs[i].max_value,
-                       specs[i].step, specs[i].decimals, nullptr},
-                      &seat_axis_value[i], true);
-    }
-  } else {
-    for (int i = 0; i < SETTINGS_PARAM_COUNT; i++) {
-      const SettingsParamSpec &param = SETTINGS_PARAMS[static_cast<size_t>(i)];
-      if (param.page == page) {
-        StepperSpec spec{param.short_name, param.label, param.min_value, param.max_value,
-                         param.step,       param.decimals, param.unit};
-        spec.names = kSettingParamNames[i];
-        // Remapping the stick changes which way a push drives the chair, and
-        // the speed how far, so neither is done mid-drive.
-        spec.locked_only = i == SETTINGS_PARAM_STICK_INVERT_X ||
-                           i == SETTINGS_PARAM_STICK_INVERT_Y || i == SETTINGS_PARAM_STICK_SWAP ||
-                           i == SETTINGS_PARAM_DRIVE_SPEED;
-        settings_view.row_add(spec, setting_subjects.value(i), false);
-      }
-    }
-  }
-  lv_subject_set_int(&setting_page_subject, page);
-  _ui_screen_change(&ui_SettingsScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
-                    &ui_SettingsScreen_screen_init);
-}
+// Fills the screen for `page` and shows it (SettingsView). LVGL task (a click handler).
+static void setting_page_open(int32_t page) { settings_view.open_page(page); }
 
