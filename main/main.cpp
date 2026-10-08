@@ -32,6 +32,7 @@
 
 #include "about_ui.hpp"
 #include "board/adapters.hpp"
+#include "board/board.hpp"
 #include "boot_logo.h"
 #include "drive_adapter.hpp"
 #include "drive_session.hpp"
@@ -599,18 +600,12 @@ extern "C" void app_main(void) {
   espp::M5StackTab5 &tab5 = espp::M5StackTab5::get();
   logger.info("Running on M5Stack Tab5");
 
-  // first let's get the internal i2c bus and probe for all devices on the bus
-  logger.info("Probing internal I2C bus...");
+  // The board's bring-up on the BSP (components/board): each step logs to `logger` as it
+  // did here, and a step that returns false has logged why. Lives as long as app_main.
+  hmi::board::Board board({.tab5 = tab5, .log = logger});
+  board.probe_internal_i2c();
   auto &i2c = tab5.internal_i2c();
-  std::vector<uint8_t> found_addresses;
-  // 0x08..0x77 only: the rest are reserved, and a glitched ACK there once put
-  // 0x01 in this list, which the self test then reported as a lost device.
-  for (uint8_t address = 0x08; address <= 0x77; address++) {
-    if (i2c.probe_device(address)) {
-      found_addresses.push_back(address);
-    }
-  }
-  logger.info("Found devices at addresses: {::#02x}", found_addresses);
+  const std::vector<uint8_t> &found_addresses = board.i2c_devices();
 
   // The haptic and sound cues: the DRV2605 comes up here (the HAPTIC TEST slot,
   // the unlock and hold clicks, a refusal); the click's samples load after the
@@ -623,35 +618,7 @@ extern "C" void app_main(void) {
   // driver class, DRO mode): bench only, CONFIG_HMI_BENCH_DA7280_TEST.
   hmi::feedback::run_da7280_bench(logger, i2c, found_addresses);
 
-  // Initialize the IO expanders
-  logger.info("Initializing IO expanders...");
-  if (!tab5.initialize_io_expanders()) {
-    logger.error("Failed to initialize IO expanders!");
-    return;
-  }
-
-  // EXT5V_EN (0x43 P2) is asserted by the expander's default output mask; read it
-  // back to confirm the M5-Bus / 2.54-10P / HY2.0-4P 5V rail is live
-  auto ext_5v = tab5.get_io_expander_output(0x43, 2);
-  logger.info("EXT_5V_EN: {}", ext_5v ? (*ext_5v ? "enabled" : "DISABLED") : "read failed");
-
-  logger.info("Initializing lcd...");
-  // initialize the LCD
-  if (!tab5.initialize_lcd()) {
-    logger.error("Failed to initialize LCD!");
-    return;
-  }
-
-  // Query LCD controller
-  const char *controller_name = tab5.get_display_controller_name();
-  logger.info(controller_name);
-
-  // initialize the display with full-screen draw buffers (the vendored BSP in
-  // components/m5stack-tab5 allocates them in PSRAM)
-  logger.info("Initializing display...");
-  auto pixel_buffer_size = tab5.display_width() * tab5.display_height();
-  if (!tab5.initialize_display(pixel_buffer_size)) {
-    logger.error("Failed to initialize display!");
+  if (!board.start_io_expanders() || !board.start_display()) {
     return;
   }
 
