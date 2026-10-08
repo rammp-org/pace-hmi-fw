@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "housekeeping/system_clock.hpp"
 #include "logger.hpp"
 #include "m5stack-tab5.hpp"
 
@@ -17,8 +18,9 @@ namespace hmi::board {
 class Board {
 public:
   struct Config {
-    espp::M5StackTab5 &tab5; ///< The BSP (app_main's first M5StackTab5::get()).
-    espp::Logger &log;       ///< app_main's boot log: every step reports there, as before.
+    espp::M5StackTab5 &tab5;   ///< The BSP (app_main's first M5StackTab5::get()).
+    espp::Logger &log;         ///< app_main's boot log: every step reports there, as before.
+    void (*brightness_step)(); ///< The side button's press (main: brightness_step). Not null.
   };
 
   /// @brief Stores the Config; touches no hardware.
@@ -46,9 +48,35 @@ public:
   /// @return Whether the LCD and the display came up.
   bool start_display();
 
+  /// @brief The IMU, with the orientation filter it runs inside Imu::update.
+  /// @param orientation_filter The housekeeping island's filter (Housekeeping::orientation_filter).
+  /// @return Whether the IMU came up.
+  bool start_imu(const espp::M5StackTab5::Imu::filter_fn &orientation_filter);
+
+  /// @brief The uSD card and its size; a missing card is only a warning.
+  void start_sdcard();
+
+  /// @brief The RTC, then the system clock set from it when its time is plausible.
+  /// @param system_clock The system clock (housekeeping) the RTC's time seeds.
+  /// @return Whether the RTC came up and was read.
+  bool start_rtc(hmi::housekeeping::SystemClock &system_clock);
+
+  /// @brief The battery monitor, then charging on.
+  /// @return Whether the battery monitor came up.
+  bool start_battery();
+
+  /// @brief The audio codecs (the click's samples load later, through the cues).
+  /// @return Whether the audio came up.
+  bool start_audio();
+
+  /// @brief The side button, each press stepping the brightness (SideButton); a failure is
+  /// only a warning.
+  void start_side_button();
+
 private:
   espp::M5StackTab5 &tab5_;
   espp::Logger &logger_;
+  void (*brightness_step_)();
   std::vector<uint8_t> i2c_devices_;
 };
 

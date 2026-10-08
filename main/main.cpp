@@ -602,7 +602,7 @@ extern "C" void app_main(void) {
 
   // The board's bring-up on the BSP (components/board): each step logs to `logger` as it
   // did here, and a step that returns false has logged why. Lives as long as app_main.
-  hmi::board::Board board({.tab5 = tab5, .log = logger});
+  hmi::board::Board board({.tab5 = tab5, .log = logger, .brightness_step = brightness_step});
   board.probe_internal_i2c();
   auto &i2c = tab5.internal_i2c();
   const std::vector<uint8_t> &found_addresses = board.i2c_devices();
@@ -659,79 +659,19 @@ extern "C" void app_main(void) {
       .rate_noise = 0.1f,
   });
 
-  logger.info("Initializing IMU...");
-  // initialize the IMU
-  if (!tab5.initialize_imu(housekeeping.orientation_filter())) {
-    logger.error("Failed to initialize IMU!");
+  if (!board.start_imu(housekeeping.orientation_filter())) {
     return;
   }
-
-  // initialize the uSD card
-  using SdCardConfig = espp::M5StackTab5::SdCardConfig;
-  SdCardConfig sdcard_config{};
-  if (!tab5.initialize_sdcard(sdcard_config)) {
-    logger.warn("Failed to initialize uSD card, there may not be a uSD card inserted!");
-  } else {
-    uint32_t size_mb = 0;
-    uint32_t free_mb = 0;
-    if (tab5.get_sd_card_info(&size_mb, &free_mb)) {
-      logger.info("uSD card size: {} MB, free space: {} MB", size_mb, free_mb);
-    } else {
-      logger.warn("Failed to get uSD card info");
-    }
-  }
+  board.start_sdcard();
 
   // The system clock and the RTC, kept to the MCB's time (housekeeping). Lives as long
   // as app_main, which never returns once RTPS runs.
   hmi::housekeeping::SystemClock system_clock({.valid = &clock_valid, .max_drift_s = 2});
 
-  logger.info("Initializing RTC...");
-  // initialize the RTC
-  if (!tab5.initialize_rtc()) {
-    logger.error("Failed to initialize RTC!");
+  if (!board.start_rtc(system_clock) || !board.start_battery() || !board.start_audio()) {
     return;
   }
-
-  auto current_time = std::tm{};
-  if (!tab5.get_rtc_time(current_time)) {
-    logger.error("Failed to get RTC time");
-    return;
-  }
-
-  // The RTC holds the MCB's local time (no TZ is set: the system clock simply holds
-  // the local wall time the MCB reported). One that lost power reads a date long
-  // gone (hmi_format clock_plausible, REQ-FMT-06); the clock then shows --:-- until
-  // the MCB sends the time.
-  if (hmi::format::clock_plausible(current_time)) {
-    system_clock.set(current_time);
-    logger.info("RTC time {:%Y-%m-%d %H:%M:%S}", current_time);
-  } else {
-    logger.warn("RTC not set ({:%Y-%m-%d}); the clock waits for the MCB", current_time);
-  }
-
-  logger.info("Initializing battery management...");
-  // initialize battery monitoring
-  if (!tab5.initialize_battery_monitoring()) {
-    logger.error("Failed to initialize battery monitoring!");
-    return;
-  }
-
-  // enable charging
-  tab5.set_charging_enabled(true);
-
-  logger.info("Initializing sound...");
-  // initialize the sound
-  if (!tab5.initialize_audio()) {
-    logger.error("Failed to initialize sound!");
-    return;
-  }
-
-  // Brightness control with button
-  logger.info("Initializing button...");
-  if (!tab5.initialize_button(
-          hmi::board::SideButton{.logger = logger, .on_press = brightness_step})) {
-    logger.warn("Failed to initialize button");
-  }
+  board.start_side_button();
 
   logger.info("Setting up LVGL UI...");
   // Load the SquareLine Studio UI. This creates every screen and makes

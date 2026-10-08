@@ -191,6 +191,8 @@ flowchart LR
   g_Espressif_registry["Espressif registry · 7"]
   g_joltwallet["joltwallet · 1"]
   g_LVGL["LVGL · 1"]
+  c_board -.-> c_hmi_format
+  c_board -.-> c_housekeeping
   c_board -.-> c_m5stack_tab5
   c_board -.-> g_espp
   c_control -.-> g_espp

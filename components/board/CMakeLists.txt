@@ -3,6 +3,7 @@
 idf_component_register(SRCS "src/adapters.cpp"
                             "src/board.cpp"
                        INCLUDE_DIRS "include"
-                       REQUIRES logger m5stack-tab5)
+                       REQUIRES housekeeping logger m5stack-tab5
+                       PRIV_REQUIRES hmi_format)
 
 fw_component_options(${COMPONENT_LIB})

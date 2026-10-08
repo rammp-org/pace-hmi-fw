@@ -5,9 +5,12 @@
     "board": {
       "reqs": [
         "espp__logger",
+        "housekeeping",
         "m5stack-tab5"
       ],
-      "priv_reqs": []
+      "priv_reqs": [
+        "hmi_format"
+      ]
     },
     "control": {
       "reqs": [
