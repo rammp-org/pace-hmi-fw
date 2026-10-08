@@ -405,45 +405,13 @@ static void joystick_screen_init() {
   joystick_view.init_button();
 }
 
-// app_main, UI build 6: the joystick's indev in nav, the lost-cursor backstop and the
-// key repeat. @p indev is the joystick keypad's.
-static void nav_input_init(lv_indev_t *indev) {
-  // The joystick's indev, nav's fallback group and the burger menu's rows (NavView).
-  nav_view.init_groups(indev);
-  // A backstop for the stick losing its cursor: if its group ever has nothing
-  // focused while the screen has settled, hand it back to the screen that is
-  // up, as a fresh arrival would. Logged, because it means some path left the
-  // group behind and that path wants fixing too.
-  lv_timer_create(
-      [](lv_timer_t *) {
-        lv_group_t *g = lv_indev_get_group(nav_view.indev());
-        static int lost = 0;
-        if (g != nullptr && lv_group_get_focused(g) != nullptr) {
-          lost = 0;
-          return;
-        }
-        // Only screens with the burger key, which always has something to
-        // focus (Boot and Update have none), and only when it stays lost for
-        // two checks in a row: a screen change or a row press in flight
-        // passes through an empty group on its way to SCREEN_LOADED.
-        if (!nav_view.has_chrome(lv_screen_active()) || nav_view.row_press_pending() ||
-            ++lost < 2) {
-          return;
-        }
-        lost = 0;
-        logger_nav.warn("the stick had nothing focused on {}; re-entering it",
-                        active_screen_name());
-        nav_arrive(lv_screen_active());
-      },
-      500, nullptr);
-  // hold-to-repeat feel. LVGL's defaults (400 ms then every 100 ms) are tuned
-  // for a keyboard and run the settings list far too fast for a joystick you
-  // steer with; these are the two knobs if it feels wrong on the bench.
-  lv_indev_set_long_press_time(indev, 500);
-  lv_indev_set_long_press_repeat_time(indev, 250);
+// The lost-cursor backstop re-enters `screen` (NavView::start_input).
+static void nav_cursor_lost(const lv_obj_t *screen) {
+  logger_nav.warn("the stick had nothing focused on {}; re-entering it",
+                  hmi::ui::NavView::screen_name(screen));
 }
 
-// app_main, UI build 7: the padlock's rest position and the three hold gestures.
+// app_main, UI build 6: the padlock's rest position and the three hold gestures.
 static void lock_screen_init() {
   // Where the shackle sits at rest, so the 01b rise can be undone exactly.
   lv_obj_update_layout(ui_Shackle);
@@ -471,7 +439,7 @@ static void lock_screen_init() {
   lv_timer_create(hold_poll_cb, kHoldPollMs, nullptr);
 }
 
-// app_main, UI build 8: the Log, Seat, Internet and About screens.
+// app_main, UI build 7: the Log, Seat, Internet and About screens.
 static void screens_init() {
   // LogScreen: TextArea1 shows the serial output log_capture has kept. Its
   // ErrorBanner5 is left for menu refusals only: a link-lost
@@ -499,7 +467,7 @@ static void screens_init() {
   about_ui_init();
 }
 
-// app_main, UI build 9: the Update screen, and the OTA image's confirm.
+// app_main, UI build 8: the Update screen, and the OTA image's confirm.
 static void update_screen_init() {
   // UpdateScreen: the GitHub releases, one release, and an install running.
   // Its two pages cover the body, so their fill is what hides it.
@@ -527,7 +495,7 @@ static void update_screen_init() {
       1);
 }
 
-// app_main, UI build 10: the seat values and the screen-loaded hooks.
+// app_main, UI build 9: the seat values and the screen-loaded hooks.
 static void screen_hooks_init() {
   // The seat values, shared by this screen and the DEBUG ACTUATORS page, and the
   // numbers bound to them.
@@ -544,7 +512,7 @@ static void screen_hooks_init() {
   }
 }
 
-// app_main, UI build 11: what outlives the screens built on demand (BenchGate's PIN pad,
+// app_main, UI build 10: what outlives the screens built on demand (BenchGate's PIN pad,
 // Settings, Skunk Works, Diagnostics) and the perf overlay's font.
 static void on_demand_parts_init() {
   // BenchGateScreen: the PIN pad, its four dots and the line above them.
@@ -896,7 +864,8 @@ extern "C" void app_main(void) {
   // one LV_EVENT_KEY. Touch keeps working; indevs coexist.
   logger.info("Adding joystick keypad input device...");
   static espp::KeypadInput joystick_keypad({.read = joystick_keypad_read});
-  nav_input_init(joystick_keypad.get_input_device());
+  // The joystick's indev in nav, the lost-cursor backstop and the key repeat.
+  nav_view.start_input(joystick_keypad.get_input_device());
 
   lock_screen_init();
 

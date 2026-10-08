@@ -66,6 +66,7 @@ static void nav_enter_screen(const lv_obj_t *screen) {
 }
 
 // The one instance (hmi::ui::NavView): every screen's key and menu, and arriving.
+static void nav_cursor_lost(const lv_obj_t *screen); // logs on logger_nav, defined after it
 static constinit hmi::ui::NavView nav_view{{
     .shared = &ui_shared_subjects,
     .menu_slide = &menu_slide_subject,
@@ -110,6 +111,7 @@ static constinit hmi::ui::NavView nav_view{{
             rd_pin_reset();
           }
         },
+    .cursor_lost = nav_cursor_lost,
 }};
 
 // The calls the rest of the unit makes (and NavPort's table).
