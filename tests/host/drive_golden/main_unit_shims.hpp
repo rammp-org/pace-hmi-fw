@@ -61,7 +61,6 @@ struct lv_subject_t {
 struct lv_timer_t {
   const char *name;
 };
-struct lv_anim_t; // hmi_ui/hold_gesture.hpp (HOLD_MAX) names it; the port never uses one
 using lv_anim_exec_xcb_t = void (*)(void *, std::int32_t);
 enum lv_screen_load_anim_t { LV_SCREEN_LOAD_ANIM_NONE = 0, LV_SCREEN_LOAD_ANIM_FADE_ON = 9 };
 

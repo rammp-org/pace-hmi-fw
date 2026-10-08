@@ -7,7 +7,7 @@
 
 #include "drive_session_table.hpp"
 #include "hmi_ui/drive_port.hpp"
-#include "hmi_ui/hold_gesture.hpp"
+#include "hmi_ui/hold_range.hpp"
 #include "hmi_ui/link_state.hpp"
 
 // Locking and unlocking the HMI are the drive session's actions, performed by the drive

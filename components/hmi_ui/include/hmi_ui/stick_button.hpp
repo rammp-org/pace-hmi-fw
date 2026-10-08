@@ -8,8 +8,6 @@
 
 #include "stick/button_edges.hpp"
 
-#include "hmi_ui/joystick_view.hpp"
-
 namespace hmi::ui {
 
 /// One instance (UiApp's). `edge` runs on the button's interrupt task (espp's
@@ -18,7 +16,10 @@ namespace hmi::ui {
 class StickButton {
 public:
   struct Config {
-    JoystickView *view;        ///< the pressed panel and the press counter's subjects
+    /// int: the Joystick screen's pressed level and press count (JoystickView's `pressed`,
+    /// `count`)
+    lv_subject_t *pressed;
+    lv_subject_t *count;
     std::atomic<bool> *level;  ///< app_state's joy_button_pressed: the raw level, for the ADC task
     std::atomic<bool> *select; ///< app_state's select_key: one ENTER for the keypad read
   };

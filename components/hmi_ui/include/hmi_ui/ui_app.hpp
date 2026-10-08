@@ -411,7 +411,8 @@ private:
   // SELECT_MAX_US is a hold's grace period, so a press short enough to select
   // never starts a hold filling, and one long enough to fill never selects.
   StickButton stick_button_{{
-      .view = &joystick_view,
+      .pressed = joystick_view.pressed(),
+      .count = joystick_view.count(),
       .level = &joy_button_pressed,
       .select = &select_key,
   }};
