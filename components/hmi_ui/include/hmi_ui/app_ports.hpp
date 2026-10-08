@@ -27,7 +27,8 @@ struct LinkPort {
   const char *(*setting_text)();
   /// The diagnostics' arrival: the latest sample's esp_timer time (0 = never) and the rate.
   void (*diag_stats)(int64_t *last_us, int32_t *rate_tenths_hz);
-  /// The DriveCommand (rtps_comms_publish_drive): safety-relevant. Result ignored (H6).
+  /// The DriveCommand (rtps_comms_publish_drive): safety-relevant. True when handed to RTPS;
+  /// the drive adapter counts and logs a failure (H6).
   bool (*publish_drive)(rammp::DriveRequest request, MIB::DriveProfile profile);
   /// One SeatCommand: an absolute target in the axis' units (rtps_comms_publish_seat).
   bool (*publish_seat)(rammp::SeatAxis axis, float target);
@@ -81,6 +82,7 @@ struct MainScreens {
   void (*update_on_load)();
   void (*calibration_init)();   ///< the Joystick screen's calibration view
   void (*calibration_toggle)(); ///< starts a calibration run, or cancels one
+  bool (*calibrating)();        ///< a calibration run owns the stick (joystick_cal_running)
 };
 
 } // namespace hmi::ui

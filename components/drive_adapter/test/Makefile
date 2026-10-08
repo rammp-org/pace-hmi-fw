@@ -1,7 +1,8 @@
-# Host L1 app for components/drive_adapter: the adapter's own contract (DAD-001..006). Contract
-# and rules in tests/host/common.mk: `make test` | `make coverage` | `make clean`.
+# Host L1 app for components/drive_adapter: the adapter's own contract (DAD-001..005,
+# DAD-007..011). Contract and rules in tests/host/common.mk: `make test` | `make coverage` |
+# `make clean`.
 # spec-deviation(TS-UNIT-01): host-native g++ in WSL, not the IDF linux target (owner, 2026-10-06).
-# The adapter against the firmware's behaviour: tests/host/drive_golden (GLD-001..004).
+# The adapter at the firmware's port: tests/host/drive_golden (GLD-101..116).
 
 NAME := drive_adapter
 HERE := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
@@ -15,7 +16,8 @@ TEST_SRCS        := $(HERE)/test_drive_adapter.cpp
 COVER_SRCS       := $(HERE)/test_drive_adapter.cpp
 THIRD_PARTY_SRCS := $(MC)/espp__logger/src/logger.cpp
 INCLUDES         := $(REPO)/components/drive_adapter/include \
-                    $(REPO)/components/drive_session/include
+                    $(REPO)/components/drive_session/include \
+                    $(REPO)/components/stick/include
 SYS_INCLUDES     := $(MC)/espp__logger/include \
                     $(MC)/espp__format/include \
                     $(MC)/espp__format/detail/fmt/include

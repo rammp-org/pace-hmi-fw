@@ -52,7 +52,7 @@ struct CodeVars {
 };
 
 // Locked phases ignore the exit variables: the code never sets them while
-// locked (except in the excluded case U3 of TABLE.md).
+// locked (U3 of TABLE.md, closed by C1: an exit hold while locked is rows 42-43).
 constexpr Phase phase_of(const CodeVars &v) noexcept {
   if (v.locked) {
     return v.lock_waiting ? Phase::ASKING : Phase::LOCKED;
@@ -94,8 +94,11 @@ enum class Input : std::uint8_t {
   ENTRY_PUSH, // frag_refusal.inc:281-304 (orig 1472-1495)
   // nav_row_cb for the DRIVE row (no row press pending).
   MENU_ROW_DRIVE, // frag_nav.inc:463-467 (orig 3691-3695)
+  // --- hazard fix C1 (docs/plans/hazard-c1-spec.md §2.1): tick sub-steps of the user's stop
+  TICK_STOP_FAULT_DUE, // has the 5 s stop window passed (G4: "MCB did not stop")
+  TICK_STOP_RESEND,    // is a DISABLE re-send due (G4: every 250 ms, then 1 Hz)
 };
-inline constexpr std::size_t kInputCount = 11;
+inline constexpr std::size_t kInputCount = 13;
 
 // ---------------------------------------------------------------------------
 // Guard
@@ -119,8 +122,15 @@ enum class Guard : std::uint8_t {
   THEN_MENU,          // drive_exit_then_menu      frag_drive.inc:14 (orig 1537)
   REQUEST_ENABLE,     // drive_request == ENABLE   frag_drive.inc:2 (orig 1525)
   UNLOCK_TIMER_ARMED, // unlock_advance_timer != nullptr frag_lock.inc:5 (orig 1070)
+  // --- hazard fix C1 (hazard-c1-spec.md §2.1), appended: env, then hidden ------------------
+  CALIBRATING,        // env: joystick_cal_running() at the sample
+  ON_BOOT_SCREEN,     // env: the screen is BootScreen (Screen::BOOT)
+  STOP_FAULT_ELAPSED, // env: stop timer armed and now >= first stop + kStopFaultAfter
+  RESEND_FAST_DUE,    // env: now >= last DISABLE + kStopResend - kStopResendSlack
+  RESEND_SLOW_DUE,    // env: now >= last DISABLE + kStopResendSlow - kStopResendSlack (=> FAST)
+  STOP_FAULT,         // hidden: "MCB did not stop" has been raised for this stop
 };
-inline constexpr std::size_t kGuardCount = 15;
+inline constexpr std::size_t kGuardCount = 21;
 
 using GuardMask = std::uint32_t;
 constexpr GuardMask bit(Guard g) noexcept { return GuardMask{1} << static_cast<unsigned>(g); }
@@ -132,10 +142,11 @@ constexpr GuardMask mask(std::initializer_list<Guard> gs) noexcept {
 inline constexpr GuardMask kEnvGuards =
     mask({Guard::LINK_CONNECTED, Guard::DRIVING_OK, Guard::MCB_READY, Guard::ON_LOCKED_SCREEN,
           Guard::ON_DRIVE_SCREEN, Guard::ON_SEAT_SCREEN, Guard::MENU_OPEN, Guard::EXIT_ELAPSED,
-          Guard::WARN_ELAPSED, Guard::GIVEUP_ELAPSED});
+          Guard::WARN_ELAPSED, Guard::GIVEUP_ELAPSED, Guard::CALIBRATING, Guard::ON_BOOT_SCREEN,
+          Guard::STOP_FAULT_ELAPSED, Guard::RESEND_FAST_DUE, Guard::RESEND_SLOW_DUE});
 inline constexpr GuardMask kHiddenGuards =
     mask({Guard::WARN_ARMED, Guard::GIVEUP_ARMED, Guard::THEN_MENU, Guard::REQUEST_ENABLE,
-          Guard::UNLOCK_TIMER_ARMED});
+          Guard::UNLOCK_TIMER_ARMED, Guard::STOP_FAULT});
 static_assert((kEnvGuards & kHiddenGuards) == 0);
 static_assert((kEnvGuards | kHiddenGuards) == (GuardMask{1} << kGuardCount) - 1);
 
@@ -158,9 +169,13 @@ constexpr bool exclusive(const GuardExpr &a, const GuardExpr &b) noexcept {
 }
 
 // The environment the oracle enumerates. env_guards derives the env bits, so
-// impossible combinations (DRIVING_OK without CONNECTED) never arise.
+// impossible combinations (DRIVING_OK without CONNECTED, RESEND_SLOW_DUE without
+// RESEND_FAST_DUE) never arise.
 enum class MibState : std::uint8_t { INITIALIZING, IDLE, ENABLED, OTHER };
 enum class Screen : std::uint8_t { BOOT, LOCKED, DRIVE, SEAT, OTHER };
+// Is a DISABLE re-send due (hazard-c1-spec.md §2.1): SLOW sets both RESEND bits, so "SLOW
+// without FAST" cannot be built.
+enum class Resend : std::uint8_t { NOT_DUE, FAST, SLOW };
 struct Env {
   bool link_connected;
   MibState mib;
@@ -169,6 +184,9 @@ struct Env {
   bool exit_elapsed;
   bool warn_elapsed;
   bool giveup_elapsed;
+  bool calibrating;        // C1: joystick_cal_running() at the sample
+  bool stop_fault_elapsed; // C1: the stop timer is armed and kStopFaultAfter has passed
+  Resend resend;           // C1: which DISABLE re-send is due
 };
 constexpr GuardMask env_guards(const Env &e) noexcept {
   GuardMask m = 0;
@@ -202,8 +220,27 @@ constexpr GuardMask env_guards(const Env &e) noexcept {
   if (e.giveup_elapsed) {
     m |= bit(Guard::GIVEUP_ELAPSED);
   }
+  if (e.calibrating) {
+    m |= bit(Guard::CALIBRATING);
+  }
+  if (e.screen == Screen::BOOT) {
+    m |= bit(Guard::ON_BOOT_SCREEN);
+  }
+  if (e.stop_fault_elapsed) {
+    m |= bit(Guard::STOP_FAULT_ELAPSED);
+  }
+  if (e.resend != Resend::NOT_DUE) {
+    m |= bit(Guard::RESEND_FAST_DUE);
+  }
+  if (e.resend == Resend::SLOW) {
+    m |= bit(Guard::RESEND_SLOW_DUE);
+  }
   return m;
 }
+
+// What the Drive screen says about the user's stop (hazard-c1-spec.md §2.6): stop_notice in
+// drive_session_table.hpp.
+enum class StopNotice : std::uint8_t { NONE, STOPPING, MCB_DID_NOT_STOP };
 
 // ---------------------------------------------------------------------------
 // Action
@@ -212,7 +249,8 @@ constexpr GuardMask env_guards(const Env &e) noexcept {
 // before a real action.
 enum class Action : std::uint8_t {
   NONE,
-  // DriveCommand (rtps_comms_publish_drive, one-shot BEST_EFFORT, result ignored: H6)
+  // DriveCommand (rtps_comms_publish_drive, one-shot BEST_EFFORT; the adapter checks and counts
+  // the result, C1 H6)
   SEND_ENABLE,   // drive_request := ENABLE; publish (drive_ask)
   SEND_DISABLE,  // drive_request := DISABLE; publish (drive_ask)
   PUBLISH_DRIVE, // drive_profile_published := clicked; publish(drive_request as it is, profile)
@@ -257,11 +295,15 @@ enum class Action : std::uint8_t {
   SHOW_DRIVE_LOST,         // kRefusedDriveLost (6), 3000 ms
   SHOW_REFUSED_DRIVE_MENU, // kRefusedDriveMenu (7), 3000 ms
   REFUSAL_FEEDBACK,        // refusal_feedback(): refusal haptic and sound
+  // --- hazard fix C1 (hazard-c1-spec.md §2.1), appended: the user's stop -------------------
+  ARM_STOP_TIMER,   // adapter: first stop time := now (G4: the 5 s counts from the first stop)
+  RAISE_STOP_FAULT, // STOP_FAULT := true; the adapter logs "MCB did not stop" once and counts it
+  CLEAR_STOP_FAULT, // STOP_FAULT := false; adapter: first stop time := 0
 };
-inline constexpr std::size_t kActionCount = 36;
-// 12: the relock rows use 10, and DriveSession::SAFE_STATE_ACTIONS 11 (it also clears the
-// menu-on-arrival flag before it loads the Locked screen); one more slot for the hazard fixes
-// (docs/plans/hazard-c1-spec.md §2.1). The padding is NONE and is not in the fingerprint.
+inline constexpr std::size_t kActionCount = 39;
+// 12: the relock rows use 11 (C1 adds SEND_DISABLE and, from the exit phases,
+// CLEAR_STOP_FAULT), and DriveSession::SAFE_STATE_ACTIONS 12. The padding is NONE and is not in
+// the fingerprint.
 inline constexpr std::size_t kMaxActions = 12;
 using Actions = std::array<Action, kMaxActions>;
 

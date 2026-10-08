@@ -89,6 +89,7 @@ void UiApp::bind_chrome() {
                       static_cast<int32_t>(MIB::DriveProfile::NORMAL));
   drive_band_view_.bind_profile_buttons(ui_ModeManual, ui_ModeAssist, ui_ModeAuto);
   drive_band_view_.bind_profile_mirror();
+  drive_notice_view_.build(ui_DriveScreen);
 }
 
 void UiApp::bind_resident_chrome(const ScreenChrome &c) {

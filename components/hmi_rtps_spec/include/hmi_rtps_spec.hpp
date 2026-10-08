@@ -213,6 +213,20 @@ static_assert(sizeof(kHmiDriveNotGrantedText) <= kErrorTextLen &&
                   sizeof(kHmiDriveStoppedText) <= kErrorTextLen &&
                   sizeof(kHmiExitRefusedText) <= kErrorTextLen,
               "refusal body outgrows the banner it shares with MIB faults");
+
+/* The Drive screen's notice (docs/plans/hazard-c1-spec.md §2.7, §3.3; texts approved by the
+   owner, decision F1, 2026-10-08): the user's stop, then why the stick is held. Its own slot,
+   not the refusal banner. One table for every hazard fix; each text has one owner spec. */
+inline constexpr char kHmiNoticeMcbDidNotStop[] = "MCB did not stop";                      // C1
+inline constexpr char kHmiNoticeStopping[] = "Stopping: waiting for the MCB";              // C1
+inline constexpr char kHmiNoticeWaitingForMcb[] = "Waiting for the MCB";                   // C4
+inline constexpr char kHmiNoticeNotCalibrated[] = "The joystick must be calibrated first"; // C1
+inline constexpr char kHmiNoticePostNotRun[] = "Start-up check not run";                   // C1
+inline constexpr char kHmiNoticeStickFault[] = "Joystick fault";                // C1, until C2
+inline constexpr char kHmiNoticeStickCheck[] = "Checking the joystick";         // C2
+inline constexpr char kHmiNoticeCentreFirst[] = "Centre the joystick to drive"; // C1
+static_assert(sizeof(kHmiNoticeNotCalibrated) <= kErrorTextLen,
+              "a Drive notice outgrows the width its slot is drawn for");
 static_assert(sizeof(kHmiDriveNotGrantedFooter) <= kErrorFooterLen &&
                   sizeof(kHmiDriveStoppedFooter) <= kErrorFooterLen &&
                   sizeof(kHmiExitRefusedFooter) <= kErrorFooterLen,

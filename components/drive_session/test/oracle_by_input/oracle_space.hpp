@@ -2,8 +2,8 @@
 // The by-input oracle's state space (TS-UNIT-08, TS-UNIT-09; docs/plans/hazard-fixes.md B3).
 //
 // The full-product oracle (test/oracle_full, DRV-001..012, on demand) drives every (phase,
-// input, hidden mask, Env): 6 x 11 x 32 x 640 = 1,351,680 steps on the AS-IS table. Each new
-// hidden bit doubles that. This oracle
+// input, hidden mask, Env): 6 x 11 x 32 x 640 = 1,351,680 steps on the AS-IS table, and
+// 6 x 13 x 64 x 7,680 = 38,338,560 with C1. Each new hidden bit doubles that. This oracle
 // splits the guard bits, per input, into the ones the table reads for that input (any row of
 // the input, and its precondition) and the rest:
 //
@@ -20,9 +20,9 @@
 //     a wider one only by chance, through the random points.
 //
 // A dimension is one field of the state the oracle varies: (link, MIB state), screen, menu,
-// each *_elapsed flag, and each hidden bit. Together they partition the guard bits
-// (static_assert below), so a new guard bit that no dimension holds does not compile; a new
-// hidden bit gets its own dimension automatically.
+// each *_elapsed flag, calibrating, the re-send, and each hidden bit. Together they partition the
+// guard bits (static_assert below), so a new guard bit that no dimension holds does not compile; a
+// new hidden bit gets its own dimension automatically.
 
 #include "drive_session.hpp"
 
@@ -57,7 +57,7 @@ inline constexpr std::array SCREENS{ds::Screen::BOOT, ds::Screen::LOCKED, ds::Sc
 
 // ---- Dimensions -----------------------------------------------------------------------------
 
-inline constexpr std::size_t kEnvDims = 6;
+inline constexpr std::size_t kEnvDims = 9;
 inline constexpr std::size_t kHiddenDims = std::popcount(ds::kHiddenGuards);
 inline constexpr std::size_t kDims = kEnvDims + kHiddenDims;
 // More than 32 dimensions does not fit DimSet: a compile error, not a silent cut.
@@ -93,12 +93,17 @@ constexpr std::array<Dim, kDims> make_dims() noexcept {
              ds::mask({ds::Guard::LINK_CONNECTED, ds::Guard::DRIVING_OK, ds::Guard::MCB_READY}), 5};
   d[1] = Dim{static_cast<std::uint8_t>(SCREENS.size()),
              ds::mask({ds::Guard::ON_LOCKED_SCREEN, ds::Guard::ON_DRIVE_SCREEN,
-                       ds::Guard::ON_SEAT_SCREEN}),
+                       ds::Guard::ON_SEAT_SCREEN, ds::Guard::ON_BOOT_SCREEN}),
              3};
   d[2] = Dim{2, ds::bit(ds::Guard::MENU_OPEN), 1};
   d[3] = Dim{2, ds::bit(ds::Guard::EXIT_ELAPSED), 1};
   d[4] = Dim{2, ds::bit(ds::Guard::WARN_ELAPSED), 1};
   d[5] = Dim{2, ds::bit(ds::Guard::GIVEUP_ELAPSED), 1};
+  // C1: a calibration running, the stop window passed, and the re-send (NOT_DUE, FAST, SLOW:
+  // value 2 sets both bits). ON_BOOT_SCREEN is the screen dimension's (Screen::BOOT).
+  d[6] = Dim{2, ds::bit(ds::Guard::CALIBRATING), 1};
+  d[7] = Dim{2, ds::bit(ds::Guard::STOP_FAULT_ELAPSED), 1};
+  d[8] = Dim{3, ds::mask({ds::Guard::RESEND_FAST_DUE, ds::Guard::RESEND_SLOW_DUE}), 2};
   for (std::size_t k = 0; k < kHiddenDims; ++k) {
     d[kEnvDims + k] = Dim{2, hidden_bit(k), 1};
   }
@@ -126,9 +131,19 @@ struct Point {
   ds::GuardMask hidden;
 };
 
+inline constexpr std::array RESENDS{ds::Resend::NOT_DUE, ds::Resend::FAST, ds::Resend::SLOW};
+
 inline Point point_of(const Values &v) noexcept {
-  const ds::Env env{(v[0] % 2U) != 0, MIBS[v[0] / 2U], SCREENS[v[1]], v[2] != 0,
-                    v[3] != 0,        v[4] != 0,       v[5] != 0};
+  const ds::Env env{.link_connected = (v[0] % 2U) != 0,
+                    .mib = MIBS[v[0] / 2U],
+                    .screen = SCREENS[v[1]],
+                    .menu_open = v[2] != 0,
+                    .exit_elapsed = v[3] != 0,
+                    .warn_elapsed = v[4] != 0,
+                    .giveup_elapsed = v[5] != 0,
+                    .calibrating = v[6] != 0,
+                    .stop_fault_elapsed = v[7] != 0,
+                    .resend = RESENDS[v[8]]};
   ds::GuardMask hidden = 0;
   for (std::size_t k = 0; k < kHiddenDims; ++k) {
     hidden |= v[kEnvDims + k] != 0 ? hidden_bit(k) : 0;

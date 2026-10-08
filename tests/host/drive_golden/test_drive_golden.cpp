@@ -1,28 +1,23 @@
-// L1 host app: the drive goldens (app-main-shrink.md S1 and V5; hazard-fixes.md Phase A).
+// L1 host app: the drive goldens (app-main-shrink.md S1 and V5; hazard-c1-spec.md §5.2).
 //
-// Two frozen logs pin what the drive code does today, so that moving it out of the main.cpp
-// unit (components/drive_adapter) is proven to change nothing:
-//   golden_port.txt  golden 1, at the DrivePort: each port method the drive code calls, in
-//                    order, with where it samples the screen, link, MIB and menu and where
-//                    it reads the clock; the world is stateful (world.hpp), so a sample
-//                    taken before or after a screen change reads differently.
-//   golden_raw.txt   golden 2, at the stub boundary: every lv_*, rtps_comms_publish_*,
-//                    esp_timer and main-unit call the drive code makes, with its arguments.
-// Both were recorded once from main/frag_drive.inc as it was before the move (6c431e4, the
-// owner-reviewed table 9b8574f) and are never regenerated from the code under test: a
-// mismatch is a behaviour change, never a reason to re-record (CORE never-list).
-// Since the move (S1b), GLD-001..003 run main/frag_drive.inc's MainDriveView and the
-// DriveAdapter instance through the same shims, and GLD-004 runs the DriveAdapter over a
-// stateful fake port (fake_port.cpp) against golden 1.
-// On a mismatch the actual logs are written to $GOLDEN_ACTUAL_DIR for a diff.
+// The hazard fix C1 retired GLD-001, GLD-002 and GLD-004 (owner decision G1, hazard-c1-spec.md
+// E1): they pinned the drive code's port and boundary calls before C1. Their frozen logs,
+// golden_port.txt and golden_raw.txt, stay in this folder unchanged as history; they are never
+// re-recorded. GLD-003 (every row taken) is replaced by GLD-115.
+//
+// What runs here:
+//   GLD-101..114  C1's hand-written goldens (goldens_c1.cpp): the firmware's drive code (drive_ui's
+//                 DrivePort over the recording shims, and the one DriveAdapter) against the
+//                 filtered log the spec writes for each step;
+//   GLD-115       the hand-written scenarios and the seeded walks (scripts.cpp) take every row of
+//                 the drive table; no log is compared;
+//   GLD-116       DrivePort's sample reads the link live, not from the rtps_link subject.
 
 #include <cstddef>
 #include <cstdio>
-#include <cstdlib>
-#include <fstream>
 #include <string>
-#include <vector>
 
+#include "goldens.hpp"
 #include "probe.hpp"
 #include "scripts.hpp"
 #include "test_case.hpp"
@@ -30,89 +25,95 @@
 
 namespace golden {
 Target main_unit_target();
-Target fake_port_target();
+bool port_sample_link_connected();
 } // namespace golden
 
 namespace {
 
-std::string env_or_empty(const char *name) {
-  const char *v = std::getenv(name);
-  return v == nullptr ? std::string{} : std::string{v};
-}
-
-std::vector<std::string> read_lines(const std::string &path) {
-  std::vector<std::string> lines;
-  std::ifstream in(path);
-  std::string line;
-  while (std::getline(in, line)) {
-    lines.push_back(line);
+// One golden by its ID, against the firmware's drive code. Unity's asserts longjmp: the work
+// that allocates is done before them.
+void expect_golden(const char *id) {
+  std::size_t steps = 0;
+  std::size_t differences = 0;
+  {
+    const golden::Golden g = golden::golden_by_id(id);
+    steps = g.steps.size();
+    differences = steps == 0 ? 0 : golden::run_golden(g, golden::main_unit_target());
   }
-  return lines;
-}
-
-void write_lines(const std::string &path, const std::vector<std::string> &lines) {
-  std::ofstream out(path);
-  for (const std::string &l : lines) {
-    out << l << '\n';
-  }
-}
-
-// The actual log against the frozen one: same lines, same order. Returns what to assert on
-// (Unity's asserts longjmp, so nothing that owns memory may be alive when they run).
-enum class Verdict { SAME, DIFFERENT, NO_GOLDEN_DIR, NO_GOLDEN };
-
-Verdict compare_golden(const std::vector<std::string> &actual, const char *golden_name,
-                       const char *actual_name) {
-  const std::string dir = env_or_empty("GOLDEN_DIR");
-  if (dir.empty()) {
-    return Verdict::NO_GOLDEN_DIR;
-  }
-  const std::vector<std::string> expected = read_lines(dir + "/" + golden_name);
-  std::size_t first_diff = 0;
-  while (first_diff < expected.size() && first_diff < actual.size() &&
-         expected[first_diff] == actual[first_diff]) {
-    ++first_diff;
-  }
-  std::printf("%s: %zu lines expected, %zu actual\n", golden_name, expected.size(), actual.size());
-  if (!expected.empty() && first_diff == expected.size() && first_diff == actual.size()) {
-    return Verdict::SAME;
-  }
-  const std::string out_dir = env_or_empty("GOLDEN_ACTUAL_DIR");
-  if (!out_dir.empty()) {
-    write_lines(out_dir + "/" + actual_name, actual);
-  }
-  if (expected.empty()) {
-    return Verdict::NO_GOLDEN;
-  }
-  std::printf("%s: first difference at line %zu\n  expected: %s\n  actual:   %s\n", golden_name,
-              first_diff + 1, first_diff < expected.size() ? expected[first_diff].c_str() : "<end>",
-              first_diff < actual.size() ? actual[first_diff].c_str() : "<end>");
-  return Verdict::DIFFERENT;
-}
-
-void expect_golden(Verdict v) {
-  TEST_ASSERT_FALSE_MESSAGE(v == Verdict::NO_GOLDEN_DIR, "GOLDEN_DIR is not set (the Makefile)");
-  TEST_ASSERT_FALSE_MESSAGE(v == Verdict::NO_GOLDEN, "the golden file is missing or empty");
-  TEST_ASSERT_TRUE_MESSAGE(v == Verdict::SAME,
-                           "the drive code's calls differ from the frozen golden");
+  TEST_ASSERT_TRUE_MESSAGE(steps > 0, "no golden with this ID");
+  TEST_ASSERT_EQUAL_UINT64(0, differences);
 }
 
 } // namespace
 
-TEST_CASE("GLD-001 the main unit's drive code calls the port as the frozen port golden says",
-          "[drive_golden]") {
-  golden::run_all(golden::main_unit_target());
-  expect_golden(compare_golden(golden::port_log(), "golden_port.txt", "actual_port_main_unit.txt"));
+TEST_CASE("GLD-101 the MCB enables unasked: the entry, no DriveCommand", "[drive_golden]") {
+  expect_golden("GLD-101");
 }
 
-TEST_CASE("GLD-002 the main unit's drive code makes the lv_ and rtps calls of the frozen "
-          "boundary golden",
+TEST_CASE("GLD-102 the MCB stops on its own: relock, one DISABLE, stopped banner",
           "[drive_golden]") {
-  golden::run_all(golden::main_unit_target());
-  expect_golden(compare_golden(golden::raw_log(), "golden_raw.txt", "actual_raw_main_unit.txt"));
+  expect_golden("GLD-102");
 }
 
-TEST_CASE("GLD-003 the golden scenarios take every row of the drive table", "[drive_golden]") {
+TEST_CASE("GLD-103 the link goes: relock, one DISABLE, lost banner; back ENABLED: the entry",
+          "[drive_golden]") {
+  expect_golden("GLD-103");
+}
+
+TEST_CASE("GLD-104 the exit hold or the burger key, the MCB obeys: Stopping, re-sent, relock, "
+          "the menu after the key (GLD-104b)",
+          "[drive_golden]") {
+  expect_golden("GLD-104");
+  expect_golden("GLD-104b");
+}
+
+TEST_CASE("GLD-105 the MCB ignores the stop: DISABLE every 250 ms, the fault at 5 s, then 1 Hz",
+          "[drive_golden]") {
+  expect_golden("GLD-105");
+}
+
+TEST_CASE("GLD-106 the burger key during an ignored stop keeps the fault at 5 s from the first "
+          "stop",
+          "[drive_golden]") {
+  expect_golden("GLD-106");
+}
+
+TEST_CASE("GLD-107 an ignored stop ends when the MCB stops: relock, one DISABLE, notice cleared",
+          "[drive_golden]") {
+  expect_golden("GLD-107");
+}
+
+TEST_CASE("GLD-108 no entry while a calibration runs", "[drive_golden]") {
+  expect_golden("GLD-108");
+}
+
+TEST_CASE("GLD-109 no entry behind the Boot screen", "[drive_golden]") { expect_golden("GLD-109"); }
+
+TEST_CASE("GLD-110 a profile tap sends ENABLE only while the MCB is ENABLED", "[drive_golden]") {
+  expect_golden("GLD-110");
+}
+
+TEST_CASE("GLD-111 the exit hold while locked sends one DISABLE and nothing else",
+          "[drive_golden]") {
+  expect_golden("GLD-111");
+}
+
+TEST_CASE("GLD-112 the exit hold while asking withdraws the ask", "[drive_golden]") {
+  expect_golden("GLD-112");
+}
+
+TEST_CASE("GLD-113 a link loss ends the user's stop; back ENABLED, the entry again",
+          "[drive_golden]") {
+  expect_golden("GLD-113");
+}
+
+TEST_CASE("GLD-114 a corrupted input during a stop gives the safe state and reports it",
+          "[drive_golden]") {
+  expect_golden("GLD-114");
+}
+
+TEST_CASE("GLD-115 the scenarios and the seeded walks take every row of the drive table",
+          "[drive_golden]") {
   golden::run_all(golden::main_unit_target());
   const auto &hits = golden::row_hits();
   unsigned covered = 0;
@@ -129,9 +130,16 @@ TEST_CASE("GLD-003 the golden scenarios take every row of the drive table", "[dr
   TEST_ASSERT_EQUAL_UINT(hmi::drive_session::kTransitionCount, covered);
 }
 
-TEST_CASE("GLD-004 DriveAdapter over a stateful fake port calls the port as the frozen port "
-          "golden says",
-          "[drive_golden]") {
-  golden::run_all(golden::fake_port_target());
-  expect_golden(compare_golden(golden::port_log(), "golden_port.txt", "actual_port_fake.txt"));
+TEST_CASE("GLD-116 DrivePort's sample reads the link live: the subject CONNECTED, the link "
+          "NO_PEER reads not connected",
+          "[drive_golden][REQ-UI-18]") {
+  golden::reset_world();
+  golden::world().link = true; // the rtps_link subject: CONNECTED
+  golden::world().live_link = false;
+  const bool stale_subject = golden::port_sample_link_connected();
+  golden::world().link = false;
+  golden::world().live_link = true;
+  const bool live = golden::port_sample_link_connected();
+  TEST_ASSERT_FALSE(stale_subject);
+  TEST_ASSERT_TRUE(live);
 }

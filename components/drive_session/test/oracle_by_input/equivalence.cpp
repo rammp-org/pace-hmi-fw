@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -35,8 +36,9 @@ using ds::Phase;
 
 // ---- Copied from test/oracle_full/test_drive_session_oracle_full.cpp (the full-product oracle)
 // ----
-constexpr unsigned HIDDEN_COMBOS = 1U << 5U;
-constexpr std::size_t ENV_COUNT = 2 * os::MIBS.size() * os::SCREENS.size() * 2 * 8;
+constexpr unsigned HIDDEN_COMBOS = 1U << static_cast<unsigned>(std::popcount(ds::kHiddenGuards));
+constexpr std::size_t ENV_COUNT =
+    2 * os::MIBS.size() * os::SCREENS.size() * 2 * 8 * 4 * os::RESENDS.size();
 
 Env env_at(std::size_t i) {
   const bool link = (i % 2) != 0;
@@ -47,7 +49,20 @@ Env env_at(std::size_t i) {
   i /= os::SCREENS.size();
   const bool menu = (i % 2) != 0;
   i /= 2;
-  return Env{link, mib, screen, menu, (i & 1U) != 0, (i & 2U) != 0, (i & 4U) != 0};
+  const std::size_t deadlines = i % 8;
+  i /= 8;
+  const std::size_t stop = i % 4;
+  i /= 4;
+  return Env{.link_connected = link,
+             .mib = mib,
+             .screen = screen,
+             .menu_open = menu,
+             .exit_elapsed = (deadlines & 1U) != 0,
+             .warn_elapsed = (deadlines & 2U) != 0,
+             .giveup_elapsed = (deadlines & 4U) != 0,
+             .calibrating = (stop & 1U) != 0,
+             .stop_fault_elapsed = (stop & 2U) != 0,
+             .resend = os::RESENDS[i % os::RESENDS.size()]};
 }
 
 GuardMask hidden_at(unsigned i) {

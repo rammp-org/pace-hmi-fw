@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -59,8 +60,9 @@ constexpr std::array MIBS{MibState::INITIALIZING, MibState::IDLE, MibState::ENAB
                           MibState::OTHER};
 constexpr std::array SCREENS{Screen::BOOT, Screen::LOCKED, Screen::DRIVE, Screen::SEAT,
                              Screen::OTHER};
-constexpr unsigned HIDDEN_COMBOS = 1U << 5U;
-constexpr std::size_t ENV_COUNT = 2 * MIBS.size() * SCREENS.size() * 2 * 8;
+constexpr std::array RESENDS{ds::Resend::NOT_DUE, ds::Resend::FAST, ds::Resend::SLOW};
+constexpr unsigned HIDDEN_COMBOS = 1U << static_cast<unsigned>(std::popcount(ds::kHiddenGuards));
+constexpr std::size_t ENV_COUNT = 2 * MIBS.size() * SCREENS.size() * 2 * 8 * 4 * RESENDS.size();
 
 // Every distinct Env, by index (0 .. ENV_COUNT-1).
 Env env_at(std::size_t i) {
@@ -72,10 +74,23 @@ Env env_at(std::size_t i) {
   i /= SCREENS.size();
   const bool menu = (i % 2) != 0;
   i /= 2;
-  return Env{link, mib, screen, menu, (i & 1U) != 0, (i & 2U) != 0, (i & 4U) != 0};
+  const std::size_t deadlines = i % 8;
+  i /= 8;
+  const std::size_t stop = i % 4;
+  i /= 4;
+  return Env{.link_connected = link,
+             .mib = mib,
+             .screen = screen,
+             .menu_open = menu,
+             .exit_elapsed = (deadlines & 1U) != 0,
+             .warn_elapsed = (deadlines & 2U) != 0,
+             .giveup_elapsed = (deadlines & 4U) != 0,
+             .calibrating = (stop & 1U) != 0,
+             .stop_fault_elapsed = (stop & 2U) != 0,
+             .resend = RESENDS[i % RESENDS.size()]};
 }
 
-// The hidden guards are bits 10..14: spread a 5-bit index over them.
+// Spread an index over the hidden guard bits, in bit order.
 GuardMask hidden_at(unsigned i) {
   GuardMask m = 0;
   unsigned k = 0;

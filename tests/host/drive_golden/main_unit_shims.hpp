@@ -33,8 +33,11 @@
 #include <format>
 #include <string>
 
+#include "drive_notice.hpp"
 #include "drive_session.hpp"
+#include "drive_ui/link_state.hpp"
 #include "logger.hpp"
+#include "stick/permit_types.hpp"
 #include "world.hpp"
 
 // --- types from rammp_rtps_messages, rtps_comms.hpp and espp, values as there ---------------
@@ -246,6 +249,8 @@ inline bool rtps_comms_publish_drive(rammp::DriveRequest request, MIB::DriveProf
   golden::raw(std::format("rtps_comms_publish_drive({}, {})", shim::request_name(request),
                           shim::profile_name(profile)));
   golden::port(std::format("publish({})", shim::request_name(request)));
+  golden::world().now += golden::world().publish_delay_us;
+  golden::world().publish_delay_us = 0;
   const char *r = request == rammp::DriveRequest::ENABLE ? "E" : "D";
   golden::filtered(golden::world().profile_picked
                        ? std::format("P({},{})", r, shim::profile_name(profile))
@@ -359,6 +364,57 @@ inline bool haptic_play(espp::Drv2605::Waveform w, std::uint8_t slots) {
   return true;
 }
 
+namespace shim {
+// The live link read (rtps_comms_link_state): the first read of a drive sample.
+inline hmi::ui::LinkState link_state_now() {
+  const golden::World &w = golden::world();
+  golden::port(std::format("sample -> link={} mib={} screen={} menu={}", int{w.live_link},
+                           golden::mib_name(w.mib), golden::screen_name(w.screen),
+                           int{w.menu_open}));
+  golden::raw(std::format("rtps_comms_link_state -> {}", w.live_link ? "CONNECTED" : "NO_PEER"));
+  return w.live_link ? hmi::ui::LinkState::CONNECTED : hmi::ui::LinkState::NO_PEER;
+}
+inline bool calibrating() {
+  golden::raw(std::format("joystick_cal_running -> {}", int{golden::world().calibrating}));
+  return golden::world().calibrating;
+}
+inline hmi::stick::HoldReason hold_reason() {
+  const auto r = static_cast<hmi::stick::HoldReason>(golden::world().hold);
+  golden::raw(std::format("hold_reason -> {}", hmi::stick::to_string(r)));
+  return r;
+}
+inline const char *notice_name(hmi::drive_adapter::DriveNotice n) {
+  using hmi::drive_adapter::DriveNotice;
+  switch (n) {
+  case DriveNotice::NONE:
+    return "NONE";
+  case DriveNotice::MCB_DID_NOT_STOP:
+    return "MCB_DID_NOT_STOP";
+  case DriveNotice::STOPPING:
+    return "STOPPING";
+  case DriveNotice::MOTION_GUARD:
+    return "MOTION_GUARD";
+  case DriveNotice::NOT_CALIBRATED:
+    return "NOT_CALIBRATED";
+  case DriveNotice::POST_NOT_PASSED:
+    return "POST_NOT_PASSED";
+  case DriveNotice::STICK_FAULT:
+    return "STICK_FAULT";
+  case DriveNotice::STICK_CHECK:
+    return "STICK_CHECK";
+  case DriveNotice::CENTRE_FIRST:
+    return "CENTRE_FIRST";
+  }
+  return "?";
+}
+inline void show_drive_notice(hmi::drive_adapter::DriveNotice n) {
+  golden::raw(std::format("drive_notice_show({})", notice_name(n)));
+  golden::port(std::format("show_notice({})", notice_name(n)));
+  golden::filtered(std::format("N:{}", notice_name(n)));
+  golden::world().notice = notice_name(n);
+}
+} // namespace shim
+
 // The Ui DrivePort is instantiated over (the firmware's is hmi::ui::DriveUi): each method is
 // the shim above of the name the drive code used in the main.cpp unit, so the boundary log
 // reads as it did.
@@ -388,4 +444,11 @@ struct MainUnitUi {
   void refusal_feedback() const { ::refusal_feedback(); }
   void haptic_click() const { (void)haptic_play(espp::Drv2605::Waveform::STRONG_CLICK, 1); }
   static constexpr lv_anim_exec_xcb_t ring_spin_cb = &::ring_spin_cb;
+  // C1's live reads (drive_port.hpp's sample) and the Drive notice.
+  hmi::ui::LinkState link_state_now() const { return shim::link_state_now(); }
+  bool calibrating() const { return shim::calibrating(); }
+  hmi::stick::HoldReason hold_reason() const { return shim::hold_reason(); }
+  void show_drive_notice(hmi::drive_adapter::DriveNotice notice) const {
+    shim::show_drive_notice(notice);
+  }
 };

@@ -19,7 +19,7 @@
 
 namespace hmi::drive_session {
 
-/// @brief The drive session: Phase plus the table's five hidden variables.
+/// @brief The drive session: Phase plus the table's hidden variables.
 /// @details Not thread-safe: one owner, the UI (LVGL) task. Allocates nothing.
 class DriveSession {
 public:
@@ -32,10 +32,10 @@ public:
   ///          in order, padded with `Action::NONE`. No matching row: nothing changes and @p out
   ///          is all `NONE`. A phase or input outside its enum (a corrupted value) sends the
   ///          session to the safe state: LOCKED, DISABLE sent, no menu on arrival, gate
-  ///          update requested.
-  /// @param in The input. A tick is the four inputs of `TICK_SEQUENCE`, in order: TICK_FOLLOW
-  ///           on the Env at the tick's start, the three deadline checks on one Env sampled
-  ///           after TICK_FOLLOW's actions were performed (README, "Model").
+  ///          update requested, stop fault cleared.
+  /// @param in The input. A tick is the inputs of `TICK_SEQUENCE`, in order: TICK_FOLLOW on
+  ///           the Env at the tick's start, the other sub-steps on one Env sampled after
+  ///           TICK_FOLLOW's actions were performed (README, "Model").
   /// @param env The environment sampled when the input arrived.
   /// @param out The actions for the caller to perform, in order.
   /// @return false only when a corrupted value forced the safe state; the caller logs it.
@@ -61,12 +61,18 @@ public:
   /// @brief The hidden variables, as the table's guard bits (a subset of `kHiddenGuards`).
   [[nodiscard]] constexpr GuardMask hidden() const noexcept { return hidden_; }
 
-  /// @brief The safe-state actions, in order (also what a corrupted value produces).
+  /// @brief What the Drive screen says about the user's stop now (`stop_notice`, C1 §2.6).
+  [[nodiscard]] constexpr StopNotice notice() const noexcept {
+    return stop_notice(phase_, hidden_);
+  }
+
+  /// @brief The safe-state actions, in order (also what a corrupted value produces). C1 adds
+  ///        CLEAR_STOP_FAULT, last.
   static constexpr Actions SAFE_STATE_ACTIONS{
       Action::SEND_DISABLE,         Action::CLEAR_WARN,      Action::CLEAR_EXIT_DEADLINE,
       Action::CLEAR_EXIT_REQUESTED, Action::CLEAR_THEN_MENU, Action::CLEAR_MENU_ON_ARRIVAL,
       Action::CANCEL_UNLOCK_TIMER,  Action::RING_REST,       Action::GO_LOCKED_SCREEN,
-      Action::SET_LOCKED,           Action::GATE_UPDATE};
+      Action::SET_LOCKED,           Action::GATE_UPDATE,     Action::CLEAR_STOP_FAULT};
 
 private:
   friend struct DriveSessionTestPeer; // test-only access, defined in the test tree
@@ -94,12 +100,15 @@ private:
   [[nodiscard]] Outcome on_exiting(Input in, GuardMask g) const noexcept;
   [[nodiscard]] Outcome on_exit_refused(Input in, GuardMask g) const noexcept;
   [[nodiscard]] Outcome stay() const noexcept;
+  [[nodiscard]] Outcome stop_fault_due(GuardMask g) const noexcept;
+  [[nodiscard]] Outcome stop_resend(GuardMask g) const noexcept;
   void perform(const Outcome &o, Actions &out) noexcept;
 
   Phase phase_ = Phase::LOCKED;
   // The hidden variables, one Guard bit each: WARN_ARMED (drive_wait_warn_us != 0),
   // GIVEUP_ARMED (drive_wait_until_us != 0), THEN_MENU (drive_exit_then_menu),
-  // REQUEST_ENABLE (drive_request == ENABLE), UNLOCK_TIMER_ARMED (unlock_advance_timer set).
+  // REQUEST_ENABLE (drive_request == ENABLE), UNLOCK_TIMER_ARMED (unlock_advance_timer set),
+  // STOP_FAULT ("MCB did not stop" raised for this stop, C1).
   GuardMask hidden_ = 0;
 };
 

@@ -74,6 +74,10 @@ inline constexpr uint32_t UNLOCK_DISSOLVE_MS = 280;
 /// task with lvgl_mutex held, inside an input of the drive adapter.
 ///
 /// `Ui` provides, each a direct call on the UI task:
+///  - the sample's live reads (C1 §2.9): `link_state_now()` (rtps_comms_link_state, the same
+///    read the 250 ms poll makes: CONNECTED means a MibStatus less than 2 s old),
+///    `calibrating()` (joystick_cal_running) and `hold_reason()` (the stick's, acquire);
+///  - the Drive notice slot: `show_drive_notice(notice)`;
 ///  - the subjects: `rtps_link_subject()`, `mib_state_subject()`, `locked_subject()`,
 ///    `entry_refused_subject()`, and the refusal banners' dwell timer `refused_timer()`;
 ///  - the menu: `nav_menu_open()` (compared with nullptr), `nav_menu_on_arrival()` (assigned);
@@ -87,20 +91,23 @@ public:
   constexpr explicit DrivePort(Ui *ui) noexcept
       : ui_(ui) {}
 
-  // The link and MIB subjects, the screen and the menu as they are now, read in this order.
+  // The link (live, not the rtps_link subject: an input between two polls must not see a
+  // status up to 2.25 s old, C1 §2.9 G2), the MIB subject, the screen, the menu, the
+  // calibration and the stick's hold reason as they are now, read in this order.
   [[nodiscard]] hmi::drive_adapter::DriveSample sample() const {
     return hmi::drive_adapter::DriveSample{
-        .link_connected = static_cast<LinkState>(lv_subject_get_int(ui_->rtps_link_subject())) ==
-                          LinkState::CONNECTED,
+        .link_connected = ui_->link_state_now() == LinkState::CONNECTED,
         .mib = drive_mib_of(
             static_cast<MIB::MibSystemState>(lv_subject_get_int(ui_->mib_state_subject()))),
         .screen = drive_screen_of(lv_screen_active()),
         .menu_open = ui_->nav_menu_open() != nullptr,
+        .calibrating = ui_->calibrating(),
+        .hold = ui_->hold_reason(),
     };
   }
   [[nodiscard]] int64_t now_us() const { return esp_timer_get_time(); }
   // The DriveCommand, with the profile the user picked (one-shot). Returns whether it was
-  // handed to RTPS; the adapter does not use it yet (H6).
+  // handed to RTPS; the adapter counts and logs a failure (H6).
   [[nodiscard]] bool publish(bool enable) const {
     return ui_->publish_drive(enable ? rammp::DriveRequest::ENABLE : rammp::DriveRequest::DISABLE,
                               ui_->drive_profile());
@@ -151,6 +158,8 @@ public:
     }
   }
   void refusal_feedback() const { ui_->refusal_feedback(); }
+  // The Drive screen's notice slot (C1 §2.7, REQ-UI-17): separate from the refusal banner.
+  void show_notice(hmi::drive_adapter::DriveNotice notice) const { ui_->show_drive_notice(notice); }
 
   // Both refusals read the same: see RefusalView::poll. The dwell is the caller's,
   // because a refused exit is asked to stay up for less time than a refused entry, and

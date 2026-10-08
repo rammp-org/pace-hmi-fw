@@ -62,6 +62,7 @@ static_assert(ACTION_COUNT == 5, "every actions_spec.h entry needs its function 
 // Is the MCB fit to drive, or to move the seat (DriveUi's readiness checks).
 bool UiApp::mcb_ready() { return hmi::ui::mcb_ready(shared_); }
 bool UiApp::seat_ready() { return hmi::ui::seat_ready(shared_); }
+hmi::stick::HoldReason UiApp::hold_reason() const { return permit_hooks_.hold_reason.read(); }
 
 // PUBLISH_DRIVE: the drive request as it stands, with the new profile.
 void UiApp::profile_clicked() {
@@ -87,8 +88,12 @@ bool UiApp::drive_exit_applies() {
   return lv_screen_active() == ui_DriveScreen && nav_menu_open == nullptr;
 }
 
+// Only while locked (C1 §2.8, REQ-UI-16): with the drive table's entry rows needing no
+// calibration running, a calibration then only ever runs locked, so no screen change the
+// session makes can cut one short (G5).
 bool UiApp::calibrate_applies() {
-  return lv_screen_active() == ui_JoystickScreen && nav_menu_open == nullptr;
+  return lv_subject_get_int(&locked_) != 0 && lv_screen_active() == ui_JoystickScreen &&
+         nav_menu_open == nullptr;
 }
 
 // The stick's own button. Reads the level the button callback mirrors out, not the edge-latched

@@ -379,6 +379,7 @@ static constexpr hmi::ui::MainScreens kMainScreens{
     .update_on_load = update_ui_on_load,
     .calibration_init = calibration_screen_init,
     .calibration_toggle = joystick_cal_toggle,
+    .calibrating = joystick_cal_running,
 };
 
 // The one UiApp: every view the UI task draws, wired (constinit: no global constructor).

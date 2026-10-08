@@ -2,13 +2,12 @@
 // The stateful world the drive goldens run in (app-main-shrink.md V5).
 //
 // One model of what the drive code's callees do to the screen, the menu, the lock state and
-// the clock, shared by both ways in:
-//   - the main-unit shims (main_unit_shims.hpp): the lv_*, rtps and main-unit helpers that
-//     main/frag_drive.inc calls, each recording one line in the boundary log (golden 2) and,
-//     where it stands for a port method, one line in the port log (golden 1);
-//   - the fake port (fake_port.hpp, after the move): the DrivePort methods themselves.
-// Both logs carry a snapshot of the world after every scripted step, so where the drive code
-// samples, reads the clock or changes the screen shows up in the logs.
+// the clock: the main-unit shims (main_unit_shims.hpp), the lv_*, rtps and main-unit helpers
+// that drive_ui's DrivePort calls, each recording one line in the boundary log and, where it
+// stands for a port method, one line in the port log and a token in the filtered log. The port
+// and boundary logs carry a snapshot of the world after every scripted step, so where the drive
+// code samples, reads the clock or changes the screen shows up in them (they are for reading;
+// the goldens that compared them, GLD-001/002/004, are retired).
 //
 // Model (what the real callees do, in the order the drive code can observe):
 //   - the clock: every read returns `now` and then advances it by 1 us, so the number and
@@ -53,6 +52,15 @@ struct World {
   // advance it), and the profile written into P(...) once the scenario has picked one.
   bool clock_fixed = false;
   bool profile_picked = false;
+  // C1's sample: the link as rtps_comms_link_state reads it now (the subject is `link`;
+  // both move together unless a scenario splits them), a calibration running, the stick's
+  // hold reason (hmi::stick::HoldReason's value), and the notice last shown.
+  bool live_link = false;
+  bool calibrating = false;
+  // The next DriveCommand publish blocks this long (the clock moves by it), then 0 again.
+  std::int64_t publish_delay_us = 0;
+  std::uint8_t hold = 0;
+  std::string notice = "NONE";
   // The adapter's logged errors (the safe state's report), counted.
   unsigned errors = 0;
 };

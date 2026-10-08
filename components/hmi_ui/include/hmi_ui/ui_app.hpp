@@ -32,6 +32,7 @@
 #include "hmi_ui/diagnostics_view.hpp"
 #include "hmi_ui/display_flip.hpp"
 #include "hmi_ui/drive_band_view.hpp"
+#include "hmi_ui/drive_notice_view.hpp"
 #include "hmi_ui/hold_gesture.hpp"
 #include "hmi_ui/nav_port.hpp"
 #include "hmi_ui/nav_view.hpp"
@@ -161,6 +162,8 @@ private:
   // Readiness, holds and drive inputs.
   bool mcb_ready();
   bool seat_ready();
+  /// The stick's hold reason as the ADC task last stored it (acquire), for the drive sample.
+  hmi::stick::HoldReason hold_reason() const;
   void profile_clicked();
   bool entry_push();
   void hold_confirm();
@@ -321,6 +324,9 @@ private:
   // Locking again is the MIB's call too: the chair stops, asked (the drive-exit
   // hold) or not (a fault, the link), and the drive session's relock (TICK_FOLLOW) brings the
   // Locked screen back with the reason on its banner.
+  // The Drive screen's notice slot (C1 §2.7): the user's stop and why the stick is held, its
+  // own place, apart from the refusal banner. The drive adapter's port shows it.
+  DriveNoticeView drive_notice_view_{};
   DriveUi drive_ui_{{
       .shared = &shared_,
       .refused = &refused_,
@@ -329,6 +335,10 @@ private:
       .menu_on_arrival = &nav_menu_on_arrival,
       .profile = &drive_profile_published,
       .publish_drive = config_.link->publish_drive,
+      .link_state = config_.link->state,
+      .calibrating = config_.screens->calibrating,
+      .hold_reason = hmi::ui::bind<&UiApp::hold_reason>(this),
+      .show_notice = hmi::ui::bind<&DriveNoticeView::show>(&drive_notice_view_),
       .input = config_.drive->input,
       .stick_drives = &stick_drives,
       .nav_home = hmi::ui::bind<&NavView::home>(&nav_view_),
