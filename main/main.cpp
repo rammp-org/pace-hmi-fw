@@ -1,10 +1,9 @@
 /**
- * @file m5stack_tab5_example.cpp
- * @brief M5Stack Tab5 BSP Example
- *
- * This example demonstrates the comprehensive functionality of the M5Stack Tab5
- * development board including display, touch, audio, camera, IMU, power management,
- * and communication interfaces.
+ * @file main.cpp
+ * @brief The HMI's app_main: brings up the Tab5 board, builds the components from their
+ *        Configs and starts them (CS-LAY-01). The UI island is hmi_ui's UiApp; the ports it
+ *        reaches the rest of the firmware through (rtps_comms, the drive adapter, the cues, the
+ *        self test, the board, the screens main keeps) are filled here.
  */
 
 #include <atomic>
@@ -639,14 +638,13 @@ extern "C" void app_main(void) {
   // First, so the LogScreen has everything printed from here on - including
   // what the tasks started below print.
   log_capture_start();
-  espp::Logger logger({.tag = "M5Stack Tab5 Example", .level = espp::Logger::Verbosity::INFO});
-  logger.info("Starting example!");
+  espp::Logger logger({.tag = "main", .level = espp::Logger::Verbosity::INFO});
+  logger.info("Starting the HMI");
   // Before anything reads /storage: the first boot of the two-slot layout brings the
   // calibration and settings over from where the old partition table kept them.
   storage_migrate_legacy();
   github_ota_boot_report();
 
-  //! [m5stack tab5 example]
   espp::M5StackTab5 &tab5 = espp::M5StackTab5::get();
   logger.info("Running on M5Stack Tab5");
 
@@ -1031,7 +1029,6 @@ extern "C" void app_main(void) {
   while (true) {
     std::this_thread::sleep_for(1s);
   }
-  //! [m5stack tab5 example]
 }
 
 // The click sound's samples: click.wav, embedded by main/CMakeLists.txt
