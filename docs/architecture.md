@@ -173,14 +173,18 @@ flowchart LR
   c_joystick_cal["joystick_cal"]
   c_m5stack_tab5["m5stack-tab5 (vendored)"]
   c_main["main"]:::safety
+  c_ota["ota"]
   c_ota_parse["ota_parse"]
   c_post["post"]:::safety
   c_rammp_rtps_messages["rammp_rtps_messages (submodule)"]:::safety
+  c_settings["settings"]
   c_stick["stick"]
+  c_storage["storage"]
   c_ui["ui"]:::gen
-  g_ESP_IDF["ESP-IDF · 15"]
+  g_ESP_IDF["ESP-IDF · 17"]
   g_espp["espp · 33"]
   g_Espressif_registry["Espressif registry · 7"]
+  g_joltwallet["joltwallet · 1"]
   g_LVGL["LVGL · 1"]
   c_drive_adapter -.-> c_drive_session
   c_drive_adapter -.-> g_espp
@@ -207,16 +211,29 @@ flowchart LR
   c_main -.-> c_joystick
   c_main -.-> c_joystick_cal
   c_main -.-> c_m5stack_tab5
+  c_main -.-> c_ota
   c_main -.-> c_ota_parse
   c_main -.-> c_rammp_rtps_messages
+  c_main -.-> c_settings
   c_main -.-> c_stick
+  c_main -.-> c_storage
   c_main -.-> c_ui
   c_main -.-> g_ESP_IDF
   c_main -.-> g_espp
   c_main -.-> g_Espressif_registry
   c_main -.-> g_LVGL
+  c_ota -.-> c_ota_parse
+  c_ota -.-> c_storage
+  c_ota -.-> g_ESP_IDF
+  c_ota -.-> g_espp
+  c_ota -.-> g_Espressif_registry
   c_ota_parse -.-> g_Espressif_registry
+  c_settings -.-> c_storage
+  c_settings -.-> g_espp
   c_stick -.-> c_joystick
+  c_storage -.-> g_ESP_IDF
+  c_storage -.-> g_espp
+  c_storage -.-> g_joltwallet
   classDef hw fill:#d9dde3,stroke:#7a8590,color:#111
   classDef safety stroke:#c0392b,stroke-width:3px
   classDef gen stroke-dasharray:5 4
@@ -224,9 +241,10 @@ flowchart LR
 
 <details><summary>Folded dependencies</summary>
 
-- **ESP-IDF**: `app_update`, `bootloader_support`, `esp_app_format`, `esp_driver_ppa`, `esp_eth`, `esp_event`, `esp_http_client`, `esp_mm`, `esp_netif`, `esp_partition`, `esp_timer`, `esp_wifi`, `freertos`, `lwip`, `mbedtls`
+- **ESP-IDF**: `app_update`, `bootloader_support`, `esp_app_format`, `esp_driver_ppa`, `esp_eth`, `esp_event`, `esp_http_client`, `esp_mm`, `esp_netif`, `esp_partition`, `esp_timer`, `esp_wifi`, `freertos`, `lwip`, `mbedtls`, `pthread`, `spi_flash`
 - **espp**: `espp__adc`, `espp__base_component`, `espp__base_peripheral`, `espp__bmi270`, `espp__button`, `espp__cdr`, `espp__cli`, `espp__codec`, `espp__display`, `espp__display_drivers`, `espp__drv2605`, `espp__file_system`, `espp__filters`, `espp__format`, `espp__gt911`, `espp__i2c`, `espp__ina226`, `espp__input_drivers`, `espp__interrupt`, `espp__led`, `espp__logger`, `espp__math`, `espp__pi4ioe5v`, `espp__reflect_cpp`, `espp__rtps`, `espp__rx8130ce`, `espp__socket`, `espp__spi`, `espp__st7123touch`, `espp__task`, `espp__thread_pool`, `espp__timer`, `espp__touch`
 - **Espressif registry**: `espressif__cjson`, `espressif__esp-dsp`, `espressif__esp_hosted`, `espressif__esp_sccb_intf`, `espressif__esp_wifi_remote`, `espressif__usb`, `espressif__w5500`
+- **joltwallet**: `joltwallet__littlefs`
 - **LVGL**: `lvgl__lvgl`
 
 </details>

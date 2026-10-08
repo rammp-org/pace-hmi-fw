@@ -70,6 +70,9 @@ yet measured or decided, and "none" means checked and absent.
 | `components/joystick` | espp joystick plus a twist axis (vendored espp 1.2.0, sha 615b8df; README + upstream.diff) | yes | host L1 (L1-JOY) | none |
 | `components/post` | the quick POST evaluator: boot facts in, a verdict per check and an overall state out (not wired yet; hazard-fixes C3) | yes (gates motion once C3 wires it) | host L1 (L1-POST) | README |
 | `components/m5stack-tab5` | vendored espp Tab5 BSP 1.2.0 (sha 615b8df), modified (VENDORED.md + upstream.diff) | no | no | none |
+| `components/ota` | the firmware image: identity and release match, the GitHub release list, download, install and rollback confirm | no (never commands motion; the restart after an install is main's, gated on the chair not driving) | no (HTTPS, flash) | README |
+| `components/settings` | the persisted user settings: spec table, settings.txt, getters and setters | no (two values feed the stick through main's atomics) | host L1 (L1-SET) | README |
+| `components/storage` | files on the storage partition: paths, atomic write, legacy migration | no | no (flash) | README |
 | `components/ui` | SquareLine export, generated | no | n/a | none |
 | `rammp_rtps_messages` (submodule `external/rammp-rtps`) | shared RTPS message and topic spec | yes (wire format of motion commands) | header-only | none |
 
@@ -165,6 +168,7 @@ yet measured or decided, and "none" means checked and absent.
 | --- | --- | --- | --- | --- |
 | TS-UNIT-01, CS-HAL-04 | `tests/` (all L1 apps) | L1 runs as host-native g++ 13 in WSL with IDF's Unity sources, not the IDF `linux` target (not installed; no sudo in WSL) | owner | approved 2026-10-06 (Q6) |
 | CS-LAY (layout) | `main/frag_*.inc` | one-TU fragments of `main.cpp`, so the split cannot change static-init order, linkage or inlining; they dissolve into components grouped by concern (CS-LAY-02; app-main-shrink.md V15), not one component per fragment | owner | temporary |
+| CS-LAY-01 (main/ holds main.cpp only) | `main/rtps_comms.cpp`, `main/log_capture.cpp`, `main/about_ui.cpp`, `main/internet_ui.cpp`, `main/update_ui.cpp`, `main/log_view.cpp` | rtps_comms is safety-relevant (it publishes XYTwist, DriveCommand, SeatCommand): a safety component may not hold transferred legacy grants (ratchet V2) and its locks and globals can only be cleaned by the islands/channels rework (CS-OWN), so it stays in main until then rather than move unmarked. log_capture is being rewritten (the heapfix branch). The four `*_ui.cpp` files are main's side of the hmi_ui views (adapters, worker threads, the LVGL hand-back, the restart after an update) until the islands work | owner | until the islands/channels rework |
 | AI-UNA-02 "never merge" | `dev_refactor` | the owner authorised merges into `dev_refactor` for the 2026-10-06 run (AI-DIS-01) | owner | per run |
 | CS-SAF-05 (two approvals) | safety-relevant changes | one human approver (the owner) until a second reviewer exists; nothing safety-relevant merges to `dev` meanwhile | owner | until a second reviewer is named |
 | CS-SAF-03 (open circuit) | joystick low rail | firmware cannot tell an open pot (0 mV) from full travel (calibrated min 6-11 mV on board 2); firmware-only for now, residual hazard documented in `docs/plans/hazard-fixes.md` | owner | revisit with an EE change |
