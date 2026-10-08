@@ -107,31 +107,13 @@ static void setting_store_observer(lv_observer_t *observer, lv_subject_t *subjec
       static_cast<int>(reinterpret_cast<intptr_t>(lv_observer_get_user_data(observer)));
   const int value = lv_subject_get_int(subject);
   settings_set(param, value);
-  switch (param) {
-  case SETTINGS_PARAM_FLIP:
+  if (param == SETTINGS_PARAM_FLIP) {
     set_display_flipped(value != 0);
-    break;
-  case SETTINGS_PARAM_STICK_SENSITIVITY:
-    stick_sensitivity.store(value);
-    break;
-  case SETTINGS_PARAM_DRIVE_SPEED:
-    drive_speed.store(value);
-    break;
-  case SETTINGS_PARAM_STICK_INVERT_X:
-    stick_invert_x.store(value != 0);
-    break;
-  case SETTINGS_PARAM_STICK_INVERT_Y:
-    stick_invert_y.store(value != 0);
-    break;
-  case SETTINGS_PARAM_STICK_SWAP:
-    stick_swap.store(value != 0);
-    break;
-  case SETTINGS_PARAM_SOUNDS:
-    sounds_on.store(value != 0);
-    break;
-  default:
-    break; // MENU_SLIDE: read where it is used, nothing to apply
+    return;
   }
+  // The stick's and the sounds' atomics; MENU_SLIDE is read where it is used, nothing to
+  // apply.
+  (void)applied_settings.apply(param, value);
 }
 
 // Seat values come from the MIB and nowhere else: a press publishes a request, and the

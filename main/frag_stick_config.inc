@@ -62,10 +62,10 @@ struct AdcStickIo {
   // While a calibration run owns the stick nothing downstream may act on it:
   // the user is being told to push it to every end in turn.
   bool calibrating() { return joystick_cal_running(); }
-  bool swap() { return stick_swap.load(); }
-  bool invert_x() { return stick_invert_x.load(); }
-  bool invert_y() { return stick_invert_y.load(); }
-  int sensitivity() { return stick_sensitivity.load(); }
+  bool swap() { return applied_settings.stick_swap(); }
+  bool invert_x() { return applied_settings.stick_invert_x(); }
+  bool invert_y() { return applied_settings.stick_invert_y(); }
+  int sensitivity() { return applied_settings.stick_sensitivity(); }
   uint32_t joy_key() { return ::joy_key.load(); }
   uint32_t remote_key() { return ::remote_key.load(); }
   void set_joy_key(uint32_t key) { ::joy_key.store(key); }
@@ -84,7 +84,7 @@ struct AdcStickIo {
       lv_subject_set_int(joystick_view.twist(), static_cast<int32_t>(mounted.twist * 100.0f));
     }
   }
-  int drive_speed() { return ::drive_speed.load(); }
+  int drive_speed() { return applied_settings.drive_speed(); }
   // The gate. The MCB gets a centred stick whenever the stick is doing something
   // else: while a calibration run sweeps it (the pipeline does not read this
   // then), and whenever it is walking the UI rather than driving -- any screen

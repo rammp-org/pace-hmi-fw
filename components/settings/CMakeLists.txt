@@ -1,6 +1,7 @@
 # settings: the user settings that survive a reboot (the spec table, /storage/settings.txt, the
 # getters and setters). README.md has the concern and requirements.
 idf_component_register(SRCS "src/settings.cpp"
+                            "src/settings_applied.cpp"
                        INCLUDE_DIRS "include"
                        PRIV_REQUIRES logger
                                      storage)

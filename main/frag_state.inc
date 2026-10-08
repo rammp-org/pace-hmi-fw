@@ -91,15 +91,9 @@ static lv_subject_t stick_swap_subject;        // 1 = the stick's X and Y trade 
 static lv_subject_t sounds_subject;            // 0 = the clicks and refusals are silent
 static lv_subject_t network_subject;           // NetLink: 0 = Ethernet, 1 = WiFi
 
-// What the ADC task needs of those, as plain atomics it can read without the
-// LVGL lock. Written by setting_store_observer.
-static std::atomic<int> stick_sensitivity{SETTINGS_STICK_SENSITIVITY_MAX - 1};
-static std::atomic<int> drive_speed{SETTINGS_DRIVE_SPEED_MAX};
-static std::atomic<bool> stick_invert_x{false};
-static std::atomic<bool> stick_invert_y{false};
-static std::atomic<bool> stick_swap{false};
-// Settings "Sounds". Read by play_click from the touch task as well as LVGL's.
-static std::atomic<bool> sounds_on{true};
+// What the ADC task and the click sound need of those, as atomics they can read
+// without the LVGL lock (components/settings). Written by setting_store_observer.
+static constinit hmi::settings::AppliedSettings applied_settings;
 
 // The burger menu's overlay while it is up, else null. Up here because the
 // hold gestures ask whether it is open before they apply.

@@ -60,6 +60,7 @@
 #include "selftest.hpp"
 #include "selftest_platform.hpp"
 #include "settings.hpp"
+#include "settings_applied.hpp"
 #include "storage.hpp"
 #include "update_ui.hpp"
 
