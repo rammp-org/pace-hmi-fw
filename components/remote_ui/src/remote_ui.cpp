@@ -186,6 +186,13 @@ void touch_to(int32_t x, int32_t y, bool down) {
   touch_down.store(down, std::memory_order_relaxed);
 }
 
+// The active screen's name, read under the LVGL lock: "?" when main gave no way to ask.
+std::string screen_now() {
+  std::lock_guard<std::recursive_mutex> lock(*cfg.lvgl_mutex);
+  const char *name = cfg.screen_name ? cfg.screen_name() : "?";
+  return name != nullptr ? name : "?";
+}
+
 uint32_t key_from_name(const std::string &name) {
   if (name == "UP") {
     return LV_KEY_UP;
@@ -460,9 +467,7 @@ bool handle(int sock, const std::string &line) {
     return send_line(sock, out);
   }
   if (verb == "SCREEN") {
-    std::lock_guard<std::recursive_mutex> lock(*cfg.lvgl_mutex);
-    const char *name = cfg.screen_name ? cfg.screen_name() : "?";
-    return send_line(sock, std::string("OK ") + (name != nullptr ? name : "?"));
+    return send_line(sock, "OK " + screen_now());
   }
   if (verb == "TAP") {
     touch_to(arg(words, 1), arg(words, 2), true);
