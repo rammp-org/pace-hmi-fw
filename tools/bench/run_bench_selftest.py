@@ -270,7 +270,10 @@ def t_net_spec() -> None:
            ("192.168.137.2", "192.168.137.0/24", "WiFi", ("192.168.137.1",)))
     expect("lan", common._net("lan:192.168.9.226/24"),
            ("192.168.9.226", "192.168.9.0/24", "Ethernet", ()))
-    for bad in ("lan:192.168.9.226/16", "lan:nonsense", "wifi"):
+    expect("routed", common._net("routed:100.92.133.114@10.0.0.0/24"),
+           ("100.92.133.114", "10.0.0.0/24", "Ethernet", ()))
+    for bad in ("lan:192.168.9.226/16", "lan:nonsense", "wifi", "routed:100.92.133.114",
+                "routed:100.92.133.114@10.0.0.0/16", "routed:x@10.0.0.0/24"):
         try:
             common._net(bad)
         except (SystemExit, ValueError):
@@ -326,7 +329,8 @@ CASES = [
     ("BENCH-011 last-good: a RECORD with a failed, listed or missing graded check does not save",
      t_last_good_dirty_record_does_not),
     ("BENCH-012 last-good: FAIL, INVALID, NOT_RUN or SKIP does not save", t_last_good_fail_does_not),
-    ("BENCH-013 BENCH_NET: hotspot, lan:<pc ip>/<prefix>; anything else refused", t_net_spec),
+    ("BENCH-013 BENCH_NET: hotspot, lan:<pc ip>/<prefix>, routed:<pc ip>@<subnet>; "
+     "anything else refused", t_net_spec),
     ("BENCH-014 on Ethernet B2 expects 'Network: Ethernet' and network 0, nothing else",
      t_boot_check_on_ethernet),
 ]

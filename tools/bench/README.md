@@ -11,6 +11,10 @@ Then B0's tethering check is not applicable, there is no hotspot restart, the RT
 covers that subnet (at most a /22), the sim binds that PC address, and B2 expects
 `Network: Ethernet` and `network 0` in place of the baseline's `Network: WiFi` and
 `network 1` (BENCH-014); every other marker is unchanged.
+`routed:<pc ip>@<board subnet>` (e.g. `routed:100.92.133.114@10.0.0.0/24`): the same, with the
+board in a subnet the PC reaches through a router (a Tailscale subnet route): the sim binds the
+PC's address on that route, the sweep covers the board's subnet, and round-trip times include
+the route, so timing verdicts are read against the reference image run on the same route.
 
 Run everything with the IDF venv python (the only one with pyserial and esptool):
 
