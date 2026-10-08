@@ -81,13 +81,70 @@ static std::recursive_mutex lvgl_mutex;
 // --
 #include "frag_haptics.inc" // split_main.py
 // --
-#include "frag_status_band.inc" // split_main.py
+#include "hmi_ui/status_band_view.hpp"
+#include "hmi_ui/ui_build.hpp"
+// The "FPS counter" Skunk Works slot -> LVGL's built-in perf overlay (hmi::ui::PerfOverlay).
+static constinit hmi::ui::PerfOverlay perf_overlay;
+static void fps_toggle() { perf_overlay.toggle(); }
+
+/////////////////////////////////////////////////////////////////////////////
+// MCB status panel
+//
+// One view (hmi::ui::StatusBandView) serves both labels on every DriveBand
+// instance. It sets the text (from the shared spec, so the MCB's logs and
+// these labels use the same words) and the colour — a style property, which
+// has no built-in binding, hence an observer rather than lv_label_bind_text.
+/////////////////////////////////////////////////////////////////////////////
+
+// The one instance, for every DriveBand; bound from app_main and the screens built on demand.
+static constinit hmi::ui::StatusBandView status_band_view{{.shared = &ui_shared_subjects}};
+static_assert(hmi::ui::StatusBandView::TEXT_SIZE == rammp::kMcbTextLen,
+              "the band's text buffers are the shared spec's");
+static void bind_status_panel(lv_obj_t *panel) { status_band_view.bind(panel); }
+
 // --
 #include "frag_stick_config.inc" // split_main.py
 // --
 #include "frag_rtps_label.inc" // split_main.py
 // --
-#include "frag_drive_band.inc" // split_main.py
+#include "hmi_format/speed.hpp"
+#include "hmi_ui/drive_band_view.hpp"
+/////////////////////////////////////////////////////////////////////////////
+// DriveScreen: drive-mode selection and the speed readout (hmi::ui::DriveBandView)
+//
+// Three plain LVGL buttons, so they are already touch-clickable; all this adds
+// is what a tap means and which one looks selected. Deliberately touch-only:
+// the joystick is busy driving on this screen, and stealing left/right for menu
+// navigation is exactly the class of bug that made pulling back exit the
+// screen.
+/////////////////////////////////////////////////////////////////////////////
+
+// The drive session's input, defined with the drive adapter below.
+static bool drive_session_input(hmi::drive_session::Input input);
+
+// The one instance; bound from app_main.
+static constinit hmi::ui::DriveBandView drive_band_view{{
+    .profiles = {static_cast<int32_t>(MIB::DriveProfile::HIGH),
+                 static_cast<int32_t>(MIB::DriveProfile::NORMAL),
+                 static_cast<int32_t>(MIB::DriveProfile::LOW)},
+    // The ADC task cannot take the LVGL lock, so the profile reaches it through an atomic.
+    .store_profile =
+        [](int32_t profile) {
+          drive_profile_published.store(static_cast<MIB::DriveProfile>(profile));
+        },
+    // PUBLISH_DRIVE: the drive request as it stands, with the new profile (rows 29-34).
+    .profile_clicked = [] { (void)drive_session_input(hmi::drive_session::Input::PROFILE_CLICK); },
+    .nav = &ui_nav_port,
+}};
+
+// MibStatus.speed is metres per second; the label shows mph to one decimal.
+// Any task: pure arithmetic, no LVGL (components/hmi_format, REQ-FMT-01).
+using hmi::format::speed_display_tenths;
+static_assert(hmi::format::MPH_PER_MPS == rammp::kMphPerMps,
+              "hmi_format's mph per m/s must be the shared spec's");
+static_assert(hmi::format::SPEED_MAX_TENTHS == rammp::kSpeedMaxTenths,
+              "hmi_format's speed clamp must be the shared spec's");
+
 // --
 #include "frag_rtps_poll.inc" // split_main.py
 // --
@@ -95,19 +152,449 @@ static std::recursive_mutex lvgl_mutex;
 // --
 #include "frag_clock.inc" // split_main.py
 // --
-#include "frag_stick_button.inc" // split_main.py
+// The stick button's edges (hmi::ui::StickButton): the pressed panel, the level the ADC task
+// publishes, the select key and the press counter.
+#include "hmi_ui/stick_button.hpp"
+static constinit hmi::ui::StickButton stick_button{{
+    .view = &joystick_view,
+    .level = &joy_button_pressed,
+    .select = &select_key,
+}};
+static void stick_button_edge(bool active) {
+  // lv_subject_set_int runs the observers synchronously on this task, and they
+  // touch widgets, so this needs the LVGL lock
+  std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
+  stick_button.edge(active);
+}
+
+// Runs on the Button's interrupt task (not in ISR context).
+static void gpio48_button_callback(const espp::Interrupt::Event &event) {
+  stick_button_edge(event.active);
+}
+
+static bool load_audio(size_t &out_size, size_t &out_sample_rate);
+static void play_click(espp::M5StackTab5 &tab5);
+// "Can't do that", heard (play_refusal) or heard and felt (refusal_feedback);
+// defined with play_click. A warning or error sounds even with Sounds off.
+static void play_refusal(bool warning = false);
+static void refusal_feedback();
+
+/////////////////////////////////////////////////////////////////////////////
+// Push-and-hold gestures
+//
+// Three places in the HMI ask the user to hold an input for kHoldMs before
+// something happens:
+//
+//   LockedScreen   stick button    enters driving mode  -> DriveScreen
+//   DriveScreen    stick button    leaves driving mode  -> LockedScreen
+//   JoystickScreen stick button, or a finger on CALIBRATE: starts calibration
+//
+// Both on the button, never the stick (issue #11): an enable held on the stick
+// left the user holding it forward the moment the chair would take it, and
+// the chair drove off at full speed.
+//
+// Everything else that used to be a hold -- enter seat, enter actions, and the
+// "pull the stick back to leave" exits on seat, bench, settings, actions,
+// diagnostics and log -- is a burger-menu row now, one tap away from anywhere,
+// so those gestures and the bars that showed their fill are gone.
+//
+// The DriveScreen is the odd one out because pulling the stick back is how you
+// reverse: an exit on LV_KEY_DOWN there fired every time the user drove
+// backwards, so it exits on the stick button instead.
+//
+// Each gesture's fill runs through a subject: the ring round the padlock and
+// Calibrate's meter are bound to theirs, and the exit hold's has no widget.
+//
+// The lock state itself (locked_subject) is declared with the other subjects at
+// the top of the file. Locked still leaves the menu reachable -- Log, UI
+// Settings and the bench tools are useful with the chair not driving -- but
+// nothing moves: the stick only drives from Drive (stick_drives).
+/////////////////////////////////////////////////////////////////////////////
+
+#include "hmi_ui/hold_gesture.hpp"
+static constexpr uint32_t kHoldMs = hmi::ui::HOLD_MS; // hold time to fill a gesture widget
+// Dead time before a hold starts filling; a select is a press shorter than this
+// (hmi::stick::SELECT_MAX_US, the same value).
+static constexpr uint32_t kBarGraceMs = hmi::ui::HOLD_GRACE_MS;
+static constexpr int32_t kHoldMax = hmi::ui::HOLD_MAX; // arc/bar range (LVGL's default)
+// Poll cadence for the inputs (matched to the ADC task's 33 ms period).
+static constexpr uint32_t kHoldPollMs = hmi::ui::HOLD_POLL_MS;
+// The gestures' timings are the drive table's (drive_session_table.hpp).
+static_assert(std::chrono::milliseconds{hmi::ui::HOLD_MS} == hmi::drive_session::kHoldFill);
+static_assert(std::chrono::milliseconds{hmi::ui::HOLD_GRACE_MS} == hmi::drive_session::kBarGrace);
+static_assert(std::chrono::milliseconds{hmi::ui::HOLD_POLL_MS} ==
+              hmi::drive_session::kHoldPollPeriod);
+static_assert(hmi::stick::SELECT_MAX_US == int64_t{hmi::ui::HOLD_GRACE_MS} * 1000,
+              "a press short enough to select never starts a hold filling");
+
 // --
-#include "frag_hold.inc" // split_main.py
+// Each hold's "let go first" flag is DriveUi's (button_armed, calibrate_armed).
+
+// The gestures and the engine that runs them (hmi::ui::HoldGesture, HoldEngine).
+using hmi::ui::HoldGesture;
+
+// Defined with the refusal banners, further down: the push check that shadows the unlock hold.
+static void entry_refusal_poll();
+
+// The one engine. Its confirmation is the same for all three gestures. Both calls are
+// non-blocking - one short I2C burst, and one xStreamBufferSend with a zero timeout - so
+// neither holds the LVGL task for the duration of the effect it starts.
+static constinit hmi::ui::HoldEngine hold_engine{{
+    .confirm =
+        [] {
+          haptic_play(espp::Drv2605::Waveform::STRONG_CLICK, 1);
+          play_click(espp::M5StackTab5::get());
+        },
+    // The self-test overlay owns the stick while it is up (see the keypad read in app_main).
+    .overlay_up = [] { return selftest_ui_visible(); },
+    .before_poll = [] { entry_refusal_poll(); },
+}};
+
+// The stick's own button. Reads the level the button callback mirrors out, not
+// the edge-latched select_key: a hold gesture needs to know the button is still
+// down, and select_key is consumed by the first indev read after the press.
+static bool joy_button_held() { return joy_button_pressed.load(); }
+
+/////////////////////////////////////////////////////////////////////////////
+// Lock / unlock, and the LockedScreen gesture
+/////////////////////////////////////////////////////////////////////////////
+
+// Locked means "not driving", and the Locked screen is where that changes.
+// Holding the stick button -- the legend under the padlock says so; the spec's
+// ACTIVATE DRIVE button is gone -- asks the MIB to start driving, and nothing
+// unlocks until the MIB says it has (activate_drive, lock_open). The ring round
+// the padlock shows where that stands: it fills while the button is held, a
+// quarter of it goes round while the MIB is asked, and it closes when the MIB
+// answers. Then the spec's 01b frame -- the shackle rises, the band flips to
+// ACTIVE -- held one second, and Drive dissolves in (Motion timing,
+// "ACTIVATE DRIVE").
+//
+// Locking again is the MIB's call too: the chair stops, asked (the drive-exit
+// hold) or not (a fault, the link), and drive_screen_follow_state brings the
+// Locked screen back with the reason on its banner.
+
 // --
-#include "frag_lock.inc" // split_main.py
+/////////////////////////////////////////////////////////////////////////////
+// Moving between screens
+//
+// Spec V2 navigates with the burger menu: the key at the bottom of every
+// screen opens a full-screen overlay of destinations, and DRIVE in the band
+// goes home from anywhere. A screen change is just a screen change (see
+// docs/ui-architecture.md).
+//
+// Swaps go through the SquareLine helper rather than lv_screen_load, so they
+// take the same path as the boot screen's own transition and re-create the
+// target if it was ever destroyed.
+/////////////////////////////////////////////////////////////////////////////
+
+// SettingsScreen, defined with its rows further down. The actuators
+// page comes after the settings_spec.hpp pages.
+static constexpr int32_t kActuatorsPage = SETTINGS_PAGE_COUNT;
+static void setting_page_open(int32_t page);
+static void settings_screen_ensure();
+static void actions_screen_ensure();
+static void actions_open();
+static void diagnostics_screen_ensure();
+static void diagnostics_open();
+
 // --
-#include "frag_refusal.inc" // split_main.py
+// Is the MCB fit to drive, or to move the seat (DriveUi's readiness checks, hmi_ui). The
+// views and the rest of the unit reach them through these.
+#include "hmi_ui/drive_ui.hpp"
+static bool mcb_ready() { return hmi::ui::mcb_ready(ui_shared_subjects); }
+static bool seat_ready() { return hmi::ui::seat_ready(ui_shared_subjects); }
+
+/////////////////////////////////////////////////////////////////////////////
+// Saying why driving is not permitted (hmi::ui::RefusalView)
+//
+// One cause, several ErrorBanners. On the Locked screen, and on the screens a
+// menu refusal can happen over: why a request to drive, or to open Seat
+// Functions, was refused - the unlock hold is gated in applies(), so a refused
+// one otherwise does nothing at all. On the DriveScreen and the SeatScreen: why
+// it was cut short, by the link dropping or the MCB faulting. All word the
+// cause from hmi_rtps_spec.hpp.
+/////////////////////////////////////////////////////////////////////////////
+#include "hmi_ui/refusal_view.hpp"
+
+// Which push was refused, so the panel can say which (hmi::ui::Refused); its dwells are
+// hmi::ui::DRIVE_REFUSED_SHOW_MS and EXIT_REFUSED_SHOW_MS (refused.hpp).
+static lv_subject_t entry_refused_subject; // hmi::ui::Refused; panel up unless REFUSED_NONE
+
+static_assert(sizeof(rammp::kHmiEthFailedText) <= rammp::kErrorTextLen &&
+                  sizeof(rammp::kHmiLinkDownText) <= rammp::kErrorTextLen &&
+                  sizeof(rammp::kHmiWifiFailedText) <= rammp::kErrorTextLen &&
+                  sizeof(rammp::kHmiWifiDownText) <= rammp::kErrorTextLen &&
+                  sizeof(rammp::kHmiNoIpText) <= rammp::kErrorTextLen &&
+                  sizeof(rammp::kHmiNoPeerText) <= rammp::kErrorTextLen,
+              "refusal body outgrows the banner it shares with MCB faults");
+static_assert(sizeof(rammp::kHmiEthFailedFooter) <= rammp::kErrorFooterLen &&
+                  sizeof(rammp::kHmiLinkDownFooter) <= rammp::kErrorFooterLen &&
+                  sizeof(rammp::kHmiWifiFailedFooter) <= rammp::kErrorFooterLen &&
+                  sizeof(rammp::kHmiWifiDownFooter) <= rammp::kErrorFooterLen &&
+                  sizeof(rammp::kHmiNoIpFooter) <= rammp::kErrorFooterLen &&
+                  sizeof(rammp::kHmiNoPeerFooter) <= rammp::kErrorFooterLen,
+              "refusal footer outgrows the banner it shares with MCB faults");
+
+// The banners' words, from the shared spec.
+static constexpr hmi::ui::RefusalTexts kRefusalTexts{
+    .eth_failed = {rammp::kHmiEthFailedText, rammp::kHmiEthFailedFooter},
+    .wifi_failed = {rammp::kHmiWifiFailedText, rammp::kHmiWifiFailedFooter},
+    .link_down = {rammp::kHmiLinkDownText, rammp::kHmiLinkDownFooter},
+    .wifi_down = {rammp::kHmiWifiDownText, rammp::kHmiWifiDownFooter},
+    .no_ip = {rammp::kHmiNoIpText, rammp::kHmiNoIpFooter},
+    .no_peer = {rammp::kHmiNoPeerText, rammp::kHmiNoPeerFooter},
+    .mcb_no_text_fmt = rammp::kHmiMcbNoTextFmt,
+    .state_name = [](MIB::MibSystemState state) { return rammp::to_string(state); },
+    .drive_stopped = {rammp::kHmiDriveStoppedTitle, rammp::kHmiDriveStoppedText,
+                      rammp::kHmiDriveStoppedFooter},
+    .drive_not_granted = {rammp::kHmiDriveNotGrantedTitle, rammp::kHmiDriveNotGrantedText,
+                          rammp::kHmiDriveNotGrantedFooter},
+    .exit_refused = {rammp::kHmiExitRefusedTitle, rammp::kHmiExitRefusedText,
+                     rammp::kHmiExitRefusedFooter},
+    .link_refused_title = rammp::kHmiLinkRefusedTitle,
+    .mcb_refused_title = rammp::kHmiMcbRefusedTitle,
+    .seat_link_refused_title = rammp::kHmiSeatLinkRefusedTitle,
+    .seat_mcb_refused_title = rammp::kHmiSeatMcbRefusedTitle,
+    .drive_lost_link_title = rammp::kHmiDriveLostLinkTitle,
+    .drive_lost_mcb_title = rammp::kHmiDriveLostMcbTitle,
+    .link_lost_title = rammp::kHmiLinkLostTitle,
+    .mcb_fault_title = rammp::kHmiMcbFaultTitle,
+};
+
+// The MIB's texts' buffers are the shared spec's.
+static_assert(hmi::ui::RefusalView::ERROR_TEXT_SIZE == rammp::kErrorTextLen &&
+                  hmi::ui::RefusalView::ERROR_FOOTER_SIZE == rammp::kErrorFooterLen,
+              "RefusalView's error text buffers are the shared spec's");
+
+// The one instance, for every refusal banner.
+static constinit hmi::ui::RefusalView refusal_view{{
+    .shared = &ui_shared_subjects,
+    .texts = &kRefusalTexts,
+    .refused = &entry_refused_subject,
+    .wifi = [] { return rtps_comms_net_link() == NetLink::WIFI; },
+    .mcb_ready = mcb_ready,
+    .play_refusal = [](bool warning) { play_refusal(warning); },
+    .keep_overlay_fill = keep_overlay_fill,
+    .button_held = joy_button_held,
+    .now_us = [] { return esp_timer_get_time(); },
+    .menu_open = [] { return nav_menu_open != nullptr; },
+    // A push is decided by the drive session (rows 38-39: locked, on the Locked
+    // screen, no menu, MCB not ready).
+    .entry_push = [] { return drive_session_input(hmi::drive_session::Input::ENTRY_PUSH); },
+    .grace_ms = kBarGraceMs,
+}};
+
+// What the rest of the unit calls (settings, the hold poll, app_main).
+static void banner_show(lv_obj_t *panel, bool up) { refusal_view.show(panel, up); }
+static void fill_drive_blocked_panel(lv_obj_t *panel, const char *link_title,
+                                     const char *mcb_title) {
+  refusal_view.fill_drive_blocked(panel, link_title, mcb_title);
+}
+static void bind_to_drive_blocked_cause(lv_obj_t *panel, lv_observer_cb_t cb) {
+  refusal_view.bind_to_cause(panel, cb, nullptr);
+}
+static void entry_refusal_poll() { refusal_view.poll(); }
+
+// The MIB decides whether the chair drives: the joystick asks with a DriveCommand and
+// shows the DriveScreen only once MibStatus says ENABLED. Two windows, because saying
+// "that was refused" and giving up on the request are different jobs:
+//
+//  - kDriveAnswer is when to speak. One MibStatus period plus a margin, so a sample
+//    already in flight when the request went out cannot be mistaken for a refusal.
+//    This is as early as a refusal can honestly be known, and waiting longer just
+//    reads as the HMI ignoring the user.
+//  - kDriveWait is when to stop asking, so a silent MIB is not left with a live
+//    request. The warning is long since up by then.
+// Both are the drive table's (drive_session_table.hpp), the drive adapter's default
+// windows; here they are held to the RTPS spec they come from.
+static_assert(hmi::drive_session::kDriveAnswer ==
+              rammp::kMibStatusPeriod + std::chrono::milliseconds{250});
+static_assert(hmi::drive_session::kDriveWait == rammp::kMibStatusTimeout);
 // --
-#include "frag_drive.inc" // split_main.py
+// The drive session: lock, ask, unlock, drive, ask to stop. The decisions live in
+// components/drive_session (DriveSession, checked against the AS-IS table in
+// drive_session_table.hpp and its TABLE.md); sampling, the deadlines and performing the
+// actions live in components/drive_adapter (DriveAdapter); each action's LVGL and RTPS call is
+// hmi_ui's DrivePort (drive_port.hpp), over the drive UI (DriveUi: the padlock and the advance
+// to Drive). Every input arrives on the LVGL task: rtps_poll_cb's tick, the hold completions,
+// the nav callbacks and the unlock timer.
+#include "hmi_ui/drive_port.hpp"
+#include "hmi_ui/drive_ui.hpp"
+
+// The one drive UI, DrivePort's `Ui`.
+static constinit hmi::ui::DriveUi drive_ui{{
+    .shared = &ui_shared_subjects,
+    .refused = &entry_refused_subject,
+    .refused_timer = [] { return refusal_view.timer(); },
+    .menu_open = &nav_menu_open,
+    .menu_on_arrival = &nav_menu_on_arrival,
+    .profile = &drive_profile_published,
+    .publish_drive = rtps_comms_publish_drive,
+    .input = drive_session_input,
+    .stick_drives = &stick_drives,
+    .nav_home = nav_home,
+    .refusal_feedback = refusal_feedback,
+    .haptic_click = [] { haptic_play(espp::Drv2605::Waveform::STRONG_CLICK, 1); },
+}};
+
+// The drive adapter's port: stateless over drive_ui.
+static constexpr hmi::ui::DrivePort<hmi::ui::DriveUi> drive_port{&drive_ui};
+static_assert(hmi::drive_adapter::DrivePort<hmi::ui::DrivePort<hmi::ui::DriveUi>>);
+
+// The drive session's adapter: the session, its deadlines and latches, and the logger for a
+// corrupted state, made at start-up with the rest (CS-SAF-04). Its windows are the table's
+// kDriveAnswer and kDriveWait (pinned to the RTPS spec with the refusal banners above).
+static hmi::drive_adapter::DriveAdapter<hmi::ui::DrivePort<hmi::ui::DriveUi>> drive_adapter{
+    {.view = drive_port}};
+
+// The inputs the fragments before this one declare: one input now; the 250 ms tick from
+// rtps_poll_cb; the unlock hold completed (unlock_gesture).
+static bool drive_session_input(hmi::drive_session::Input input) {
+  return drive_adapter.input(input);
+}
+static void drive_wait_poll() { drive_adapter.tick(); }
+static void drive_unlock_hold_done() { drive_adapter.unlock_hold_done(); }
+
+// Holding the stick button on the Locked screen: how driving is asked for, the
+// same hold that leaves it on Drive (and so the same "let go first" flag). Only
+// while there is something to ask -- a MIB that is not ready gets the refusal
+// once the press is a hold instead (entry_refusal_poll), rather than a ring
+// that fills for a second and then says no.
+static constinit HoldGesture unlock_gesture{
+    .armed = drive_ui.button_armed(),
+    .is_held = joy_button_held,
+    .applies =
+        [] {
+          return lv_subject_get_int(&locked_subject) != 0 && !drive_ui.lock_waiting() &&
+                 lv_screen_active() == ui_LockedScreen && nav_menu_open == nullptr && mcb_ready();
+        },
+    .completed = [] { drive_unlock_hold_done(); },
+    // The button doubles as select (a tap opens the menu from the key), so a
+    // tap must not tick the ring.
+    .grace_ms = kBarGraceMs,
+};
+
+// Exits on the stick BUTTON, not on pulling the stick back: pulling back is how
+// you drive in reverse, so a pull-to-exit gesture fired every time the user
+// reversed. The button is the only input on this screen that means nothing to
+// driving.
+//
+// This one survives the move to the burger menu because it is not navigation:
+// it asks the MIB to stop. Leaving the screen by any other route does not.
+static constinit HoldGesture drive_exit_gesture{
+    .armed = drive_ui.button_armed(),
+    .is_held = joy_button_held,
+    .applies = [] { return lv_screen_active() == ui_DriveScreen && nav_menu_open == nullptr; },
+    // Ask only. The session's relock (TICK_FOLLOW) closes the screen once the MIB actually
+    // stops driving, so a MIB that does not stop cannot leave someone looking at the
+    // main screen while the chair is still moving.
+    .completed = [] { drive_adapter.exit_hold_done(); },
+    // The button doubles as select, so a tap would visibly tick the bar and
+    // snap back without this.
+    .grace_ms = kBarGraceMs,
+};
 // --
-#include "frag_hold_poll.inc" // split_main.py
+// Defined with the rest of the seat navigation below, which is where the button
+// grid it restores focus into is declared.
+static void seat_show_buttons_page();
+
+// Calibrate is press-and-HOLD, never a tap: a run takes the stick over for the
+// best part of a minute, so it should not start from a brush of the screen or
+// a stray click of the stick button. Holding the Calibrate button, or the stick
+// button anywhere on the joystick screen, fills the meter along the bottom of
+// the button (bound in app_main) and starts a run when it is full; the same
+// hold during a run cancels it.
+//
+// The touch half is polled -- "is a pointer down, and on Calibrate?" at the
+// gesture's own cadence -- rather than tracked from the button's press events,
+// so there is no event to miss and nothing to keep in step. Both inputs feed
+// the one gesture and share its grace and fill time.
+static bool calibrate_held() {
+  return joy_button_held() || hmi::ui::touch_held_on(ui_JoystickScreen, ui_CalibrateButton);
+}
+
+// Its own "let go first" flag (DriveUi's calibrate_armed), not the stick button's.
+static constinit HoldGesture calibrate_gesture{
+    .armed = drive_ui.calibrate_armed(),
+    .is_held = calibrate_held,
+    .applies = [] { return lv_screen_active() == ui_JoystickScreen && nav_menu_open == nullptr; },
+    .completed = [] { joystick_cal_toggle(); },
+    // The button doubles as select, so a tap must not tick the fill.
+    .grace_ms = kBarGraceMs,
+};
+
+// Three gestures. Everything else that used to be one -- enter the drive, seat
+// and actions screens, leave the seat, bench, settings, actions, diagnostics
+// and log screens -- is a menu row or the DRIVE cell now.
+static HoldGesture *const kHoldGestures[] = {
+    &unlock_gesture,
+    &drive_exit_gesture,
+    &calibrate_gesture,
+};
+
+static void hold_poll_cb(lv_timer_t *) { hold_engine.poll_all(kHoldGestures); }
+
+/////////////////////////////////////////////////////////////////////////////
+// SeatScreen: joystick navigation of both pages
+//
+// The joystick walks each page as the grid the user sees rather than as the
+// flat list LVGL's own focus_next would give. Each page has its own group and
+// its own cursor:
+//
+//   function buttons                adjustment page (spec 04b)
+//   [ FB Tilt   ] [ Side Tilt   ]   [ < ]
+//   [ Elevation ] [ Translation ]   [     -     ] [     +     ]
+//   [ Static    ] [ Dynamic     ]   [ 0deg ] [ 15deg ] [ 25deg ]
+//
+// The rows are different lengths, which is why a grid carries a per-row count
+// rather than one column total. The ButtonGrid also serves the bench gate's
+// PIN pad.
+//
+// Picking one of the four function buttons names its motion on the adjustment
+// page and shows it over the buttons; "<", or left from the first column,
+// hides it again. The page's buttons step the motion or send it to a preset.
+/////////////////////////////////////////////////////////////////////////////
+
+static constexpr int kGridMaxRows = 4; // the PIN pad's bottom row is the fourth
+static constexpr int kGridMaxCols = 3;
+
 // --
-#include "frag_seat.inc" // split_main.py
+#include "hmi_models/grid.hpp"
+#include "hmi_ui/button_grid.hpp"
+#include "hmi_ui/seat_view.hpp"
+using hmi::ui::ButtonGrid;
+using hmi::ui::grid_key_cb;
+using hmi::ui::grid_sync_cursor;
+// The subtree helpers (components/hmi_ui).
+#include "hmi_ui/widget_tree.hpp"
+using hmi::ui::clear_click_focusable_recursive;
+using hmi::ui::set_focused_recursive;
+
+static_assert(kGridMaxRows == hmi::ui::GRID_MAX_ROWS && kGridMaxCols == hmi::ui::GRID_MAX_COLS,
+              "ButtonGrid and the cursor model must agree on the grid's size");
+
+// Both defined with the settings rows further down, which own the seat values
+// and the path that asks the MCB to move one.
+static void seat_step(size_t row, int direction);
+static void seat_request(rammp::SeatAxis axis, int32_t target);
+
+// Raw value per seat axis, in the table's units, as the MCB last reported it
+// (seat_apply_state). Shared by the seat view and the DEBUG ACTUATORS rows;
+// the command path (seat_step, seat_request) reads it too.
+static lv_subject_t seat_axis_value[rammp::kSeatAxisCount];
+
+// The one instance.
+static constinit hmi::ui::SeatView seat_view{{
+    .nav = &ui_nav_port,
+    .values = seat_axis_value,
+    .step = seat_step,
+    .request = seat_request,
+    .show_buttons_page = seat_show_buttons_page,
+    .keep_overlay_fill = keep_overlay_fill,
+}};
+// nav_enter_screen resets the function buttons' cursor on arrival.
+static constinit ButtonGrid &seat_buttons_grid = seat_view.buttons_grid();
+static void seat_show_buttons_page() { seat_view.show_buttons_page(); }
 // --
 #include "frag_bench_pin.inc" // split_main.py
 // --
@@ -117,7 +604,128 @@ static std::recursive_mutex lvgl_mutex;
 // --
 #include "frag_diag.inc" // split_main.py
 // --
-#include "frag_nav.inc" // split_main.py
+// How long an updated image runs before it keeps itself (github_ota_boot_confirm).
+static constexpr uint32_t kOtaConfirmAfterMs = 30'000;
+
+/////////////////////////////////////////////////////////////////////////////
+// The burger menu, and moving around with the joystick (hmi::ui::NavView)
+/////////////////////////////////////////////////////////////////////////////
+#include "hmi_ui/nav_view.hpp"
+
+using hmi::ui::NavDest;
+using hmi::ui::NavView;
+
+// The stick gate's writer is DriveUi's (update_stick_gate); NavView reaches it through this.
+static void nav_update_stick_gate() { drive_ui.update_stick_gate(); }
+
+static void nav_use_group(lv_group_t *g, const lv_obj_t *screen);
+static lv_group_t *nav_fallback_group(); // the view's, defined after it
+
+// Hands the joystick to the screen being shown and puts the cursor at its top.
+// Called on load; closing the menu restores the group without this reset.
+static void nav_enter_screen(const lv_obj_t *screen) {
+  if (screen == ui_SeatScreen) {
+    seat_buttons_grid.row = 0;
+    seat_buttons_grid.col = 0;
+    seat_show_buttons_page();
+  } else if (screen == ui_BenchGateScreen) {
+    nav_use_group(bench_pin_view.group(), screen);
+    rd_focus(0);
+  } else if (screen == ui_SettingsScreen) {
+    nav_use_group(settings_view.group(), screen);
+    setting_focus(0);
+  } else if (screen == ui_SkunkWorksScreen) {
+    nav_use_group(actions_view.group(), screen);
+    action_focus(0);
+  } else if (screen == ui_DiagnosticsScreen) {
+    nav_use_group(diag_view.group(), screen);
+    diag_focus(0);
+  } else if (screen == ui_InternetScreen) {
+    internet_ui_on_load(); // its own groups, one per page
+  } else if (screen == ui_UpdateScreen) {
+    update_ui_on_load(); // its own groups, one per page
+  } else if (screen == ui_AboutScreen) {
+    about_ui_on_load();
+    lv_group_remove_all_objs(nav_fallback_group()); // nothing to pick: only the key
+    nav_use_group(nav_fallback_group(), screen);
+  } else if (screen == ui_LogScreen && log_view_group() != nullptr) {
+    nav_use_group(log_view_group(), screen);
+    log_view_on_load();
+  } else {
+    // The screens with at most a button or two of their own share one group,
+    // refilled for whichever is up.
+    lv_group_remove_all_objs(nav_fallback_group());
+    if (screen == ui_JoystickScreen) {
+      lv_group_add_obj(nav_fallback_group(), ui_CalibrateButton);
+    }
+    nav_use_group(nav_fallback_group(), screen);
+  }
+}
+
+// The one instance (hmi::ui::NavView): every screen's key and menu, and arriving.
+static void nav_cursor_lost(const lv_obj_t *screen); // logs on logger_nav, defined after it
+static constinit hmi::ui::NavView nav_view{{
+    .shared = &ui_shared_subjects,
+    .menu_slide = setting_subjects.value(SETTINGS_PARAM_MENU_SLIDE),
+    .menu_open = &nav_menu_open,
+    .menu_on_arrival = &nav_menu_on_arrival,
+    .gate_update = nav_update_stick_gate,
+    .keep_overlay_fill = keep_overlay_fill,
+    .ready_observer = action_ready_observer,
+    .mcb_ready = mcb_ready,
+    // Refused where it was picked: the feedback, and the banner underneath.
+    .refuse_seat =
+        [] {
+          refusal_feedback();
+          drive_port.show_refused(hmi::ui::REFUSED_SEAT, hmi::ui::DRIVE_REFUSED_SHOW_MS);
+        },
+    .drive_row = [] { return drive_session_input(hmi::drive_session::Input::MENU_ROW_DRIVE); },
+    .drive_key = [] { (void)drive_session_input(hmi::drive_session::Input::MENU_KEY_DRIVE); },
+    .open_dest =
+        [](NavDest dest) {
+          switch (dest) {
+          case hmi::ui::NAV_SKUNK:
+            actions_open();
+            break;
+          case hmi::ui::NAV_DIAG:
+            diagnostics_open();
+            break;
+          case hmi::ui::NAV_SET_DISPLAY:
+            setting_page_open(SETTINGS_PAGE_DISPLAY);
+            break;
+          case hmi::ui::NAV_SET_STICK:
+            setting_page_open(SETTINGS_PAGE_STICK);
+            break;
+          default:
+            break;
+          }
+        },
+    .enter_screen = nav_enter_screen,
+    // The PIN is asked again on every visit rather than latching once per boot.
+    .arrived =
+        [](const lv_obj_t *screen) {
+          if (screen == ui_BenchGateScreen) {
+            rd_pin_reset();
+          }
+        },
+    .cursor_lost = nav_cursor_lost,
+}};
+
+// The calls the rest of the unit makes (and NavPort's table).
+static void nav_use_group(lv_group_t *g, const lv_obj_t *screen) { nav_view.use_group(g, screen); }
+static void nav_to_key() { nav_view.to_key(); }
+static lv_group_t *nav_fallback_group() { return nav_view.fallback_group(); }
+static void nav_mirror_states(lv_obj_t *obj) { NavView::mirror_states(obj); }
+static void nav_focus_ring(lv_obj_t *obj) { NavView::focus_ring(obj); }
+static void nav_focusable_button(lv_obj_t *button) { NavView::focusable_button(button); }
+static void nav_claim_clicks(lv_obj_t *obj) { NavView::claim_clicks(obj); }
+static void nav_home() { nav_view.home(); }
+static void nav_arrive(const lv_obj_t *screen) { nav_view.arrive(screen); }
+static void nav_attach_chrome(lv_obj_t *key, lv_obj_t *overlay, lv_obj_t *band) {
+  nav_view.attach_chrome(key, overlay, band);
+}
+static void screen_loaded_cb(lv_event_t *e) { nav_arrive(lv_event_get_target_obj(e)); }
+static const char *active_screen_name() { return NavView::screen_name(lv_screen_active()); }
 // --
 #include "frag_overdraw.inc" // split_main.py
 // --
@@ -313,7 +921,7 @@ static void banners_bind() {
   // taking any observer already on it with it, and the lost panels bound below watch
   // this one so the drive screen can show a refused exit.
   lv_subject_init_int(&entry_refused_subject, 0);
-  refusal_view.start_timer(kDriveRefusedShowMs);
+  refusal_view.start_timer(hmi::ui::DRIVE_REFUSED_SHOW_MS);
 
   // The resident screens' error banners (RefusalView).
   refusal_view.bind_resident_banners();
@@ -352,12 +960,9 @@ static void nav_cursor_lost(const lv_obj_t *screen) {
 
 // app_main, UI build 6: the padlock's rest position and the three hold gestures.
 static void lock_screen_init() {
-  // Where the shackle sits at rest, so the 01b rise can be undone exactly.
-  lv_obj_update_layout(ui_Shackle);
-  shackle_rest_y = lv_obj_get_y(ui_Shackle);
-  shackle_rest_h = lv_obj_get_height(ui_Shackle);
-  lv_arc_set_range(ui_LockRing, 0, kHoldMax);
-  lv_obj_remove_flag(ui_LockRing, LV_OBJ_FLAG_CLICKABLE);
+  // Where the shackle sits at rest, so the 01b rise can be undone exactly, and the ring's
+  // range (DriveUi).
+  drive_ui.init_lock();
 
   // The three push-and-hold gestures, polled by one shared timer — only the
   // gesture whose applies() is true on the current screen can be filling at any
@@ -367,8 +972,7 @@ static void lock_screen_init() {
   lv_subject_init_int(&drive_exit_gesture.progress, 0);
   lv_subject_init_int(&calibrate_gesture.progress, 0);
   // The ring round the padlock fills with the button hold.
-  lv_subject_add_observer_obj(&unlock_gesture.progress, lock_ring_hold_observer, ui_LockRing,
-                              nullptr);
+  drive_ui.bind_ring(&unlock_gesture.progress);
   // Calibrate's meter shows the hold filling, and is out of sight while it is
   // empty. Held by touch or by the stick button, it is the same fill.
   lv_bar_set_range(ui_CalibrateFill, 0, kHoldMax);

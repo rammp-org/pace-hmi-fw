@@ -31,7 +31,6 @@ public:
     void (*request)(rammp::SeatAxis axis, int32_t target); ///< main's seat_request (absolute)
     void (*show_buttons_page)(); ///< main's seat_show_buttons_page (the grids' off_left)
     void (*keep_overlay_fill)(lv_obj_t *obj); ///< main's overdraw exemption
-    int *page; ///< main's seat_page: 0 = the function buttons, 1 = the adjustment page
   };
 
   constexpr explicit SeatView(const Config &config) noexcept
@@ -85,6 +84,9 @@ private:
   /// The label each function button names on the adjustment page; null for the inert pair.
   lv_obj_t *labels_[GRID_MAX_ROWS][GRID_MAX_COLS]{};
   int selected_axis_ = -1; ///< the axis the adjustment page shows; -1 until a button picks one
+  /// Which page is showing: 0 = the function buttons, 1 = the adjustment panel over them
+  /// (spec 04b). Was main's seat_page.
+  int page_ = 0;
   std::array<format::StepperSpec, AXES> formats_{}; ///< how each axis' number is drawn
   lv_subject_t function_subject_{}; ///< string: which function the adjustment page shows
   std::array<char, FUNCTION_TEXT_SIZE> function_buf_{};

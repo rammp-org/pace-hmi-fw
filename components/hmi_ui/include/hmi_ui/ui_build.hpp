@@ -23,4 +23,16 @@ void finish_build(void (*strip_overdraw)());
 /// app_main, before lv_task starts.
 void perf_overlay_font();
 
+/// The "FPS counter" Skunk Works slot: LVGL's built-in perf overlay (lv_sysmon), which
+/// renders FPS/CPU on the sys layer above every screen, shown and hidden in turn. One
+/// instance (main's, constinit); starts hidden, as finish_build leaves the overlay.
+class PerfOverlay {
+public:
+  /// @brief Shows the overlay if hidden, else hides it. UI task (an action), lvgl_mutex held.
+  void toggle();
+
+private:
+  bool shown_ = false;
+};
+
 } // namespace hmi::ui

@@ -2,6 +2,27 @@
 
 #include "hmi_ui/hold_gesture.hpp"
 
+// Moved from main/frag_hold_poll.inc (calibrate_touch_held), with the screen and the button
+// as arguments: the same checks and calls in the same order.
+bool hmi::ui::touch_held_on(const lv_obj_t *screen, const lv_obj_t *target) {
+  if (target == nullptr || lv_screen_active() != screen) {
+    return false;
+  }
+  for (lv_indev_t *indev = lv_indev_get_next(nullptr); indev != nullptr;
+       indev = lv_indev_get_next(indev)) {
+    if (lv_indev_get_type(indev) != LV_INDEV_TYPE_POINTER ||
+        lv_indev_get_state(indev) != LV_INDEV_STATE_PRESSED) {
+      continue;
+    }
+    lv_point_t point;
+    lv_indev_get_point(indev, &point);
+    if (lv_indev_search_obj(lv_screen_active(), &point) == target) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void hmi::ui::HoldEngine::anim_exec_cb(void *var, int32_t value) {
   lv_subject_set_int(&static_cast<HoldGesture *>(var)->progress, value);
 }

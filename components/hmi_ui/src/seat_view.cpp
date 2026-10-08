@@ -99,7 +99,7 @@ void hmi::ui::SeatView::click_cb(lv_event_t *e) {
   view->adjust_grid_.row = 1;
   view->adjust_grid_.col = 0;
   lv_group_focus_obj(view->adjust_grid_.cell[1][0]);
-  *view->config_.page = 1;
+  view->page_ = 1;
 }
 
 void hmi::ui::SeatView::back_cb(lv_event_t *e) {
@@ -111,7 +111,7 @@ void hmi::ui::SeatView::back_cb(lv_event_t *e) {
 // buttons hidden underneath it.
 void hmi::ui::SeatView::show_buttons_page() {
   lv_obj_add_flag(ui_SeatAdjustmentPanel, LV_OBJ_FLAG_HIDDEN);
-  *config_.page = 0;
+  page_ = 0;
   config_.nav->use_group(buttons_group_, ui_SeatScreen);
   // Back to the button the user selected rather than the top-left one: the
   // grid's cursor still holds it, and returning to where you were is less
