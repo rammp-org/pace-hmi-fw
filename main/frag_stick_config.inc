@@ -78,9 +78,9 @@ struct AdcStickIo {
     // one cycle later.
     std::unique_lock<std::recursive_mutex> lock(lvgl_mutex, std::try_to_lock);
     if (lock.owns_lock()) {
-      lv_subject_set_int(&adc_x_subject, static_cast<int32_t>(mounted.x * 100.0f));
-      lv_subject_set_int(&adc_y_subject, static_cast<int32_t>(mounted.y * 100.0f));
-      lv_subject_set_int(&adc_twist_subject, static_cast<int32_t>(mounted.twist * 100.0f));
+      lv_subject_set_int(joystick_view.x(), static_cast<int32_t>(mounted.x * 100.0f));
+      lv_subject_set_int(joystick_view.y(), static_cast<int32_t>(mounted.y * 100.0f));
+      lv_subject_set_int(joystick_view.twist(), static_cast<int32_t>(mounted.twist * 100.0f));
     }
   }
   int drive_speed() { return ::drive_speed.load(); }

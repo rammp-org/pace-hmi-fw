@@ -22,6 +22,7 @@ static void nav_update_stick_gate() {
 }
 
 static void nav_use_group(lv_group_t *g, const lv_obj_t *screen);
+static lv_group_t *nav_fallback_group(); // the view's, defined after it
 
 // Hands the joystick to the screen being shown and puts the cursor at its top.
 // Called on load; closing the menu restores the group without this reset.
@@ -31,7 +32,7 @@ static void nav_enter_screen(const lv_obj_t *screen) {
     seat_buttons_grid.col = 0;
     seat_show_buttons_page();
   } else if (screen == ui_BenchGateScreen) {
-    nav_use_group(rd_group, screen);
+    nav_use_group(bench_pin_view.group(), screen);
     rd_focus(0);
   } else if (screen == ui_SettingsScreen) {
     nav_use_group(setting_group, screen);
@@ -48,19 +49,19 @@ static void nav_enter_screen(const lv_obj_t *screen) {
     update_ui_on_load(); // its own groups, one per page
   } else if (screen == ui_AboutScreen) {
     about_ui_on_load();
-    lv_group_remove_all_objs(joystick_group); // nothing to pick: only the key
-    nav_use_group(joystick_group, screen);
+    lv_group_remove_all_objs(nav_fallback_group()); // nothing to pick: only the key
+    nav_use_group(nav_fallback_group(), screen);
   } else if (screen == ui_LogScreen && log_view_group() != nullptr) {
     nav_use_group(log_view_group(), screen);
     log_view_on_load();
   } else {
     // The screens with at most a button or two of their own share one group,
     // refilled for whichever is up.
-    lv_group_remove_all_objs(joystick_group);
+    lv_group_remove_all_objs(nav_fallback_group());
     if (screen == ui_JoystickScreen) {
-      lv_group_add_obj(joystick_group, ui_CalibrateButton);
+      lv_group_add_obj(nav_fallback_group(), ui_CalibrateButton);
     }
-    nav_use_group(joystick_group, screen);
+    nav_use_group(nav_fallback_group(), screen);
   }
 }
 
@@ -70,8 +71,6 @@ static constinit hmi::ui::NavView nav_view{{
     .menu_slide = &menu_slide_subject,
     .menu_open = &nav_menu_open,
     .menu_on_arrival = &nav_menu_on_arrival,
-    .menu_group = &menu_group,
-    .indev = &joystick_indev,
     .gate_update = nav_update_stick_gate,
     .keep_overlay_fill = keep_overlay_fill,
     .ready_observer = action_ready_observer,
@@ -116,6 +115,7 @@ static constinit hmi::ui::NavView nav_view{{
 // The calls the rest of the unit makes (and NavPort's table).
 static void nav_use_group(lv_group_t *g, const lv_obj_t *screen) { nav_view.use_group(g, screen); }
 static void nav_to_key() { nav_view.to_key(); }
+static lv_group_t *nav_fallback_group() { return nav_view.fallback_group(); }
 static void nav_mirror_states(lv_obj_t *obj) { NavView::mirror_states(obj); }
 static void nav_focus_ring(lv_obj_t *obj) { NavView::focus_ring(obj); }
 static void nav_focusable_button(lv_obj_t *button) { NavView::focusable_button(button); }

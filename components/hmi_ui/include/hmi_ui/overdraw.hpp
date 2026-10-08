@@ -8,6 +8,14 @@
 
 namespace hmi::ui {
 
+/// "This object covers what is behind it": kept out of the overdraw pass, with its fill. LVGL
+/// leaves the USER flags for exactly this; nothing in the export uses them.
+inline constexpr lv_obj_flag_t OVERLAY_FLAG = LV_OBJ_FLAG_USER_1;
+
+/// @brief Marks `obj` an overlay (OVERLAY_FLAG) and keeps it opaque whatever the theme says.
+/// UI task (app_main and the views' binds).
+void keep_overlay_fill(lv_obj_t *obj);
+
 /// @brief Clears the redundant background fills under one screen; the screen keeps its own.
 /// @param screen The screen.
 /// @param overlay The flag that marks an overlay: it keeps its fill, subtree and all.

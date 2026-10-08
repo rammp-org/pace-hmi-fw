@@ -9,18 +9,18 @@
 #include "hmi_ui/link_state.hpp"
 
 void hmi::ui::StatusBandView::drive_observer_cb(lv_observer_t *observer, lv_subject_t *) {
-  static_cast<const StatusBandView *>(lv_observer_get_user_data(observer))
+  static_cast<StatusBandView *>(lv_observer_get_user_data(observer))
       ->show(lv_observer_get_target_obj(observer), Kind::DRIVE_STATUS);
 }
 
 void hmi::ui::StatusBandView::state_observer_cb(lv_observer_t *observer, lv_subject_t *) {
-  static_cast<const StatusBandView *>(lv_observer_get_user_data(observer))
+  static_cast<StatusBandView *>(lv_observer_get_user_data(observer))
       ->show(lv_observer_get_target_obj(observer), Kind::STATE);
 }
 
 // Re-run either when the MCB says something new or when the link or the lock
 // changes: whichever subject fired, the answer depends on all of them.
-void hmi::ui::StatusBandView::show(lv_obj_t *label, Kind kind) const {
+void hmi::ui::StatusBandView::show(lv_obj_t *label, Kind kind) {
   // Theme colours, not literals: the day theme's green and red are darker, so
   // they still read on white. Re-run on a theme switch (rtps_poll_cb notifies).
   const lv_color_t ok = lv_color_hex(static_cast<uint32_t>(ui_get_theme_value(_ui_theme_color_ok)));
@@ -58,7 +58,7 @@ void hmi::ui::StatusBandView::show(lv_obj_t *label, Kind kind) const {
   }
   // The MIB's own wording wins when it sends one ("M2 ERROR"); the colour still
   // comes from the state, so it can say anything and still read as a fault.
-  const char *override_text = lv_subject_get_string(config_.shared->state_text);
+  const char *override_text = lv_subject_get_string(&state_text_);
   const bool overridden = override_text != nullptr && override_text[0] != '\0';
   switch (state) {
   case MIB::MibSystemState::IDLE:
@@ -92,8 +92,15 @@ void hmi::ui::StatusBandView::bind(lv_obj_t *panel) {
   // with the label.
   lv_subject_add_observer_obj(s.rtps_link, drive_observer_cb, drive_label, this);
   lv_subject_add_observer_obj(s.rtps_link, state_observer_cb, state_label, this);
-  lv_subject_add_observer_obj(s.drive_text, drive_observer_cb, drive_label, this);
-  lv_subject_add_observer_obj(s.state_text, state_observer_cb, state_label, this);
+  lv_subject_add_observer_obj(&drive_text_, drive_observer_cb, drive_label, this);
+  lv_subject_add_observer_obj(&state_text_, state_observer_cb, state_label, this);
   // The drive cell reads LOCKED while locked, so it re-runs on that too.
   lv_subject_add_observer_obj(s.locked, drive_observer_cb, drive_label, this);
+}
+
+void hmi::ui::StatusBandView::init_texts() {
+  lv_subject_init_string(&drive_text_, drive_text_buf_.data(), drive_text_prev_buf_.data(),
+                         drive_text_buf_.size(), "");
+  lv_subject_init_string(&state_text_, state_text_buf_.data(), state_text_prev_buf_.data(),
+                         state_text_buf_.size(), "");
 }

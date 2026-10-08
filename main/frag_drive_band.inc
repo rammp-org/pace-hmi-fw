@@ -16,8 +16,6 @@ static bool drive_session_input(hmi::drive_session::Input input);
 
 // The one instance; bound from app_main.
 static constinit hmi::ui::DriveBandView drive_band_view{{
-    .profile = &drive_profile_subject,
-    .speed_tenths = &speed_tenths_subject,
     .profiles = {static_cast<int32_t>(MIB::DriveProfile::HIGH),
                  static_cast<int32_t>(MIB::DriveProfile::NORMAL),
                  static_cast<int32_t>(MIB::DriveProfile::LOW)},

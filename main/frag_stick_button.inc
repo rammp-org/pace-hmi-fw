@@ -7,7 +7,7 @@ static void stick_button_edge(bool active) {
 
   // the panel follows every edge, so contact bounce can't strand it blue: the
   // last edge always wins
-  lv_subject_set_int(&button_pressed_subject, active);
+  lv_subject_set_int(joystick_view.pressed(), active);
   // undebounced on purpose: the MCB wants the raw line state, and this is the
   // same every-edge signal the panel follows
   joy_button_pressed.store(active);
@@ -21,7 +21,7 @@ static void stick_button_edge(bool active) {
     select_key.store(true);
   }
   if (effect.count) {
-    lv_subject_set_int(&button_count_subject, lv_subject_get_int(&button_count_subject) + 1);
+    lv_subject_set_int(joystick_view.count(), lv_subject_get_int(joystick_view.count()) + 1);
   }
 }
 

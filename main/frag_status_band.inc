@@ -15,21 +15,6 @@ static void fps_toggle() {
   }
 }
 
-// Observer for the button counter's colour. There's no built-in binding for a
-// style property, so the widget work happens here; the observer is bound to the
-// object, so it dies with it.
-static void gpio48_panel_observer(lv_observer_t *observer, lv_subject_t *subject) {
-  lv_obj_t *label = lv_observer_get_target_obj(observer);
-  // "not pressed" is the *current theme's* text colour, not a hardcoded white —
-  // SquareLine registered this property as themeable, so reading the theme keeps
-  // the count correct after a dark/day switch.
-  lv_obj_set_style_text_color(label,
-                              lv_subject_get_int(subject)
-                                  ? lv_palette_main(LV_PALETTE_BLUE)
-                                  : lv_color_hex(ui_get_theme_value(_ui_theme_color_text)),
-                              LV_PART_MAIN);
-}
-
 /////////////////////////////////////////////////////////////////////////////
 // MCB status panel
 //
@@ -41,5 +26,7 @@ static void gpio48_panel_observer(lv_observer_t *observer, lv_subject_t *subject
 
 // The one instance, for every DriveBand; bound from app_main and the screens built on demand.
 static constinit hmi::ui::StatusBandView status_band_view{{.shared = &ui_shared_subjects}};
+static_assert(hmi::ui::StatusBandView::TEXT_SIZE == rammp::kMcbTextLen,
+              "the band's text buffers are the shared spec's");
 static void bind_status_panel(lv_obj_t *panel) { status_band_view.bind(panel); }
 

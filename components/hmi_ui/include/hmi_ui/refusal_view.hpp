@@ -3,6 +3,8 @@
 // Locked screen and the screens a menu refusal lands on, and a drive cut short on the Drive and
 // Seat screens.
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 
 #include "lvgl.h"
@@ -67,8 +69,6 @@ public:
   struct Config {
     const SharedSubjects *shared;             ///< `rtps_link`, `mib_state` and `locked` are read
     const RefusalTexts *texts;                ///< the words
-    lv_subject_t *error_text;                 ///< string: the MIB's error_message ("" = none)
-    lv_subject_t *error_footer;               ///< string: the MIB's error_footer ("" = none)
     lv_subject_t *refused;                    ///< int: Refused; banners up unless REFUSED_NONE
     bool (*wifi)();                           ///< the link is Wi-Fi (rtps_comms_net_link)
     bool (*mcb_ready)();                      ///< link CONNECTED and the MIB IDLE or ENABLED
@@ -85,6 +85,20 @@ public:
   constexpr explicit RefusalView(const Config &config) noexcept
       : config_(config) {}
 
+  /// The two text buffers' sizes: the shared spec's kErrorTextLen and kErrorFooterLen (main
+  /// static_asserts them).
+  static constexpr size_t ERROR_TEXT_SIZE = 64;
+  static constexpr size_t ERROR_FOOTER_SIZE = 32;
+
+  /// @brief Initialises the MIB's error text and footer subjects, empty. app_main, before any
+  ///        banner binds (V7).
+  void init_error_texts();
+  /// string: the MIB's error_message ("" = none). Written by main's MibStatus handler under
+  /// lvgl_mutex.
+  [[nodiscard]] lv_subject_t *error_text() { return &error_text_; }
+  /// string: the MIB's error_footer ("" = none), written the same way.
+  [[nodiscard]] lv_subject_t *error_footer() { return &error_footer_; }
+
   /// @brief Binds a banner that names a refused request (Locked screen and the menu's
   ///        landing screens): on `refused` and every cause subject. Null skips the binding.
   /// app_main (after `refused` and the cause subjects are initialised, V7).
@@ -96,7 +110,7 @@ public:
   /// @brief Fills a banner with why driving is not permitted right now; the titles are the
   ///        caller's (a refused push and a drive cut short read differently).
   /// UI task, lvgl_mutex held.
-  void fill_drive_blocked(lv_obj_t *panel, const char *link_title, const char *mcb_title) const;
+  void fill_drive_blocked(lv_obj_t *panel, const char *link_title, const char *mcb_title);
   /// @brief Binds `cb` on `panel` (object-bound, with `user_data`) to every subject the cause
   ///        depends on: link, MIB state, error text and footer. Also for other views' banners
   ///        that word the same cause.
@@ -122,12 +136,18 @@ public:
 private:
   [[nodiscard]] BannerLines link_text(LinkState link) const;
   void fill_mib_reason(lv_obj_t *panel, const char *title, const char *fallback_body,
-                       const char *fallback_footer) const;
+                       const char *fallback_footer);
   static void refused_panel_observer(lv_observer_t *observer, lv_subject_t *subject);
   static void lost_panel_observer(lv_observer_t *observer, lv_subject_t *subject);
   static void timer_cb(lv_timer_t *timer);
 
   Config config_;
+  lv_subject_t error_text_{};
+  lv_subject_t error_footer_{};
+  std::array<char, ERROR_TEXT_SIZE> error_text_buf_{};
+  std::array<char, ERROR_TEXT_SIZE> error_text_prev_buf_{};
+  std::array<char, ERROR_FOOTER_SIZE> error_footer_buf_{};
+  std::array<char, ERROR_FOOTER_SIZE> error_footer_prev_buf_{};
   lv_timer_t *timer_ = nullptr;     ///< the dwell timer
   int64_t pressed_at_us_ = 0;       ///< when the current press began; 0 = not pressed
   bool refused_this_press_ = false; ///< this press already raised its refusal

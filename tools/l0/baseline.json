@@ -1,7 +1,7 @@
 {
   "metrics": {
     "app_main_lines": {
-      "main/main.cpp": 761
+      "main/main.cpp": 742
     },
     "assert": {
       "components/joystick/src/joystick.cpp": 17,
@@ -26,7 +26,7 @@
       "main/selftest.cpp": 2
     },
     "heap_raw": {
-      "main/log_capture.cpp": 2,
+      "main/log_capture.cpp": 1,
       "main/log_view.cpp": 1,
       "main/lv_mem_psram.c": 5,
       "main/rtps_comms.cpp": 1,
@@ -34,7 +34,7 @@
     },
     "if_config": {},
     "lines": {
-      "main/main.cpp": 1947,
+      "main/main.cpp": 1896,
       "main/selftest.cpp": 1030
     },
     "locks": {
@@ -63,7 +63,7 @@
       "main/joystick_cal.cpp": 15,
       "main/log_capture.cpp": 8,
       "main/log_view.cpp": 1,
-      "main/main.cpp": 95,
+      "main/main.cpp": 73,
       "main/rtps_comms.cpp": 32,
       "main/selftest.cpp": 25,
       "main/update_ui.cpp": 4

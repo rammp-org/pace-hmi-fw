@@ -45,13 +45,11 @@ enum NavDest : int {
 class NavView {
 public:
   struct Config {
-    const SharedSubjects *shared;  ///< `locked` is read; `rtps_link`, `mib_state` gate two rows
-    lv_subject_t *menu_slide;      ///< int: 0 = the menu appears at once, 1 = it slides
-    lv_obj_t **menu_open;          ///< main's nav_menu_open: the overlay up, else null
-    bool *menu_on_arrival;         ///< main's nav_menu_on_arrival: open it on the next load
-    lv_group_t *const *menu_group; ///< the menu rows' group (made in app_main)
-    lv_indev_t *const *indev;      ///< the joystick's keypad indev (made in app_main)
-    void (*gate_update)();         ///< main's nav_update_stick_gate
+    const SharedSubjects *shared; ///< `locked` is read; `rtps_link`, `mib_state` gate two rows
+    lv_subject_t *menu_slide;     ///< int: 0 = the menu appears at once, 1 = it slides
+    lv_obj_t **menu_open;         ///< main's nav_menu_open: the overlay up, else null
+    bool *menu_on_arrival;        ///< main's nav_menu_on_arrival: open it on the next load
+    void (*gate_update)();        ///< main's nav_update_stick_gate
     void (*keep_overlay_fill)(lv_obj_t *obj); ///< main's overdraw exemption
     /// Greys a gated row while the MCB could not act on it (main's action_ready_observer).
     lv_observer_cb_t ready_observer;
@@ -81,6 +79,18 @@ public:
 
   constexpr explicit NavView(const Config &config) noexcept
       : config_(config) {}
+
+  /// @brief Takes the joystick's keypad indev and makes the two groups nav owns, in this
+  ///        order: the fallback group (the screens whose content nothing focuses: Drive,
+  ///        Update and Boot; it holds nothing, so the stick's LVGL half is idle there while the
+  ///        hold poll still reads the same latch for the exit hold), then the menu rows' group
+  ///        (filled per overlay when the menu opens). The indev starts on the fallback group.
+  /// app_main, before lv_task starts.
+  void init_groups(lv_indev_t *indev);
+  /// The joystick's keypad indev (null before init_groups).
+  [[nodiscard]] lv_indev_t *indev() const { return indev_; }
+  /// The fallback group, for the screens with at most a button or two of their own.
+  [[nodiscard]] lv_group_t *fallback_group() const { return fallback_group_; }
 
   /// @brief One screen's chrome: its burger key, the menu overlay, and the DriveBand whose
   ///        DRIVE cell goes home (null: none). Done again for a screen rebuilt on demand.
@@ -154,6 +164,9 @@ private:
   Config config_;
   std::array<Chrome, 16> chrome_{}; ///< each screen's key and overlay, as attach_chrome wires them
   std::array<Row, NAV_DEST_COUNT> rows_{}; ///< the rows' callback data (the same for every overlay)
+  lv_indev_t *indev_ = nullptr;            ///< the joystick's keypad indev
+  lv_group_t *fallback_group_ = nullptr;   ///< the screens with little of their own to focus
+  lv_group_t *menu_group_ = nullptr;       ///< the open menu's rows
   lv_group_t *screen_group_ = nullptr;     ///< the group the screen underneath uses
   lv_timer_t *press_timer_ = nullptr;      ///< a picked row waiting out ROW_PRESS_MS
   int drop_row_ = -1;                      ///< the row the destination's overlay replays on arrival
