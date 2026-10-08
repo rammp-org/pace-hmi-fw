@@ -24,13 +24,21 @@ yet measured or decided, and "none" means checked and absent.
   `==1.3.2` in `main/idf_component.yml` · LVGL 9.5.0 · clang-format 14.0.6 (not installed locally;
   pre-commit fetches it) · esp-clang 20.1.1 (from ESP-IDF 6.0) · cppcheck from
   `esp-cpp/StaticAnalysis@master` in CI (version unknown; not installed locally).
-- C++ standard: IDF 6.0 builds `-std=gnu++26`; that is what `main` and every third-party component
-  get. First-party components get `-std=gnu++23` and the CS-LNG-02 warning set as errors
-  from `fw_component_options()` (`cmake/fw_standards.cmake`), placed after IDF's flags so they
-  win. That has applied only since `dev_ai_refactor_fwopts`. Before it, the function was
-  defined after `project()`, where IDF has already run every component's `CMakeLists.txt`, so
-  the call was skipped and every first-party component built with IDF's defaults.
-  `CMAKE_CXX_STANDARD` has no effect on IDF component targets.
+- C++ standard: all first-party C++ builds at `-std=gnu++23` (owner decision, 2026-10-07).
+  First-party components get it, and the CS-LNG-02 warning set as errors, from
+  `fw_component_options()` (`cmake/fw_standards.cmake`), placed after IDF's flags so they win.
+  That has applied only since `dev_ai_refactor_fwopts`. Before it, the function was defined
+  after `project()`, where IDF has already run every component's `CMakeLists.txt`, so the call
+  was skipped and every first-party component built with IDF's defaults.
+  `main` gets only `-std=gnu++23` (`main/CMakeLists.txt`, C++ sources only), since
+  `dev_ai_refactor_main23`. Its warnings are still IDF's defaults (see the CS-LNG-02
+  deviation). The switch changed no code: the default build's `.flash.text` and
+  `.iram0.text` hash the same before and after, and every section size is unchanged.
+  Third-party components (ESP-IDF, espp, LVGL, managed components, the rammp-rtps submodule)
+  stay at IDF 6.0's default `-std=gnu++26`; we don't control their flags. So the image still
+  mixes gnu++23 and gnu++26 translation units, sharing inline and template code from
+  libstdc++, fmt and espp headers. GCC's C++26 mode is experimental, with no ABI promise.
+  This is the residual risk. `CMAKE_CXX_STANDARD` has no effect on IDF component targets.
 - Build variants (CS-LAY-09):
 
   | Variant | How | Differences |
@@ -160,4 +168,4 @@ yet measured or decided, and "none" means checked and absent.
 | AI-UNA-02 "never merge" | `dev_refactor` | the owner authorised merges into `dev_refactor` for the 2026-10-06 run (AI-DIS-01) | owner | per run |
 | CS-SAF-05 (two approvals) | safety-relevant changes | one human approver (the owner) until a second reviewer exists; nothing safety-relevant merges to `dev` meanwhile | owner | until a second reviewer is named |
 | CS-SAF-03 (open circuit) | joystick low rail | firmware cannot tell an open pot (0 mV) from full travel (calibrated min 6-11 mV on board 2); firmware-only for now, residual hazard documented in `docs/plans/hazard-fixes.md` | owner | revisit with an EE change |
-| CS-LNG-02 | `main` | `main` keeps IDF's gnu++26 and default warnings until its legacy counts are in the ratchet; new components use `fw_component_options` | owner | open |
+| CS-LNG-02 | `main` | `main` builds at gnu++23 like all first-party code (since `dev_ai_refactor_main23`), but keeps IDF's default warnings. The CS-LNG-02 warning set (`-Wconversion`, `-Wshadow`, ...) comes in a later step, as the legacy counts in the ratchet come down. Components use `fw_component_options` | owner | open (warnings only) |
