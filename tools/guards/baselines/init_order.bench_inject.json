@@ -323,21 +323,6 @@
         "guard variable for fmt::v12::format_facet<std::locale>::id"
       ]
     },
-    "main/remote_ui.cpp.obj": {
-      "init_functions": 1,
-      "objects": [
-        "(anonymous namespace)::cfg"
-      ],
-      "reads_external": [],
-      "lazy_statics": [],
-      "calls": [
-        "(anonymous namespace)::ServerConfig::~ServerConfig()",
-        "__cxa_atexit"
-      ],
-      "shared": [
-        "guard variable for fmt::v12::format_facet<std::locale>::id"
-      ]
-    },
     "main/rtps_comms.cpp.obj": {
       "init_functions": 1,
       "objects": [
@@ -467,6 +452,21 @@
         "espp::Logger::~Logger()",
         "pthread_mutex_init",
         "std::mutex::~mutex()"
+      ],
+      "shared": [
+        "guard variable for fmt::v12::format_facet<std::locale>::id"
+      ]
+    },
+    "remote_ui/src/remote_ui.cpp.obj": {
+      "init_functions": 1,
+      "objects": [
+        "(anonymous namespace)::cfg"
+      ],
+      "reads_external": [],
+      "lazy_statics": [],
+      "calls": [
+        "(anonymous namespace)::ServerConfig::~ServerConfig()",
+        "__cxa_atexit"
       ],
       "shared": [
         "guard variable for fmt::v12::format_facet<std::locale>::id"
