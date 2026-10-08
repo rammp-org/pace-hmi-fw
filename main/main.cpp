@@ -124,6 +124,126 @@ static std::recursive_mutex lvgl_mutex;
 // --
 #include "frag_display_flip.inc" // split_main.py
 // --
+namespace hmi::housekeeping {
+namespace {
+
+/// @brief The housekeeping island: the IMU, the battery monitor and the RTC, read every
+/// `period` on one task, and the Kalman filter that turns the IMU's readings into an
+/// orientation. The self test reads what it leaves behind (the IMU's accelerometer, the
+/// battery status) without bus traffic of its own. Built once, an app_main local
+/// (app-main-shrink V6); it must outlive the IMU's use of orientation_filter().
+class Housekeeping {
+public:
+  using Imu = espp::M5StackTab5::Imu;
+
+  struct Config {
+    /// The task, as a literal copy of today's (name, stack, priority, core).
+    espp::Task::BaseConfig task;
+    /// The wait before each read.
+    std::chrono::milliseconds period;
+    /// The Kalman orientation filter's measurement noise (the accelerometer's angles).
+    float angle_noise;
+    /// The Kalman orientation filter's process noise (the gyro's rates).
+    float rate_noise;
+  };
+
+  /// @brief Sets the filter up; touches no hardware and starts nothing.
+  /// @param config See Config.
+  explicit Housekeeping(const Config &config);
+  Housekeeping(const Housekeeping &) = delete;
+  Housekeeping &operator=(const Housekeeping &) = delete;
+  Housekeeping(Housekeeping &&) = delete;
+  Housekeeping &operator=(Housekeeping &&) = delete;
+  ~Housekeeping() = default;
+
+  /// @brief The IMU's orientation filter, for M5StackTab5::initialize_imu. It runs inside
+  /// Imu::update, which only this island's task calls.
+  /// @return A filter bound to this object.
+  [[nodiscard]] Imu::filter_fn orientation_filter();
+
+  /// @brief Starts the task (app_main, once the IMU, the battery monitor and the RTC are up).
+  /// @return Whether the task started.
+  bool start();
+
+private:
+  Imu::Value filter(float dt, const Imu::Value &accel, const Imu::Value &gyro);
+  void read();
+
+  espp::M5StackTab5 &tab5_;
+  std::chrono::milliseconds period_;
+  espp::KalmanFilter<2> kf_;
+  std::shared_ptr<Imu> imu_;
+  std::optional<int64_t> t0_us_;
+  espp::Task task_;
+};
+
+Housekeeping::Housekeeping(const Config &config)
+    : tab5_(espp::M5StackTab5::get())
+    , period_(config.period)
+    , task_({.callback = [this](std::mutex &m, std::condition_variable &cv) -> bool {
+               // sleep first in case we don't get IMU data and need to exit early
+               {
+                 std::unique_lock<std::mutex> lock(m);
+                 cv.wait_for(lock, period_);
+               }
+               read();
+               return false;
+             },
+             .task_config = config.task}) {
+  kf_.set_process_noise(config.rate_noise);
+  kf_.set_measurement_noise(config.angle_noise);
+}
+
+Housekeeping::Imu::filter_fn Housekeeping::orientation_filter() {
+  return [this](float dt, const Imu::Value &accel, const Imu::Value &gyro) {
+    return filter(dt, accel, gyro);
+  };
+}
+
+bool Housekeeping::start() {
+  imu_ = tab5_.imu();
+  return task_.start();
+}
+
+Housekeeping::Imu::Value Housekeeping::filter(float dt, const Imu::Value &accel,
+                                              const Imu::Value &gyro) {
+  // Apply Kalman filter
+  float accelRoll = static_cast<float>(atan2(accel.y, accel.z));
+  float accelPitch =
+      static_cast<float>(atan2(-accel.x, sqrt(accel.y * accel.y + accel.z * accel.z)));
+  kf_.predict({espp::deg_to_rad(gyro.x), espp::deg_to_rad(gyro.y)}, dt);
+  kf_.update({accelRoll, accelPitch});
+  float roll, pitch;
+  std::tie(roll, pitch) = kf_.get_state();
+  // return the computed orientation
+  Imu::Value orientation{};
+  orientation.roll = roll;
+  orientation.pitch = pitch;
+  orientation.yaw = 0.0f;
+  return orientation;
+}
+
+void Housekeeping::read() {
+  // The RTC and the battery monitor, read as they were when their values were drawn.
+  std::tm rtc_time;
+  (void)tab5_.get_rtc_time(rtc_time);
+  (void)tab5_.read_battery_status();
+
+  const int64_t now = esp_timer_get_time(); // time in microseconds
+  if (!t0_us_) {
+    t0_us_ = now;
+  }
+  float dt = static_cast<float>(now - *t0_us_) / 1'000'000.0f; // convert us to s
+  t0_us_ = now;
+
+  // update the imu data
+  std::error_code ec;
+  (void)imu_->update(dt, ec);
+}
+
+} // namespace
+} // namespace hmi::housekeeping
+
 extern "C" void app_main(void) {
   // First, so the LogScreen has everything printed from here on - including
   // what the tasks started below print.
@@ -257,34 +377,24 @@ extern "C" void app_main(void) {
     }
   };
 
-  // make the filter we'll use for the IMU to compute the orientation
-  static constexpr float angle_noise = 0.001f;
-  static constexpr float rate_noise = 0.1f;
-  static espp::KalmanFilter<2> kf;
-  kf.set_process_noise(rate_noise);
-  kf.set_measurement_noise(angle_noise);
-
-  using Imu = espp::M5StackTab5::Imu;
-  auto kalman_filter_fn = [](float dt, const Imu::Value &accel,
-                             const Imu::Value &gyro) -> Imu::Value {
-    // Apply Kalman filter
-    float accelRoll = atan2(accel.y, accel.z);
-    float accelPitch = atan2(-accel.x, sqrt(accel.y * accel.y + accel.z * accel.z));
-    kf.predict({espp::deg_to_rad(gyro.x), espp::deg_to_rad(gyro.y)}, dt);
-    kf.update({accelRoll, accelPitch});
-    float roll, pitch;
-    std::tie(roll, pitch) = kf.get_state();
-    // return the computed orientation
-    Imu::Value orientation{};
-    orientation.roll = roll;
-    orientation.pitch = pitch;
-    orientation.yaw = 0.0f;
-    return orientation;
-  };
+  // The housekeeping island (IMU, battery, RTC). Built here because the IMU takes its
+  // orientation filter; its task starts after the click sound is loaded, below.
+  hmi::housekeeping::Housekeeping housekeeping({
+      .task =
+          {
+              .name = "Data Display Task",
+              .stack_size_bytes = 6 * 1024,
+              .priority = 10,
+              .core_id = 1,
+          },
+      .period = 20ms,
+      .angle_noise = 0.001f,
+      .rate_noise = 0.1f,
+  });
 
   logger.info("Initializing IMU...");
   // initialize the IMU
-  if (!tab5.initialize_imu(kalman_filter_fn)) {
+  if (!tab5.initialize_imu(housekeeping.orientation_filter())) {
     logger.error("Failed to initialize IMU!");
     return;
   }
@@ -928,45 +1038,8 @@ extern "C" void app_main(void) {
 
   // (brightness is the saved setting, applied when brightness_view.init adds its observer)
 
-  // A task to read the IMU, the battery monitor and the RTC every 20 ms. The self test reads
-  // what it leaves behind: the IMU's accelerometer and the battery status (imu_accel_mg,
-  // battery_mv), with no bus traffic of its own.
   logger.info("Starting data display task...");
-  espp::Task imu_task({.callback = [](std::mutex &m, std::condition_variable &cv) -> bool {
-                         // sleep first in case we don't get IMU data and need to exit early
-                         {
-                           std::unique_lock<std::mutex> lock(m);
-                           cv.wait_for(lock, 20ms);
-                         }
-                         static auto &tab5 = espp::M5StackTab5::get();
-                         static auto imu = tab5.imu();
-
-                         // The RTC and the battery monitor, read as they were when their values
-                         // were drawn.
-                         std::tm rtc_time;
-                         (void)tab5.get_rtc_time(rtc_time);
-                         (void)tab5.read_battery_status();
-
-                         auto now = esp_timer_get_time(); // time in microseconds
-                         static auto t0 = now;
-                         auto t1 = now;
-                         float dt = (t1 - t0) / 1'000'000.0f; // convert us to s
-                         t0 = t1;
-
-                         // update the imu data
-                         std::error_code ec;
-                         if (!imu->update(dt, ec)) {
-                           return false;
-                         }
-                         return false;
-                       },
-                       .task_config = {
-                           .name = "Data Display Task",
-                           .stack_size_bytes = 6 * 1024,
-                           .priority = 10,
-                           .core_id = 1,
-                       }});
-  imu_task.start();
+  housekeeping.start();
 
   // guards the joystick range-mapping math (center/range deadbands, circular
   // clamp, and that twist stays independent of the X/Y gimbal). Asserts, so it
