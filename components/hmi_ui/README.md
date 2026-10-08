@@ -27,6 +27,9 @@ behaviour.
 | `include/hmi_ui/button_grid.hpp`, `src/button_grid.cpp` | `ButtonGrid`, `grid_key_cb`, `grid_sync_cursor`: the joystick's walk over a page of buttons (seat, bench PIN), on hmi_models' `grid_step` (from `main/frag_seat.inc`) |
 | `include/hmi_ui/display_flip.hpp`, `src/display_flip.cpp` | `DisplayFlip`: DIRECT rendering into the DSI panel's two frame buffers, the 180-degree Settings "Flip screen" (PPA, CPU fallback) and the touch input that turns with it (from `main/frag_display_flip.inc`). Finds itself through the display's and the touch input's LVGL driver data. The PSRAM frame's `heap_caps_aligned_alloc` is legacy debt moved with `ratchet.py transfer` |
 | `include/hmi_ui/drive_band_view.hpp`, `src/drive_band_view.cpp` | `DriveBandView`: the Drive screen's speed readout and its three drive-profile buttons (from `main/frag_drive_band.inc`) |
+| `include/hmi_ui/drive_port.hpp` | `DrivePort<Ui>`, `drive_screen_of`, `drive_mib_of`: the drive adapter's port (components/drive_adapter `DrivePort`), each action's LVGL and RTPS call as it has always been (from `main/frag_drive.inc`, MainDriveView). A template over the drive UI so its calls are direct (CS-SAF-08) and the drive goldens (tests/host/drive_golden) run it verbatim. **Safety-relevant** (CS-SAF-01): it sends the DriveCommand. Included by main, which makes the one DriveAdapter over it (needs `ui` and `esp_timer`, private here) |
+| `include/hmi_ui/drive_ui.hpp`, `src/drive_ui.cpp` | `DriveUi`: the padlock (ring and shackle) and the one-second advance to Drive after an unlock, and what DrivePort acts on (from `main/frag_lock.inc` and app_main's lock wiring). main owns the one instance (constinit) and the DriveAdapter |
+| `include/hmi_ui/refused.hpp` | `Refused`, `DRIVE_REFUSED_SHOW_MS`, `EXIT_REFUSED_SHOW_MS`: which request a banner says was refused, and its dwell (from `refusal_view.hpp` and `main/frag_refusal.inc`); no LVGL |
 | `include/hmi_ui/fps_meter.hpp`, `src/fps_meter.cpp` | `FpsMeter`: render time per frame and the once-a-second `[FPS]` debug line, `CONFIG_HMI_DEBUG_FPS` only (from `main/frag_fps.inc`) |
 | `include/hmi_ui/hold_gesture.hpp`, `src/hold_gesture.cpp` | `HoldGesture`, `HoldEngine`: the push-and-hold gestures (unlock, drive exit, calibrate) and the engine that fills and completes them (from `main/frag_hold.inc`) |
 | `include/hmi_ui/joystick_view.hpp`, `src/joystick_view.cpp` | `JoystickView`: the Joystick test screen's axis bars and GPIO48 button count, and their subjects (from `main/frag_status_band.inc`, `frag_state.inc` and app_main) |
@@ -89,7 +92,8 @@ behaviour.
   (`components/topology`, CS-CON-02) is the target design; taking the config from
   `topo.task_config(...)` is a later step, made once the owner has reviewed the TASKS rows,
   and it comes with its own G10 baseline.
-- Dependencies, public (the headers use their types): `lvgl`, `hmi_format` (texts,
+- Dependencies, public (the headers use their types): `drive_adapter` and `drive_session`
+  (DrivePort, DriveUi), `lvgl`, `hmi_format` (texts,
   `StepperSpec`), `hmi_models` (`grid.hpp`, `pin.hpp`), `rammp_rtps_messages`
   (`MIB::MibSystemState`, the seat axis table), `ota_parse` (`hmi::ota::Release`),
   `esp_driver_ppa`, espp `logger` and `task` (`UiIsland`), and `settings` (the spec table and the saved values). Private: `ui` (the export: widgets, component children,

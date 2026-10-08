@@ -99,11 +99,114 @@ static std::recursive_mutex lvgl_mutex;
 // --
 #include "frag_hold.inc" // split_main.py
 // --
-#include "frag_lock.inc" // split_main.py
+/////////////////////////////////////////////////////////////////////////////
+// Moving between screens
+//
+// Spec V2 navigates with the burger menu: the key at the bottom of every
+// screen opens a full-screen overlay of destinations, and DRIVE in the band
+// goes home from anywhere. A screen change is just a screen change (see
+// docs/ui-architecture.md).
+//
+// Swaps go through the SquareLine helper rather than lv_screen_load, so they
+// take the same path as the boot screen's own transition and re-create the
+// target if it was ever destroyed.
+/////////////////////////////////////////////////////////////////////////////
+
+// SettingsScreen, defined with its rows further down. The actuators
+// page comes after the settings_spec.hpp pages.
+static constexpr int32_t kActuatorsPage = SETTINGS_PAGE_COUNT;
+static void setting_page_open(int32_t page);
+static void settings_screen_ensure();
+static void actions_screen_ensure();
+static void actions_open();
+static void diagnostics_screen_ensure();
+static void diagnostics_open();
+
 // --
 #include "frag_refusal.inc" // split_main.py
 // --
-#include "frag_drive.inc" // split_main.py
+// The drive session: lock, ask, unlock, drive, ask to stop. The decisions live in
+// components/drive_session (DriveSession, checked against the AS-IS table in
+// drive_session_table.hpp and its TABLE.md); sampling, the deadlines and performing the
+// actions live in components/drive_adapter (DriveAdapter); each action's LVGL and RTPS call is
+// hmi_ui's DrivePort (drive_port.hpp), over the drive UI (DriveUi: the padlock and the advance
+// to Drive). Every input arrives on the LVGL task: rtps_poll_cb's tick, the hold completions,
+// the nav callbacks and the unlock timer.
+#include "hmi_ui/drive_port.hpp"
+#include "hmi_ui/drive_ui.hpp"
+
+// The one drive UI, DrivePort's `Ui`.
+static constinit hmi::ui::DriveUi drive_ui{{
+    .shared = &ui_shared_subjects,
+    .refused = &entry_refused_subject,
+    .refused_timer = [] { return refusal_view.timer(); },
+    .menu_open = &nav_menu_open,
+    .menu_on_arrival = &nav_menu_on_arrival,
+    .profile = &drive_profile_published,
+    .publish_drive = rtps_comms_publish_drive,
+    .input = drive_session_input,
+    .gate_update = nav_update_stick_gate,
+    .nav_home = nav_home,
+    .refusal_feedback = refusal_feedback,
+    .haptic_click = [] { haptic_play(espp::Drv2605::Waveform::STRONG_CLICK, 1); },
+}};
+
+// The drive adapter's port: stateless over drive_ui.
+static constexpr hmi::ui::DrivePort<hmi::ui::DriveUi> drive_port{&drive_ui};
+static_assert(hmi::drive_adapter::DrivePort<hmi::ui::DrivePort<hmi::ui::DriveUi>>);
+
+// The drive session's adapter: the session, its deadlines and latches, and the logger for a
+// corrupted state, made at start-up with the rest (CS-SAF-04). Its windows are the table's
+// kDriveAnswer and kDriveWait (pinned to the RTPS spec in frag_refusal.inc).
+static hmi::drive_adapter::DriveAdapter<hmi::ui::DrivePort<hmi::ui::DriveUi>> drive_adapter{
+    {.view = drive_port}};
+
+// The inputs the fragments before this one declare: one input now; the 250 ms tick from
+// rtps_poll_cb; the unlock hold completed (unlock_gesture).
+static bool drive_session_input(hmi::drive_session::Input input) {
+  return drive_adapter.input(input);
+}
+static void drive_wait_poll() { drive_adapter.tick(); }
+static void drive_unlock_hold_done() { drive_adapter.unlock_hold_done(); }
+
+// Holding the stick button on the Locked screen: how driving is asked for, the
+// same hold that leaves it on Drive (and so the same "let go first" flag). Only
+// while there is something to ask -- a MIB that is not ready gets the refusal
+// once the press is a hold instead (entry_refusal_poll), rather than a ring
+// that fills for a second and then says no.
+static HoldGesture unlock_gesture{
+    .armed = &joy_button_armed,
+    .is_held = joy_button_held,
+    .applies =
+        [] {
+          return lv_subject_get_int(&locked_subject) != 0 && !drive_ui.lock_waiting() &&
+                 lv_screen_active() == ui_LockedScreen && nav_menu_open == nullptr && mcb_ready();
+        },
+    .completed = [] { drive_unlock_hold_done(); },
+    // The button doubles as select (a tap opens the menu from the key), so a
+    // tap must not tick the ring.
+    .grace_ms = kBarGraceMs,
+};
+
+// Exits on the stick BUTTON, not on pulling the stick back: pulling back is how
+// you drive in reverse, so a pull-to-exit gesture fired every time the user
+// reversed. The button is the only input on this screen that means nothing to
+// driving.
+//
+// This one survives the move to the burger menu because it is not navigation:
+// it asks the MIB to stop. Leaving the screen by any other route does not.
+static HoldGesture drive_exit_gesture{
+    .armed = &joy_button_armed,
+    .is_held = joy_button_held,
+    .applies = [] { return lv_screen_active() == ui_DriveScreen && nav_menu_open == nullptr; },
+    // Ask only. The session's relock (TICK_FOLLOW) closes the screen once the MIB actually
+    // stops driving, so a MIB that does not stop cannot leave someone looking at the
+    // main screen while the chair is still moving.
+    .completed = [] { drive_adapter.exit_hold_done(); },
+    // The button doubles as select, so a tap would visibly tick the bar and
+    // snap back without this.
+    .grace_ms = kBarGraceMs,
+};
 // --
 #include "frag_hold_poll.inc" // split_main.py
 // --
@@ -352,12 +455,9 @@ static void nav_cursor_lost(const lv_obj_t *screen) {
 
 // app_main, UI build 6: the padlock's rest position and the three hold gestures.
 static void lock_screen_init() {
-  // Where the shackle sits at rest, so the 01b rise can be undone exactly.
-  lv_obj_update_layout(ui_Shackle);
-  shackle_rest_y = lv_obj_get_y(ui_Shackle);
-  shackle_rest_h = lv_obj_get_height(ui_Shackle);
-  lv_arc_set_range(ui_LockRing, 0, kHoldMax);
-  lv_obj_remove_flag(ui_LockRing, LV_OBJ_FLAG_CLICKABLE);
+  // Where the shackle sits at rest, so the 01b rise can be undone exactly, and the ring's
+  // range (DriveUi).
+  drive_ui.init_lock();
 
   // The three push-and-hold gestures, polled by one shared timer — only the
   // gesture whose applies() is true on the current screen can be filling at any
@@ -367,8 +467,7 @@ static void lock_screen_init() {
   lv_subject_init_int(&drive_exit_gesture.progress, 0);
   lv_subject_init_int(&calibrate_gesture.progress, 0);
   // The ring round the padlock fills with the button hold.
-  lv_subject_add_observer_obj(&unlock_gesture.progress, lock_ring_hold_observer, ui_LockRing,
-                              nullptr);
+  drive_ui.bind_ring(&unlock_gesture.progress);
   // Calibrate's meter shows the hold filling, and is out of sight while it is
   // empty. Held by touch or by the stick button, it is the same fill.
   lv_bar_set_range(ui_CalibrateFill, 0, kHoldMax);

@@ -31,8 +31,7 @@ static bool seat_ready() {
 /////////////////////////////////////////////////////////////////////////////
 #include "hmi_ui/refusal_view.hpp"
 
-static constexpr uint32_t kDriveRefusedShowMs = 3000; // how long one refusal stays up
-static constexpr uint32_t kExitRefusedShowMs = 2000;  // a refused exit gets its own dwell
+static constexpr uint32_t kDriveRefusedShowMs = hmi::ui::DRIVE_REFUSED_SHOW_MS;
 // Which push was refused, so the panel can say which (hmi::ui::Refused).
 enum : int32_t {
   kRefusedNone = hmi::ui::REFUSED_NONE,

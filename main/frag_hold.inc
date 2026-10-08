@@ -51,8 +51,3 @@ static bool joy_button_held() { return joy_button_pressed.load(); }
 // hold) or not (a fault, the link), and drive_screen_follow_state brings the
 // Locked screen back with the reason on its banner.
 
-static constexpr int32_t kShackleRisePx = 30; // spec 01b: 103 px -> 133 px, bottom fixed
-static constexpr uint32_t kRingSpinMs = 900;  // one turn of the waiting arc
-static constexpr int32_t kRingWaitArc = 25;   // how much of the ring goes round
-static constexpr uint32_t kUnlockDissolveMs = 280;
-

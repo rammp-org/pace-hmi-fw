@@ -17,7 +17,7 @@ using hmi::ui::NavView;
 // The rule is the drive session's pure stick_drives (drive_session_table.hpp).
 static void nav_update_stick_gate() {
   stick_drives.store(hmi::drive_session::stick_drives(lv_subject_get_int(&locked_subject) != 0,
-                                                      drive_screen_of(lv_screen_active()),
+                                                      hmi::ui::drive_screen_of(lv_screen_active()),
                                                       nav_menu_open != nullptr));
 }
 
@@ -80,7 +80,7 @@ static constinit hmi::ui::NavView nav_view{{
     .refuse_seat =
         [] {
           refusal_feedback();
-          entry_refused_show(kRefusedSeat, kDriveRefusedShowMs);
+          drive_port.show_refused(kRefusedSeat, kDriveRefusedShowMs);
         },
     .drive_row = [] { return drive_session_input(hmi::drive_session::Input::MENU_ROW_DRIVE); },
     .drive_key = [] { (void)drive_session_input(hmi::drive_session::Input::MENU_KEY_DRIVE); },

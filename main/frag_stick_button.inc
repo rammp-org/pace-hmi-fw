@@ -75,9 +75,6 @@ static constexpr uint32_t kHoldMs = hmi::ui::HOLD_MS; // hold time to fill a ges
 // (hmi::stick::SELECT_MAX_US, the same value).
 static constexpr uint32_t kBarGraceMs = hmi::ui::HOLD_GRACE_MS;
 static constexpr int32_t kHoldMax = hmi::ui::HOLD_MAX; // arc/bar range (LVGL's default)
-// Beat between the unlock landing and the Drive screen dissolving in, so the
-// unlocked padlock is legible rather than a flash.
-static constexpr uint32_t kUnlockAdvanceMs = 1000;
 // Poll cadence for the inputs (matched to the ADC task's 33 ms period).
 static constexpr uint32_t kHoldPollMs = hmi::ui::HOLD_POLL_MS;
 // The gestures' timings are the drive table's (drive_session_table.hpp).

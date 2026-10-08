@@ -12,27 +12,10 @@
 #include "messages/mib_message.hpp"
 
 #include "hmi_ui/link_state.hpp"
+#include "hmi_ui/refused.hpp"
 #include "hmi_ui/shared_subjects.hpp"
 
 namespace hmi::ui {
-
-/// Which request was refused: the value of the `refused` subject. main's kRefused* name the
-/// same values (main static_asserts it).
-enum Refused : int32_t {
-  REFUSED_NONE = 0,
-  REFUSED_DRIVE = 1, ///< a push barred before it was sent; the cause is read live
-  REFUSED_SEAT = 2,
-  // These three are the MIB's own doing, so they stay up for their whole window rather than
-  // clearing the moment the MCB is ready again: the chair being fine again is exactly what
-  // makes them worth reading.
-  REFUSED_DRIVE_NOT_GRANTED = 3, ///< asked to drive, never got ENABLED
-  REFUSED_DRIVE_STOPPED = 4,     ///< was driving, the MIB stopped it
-  REFUSED_EXIT = 5,              ///< asked to stop, the MIB is still driving
-  REFUSED_DRIVE_LOST = 6,        ///< was driving, then the link went; cause read live
-  /// Drive picked from the menu while the MCB could not drive. Like REFUSED_SEAT: no push
-  /// holds it up, so it stays its window unless the cause clears.
-  REFUSED_DRIVE_MENU = 7,
-};
 
 /// A banner's body and footer.
 struct BannerLines {
