@@ -40,6 +40,12 @@ jobs:
         python3 tools/l0/include_boundary.py selftest
         python3 tools/l0/include_boundary.py check
 
+    # CS-FMT-01: the repo's pre-commit hooks (clang-format 14.0.6) on every file.
+    - name: Pre-commit (all files)
+      run: |
+        python3 -m pip install --quiet pre-commit
+        pre-commit run --all-files --show-diff-on-failure
+
     - name: UI contract (SquareLine export vs what main.cpp assumes)
       run: python3 scripts/ui_contract.py
 
