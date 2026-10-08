@@ -6,7 +6,6 @@
       "main/main.cpp": 1
     },
     "c_cast": {
-      "main/hmi_rtps_spec.hpp": 28,
       "main/lv_mem_psram.c": 1
     },
     "esp_error_check": {},
@@ -29,7 +28,6 @@
     },
     "if_config": {},
     "lines": {
-      "main/main.cpp": 1265,
       "main/selftest.cpp": 1030
     },
     "locks": {
@@ -53,12 +51,11 @@
     },
     "mutable_globals": {
       "main/about_ui.cpp": 1,
-      "main/hmi_rtps_spec.hpp": 5,
       "main/internet_ui.cpp": 4,
       "main/joystick_cal.cpp": 15,
       "main/log_capture.cpp": 8,
       "main/log_view.cpp": 1,
-      "main/main.cpp": 34,
+      "main/main.cpp": 6,
       "main/rtps_comms.cpp": 32,
       "main/selftest.cpp": 25,
       "main/update_ui.cpp": 4
@@ -76,8 +73,7 @@
       "main/update_ui.cpp": 1
     },
     "typedef": {
-      "components/joystick/include/joystick.hpp": 2,
-      "main/hmi_rtps_spec.hpp": 5
+      "components/joystick/include/joystick.hpp": 2
     },
     "vtaskdelay": {
       "main/selftest.cpp": 6
