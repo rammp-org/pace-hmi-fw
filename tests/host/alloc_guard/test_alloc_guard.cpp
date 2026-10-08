@@ -20,6 +20,8 @@ void sink(void *p) {
   std::free(p);
 }
 
+void release(void *p) { std::free(p); }
+
 unsigned count_of(void (*body)()) {
   unsigned hits = 0;
   {
@@ -75,7 +77,7 @@ TEST_CASE("AGD-006 a path that only uses the stack is not counted, and free is n
   unsigned char buf[64];
   TEST_ASSERT_NO_ALLOC({
     std::memset(buf, 0x5a, sizeof buf);
-    std::free(outside);
+    release(outside);
   });
   TEST_ASSERT_EQUAL_UINT8(0x5a, buf[63]);
 }
