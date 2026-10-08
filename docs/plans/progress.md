@@ -1,7 +1,7 @@
 # Refactor progress (living report)
 
 Updated by the orchestrator after each merge into `dev_refactor`. Last update: 2026-10-07 (PAUSED at the owner's request),
-`dev_refactor` at 24e4571. Nothing has gone to `dev` or `main`; no PR was opened.
+`dev_refactor` at ec219e4. Nothing has gone to `dev` or `main`; no PR was opened.
 
 ## Where it stands
 
@@ -71,6 +71,20 @@ branch: `storage`, `settings`, `ota`, `remote_ui`.
 | P5 | fw-standards branch `ai/cmake-include-order` | **Merge into fw-standards `dev`** (approved) |
 | P6 | Scope when resuming | **Plan scope**: finish app_main ≤300 (StickIsland, adapters, RtpsUiBridge, §4 view inits), bench and merge the modules and K1 branches, refresh the docs; rtps_comms and selftest stay in main |
 | P7 | Agent budget | **2 Opus lanes + Sonnet bench** |
+
+### State at the 2026-10-07 evening reboot
+- Bench network: the hotspot will not start after the first reboot, so the bench moves to Ethernet.
+  `dev_refactor` ec219e4 adds `BENCH_NET=lan:<pc ip>/<prefix>` (B0 skips tethering, B2 expects
+  `Network: Ethernet` and `network 0`). Board 2 is on Ethernet (saved setting network 0) and gets
+  10.0.0.197 from a 10.0.0.1 router; the PC is on Skynet_AZ 192.168.9.x and reaches 10.0.0.x only
+  through Tailscale, which is not a valid bench path (no multicast; unknown peers). Needed: the
+  PC's Ethernet port cabled to the same PoE switch (the PC then gets its own 10.0.0.x lease).
+- Board: final-a9a040f, no lease held.
+- K1 lane: `dev_ai_refactor_shrink_k1`, d192403 green (app_main 237) plus c20e603 (DiagnosticsView
+  owns its subjects) and work in progress (UI build into hmi_ui, Set A item 7). Unit-size decision:
+  Set A items 7, 4, 6 now; 1 and 3 after the modules merge; 2 and 5 skipped; no option C
+  (ratchet frozen list stays). Set A + 1 + 3 lands near 1320 lines; ≤1000 (CS-FIL-01) needs
+  Set B (nav/refusal/lock glue behind name-preserving aliases): an owner decision, or a deviation row.
 
 ### Resume checklist
 1. Modules branch `dev_ai_refactor_modules` bb37381: confirm CI green (bench_inject init_order is CI-only), build the Wi-Fi bench image, Sonnet bench run, merge, ratchet update.
