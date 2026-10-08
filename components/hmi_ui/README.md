@@ -40,6 +40,7 @@ behaviour.
 | `include/hmi_ui/refusal_view.hpp`, `src/refusal_view.cpp` | `RefusalView`: the ErrorBanners that say why driving or the seat is not permitted (a refused request; a drive cut short or an exit refused), their dwell timer and the hold poll's push check (from `main/frag_refusal.inc`). The texts table stays in main; `mcb_ready` and `seat_ready` are drive_ui.hpp's |
 | `include/hmi_ui/rtps_label_view.hpp`, `src/rtps_label_view.cpp` | `RtpsLabelView`: the TopBar's RTPS label (from `main/frag_rtps_label.inc`) |
 | `include/hmi_ui/seat_view.hpp`, `src/seat_view.cpp` | `SeatView`: the SeatScreen's function buttons and adjustment page, and the seat numbers on them (from `main/frag_seat.inc`, the seat parts of `frag_settings_ui.inc` and app_main's wiring). The seat command path (`seat_step`, `seat_request`, `seat_apply_state`) stays in main |
+| `include/hmi_ui/stick_button.hpp`, `src/stick_button.cpp` | `StickButton`: one edge of the stick button (GPIO48): the Joystick screen's pressed panel and counter, the level for the ADC task and the select key, in that order, on `stick`'s ButtonEdges (from `main/frag_stick_button.inc`). Runs on the button's task; main's caller holds lvgl_mutex |
 | `include/hmi_ui/status_band_view.hpp`, `src/status_band_view.cpp` | `StatusBandView`: the DriveBand's DRIVE and STATE cells, on every resident and on-demand screen (from `main/frag_status_band.inc`) |
 | `include/hmi_ui/widget_tree.hpp`, `src/widget_tree.cpp` | `for_each_descendant` (iterative, pre-order, bounded), `set_focused_recursive`, `clear_click_focusable_recursive`: helpers for rows and buttons whose look spans their children (from `main/frag_settings_ui.inc`) |
 | `include/hmi_ui/update_view.hpp`, `src/update_view.cpp` | `UpdateView`, `ReleaseList`, `InstallStage`, `InstallStatus`: the UpdateScreen's three pages (from `main/update_ui.cpp`); the release list, the install, the worker thread, the hand-back to the LVGL task and the restart after an install (with its may_restart guard) are main's (`main/update_ui.cpp`) |
@@ -93,7 +94,7 @@ behaviour.
   `topo.task_config(...)` is a later step, made once the owner has reviewed the TASKS rows,
   and it comes with its own G10 baseline.
 - Dependencies, public (the headers use their types): `drive_adapter` and `drive_session`
-  (DrivePort, DriveUi), `lvgl`, `hmi_format` (texts,
+  (DrivePort, DriveUi), `stick` (StickButton's ButtonEdges), `lvgl`, `hmi_format` (texts,
   `StepperSpec`), `hmi_models` (`grid.hpp`, `pin.hpp`), `rammp_rtps_messages`
   (`MIB::MibSystemState`, the seat axis table), `ota_parse` (`hmi::ota::Release`),
   `esp_driver_ppa`, espp `logger` and `task` (`UiIsland`), and `settings` (the spec table and the saved values). Private: `ui` (the export: widgets, component children,
