@@ -4,7 +4,7 @@
 
 namespace hmi::ui {
 
-void for_each_resident_chrome(void (*bind)(const ScreenChrome &chrome)) {
+void for_each_resident_chrome(Fn<void(const ScreenChrome &chrome)> bind) {
   const ScreenChrome kChrome[] = {
       // DRIVE goes "home", which while locked IS this screen; on it, the cell
       // only closes the menu. The unlock hold, or the menu's Drive row, is the way in.

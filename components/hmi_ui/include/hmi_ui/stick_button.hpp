@@ -12,15 +12,15 @@
 
 namespace hmi::ui {
 
-/// One instance (main's, constinit). `edge` runs on the button's interrupt task (espp's
+/// One instance (UiApp's). `edge` runs on the button's interrupt task (espp's
 /// "Button" task), with lvgl_mutex held by main's caller: it writes subjects, whose observers
 /// touch widgets. No lock here (CS-OWN-08: the caller keeps it).
 class StickButton {
 public:
   struct Config {
     JoystickView *view;        ///< the pressed panel and the press counter's subjects
-    std::atomic<bool> *level;  ///< main's joy_button_pressed: the raw level, for the ADC task
-    std::atomic<bool> *select; ///< main's select_key: one ENTER for the keypad read
+    std::atomic<bool> *level;  ///< app_state's joy_button_pressed: the raw level, for the ADC task
+    std::atomic<bool> *select; ///< app_state's select_key: one ENTER for the keypad read
   };
 
   constexpr explicit StickButton(const Config &config) noexcept

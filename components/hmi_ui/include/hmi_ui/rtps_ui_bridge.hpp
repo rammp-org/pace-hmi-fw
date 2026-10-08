@@ -7,6 +7,7 @@
 #include "lvgl.h"
 
 #include "hmi_ui/drive_band_view.hpp"
+#include "hmi_ui/fn.hpp"
 #include "hmi_ui/refusal_view.hpp"
 #include "hmi_ui/status_band_view.hpp"
 #include "messages/joystick_message.hpp"
@@ -18,11 +19,11 @@ namespace hmi::ui {
 /// observers then repaint (CS-UI-05). Both calls run on the RTPS receive task with
 /// lvgl_mutex held by the caller (main's handlers take it: lv_subject_set_int runs the
 /// observers synchronously, on this task, and they touch widgets). No lock of its own. One
-/// instance, main's, built at compile time.
+/// instance, UiApp's.
 class RtpsUiBridge {
 public:
   struct Config {
-    /// int: the MIB's system state (main's mib_state_subject).
+    /// int: the MIB's system state (UiApp's).
     lv_subject_t *mib_state;
     /// The Drive screen's speed and profile.
     DriveBandView *drive_band;
@@ -30,9 +31,9 @@ public:
     StatusBandView *status_band;
     /// The error banner's text and footer.
     RefusalView *refusal;
-    /// The seat values (main's seat_apply_state).
-    void (*seat_apply_state)(const MIB::seatState &seat);
-    /// main's diagnostics readings, raw, [item][reading].
+    /// The seat values (UiApp's seat_apply_state).
+    Fn<void(const MIB::seatState &seat)> seat_apply_state;
+    /// DiagnosticsView's readings, raw, [item][reading].
     lv_subject_t (*diag_values)[rammp::kDiagFields];
   };
 

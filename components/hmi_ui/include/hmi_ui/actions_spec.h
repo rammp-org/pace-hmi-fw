@@ -4,8 +4,8 @@
  * - One X line per button, drawn in table order: a title, a subtitle, and
  *   whether it needs the MCB (greyed out while the link is down or the MCB's
  *   state is not OK).
- * - What a button DOES is main.cpp's kActionRun table, in the same order: a
- *   local function, or a request to the MCB over RTPS.
+ * - What a button DOES is hmi::ui::UiApp's action_run_ table (ui_app.hpp), in the
+ *   same order: a local function, or a request to the MCB over RTPS.
  * - HMI-only: nothing here crosses the wire (see messages/joystick_message.hpp for that).
  */
 

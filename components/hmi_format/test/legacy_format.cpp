@@ -16,7 +16,7 @@
 extern "C" int lv_snprintf(char *buffer, size_t count, const char *format, ...);
 
 namespace {
-// Stand-ins for main/hmi_rtps_spec.hpp:118-119.
+// Stand-ins for components/hmi_rtps_spec/include/hmi_rtps_spec.hpp:118-119.
 namespace rammp {
 inline constexpr float kMphPerMps = 2.236936f;
 inline constexpr int32_t kSpeedMaxTenths = 99; // 9.9 mph, the widest the label fits

@@ -619,7 +619,7 @@ void hmi::ui::NavView::attach_chrome(lv_obj_t *key, lv_obj_t *overlay, lv_obj_t 
     lv_obj_t *row = ui_comp_get_child(overlay, kNavRowIds[static_cast<size_t>(gated)]);
     lv_obj_set_style_opa(row, LV_OPA_40, ActionsView::UNAVAILABLE_STYLE);
     for (lv_subject_t *subject : {config_.shared->rtps_link, config_.shared->mib_state}) {
-      lv_subject_add_observer_obj(subject, config_.ready_observer, row, nullptr);
+      lv_subject_add_observer_obj(subject, config_.ready_observer, row, config_.ready_data);
     }
   }
 

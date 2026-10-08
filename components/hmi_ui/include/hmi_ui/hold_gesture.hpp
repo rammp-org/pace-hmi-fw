@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <span>
 
+#include "hmi_ui/fn.hpp"
 #include "lvgl.h"
 
 namespace hmi::ui {
@@ -34,7 +35,7 @@ struct HoldGesture {
   lv_subject_t progress{};            ///< 0..HOLD_MAX; the arc/bar is bound to this
   bool *armed;                        ///< the input's "released since the last completion"
   bool (*is_held)();                  ///< is the input held right now (sampled on the UI task)
-  bool (*applies)();                  ///< is this gesture live on the current screen/page
+  Fn<bool()> applies;                 ///< is this gesture live on the current screen/page
   void (*completed)();                ///< what a full hold does
   uint32_t grace_ms = 0;              ///< dead time before the widget starts filling
   bool holding = false;               ///< edge detector for is_held && applies
@@ -47,14 +48,14 @@ struct HoldGesture {
 class HoldEngine {
 public:
   struct Config {
-    /// Confirmation feedback when a hold completes, the same for every gesture (main's
+    /// Confirmation feedback when a hold completes, the same for every gesture (UiApp's
     /// STRONG_CLICK haptic and click sound). Must not block the UI task.
-    void (*confirm)();
+    Fn<void()> confirm;
     /// The self-test overlay is up: it owns the stick, so every fill is cancelled.
     bool (*overlay_up)();
-    /// Runs before the gestures on each poll without the overlay (main's refusal check, which
+    /// Runs before the gestures on each poll without the overlay (RefusalView::poll, which
     /// shadows the unlock gesture on the same input and cadence).
-    void (*before_poll)();
+    Fn<void()> before_poll;
   };
 
   constexpr explicit HoldEngine(const Config &config) noexcept
@@ -65,7 +66,7 @@ public:
   /// UI task, lvgl_mutex held.
   void poll(HoldGesture *g) const;
 
-  /// @brief One poll of every gesture, in order (main's hold poll timer, every HOLD_POLL_MS).
+  /// @brief One poll of every gesture, in order (UiApp's hold poll timer, every HOLD_POLL_MS).
   ///        With the overlay up, cancels any fill instead and polls nothing.
   /// UI task, lvgl_mutex held.
   void poll_all(std::span<HoldGesture *const> gestures) const;

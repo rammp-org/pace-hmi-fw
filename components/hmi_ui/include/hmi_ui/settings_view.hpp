@@ -6,6 +6,7 @@
 #include "lvgl.h"
 
 #include "hmi_format/stepper.hpp"
+#include "hmi_ui/fn.hpp"
 #include "hmi_ui/nav_port.hpp"
 #include "hmi_ui/setting_subjects.hpp"
 
@@ -14,9 +15,9 @@ namespace hmi::ui {
 /// A page is a title and some rows; each row is the export's SettingRow component: short
 /// label, label, value, and -/+ buttons that grey out at the ends of the range. Up/down move
 /// between rows, left/right step the focused one (holding the stick repeats), and touch works
-/// on the buttons. What a page holds, and what a step on it means, is main's: a settings row
+/// on the buttons. What a page holds, and what a step on it means, is UiApp's: a settings row
 /// sets its subject (whose owner applies and saves it); an actuator row asks main to step the
-/// seat (main's seat_step), and its number moves only when the MCB says so. The screen and its
+/// seat (UiApp's seat_step), and its number moves only when the MCB says so. The screen and its
 /// rows exist only while it is up.
 class SettingsView {
 public:
@@ -32,13 +33,13 @@ public:
     const NavPort *nav;
     lv_subject_t *locked;      ///< int: 1 = locked; a locked_only row refuses a step while 0
     SettingSubjects *subjects; ///< what each settings row shows and steps
-    /// main's seat_axis_value[rammp::kSeatAxisCount]: what each actuator row shows (raw units,
+    /// UiApp's seat_axis_value_[rammp::kSeatAxisCount]: what each actuator row shows (raw units,
     /// as the MCB last reported them).
     lv_subject_t *seat_values;
-    void (*screen_ensure)(); ///< builds the screen if it is not up (main's on-demand code)
-    int32_t actuators_page;  ///< the page number of the actuator rows
-    void (*seat_step)(size_t row, int direction); ///< main's: one actuator step, a request
-    void (*refuse)();                             ///< the refusal cue
+    Fn<void()> screen_ensure; ///< builds the screen if it is not up (OnDemandScreens)
+    int32_t actuators_page;   ///< the page number of the actuator rows
+    Fn<void(size_t row, int direction)> seat_step; ///< UiApp's: one actuator step, a request
+    void (*refuse)();                              ///< the refusal cue
   };
 
   constexpr explicit SettingsView(const Config &config) noexcept
@@ -52,7 +53,7 @@ public:
   /// The rows' group (init()), for the joystick.
   [[nodiscard]] lv_group_t *group() const { return group_; }
   /// int: the page that is up, a SETTINGS_PAGE_* or Config::actuators_page. A subject because
-  /// main's warning panel depends on it; main initialises it before that panel binds.
+  /// UiApp's warning panel depends on it; UiApp initialises it before that panel binds.
   [[nodiscard]] constexpr lv_subject_t *page() { return &page_; }
   /// @brief Fills the screen for @p page and shows it: the actuator rows (DEBUG ACTUATORS),
   ///        or the settings_spec.hpp rows of that page.
@@ -66,7 +67,7 @@ public:
   /// @brief Adds one row.
   /// @param spec how it reads and steps
   /// @param value its subject (raw units; VALUE_UNKNOWN greys both buttons)
-  /// @param actuator an actuator row: a step is main's seat request, and the row shows the
+  /// @param actuator an actuator row: a step is UiApp's seat request, and the row shows the
   ///        rejection flash
   /// UI task.
   void row_add(const format::StepperSpec &spec, lv_subject_t *value, bool actuator);

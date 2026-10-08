@@ -14,7 +14,7 @@ namespace hmi::ui {
 class BrightnessView {
 public:
   struct Config {
-    lv_subject_t *subject;            ///< main's brightness_subject (the Settings row steps it)
+    lv_subject_t *subject;            ///< the Settings Brightness row's subject (it steps it)
     int min_percent;                  ///< the lowest level `set` gives; above 0
     int max_percent;                  ///< the highest level `set` gives
     void (*backlight)(float percent); ///< the board's backlight call; any task

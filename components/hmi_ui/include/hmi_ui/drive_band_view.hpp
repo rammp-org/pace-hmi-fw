@@ -6,6 +6,7 @@
 
 #include "lvgl.h"
 
+#include "hmi_ui/fn.hpp"
 #include "hmi_ui/nav_port.hpp"
 
 namespace hmi::ui {
@@ -20,12 +21,12 @@ public:
   struct Config {
     /// The MIB::DriveProfile values of the three buttons, in bind order: Manual, Assist, Auto.
     std::array<int32_t, 3> profiles;
-    /// Mirrors a profile out to the ADC task (main's drive_profile_published). Any context.
+    /// Mirrors a profile out to the ADC task (app_state's drive_profile_published). Any context.
     void (*store_profile)(int32_t profile);
     /// The drive session's PROFILE_CLICK input (re-publishes the request with the new profile).
     /// UI task, lvgl_mutex held.
-    void (*profile_clicked)();
-    /// main's navigation: `mirror_states` makes a button's label follow its pressed and
+    Fn<void()> profile_clicked;
+    /// Navigation: `mirror_states` makes a button's label follow its pressed and
     /// checked states.
     const NavPort *nav;
   };

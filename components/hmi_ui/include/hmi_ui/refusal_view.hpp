@@ -11,6 +11,7 @@
 
 #include "messages/mib_message.hpp"
 
+#include "hmi_ui/fn.hpp"
 #include "hmi_ui/link_state.hpp"
 #include "hmi_ui/refused.hpp"
 #include "hmi_ui/shared_subjects.hpp"
@@ -54,14 +55,14 @@ public:
     const RefusalTexts *texts;                ///< the words
     lv_subject_t *refused;                    ///< int: Refused; banners up unless REFUSED_NONE
     bool (*wifi)();                           ///< the link is Wi-Fi (rtps_comms_net_link)
-    bool (*mcb_ready)();                      ///< link CONNECTED and the MIB IDLE or ENABLED
+    Fn<bool()> mcb_ready;                     ///< link CONNECTED and the MIB IDLE or ENABLED
     void (*play_refusal)(bool warning);       ///< the refusal sound (warning = louder)
     void (*keep_overlay_fill)(lv_obj_t *obj); ///< main's overdraw exemption
     bool (*button_held)();                    ///< the stick button, now (joy_button_held)
     int64_t (*now_us)();                      ///< esp_timer_get_time
     bool (*menu_open)();                      ///< the burger menu is open
     /// The drive session's ENTRY_PUSH input; true when its row acted (a refusal was raised).
-    bool (*entry_push)();
+    Fn<bool()> entry_push;
     uint32_t grace_ms; ///< a press shorter than this is a tap, not a push (kBarGraceMs)
   };
 
@@ -118,7 +119,7 @@ public:
   void clear() const;
   /// @brief One hold poll's refusal check: a push held past the grace on the Locked screen goes
   ///        to the drive session (ENTRY_PUSH); a refusal whose cause cleared is cleared.
-  /// UI task (main's hold poll timer), lvgl_mutex held.
+  /// UI task (UiApp's hold poll timer), lvgl_mutex held.
   void poll();
 
 private:

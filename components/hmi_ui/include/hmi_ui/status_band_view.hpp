@@ -23,10 +23,10 @@ public:
   static constexpr const char *UNKNOWN_TEXT = "---";
 
   struct Config {
-    const SharedSubjects *shared; ///< main's subjects
+    const SharedSubjects *shared; ///< UiApp's subjects
   };
 
-  /// The texts' buffer size, the shared spec's kMcbTextLen (main static_asserts it): shows up
+  /// The texts' buffer size, the shared spec's kMcbTextLen (UiApp static_asserts it): shows up
   /// to 15 chars.
   static constexpr size_t TEXT_SIZE = 16;
 

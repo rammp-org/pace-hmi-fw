@@ -7,6 +7,7 @@
 
 #include "lvgl.h"
 
+#include "hmi_ui/fn.hpp"
 #include "hmi_ui/shared_subjects.hpp"
 
 namespace hmi::ui {
@@ -39,7 +40,7 @@ enum NavDest : int {
 /// One instance. Spec V2 navigates with the burger menu: the key at the bottom of every screen
 /// opens a full-screen overlay of destinations, and DRIVE in the band goes home from anywhere.
 /// Every call is on the UI task (LVGL events, timers and screen loads) with lvgl_mutex held,
-/// or in app_main before lv_task starts. The stick gate is main's: `gate_update` runs at
+/// or in app_main before lv_task starts. The stick gate is DriveUi's: `gate_update` runs at
 /// exactly the gate's trigger points here (nav_close_menu, nav_open_menu, nav_go, nav_arrive;
 /// drive_session_table.hpp GATE_TRIGGERS), in the same places as before.
 class NavView {
@@ -47,27 +48,28 @@ public:
   struct Config {
     const SharedSubjects *shared; ///< `locked` is read; `rtps_link`, `mib_state` gate two rows
     lv_subject_t *menu_slide;     ///< int: 0 = the menu appears at once, 1 = it slides
-    lv_obj_t **menu_open;         ///< main's nav_menu_open: the overlay up, else null
-    bool *menu_on_arrival;        ///< main's nav_menu_on_arrival: open it on the next load
-    void (*gate_update)();        ///< main's nav_update_stick_gate
-    void (*keep_overlay_fill)(lv_obj_t *obj); ///< main's overdraw exemption
-    /// Greys a gated row while the MCB could not act on it (main's action_ready_observer).
+    lv_obj_t **menu_open;         ///< app_state's nav_menu_open: the overlay up, else null
+    bool *menu_on_arrival;        ///< app_state's nav_menu_on_arrival: open it on the next load
+    Fn<void()> gate_update;       ///< DriveUi::update_stick_gate
+    void (*keep_overlay_fill)(lv_obj_t *obj); ///< the overdraw exemption
+    /// Greys a gated row while the MCB could not act on it (UiApp's action_ready_observer).
     lv_observer_cb_t ready_observer;
-    bool (*mcb_ready)();   ///< link CONNECTED and the MIB IDLE or ENABLED
-    void (*refuse_seat)(); ///< Seat Functions refused: the refusal feedback and banner
+    void *ready_data;       ///< the observer's user data
+    Fn<bool()> mcb_ready;   ///< link CONNECTED and the MIB IDLE or ENABLED
+    Fn<void()> refuse_seat; ///< Seat Functions refused: the refusal feedback and banner
     /// The DRIVE row: the drive session's MENU_ROW_DRIVE; true when it refused the pick.
-    bool (*drive_row)();
-    void (*drive_key)(); ///< the burger key on Drive, unlocked: MENU_KEY_DRIVE
+    Fn<bool()> drive_row;
+    Fn<void()> drive_key; ///< the burger key on Drive, unlocked: MENU_KEY_DRIVE
     /// The destinations main opens itself (Skunk Works, Diagnostics, the two Settings pages).
-    void (*open_dest)(NavDest dest);
-    /// A screen came up: hand the joystick its group and put the cursor at its top (main's
+    Fn<void(NavDest dest)> open_dest;
+    /// A screen came up: hand the joystick its group and put the cursor at its top (UiApp's
     /// per-screen wiring).
-    void (*enter_screen)(const lv_obj_t *screen);
-    /// After the arrival's gate update (main: the bench PIN is asked again on every visit).
-    void (*arrived)(const lv_obj_t *screen);
-    /// The lost-cursor backstop is about to re-enter `screen` (main logs it: some path left
+    Fn<void(const lv_obj_t *screen)> enter_screen;
+    /// After the arrival's gate update (UiApp: the bench PIN is asked again on every visit).
+    Fn<void(const lv_obj_t *screen)> arrived;
+    /// The lost-cursor backstop is about to re-enter `screen` (UiApp logs it: some path left
     /// the group behind, and that path wants fixing too).
-    void (*cursor_lost)(const lv_obj_t *screen);
+    Fn<void(const lv_obj_t *screen)> cursor_lost;
   };
 
   /// p21 "HOME BUTTON": a dissolve from any screen back to Drive.

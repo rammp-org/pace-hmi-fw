@@ -129,7 +129,7 @@ The serial log says which link came up (`Network: WiFi`), the C6's firmware, the
 
 - The shared spec is [rammp-rtps](https://github.com/rammp-org/rammp-rtps), the git submodule `external/rammp-rtps`.
 - `messages/joystick_message.hpp` there holds the joystick's commands, the shared tables and Diagnostics; `messages/mib_message.hpp` holds `MIB::MibStatus`, the chair's own state. Between them they are everything the MIB and the HMI share, and the first has an espp example at the top.
-- `main/hmi_rtps_spec.hpp` adds what only this HMI needs: timing, display limits, the bench self-test topics.
+- `components/hmi_rtps_spec` (`hmi_rtps_spec.hpp`) adds what only this HMI needs: timing, display limits, the bench self-test topics.
 - Messages are plain C++ structs serialized by espp/cdr as **XCDR1** (classic CDR), so any DDS / ROS 2 stack can talk to it.
 - Every topic is best-effort; the MCB resends its state periodically.
 - The MCB owns the chair's state; the HMI shows it and asks for changes.

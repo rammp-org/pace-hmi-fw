@@ -4,6 +4,7 @@
 #include "lvgl.h"
 
 #include "hmi_models/grid.hpp"
+#include "hmi_ui/fn.hpp"
 
 namespace hmi::ui {
 
@@ -19,8 +20,8 @@ struct ButtonGrid {
   int row = 0; ///< cursor
   int col = 0;
   bool left_edge_is_back = false; ///< left from the first column leaves the page (off_left)
-  void (*off_bottom)() = nullptr; ///< down from the bottom row; must be set (main: nav_to_key)
-  void (*off_left)() = nullptr;   ///< left off the edge; set when left_edge_is_back
+  Fn<void()> off_bottom{}; ///< down from the bottom row; must be set (UiApp: NavView::to_key)
+  Fn<void()> off_left{};   ///< left off the edge; set when left_edge_is_back
 };
 
 /// @brief The grid as the cursor model sees it: row lengths, and a hole where a cell is null.

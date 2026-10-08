@@ -39,7 +39,8 @@ void hmi::ui::OnDemandScreens::ensure_settings() {
   ui_Parameter1 = nullptr;
   config_.bind_chrome(ui_DriveBand7, ui_TopBar8, ui_MenuKey7, ui_MenuOverlay7);
   config_.settings_bound();
-  lv_obj_add_event_cb(ui_SettingsScreen, config_.screen_loaded, LV_EVENT_SCREEN_LOADED, nullptr);
+  lv_obj_add_event_cb(ui_SettingsScreen, config_.screen_loaded, LV_EVENT_SCREEN_LOADED,
+                      config_.screen_loaded_data);
   lv_obj_add_event_cb(ui_SettingsScreen, settings_unloaded_cb, LV_EVENT_SCREEN_UNLOADED, this);
   config_.strip_overdraw(ui_SettingsScreen);
 }
@@ -64,7 +65,8 @@ void hmi::ui::OnDemandScreens::ensure_actions() {
   // Its ErrorBanner stays down: an action that needs the MCB greys out
   // instead (action_ready_observer), which keeps the local ones reachable.
   lv_obj_add_flag(ui_ErrorBanner7, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_add_event_cb(ui_SkunkWorksScreen, config_.screen_loaded, LV_EVENT_SCREEN_LOADED, nullptr);
+  lv_obj_add_event_cb(ui_SkunkWorksScreen, config_.screen_loaded, LV_EVENT_SCREEN_LOADED,
+                      config_.screen_loaded_data);
   lv_obj_add_event_cb(ui_SkunkWorksScreen, actions_unloaded_cb, LV_EVENT_SCREEN_UNLOADED, this);
   config_.strip_overdraw(ui_SkunkWorksScreen);
 }
@@ -96,7 +98,8 @@ void hmi::ui::OnDemandScreens::ensure_diagnostics() {
   // would cover exactly what someone opened the screen to look at.
   lv_obj_add_flag(ui_ErrorBanner8, LV_OBJ_FLAG_HIDDEN);
   config_.diagnostics_bound();
-  lv_obj_add_event_cb(ui_DiagnosticsScreen, config_.screen_loaded, LV_EVENT_SCREEN_LOADED, nullptr);
+  lv_obj_add_event_cb(ui_DiagnosticsScreen, config_.screen_loaded, LV_EVENT_SCREEN_LOADED,
+                      config_.screen_loaded_data);
   lv_obj_add_event_cb(ui_DiagnosticsScreen, diagnostics_unloaded_cb, LV_EVENT_SCREEN_UNLOADED,
                       this);
   config_.strip_overdraw(ui_DiagnosticsScreen);

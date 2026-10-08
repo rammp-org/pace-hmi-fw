@@ -5,12 +5,13 @@
 
 #include "lvgl.h"
 
+#include "hmi_ui/fn.hpp"
 #include "hmi_ui/nav_port.hpp"
 
 namespace hmi::ui {
 
 /// One tile per action main lists (actions_spec.h): its title, its subtitle, and whether it
-/// needs the MCB. What a tile does is main's (Config::run). The stick walks the tiles as the
+/// needs the MCB. What a tile does is UiApp's (Config::run). The stick walks the tiles as the
 /// grid the flex panel wraps them into; the stick button (or a tap) runs the focused one. A
 /// tile that needs the MCB is greyed (UNAVAILABLE) while main says the MCB could not act on
 /// it, stays walkable, and refuses a press. The screen and its tiles exist only while it is up.
@@ -33,12 +34,12 @@ public:
 
   struct Config {
     const NavPort *nav;
-    const Tile *tiles;       ///< `count` tiles, in the order they are drawn
-    void (*const *run)();    ///< what each tile does, by index; UI task (a click)
-    int count;               ///< at most TILES_MAX
-    void (*screen_ensure)(); ///< builds the screen if it is not up (main's on-demand code)
-    /// binds a tile needing the MCB to every subject main's readiness test reads
-    void (*bind_ready)(lv_obj_t *tile, lv_observer_cb_t observer);
+    const Tile *tiles;        ///< `count` tiles, in the order they are drawn
+    const Fn<void()> *run;    ///< what each tile does, by index; UI task (a click)
+    int count;                ///< at most TILES_MAX
+    Fn<void()> screen_ensure; ///< builds the screen if it is not up (OnDemandScreens)
+    /// binds a tile needing the MCB to every subject the readiness test reads
+    Fn<void(lv_obj_t *tile, lv_observer_cb_t observer)> bind_ready;
     lv_observer_cb_t ready_observer; ///< sets UNAVAILABLE on its target while the MCB is not
     void (*refuse)();                ///< the refusal cue for a greyed tile
   };
