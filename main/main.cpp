@@ -132,6 +132,17 @@ static void lvgl_cycle() {
   lv_task_handler();
 }
 
+// What the RTPS receive task's handlers change in the UI (RtpsUiBridge); the handlers in
+// app_main take lvgl_mutex around it.
+static constinit const hmi::ui::RtpsUiBridge rtps_ui_bridge({
+    .mib_state = &mib_state_subject,
+    .drive_band = &drive_band_view,
+    .status_band = &status_band_view,
+    .refusal = &refusal_view,
+    .seat_apply_state = seat_apply_state,
+    .diag_values = diag_value,
+});
+
 // ---------------------------------------------------------------------------
 // Adapters: the callbacks the board's own tasks run (app-main-shrink §3). Each
 // stays on the task that calls it today; app_main builds and registers them.
@@ -1026,29 +1037,11 @@ extern "C" void app_main(void) {
   rtps_comms_on_mib_status([](const MIB::MibStatus &status) {
     clock_note_mcb_time(status); // no LVGL: sets the system clock and the RTC
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
-    lv_subject_set_int(&mib_state_subject, static_cast<int32_t>(status.systemState));
-    // What the MIB is actually driving with: the three profile buttons highlight from
-    // this, so they follow the chair even when something else changed it.
-    lv_subject_set_int(drive_band_view.profile_subject(),
-                       static_cast<int32_t>(status.activeProfile));
-    // m/s on the wire, mph on the dial: the shared spec carries the real
-    // quantity and the unit on the label is ours to pick.
-    lv_subject_set_int(drive_band_view.speed_subject(), speed_display_tenths(status.speed));
-    // copy_string cuts each text to its subject's buffer (RAMMP_*_LEN). drive_text stays
-    // empty: the MIB sends one wording, and the state label is where it belongs.
-    lv_subject_copy_string(status_band_view.state_text(), status.status_text.c_str());
-    lv_subject_copy_string(refusal_view.error_text(), status.error_message.c_str());
-    lv_subject_copy_string(refusal_view.error_footer(), status.error_footer.c_str());
-    seat_apply_state(status.currentSeatState);
+    rtps_ui_bridge.apply_mib_status(status);
   });
   rtps_comms_on_diagnostics([](const rammp::Diagnostics &diag) {
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
-    for (size_t i = 0; i < std::min<size_t>(diag.items.size(), rammp::kDiagCount); i++) {
-      const auto &values = diag.items[i].values;
-      for (size_t f = 0; f < std::min<size_t>(values.size(), rammp::kDiagFields); f++) {
-        lv_subject_set_int(&diag_value[i][f], values[f]);
-      }
-    }
+    rtps_ui_bridge.apply_diagnostics(diag);
   });
   if (!rtps_comms_start(static_cast<NetLink>(settings_get(SETTINGS_PARAM_NETWORK)))) {
     logger.warn("RTPS comms not started (network bring-up failed)");
