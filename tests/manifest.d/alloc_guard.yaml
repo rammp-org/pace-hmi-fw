@@ -1,0 +1,16 @@
+# L1 host app for the host allocation guard, tests/host/alloc_guard.{hpp,cpp} (cases AGD-001..
+# in tests/host/alloc_guard/): while armed, malloc, calloc, realloc, strdup, aligned forms and
+# operator new are counted, and nothing else (TS-DET-08).
+# spec-deviation(TS-UNIT-01): host-native g++ in WSL, not the IDF linux target (owner, 2026-10-06).
+- id: L1-AGD
+  title: host allocation guard counts the allocation forms while armed
+  level: L1
+  path: tests/host/alloc_guard
+  requirements: []
+  resources: [host]
+  timeout_s: 300
+  expected_s: 30
+  repeat: 1
+  pass_threshold: 1
+  safety: false
+  artifact: test
