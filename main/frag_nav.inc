@@ -41,7 +41,7 @@ static void nav_enter_screen(const lv_obj_t *screen) {
     nav_use_group(actions_group, screen);
     action_focus(0);
   } else if (screen == ui_DiagnosticsScreen) {
-    nav_use_group(diag_group, screen);
+    nav_use_group(diag_view.group(), screen);
     diag_focus(0);
   } else if (screen == ui_InternetScreen) {
     internet_ui_on_load(); // its own groups, one per page

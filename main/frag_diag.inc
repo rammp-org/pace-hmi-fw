@@ -26,34 +26,19 @@
 
 static_assert(rammp::kDiagFields == 3, "the DiagnosticComponent has exactly three readings");
 
-// Readings, raw, [table row][reading]; kValueUnknown until the MCB sends one.
-// Static: the rows' observers point at them, and they keep updating with no
-// screen up.
-static lv_subject_t diag_value[rammp::kDiagCount][rammp::kDiagFields];
-static lv_subject_t diag_stale_subject; // 1 = nothing within rammp::kDiagTimeout, or ever
-static lv_subject_t diag_rate_subject;  // arrival rate, tenths of a Hz
-static lv_group_t *diag_group = nullptr;
-
-// Keeps diag_stale_subject and diag_rate_subject current. LVGL task, from
-// rtps_poll_cb: staleness has to be polled - nothing happens when a sample
-// fails to arrive.
-static void diag_poll() {
-  const RtpsDiagStats stats = rtps_comms_diag_stats();
-  const bool stale =
-      stats.last_us == 0 ||
-      esp_timer_get_time() - stats.last_us >
-          std::chrono::duration_cast<std::chrono::microseconds>(rammp::kDiagTimeout).count();
-  lv_subject_set_int(&diag_stale_subject, stale ? 1 : 0);
-  lv_subject_set_int(&diag_rate_subject, stale ? 0 : stats.rate_tenths_hz);
-}
-
-// The one instance; the readings, the stale and rate subjects and the group stay out here
-// (rtps_poll_cb, the RTPS handler, the on-demand screen and nav use them).
+// The one instance. It owns the readings (the RTPS handler writes them through
+// RtpsUiBridge), the stale and rate subjects and the rows' group; main's 250 ms poll
+// (rtps_poll_cb) keeps the stale and rate subjects current through diag_poll.
 static constinit hmi::ui::DiagnosticsView diag_view{{
     .nav = &ui_nav_port,
-    .values = diag_value,
-    .stale = &diag_stale_subject,
-    .rate = &diag_rate_subject,
+    .stats =
+        [](int64_t *last_us, int32_t *rate_tenths_hz) {
+          const RtpsDiagStats stats = rtps_comms_diag_stats();
+          *last_us = stats.last_us;
+          *rate_tenths_hz = stats.rate_tenths_hz;
+        },
+    .timeout_us =
+        std::chrono::duration_cast<std::chrono::microseconds>(rammp::kDiagTimeout).count(),
     .blink = &rtps_blink_subject,
     .screen_ensure = diagnostics_screen_ensure,
     .row_focus_cb = setting_focus_cb,
@@ -61,6 +46,7 @@ static constinit hmi::ui::DiagnosticsView diag_view{{
 static void diag_freq_observer(lv_observer_t *observer, lv_subject_t *) {
   diag_view.paint_freq(lv_observer_get_target_obj(observer));
 }
+static void diag_poll() { diag_view.poll(); }
 static void diag_focus(int index) { diag_view.focus(index); }
 static void diag_rows_clear() { diag_view.rows_clear(); }
 static void diagnostics_open() { diag_view.open(); }

@@ -6,6 +6,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "esp_timer.h"
+
 #include "hmi_format/diag.hpp"
 #include "hmi_format/stepper.hpp"
 #include "hmi_ui/widget_tree.hpp"
@@ -30,12 +32,21 @@ static constexpr lv_style_selector_t kDiagStale = static_cast<lv_style_selector_
 
 void hmi::ui::DiagnosticsView::init_subjects() {
   for (size_t i = 0; i < rammp::kDiagCount; i++) {
-    for (auto &reading : config_.values[i]) {
+    for (auto &reading : values_[i]) {
       lv_subject_init_int(&reading, format::VALUE_UNKNOWN);
     }
   }
-  lv_subject_init_int(config_.stale, 1);
-  lv_subject_init_int(config_.rate, 0);
+  lv_subject_init_int(&stale_, 1);
+  lv_subject_init_int(&rate_, 0);
+}
+
+void hmi::ui::DiagnosticsView::poll() {
+  int64_t last_us = 0;
+  int32_t rate_tenths_hz = 0;
+  config_.stats(&last_us, &rate_tenths_hz);
+  const bool stale = last_us == 0 || esp_timer_get_time() - last_us > config_.timeout_us;
+  lv_subject_set_int(&stale_, stale ? 1 : 0);
+  lv_subject_set_int(&rate_, stale ? 0 : rate_tenths_hz);
 }
 
 lv_group_t *hmi::ui::DiagnosticsView::init() {
@@ -86,19 +97,19 @@ void hmi::ui::DiagnosticsView::mark_stale(lv_obj_t *obj, bool stale, lv_opa_t op
 
 // Bound to each row, on the stale and blink subjects both.
 void hmi::ui::DiagnosticsView::row_stale_observer(lv_observer_t *observer, lv_subject_t *) {
-  const auto *view = static_cast<const DiagnosticsView *>(lv_observer_get_user_data(observer));
-  mark_stale(lv_observer_get_target_obj(observer), lv_subject_get_int(view->config_.stale) != 0,
+  auto *view = static_cast<DiagnosticsView *>(lv_observer_get_user_data(observer));
+  mark_stale(lv_observer_get_target_obj(observer), lv_subject_get_int(&view->stale_) != 0,
              view->blink_opa());
 }
 
 // DiagnosticsFreqLabel, on the rate, stale and blink subjects.
-void hmi::ui::DiagnosticsView::paint_freq(lv_obj_t *label) const {
-  const bool stale = lv_subject_get_int(config_.stale) != 0;
+void hmi::ui::DiagnosticsView::paint_freq(lv_obj_t *label) {
+  const bool stale = lv_subject_get_int(&stale_) != 0;
   if (stale) {
     lv_label_set_text(label, "No data");
   } else {
     char text[32]; // "-214748364.-8 Hz - Live" at the very most
-    format::diag_rate_text(lv_subject_get_int(config_.rate), text);
+    format::diag_rate_text(lv_subject_get_int(&rate_), text);
     lv_label_set_text(label, text);
   }
   lv_obj_set_style_text_color(label, lv_color_hex(STALE_COLOUR), kDiagStale);
@@ -163,10 +174,10 @@ void hmi::ui::DiagnosticsView::open() {
       }
       lv_label_set_text(ui_comp_get_child(row, kDiagFieldIds[f].units), specs[i].unit[f]);
       fields_[i][f] = {i, f};
-      lv_subject_add_observer_obj(&config_.values[i][f], value_observer,
+      lv_subject_add_observer_obj(&values_[i][f], value_observer,
                                   ui_comp_get_child(row, kDiagFieldIds[f].value), &fields_[i][f]);
     }
-    lv_subject_add_observer_obj(config_.stale, row_stale_observer, row, this);
+    lv_subject_add_observer_obj(&stale_, row_stale_observer, row, this);
     lv_subject_add_observer_obj(config_.blink, row_stale_observer, row, this);
     lv_group_add_obj(group_, row);
     lv_obj_add_event_cb(row, key_cb, LV_EVENT_KEY, this);

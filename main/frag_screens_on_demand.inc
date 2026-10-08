@@ -22,7 +22,7 @@ static constinit hmi::ui::OnDemandScreens on_demand_screens{{
     .diagnostics_bound =
         [] {
           for (lv_subject_t *subject :
-               {&diag_rate_subject, &diag_stale_subject, &rtps_blink_subject}) {
+               {diag_view.rate(), diag_view.stale(), &rtps_blink_subject}) {
             lv_subject_add_observer_obj(subject, diag_freq_observer, ui_DiagnosticsFreqLabel,
                                         nullptr);
           }

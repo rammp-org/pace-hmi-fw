@@ -140,7 +140,7 @@ static constinit const hmi::ui::RtpsUiBridge rtps_ui_bridge({
     .status_band = &status_band_view,
     .refusal = &refusal_view,
     .seat_apply_state = seat_apply_state,
-    .diag_values = diag_value,
+    .diag_values = diag_view.values(),
 });
 
 // ---------------------------------------------------------------------------
@@ -652,7 +652,7 @@ static void on_demand_parts_init() {
   // (diagnostics_screen_ensure). The menu row goes through diagnostics_open
   // rather than a SquareLine screen-change action, which would build the
   // screen without any of that.
-  diag_group = diag_view.init();
+  (void)diag_view.init();
 
   // The overlay hardcodes LVGL's 14 px default font (lv_sysmon_create sets no
   // font at all), which is unreadable on a 1280x720 panel at arm's length.
