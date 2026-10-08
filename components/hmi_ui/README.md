@@ -12,6 +12,7 @@ behaviour.
 
 | File | What |
 | --- | --- |
+| `include/hmi_ui/app_state.hpp`, `src/app_state.cpp` | The state the main unit's parts share (the Joystick view, the RTPS blink subject, the stick latches and gate, the Settings subjects and applied settings, the menu's overlay and on-arrival flag), declared once so a part can leave `main.cpp` and still reach it (from `main/frag_state.inc`, moved verbatim). Global names, as the moved code reads them. Legacy debt under ratchet transfer grants (`mutable_globals`); each piece moves on to its owner (S7) or a channel (T-H4a) |
 | `include/hmi_ui/nav_port.hpp` | `NavPort`: main's navigation calls the views need, until nav moves here. main fills one constexpr table |
 | `include/hmi_ui/setting_subjects.hpp`, `src/setting_subjects.cpp` | `SettingSubjects`: one subject per settings_spec.hpp parameter, what each Settings row shows and steps; `init` starts them from the saved settings, applies the theme and hands the rest to main's `setting_store_observer` (from `main/frag_state.inc`, `frag_brightness.inc` and app_main) |
 | `include/hmi_ui/settings_view.hpp`, `src/settings_view.cpp` | `SettingsView`: the SettingsScreen's -/+ rows, their limits, press flash and the actuator rejection flash (from `main/frag_settings_ui.inc` and app_main's wiring). The pages' contents, `setting_store_observer` (settings, flip, the ADC task's atomics) and the seat command path stay in main |
@@ -54,7 +55,8 @@ behaviour.
   callers on other tasks keep theirs in main (CS-OWN-08).
 - No mutable state at namespace scope (CS-CMP-03). A view's state is its members; main owns the
   one instance of each, built at compile time (`constinit`, no global constructor: G4), and
-  binds it from `app_main` (V6).
+  binds it from `app_main` (V6). The exception is `app_state.cpp`: main's shared state, moved
+  verbatim with its debt (transfer grants), to be dissolved into its owners.
 - Subjects are initialised before anything binds to them (V7); a view's `init` comes before its
   `bind`.
 - Board calls (backlight, RTC) and settings storage come in through a view's `Config` as plain

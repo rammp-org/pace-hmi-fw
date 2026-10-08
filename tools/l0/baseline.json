@@ -58,7 +58,7 @@
       "main/joystick_cal.cpp": 15,
       "main/log_capture.cpp": 8,
       "main/log_view.cpp": 1,
-      "main/main.cpp": 51,
+      "main/main.cpp": 38,
       "main/rtps_comms.cpp": 32,
       "main/selftest.cpp": 25,
       "main/update_ui.cpp": 4
@@ -175,6 +175,25 @@
       "sleep_this_thread": {
         "main/main.cpp@fea0ceb4e1459da744a95a8ee41fcc9430c8cac6": [
           "3c30b477fff3fdf4933bb42884869c32c8587518"
+        ]
+      }
+    },
+    "components/hmi_ui/src/app_state.cpp": {
+      "mutable_globals": {
+        "main/main.cpp@c222f57322c4777a1e1d8cd1a6513b08cbead32f": [
+          "19bfb419bc412edb3344b6da53c2d4511f2d46bf",
+          "2293b9e456e79ca45ed3cf6bceb8a212409b32c6",
+          "281f46f6d0e5ba820429b3683bf17b504dfb195c",
+          "28f4ec5c8bb084d317a0af8ff4041002282bfceb",
+          "37ab71d429b7f962ab539fe18ac47c04a649054e",
+          "4e1aa2910d484e08c66fede636ec8e731cbee0a5",
+          "6e4441fce8ebdd200a1119346f1176cd0b7af363",
+          "8bf64456aea85afcdea83cde966c934116948cd3",
+          "949f9092dfcf23853267fbacb9a331a84432c10b",
+          "99a7de8bedd95762356278d87b306dd9ac06273c",
+          "b630c29b4d275585686afbc3e7f9c7c811148c8c",
+          "ea69abfe86f47e3968c044acb3a3e35af0fe78bf",
+          "ee9c848436a3e250ef8c8025f694f0733444e1c1"
         ]
       }
     },
