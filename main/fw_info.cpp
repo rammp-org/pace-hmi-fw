@@ -146,7 +146,9 @@ void fw_info_record_release(const std::string &sha256, const std::string &tag, b
   std::string contents;
   {
     std::ifstream in(storage_path(kReleasesFile));
-    contents.assign(std::istreambuf_iterator<char>(in), {});
+    std::ostringstream buffer;
+    buffer << in.rdbuf(); // the whole file; "" when there is none
+    contents = buffer.str();
   }
   if (!contents.empty() && contents.back() != '\n') {
     contents += '\n';

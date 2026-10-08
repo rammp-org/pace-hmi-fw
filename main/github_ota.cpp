@@ -6,6 +6,7 @@
 #include <iterator>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <thread>
@@ -190,8 +191,8 @@ esp_err_t mark_next_boot_valid() {
     return ESP_ERR_NOT_FOUND;
   }
   std::array<esp_ota_select_entry_t, 2> entry{};
-  int newest = -1;
-  for (int i = 0; i < 2; i++) {
+  std::optional<size_t> newest; // the sector with the higher valid ota_seq
+  for (size_t i = 0; i < entry.size(); i++) {
     if (esp_partition_read(otadata, i * kOtaDataSector, &entry[i], sizeof(entry[i])) != ESP_OK) {
       return ESP_FAIL;
     }
@@ -199,20 +200,20 @@ esp_err_t mark_next_boot_valid() {
         entry[i].ota_seq != UINT32_MAX &&
         entry[i].crc == esp_rom_crc32_le(UINT32_MAX, reinterpret_cast<uint8_t *>(&entry[i].ota_seq),
                                          sizeof(entry[i].ota_seq));
-    if (valid && (newest < 0 || entry[i].ota_seq > entry[newest].ota_seq)) {
+    if (valid && (!newest || entry[i].ota_seq > entry[*newest].ota_seq)) {
       newest = i;
     }
   }
-  if (newest < 0) {
+  if (!newest) {
     return ESP_ERR_INVALID_STATE;
   }
-  entry[newest].ota_state = ESP_OTA_IMG_VALID;
+  entry[*newest].ota_state = ESP_OTA_IMG_VALID;
   // A reset between the erase and the write leaves this sector blank, and the
   // bootloader falls back to the other one: the image running now.
-  esp_err_t err = esp_partition_erase_range(otadata, newest * kOtaDataSector, kOtaDataSector);
+  esp_err_t err = esp_partition_erase_range(otadata, *newest * kOtaDataSector, kOtaDataSector);
   if (err == ESP_OK) {
-    err = esp_partition_write(otadata, newest * kOtaDataSector, &entry[newest],
-                              sizeof(entry[newest]));
+    err = esp_partition_write(otadata, *newest * kOtaDataSector, &entry[*newest],
+                              sizeof(entry[*newest]));
   }
   return err;
 }
@@ -367,9 +368,11 @@ std::string download(Http &http, esp_ota_handle_t ota, size_t total, hmi::ota::M
 std::string finish(const GithubRelease &release, const esp_partition_t *slot, esp_ota_handle_t ota,
                    const hmi::ota::MarkerSearch &marker, const Downloaded &got) {
   const int64_t ms = (esp_timer_get_time() - got.started_us) / 1000;
-  set_stage(OtaStage::VERIFYING,
-            fmt::format("Downloaded {} KB in {:.1f} s ({:.0f} KB/s). Checking...", got.done / 1024,
-                        ms / 1000.0, ms > 0 ? got.done / 1.024 / ms : 0.0));
+  set_stage(
+      OtaStage::VERIFYING,
+      fmt::format("Downloaded {} KB in {:.1f} s ({:.0f} KB/s). Checking...", got.done / 1024,
+                  static_cast<double>(ms) / 1000.0,
+                  ms > 0 ? static_cast<double>(got.done) / 1.024 / static_cast<double>(ms) : 0.0));
 
   // esp_ota_end checks the image itself: its segments and its own SHA-256.
   if (esp_err_t err = esp_ota_end(ota); err != ESP_OK) {
@@ -497,7 +500,7 @@ GithubReleases github_releases_fetch() {
     if (n == 0) {
       break;
     }
-    json.append(buf.get(), n);
+    json.append(buf.get(), static_cast<size_t>(n)); // n > 0 here
   }
   out.releases = parse_releases(json, out.error);
   out.ok = out.error.empty();
