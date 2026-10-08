@@ -6,6 +6,7 @@
 
 #include "lvgl.h"
 
+#include "hmi_ui/fn.hpp"
 #include "hmi_ui/link_state.hpp"
 #include "hmi_ui/shared_subjects.hpp"
 
@@ -29,13 +30,13 @@ public:
     /// Called with the state on every tick, before the subject is set: main logs a change.
     void (*link_seen)(LinkState state);
     /// Diagnostics staleness (main's diag_poll). UI task, lvgl_mutex held.
-    void (*diag_poll)();
+    Fn<void()> diag_poll;
     /// The drive adapter's tick (main's drive_wait_poll). UI task, lvgl_mutex held.
     void (*drive_tick)();
     /// The theme was switched (by any route): main takes the redundant background fills out
     /// again and saves the setting. Called after the link subject is re-notified and before the
     /// Theme row's subject is set. UI task, lvgl_mutex held.
-    void (*theme_switched)(uint8_t theme);
+    Fn<void(uint8_t theme)> theme_switched;
   };
 
   constexpr explicit UiPoll(const Config &config) noexcept

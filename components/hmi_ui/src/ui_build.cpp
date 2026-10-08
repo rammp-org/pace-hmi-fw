@@ -55,7 +55,7 @@ void build_screens(const lv_image_dsc_t *boot_logo, bool benchmark_drive_screen)
   }
 }
 
-void finish_build(void (*strip_overdraw)()) {
+void finish_build(Fn<void()> strip_overdraw) {
   // LV_USE_PERF_MONITOR makes lv_display_create() show the overlay immediately
   // (lv_display.c calls lv_sysmon_show_performance), so start it hidden — it is
   // a debug readout, not part of the normal HMI. The label already exists by

@@ -7,6 +7,7 @@
 #include "lvgl.h"
 
 #include "hmi_ui/drive_band_view.hpp"
+#include "hmi_ui/fn.hpp"
 #include "hmi_ui/refusal_view.hpp"
 #include "hmi_ui/status_band_view.hpp"
 #include "messages/joystick_message.hpp"
@@ -31,7 +32,7 @@ public:
     /// The error banner's text and footer.
     RefusalView *refusal;
     /// The seat values (main's seat_apply_state).
-    void (*seat_apply_state)(const MIB::seatState &seat);
+    Fn<void(const MIB::seatState &seat)> seat_apply_state;
     /// main's diagnostics readings, raw, [item][reading].
     lv_subject_t (*diag_values)[rammp::kDiagFields];
   };

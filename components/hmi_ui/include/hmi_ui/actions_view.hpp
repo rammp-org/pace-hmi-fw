@@ -5,6 +5,7 @@
 
 #include "lvgl.h"
 
+#include "hmi_ui/fn.hpp"
 #include "hmi_ui/nav_port.hpp"
 
 namespace hmi::ui {
@@ -33,12 +34,12 @@ public:
 
   struct Config {
     const NavPort *nav;
-    const Tile *tiles;       ///< `count` tiles, in the order they are drawn
-    void (*const *run)();    ///< what each tile does, by index; UI task (a click)
-    int count;               ///< at most TILES_MAX
-    void (*screen_ensure)(); ///< builds the screen if it is not up (main's on-demand code)
+    const Tile *tiles;        ///< `count` tiles, in the order they are drawn
+    const Fn<void()> *run;    ///< what each tile does, by index; UI task (a click)
+    int count;                ///< at most TILES_MAX
+    Fn<void()> screen_ensure; ///< builds the screen if it is not up (main's on-demand code)
     /// binds a tile needing the MCB to every subject main's readiness test reads
-    void (*bind_ready)(lv_obj_t *tile, lv_observer_cb_t observer);
+    Fn<void(lv_obj_t *tile, lv_observer_cb_t observer)> bind_ready;
     lv_observer_cb_t ready_observer; ///< sets UNAVAILABLE on its target while the MCB is not
     void (*refuse)();                ///< the refusal cue for a greyed tile
   };

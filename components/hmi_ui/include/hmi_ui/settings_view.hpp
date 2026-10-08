@@ -6,6 +6,7 @@
 #include "lvgl.h"
 
 #include "hmi_format/stepper.hpp"
+#include "hmi_ui/fn.hpp"
 #include "hmi_ui/nav_port.hpp"
 #include "hmi_ui/setting_subjects.hpp"
 
@@ -35,10 +36,10 @@ public:
     /// main's seat_axis_value[rammp::kSeatAxisCount]: what each actuator row shows (raw units,
     /// as the MCB last reported them).
     lv_subject_t *seat_values;
-    void (*screen_ensure)(); ///< builds the screen if it is not up (main's on-demand code)
-    int32_t actuators_page;  ///< the page number of the actuator rows
-    void (*seat_step)(size_t row, int direction); ///< main's: one actuator step, a request
-    void (*refuse)();                             ///< the refusal cue
+    Fn<void()> screen_ensure; ///< builds the screen if it is not up (main's on-demand code)
+    int32_t actuators_page;   ///< the page number of the actuator rows
+    Fn<void(size_t row, int direction)> seat_step; ///< main's: one actuator step, a request
+    void (*refuse)();                              ///< the refusal cue
   };
 
   constexpr explicit SettingsView(const Config &config) noexcept

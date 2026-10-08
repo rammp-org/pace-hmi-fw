@@ -9,6 +9,7 @@
 
 #include "hmi_format/stepper.hpp"
 #include "hmi_ui/button_grid.hpp"
+#include "hmi_ui/fn.hpp"
 #include "hmi_ui/nav_port.hpp"
 #include "messages/joystick_message.hpp"
 
@@ -26,10 +27,10 @@ public:
 
   struct Config {
     const NavPort *nav;
-    lv_subject_t *values;                    ///< main's seat_axis_value[AXES]; int, raw units
-    void (*step)(size_t row, int direction); ///< main's seat_step: one step from the MCB's value
-    void (*request)(rammp::SeatAxis axis, int32_t target); ///< main's seat_request (absolute)
-    void (*show_buttons_page)(); ///< main's seat_show_buttons_page (the grids' off_left)
+    lv_subject_t *values;                     ///< main's seat_axis_value[AXES]; int, raw units
+    Fn<void(size_t row, int direction)> step; ///< main's seat_step: one step from the MCB's value
+    Fn<void(rammp::SeatAxis axis, int32_t target)> request; ///< main's seat_request (absolute)
+    Fn<void()> show_buttons_page; ///< main's seat_show_buttons_page (the grids' off_left)
     void (*keep_overlay_fill)(lv_obj_t *obj); ///< main's overdraw exemption
   };
 

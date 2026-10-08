@@ -1,6 +1,7 @@
 #pragma once
 // The screens built when opened and destroyed once left: Settings, Skunk Works, Diagnostics.
 
+#include "hmi_ui/fn.hpp"
 #include "lvgl.h"
 
 namespace hmi::ui {
@@ -20,15 +21,15 @@ public:
   struct Config {
     /// The chrome every screen carries, bound in this order: the DriveBand's status cells,
     /// the TopBar's RTPS label, its clock and link labels, then the burger key and menu.
-    void (*bind_chrome)(lv_obj_t *band, lv_obj_t *bar, lv_obj_t *key, lv_obj_t *overlay);
+    Fn<void(lv_obj_t *band, lv_obj_t *bar, lv_obj_t *key, lv_obj_t *overlay)> bind_chrome;
     /// Settings' warning banner, bound to the cause and to the page (main's).
-    void (*settings_bound)();
+    Fn<void()> settings_bound;
     /// Diagnostics' frequency label, bound to its subjects (main's).
-    void (*diagnostics_bound)();
+    Fn<void()> diagnostics_bound;
     /// Each screen's rows, cleared as it is left (before its destruction is queued).
-    void (*settings_left)();
-    void (*actions_left)();
-    void (*diagnostics_left)();
+    Fn<void()> settings_left;
+    Fn<void()> actions_left;
+    Fn<void()> diagnostics_left;
     lv_event_cb_t screen_loaded; ///< main's SCREEN_LOADED handler (NavView arrival)
     void (*strip_overdraw)(const lv_obj_t *screen); ///< the redundant background fills
   };

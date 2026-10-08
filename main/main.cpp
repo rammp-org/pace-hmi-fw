@@ -1180,7 +1180,7 @@ static void action_restart_hmi() {
 }
 
 // In actions_spec.h order.
-static void (*const kActionRun[])() = {
+static constexpr hmi::ui::Fn<void()> kActionRun[] = {
     action_haptic_test, // ACTION_HAPTIC_TEST
     action_self_test,   // ACTION_SELF_TEST
     action_seat_up,     // ACTION_SEAT_UP

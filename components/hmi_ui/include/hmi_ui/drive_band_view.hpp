@@ -6,6 +6,7 @@
 
 #include "lvgl.h"
 
+#include "hmi_ui/fn.hpp"
 #include "hmi_ui/nav_port.hpp"
 
 namespace hmi::ui {
@@ -24,7 +25,7 @@ public:
     void (*store_profile)(int32_t profile);
     /// The drive session's PROFILE_CLICK input (re-publishes the request with the new profile).
     /// UI task, lvgl_mutex held.
-    void (*profile_clicked)();
+    Fn<void()> profile_clicked;
     /// main's navigation: `mirror_states` makes a button's label follow its pressed and
     /// checked states.
     const NavPort *nav;

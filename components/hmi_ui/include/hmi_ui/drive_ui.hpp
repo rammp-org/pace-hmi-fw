@@ -13,6 +13,7 @@
 #include "messages/mib_message.hpp"
 
 #include "drive_session.hpp"
+#include "hmi_ui/fn.hpp"
 #include "hmi_ui/shared_subjects.hpp"
 
 namespace hmi::ui {
@@ -32,11 +33,11 @@ namespace hmi::ui {
 class DriveUi {
 public:
   struct Config {
-    const SharedSubjects *shared;   ///< `locked`, `mib_state` and `rtps_link` are read
-    lv_subject_t *refused;          ///< int: Refused; RefusalView's `refused` (main's subject)
-    lv_timer_t *(*refused_timer)(); ///< RefusalView's dwell timer (after its start_timer)
-    lv_obj_t **menu_open;           ///< main's nav_menu_open: the overlay up, else null
-    bool *menu_on_arrival;          ///< main's nav_menu_on_arrival: open it on the next load
+    const SharedSubjects *shared;     ///< `locked`, `mib_state` and `rtps_link` are read
+    lv_subject_t *refused;            ///< int: Refused; RefusalView's `refused` (main's subject)
+    Fn<lv_timer_t *()> refused_timer; ///< RefusalView's dwell timer (after its start_timer)
+    lv_obj_t **menu_open;             ///< main's nav_menu_open: the overlay up, else null
+    bool *menu_on_arrival;            ///< main's nav_menu_on_arrival: open it on the next load
     /// The drive profile the user picked, mirrored for the ADC task (main's
     /// drive_profile_published).
     const std::atomic<MIB::DriveProfile> *profile;
@@ -47,7 +48,7 @@ public:
     /// The stick gate: whether the stick may drive the chair now. Written here (the UI task),
     /// read by the ADC task, which sends the MCB a centred stick whenever it is false.
     std::atomic<bool> *stick_drives;
-    void (*nav_home)();         ///< NavView::home
+    Fn<void()> nav_home;        ///< NavView::home
     void (*refusal_feedback)(); ///< "can't do that", heard and felt
     void (*haptic_click)();     ///< the STRONG_CLICK the unlock lands with
   };

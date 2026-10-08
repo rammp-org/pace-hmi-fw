@@ -6,6 +6,8 @@
 
 #include "lvgl.h"
 
+#include "hmi_ui/fn.hpp"
+
 namespace hmi::ui {
 
 /// @brief Every screen ui_init builds, less the ones built on demand, and the boot logo.
@@ -17,7 +19,7 @@ void build_screens(const lv_image_dsc_t *boot_logo, bool benchmark_drive_screen)
 /// @brief The perf overlay hidden, @p strip_overdraw run, and the boot screen's exit armed.
 /// @param strip_overdraw main's overdraw pass (it logs what it cleared).
 /// app_main, before lv_task starts, once everything behind the first screen is wired.
-void finish_build(void (*strip_overdraw)());
+void finish_build(Fn<void()> strip_overdraw);
 
 /// @brief The perf overlay's label in a readable font.
 /// app_main, before lv_task starts.

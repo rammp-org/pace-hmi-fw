@@ -7,6 +7,7 @@
 
 #include "lvgl.h"
 
+#include "hmi_ui/fn.hpp"
 #include "hmi_ui/shared_subjects.hpp"
 
 namespace hmi::ui {
@@ -49,25 +50,25 @@ public:
     lv_subject_t *menu_slide;     ///< int: 0 = the menu appears at once, 1 = it slides
     lv_obj_t **menu_open;         ///< main's nav_menu_open: the overlay up, else null
     bool *menu_on_arrival;        ///< main's nav_menu_on_arrival: open it on the next load
-    void (*gate_update)();        ///< main's nav_update_stick_gate
+    Fn<void()> gate_update;       ///< main's nav_update_stick_gate
     void (*keep_overlay_fill)(lv_obj_t *obj); ///< main's overdraw exemption
     /// Greys a gated row while the MCB could not act on it (main's action_ready_observer).
     lv_observer_cb_t ready_observer;
-    bool (*mcb_ready)();   ///< link CONNECTED and the MIB IDLE or ENABLED
-    void (*refuse_seat)(); ///< Seat Functions refused: the refusal feedback and banner
+    Fn<bool()> mcb_ready;   ///< link CONNECTED and the MIB IDLE or ENABLED
+    Fn<void()> refuse_seat; ///< Seat Functions refused: the refusal feedback and banner
     /// The DRIVE row: the drive session's MENU_ROW_DRIVE; true when it refused the pick.
-    bool (*drive_row)();
-    void (*drive_key)(); ///< the burger key on Drive, unlocked: MENU_KEY_DRIVE
+    Fn<bool()> drive_row;
+    Fn<void()> drive_key; ///< the burger key on Drive, unlocked: MENU_KEY_DRIVE
     /// The destinations main opens itself (Skunk Works, Diagnostics, the two Settings pages).
-    void (*open_dest)(NavDest dest);
+    Fn<void(NavDest dest)> open_dest;
     /// A screen came up: hand the joystick its group and put the cursor at its top (main's
     /// per-screen wiring).
-    void (*enter_screen)(const lv_obj_t *screen);
+    Fn<void(const lv_obj_t *screen)> enter_screen;
     /// After the arrival's gate update (main: the bench PIN is asked again on every visit).
-    void (*arrived)(const lv_obj_t *screen);
+    Fn<void(const lv_obj_t *screen)> arrived;
     /// The lost-cursor backstop is about to re-enter `screen` (main logs it: some path left
     /// the group behind, and that path wants fixing too).
-    void (*cursor_lost)(const lv_obj_t *screen);
+    Fn<void(const lv_obj_t *screen)> cursor_lost;
   };
 
   /// p21 "HOME BUTTON": a dissolve from any screen back to Drive.

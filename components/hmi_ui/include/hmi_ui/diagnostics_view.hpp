@@ -5,6 +5,7 @@
 
 #include "lvgl.h"
 
+#include "hmi_ui/fn.hpp"
 #include "hmi_ui/nav_port.hpp"
 #include "messages/joystick_message.hpp"
 
@@ -28,8 +29,8 @@ public:
     void (*stats)(int64_t *last_us, int32_t *rate_tenths_hz);
     /// No sample for this long (us) = stale (main's rammp::kDiagTimeout).
     int64_t timeout_us;
-    lv_subject_t *blink;     ///< int: 0/1 blink phase
-    void (*screen_ensure)(); ///< builds the screen if it is not up (main's on-demand code)
+    lv_subject_t *blink;      ///< int: 0/1 blink phase
+    Fn<void()> screen_ensure; ///< builds the screen if it is not up (main's on-demand code)
     void (*row_focus_cb)(lv_event_t *e); ///< main's FOCUSED/DEFOCUSED look for a row
   };
 
