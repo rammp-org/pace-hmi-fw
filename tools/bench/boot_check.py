@@ -15,7 +15,9 @@ log's own order is what the firmware does):
   (the baseline has no "joystick self test passed" line; these two are the
   nearest boot-time evidence -- see README)
 - `joy_cal/I ... loaded /storage/joystick_cal.txt: <mV>`  same mV as the baseline
-- `rtps_comms/I ... Network: WiFi`
+- `rtps_comms/I ... Network: WiFi`               the bench network's link (common.LINK):
+  WiFi on the hotspot, Ethernet with BENCH_NET=lan. On Ethernet the settings line's
+  `network` (Connection, N1) is 0 where the baseline has 1: the board's saved choice
 - `Got IP a.b.c.d`
 Forbidden: `Guru Meditation`, `abort()`, a second boot (a second ROM banner
 `ESP-ROM:` or a second `Calling app_main()`).
@@ -43,7 +45,7 @@ MARKERS = [  # (name, regex, compare the captured group with the baseline's?)
     ("joystick_input", r"(Adding joystick keypad input device\.\.\.)", True),
     ("selftest_ready", r"\[selftest/I\]" + TS + r"(ready: .*)$", True),
     ("joy_cal_loaded", r"\[joy_cal/I\]" + TS + r"(loaded /storage/joystick_cal\.txt: .*)$", True),
-    ("network_wifi", r"\[rtps_comms/I\]" + TS + r"(Network: WiFi)\s*$", True),
+    ("network_link", r"\[rtps_comms/I\]" + TS + r"(Network: \w+)\s*$", True),
     ("got_ip", r"Got IP (\d+\.\d+\.\d+\.\d+)", False),
 ]
 FORBIDDEN = [("guru", r"Guru Meditation"), ("abort", r"abort\(\)")]
@@ -57,6 +59,21 @@ except FileNotFoundError:
     OVERRIDES = {}
 WDT_TRIP = re.compile(r"task_wdt: Task watchdog got triggered")
 WDT_TASK = re.compile(r"task_wdt:\s+- (\S+)|task_wdt: CPU (\d): (\S+)")
+
+
+def for_link(name: str, value: str) -> str:
+    """The expected text on this bench's link. The baseline was captured on WiFi
+    (Connection setting 1); on Ethernet the setting is 0 and the link line says so."""
+    if common.LINK == "WiFi":
+        return value
+    if name == "network_link":
+        return f"Network: {common.LINK}"
+    if name == "settings_loaded":
+        fixed, n = re.subn(r"\bnetwork 1$", "network 0", value)
+        if n != 1:
+            raise SystemExit(f"settings_loaded has no trailing 'network 1': {value!r}")
+        return fixed
+    return value
 
 
 def find(lines: list[str], regex: str) -> list[tuple[int, str]]:
@@ -90,6 +107,7 @@ def analyse(capture: str, baseline: str) -> dict:
         if not hits:
             raise SystemExit(f"baseline has no {name} line: the baseline is not usable")
         value = OVERRIDES.get(name, {}).get("value", hits[0][1])
+        value = for_link(name, value)
         expected.append((hits[0][0], name, regex, compare, value))
     expected.sort()
 

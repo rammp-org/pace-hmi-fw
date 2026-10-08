@@ -8,6 +8,7 @@ Run every script with the IDF venv python, the only one with pyserial/esptool.
 from __future__ import annotations
 
 import datetime
+import ipaddress
 import json
 import os
 import pathlib
@@ -25,8 +26,28 @@ BASELINE_DIR = REPO / "tests" / "characterisation" / "baseline-e2047a4"
 LOCAL_BASELINE_DIR = BENCH_HOME / "baseline"
 
 BOARD_MAC = "80:F1:B2:D1:51:A6"
-PC_IP = "192.168.137.2"
-SUBNET = "192.168.137.0/24"
+
+# The bench network. BENCH_NET unset (or "hotspot"): the PC's Mobile Hotspot, the PC at
+# 192.168.137.2 and the board on WiFi. BENCH_NET="lan:<pc ip>/<prefix>", e.g.
+# "lan:192.168.9.226/24": the board on Ethernet (its saved Connection setting, N1 = 0)
+# in the same LAN as that PC address; no tethering is checked or restarted.
+NET = os.environ.get("BENCH_NET", "hotspot")
+
+
+def _net(spec: str) -> tuple[str, str, str, tuple[str, ...]]:
+    """(PC_IP, SUBNET, LINK, addresses the RTPS sweep skips besides PC_IP)."""
+    if spec == "hotspot":
+        return "192.168.137.2", "192.168.137.0/24", "WiFi", ("192.168.137.1",)
+    if spec.startswith("lan:"):
+        iface = ipaddress.IPv4Interface(spec[4:])
+        if iface.network.prefixlen < 22:
+            raise SystemExit(f"BENCH_NET={spec}: the RTPS sweep covers at most a /22")
+        return str(iface.ip), str(iface.network), "Ethernet", ()
+    raise SystemExit(f"BENCH_NET={spec!r}: expected 'hotspot' or 'lan:<pc ip>/<prefix>'")
+
+
+PC_IP, SUBNET, LINK, SWEEP_SKIP = _net(NET)
+HOTSPOT = NET == "hotspot"
 CHIP = "esp32p4"
 BAUD = 460800
 

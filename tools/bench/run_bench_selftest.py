@@ -264,6 +264,47 @@ def t_plan() -> None:
     expect("case-insensitive", run_bench.plan_steps("b0,b4B,b5E")[1], ["B0", "B4b", "B5e"])
 
 
+
+def t_net_spec() -> None:
+    expect("hotspot", common._net("hotspot"),
+           ("192.168.137.2", "192.168.137.0/24", "WiFi", ("192.168.137.1",)))
+    expect("lan", common._net("lan:192.168.9.226/24"),
+           ("192.168.9.226", "192.168.9.0/24", "Ethernet", ()))
+    for bad in ("lan:192.168.9.226/16", "lan:nonsense", "wifi"):
+        try:
+            common._net(bad)
+        except (SystemExit, ValueError):
+            continue
+        raise AssertionError(f"BENCH_NET={bad!r} was accepted")
+
+
+def t_boot_check_on_ethernet() -> None:
+    import boot_check
+    baseline = (common.BASELINE_DIR / "boot-board2.log").read_text(encoding="utf-8",
+                                                                    errors="replace")
+    settings_re = boot_check.MARKERS[0][1]
+    (_, base_settings), = boot_check.find(baseline.splitlines(), settings_re)[:1]
+    wanted = boot_check.OVERRIDES.get("settings_loaded", {}).get("value", base_settings)
+    # A boot as board 2 logs it today, on each link.
+    wifi_log = baseline.replace(base_settings, wanted)
+    eth_log = wifi_log.replace(wanted, wanted[:-len("network 1")] + "network 0").replace(
+        "Network: WiFi", "Network: Ethernet")
+    saved = common.LINK
+    try:
+        common.LINK = "WiFi"
+        expect("WiFi bench, WiFi boot", boot_check.analyse(wifi_log, baseline)["problems"], [])
+        expect("WiFi bench, Ethernet boot", sorted(
+            p.split(":")[0] for p in boot_check.analyse(eth_log, baseline)["problems"]),
+            ["network_link", "settings_loaded"])
+        common.LINK = "Ethernet"
+        expect("Ethernet bench, Ethernet boot", boot_check.analyse(eth_log, baseline)["problems"],
+               [])
+        expect("Ethernet bench, WiFi boot", sorted(
+            p.split(":")[0] for p in boot_check.analyse(wifi_log, baseline)["problems"]),
+            ["network_link", "settings_loaded"])
+    finally:
+        common.LINK = saved
+
 CASES = [
     ("BENCH-001 after B0's reset, B5 waits for the boot (Got IP) and PING before it runs",
      t_b0_then_b5_waits),
@@ -285,6 +326,9 @@ CASES = [
     ("BENCH-011 last-good: a RECORD with a failed, listed or missing graded check does not save",
      t_last_good_dirty_record_does_not),
     ("BENCH-012 last-good: FAIL, INVALID, NOT_RUN or SKIP does not save", t_last_good_fail_does_not),
+    ("BENCH-013 BENCH_NET: hotspot, lan:<pc ip>/<prefix>; anything else refused", t_net_spec),
+    ("BENCH-014 on Ethernet B2 expects 'Network: Ethernet' and network 0, nothing else",
+     t_boot_check_on_ethernet),
 ]
 
 

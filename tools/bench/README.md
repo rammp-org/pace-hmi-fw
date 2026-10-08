@@ -4,6 +4,14 @@ Board 2 (Tab5, ESP32-P4), USB serial number `80:F1:B2:D1:51:A6`, on the Windows 
 192.168.137.0/24 (PC = 192.168.137.2). No motors exist: the MCB is `scripts/rtps_mcb_sim.py`.
 Scripts decide every verdict (TS-PRI-02).
 
+The network is `BENCH_NET` (common.py). Unset or `hotspot`: as above, the board on WiFi.
+`lan:<pc ip>/<prefix>` (e.g. `set BENCH_NET=lan:192.168.9.226/24`): the board on Ethernet in
+the PC's LAN (its Connection setting, Settings > Internet, saved as Ethernet: `network 0`).
+Then B0's tethering check is not applicable, there is no hotspot restart, the RTPS sweep
+covers that subnet (at most a /22), the sim binds that PC address, and B2 expects
+`Network: Ethernet` and `network 0` in place of the baseline's `Network: WiFi` and
+`network 1` (BENCH-014); every other marker is unchanged.
+
 Run everything with the IDF venv python (the only one with pyserial and esptool):
 
 ```
