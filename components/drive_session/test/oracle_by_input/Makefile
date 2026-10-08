@@ -2,7 +2,7 @@
 # TS-UNIT-09; docs/plans/hazard-fixes.md B3). Contract and rules in tests/host/common.mk:
 # `make test` | `make coverage` | `make clean`. Two more targets, on demand:
 #   make equivalence   this oracle visits every (phase, input, read-bit) class the full-product
-#                      oracle (../oracle) visits, with the same row and verdict (equivalence.cpp)
+#                      oracle (../oracle_full) visits, with the same row and verdict (equivalence.cpp)
 #   make mutants       one-line mutations of the table and of the code: both oracles must
 #                      reject each one (mutants.sh)
 # spec-deviation(TS-UNIT-01): host-native g++ in WSL, not the IDF linux target (owner, 2026-10-06).

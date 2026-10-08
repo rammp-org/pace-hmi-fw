@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # `make mutants` (docs/plans/hazard-fixes.md B3): one-line mutations of the drive session
-# table and of its code. Each mutant is built into BOTH oracles, the full product (../oracle,
-# DRV-001..022) and the by-input one (this folder, DRV-101..113), and each oracle must reject
+# table and of its code. Each mutant is built into BOTH oracles, the full product (../oracle_full,
+# DRV-001..012) and the by-input one (this folder, DRV-101..113), and each oracle must reject
 # it: Unity reports failures. A mutant that does not compile is a bad mutant (the table's own
 # static_asserts are `make mnc`'s job in ../oracle_selfcheck), and fails this script.
 #
@@ -19,7 +19,7 @@ OUT=$2
 UNITY=$3
 INC=$REPO/components/drive_session/include
 SRC=$REPO/components/drive_session/src/drive_session.cpp
-OLD=$REPO/components/drive_session/test/oracle
+OLD=$REPO/components/drive_session/test/oracle_full
 NEW=$REPO/components/drive_session/test/oracle_by_input
 
 # name|table or code|sed expression (applied to drive_session_table.hpp or drive_session.cpp)

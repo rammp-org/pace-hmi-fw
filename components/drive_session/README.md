@@ -15,7 +15,8 @@ behaviour change and needs two human approvals and a new table (CS-SAF-05).
 | The code: `DriveSession`, the hand-written transition function | `include/drive_session.hpp`, `src/drive_session.cpp` |
 | The table's fingerprint: one 64-bit number over every row, pinned by a `static_assert` | `include/drive_session_fingerprint.hpp` |
 | The table's own invariants (DSO-001..013) | `test/oracle_selfcheck` |
-| The oracle: the code against the table (DRV-001..022, TS-UNIT-08) | `test/oracle` |
+| The sequences, the safe state and the stick gate (DRV-013..022) | `test/oracle` |
+| The full-product oracle: the code against the table in every state (DRV-001..012, TS-UNIT-08), on demand (`make full`, owner decision G2) | `test/oracle_full` |
 | The oracle by input: the same check over only the guards each input reads, the rest sampled (DRV-101..113, TS-UNIT-09) | `test/oracle_by_input` |
 
 The header `drive_session_table.hpp` is a declaration: it is never edited to make a check pass.
@@ -80,8 +81,8 @@ a DISABLE and a latched exit. That is parked for the owner.
 
 ## Two oracles
 
-`test/oracle` (DRV-001..012) drives the full product: 6 phases x 11 inputs x 32 hidden masks x
-640 Envs = 1,351,680 steps. Every new hidden bit doubles it (the hazard fixes add
+`test/oracle_full` (DRV-001..012) drives the full product: 6 phases x 11 inputs x 32 hidden
+masks x 640 Envs = 1,351,680 steps (1.1 s on the AS-IS table). Every new hidden bit doubles it (the hazard fixes add
 DISABLE_PENDING, POST_PENDING, STICK_OK, ...), past the 30 s budget of an L1 app (TS-UNIT-09).
 `test/oracle_by_input` (DRV-101..113, docs/plans/hazard-fixes.md B3) gives the same verdict over
 fewer states. The state is cut into dimensions: (link, MIB state), screen, menu, each `*_ELAPSED`,
@@ -105,12 +106,14 @@ Evidence, on today's table (both run on demand in `test/oracle_by_input`):
 - `make mutants`: one-line mutations of the table (the fingerprint check off in the copy) and of
   the code; both oracles must reject each.
 
-Both run in CI until the owner retires the full product. Re-run `make equivalence` and
-`make mutants` with every table change until then.
+The full product is out of CI by the owner's decision G2 (2026-10-08, hazard-c1-spec.md E5):
+CI runs the by-input oracle; the full product runs on demand with `make full` in
+`test/oracle_full`. Re-run `make full`, `make equivalence` and `make mutants` with every table
+change.
 
 ## Coverage
 
-`make coverage` in `test/oracle`: 100% lines. Branches: 100% without sanitizers
+`make coverage` in `test/oracle_full`: 100% lines. Branches: 100% without sanitizers
 (`make coverage SAN_FLAGS= BUILD_DIR=$HOME/hmi-build/drive_session_nosan`); 99.32% with
 ASan/UBSan, where the one branch never taken is UBSan's own check of the `bool` load in `step()`.
 

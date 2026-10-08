@@ -1,15 +1,16 @@
 // L1 host app for drive_session: the transition-table oracle by input (TS-UNIT-08, TS-UNIT-09;
 // docs/plans/hazard-fixes.md B3).
 //
-// The same verdict as the full-product oracle (test/oracle, DRV-001..012): where find_row()
-// finds a row, the phase must become the row's `to`, the hidden mask apply(row.actions, hidden)
-// and the actions the row's, in order; where it finds none, nothing may change and nothing may
-// be returned. What differs is the set of states: per input, every value of every dimension the
-// table reads for that input, in every phase, crossed with a fixed set of the other dimensions
-// (oracle_space.hpp says which). The full-product oracle stays, side by side, until the owner
-// retires it; `make equivalence` shows that this one visits every (phase, input, read-bit)
-// class the full product does, with the same row, and `make mutants` that both reject the same
-// table and code mutations.
+// The same verdict as the full-product oracle (test/oracle_full, DRV-001..012): where
+// find_row() finds a row, the phase must become the row's `to`, the hidden mask
+// apply(row.actions, hidden) and the actions the row's, in order; where it finds none, nothing
+// may change and nothing may be returned. What differs is the set of states: per input, every
+// value of every dimension the table reads for that input, in every phase, crossed with a fixed
+// set of the other dimensions (oracle_space.hpp says which). This is the oracle CI runs; the
+// full product runs on demand (`make full` in test/oracle_full, owner decision G2).
+// `make equivalence` shows that this one visits every (phase, input, read-bit) class the full
+// product does, with the same row, and `make mutants` that both reject the same table and code
+// mutations.
 
 #include "oracle_space.hpp"
 

@@ -3,7 +3,7 @@
 # test/oracle_by_input/test_drive_session_oracle_by_input.cpp. Per input, every value of every
 # guard dimension the table reads for it, in every phase, crossed with all (or, above 256
 # points, a distance-3 corner sample plus seeded random points) of the dimensions it does not
-# read. Runs side by side with DRV-L1 (the full product) until the owner retires that one;
+# read. The full product (DRV-L1-FULL) runs on demand only (owner decision G2);
 # `make equivalence` and `make mutants` in the app folder are the evidence that it is not weaker.
 # spec-deviation(TS-UNIT-01): host-native g++ in WSL, not the IDF linux target (owner, 2026-10-06).
 - id: DRV-L1-BYINPUT

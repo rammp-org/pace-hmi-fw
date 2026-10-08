@@ -1,8 +1,9 @@
 #pragma once
 // The by-input oracle's state space (TS-UNIT-08, TS-UNIT-09; docs/plans/hazard-fixes.md B3).
 //
-// The full-product oracle (test/oracle, DRV-001..012) drives every (phase, input, hidden mask,
-// Env): 6 x 11 x 32 x 640 = 1,351,680 steps. Each new hidden bit doubles that. This oracle
+// The full-product oracle (test/oracle_full, DRV-001..012, on demand) drives every (phase,
+// input, hidden mask, Env): 6 x 11 x 32 x 640 = 1,351,680 steps on the AS-IS table. Each new
+// hidden bit doubles that. This oracle
 // splits the guard bits, per input, into the ones the table reads for that input (any row of
 // the input, and its precondition) and the rest:
 //
