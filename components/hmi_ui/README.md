@@ -13,6 +13,7 @@ behaviour.
 | File | What |
 | --- | --- |
 | `include/hmi_ui/nav_port.hpp` | `NavPort`: main's navigation calls the views need, until nav moves here. main fills one constexpr table |
+| `include/hmi_ui/setting_subjects.hpp`, `src/setting_subjects.cpp` | `SettingSubjects`: one subject per settings_spec.hpp parameter, what each Settings row shows and steps; `init` starts them from the saved settings, applies the theme and hands the rest to main's `setting_store_observer` (from `main/frag_state.inc`, `frag_brightness.inc` and app_main) |
 | `include/hmi_ui/settings_view.hpp`, `src/settings_view.cpp` | `SettingsView`: the SettingsScreen's -/+ rows, their limits, press flash and the actuator rejection flash (from `main/frag_settings_ui.inc` and app_main's wiring). The pages' contents, `setting_store_observer` (settings, flip, the ADC task's atomics) and the seat command path stay in main |
 | `include/hmi_ui/shared_subjects.hpp` | `SharedSubjects`: the subjects main still defines (`main/frag_state.inc`) and several views read. main fills it once; it shrinks as each subject moves to its view (S7) |
 | `include/hmi_ui/diagnostics_view.hpp`, `src/diagnostics_view.cpp` | `DiagnosticsView`: the DiagnosticsScreen's rows, the rate label and the stale warning (from `main/frag_diag.inc`); main keeps the readings, `diag_poll` and the group |
@@ -91,7 +92,7 @@ behaviour.
 - Dependencies, public (the headers use their types): `lvgl`, `hmi_format` (texts,
   `StepperSpec`), `hmi_models` (`grid.hpp`, `pin.hpp`), `rammp_rtps_messages`
   (`MIB::MibSystemState`, the seat axis table), `ota_parse` (`hmi::ota::Release`),
-  `esp_driver_ppa` and espp `logger` and `task` (`UiIsland`). Private: `ui` (the export: widgets, component children,
+  `esp_driver_ppa`, espp `logger` and `task` (`UiIsland`), and `settings` (the spec table and the saved values). Private: `ui` (the export: widgets, component children,
   theme colours), `esp_mm` (the flip's cache sync), `esp_timer` (the FPS meter). `main`
   requires the component (`PRIV_REQUIRES hmi_ui`).
 - Build: `fw_component_options(${COMPONENT_LIB})` (C++23 and the fw warning set as errors),

@@ -10,6 +10,7 @@
 // The views' own subjects are their members (CS-UI-05): JoystickView, DriveBandView,
 // StatusBandView, RefusalView; the groups are NavView's and BenchPinView's.
 // The Joystick test screen's readouts (axis bars, button count) own their subjects.
+#include "hmi_ui/setting_subjects.hpp"
 #include "hmi_ui/joystick_view.hpp"
 static constinit hmi::ui::JoystickView joystick_view;
 // The MIB's state, as reported over RTPS. The joystick is a slave here: this holds
@@ -77,19 +78,11 @@ static constexpr lv_obj_flag_t kOverlayFlag = hmi::ui::OVERLAY_FLAG;
 using hmi::ui::keep_overlay_fill;
 
 
-// The Settings rows; brightness has its own brightness_subject. Up here because
-// rtps_poll_cb keeps the theme row in step and the menu reads the slide. Each
-// observer (app_main) applies and saves its value.
-static lv_subject_t theme_subject;             // 0 = dark (UI_THEME_DEFAULT), 1 = day
-static lv_subject_t menu_slide_subject;        // 0 = the menu appears at once, 1 = it slides
-static lv_subject_t flip_subject;              // 1 = the panel is turned 180 degrees
-static lv_subject_t stick_sensitivity_subject; // 1..10, see stick_key_thresholds
-static lv_subject_t drive_speed_subject;       // 1..10 tenths: the stick's scale to the MCB
-static lv_subject_t stick_invert_x_subject;    // 1 = left and right swap over
-static lv_subject_t stick_invert_y_subject;    // 1 = forward and back swap over
-static lv_subject_t stick_swap_subject;        // 1 = the stick's X and Y trade places
-static lv_subject_t sounds_subject;            // 0 = the clicks and refusals are silent
-static lv_subject_t network_subject;           // NetLink: 0 = Ethernet, 1 = WiFi
+// The Settings rows' subjects, one per SETTINGS_PARAM_* (hmi_ui). Up here because
+// the backlight, rtps_poll_cb (the theme row), the menu (the slide) and the
+// Internet screen (the network) read them. Each owner's observer applies and
+// saves its value.
+static constinit hmi::ui::SettingSubjects setting_subjects;
 
 // What the ADC task and the click sound need of those, as atomics they can read
 // without the LVGL lock (components/settings). Written by setting_store_observer.

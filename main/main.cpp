@@ -253,36 +253,8 @@ static void settings_ui_init() {
     ui_theme_set(theme);
   }
   brightness_view.init(settings_brightness());
-  // Theme: the row switches the UI's palette; rtps_poll_cb notices the switch
-  // (however it was made) and saves it, and keeps this subject in step.
-  lv_subject_init_int(&theme_subject, ui_theme_idx == UI_THEME_DAY ? 1 : 0);
-  lv_subject_add_observer(
-      &theme_subject,
-      [](lv_observer_t *, lv_subject_t *subject) {
-        const uint8_t want = lv_subject_get_int(subject) != 0 ? UI_THEME_DAY : UI_THEME_DEFAULT;
-        if (ui_theme_idx != want) {
-          ui_theme_set(want);
-        }
-      },
-      nullptr);
-  // The rest of Settings: each row's subject starts at its saved value, and
-  // setting_store_observer applies it (on this first run too, which is what
-  // puts a saved flip or stick mapping back at boot) and saves any change.
-  for (const auto &[subject, param] : std::initializer_list<std::pair<lv_subject_t *, int>>{
-           {&menu_slide_subject, SETTINGS_PARAM_MENU_SLIDE},
-           {&flip_subject, SETTINGS_PARAM_FLIP},
-           {&stick_sensitivity_subject, SETTINGS_PARAM_STICK_SENSITIVITY},
-           {&drive_speed_subject, SETTINGS_PARAM_DRIVE_SPEED},
-           {&stick_invert_x_subject, SETTINGS_PARAM_STICK_INVERT_X},
-           {&stick_invert_y_subject, SETTINGS_PARAM_STICK_INVERT_Y},
-           {&stick_swap_subject, SETTINGS_PARAM_STICK_SWAP},
-           {&sounds_subject, SETTINGS_PARAM_SOUNDS},
-           {&network_subject, SETTINGS_PARAM_NETWORK},
-       }) {
-    lv_subject_init_int(subject, settings_get(param));
-    lv_subject_add_observer(subject, setting_store_observer,
-                            reinterpret_cast<void *>(static_cast<intptr_t>(param)));
-  }
+  // Every other row's subject: its saved value, and its observer (SettingSubjects).
+  setting_subjects.init(setting_store_observer);
   brightness_view.start_save_timer(kBrightnessSaveDelayMs);
 }
 
@@ -424,7 +396,7 @@ static void screens_init() {
   keep_overlay_fill(ui_NetPwPanel);
   internet_ui_init({
       .lvgl_mutex = &lvgl_mutex,
-      .connection = &network_subject,
+      .connection = setting_subjects.value(SETTINGS_PARAM_NETWORK),
       .use_group = [](lv_group_t *group) { nav_use_group(group, ui_InternetScreen); },
       .focus_ring = nav_focus_ring,
       .mirror_states = nav_mirror_states,

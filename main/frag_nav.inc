@@ -69,7 +69,7 @@ static void nav_enter_screen(const lv_obj_t *screen) {
 static void nav_cursor_lost(const lv_obj_t *screen); // logs on logger_nav, defined after it
 static constinit hmi::ui::NavView nav_view{{
     .shared = &ui_shared_subjects,
-    .menu_slide = &menu_slide_subject,
+    .menu_slide = setting_subjects.value(SETTINGS_PARAM_MENU_SLIDE),
     .menu_open = &nav_menu_open,
     .menu_on_arrival = &nav_menu_on_arrival,
     .gate_update = nav_update_stick_gate,

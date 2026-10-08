@@ -38,22 +38,6 @@ struct SettingPageText {
 static constexpr SettingPageText kActuatorsPageText{"DEBUG ACTUATORS",
                                                     "Up/down to pick, left/right or -/+ to move."};
 
-// The subject each settings parameter steps, in SETTINGS_PARAM_* order. Each
-// one's observer applies and saves it.
-static lv_subject_t *const kSettingParamValue[] = {
-    &brightness_subject,        // SETTINGS_PARAM_BRIGHTNESS
-    &theme_subject,             // SETTINGS_PARAM_THEME
-    &menu_slide_subject,        // SETTINGS_PARAM_MENU_SLIDE
-    &flip_subject,              // SETTINGS_PARAM_FLIP
-    &stick_sensitivity_subject, // SETTINGS_PARAM_STICK_SENSITIVITY
-    &drive_speed_subject,       // SETTINGS_PARAM_DRIVE_SPEED
-    &stick_invert_x_subject,    // SETTINGS_PARAM_STICK_INVERT_X
-    &stick_invert_y_subject,    // SETTINGS_PARAM_STICK_INVERT_Y
-    &stick_swap_subject,        // SETTINGS_PARAM_STICK_SWAP
-    &sounds_subject,            // SETTINGS_PARAM_SOUNDS
-    &network_subject,           // SETTINGS_PARAM_NETWORK
-};
-
 // What the named rows read, in SETTINGS_PARAM_* order; nullptr = a number.
 static constexpr const char *kThemeNames[] = {"Dark", "Day"};
 static constexpr const char *kOnOffNames[] = {"Off", "On"};
@@ -76,8 +60,6 @@ static const char *const *const kSettingParamNames[] = {
 };
 static_assert(std::size(kSettingParamNames) == SETTINGS_PARAM_COUNT,
               "every settings_spec.hpp parameter needs its names (or nullptr) here");
-static_assert(std::size(kSettingParamValue) == SETTINGS_PARAM_COUNT,
-              "every settings_spec.hpp parameter needs its subject here");
 
 static constexpr int kSettingRowsMax = std::max<int>(rammp::kSeatAxisCount, SETTINGS_PARAM_COUNT);
 static_assert(kSettingRowsMax <= hmi::ui::SettingsView::ROWS_MAX, "a page has more rows than the view");
@@ -203,7 +185,7 @@ static void setting_page_open(int32_t page) {
         spec.locked_only = i == SETTINGS_PARAM_STICK_INVERT_X ||
                            i == SETTINGS_PARAM_STICK_INVERT_Y || i == SETTINGS_PARAM_STICK_SWAP ||
                            i == SETTINGS_PARAM_DRIVE_SPEED;
-        settings_view.row_add(spec, kSettingParamValue[i], false);
+        settings_view.row_add(spec, setting_subjects.value(i), false);
       }
     }
   }
