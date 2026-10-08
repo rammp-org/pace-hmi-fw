@@ -124,6 +124,86 @@ static std::recursive_mutex lvgl_mutex;
 // --
 #include "frag_display_flip.inc" // split_main.py
 // --
+// One LVGL cycle, for the UI island: lv_task_handler under the LVGL lock (CS-UI: only the
+// UI task touches LVGL; RTPS handlers and the side button take the same lock).
+static void lvgl_cycle() {
+  std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
+  if constexpr (kFpsStress) {
+    lv_obj_invalidate(lv_screen_active());
+  }
+  lv_task_handler();
+}
+
+namespace hmi::ui {
+namespace {
+
+/// @brief The UI island: the task that runs LVGL. Every `period` at most it runs one LVGL
+/// cycle (Config::cycle: lv_task_handler, which renders, runs the timers and reads the input
+/// devices) and yields. Built once, an app_main local (app-main-shrink V6), and started once
+/// the whole UI is built.
+class UiIsland {
+public:
+  struct Config {
+    /// The task, as a literal copy of today's (name, stack, priority, core).
+    espp::Task::BaseConfig task;
+    /// One LVGL cycle, under the LVGL lock (main's lvgl_cycle).
+    void (*cycle)();
+    /// The cadence: the next cycle is due this long after the last one started.
+    std::chrono::milliseconds period;
+    /// Reported after every cycle when not null (CONFIG_HMI_DEBUG_FPS).
+    FpsMeter *fps_meter;
+  };
+
+  /// @brief Stores the config; starts nothing.
+  /// @param config See Config.
+  explicit UiIsland(const Config &config);
+  UiIsland(const UiIsland &) = delete;
+  UiIsland &operator=(const UiIsland &) = delete;
+  UiIsland(UiIsland &&) = delete;
+  UiIsland &operator=(UiIsland &&) = delete;
+  ~UiIsland() = default;
+
+  /// @brief Starts the task (app_main, once the UI is built and touch is up).
+  /// @return Whether the task started.
+  bool start();
+
+private:
+  void (*cycle_)();
+  std::chrono::milliseconds period_;
+  FpsMeter *fps_meter_;
+  espp::Task task_;
+};
+
+UiIsland::UiIsland(const Config &config)
+    : cycle_(config.cycle)
+    , period_(config.period)
+    , fps_meter_(config.fps_meter)
+    , task_({.callback = [this](std::mutex &m, std::condition_variable &cv) -> bool {
+               // steady_clock, never high_resolution_clock: on ESP-IDF that one is the
+               // wall clock, which the MCB's time moves (see "TopBar clock"), and
+               // wait_until on a wall clock that steps back sleeps out the whole step
+               // - the screen froze for as long as the clock went back.
+               auto start_time = std::chrono::steady_clock::now();
+               cycle_();
+               if (fps_meter_ != nullptr) {
+                 fps_meter_->report_if_due();
+               }
+               std::unique_lock<std::mutex> lock(m);
+               // Always yield at least one tick: once a cycle takes longer than the period
+               // the deadline is already past and wait_until returns without
+               // yielding, which pins core 1 at priority 20 and starves IDLE1.
+               const auto deadline =
+                   std::max(start_time + period_, std::chrono::steady_clock::now() + 1ms);
+               cv.wait_until(lock, deadline, []() { return false; });
+               return false;
+             },
+             .task_config = config.task}) {}
+
+bool UiIsland::start() { return task_.start(); }
+
+} // namespace
+} // namespace hmi::ui
+
 extern "C" void app_main(void) {
   // First, so the LogScreen has everything printed from here on - including
   // what the tasks started below print.
@@ -855,47 +935,27 @@ extern "C" void app_main(void) {
     display_flip.wrap_touch(touchpad->get_touchpad_input_device());
   }
 
-  // start a simple thread to do the lv_task_handler every 8ms — the refresh
-  // timer runs at 16ms (60 fps), polling at twice that rate keeps its firing
-  // jitter well under a frame
+  // The UI island: lv_task_handler every 8ms -- the refresh timer runs at 16ms
+  // (60 fps), polling at twice that rate keeps its firing jitter well under a frame.
   logger.info("Starting LVGL task...");
-  espp::Task lv_task({.callback = [](std::mutex &m, std::condition_variable &cv) -> bool {
-                        // steady_clock, never high_resolution_clock: on ESP-IDF that one is the
-                        // wall clock, which the MCB's time moves (see "TopBar clock"), and
-                        // wait_until on a wall clock that steps back sleeps out the whole step
-                        // - the screen froze for as long as the clock went back.
-                        auto start_time = std::chrono::steady_clock::now();
-                        {
-                          std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
-                          if constexpr (kFpsStress) {
-                            lv_obj_invalidate(lv_screen_active());
-                          }
-                          lv_task_handler();
-                        }
-                        if constexpr (kFpsInstrument) {
-                          fps_meter.report_if_due();
-                        }
-                        std::unique_lock<std::mutex> lock(m);
-                        // Always yield at least one tick: once a render cycle exceeds 8 ms
-                        // the deadline is already past and wait_until returns without
-                        // yielding, which pins core 1 at priority 20 and starves IDLE1.
-                        const auto deadline =
-                            std::max(start_time + 8ms, std::chrono::steady_clock::now() + 1ms);
-                        cv.wait_until(lock, deadline, []() { return false; });
-                        return false;
-                      },
-                      .task_config = {
-                          .name = "lv_task",
-                          // Measured peak ~6 KB (self test mem.stk_lvgl: 26964 B of 32 KB
-                          // never used). The stack is internal DMA-capable RAM, which RTPS
-                          // start-up runs dry on: at 32 KB the W5500 driver's bounce buffer
-                          // failed to allocate and the board boot-looped. mem.stk_lvgl
-                          // guards the headroom.
-                          .stack_size_bytes = 16 * 1024,
-                          .priority = 20,
-                          .core_id = 1,
-                      }});
-  if (!lv_task.start()) {
+  hmi::ui::UiIsland ui_island({
+      .task =
+          {
+              .name = "lv_task",
+              // Measured peak ~6 KB (self test mem.stk_lvgl: 26964 B of 32 KB
+              // never used). The stack is internal DMA-capable RAM, which RTPS
+              // start-up runs dry on: at 32 KB the W5500 driver's bounce buffer
+              // failed to allocate and the board boot-looped. mem.stk_lvgl
+              // guards the headroom.
+              .stack_size_bytes = 16 * 1024,
+              .priority = 20,
+              .core_id = 1,
+          },
+      .cycle = lvgl_cycle,
+      .period = 8ms,
+      .fps_meter = kFpsInstrument ? &fps_meter : nullptr,
+  });
+  if (!ui_island.start()) {
     logger.error("Failed to start LVGL task!");
     return;
   }
