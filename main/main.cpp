@@ -335,9 +335,6 @@ static_assert(sizeof(rammp::kHmiEthFailedFooter) <= rammp::kErrorFooterLen &&
                   sizeof(rammp::kHmiNoPeerFooter) <= rammp::kErrorFooterLen,
               "refusal footer outgrows the banner it shares with MCB faults");
 
-// The drive session's input, defined with the drive adapter below.
-static bool drive_session_input(hmi::drive_session::Input input);
-
 // The banners' words, from the shared spec.
 static constexpr hmi::ui::RefusalTexts kRefusalTexts{
     .eth_failed = {rammp::kHmiEthFailedText, rammp::kHmiEthFailedFooter},
