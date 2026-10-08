@@ -237,58 +237,7 @@ static void joystick_keypad_read(bool *up, bool *down, bool *left, bool *right, 
 // app_main in this order, on its task, before the UI task starts (CS-LAY-01).
 // ---------------------------------------------------------------------------
 
-// app_main, UI build 1: every screen ui_init builds, less the ones built on demand,
-// and the boot logo.
-static void ui_build_screens() {
-  // The Tab5 panel is natively 720x1280 portrait, which is what the UI is drawn
-  // for. DIRECT rendering needs rotation 0; Flip screen turns the picture in
-  // the flush instead (set_display_flipped).
-  lv_display_set_rotation(lv_display_get_default(), LV_DISPLAY_ROTATION_0);
-  ui_init();
-  // ui_init builds every screen, and this one is dead: the actuators are a
-  // page of the SettingsScreen now (DEBUG ACTUATORS). Its widget tree sits in
-  // internal RAM, and the W5500's SPI bounce buffer is allocated from the same
-  // DMA-capable pool when RTPS starts - with the Skunk Works screen added
-  // that pool ran dry and the board boot-looped (spi_master does not check the
-  // allocation). Delete the screen in SquareLine and this line goes too: the
-  // build fails on it, which is the reminder.
-  ui_BenchMotorsScreen_screen_destroy();
-  // Built on demand instead: see "Screens built on demand".
-  ui_SettingsScreen_screen_destroy();
-  ui_SkunkWorksScreen_screen_destroy();
-  ui_DiagnosticsScreen_screen_destroy();
-
-  // Swap the boot logo from the export's embedded SVG to a pre-rasterised A8
-  // mask (main/boot_logo.c). Done here rather than in the SquareLine project
-  // because import_ui.ps1 mirrors components/ui/ with robocopy /MIR and would put the
-  // SVG straight back on the next import.
-  //
-  // This is what lets LV_USE_SVG, LV_USE_THORVG and LV_USE_VECTOR_GRAPHIC all
-  // stay off: this wordmark was the only vector asset in the project, and the
-  // entire ThorVG engine was compiled in to draw it once at boot.
-  //
-  // The scale is deliberately left alone. The export draws this at
-  // lv_image_set_scale(300) and LVGL scales about the image's centre pivot, so
-  // boot_logo.c is rasterised at the size the SVG DECLARED (457x196) rather
-  // than its on-screen size -- feed it a pre-scaled source and the logo lands
-  // about 40 px from where it sits today.
-  //
-  // A8 carries no colour of its own, so the wordmark's white has to come from
-  // image_recolor. That is the same convention the export already uses for the
-  // other single-ink assets (the padlock, the arrows); it just never set one
-  // here, because a vector image brought its own fill.
-  lv_image_set_src(ui_Image3, &boot_logo);
-  lv_obj_set_style_image_recolor(ui_Image3, lv_color_white(), LV_PART_MAIN);
-  lv_obj_set_style_image_recolor_opa(ui_Image3, LV_OPA_COVER, LV_PART_MAIN);
-
-  // Benchmark against a real screen rather than the boot screen, whose logo
-  // otherwise dominates every measurement. Only with kFpsInstrument.
-  if constexpr (kFpsInstrument) {
-    lv_screen_load(ui_DriveScreen);
-  }
-}
-
-// app_main, UI build 2: the saved settings, the theme, the backlight and every
+// app_main, UI build 1: the saved settings, the theme, the backlight and every
 // Settings row's subject.
 static void settings_ui_init() {
   // Saved settings (settings.cpp). The theme goes on before anything is drawn
@@ -334,7 +283,7 @@ static void settings_ui_init() {
   brightness_view.start_save_timer(kBrightnessSaveDelayMs);
 }
 
-// app_main, UI build 3: the MCB, link and band subjects, before anything binds to them.
+// app_main, UI build 2: the MCB, link and band subjects, before anything binds to them.
 static void status_subjects_init() {
   // MCB status labels. The joystick is a slave: until the MCB says otherwise
   // the chair is not accepting drive commands, so INACTIVE/OK is the honest
@@ -357,7 +306,7 @@ static void status_subjects_init() {
   refusal_view.init_error_texts();
 }
 
-// app_main, UI build 4: every resident screen's chrome (TopBar, band, burger key), the
+// app_main, UI build 3: every resident screen's chrome (TopBar, band, burger key), the
 // clock and the Drive band.
 static void chrome_bind() {
   // Every screen ui_init built, in the screen order of the header list above.
@@ -405,7 +354,7 @@ static void chrome_bind() {
   drive_band_view.bind_profile_mirror();
 }
 
-// app_main, UI build 5: the error banners, the diagnostics subjects and the 250 ms poll.
+// app_main, UI build 4: the error banners, the diagnostics subjects and the 250 ms poll.
 static void banners_bind() {
   // Before the panels that observe it. lv_subject_init_int memzeroes the subject,
   // taking any observer already on it with it, and bind_mcb_lost_panel below watches
@@ -435,7 +384,7 @@ static void banners_bind() {
   lv_timer_create(rtps_poll_cb, kRtpsPollMs, nullptr);
 }
 
-// app_main, UI build 6: the JoystickScreen's calibration and GPIO48 counter.
+// app_main, UI build 5: the JoystickScreen's calibration and GPIO48 counter.
 static void joystick_screen_init() {
   // Calibration on the JoystickScreen: holding Calibrate or the stick button
   // starts a run (calibrate_gesture), so the button is not handed to
@@ -456,7 +405,7 @@ static void joystick_screen_init() {
   joystick_view.init_button();
 }
 
-// app_main, UI build 7: the joystick's indev in nav, the lost-cursor backstop and the
+// app_main, UI build 6: the joystick's indev in nav, the lost-cursor backstop and the
 // key repeat. @p indev is the joystick keypad's.
 static void nav_input_init(lv_indev_t *indev) {
   // The joystick's indev, nav's fallback group and the burger menu's rows (NavView).
@@ -494,7 +443,7 @@ static void nav_input_init(lv_indev_t *indev) {
   lv_indev_set_long_press_repeat_time(indev, 250);
 }
 
-// app_main, UI build 8: the padlock's rest position and the three hold gestures.
+// app_main, UI build 7: the padlock's rest position and the three hold gestures.
 static void lock_screen_init() {
   // Where the shackle sits at rest, so the 01b rise can be undone exactly.
   lv_obj_update_layout(ui_Shackle);
@@ -522,7 +471,7 @@ static void lock_screen_init() {
   lv_timer_create(hold_poll_cb, kHoldPollMs, nullptr);
 }
 
-// app_main, UI build 9: the Log, Seat, Internet and About screens.
+// app_main, UI build 8: the Log, Seat, Internet and About screens.
 static void screens_init() {
   // LogScreen: TextArea1 shows the serial output log_capture has kept. Its
   // ErrorBanner5 is left for menu refusals only: a link-lost
@@ -550,7 +499,7 @@ static void screens_init() {
   about_ui_init();
 }
 
-// app_main, UI build 10: the Update screen, and the OTA image's confirm.
+// app_main, UI build 9: the Update screen, and the OTA image's confirm.
 static void update_screen_init() {
   // UpdateScreen: the GitHub releases, one release, and an install running.
   // Its two pages cover the body, so their fill is what hides it.
@@ -578,7 +527,7 @@ static void update_screen_init() {
       1);
 }
 
-// app_main, UI build 11: the seat values and the screen-loaded hooks.
+// app_main, UI build 10: the seat values and the screen-loaded hooks.
 static void screen_hooks_init() {
   // The seat values, shared by this screen and the DEBUG ACTUATORS page, and the
   // numbers bound to them.
@@ -595,38 +544,7 @@ static void screen_hooks_init() {
   }
 }
 
-// app_main, UI build 12: the perf overlay hidden, the overdraw pass and the boot
-// screen's exit.
-static void ui_build_finish() {
-  // LV_USE_PERF_MONITOR makes lv_display_create() show the overlay immediately
-  // (lv_display.c calls lv_sysmon_show_performance), so start it hidden — it is
-  // a debug readout, not part of the normal HMI. The label already exists by
-  // now, which is what makes the hide safe. The "FPS counter" Skunk Works slot
-  // toggles it from here on.
-  lv_sysmon_hide_performance(lv_display_get_default());
-
-  // Remove the redundant nested background fills (see strip_redundant_backgrounds).
-  strip_all_overdraw();
-
-  // Leave the boot logo. Spec V1 did this with a screen-change event set in
-  // SquareLine; firmware owns it now, because the honest moment to leave is
-  // when everything behind the first screen is wired -- which is here, not a
-  // fixed delay the designer picked. kBootHoldMs is only so the wordmark is
-  // readable rather than a flash.
-  //
-  // LockedScreen and not DriveScreen: locked_subject starts at 1 and the chair
-  // does not drive until someone unlocks it.
-  static constexpr uint32_t kBootHoldMs = 1200;
-  lv_timer_t *boot_done = lv_timer_create(
-      [](lv_timer_t *) {
-        _ui_screen_change(&ui_LockedScreen, LV_SCREEN_LOAD_ANIM_FADE_ON, 280, 0,
-                          &ui_LockedScreen_screen_init);
-      },
-      kBootHoldMs, nullptr);
-  lv_timer_set_repeat_count(boot_done, 1);
-}
-
-// app_main, UI build 13: what outlives the screens built on demand (BenchGate's PIN pad,
+// app_main, UI build 11: what outlives the screens built on demand (BenchGate's PIN pad,
 // Settings, Skunk Works, Diagnostics) and the perf overlay's font.
 static void on_demand_parts_init() {
   // BenchGateScreen: the PIN pad, its four dots and the line above them.
@@ -654,15 +572,7 @@ static void on_demand_parts_init() {
   // screen without any of that.
   (void)diag_view.init();
 
-  // The overlay hardcodes LVGL's 14 px default font (lv_sysmon_create sets no
-  // font at all), which is unreadable on a 1280x720 panel at arm's length.
-  // There's no API or Kconfig for it, but the label is parented to the sys
-  // layer, and with LV_USE_MEM_MONITOR off it is that layer's only child.
-  if (lv_obj_t *perf_label =
-          lv_obj_get_child(lv_display_get_layer_sys(lv_display_get_default()), 0)) {
-    lv_obj_set_style_text_font(perf_label, &lv_font_montserrat_48, 0);
-    lv_obj_set_style_pad_all(perf_label, 10, 0); // grow the backing box to match
-  }
+  hmi::ui::perf_overlay_font();
 }
 
 // ---------------------------------------------------------------------------
@@ -949,7 +859,7 @@ extern "C" void app_main(void) {
   // ui_BootScreen the active one; the default screen LVGL started on stays
   // behind it, empty.
   logger.info("Loading SquareLine UI...");
-  ui_build_screens();
+  hmi::ui::build_screens(&boot_logo, kFpsInstrument);
 
   settings_ui_init();
 
@@ -996,7 +906,7 @@ extern "C" void app_main(void) {
 
   screen_hooks_init();
 
-  ui_build_finish();
+  hmi::ui::finish_build(strip_all_overdraw);
 
   // The self test's checks and their limits are in selftest_spec.hpp;
   // selftest.cpp measures them. Started from the "Self test" Skunk Works slot,

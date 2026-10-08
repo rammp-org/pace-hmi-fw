@@ -1,6 +1,7 @@
 // split_main.py fragment of main.cpp (frag_fps: original lines 78-107); one TU, see main.cpp.
 #include "hmi_ui/fps_meter.hpp"
 #include "hmi_ui/rtps_ui_bridge.hpp"
+#include "hmi_ui/ui_build.hpp"
 #include "hmi_ui/ui_island.hpp"
 // ---------------------------------------------------------------------------
 // Frame-rate instrumentation: a debug feature, off unless CONFIG_HMI_DEBUG_FPS
