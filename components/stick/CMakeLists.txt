@@ -3,7 +3,8 @@
 idf_component_register(
   SRCS "src/stick_pipeline.cpp"
   INCLUDE_DIRS "include"
-  REQUIRES joystick)
+  REQUIRES fw_core
+           joystick)
 
 fw_component_options(${COMPONENT_LIB})
 
