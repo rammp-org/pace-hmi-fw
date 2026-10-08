@@ -22,6 +22,15 @@ instead of by someone looking at the display.
     python hmi_ui.py stick sweep 1507 1510 1477 1507 6 1477   # rest -> forward
     python hmi_ui.py stick fail 2 1507 1510 1477              # the vertical read fails
 
+    # The hazard fixes' bench verbs (same builds; components/remote_ui/include/bench_verbs.hpp).
+    python hmi_ui.py state                     # one JSON line: phase, notice, POST, stick...
+    python hmi_ui.py permit post pass          # the POST gate (not_run|pending|pass|fail)
+    python hmi_ui.py permit stick fault        # stick health (not_monitored|ok|fault), C1 only
+    python hmi_ui.py cal-unsaved               # forget the calibration until reboot (RAM)
+    python hmi_ui.py post-rerun                # restart POST from NOT_RUN
+    python hmi_ui.py crash                     # abort: a PANIC reset
+    python hmi_ui.py stall ui 300              # hold the LVGL lock 300 ms (also adc, cadc)
+
 --host takes the board's address; without it the script asks the network (an
 RTPS participant announces itself, so rtps_net.py's sweep finds the board) and
 falls back to HMI_HOST from the environment.
@@ -49,6 +58,38 @@ import zlib
 
 PORT = 3333
 TIMEOUT_S = 20.0
+
+
+class BenchVerbError(RuntimeError):
+    """A bench verb the board answered with ERR. `not_in_firmware` is True when the board
+    says the verb or its hook is not there (a build without stick injection, a remote UI
+    from before the verbs, or a hook another change has not wired yet): the step that
+    needed it cannot run, which is not a verdict on what it would have checked."""
+
+    def __init__(self, command: str, reply: str):
+        super().__init__(f"{command}: {reply}")
+        self.command = command
+        self.reply = reply
+
+    @property
+    def not_in_firmware(self) -> bool:
+        return any(k in self.reply for k in ("not wired", "unknown command",
+                                             "CONFIG_HMI_BENCH_STICK_INJECT"))
+
+
+def parse_state(reply: str) -> dict:
+    """STATE's answer, "OK {json}", as a dict (bench_verbs.hpp's keys; null as None).
+    Raises BenchVerbError for anything else."""
+    if not reply.startswith("OK {"):
+        raise BenchVerbError("STATE", reply)
+    import json
+    try:
+        value = json.loads(reply[3:])
+    except ValueError as e:
+        raise BenchVerbError("STATE", f"not JSON ({e}): {reply[:120]}") from None
+    if not isinstance(value, dict):
+        raise BenchVerbError("STATE", f"not an object: {reply[:120]}")
+    return value
 
 # The burger key, centred in the bottom 162 px of a 720x1280 panel, and the
 # menu rows: eight divide the 921 px body, starting at its top. Settings opens
@@ -146,12 +187,45 @@ class Hmi:
 
     def stick(self, h_mv: int, v_mv: int, twist_mv: int, fail_mask: int, seq: int) -> str:
         """One STICK injection: the three raw reads in mV, the reads that fail
-        (bit 0 horizontal, 1 vertical, 2 twist) and a sequence number. Holds
-        for STICK_EXPIRY_MS on the board; raises on anything but OK."""
+        (bit 0 horizontal, 1 vertical, 2 twist; with C2 also 3-5 NaN, 6 X/Y frozen, 7 one
+        cycle only) and a sequence number. Holds for STICK_EXPIRY_MS on the board; raises
+        on anything but OK."""
         reply = self.command(f"STICK {h_mv} {v_mv} {twist_mv} {fail_mask} {seq}")
         if reply != "OK":
             raise RuntimeError(f"STICK refused: {reply}")
         return reply
+
+    # --- the hazard fixes' bench verbs (bench_verbs.hpp) -------------------------
+
+    def _bench(self, text: str) -> str:
+        reply = self.command(text)
+        if reply != "OK" and not reply.startswith("OK "):
+            raise BenchVerbError(text, reply)
+        return reply
+
+    def state(self) -> dict:
+        """STATE: the HMI's state as one dict (screen, phase, notice, hold_reason,
+        calibrating, menu_open, cal, post, post_check, indicator, indicator_text,
+        reset_reason, stick); a field whose hook is not in this firmware is None."""
+        return parse_state(self.command("STATE"))
+
+    def permit(self, what: str, value: str) -> str:
+        """PERMIT POST not_run|pending|pass|fail, or PERMIT STICK not_monitored|ok|fault."""
+        return self._bench(f"PERMIT {what.upper()} {value.lower()}")
+
+    def cal_unsaved(self) -> str:
+        return self._bench("CAL UNSAVED")
+
+    def post_rerun(self) -> str:
+        return self._bench("POST RERUN")
+
+    def crash(self) -> str:
+        """CRASH: the board answers, then aborts (a PANIC reset); the answer may be lost."""
+        return self._bench("CRASH")
+
+    def stall(self, target: str, ms: int) -> str:
+        """STALL UI|ADC|CADC <ms>: answered when the stall ends."""
+        return self._bench(f"STALL {target.upper()} {int(ms)}")
 
     # --- the joystick, as a person would use it -------------------------------
 
@@ -291,10 +365,13 @@ def cmd_walk(hmi: Hmi, out: pathlib.Path, half: bool) -> int:
 
 
 # What components/remote_ui/include/stick_inject.hpp and components/stick/include/stick/bench_inject.hpp
-# accept: an injection holds this long after the last STICK, mV 0..3300, mask 0..7.
+# accept: an injection holds this long after the last STICK, mV 0..3300, mask 0..7 today.
+# hazard-c2-spec.md REQ-STK-26 widens the mask to 0..255 (3-5 NaN, 6 X/Y frozen, 7 one cycle);
+# a board before C2 answers a mask above 7 with ERR, which stick() raises.
 STICK_EXPIRY_MS = 300
 STICK_MAX_MV = 3300
 STICK_FAIL_ALL = 7
+STICK_MASK_MAX = 255
 
 
 def stick_check(start: tuple[int, ...], end: tuple[int, ...], fail_mask: int,
@@ -303,8 +380,8 @@ def stick_check(start: tuple[int, ...], end: tuple[int, ...], fail_mask: int,
     for mv in (*start, *end):
         if not 0 <= mv <= STICK_MAX_MV:
             raise SystemExit(f"{mv} mV is outside 0..{STICK_MAX_MV}")
-    if not 0 <= fail_mask <= STICK_FAIL_ALL:
-        raise SystemExit(f"fail mask {fail_mask} is outside 0..{STICK_FAIL_ALL}")
+    if not 0 <= fail_mask <= STICK_MASK_MAX:
+        raise SystemExit(f"fail mask {fail_mask} is outside 0..{STICK_MASK_MAX}")
     if not 10 <= period_ms <= STICK_EXPIRY_MS // 2:
         raise SystemExit(f"--period must be 10..{STICK_EXPIRY_MS // 2} ms, so a late "
                          f"refresh cannot let the {STICK_EXPIRY_MS} ms expiry run out")
@@ -408,16 +485,28 @@ def main() -> int:
         mode = stick_sub.add_parser(name, help=text)
         if name == "fail":
             mode.add_argument("mask", type=int,
-                              help="reads that fail: 1 horizontal, 2 vertical, 4 twist (0..7)")
+                              help="reads that fail: 1 horizontal, 2 vertical, 4 twist (0..7; "
+                                   "with C2 also 8/16/32 NaN, 64 X/Y frozen, 128 one cycle)")
         mode.add_argument("mv", type=int, nargs=6 if name == "sweep" else 3,
                           metavar="MV", help="horizontal vertical twist, raw mV "
                           "(sweep: from h v t, then to h v t)")
         if name != "fail":
-            mode.add_argument("--fail", type=int, default=0, help="fail mask (0..7)")
+            mode.add_argument("--fail", type=int, default=0, help="fail mask (0..255)")
         mode.add_argument("--ms", type=int, default=2000, help="how long (default 2000)")
         mode.add_argument("--period", type=int, default=100,
                           help="ms between refreshes (default 100; the board expires at 300)")
         mode.add_argument("--log", type=pathlib.Path, help="write what was sent as CSV")
+
+    sub.add_parser("state", help="STATE: the HMI's state as one JSON line (bench verbs)")
+    permit = sub.add_parser("permit", help="PERMIT POST|STICK <value> (bench verbs)")
+    permit.add_argument("what", choices=["post", "stick"])
+    permit.add_argument("value")
+    sub.add_parser("cal-unsaved", help="CAL UNSAVED: forget the calibration until reboot")
+    sub.add_parser("post-rerun", help="POST RERUN: restart POST from NOT_RUN")
+    sub.add_parser("crash", help="CRASH: abort the HMI (a PANIC reset)")
+    stall = sub.add_parser("stall", help="STALL UI|ADC|CADC <ms> (bench verbs)")
+    stall.add_argument("target", choices=["ui", "adc", "cadc"])
+    stall.add_argument("ms", type=int)
 
     args = parser.parse_args()
     if args.command == "stick":
@@ -461,6 +550,22 @@ def main() -> int:
         elif args.command == "stick":
             return stick_run(hmi, args.start, args.end, args.mask, args.ms, args.period,
                              args.log)
+        elif args.command == "state":
+            import json
+            print(json.dumps(hmi.state()))
+        elif args.command == "permit":
+            print(hmi.permit(args.what, args.value))
+        elif args.command == "cal-unsaved":
+            print(hmi.cal_unsaved())
+        elif args.command == "post-rerun":
+            print(hmi.post_rerun())
+        elif args.command == "crash":
+            try:
+                print(hmi.crash())
+            except (OSError, ConnectionError) as e:
+                print(f"no answer ({e}): the board is restarting")
+        elif args.command == "stall":
+            print(hmi.stall(args.target, args.ms))
     return 0
 
 
