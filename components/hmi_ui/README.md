@@ -40,6 +40,7 @@ behaviour.
 | `include/hmi_ui/widget_tree.hpp`, `src/widget_tree.cpp` | `for_each_descendant` (iterative, pre-order, bounded), `set_focused_recursive`, `clear_click_focusable_recursive`: helpers for rows and buttons whose look spans their children (from `main/frag_settings_ui.inc`) |
 | `include/hmi_ui/update_view.hpp`, `src/update_view.cpp` | `UpdateView`, `ReleaseList`, `InstallStage`, `InstallStatus`: the UpdateScreen's three pages (from `main/update_ui.cpp`); the release list, the install, the worker thread, the hand-back to the LVGL task and the restart after an install (with its may_restart guard) are main's (`main/update_ui.cpp`) |
 | `include/hmi_ui/topbar_view.hpp`, `src/topbar_view.cpp` | `TopBarView`: the TopBar's clock and link labels (from `main/frag_clock.inc`). Setting the clock from the MCB is not UI and stays in main |
+| `include/hmi_ui/ui_island.hpp`, `src/ui_island.cpp` | `UiIsland`: the task that runs LVGL (today's `lv_task`): one LVGL cycle every 8 ms at most, then it yields at least a tick (from app_main). The cycle itself, `lv_task_handler` under `lvgl_mutex`, is main's `lvgl_cycle`, passed in its Config, so the island takes no lock |
 | `include/hmi_ui/ui_poll.hpp`, `src/ui_poll.cpp` | `UiPoll`: the island's 250 ms tick: link indicator and blink, diagnostics staleness, the drive adapter's tick, theme switch (from `main/frag_rtps_poll.inc`) |
 
 ## Rules for code here
@@ -77,12 +78,17 @@ behaviour.
 
 ## Tasks and dependencies
 
-- Tasks: none of its own. Views run on the UI task (LVGL timers and observers) and on
-  `app_main` during start-up.
+- Tasks: `UiIsland` runs the UI task, `lv_task` (16 KB, priority 20, core 1, 8 ms). Views run
+  on it (LVGL timers and observers) and on `app_main` during start-up. `UiIsland::Config::task`
+  is that row as a literal, copied from the code it replaced, so the G10 task dump
+  (`tools/guards/baselines/tasks.json`) is unchanged. The topology's `ui` row
+  (`components/topology`, CS-CON-02) is the target design; taking the config from
+  `topo.task_config(...)` is a later step, made once the owner has reviewed the TASKS rows,
+  and it comes with its own G10 baseline.
 - Dependencies, public (the headers use their types): `lvgl`, `hmi_format` (texts,
   `StepperSpec`), `hmi_models` (`grid.hpp`, `pin.hpp`), `rammp_rtps_messages`
   (`MIB::MibSystemState`, the seat axis table), `ota_parse` (`hmi::ota::Release`),
-  `esp_driver_ppa` and espp `logger`. Private: `ui` (the export: widgets, component children,
+  `esp_driver_ppa` and espp `logger` and `task` (`UiIsland`). Private: `ui` (the export: widgets, component children,
   theme colours), `esp_mm` (the flip's cache sync), `esp_timer` (the FPS meter). `main`
   requires the component (`PRIV_REQUIRES hmi_ui`).
 - Build: `fw_component_options(${COMPONENT_LIB})` (C++23 and the fw warning set as errors),

@@ -22,6 +22,7 @@ idf_component_register(SRCS "src/about_view.cpp"
                             "src/settings_view.cpp"
                             "src/status_band_view.cpp"
                             "src/topbar_view.cpp"
+                            "src/ui_island.cpp"
                             "src/ui_poll.cpp"
                             "src/update_view.cpp"
                             "src/widget_tree.cpp"
@@ -33,6 +34,7 @@ idf_component_register(SRCS "src/about_view.cpp"
                                 lvgl
                                 ota_parse
                                 rammp_rtps_messages
+                                task
                        PRIV_REQUIRES esp_mm
                                      esp_timer
                                      ui)
