@@ -27,8 +27,8 @@
 #include "drv2605.hpp"
 #include "feedback/da7280_bench.hpp"
 #include "feedback/feedback.hpp"
+#include "housekeeping/housekeeping.hpp"
 
-#include "kalman_filter.hpp"
 #include "simple_lowpass_filter.hpp"
 
 #include "ui.h"
@@ -124,126 +124,6 @@ static std::recursive_mutex lvgl_mutex;
 // --
 #include "frag_display_flip.inc" // split_main.py
 // --
-namespace hmi::housekeeping {
-namespace {
-
-/// @brief The housekeeping island: the IMU, the battery monitor and the RTC, read every
-/// `period` on one task, and the Kalman filter that turns the IMU's readings into an
-/// orientation. The self test reads what it leaves behind (the IMU's accelerometer, the
-/// battery status) without bus traffic of its own. Built once, an app_main local
-/// (app-main-shrink V6); it must outlive the IMU's use of orientation_filter().
-class Housekeeping {
-public:
-  using Imu = espp::M5StackTab5::Imu;
-
-  struct Config {
-    /// The task, as a literal copy of today's (name, stack, priority, core).
-    espp::Task::BaseConfig task;
-    /// The wait before each read.
-    std::chrono::milliseconds period;
-    /// The Kalman orientation filter's measurement noise (the accelerometer's angles).
-    float angle_noise;
-    /// The Kalman orientation filter's process noise (the gyro's rates).
-    float rate_noise;
-  };
-
-  /// @brief Sets the filter up; touches no hardware and starts nothing.
-  /// @param config See Config.
-  explicit Housekeeping(const Config &config);
-  Housekeeping(const Housekeeping &) = delete;
-  Housekeeping &operator=(const Housekeeping &) = delete;
-  Housekeeping(Housekeeping &&) = delete;
-  Housekeeping &operator=(Housekeeping &&) = delete;
-  ~Housekeeping() = default;
-
-  /// @brief The IMU's orientation filter, for M5StackTab5::initialize_imu. It runs inside
-  /// Imu::update, which only this island's task calls.
-  /// @return A filter bound to this object.
-  [[nodiscard]] Imu::filter_fn orientation_filter();
-
-  /// @brief Starts the task (app_main, once the IMU, the battery monitor and the RTC are up).
-  /// @return Whether the task started.
-  bool start();
-
-private:
-  Imu::Value filter(float dt, const Imu::Value &accel, const Imu::Value &gyro);
-  void read();
-
-  espp::M5StackTab5 &tab5_;
-  std::chrono::milliseconds period_;
-  espp::KalmanFilter<2> kf_;
-  std::shared_ptr<Imu> imu_;
-  std::optional<int64_t> t0_us_;
-  espp::Task task_;
-};
-
-Housekeeping::Housekeeping(const Config &config)
-    : tab5_(espp::M5StackTab5::get())
-    , period_(config.period)
-    , task_({.callback = [this](std::mutex &m, std::condition_variable &cv) -> bool {
-               // sleep first in case we don't get IMU data and need to exit early
-               {
-                 std::unique_lock<std::mutex> lock(m);
-                 cv.wait_for(lock, period_);
-               }
-               read();
-               return false;
-             },
-             .task_config = config.task}) {
-  kf_.set_process_noise(config.rate_noise);
-  kf_.set_measurement_noise(config.angle_noise);
-}
-
-Housekeeping::Imu::filter_fn Housekeeping::orientation_filter() {
-  return [this](float dt, const Imu::Value &accel, const Imu::Value &gyro) {
-    return filter(dt, accel, gyro);
-  };
-}
-
-bool Housekeeping::start() {
-  imu_ = tab5_.imu();
-  return task_.start();
-}
-
-Housekeeping::Imu::Value Housekeeping::filter(float dt, const Imu::Value &accel,
-                                              const Imu::Value &gyro) {
-  // Apply Kalman filter
-  float accelRoll = static_cast<float>(atan2(accel.y, accel.z));
-  float accelPitch =
-      static_cast<float>(atan2(-accel.x, sqrt(accel.y * accel.y + accel.z * accel.z)));
-  kf_.predict({espp::deg_to_rad(gyro.x), espp::deg_to_rad(gyro.y)}, dt);
-  kf_.update({accelRoll, accelPitch});
-  float roll, pitch;
-  std::tie(roll, pitch) = kf_.get_state();
-  // return the computed orientation
-  Imu::Value orientation{};
-  orientation.roll = roll;
-  orientation.pitch = pitch;
-  orientation.yaw = 0.0f;
-  return orientation;
-}
-
-void Housekeeping::read() {
-  // The RTC and the battery monitor, read as they were when their values were drawn.
-  std::tm rtc_time;
-  (void)tab5_.get_rtc_time(rtc_time);
-  (void)tab5_.read_battery_status();
-
-  const int64_t now = esp_timer_get_time(); // time in microseconds
-  if (!t0_us_) {
-    t0_us_ = now;
-  }
-  float dt = static_cast<float>(now - *t0_us_) / 1'000'000.0f; // convert us to s
-  t0_us_ = now;
-
-  // update the imu data
-  std::error_code ec;
-  (void)imu_->update(dt, ec);
-}
-
-} // namespace
-} // namespace hmi::housekeeping
-
 extern "C" void app_main(void) {
   // First, so the LogScreen has everything printed from here on - including
   // what the tasks started below print.

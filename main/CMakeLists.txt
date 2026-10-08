@@ -10,6 +10,7 @@ idf_component_register(SRC_DIRS "."
                          hmi_format
                          hmi_models
                          hmi_ui
+                         housekeeping
                          input_drivers
                          joystick
                          joystick_cal
