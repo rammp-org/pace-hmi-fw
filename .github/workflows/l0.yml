@@ -34,6 +34,12 @@ jobs:
     - name: Ratchet check (legacy counts may only fall; new files start clean)
       run: python3 tools/l0/ratchet.py check
 
+    # No file includes another component's private src/ (CS-LAY-03; compliance-gaps.md gap 8).
+    - name: Include boundary (no #include of another component's src/)
+      run: |
+        python3 tools/l0/include_boundary.py selftest
+        python3 tools/l0/include_boundary.py check
+
     - name: UI contract (SquareLine export vs what main.cpp assumes)
       run: python3 scripts/ui_contract.py
 

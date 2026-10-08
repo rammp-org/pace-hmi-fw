@@ -56,3 +56,8 @@ the top of `ratchet.py`.
 
 `check` re-verifies every grant against git history, so CI checks out with `fetch-depth: 0`.
 `update` drops grants whose line is gone; a dropped grant never comes back.
+
+## include_boundary.py
+
+`python tools/l0/include_boundary.py check` fails when a file includes another component's
+private `src/` files (CS-LAY-03); `selftest` runs its cases. Both run in the `L0` workflow.
