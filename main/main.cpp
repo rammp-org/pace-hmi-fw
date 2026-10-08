@@ -171,7 +171,51 @@ static_assert(hmi::stick::SELECT_MAX_US == int64_t{hmi::ui::HOLD_GRACE_MS} * 100
               "a press short enough to select never starts a hold filling");
 
 // --
-#include "frag_hold.inc" // split_main.py
+// Each hold's "let go first" flag is DriveUi's (button_armed, calibrate_armed).
+
+// The gestures and the engine that runs them (hmi::ui::HoldGesture, HoldEngine).
+using hmi::ui::HoldGesture;
+
+// Defined with the refusal banners, further down: the push check that shadows the unlock hold.
+static void entry_refusal_poll();
+
+// The one engine. Its confirmation is the same for all three gestures. Both calls are
+// non-blocking - one short I2C burst, and one xStreamBufferSend with a zero timeout - so
+// neither holds the LVGL task for the duration of the effect it starts.
+static constinit hmi::ui::HoldEngine hold_engine{{
+    .confirm =
+        [] {
+          haptic_play(espp::Drv2605::Waveform::STRONG_CLICK, 1);
+          play_click(espp::M5StackTab5::get());
+        },
+    // The self-test overlay owns the stick while it is up (see the keypad read in app_main).
+    .overlay_up = [] { return selftest_ui_visible(); },
+    .before_poll = [] { entry_refusal_poll(); },
+}};
+
+// The stick's own button. Reads the level the button callback mirrors out, not
+// the edge-latched select_key: a hold gesture needs to know the button is still
+// down, and select_key is consumed by the first indev read after the press.
+static bool joy_button_held() { return joy_button_pressed.load(); }
+
+/////////////////////////////////////////////////////////////////////////////
+// Lock / unlock, and the LockedScreen gesture
+/////////////////////////////////////////////////////////////////////////////
+
+// Locked means "not driving", and the Locked screen is where that changes.
+// Holding the stick button -- the legend under the padlock says so; the spec's
+// ACTIVATE DRIVE button is gone -- asks the MIB to start driving, and nothing
+// unlocks until the MIB says it has (activate_drive, lock_open). The ring round
+// the padlock shows where that stands: it fills while the button is held, a
+// quarter of it goes round while the MIB is asked, and it closes when the MIB
+// answers. Then the spec's 01b frame -- the shackle rises, the band flips to
+// ACTIVE -- held one second, and Drive dissolves in (Motion timing,
+// "ACTIVATE DRIVE").
+//
+// Locking again is the MIB's call too: the chair stops, asked (the drive-exit
+// hold) or not (a fault, the link), and drive_screen_follow_state brings the
+// Locked screen back with the reason on its banner.
+
 // --
 /////////////////////////////////////////////////////////////////////////////
 // Moving between screens
@@ -361,8 +405,8 @@ static void drive_unlock_hold_done() { drive_adapter.unlock_hold_done(); }
 // while there is something to ask -- a MIB that is not ready gets the refusal
 // once the press is a hold instead (entry_refusal_poll), rather than a ring
 // that fills for a second and then says no.
-static HoldGesture unlock_gesture{
-    .armed = &joy_button_armed,
+static constinit HoldGesture unlock_gesture{
+    .armed = drive_ui.button_armed(),
     .is_held = joy_button_held,
     .applies =
         [] {
@@ -382,8 +426,8 @@ static HoldGesture unlock_gesture{
 //
 // This one survives the move to the burger menu because it is not navigation:
 // it asks the MIB to stop. Leaving the screen by any other route does not.
-static HoldGesture drive_exit_gesture{
-    .armed = &joy_button_armed,
+static constinit HoldGesture drive_exit_gesture{
+    .armed = drive_ui.button_armed(),
     .is_held = joy_button_held,
     .applies = [] { return lv_screen_active() == ui_DriveScreen && nav_menu_open == nullptr; },
     // Ask only. The session's relock (TICK_FOLLOW) closes the screen once the MIB actually
@@ -395,7 +439,74 @@ static HoldGesture drive_exit_gesture{
     .grace_ms = kBarGraceMs,
 };
 // --
-#include "frag_hold_poll.inc" // split_main.py
+// Which page of the seat screen is showing: 0 = the function buttons, 1 = the
+// adjustment panel over them (spec 04b).
+static int seat_page = 0;
+
+// Defined with the rest of the seat navigation below, which is where the button
+// grid it restores focus into is declared.
+static void seat_show_buttons_page();
+
+// Calibrate is press-and-HOLD, never a tap: a run takes the stick over for the
+// best part of a minute, so it should not start from a brush of the screen or
+// a stray click of the stick button. Holding the Calibrate button, or the stick
+// button anywhere on the joystick screen, fills the meter along the bottom of
+// the button (bound in app_main) and starts a run when it is full; the same
+// hold during a run cancels it.
+//
+// The touch half is polled -- "is a pointer down, and on Calibrate?" at the
+// gesture's own cadence -- rather than tracked from the button's press events,
+// so there is no event to miss and nothing to keep in step. Both inputs feed
+// the one gesture and share its grace and fill time.
+static bool calibrate_held() {
+  return joy_button_held() || hmi::ui::touch_held_on(ui_JoystickScreen, ui_CalibrateButton);
+}
+
+// Its own "let go first" flag (DriveUi's calibrate_armed), not the stick button's.
+static constinit HoldGesture calibrate_gesture{
+    .armed = drive_ui.calibrate_armed(),
+    .is_held = calibrate_held,
+    .applies = [] { return lv_screen_active() == ui_JoystickScreen && nav_menu_open == nullptr; },
+    .completed = [] { joystick_cal_toggle(); },
+    // The button doubles as select, so a tap must not tick the fill.
+    .grace_ms = kBarGraceMs,
+};
+
+// Three gestures. Everything else that used to be one -- enter the drive, seat
+// and actions screens, leave the seat, bench, settings, actions, diagnostics
+// and log screens -- is a menu row or the DRIVE cell now.
+static HoldGesture *const kHoldGestures[] = {
+    &unlock_gesture,
+    &drive_exit_gesture,
+    &calibrate_gesture,
+};
+
+static void hold_poll_cb(lv_timer_t *) { hold_engine.poll_all(kHoldGestures); }
+
+/////////////////////////////////////////////////////////////////////////////
+// SeatScreen: joystick navigation of both pages
+//
+// The joystick walks each page as the grid the user sees rather than as the
+// flat list LVGL's own focus_next would give. Each page has its own group and
+// its own cursor:
+//
+//   function buttons                adjustment page (spec 04b)
+//   [ FB Tilt   ] [ Side Tilt   ]   [ < ]
+//   [ Elevation ] [ Translation ]   [     -     ] [     +     ]
+//   [ Static    ] [ Dynamic     ]   [ 0deg ] [ 15deg ] [ 25deg ]
+//
+// The rows are different lengths, which is why a grid carries a per-row count
+// rather than one column total. The ButtonGrid also serves the bench gate's
+// PIN pad.
+//
+// Picking one of the four function buttons names its motion on the adjustment
+// page and shows it over the buttons; "<", or left from the first column,
+// hides it again. The page's buttons step the motion or send it to a preset.
+/////////////////////////////////////////////////////////////////////////////
+
+static constexpr int kGridMaxRows = 4; // the PIN pad's bottom row is the fourth
+static constexpr int kGridMaxCols = 3;
+
 // --
 #include "frag_seat.inc" // split_main.py
 // --

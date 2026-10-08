@@ -62,6 +62,12 @@ public:
   constexpr explicit DriveUi(const Config &config) noexcept
       : config_(config) {}
 
+  /// The stick button's "let go first" flag, shared by the unlock and drive exit holds: is the
+  /// button released since the last completed hold (HoldGesture::armed).
+  [[nodiscard]] constexpr bool *button_armed() { return &button_armed_; }
+  /// Calibrate's own "let go first" flag (the stick button or a finger on Calibrate).
+  [[nodiscard]] constexpr bool *calibrate_armed() { return &calibrate_armed_; }
+
   /// @brief Reads the shackle's resting geometry from the export and readies the ring (its
   ///        range, not clickable). app_main, before lv_task starts.
   void init_lock();
@@ -121,6 +127,19 @@ private:
   // The shackle's resting geometry, read from the export at wiring time.
   int32_t shackle_rest_y_ = 0;
   int32_t shackle_rest_h_ = 0;
+  // Whether each input is currently released, and so free to start a new hold.
+  //
+  // This is the "let go first" rule, and it is per *input* rather than per
+  // gesture on purpose: completing one gesture usually navigates straight to a
+  // screen where another gesture watches the same input, and the user's thumb is
+  // still where it was. Without this, the button hold that enters driving would
+  // roll on into the Drive screen's exit hold, which watches the same button.
+  bool button_armed_ = true;
+  // Its own flag, not button_armed_: that one is shared with the drive exit hold, whose
+  // poll sees the stick button up while a FINGER holds Calibrate and re-arms it every
+  // 33 ms -- so a completed touch hold was armed again at once, and one long press
+  // started a run and then cancelled it.
+  bool calibrate_armed_ = true;
 };
 
 } // namespace hmi::ui
