@@ -17,6 +17,7 @@
 #include "messages/mib_message.hpp"
 #include "settings.hpp"
 #include "settings_spec.hpp"
+#include "stick/permit_hooks.hpp"
 
 #include "drive_ui/drive_ui.hpp"
 #include "drive_ui/fn.hpp"
@@ -133,6 +134,9 @@ public:
   [[nodiscard]] constexpr const RtpsUiBridge &rtps_bridge() const noexcept { return rtps_bridge_; }
   /// int: MIB::MibSystemState, as the MIB last reported it.
   [[nodiscard]] constexpr lv_subject_t *mib_state() noexcept { return &mib_state_; }
+  /// The stick output permit's channels (stick/permit_hooks.hpp): the POST gate, stick health
+  /// and the hold reason. Any task, each through its own end (the table there).
+  [[nodiscard]] constexpr hmi::stick::PermitHooks &permit_hooks() noexcept { return permit_hooks_; }
 
   /// @brief The joystick's LVGL keypad read: moves the cursor through each screen's focus
   ///        group. It drains the latch the ADC task fills, so one flick of the stick = one
@@ -202,6 +206,10 @@ private:
 
   // Members in dependency order: a view's Config may read only what is declared above it.
   Config config_;
+
+  // The stick output permit's channels, shared with the ADC task (hazard-c1-spec.md §3.2,
+  // hazard-c3-spec.md §2.4): constant initialised with the rest of UiApp.
+  hmi::stick::PermitHooks permit_hooks_{};
 
   // The subjects several views read (were main's mib_state_subject, rtps_link_subject,
   // locked_subject, entry_refused_subject, seat_axis_value).
