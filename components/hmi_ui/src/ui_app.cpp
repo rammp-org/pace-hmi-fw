@@ -123,6 +123,35 @@ void UiApp::rtps_poll_cb(lv_timer_t *timer) {
   static_cast<UiPoll *>(lv_timer_get_user_data(timer))->poll();
 }
 
+void UiApp::keypad_read(bool *up, bool *down, bool *left, bool *right, bool *enter, bool *escape) {
+  // While the self-test overlay is up it owns the stick: nothing reaches
+  // the screens behind it, and the stick button closes it once the run
+  // has finished. This read runs on the LVGL task, under its lock.
+  if (config_.selftest->overlay_visible()) {
+    *left = *right = *up = *down = *enter = *escape = false;
+    if (select_key.exchange(false)) {
+      config_.selftest->dismiss();
+    }
+    return;
+  }
+  uint32_t key = joy_key.load(); // held, so LVGL can repeat it
+  const uint32_t flick = joy_flick.exchange(0);
+  if (key == 0) {
+    key = flick; // pressed for this one read, released on the next
+  }
+  *left = key == LV_KEY_LEFT;
+  *right = key == LV_KEY_RIGHT;
+  *up = key == LV_KEY_UP;
+  *down = key == LV_KEY_DOWN;
+  *enter = select_key.exchange(false); // one-shot
+  *escape = false;
+  if (*enter) {
+    // The stick button's select, heard like a finger landing on the
+    // screen (the touch callback clicks on the press).
+    config_.cues->click();
+  }
+}
+
 // --- Seat, bench gate, Settings, Skunk Works, Diagnostics --------------------------------------
 
 // Seat values come from the MIB and nowhere else: a press publishes a request, and the number

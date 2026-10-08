@@ -134,6 +134,12 @@ public:
   /// int: MIB::MibSystemState, as the MIB last reported it.
   [[nodiscard]] constexpr lv_subject_t *mib_state() noexcept { return &mib_state_; }
 
+  /// @brief The joystick's LVGL keypad read: moves the cursor through each screen's focus
+  ///        group. It drains the latch the ADC task fills, so one flick of the stick = one
+  ///        PRESSED cycle = one LV_EVENT_KEY.
+  /// UI task (the keypad indev's read), lvgl_mutex held.
+  void keypad_read(bool *up, bool *down, bool *left, bool *right, bool *enter, bool *escape);
+
 private:
   // The build's steps (main's settings_ui_init .. screen_hooks_init), in build()'s order.
   void init_settings();
@@ -352,7 +358,7 @@ private:
   // nothing moves: the stick only drives from Drive (stick_drives).
   HoldEngine hold_engine_{{
       .confirm = hmi::ui::bind<&UiApp::hold_confirm>(this),
-      // The self-test overlay owns the stick while it is up (see main's keypad read).
+      // The self-test overlay owns the stick while it is up (see keypad_read).
       .overlay_up = config_.selftest->overlay_visible,
       .before_poll = hmi::ui::bind<&RefusalView::poll>(&refusal_view_),
   }};

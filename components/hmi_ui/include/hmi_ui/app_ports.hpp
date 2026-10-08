@@ -55,6 +55,7 @@ struct CuesPort {
 /// The self test (main: selftest). UI task.
 struct SelfTestPort {
   bool (*overlay_visible)(); ///< its overlay is up: it owns the stick
+  void (*dismiss)();         ///< the stick button closes the overlay once the run has finished
   void (*run)();             ///< a run from the Skunk Works tile (SelfTestTrigger::LOCAL)
 };
 

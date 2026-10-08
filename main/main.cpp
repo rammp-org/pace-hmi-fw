@@ -362,6 +362,7 @@ static constexpr hmi::ui::CuesPort kCuesPort{
 
 static constexpr hmi::ui::SelfTestPort kSelfTestPort{
     .overlay_visible = selftest_ui_visible,
+    .dismiss = selftest_ui_dismiss,
     .run = [] { (void)selftest_request(SelfTestTrigger::LOCAL, 0); },
 };
 
@@ -584,37 +585,10 @@ struct SideButton {
   }
 };
 
-// The joystick's LVGL keypad read, on the LVGL task: moves the cursor through each
-// screen's focus group. It drains the latch the ADC task fills, so one flick of
-// the stick = one PRESSED cycle = one LV_EVENT_KEY.
+// The joystick's LVGL keypad read, on the LVGL task (espp's KeypadInput calls it): UiApp's.
 static void joystick_keypad_read(bool *up, bool *down, bool *left, bool *right, bool *enter,
                                  bool *escape) {
-  // While the self-test overlay is up it owns the stick: nothing reaches
-  // the screens behind it, and the stick button closes it once the run
-  // has finished. This read runs on the LVGL task, under its lock.
-  if (selftest_ui_visible()) {
-    *left = *right = *up = *down = *enter = *escape = false;
-    if (select_key.exchange(false)) {
-      selftest_ui_dismiss();
-    }
-    return;
-  }
-  uint32_t key = joy_key.load(); // held, so LVGL can repeat it
-  const uint32_t flick = joy_flick.exchange(0);
-  if (key == 0) {
-    key = flick; // pressed for this one read, released on the next
-  }
-  *left = key == LV_KEY_LEFT;
-  *right = key == LV_KEY_RIGHT;
-  *up = key == LV_KEY_UP;
-  *down = key == LV_KEY_DOWN;
-  *enter = select_key.exchange(false); // one-shot
-  *escape = false;
-  if (*enter) {
-    // The stick button's select, heard like a finger landing on the
-    // screen (the touch callback clicks on the press).
-    play_click(espp::M5StackTab5::get());
-  }
+  ui_app.keypad_read(up, down, left, right, enter, escape);
 }
 
 // ---------------------------------------------------------------------------
