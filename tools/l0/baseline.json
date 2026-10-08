@@ -14,14 +14,11 @@
     "esp_error_check": {},
     "esp_timer_create": {},
     "fn_over_120": {
-      "main/github_ota.cpp": 1,
       "main/main.cpp": 1
     },
     "fn_over_60": {
       "components/joystick/src/joystick.cpp": 1,
-      "main/github_ota.cpp": 1,
       "main/main.cpp": 1,
-      "main/remote_ui.cpp": 1,
       "main/rtps_comms.cpp": 4,
       "main/selftest.cpp": 2
     },
