@@ -11,9 +11,11 @@
 
 #pragma once
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <string>
 #include <string_view>
 
@@ -285,12 +287,10 @@ inline constexpr PostCheckText kPostCheckTexts[] = {
 
 /* A check's text, or nullptr for a name the table does not hold. */
 constexpr const PostCheckText *post_check_text(std::string_view check) {
-  for (const PostCheckText &t : kPostCheckTexts) {
-    if (t.check == check) {
-      return &t;
-    }
-  }
-  return nullptr;
+  const auto *const end = std::end(kPostCheckTexts);
+  const auto *const it = std::find_if(std::begin(kPostCheckTexts), end,
+                                      [check](const PostCheckText &t) { return t.check == check; });
+  return it == end ? nullptr : it;
 }
 
 } // namespace rammp
