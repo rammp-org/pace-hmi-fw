@@ -129,10 +129,13 @@ void UiApp::store_profile(int32_t profile) {
   drive_profile_published.store(static_cast<MIB::DriveProfile>(profile));
 }
 
-// The three gestures, polled by one shared timer; user data is the app.
+// The three gestures, polled by one shared timer; user data is the app. Then the Drive notice
+// takes the stick's hold reason as it is now, so the screen follows it within one hold poll
+// (REQ-UI-17), not one 250 ms tick.
 void UiApp::hold_poll_cb(lv_timer_t *timer) {
   UiApp *self = static_cast<UiApp *>(lv_timer_get_user_data(timer));
   self->hold_engine_.poll_all(self->hold_gestures_);
+  self->config_.drive->refresh_notice(self->hold_reason());
 }
 
 // The 250 ms poll; user data is the UiPoll.

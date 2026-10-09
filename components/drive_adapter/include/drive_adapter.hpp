@@ -162,6 +162,21 @@ public:
   /// @brief The exit hold completed: rows 21-24 unlocked, rows 42-43 locked (C1; was U3).
   void exit_hold_done() { (void)input(hmi::drive_session::Input::EXIT_HOLD_DONE); }
 
+  /// @brief The stick's hold reason between two ticks (the hold poll, every kHoldPollPeriod):
+  ///        the Drive notice is combined again with `hold` (§2.7 order) and handed to the port
+  ///        if it changed, so the screen follows the ADC task's hold reason within one hold
+  ///        poll, not one 250 ms tick (REQ-UI-17). Steps nothing: no table input, no clock,
+  ///        no sample. Dropped while an input is performed (a port method calling back).
+  /// @param hold the hold reason as the ADC task last stored it (the permit hooks', acquire)
+  void refresh_notice(hmi::stick::HoldReason hold) {
+    if (busy_) {
+      return;
+    }
+    hold_ = hold;
+    update_notice();
+    publish_state();
+  }
+
   /// @brief True in LOCKED and ASKING (the stick gate is shut).
   [[nodiscard]] bool locked() const { return session_.locked(); }
   /// @brief The Drive notice last handed to the port.
@@ -175,9 +190,17 @@ public:
   [[nodiscard]] hmi::drive_session::Phase published_phase() const {
     return phase_pub_.load(std::memory_order_acquire);
   }
-  /// @brief The Drive notice as of the last input or tick. Any task, as published_phase.
+  /// @brief The Drive notice as of the last input, tick or refresh_notice. Any task, as
+  ///        published_phase.
   [[nodiscard]] DriveNotice published_notice() const {
     return notice_pub_.load(std::memory_order_acquire);
+  }
+  /// @brief The Drive notice for `hold` now: the stop notice as of the last input or tick
+  ///        first, else `hold` (drive_notice, §2.7 order). Any task, as published_phase: the
+  ///        bench's STATE line gives it the hold reason it reports beside it, so the two agree.
+  /// @param hold the stick's hold reason, as read by the caller
+  [[nodiscard]] DriveNotice notice_for(hmi::stick::HoldReason hold) const {
+    return drive_notice(stop_pub_.load(std::memory_order_acquire), hold);
   }
 
 private:
@@ -242,7 +265,7 @@ private:
     return actions[0] != Action::NONE;
   }
 
-  // The Drive notice after an input or a tick: handed to the port once per change.
+  // The Drive notice after an input, a tick or a refresh: handed to the port once per change.
   void update_notice() {
     const DriveNotice n = drive_notice(session_.notice(), hold_);
     if (n != notice_) {
@@ -251,9 +274,11 @@ private:
     }
   }
 
-  // The phase and the notice for other tasks (published_phase, published_notice).
+  // The phase, the stop notice and the notice for other tasks (published_phase, notice_for,
+  // published_notice).
   void publish_state() {
     phase_pub_.store(session_.phase(), std::memory_order_release);
+    stop_pub_.store(session_.notice(), std::memory_order_release);
     notice_pub_.store(notice_, std::memory_order_release);
   }
 
@@ -494,6 +519,7 @@ private:
   DriveNotice notice_ = DriveNotice::NONE;
   // The same, for other tasks (one byte each: lock-free).
   std::atomic<hmi::drive_session::Phase> phase_pub_{hmi::drive_session::Phase::LOCKED};
+  std::atomic<hmi::drive_session::StopNotice> stop_pub_{hmi::drive_session::StopNotice::NONE};
   std::atomic<DriveNotice> notice_pub_{DriveNotice::NONE};
   static_assert(std::atomic<hmi::drive_session::Phase>::is_always_lock_free &&
                 std::atomic<DriveNotice>::is_always_lock_free);

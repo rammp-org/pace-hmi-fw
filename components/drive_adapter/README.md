@@ -30,8 +30,13 @@ other sub-steps of `TICK_SEQUENCE`, in its order (TICK_EXIT_DUE, TICK_STOP_FAULT
 TICK_STOP_RESEND, TICK_WARN_DUE, TICK_GIVEUP_DUE: two Envs per tick, DRV-116).
 `exit_hold_done()` is a plain input in every phase (C1: rows 42-43 replace TABLE.md U3). After
 every input and tick the Drive notice (`drive_notice`: MCB did not stop > Stopping > the stick's
-hold reason in its order > none) is handed to the port once per change. The adapter keeps the
-deadlines (`wait_warn`, `wait_until`, `exit_until`), the exit latches, the time of the last ask,
+hold reason in its order > none) is handed to the port once per change; so is it after
+`refresh_notice(hold)`, which the UI calls every hold poll (33 ms) with the stick's hold reason
+as it is now, so the screen follows the ADC task between two ticks (REQ-UI-17). That steps
+nothing and is dropped while an input is performed. `published_phase()`, `published_notice()`
+and `notice_for(hold)` are for other tasks (atomics): `notice_for` combines the stop notice as of
+the last input or tick with a hold reason the caller read (the bench's STATE line). The adapter
+keeps the deadlines (`wait_warn`, `wait_until`, `exit_until`), the exit latches, the time of the last ask,
 the DriveCommand request, and (C1) the stop timer (`stop_first_us`, ARM_STOP_TIMER /
 CLEAR_STOP_FAULT), the last DISABLE published (the re-send counts from it), the publish failures
 and the stop faults; the session keeps the phase and its hidden variables.
@@ -56,7 +61,7 @@ does is dropped and logged, see REQ-DAD-03).
 | `go_locked_screen()`, `go_drive_screen()`, `nav_home()` | GO_LOCKED_SCREEN, GO_DRIVE_SCREEN, NAV_HOME | `locked_screen_go()`, fade to Drive over kUnlockDissolveMs, `nav_home()` |
 | `show_banner(banner)` | SHOW_* (C3: SHOW_REFUSED_POST, REFUSED_POST) | `DrivePort::show_refused(kRefused*, dwell)` |
 | `refusal_feedback()` | REFUSAL_FEEDBACK | `refusal_feedback()` |
-| `show_notice(notice)` | after every input and tick, on a change | the Drive screen's notice slot (hmi_ui's DriveNoticeView) |
+| `show_notice(notice)` | after every input, tick and `refresh_notice`, on a change | the Drive screen's notice slot (hmi_ui's DriveNoticeView) |
 
 ## Requirements
 
@@ -71,7 +76,7 @@ does is dropped and logged, see REQ-DAD-03).
 | REQ-DAD-07 | Driven by the C1 golden scenarios, the adapter makes the port calls hazard-c1-spec.md §5.2 writes | GLD-101..114 (GLD-115: the scenarios take every row) |
 | REQ-DAD-08 | The stop timer starts at the first stop of an exit and is not reset by a repeated stop; the last-DISABLE time is every DISABLE published; the Env's stop and re-send guards follow hazard-c1-spec.md §2.1 exactly at their boundaries | DAD-007, DAD-008, DAD-011 |
 | REQ-DAD-09 | Every DriveCommand publish result is checked; a failure is counted and logged at most once a second, and the re-send schedule does not change | DAD-009 |
-| REQ-DAD-10 | After every input and tick, the Drive notice (MCB did not stop > Stopping > the hold reason in its order > none) is handed to the port once per change | DAD-010 |
+| REQ-DAD-10 | After every input and tick, the Drive notice (MCB did not stop > Stopping > the hold reason in its order > none) is handed to the port once per change | DAD-010, DAD-012 |
 
 ## Tasks
 

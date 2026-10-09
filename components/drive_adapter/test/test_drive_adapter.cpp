@@ -1,5 +1,5 @@
 // L1 host app for components/drive_adapter: the adapter's own contract (DAD-001..005,
-// DAD-007..011). Its behaviour at the port is pinned by the drive goldens
+// DAD-007..012). Its behaviour at the port is pinned by the drive goldens
 // (tests/host/drive_golden, GLD-101..116). DAD-006 (TABLE.md U3) is removed: the exit hold while
 // locked is now the table's rows 42-43 (hazard-c1-spec.md E8).
 
@@ -417,4 +417,63 @@ TEST_CASE("DAD-011 a running calibration and the Boot screen in the sample reach
   g_port.sample.screen = ds::Screen::LOCKED;
   adapter.tick();
   TEST_ASSERT_FALSE(adapter.locked());
+}
+
+TEST_CASE("DAD-012 between two ticks the Drive notice follows the stick's hold reason; the stop "
+          "still ranks first; notice_for combines the stop with a hold reason given at the read",
+          "[drive_adapter][REQ-DAD-10]") {
+  fresh_port();
+  Adapter adapter{{.view = FakeView{}}};
+  g_adapter = &adapter;
+  drive(adapter);
+  TEST_ASSERT_EQUAL_UINT(0, g_port.notice_count);
+  // The ADC task holds the stick (hazard-c1-spec.md §3.3); the tick's sample still says NONE.
+  const std::size_t before = g_port.count;
+  adapter.refresh_notice(HoldReason::CENTRE_FIRST);
+  TEST_ASSERT_EQUAL_UINT(1, g_port.notice_count);
+  TEST_ASSERT_TRUE(g_port.notices[0] == DriveNotice::CENTRE_FIRST);
+  TEST_ASSERT_TRUE(adapter.published_notice() == DriveNotice::CENTRE_FIRST);
+  // It steps nothing: the one port call is the notice (no clock, no sample, no publish).
+  TEST_ASSERT_EQUAL_UINT(before + 1, g_port.count);
+  TEST_ASSERT_TRUE(adapter.published_phase() == ds::Phase::DRIVING);
+  adapter.refresh_notice(HoldReason::CENTRE_FIRST); // once per change
+  TEST_ASSERT_EQUAL_UINT(1, g_port.notice_count);
+  adapter.refresh_notice(HoldReason::NOT_CALIBRATED);
+  TEST_ASSERT_EQUAL_UINT(2, g_port.notice_count);
+  TEST_ASSERT_TRUE(g_port.notices[1] == DriveNotice::NOT_CALIBRATED);
+  adapter.refresh_notice(HoldReason::GATE_SHUT); // no text for a shut gate
+  TEST_ASSERT_EQUAL_UINT(3, g_port.notice_count);
+  TEST_ASSERT_TRUE(g_port.notices[2] == DriveNotice::NONE);
+  // The read-time combination, no stop yet: the hold reason given, in its words.
+  TEST_ASSERT_TRUE(adapter.notice_for(HoldReason::CENTRE_FIRST) == DriveNotice::CENTRE_FIRST);
+  TEST_ASSERT_TRUE(adapter.notice_for(HoldReason::NOT_CALIBRATED) == DriveNotice::NOT_CALIBRATED);
+  TEST_ASSERT_TRUE(adapter.notice_for(HoldReason::CALIBRATING) == DriveNotice::NONE);
+  TEST_ASSERT_TRUE(adapter.notice_for(HoldReason::NONE) == DriveNotice::NONE);
+  // The user's stop: STOPPING ranks above any hold reason, at the read and on the screen.
+  adapter.exit_hold_done();
+  TEST_ASSERT_EQUAL_UINT(4, g_port.notice_count);
+  TEST_ASSERT_TRUE(g_port.notices[3] == DriveNotice::STOPPING);
+  adapter.refresh_notice(HoldReason::CENTRE_FIRST);
+  TEST_ASSERT_EQUAL_UINT(4, g_port.notice_count);
+  TEST_ASSERT_TRUE(adapter.published_notice() == DriveNotice::STOPPING);
+  TEST_ASSERT_TRUE(adapter.notice_for(HoldReason::CENTRE_FIRST) == DriveNotice::STOPPING);
+  TEST_ASSERT_TRUE(adapter.notice_for(HoldReason::NONE) == DriveNotice::STOPPING);
+  // A refresh from a port method while an input is performed is dropped: the relock hands the
+  // port one notice, the one its own sample gives (gate shut: none), and never the refresh's.
+  g_port.sample.mib = ds::MibState::IDLE;
+  g_port.sample.hold = HoldReason::GATE_SHUT;
+  g_port.on_gate_update = [] {
+    g_adapter->refresh_notice(HoldReason::STICK_FAULT);
+    return true;
+  };
+  adapter.tick();
+  g_port.on_gate_update = nullptr;
+  TEST_ASSERT_TRUE(adapter.locked());
+  TEST_ASSERT_TRUE(g_port.count_of(Call::GATE_UPDATE) > 0);
+  TEST_ASSERT_EQUAL_UINT(5, g_port.notice_count);
+  TEST_ASSERT_TRUE(g_port.notices[4] == DriveNotice::NONE);
+  TEST_ASSERT_TRUE(adapter.notice() == DriveNotice::NONE);
+  // The stop ended at the relock: the hold reason given reads again.
+  TEST_ASSERT_TRUE(adapter.notice_for(HoldReason::CENTRE_FIRST) == DriveNotice::CENTRE_FIRST);
+  g_adapter = nullptr;
 }

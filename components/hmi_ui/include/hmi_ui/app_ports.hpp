@@ -14,6 +14,7 @@
 
 #include "drive_session.hpp"
 #include "drive_ui/link_state.hpp"
+#include "stick/permit_types.hpp"
 
 namespace hmi::ui {
 
@@ -41,6 +42,8 @@ struct DriveInputs {
   void (*tick)();                                 ///< the 250 ms tick
   void (*unlock_hold_done)();                     ///< the unlock hold completed
   void (*exit_hold_done)();                       ///< the drive exit hold completed
+  /// The stick's hold reason between two ticks, for the Drive notice (every hold poll).
+  void (*refresh_notice)(hmi::stick::HoldReason hold);
 };
 
 /// The user's haptic and sound cues (main: hmi::feedback::Feedback). UI task, or under

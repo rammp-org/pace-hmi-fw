@@ -1,5 +1,5 @@
 # Host L1 app for components/drive_adapter: the adapter's own contract (DAD-001..005,
-# DAD-007..011). Contract and rules in tests/host/common.mk: `make test` | `make coverage` |
+# DAD-007..012). Contract and rules in tests/host/common.mk: `make test` | `make coverage` |
 # `make clean`.
 # spec-deviation(TS-UNIT-01): host-native g++ in WSL, not the IDF linux target (owner, 2026-10-06).
 # The adapter at the firmware's port: tests/host/drive_golden (GLD-101..116).

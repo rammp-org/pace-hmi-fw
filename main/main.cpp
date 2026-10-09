@@ -364,6 +364,7 @@ static bool drive_session_input(hmi::drive_session::Input input);
 static void drive_wait_poll();
 static void drive_unlock_hold_done();
 static void drive_exit_hold_done();
+static void drive_refresh_notice(hmi::stick::HoldReason hold);
 static void log_screen_init();
 static void internet_screen_init();
 static void update_screen_init();
@@ -392,6 +393,7 @@ static constexpr hmi::ui::DriveInputs kDriveInputs{
     .tick = drive_wait_poll,
     .unlock_hold_done = drive_unlock_hold_done,
     .exit_hold_done = drive_exit_hold_done,
+    .refresh_notice = drive_refresh_notice,
 };
 
 static constexpr hmi::ui::CuesPort kCuesPort{
@@ -611,6 +613,10 @@ static void drive_unlock_hold_done() { drive_adapter.unlock_hold_done(); }
 // Ask only. The session's relock (TICK_FOLLOW) closes the screen once the MIB actually stops
 // driving.
 static void drive_exit_hold_done() { drive_adapter.exit_hold_done(); }
+// The hold poll: the stick's hold reason between two ticks, for the Drive notice (C1 §2.7).
+static void drive_refresh_notice(hmi::stick::HoldReason hold) {
+  drive_adapter.refresh_notice(hold);
+}
 
 // How long an updated image runs before it keeps itself (github_ota_boot_confirm).
 static constexpr uint32_t kOtaConfirmAfterMs = 30'000;
@@ -779,14 +785,17 @@ static hmi::bench_verbs::CalRecord bench_cal_record() {
 }
 
 // The drive table's side of the bench STATE line (L1, hazard-c1-spec.md §6): the session's
-// phase, the Drive notice, the menu and the refusal banner, each an atomic mirror the UI task
-// writes (no LVGL lock on the remote-UI task).
+// phase, the Drive notice, the menu and the refusal banner, each from an atomic mirror the UI
+// task writes (no LVGL lock on the remote-UI task). The notice is §2.7's combination made at the
+// read: the stop notice as of the last input or tick first, else the stick's hold reason now, so
+// it agrees with the hold reason the same line reports.
 static void add_drive_hooks(hmi::bench_verbs::Hooks &h) {
   h.phase = [] {
     return std::string(hmi::drive_session::to_string(drive_adapter.published_phase()));
   };
   h.notice = [] {
-    return std::string(hmi::drive_adapter::to_string(drive_adapter.published_notice()));
+    const hmi::stick::HoldReason hold = ui_app.permit_hooks().hold_reason.read();
+    return std::string(hmi::drive_adapter::to_string(drive_adapter.notice_for(hold)));
   };
   h.menu_open = [] { return ui_app.menu_open_any_task(); };
   h.banner = [] { return std::string(hmi::ui::refused_name(ui_app.refused_any_task())); };
