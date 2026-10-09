@@ -50,8 +50,9 @@ struct Cycle {
 /// @tparam Ports The board's side of each cycle, as static functions (direct calls, no
 ///         indirection on the ADC path): `std::uint32_t now_ms()` (the ADC side's clock),
 ///         `bool watchdog_subscribe()` and `void watchdog_reset()` (the task watchdog; hazard
-///         fix C4, §4.3). The cycle itself is ControlCycle (cycle.hpp): the motion guard, the
-///         stick, note_cycle, the watchdog reset.
+///         fix C4, §4.3), and `void after_cycle()` (after the watchdog reset, before the
+///         wait: the bench's STALL ADC, a no-op otherwise). The cycle itself is ControlCycle
+///         (cycle.hpp): the motion guard, the stick, note_cycle, the watchdog reset.
 template <typename Stick, typename Io, Cycle kCycle, typename Ports> class StickIsland {
 public:
   /// @brief The motion guard's channels (hazard fix C4, §3.1); every one outlives the task.
@@ -104,6 +105,7 @@ public:
                                                 hmi::stick::RawReadsMv{.horizontal_mv = horiz_mv,
                                                                        .vertical_mv = vert_mv,
                                                                        .twist_mv = twist_mv}));
+                 Ports::after_cycle();
 
                  // NOTE: sleeping in this way allows the sleep to exit early when the
                  // task is being stopped / destroyed

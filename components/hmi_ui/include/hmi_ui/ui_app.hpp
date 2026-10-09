@@ -13,6 +13,7 @@
 #include "logger.hpp"
 #include "lvgl.h"
 
+#include "control/bench_stall.hpp"
 #include "control/motion_guard.hpp"
 #include "messages/joystick_message.hpp"
 #include "messages/mib_message.hpp"
@@ -151,6 +152,8 @@ public:
   [[nodiscard]] constexpr hmi::control::GuardTelemetry &guard_telemetry() noexcept {
     return guard_telemetry_;
   }
+  /// The bench verb STALL's requests (bench builds only take them, C4 REQ-RUI-07).
+  [[nodiscard]] constexpr hmi::control::BenchStall &bench_stall() noexcept { return bench_stall_; }
   /// The refusal banner up (`refused`, a Refused value) as of its last change. Any task (an
   /// acquire load): the bench's STATE line reads it from the remote-UI task.
   [[nodiscard]] int32_t refused_any_task() const {
@@ -247,6 +250,7 @@ private:
   // The motion guard's channels (hazard-c4-spec.md §3.1): constant initialised too.
   hmi::control::GuardSources guard_sources_{};
   hmi::control::GuardTelemetry guard_telemetry_{};
+  hmi::control::BenchStall bench_stall_{};
   // The quick POST (hazard-c3-spec.md §2.3): the POST gate's only writer.
   PostStage post_stage_{{
       .port = config_.post,

@@ -216,6 +216,7 @@ struct StickPorts {
   static uint32_t now_ms() { return adc_clock_ms(); }
   static bool watchdog_subscribe() { return task_watchdog_subscribe(); }
   static void watchdog_reset() { task_watchdog_reset(); }
+  static void after_cycle();
 };
 
 // The ADC task's side of StickPipeline::cycle. Runs on the ADC task only; every
@@ -823,11 +824,35 @@ static void add_drive_hooks(hmi::bench_verbs::Hooks &h) {
   h.banner = [] { return std::string(hmi::ui::refused_name(ui_app.refused_any_task())); };
 }
 
+// Bench builds: STALL ADC, at the end of a stick cycle (after the watchdog reset): the task
+// neither cycles nor resets its watchdog for the stall's length (C4 §8 B5j).
+void StickPorts::after_cycle() {
+  if constexpr (BENCH_STICK_INJECT) {
+    hmi::control::spin_for_ms(ui_app.bench_stall().take(hmi::control::StallTask::ADC),
+                              adc_clock_ms);
+  }
+}
+
+// C4's verb: STALL UI|ADC <ms> (REQ-RUI-07). The task stalls itself at its next cycle; the reply
+// comes at once. STALL CADC is C2's (O14): refused here.
+static void add_motion_guard_hooks(hmi::bench_verbs::Hooks &h) {
+  h.stall = [](hmi::bench_verbs::StallTarget target, uint32_t ms) {
+    using hmi::bench_verbs::StallTarget;
+    if (target == StallTarget::CADC) {
+      return false;
+    }
+    ui_app.bench_stall().request(
+        target == StallTarget::UI ? hmi::control::StallTask::UI : hmi::control::StallTask::ADC, ms);
+    return true;
+  };
+}
+
 static hmi::bench_verbs::Hooks bench_verb_hooks() {
   using hmi::bench_verbs::PostGateName;
   using hmi::bench_verbs::StickHealthName;
   hmi::bench_verbs::Hooks h;
   add_drive_hooks(h);
+  add_motion_guard_hooks(h);
   h.hold_reason = [] {
     return std::string(hmi::stick::to_string(ui_app.permit_hooks().hold_reason.read()));
   };
@@ -1114,7 +1139,16 @@ extern "C" void app_main(void) {
       .period = 8ms,
       .fps_meter = kFpsInstrument ? &fps_meter : nullptr,
       // The motion guard's UI heartbeat (hazard-c4-spec.md §3.1), on the ADC side's clock.
-      .heartbeat = [] { ui_app.guard_sources().note_ui_cycle(adc_clock_ms()); },
+      .heartbeat =
+          [] {
+            ui_app.guard_sources().note_ui_cycle(adc_clock_ms());
+            // Bench builds: STALL UI. This cycle completed; the next comes after the stall, and
+            // the watchdog reset waits for it too.
+            if constexpr (BENCH_STICK_INJECT) {
+              hmi::control::spin_for_ms(ui_app.bench_stall().take(hmi::control::StallTask::UI),
+                                        adc_clock_ms);
+            }
+          },
       // The task watchdog (C4 §4.3): the UI task subscribes at its first cycle; the result is
       // the motion guard's ui_wdt_ok.
       .watchdog_subscribe = task_watchdog_subscribe,
