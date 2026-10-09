@@ -272,15 +272,22 @@ class Rig:
         self._hmi_ui = importlib.import_module("hmi_ui")
         self.sim = peers.SimChild(self.ip, self.tree, self.out / "sim.log",
                                   event_log=self.out / "sim-events.jsonl")
-        if not self.sim.wait_ready(SIM_READY_S):
-            raise NotRun("bench", self.sim.not_ready_reason(SIM_READY_S))
-        strays = common.stray_peers({self.sim.proc.pid})
-        if strays:
-            raise NotRun("bench", "another RTPS peer started beside this run's sim: "
-                         + "; ".join(strays))
-        self.sim.event_mark("step-start")
-        self.sim.send("jstart")
-        self._connect()
+        try:
+            if not self.sim.wait_ready(SIM_READY_S):
+                raise NotRun("bench", self.sim.not_ready_reason(SIM_READY_S))
+            # This run's sim is a process tree under a venv (launcher + base interpreter).
+            strays = common.stray_peers(exclude_trees={self.sim.proc.pid})
+            if strays:
+                raise NotRun("bench", "another RTPS peer started beside this run's sim: "
+                             + "; ".join(strays))
+            self.sim.event_mark("step-start")
+            self.sim.send("jstart")
+            self._connect()
+        except BaseException:
+            # __exit__ does not run when __enter__ raises: a sim left running here kept the
+            # board's XYTwist and starved every later step's sim (bench run 2026-10-08).
+            self.__exit__(None, None, None)
+            raise
         return self
 
     def __exit__(self, *_: object) -> None:

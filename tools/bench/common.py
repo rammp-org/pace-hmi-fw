@@ -87,6 +87,14 @@ def child_env(**extra: str) -> dict:
     return env
 
 
+def kill_tree(pid: int) -> str:
+    """Kill a process and everything below it (taskkill /T): killing only a venv launcher
+    leaves its base-interpreter child running, holding its sockets."""
+    r = subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True,
+                       text=True, timeout=30)
+    return (r.stdout + r.stderr).strip()
+
+
 def stamp() -> str:
     return datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
@@ -117,25 +125,52 @@ def esptool(args: list[str], timeout: float = 600.0, cwd: str | None = None) -> 
                           env=child_env())
 
 
-def python_processes() -> list[tuple[int, str]]:
-    """(pid, command line) of every python process, from CIM."""
+def python_process_table() -> list[tuple[int, int, str]]:
+    """(pid, parent pid, command line) of every python process, from CIM."""
     ps = ("Get-CimInstance Win32_Process | Where-Object { $_.Name -like 'python*' } | "
-          "ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }")
+          "ForEach-Object { \"$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.CommandLine)\" }")
     out = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
                          capture_output=True, text=True, timeout=60)
     rows = []
     for line in out.stdout.splitlines():
-        pid, _, cmd = line.partition("\t")
-        if pid.strip().isdigit():
-            rows.append((int(pid), cmd))
+        pid, _, rest = line.partition("\t")
+        ppid, _, cmd = rest.partition("\t")
+        if pid.strip().isdigit() and ppid.strip().isdigit():
+            rows.append((int(pid), int(ppid), cmd))
     return rows
 
 
-def stray_peers(exclude_pids: set[int] | None = None) -> list[str]:
-    """Running rtps_mcb_* / rtps_selftest / sim_child processes, our own excluded."""
-    exclude = set(exclude_pids or ()) | {os.getpid()}
+def python_processes() -> list[tuple[int, str]]:
+    """(pid, command line) of every python process, from CIM."""
+    return [(pid, cmd) for pid, _, cmd in python_process_table()]
+
+
+def descendants(roots: set[int], table: list[tuple[int, int, str]]) -> set[int]:
+    """`roots` and every process below them in `table` ((pid, parent pid, cmd) rows).
+    A venv's python.exe on Windows is a launcher that runs the base interpreter as its
+    child, and the child is the process doing the work: a child started from a venv is a
+    tree of two."""
+    found = set(roots)
+    grew = True
+    while grew:
+        grew = False
+        for pid, ppid, _ in table:
+            if ppid in found and pid not in found:
+                found.add(pid)
+                grew = True
+    return found
+
+
+def stray_peers(exclude_pids: set[int] | None = None, exclude_trees: set[int] | None = None,
+                table: list[tuple[int, int, str]] | None = None) -> list[str]:
+    """Running rtps_mcb_* / rtps_selftest / sim_child processes, our own excluded:
+    `exclude_pids` alone, `exclude_trees` with everything below them (a child started
+    through the venv launcher, e.g. this run's own sim)."""
+    rows = python_process_table() if table is None else table
+    exclude = (set(exclude_pids or ()) | {os.getpid()}
+               | descendants(set(exclude_trees or ()), rows))
     hits = []
-    for pid, cmd in python_processes():
+    for pid, _, cmd in rows:
         if pid in exclude:
             continue
         if any(k in cmd for k in ("rtps_mcb_", "rtps_selftest", "sim_child.py",

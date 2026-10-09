@@ -963,6 +963,108 @@ def t_injector() -> None:
     expect("no cal", hg.Cal.from_state({"cal": None}), None)
 
 
+def t_process_tree() -> None:
+    # A venv launcher (10) runs the base interpreter (11) that is this run's sim; 20/21 is
+    # another sim, 30 an unrelated python, 12 a grandchild of the launcher.
+    table = [(10, 1, r"C:\v\Scripts\python.exe sim_child.py --tree T"),
+             (11, 10, r"C:\Espressif\tools\python\python.exe sim_child.py --tree T"),
+             (12, 11, "python.exe -c pass"),
+             (20, 1, r"C:\v\Scripts\python.exe sim_child.py --tree U"),
+             (21, 20, r"C:\Espressif\tools\python\python.exe sim_child.py --tree U"),
+             (30, 1, "python.exe lsp_server.py")]
+    expect("the launcher's tree", common.descendants({10}, table), {10, 11, 12})
+    expect("no roots", common.descendants(set(), table), set())
+    strays = common.stray_peers(exclude_trees={10}, table=table)
+    expect("this run's sim (launcher and child) is not a stray; another sim is",
+           [s.split(":")[0] for s in strays], ["20", "21"])
+    old = common.stray_peers({10}, table=table)
+    expect("excluding the launcher pid alone reports its child (the 2026-10-08 NOT_RUN)",
+           [s.split(":")[0] for s in old], ["11", "20", "21"])
+
+
+class FakeSim:
+    """peers.SimChild's surface for the rig's start-up."""
+    started: list["FakeSim"] = []
+
+    def __init__(self, ip, tree, log_path=None, event_log=None, ready=True):
+        self.ready = ready
+        self.stopped = False
+        self.proc = type("P", (), {"pid": 4242})()
+        FakeSim.started.append(self)
+
+    def wait_ready(self, timeout=45.0):
+        return self.ready
+
+    def not_ready_reason(self, timeout=45.0):
+        return "the simulated MCB got no XYTwist (fake)"
+
+    def event_mark(self, label, timeout=5.0):
+        return True
+
+    def send(self, cmd):
+        pass
+
+    def stop(self):
+        self.stopped = True
+
+
+def t_rig_start_failure_stops_sim() -> None:
+    saved = (hazard_rig.peers.SimChild, common.stray_peers, hazard_rig.ui_client.open_hmi)
+    cases = (("not ready", dict(ready=False), [], None),
+             ("a stray beside it", {}, ["99: sim_child.py --tree X"], None),
+             ("the remote UI does not answer", {}, [], OSError("refused")))
+    try:
+        for what, kw, strays, ui_error in cases:
+            FakeSim.started = []
+            hazard_rig.peers.SimChild = lambda *a, kw=kw, **k: FakeSim(*a, **k, **kw)
+            common.stray_peers = lambda *a, strays=strays, **k: list(strays)
+
+            def open_hmi(*a, ui_error=ui_error, **k):
+                raise ui_error
+            hazard_rig.ui_client.open_hmi = open_hmi
+            with quiet(), tempfile.TemporaryDirectory() as tmp:
+                st = hazard_rig.HazardStep("x", pathlib.Path(tmp))
+                rig = hazard_rig.Rig("1.2.3.4", common.REPO, pathlib.Path(tmp), st, set(),
+                                     proven="proof")
+                try:
+                    with rig:
+                        raise AssertionError(f"{what}: the rig started")
+                except (hazard_rig.NotRun, OSError):
+                    pass
+            expect(f"{what}: the sim is stopped", [s.stopped for s in FakeSim.started], [True])
+    finally:
+        hazard_rig.peers.SimChild, common.stray_peers, hazard_rig.ui_client.open_hmi = saved
+
+
+def t_forced_stop_kills_tree() -> None:
+    import peers
+    killed = []
+
+    class Proc:
+        pid = 777
+        waits = 0
+
+        def wait(self, timeout=None):
+            Proc.waits += 1
+            if Proc.waits == 1:
+                raise TimeoutError("the sim did not quit")
+
+        def kill(self):
+            killed.append("kill-launcher-only")
+    sim = peers.SimChild.__new__(peers.SimChild)
+    sim.proc, sim.log_path, sim.lines = Proc(), None, []
+    sim.send = lambda cmd: None
+    saved = common.kill_tree
+    common.kill_tree = lambda pid: killed.append(pid) or "killed"
+    try:
+        with quiet():
+            sim.stop()
+    finally:
+        common.kill_tree = saved
+    expect("a sim that does not quit is killed as a tree, not by its launcher pid", killed,
+           [777])
+
+
 CASES = [
     ("BENCH-015 the hazard steps: only behind --hazard or --steps; retired as the fixes land; "
      "B5pp names", t_plan),
@@ -1003,6 +1105,10 @@ CASES = [
     ("BENCH-045 C2-13 is NOT_RUN (no calibration that writes flash); the C2 clean-up reboots; "
      "C2-14 grader: boot", t_c2_13_14),
     ("BENCH-046 C2-15, 16 graders: the soak's self test, ContinuousAdc starvation", t_c2_15_16),
+    ("BENCH-047 stray peers exclude this run's sim as a process tree (venv launcher and its "
+     "base-interpreter child), not its pid alone", t_process_tree),
+    ("BENCH-048 a rig whose start-up fails stops the sim it started", t_rig_start_failure_stops_sim),
+    ("BENCH-049 a sim that does not quit is killed with its whole tree", t_forced_stop_kills_tree),
 ]
 
 
