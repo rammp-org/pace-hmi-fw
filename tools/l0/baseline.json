@@ -22,9 +22,8 @@
     "heap_raw": {
       "main/log_capture.cpp": 1,
       "main/log_view.cpp": 1,
-      "main/lv_mem_psram.c": 5,
-      "main/rtps_comms.cpp": 1,
-      "main/selftest.cpp": 11
+      "main/lv_mem_psram.c": 4,
+      "main/selftest.cpp": 2
     },
     "if_config": {},
     "lines": {
@@ -33,7 +32,7 @@
     "locks": {
       "main/internet_ui.cpp": 2,
       "main/internet_ui.hpp": 1,
-      "main/joystick_cal.cpp": 11,
+      "main/joystick_cal.cpp": 9,
       "main/log_capture.cpp": 7,
       "main/main.cpp": 19,
       "main/rtps_comms.cpp": 36,
