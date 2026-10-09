@@ -360,6 +360,7 @@ def s_b17b(rig: Rig) -> dict:
 
 def s_b18(rig: Rig) -> dict:
     rig.begin()
+    rig.need("notice")  # "notice names the check": an image without the hook is NOT_RUN
     rig.sim_toggle("s", True)
     to_drive_by_mcb(rig)
     rig.watch(0.5)  # centred
