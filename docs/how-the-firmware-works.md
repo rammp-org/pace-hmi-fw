@@ -954,30 +954,10 @@ Found while writing this; none is a hazard on its own.
 
 **Comments and docs that no longer match the code:**
 
-- `main.cpp:633-635` says the UI loop calls `lv_task_handler` every 16 ms; it is 8 ms.
-- `main.cpp:840-842` says brightness over RTPS drives the backlight directly with no LVGL;
-  `brightness_set` takes the lock and sets a subject. It also names `rtps_brightness.py`,
-  which is not in `scripts/`.
-- `rtps_comms.cpp:567` says "5 writers + 5 readers"; the code makes 4 readers.
-  `sdkconfig.defaults:287` also says 5 readers.
-- `hmi_ui/app_state.hpp` says `stick_drives` is written by `nav_update_stick_gate`; the writer
-  is `DriveUi::update_stick_gate`.
-- `remote_ui/include/stick_inject.hpp` speaks of "app_main's `static StickSlot stick`"; the
-  slot is now a `StickIsland` member.
-- `main/selftest.hpp:10` and `selftest_spec.hpp` say a run starts from a Settings "SELF TEST"
-  row; it is the Skunk Works tile.
-- `drive_adapter/README.md` still names the port `MainDriveView`, `nav_update_stick_gate` and
-  `entry_refused_show`; they are now `hmi::ui::DrivePort<DriveUi>`,
-  `DriveUi::update_stick_gate` and `DrivePort::show_refused`.
 - `docs/plans/hazard-c1-spec.md` points at `components/hmi_ui/include/hmi_ui/drive_port.hpp`;
   it moved to `components/drive_ui/include/drive_ui/drive_port.hpp`.
-- `tools/guards/baselines/tasks.json`: the values match the code, but its "source" fields
-  still name old `main.cpp` lines and `main/fw_info.cpp`, `main/github_ota.cpp`,
-  `main/remote_ui.cpp`.
-- `fw_core/README.md` says nothing requires it; `main` and `remote_ui` do, and the bench
-  injection uses its `Mailbox` and `AtomicValue`.
-- `README.md` and `architecture.md` ("Today vs target") still describe `main.cpp` as
-  `frag_*.inc` fragments.
+
+(The other stale comments found while writing this were fixed in `dev_ai_stale_text`.)
 
 **Dead or unused:**
 
