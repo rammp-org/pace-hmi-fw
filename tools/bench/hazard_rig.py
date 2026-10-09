@@ -795,7 +795,7 @@ class Rig:
             self._modes_off()
             self.sim_cmd("ok")
             s = self.watch(3.0, until=hg.screen_is("LockedScreen"))
-            if s is not None and s.get("menu_open"):
+            if s is None or s.get("menu_open"):  # another screen, or a menu over Locked
                 self.home()
                 s = self.watch(3.0, until=lambda s: s.get("screen") == "LockedScreen"
                                and not s.get("menu_open"))

@@ -1257,12 +1257,15 @@ def t_sim_carry_over() -> None:
 def t_seat_targets_and_key_enter() -> None:
     elevation, minus = (30, 380, 320, 162, 6), (30, 520, 320, 162, 6)
     c3.check_seat_targets(elevation, minus)
+    c3.check_seat_targets(elevation[:4] + (7,), minus[:4] + (7,))  # one more focusable (05c22b5)
     expect("touch points are the widgets' middles", c3.centre_of(minus), (190, 601))
     for what, b, m in (("the burger key, not '-' (the 2026-10-09 walk)", elevation,
                         (0, 1116, 720, 164, 6)),
                        ("no focus on the page", elevation, None),
                        ("not the function grid", (0, 1116, 720, 164, 1), minus),
-                       ("the page did not open", elevation, elevation)):
+                       ("the page did not open", elevation, elevation),
+                       ("a focused object that is not a seat button", (30, 349, 300, 90, 7),
+                        minus)):
         try:
             c3.check_seat_targets(b, m)
         except hazard_rig.NotRun as e:

@@ -429,9 +429,11 @@ def check_seat_targets(buttons: tuple | None, minus: tuple | None) -> None:
     on arrival) and its adjustment page's "-" (ui_SeatAdjustmentButton1). Anything else is
     a rig fault, never a firmware verdict (on 2026-10-09 a keypad walk under the bumped
     stick ended on the burger key)."""
-    if buttons is None or buttons[4] != SEAT_BUTTONS:
+    # The keypad group may hold one more object than the grid (05c22b5: 7 for 6 buttons);
+    # the button itself is checked by its size (ui_SeatButton1: 320x162).
+    if buttons is None or buttons[4] < SEAT_BUTTONS or tuple(buttons[2:4]) != (320, 162):
         raise NotRun("bench", f"Seat screen: the function grid is not focused (FOCUS {buttons})")
-    if minus is None or minus[4] != SEAT_ADJUST:
+    if minus is None or minus[4] < SEAT_ADJUST:
         raise NotRun("bench", f"Seat screen: the adjustment page is not focused (FOCUS {minus})")
     if tuple(minus[:4]) == tuple(buttons[:4]) or minus[2] >= 720:
         raise NotRun("bench", f"Seat screen: '-' not found (FOCUS {minus}, button {buttons})")
@@ -445,7 +447,7 @@ def seat_targets(rig: Rig) -> tuple[int, int]:
     if rig.watch(3.0, until=hg.screen_is("SeatScreen")) is None:
         raise NotRun("bench", "could not open the Seat screen")
     buttons = rig.focus()
-    if buttons is None or buttons[4] != SEAT_BUTTONS:
+    if buttons is None or buttons[4] < SEAT_BUTTONS or tuple(buttons[2:4]) != (320, 162):
         check_seat_targets(buttons, None)  # raises: not the function grid
     rig.tap(*centre_of(buttons))
     time.sleep(0.3)  # the page change
