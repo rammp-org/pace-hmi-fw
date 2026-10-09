@@ -7,10 +7,10 @@
 ///          default, never in sdkconfig.defaults; hazard-fixes.md §3 B1). The logic (parse,
 ///          expiry, fail_mask) is hmi::stick's bench_inject.hpp, host-tested (STK-040..049).
 ///
-///          app_main's `static StickSlot stick` is hmi::stick::StickPipeline itself in every
-///          other build: the type is chosen by `std::conditional_t` on the constexpr, so a
-///          release build compiles none of this (CS-LAY-09, CS-TYP-05) and app_main is unchanged
-///          (the L0 ratchet holds main.cpp's lines and statics).
+///          the stick that main's `StickIsland<StickSlot, ...>` owns is hmi::stick::StickPipeline
+///          itself in every other build: the type is chosen by `std::conditional_t` on the
+///          constexpr, so a release build compiles none of this (CS-LAY-09, CS-TYP-05) and app_main
+///          is unchanged (the L0 ratchet holds main.cpp's lines and statics).
 ///
 ///          In a bench inject build it is StickInjectBench, a StickPipeline whose cycle() first
 ///          swaps the ADC task's RawReadsMv for the injected ones (StickInjector::apply), then
@@ -107,6 +107,7 @@ private:
   StickInjectActive active_{{.initial = false}};
 };
 
-/// @brief app_main's stick: StickInjectBench in a bench inject build, else StickPipeline.
+/// @brief main's stick (the StickIsland's): StickInjectBench in a bench inject build, else
+/// StickPipeline.
 using StickSlot =
     std::conditional_t<BENCH_STICK_INJECT, StickInjectBench, hmi::stick::StickPipeline>;
