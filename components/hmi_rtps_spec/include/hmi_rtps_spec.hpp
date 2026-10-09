@@ -239,4 +239,58 @@ static_assert(std::string_view(kHmiNoPeerFooter).ends_with(MIB::kMibStatus.name)
 /* ERROR with an empty error_message: printf(state number, to_string(state)) */
 inline constexpr char kHmiMcbNoTextFmt[] = "systemState=%u (%s), error_message empty";
 
+/* ==== The quick POST's words (hazard-c3-spec.md §2.8, §2.12; owner F1, 2026-10-08) ======
+   The TopBar's persistent indicator and the About screen. One text per check, keyed by the
+   check's name in components/post's table; a FAIL adds what to do unless the text says it. */
+
+inline constexpr char kPostChecking[] = "Start-up check";       // a latched check gathering
+inline constexpr char kPostNotRun[] = "Start-up check not run"; // the runner never ran
+inline constexpr char kPostFailedPrefix[] = "Start-up check failed: ";
+inline constexpr char kPostTimedOutPrefix[] = "Start-up check timed out: ";
+inline constexpr char kPostTurnOffAndOn[] = ". Turn the HMI off and on";
+inline constexpr char kPostCalSavedRestart[] = "Calibration saved. Restart the HMI to drive";
+inline constexpr char kPostLastResetKey[] = "Last reset"; // the About row: "Last reset: <name>"
+
+/* A check's words. A FAIL adds the reset's name when `names_reset`, then "Turn the HMI off and
+   on" when `turn_off_and_on` (not when the text already says what to do). No enum here:
+   scripts/rammp_rtps.py scrapes this header's enums as wire values. */
+struct PostCheckText {
+  std::string_view check; // the check's name (components/post CHECKS)
+  const char *text;
+  bool names_reset;     // the unclean-reset text: the reset's name follows
+  bool turn_off_and_on; // a FAIL ends "... Turn the HMI off and on"
+};
+
+inline constexpr PostCheckText kPostCheckTexts[] = {
+    {"adc.valid", "Joystick read failed", false, true},
+    {"joy.cal_saved", "The joystick must be calibrated first", false, false},
+    {"joy.cal_span", "Joystick calibration too small: calibrate again", false, false},
+    {"i2c.missing", "Internal device missing", false, true},
+    {"sys.clean_reset", "Restarted after a fault: ", true, true},
+    {"img.ok", "Firmware image not valid", false, true},
+    {"mem.int_min", "Low memory", false, true},
+    {"mem.int_block", "Low memory", false, true},
+    {"mem.dma_min", "Low memory", false, true},
+    {"mem.psram_free", "Low memory", false, true},
+    {"stk.adc", "Low memory", false, true},
+    {"stk.ui", "Low memory", false, true},
+    {"joy.x_cal_off", "Centre the joystick", false, false},
+    {"joy.y_cal_off", "Centre the joystick", false, false},
+    {"joy.twist_cal_off", "Centre the joystick", false, false},
+    {"joy.x_noise", "Centre the joystick", false, false},
+    {"joy.y_noise", "Centre the joystick", false, false},
+    {"joy.twist_noise", "Centre the joystick", false, false},
+    {"joy.button_idle", "Release the joystick button", false, false},
+};
+
+/* A check's text, or nullptr for a name the table does not hold. */
+constexpr const PostCheckText *post_check_text(std::string_view check) {
+  for (const PostCheckText &t : kPostCheckTexts) {
+    if (t.check == check) {
+      return &t;
+    }
+  }
+  return nullptr;
+}
+
 } // namespace rammp

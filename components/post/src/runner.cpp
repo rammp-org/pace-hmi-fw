@@ -79,6 +79,44 @@ std::string_view reset_reason_name(ResetReason reason) noexcept {
   }
 }
 
+std::string_view reset_reason_id(ResetReason reason) noexcept {
+  switch (reason) {
+  case ResetReason::UNKNOWN:
+    return "UNKNOWN";
+  case ResetReason::POWERON:
+    return "POWERON";
+  case ResetReason::EXT:
+    return "EXT";
+  case ResetReason::SW:
+    return "SW";
+  case ResetReason::PANIC:
+    return "PANIC";
+  case ResetReason::INT_WDT:
+    return "INT_WDT";
+  case ResetReason::TASK_WDT:
+    return "TASK_WDT";
+  case ResetReason::WDT:
+    return "WDT";
+  case ResetReason::DEEPSLEEP:
+    return "DEEPSLEEP";
+  case ResetReason::BROWNOUT:
+    return "BROWNOUT";
+  case ResetReason::SDIO:
+    return "SDIO";
+  case ResetReason::USB:
+    return "USB";
+  case ResetReason::JTAG:
+    return "JTAG";
+  case ResetReason::EFUSE:
+    return "EFUSE";
+  case ResetReason::PWR_GLITCH:
+    return "PWR_GLITCH";
+  case ResetReason::CPU_LOCKUP:
+    return "CPU_LOCKUP";
+  }
+  return "?";
+}
+
 Line check_line(const Check &row, const Result &result) noexcept {
   Line line;
   const std::string_view verdict = printed_verdict(row, result);

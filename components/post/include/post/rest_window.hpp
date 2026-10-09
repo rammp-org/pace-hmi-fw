@@ -45,9 +45,22 @@ public:
                                                std::optional<float> vertical_mv,
                                                std::optional<float> twist_mv,
                                                bool button_pressed) noexcept {
+    StickWindow done{};
+    if (!add_into(horizontal_mv, vertical_mv, twist_mv, button_pressed, done)) {
+      return std::nullopt;
+    }
+    return done;
+  }
+
+  /// @brief As add(), but the finished window goes into @p out (the caller's, so the ADC task's
+  ///        frame holds no window).
+  /// @return true when @p out now holds a finished window (else @p out is untouched)
+  [[nodiscard]] bool add_into(std::optional<float> horizontal_mv, std::optional<float> vertical_mv,
+                              std::optional<float> twist_mv, bool button_pressed,
+                              StickWindow &out) noexcept {
     const bool valid = usable(horizontal_mv) && usable(vertical_mv) && usable(twist_mv);
     if (!started_ && !valid) {
-      return std::nullopt; // waiting for the first all-valid cycle
+      return false; // waiting for the first all-valid cycle
     }
     started_ = true;
     ++cycles_;
@@ -59,16 +72,16 @@ public:
       twist_.add(*twist_mv);
     }
     if (cycles_ < static_cast<std::uint32_t>(WINDOW_MIN_SAMPLES)) {
-      return std::nullopt;
+      return false;
     }
-    const StickWindow done{.cycles = cycles_,
-                           .valid_cycles = valid_,
-                           .x = x_.rest(valid_),
-                           .y = y_.rest(valid_),
-                           .twist = twist_.rest(valid_),
-                           .button_idle = button_idle_};
+    out.cycles = cycles_;
+    out.valid_cycles = valid_;
+    out.x = x_.rest(valid_);
+    out.y = y_.rest(valid_);
+    out.twist = twist_.rest(valid_);
+    out.button_idle = button_idle_;
     start_window();
-    return done;
+    return true;
   }
 
   /// @brief Drops any partial window and waits again for a first all-valid cycle (the bench's

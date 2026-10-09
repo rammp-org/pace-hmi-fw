@@ -8,18 +8,18 @@ for the host and the target (`fw_component_options`, `-Wswitch-enum`, a `.clang-
 60-line functions). Safety-relevant (CS-SAF-01): once wired, a POST that is not PASS keeps
 the chair from moving.
 
-## Not yet wired
+## Wired (hazard-c3-spec.md, approved 2026-10-08)
 
-Nothing in the firmware calls this yet. `main` does not require it; the project's
-`COMPONENTS` list names it only so that it builds for the target. Wiring it in is
-**hazard-fixes §4 C3**, a safety behaviour change that needs its own spec and the owner's
-approval first. C3 adds:
-
-- the `POST_PENDING` and `POST_FAILED` phases to the drive table;
-- the ADC task's rest window (`StickWindow`, sent as a message about once a second);
-- the boot facts gathered in `app_main`;
-- a `std::atomic<uint8_t>` POST state that the UI task reads;
-- the persistent fault indicator that names `blocking_check()`.
+- `Read ADC` feeds `RestWindow` every cycle with the reads the stick pipeline gets and writes
+  each window to a one-slot mailbox (main's `AdcStickIo::feed_rest_window`); it stops once the
+  POST gate is PASS or FAIL.
+- `PostRunner` runs on the UI task, in the 250 ms poll before the drive adapter's tick
+  (hmi_ui `PostStage`; decision C6, a CS-SAF-04 deviation until the islands work). It is the
+  POST gate's only writer (`stick/permit_hooks.hpp`); the stick's output permit and the drive
+  table read the gate.
+- main's `kPostPort` gathers the IDF facts (reset reason, OTA state, calibration, heap, stacks)
+  with the enum `static_assert`s of POST-050; the boot I2C scan is handed over at start-up.
+- `post_indicator` drives the TopBar's persistent indicator; its words are in hmi_rtps_spec.
 
 The extended self test (`main/selftest*`) is not touched and stays separate.
 
@@ -80,7 +80,7 @@ only D2 and D3 today.
 | REQ-POST-12 | `blocking_check` returns the first REQUIRED FAIL in table order (hardware first), else the first REQUIRED PENDING, else none. | POST-004, POST-018, POST-024, POST-025, POST-027, POST-028 |
 | REQ-POST-13 | Each verdict, overall state and reason has its own name. A value outside the enum reads `?`. | POST-032 |
 | REQ-POST-14 | The rest-window accumulator starts at the first cycle with all three reads valid, counts every cycle after it, and emits one `StickWindow` per `WINDOW_MIN_SAMPLES` cycles, then starts a new one. Axis mean, min and max are over the valid cycles, rounded to whole mV; `button_idle` is true only if the button read released on every cycle of the window. A NaN read counts as a failed read (hazard-c3-spec.md §5.2). | POST-034..038 |
-| REQ-POST-15 | The runner stores PENDING at its first tick. It gathers the boot facts once, at the first window; merges every new window into the latched report; and stores the gate PASS or FAIL as the latched overall state. The gate never moves back. It is the gate's only writer. | POST-039..041, POST-044, POST-047, POST-049 |
+| REQ-POST-15 | The runner stores PENDING at its first tick. It gathers the boot facts once, at the first window; merges every new window into the latched report; and stores the gate PASS or FAIL as the latched overall state. The gate never moves back. It is the gate's only writer. | POST-039..041, POST-044, POST-047, POST-049, POST-052 |
 | REQ-POST-16 | A LATCHED check still PENDING `POST_BUDGET_MS` after the first tick makes the gate FAIL ("timed out", that check blocking). A LIVE check has no budget. | POST-042, POST-043 |
 | REQ-POST-17 | At PASS or FAIL the runner prints the TS-POST-05 lines once, in table order (hazard-c3-spec.md §2.7). A LATCHED check without a measurement prints FAIL, a LIVE one SKIP. The reset reason line is printed at every boot. | POST-045, POST-051 |
 | REQ-POST-18 | `post_indicator` gives NONE, CHECKING, WAITING, FAILED or NOT_RUN per hazard-c3-spec.md §2.8. | POST-040, POST-042, POST-046 |
@@ -133,9 +133,10 @@ constants and are used only in `static_assert`s.
 
 ## Tasks and dependencies
 
-- Tasks: none. Every function is pure, and runs on whichever task calls it (C3: the control
-  island).
-- Dependencies: the C++ standard library only. Nothing requires this component yet.
+- Tasks: none of its own. `RestWindow` runs on `Read ADC`, `PostRunner` and `post_indicator`
+  on the UI task (C3 §2.3).
+- Dependencies: the C++ standard library, and `stick` for the POST gate's type
+  (`stick/permit_types.hpp`). Required by hmi_ui and main.
 
 ## Tests
 

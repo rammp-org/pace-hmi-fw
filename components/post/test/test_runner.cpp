@@ -648,8 +648,34 @@ TEST_CASE("POST-051 the reset reason names are the self test's (main/selftest.cp
     TEST_ASSERT_EQUAL_STRING_MESSAGE(want.c_str(),
                                      std::string(hmi::post::reset_reason_name(n.reason)).c_str(),
                                      std::string(n.idf).c_str());
+    // The bench's STATE names it as ESP-IDF does, without ESP_RST_.
+    TEST_ASSERT_EQUAL_STRING(std::string(n.idf).c_str(),
+                             std::string(hmi::post::reset_reason_id(n.reason)).c_str());
   }
   TEST_ASSERT_EQUAL_INT(13, named); // the self test names 13; the rest read "other"
   TEST_ASSERT_EQUAL_STRING(
       "other", std::string(hmi::post::reset_reason_name(static_cast<ResetReason>(99))).c_str());
+}
+
+TEST_CASE("POST-052 bench only: PERMIT POST forces the gate through the runner and holds it; "
+          "POST RERUN restarts from NOT_RUN and gathers the boot facts again",
+          "[post][runner][bench][REQ-POST-15]") {
+  World world;
+  Runner runner{FakePort{&world}};
+  runner.tick(T0, std::nullopt);
+  runner.tick(T0 + 250, good_window());
+  TEST_ASSERT_TRUE(runner.gate() == PostGate::PASS);
+  runner.force(PostGate::PENDING);
+  TEST_ASSERT_TRUE(runner.gate() == PostGate::PENDING);
+  TEST_ASSERT_TRUE(world.stored[world.stores - 1] == PostGate::PENDING);
+  runner.tick(T0 + 500, good_window()); // held: the override wins over the facts
+  TEST_ASSERT_TRUE(runner.gate() == PostGate::PENDING);
+  runner.rerun();
+  TEST_ASSERT_TRUE(runner.gate() == PostGate::NOT_RUN);
+  TEST_ASSERT_TRUE(world.stored[world.stores - 1] == PostGate::NOT_RUN);
+  runner.tick(T0 + 750, std::nullopt);
+  TEST_ASSERT_TRUE(runner.gate() == PostGate::PENDING);
+  runner.tick(T0 + 1000, good_window());
+  TEST_ASSERT_TRUE(runner.gate() == PostGate::PASS);
+  TEST_ASSERT_EQUAL_INT(2, world.reset_calls); // the boot facts gathered again
 }

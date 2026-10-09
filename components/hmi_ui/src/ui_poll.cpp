@@ -11,7 +11,9 @@ void hmi::ui::UiPoll::poll() {
   // flip every other tick: a 500 ms half-period, i.e. a 1 Hz blink
   lv_subject_set_int(config_.shared->rtps_blink, static_cast<int32_t>((++ticks_ / 2) & 1u));
   config_.diag_poll();
+  config_.post_tick();
   config_.drive_tick();
+  config_.post_indicator();
   check_theme();
 }
 

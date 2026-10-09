@@ -18,6 +18,7 @@ namespace hmi::ui {
 ///   firmware version, commit, build date
 ///   SHA-256  of the image in flash, as `sha256sum rammp-hmi-p4.bin` prints it
 ///   device   the chip's MAC (also the USB serial number), link, IP, hostname
+///   last reset  why the chip last reset (hazard-c3-spec.md §2.9: "Last reset: <name>")
 /// Nothing on the screen can be selected; the stick only reaches the burger key. Everything
 /// it shows comes from main through the Config (the hash, the network, the board).
 class AboutView {
@@ -33,6 +34,7 @@ public:
     LinkState (*link_state)();                ///< what that link is doing
     std::string (*ip)();                      ///< its address; empty without one
     const char *(*hostname)();                ///< the board's hostname
+    const char *(*last_reset)();              ///< the last reset's name (C3 §2.9, H12)
   };
 
   constexpr explicit AboutView(const Config &config) noexcept
@@ -57,6 +59,7 @@ private:
   static const char *link_words(LinkState state);
   void refresh();
   void fill_static();
+  void add_last_reset_row();
   static void refresh_cb(lv_timer_t *timer);
 
   Config config_;

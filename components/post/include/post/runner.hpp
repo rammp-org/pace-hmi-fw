@@ -59,6 +59,11 @@ static_assert(gate_of(Overall::PENDING) == PostGate::PENDING &&
 /// @return its name; "other" for a reason the self test does not name
 [[nodiscard]] std::string_view reset_reason_name(ResetReason reason) noexcept;
 
+/// @brief A reset reason as ESP-IDF names it, without `ESP_RST_` (the bench's STATE line).
+/// @param reason the reason
+/// @return e.g. "SW", "PANIC", "TASK_WDT"; "?" for a value the enum does not name
+[[nodiscard]] std::string_view reset_reason_id(ResetReason reason) noexcept;
+
 /// One POST line, built in a fixed buffer (no allocation).
 struct Line {
   std::array<char, 128> text{}; ///< NUL-terminated
@@ -126,6 +131,9 @@ public:
   /// @param now_ms the UI task's clock, ms (modulo 2^32)
   /// @param window a window read from the mailbox this tick (CHANGED), else nothing
   void tick(std::uint32_t now_ms, const std::optional<StickWindow> &window) noexcept {
+    if (forced_) {
+      return; // a bench override holds until the next rerun
+    }
     if (!started_) {
       start(now_ms);
     }
@@ -153,6 +161,7 @@ public:
   /// @brief Bench only (`POST RERUN`): back to NOT_RUN, facts dropped; the next tick starts
   ///        again and gathers the boot facts again.
   void rerun() noexcept {
+    forced_ = false;
     facts_ = Facts{};
     latched_ = Report{};
     overall_ = Overall::PENDING;
@@ -161,6 +170,17 @@ public:
     timed_out_ = false;
     waiting_on_.reset();
     store(PostGate::NOT_RUN);
+  }
+
+  /// @brief Bench only (`PERMIT POST <value>`, C1 §3.2, applied by the runner, C3 §2.4): stores
+  ///        @p gate and holds it; ticks change nothing until rerun().
+  /// @param gate the gate the bench asks for
+  void force(PostGate gate) noexcept {
+    forced_ = true;
+    if (gate != gate_) {
+      gate_ = gate;
+      port_.store_gate(gate);
+    }
   }
 
   /// @return the gate as last stored
@@ -244,6 +264,7 @@ private:
   bool started_ = false;
   bool gathered_ = false;
   bool timed_out_ = false;
+  bool forced_ = false; ///< a bench override holds the gate
   std::optional<Id> waiting_on_;
 };
 

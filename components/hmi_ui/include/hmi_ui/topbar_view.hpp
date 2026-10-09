@@ -1,5 +1,5 @@
 #pragma once
-// The TopBar's clock and link labels.
+// The TopBar's clock and link labels, and the POST's persistent indicator.
 
 #include <array>
 #include <atomic>
@@ -46,9 +46,22 @@ public:
   /// Any task, with lvgl_mutex held by the caller.
   void set_link(const char *text);
 
+  /// The POST indicator's colour (hazard-c3-spec.md §2.8): NONE hides it.
+  enum class PostColour : int32_t { NONE = 0, GREY = 1, AMBER = 2, RED = 3 };
+  /// @brief Shows the POST's persistent indicator on every TopBar (every screen but Boot,
+  ///        which has none): not a banner, it neither times out nor can be dismissed. Changes
+  ///        the subjects only when the text or colour changed.
+  /// @param colour its colour; NONE hides it
+  /// @param text its words (hmi_rtps_spec)
+  /// UI task (the 250 ms poll, after the drive tick), lvgl_mutex held.
+  void set_post(PostColour colour, const char *text);
+
 private:
   static constexpr size_t CLOCK_TEXT_SIZE = 8; ///< "HH:MM" and its terminator, with room
   static constexpr size_t LINK_TEXT_SIZE = 16;
+  static constexpr size_t POST_TEXT_SIZE = 112;
+
+  static void post_colour_observer(lv_observer_t *observer, lv_subject_t *subject);
 
   // UI task (an LVGL timer).
   static void clock_poll_cb(lv_timer_t *timer);
@@ -61,6 +74,10 @@ private:
   lv_subject_t link_subject_{};
   std::array<char, LINK_TEXT_SIZE> link_buf_{};
   std::array<char, LINK_TEXT_SIZE> link_prev_buf_{};
+  lv_subject_t post_text_subject_{}; ///< the POST indicator's words
+  std::array<char, POST_TEXT_SIZE> post_buf_{};
+  std::array<char, POST_TEXT_SIZE> post_prev_buf_{};
+  lv_subject_t post_colour_subject_{}; ///< int: PostColour
 };
 
 } // namespace hmi::ui

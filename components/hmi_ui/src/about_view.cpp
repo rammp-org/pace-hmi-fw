@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "hmi_format/about.hpp"
+#include "hmi_rtps_spec.hpp"
 #include "ui.h"
 
 void hmi::ui::AboutView::set_mark(Mark mark) {
@@ -119,6 +120,31 @@ void hmi::ui::AboutView::fill_static() {
     lv_label_set_text(ui_AboutDeviceValue, text.data());
   }
   lv_label_set_text(ui_AboutHostValue, config_.hostname());
+  add_last_reset_row();
+}
+
+// "Last reset: <name>" (hazard-c3-spec.md §2.9, REQ-UI-21): a row in code below Hostname, in
+// the export's own row layout (key at x 30, value at x 250, rows 50 px apart) and styles.
+void hmi::ui::AboutView::add_last_reset_row() {
+  constexpr int32_t ROW_STEP = 50;
+  const int32_t y = lv_obj_get_y(ui_AboutHostKey) + ROW_STEP;
+  const auto main = static_cast<lv_style_selector_t>(LV_PART_MAIN) |
+                    static_cast<lv_style_selector_t>(LV_STATE_DEFAULT);
+  lv_obj_t *key = lv_label_create(ui_AboutContent);
+  lv_obj_set_pos(key, lv_obj_get_x(ui_AboutHostKey), y);
+  lv_label_set_text(key, rammp::kPostLastResetKey);
+  ui_object_set_themeable_style_property(key, main, LV_STYLE_TEXT_COLOR,
+                                         _ui_theme_color_text_muted);
+  ui_object_set_themeable_style_property(key, main, LV_STYLE_TEXT_OPA, _ui_theme_alpha_text_muted);
+  lv_obj_set_style_text_font(key, lv_obj_get_style_text_font(ui_AboutHostKey, LV_PART_MAIN), main);
+  lv_obj_t *value = lv_label_create(ui_AboutContent);
+  lv_obj_set_pos(value, lv_obj_get_x(ui_AboutHostValue), y);
+  lv_obj_set_width(value, lv_obj_get_width(ui_AboutHostValue));
+  lv_label_set_text(value, config_.last_reset());
+  ui_object_set_themeable_style_property(value, main, LV_STYLE_TEXT_COLOR, _ui_theme_color_text);
+  ui_object_set_themeable_style_property(value, main, LV_STYLE_TEXT_OPA, _ui_theme_alpha_text);
+  lv_obj_set_style_text_font(value, lv_obj_get_style_text_font(ui_AboutHostValue, LV_PART_MAIN),
+                             main);
 }
 
 void hmi::ui::AboutView::refresh_cb(lv_timer_t *timer) {
