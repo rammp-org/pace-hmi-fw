@@ -75,10 +75,17 @@ def driving_forward(rig: Rig, label: str = "enter") -> None:
 
 
 def watch_disables(rig: Rig, after: str, within: float = 3.0) -> float | None:
-    """Wait for the sim to log the first DISABLE after mark `after`; its stamp."""
-    e = rig.sim.wait_event(lambda e: e.get("ev") == "drive_command"
-                           and e.get("request") == "DISABLE", within, after)
-    return None if e is None else e["mono"]
+    """Wait for the sim to log the first DISABLE after mark `after`, polling STATE all the
+    while (the notice that comes with that DISABLE is graded against its time); its stamp."""
+    deadline = time.monotonic() + within
+    while True:
+        e = next((e for e in rig.sim.events(after) if e.get("ev") == "drive_command"
+                  and e.get("request") == "DISABLE"), None)
+        if e is not None:
+            return e["mono"]
+        if time.monotonic() >= deadline:
+            return None
+        rig.watch(0.1)  # one STATE poll per period until the DISABLE is in the sim's log
 
 
 # ---------------------------------------------------------------- graders (pure)
@@ -111,10 +118,25 @@ def check_no_nonzero(st: HazardStep, what: str, tr: hg.Trace, t0: float, t1: flo
              + (f", first {list(bad[0])}" if bad else ""))
 
 
+# C1 §3.3: GATE_SHUT and CALIBRATING have no notice text (the Drive screen is not up yet,
+# or the calibration screen is): with either as the hold reason the notice is NONE.
+NO_TEXT_REASONS = ("GATE_SHUT", "CALIBRATING")
+
+
+def notice_as_spec(notice: str):
+    """The Drive notice C1 §2.7/§3.3 asks for: `notice`, or NONE while the hold reason is
+    one §3.3 gives no text (e.g. GATE_SHUT until the Drive screen's fade has opened the
+    gate, about 0.4 s after STATE first shows DriveScreen)."""
+    return lambda s: s.get("notice") == notice or (
+        s.get("notice") == "NONE" and s.get("hold_reason") in NO_TEXT_REASONS)
+
+
 def check_notice_all(st: HazardStep, tr: hg.Trace, notice: str, t0: float, t1: float) -> None:
-    ok, n, bad = hg.all_states(tr.states, hg.field_is("notice", notice), t0, t1)
-    st.check(f"STATE notice {notice}", ok,
-             f"{n} polls in [{t0:.2f}, {t1:.2f}]" + (f"; first other {bad[0]}" if bad else ""))
+    ok, n, bad = hg.all_states(tr.states, notice_as_spec(notice), t0, t1)
+    shown = sum(1 for t, s in hg.states_in(tr.states, t0, t1) if s.get("notice") == notice)
+    st.check(f"STATE notice {notice}", ok and shown > 0,
+             f"{n} polls in [{t0:.2f}, {t1:.2f}], {shown} show it"
+             + (f"; first other {bad[0]}" if bad else ""))
 
 
 def grade_b1(st: HazardStep, tr: hg.Trace, p: dict) -> None:

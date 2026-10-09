@@ -150,6 +150,40 @@ def t_b1() -> None:
           "CENTRE_FIRST")
 
 
+def t_b1_gate_shut() -> None:
+    def b(tb: TB, gate_notice: str = "NONE", later: str = "CENTRE_FIRST") -> TB:
+        # DriveScreen at 101.0; the fade ends and the gate opens 0.39 s later (C1 §3.3:
+        # GATE_SHUT has no text, so the notice is NONE until then)
+        return (tb.mark("enter", 100.0).polls(99.0, 101.0)
+                .polls(101.0, 101.4, screen="DriveScreen", phase="DRIVING", notice=gate_notice,
+                       hold_reason="GATE_SHUT")
+                .polls(101.4, 104.5, screen="DriveScreen", phase="DRIVING", notice=later,
+                       hold_reason="CENTRE_FIRST").stream(99.0, 104.5))
+    passes("B5''-1: NONE while GATE_SHUT, then CENTRE_FIRST", c1.grade_b1, b(TB()).build())
+    fails("B5''-1: NONE once the gate is open", c1.grade_b1, b(TB(), later="NONE").build(),
+          "CENTRE_FIRST")
+    fails("B5''-1: another notice while GATE_SHUT", c1.grade_b1,
+          b(TB(), gate_notice="STOPPING").build(), "CENTRE_FIRST")
+
+
+def t_hold_polls() -> None:
+    sent: list[str] = []
+
+    class Hmi:
+        def command(self, text):
+            sent.append(text)
+            return "OK"
+    with quiet(), tempfile.TemporaryDirectory() as tmp:
+        st = hazard_rig.HazardStep("x", pathlib.Path(tmp))
+        rig = hazard_rig.Rig("1.2.3.4", common.REPO, pathlib.Path(tmp), st, set(), proven="p")
+        rig.hmi = Hmi()
+        rig.state = lambda: sent.append("STATE") or {}
+        rig.hold_button(500)
+    expect("BTN 1, STATE polled through the hold, BTN 0",
+           (sent[0], sent[-1], sent[1:-1].count("STATE") >= 4, set(sent[1:-1])),
+           ("BTN 1", "BTN 0", True, {"STATE"}))
+
+
 def t_b1bc() -> None:
     def b(tb: TB) -> TB:
         return tb.mark("centre", 200.0).mark("forward", 200.2).stream(199.0, 202.5)
@@ -1272,6 +1306,10 @@ CASES = [
      "verdict detail says so", t_sim_carry_over),
     ("BENCH-054 at an HMI reboot the sim is retired at once and its successor gets the old "
      "modes and state before it can publish", t_sim_replaced_at_reboot),
+    ("BENCH-055 B5''-1/4b/10's notice: NONE allowed only while the hold reason has no text "
+     "(GATE_SHUT, CALIBRATING; C1 3.3), the notice shown after", t_b1_gate_shut),
+    ("BENCH-056 STATE is polled through every button hold, so a stop's notice is timed from "
+     "the hold's completion", t_hold_polls),
     ("BENCH-051 injection lapses come from the STICK send times in the remote-UI log, not "
      "the injector's own clock; a pause is not a lapse", t_stick_lapses),
 ]
