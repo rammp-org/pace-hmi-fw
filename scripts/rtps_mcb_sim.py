@@ -34,8 +34,8 @@ stdin command and, where it makes sense at start-up, a flag; 'h' lists them all:
   mark LABEL        a mark in the event log, for a script to find its place
 --event-log PATH appends one JSON object per line: every DriveCommand and
 SeatCommand received (with what the sim did with it), every non-zero or
-button-changing XYTwist plus a per-second XYTwist summary, every MibStatus state
-change actually sent, pause/resume, the HMI going and coming back, mode changes
+button-changing XYTwist plus a per-second XYTwist summary, every MibStatus publish
+(`mib_publish`) and every state change actually sent (`mib_state`), pause/resume, the HMI going and coming back, mode changes
 and marks. Each record has `t` (wall clock), `mono` (monotonic s) and `ev`. The
 decision logic lives in mcb_sim_logic.py, where `selftest` tests it.
 
@@ -586,6 +586,10 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
         # subscriber yet went nowhere, so it is not a change the HMI could see.
         # Under the lock: the network thread and the stdin loop both publish (seen
         # on the board: the first IDLE logged twice).
+        # Every publish, with its time (hazard-c4-spec.md B5f/B5g grade XYTwist against the
+        # first IDLE publish and the last one before a pause). Before the change record, so a
+        # change's publish is already in the log when its mib_state follows.
+        self.events.record(sim_logic.mib_publish_event(sent_state, self.seq - 1, len(targets)))
         previous = sent_state
         if targets:
             with self._modes_lock:

@@ -12,8 +12,10 @@ moves are unchanged; only the I/O under them is replaced) gives every command:
 - a timeout: COMMAND_TIMEOUT_S (SHOT: SHOT_TIMEOUT_S, a 1.8 MB frame; SWIPE: + its ms);
 - on a timeout or a dropped connection, a reconnect, then ONE retry if the verb is
   idempotent (setting a level or reading: PING SCREEN FOCUS TASKS SHOT KEY BTN THEME
-  PRESS RELEASE). TAP and SWIPE are not retried: the first may have been carried out
-  with only its reply lost, and a second tap on a toggle (the burger key) undoes it.
+  PRESS RELEASE, and the bench verbs STICK STATE PERMIT CAL). TAP and SWIPE are not
+  retried: the first may have been carried out with only its reply lost, and a second
+  tap on a toggle (the burger key) undoes it. Nor are POST RERUN (a second rerun restarts
+  the first), CRASH (the board is gone) and STALL (a second stall doubles it).
   They raise RemoteUiError after the reconnect, as does a retry that fails too. The
   reconnect itself releases whatever was held: the board's remote UI lets go of the
   touch, the key and the button when a client goes (components/remote_ui/src/remote_ui.cpp);
@@ -44,7 +46,7 @@ SHOT_TIMEOUT_S = 20.0       # 720 x 1280 x 2 bytes over Wi-Fi
 CONNECT_TIMEOUT_S = 10.0    # the board serves one client; a new one waits in the backlog
 SLOW_S = 1.0                # a command slower than this is counted as slow in stats()
 IDEMPOTENT = {"PING", "SCREEN", "FOCUS", "TASKS", "SHOT", "KEY", "BTN", "THEME", "PRESS",
-              "RELEASE"}
+              "RELEASE", "STICK", "STATE", "PERMIT", "CAL"}
 
 
 class RemoteUiError(RuntimeError):
@@ -91,6 +93,8 @@ def _timeout_for(text: str) -> float:
         return SHOT_TIMEOUT_S
     if verb == "SWIPE" and len(words) > 5 and words[5].isdigit():
         return COMMAND_TIMEOUT_S + int(words[5]) / 1000.0
+    if verb == "STALL" and len(words) > 2 and words[2].isdigit():
+        return COMMAND_TIMEOUT_S + int(words[2]) / 1000.0  # answered when the stall ends
     return COMMAND_TIMEOUT_S
 
 
@@ -229,6 +233,10 @@ class FakeRemoteUi:
         self.seen: list[str] = []
         self.clients = 0
         self.screen = "LockedScreen"
+        # What the bench verbs answer (bench_verbs.hpp): STATE's object, and a reply per
+        # first two words for the others ("OK" when not listed).
+        self.state: dict = {"screen": self.screen, "phase": None, "post": None}
+        self.replies: dict[str, str] = {}
         self._stop = False
         threading.Thread(target=self._serve, daemon=True).start()
 
@@ -262,6 +270,11 @@ class FakeRemoteUi:
                         continue  # no answer
                     if verb == "SCREEN":
                         client.sendall(f"OK {self.screen}\n".encode())
+                    elif verb == "STATE":
+                        client.sendall(f"OK {json.dumps(self.state)}\n".encode())
+                    elif " ".join(text.split()[:2]) in self.replies:
+                        reply = self.replies[" ".join(text.split()[:2])]
+                        client.sendall(f"{reply}\n".encode())
                     elif verb == "SHOT":
                         client.sendall(b"FRAME 2 2 8\n" + bytes(range(8)))
                     else:
@@ -378,6 +391,61 @@ def t_ping() -> None:
     expect("nothing listening", (ok, "no PING answer" in detail), (False, True))
 
 
+def t_state(fake, hmi, log) -> None:
+    fake.state = {"screen": "DriveScreen", "phase": "DRIVING", "notice": "CENTRE_FIRST",
+                  "post": "PASS", "post_check": None, "cal": {"v": [6, 1510, 2962]}}
+    expect("parsed", hmi.state(), fake.state)
+    fake.stall["STATE"] = 1
+    expect("a STATE that times out is asked again", hmi.state()["phase"], "DRIVING")
+    expect("logged twice, the first an error", [("error" in r, r["attempt"])
+                                                for r in _rows(log)[1:]], [(True, 1), (False, 2)])
+
+
+def t_bench_verbs_retry_policy(fake, hmi, log) -> None:
+    for text in ("STICK 1507 1510 1477 0 1", "PERMIT POST pass", "CAL UNSAVED"):
+        fake.stall[text.split()[0]] = 1
+        expect(f"{text} retried", hmi.command(text), "OK")
+    for text in ("POST RERUN", "CRASH", "STALL UI 300"):
+        fake.stall[text.split()[0]] = 1
+        try:
+            hmi.command(text)
+        except RemoteUiError as e:
+            expect(f"{text} not retried", "not retried: not idempotent" in str(e), True)
+        else:
+            raise AssertionError(f"a stalled {text} did not raise")
+        expect(f"{text} sent once", fake.seen.count(text), 1)
+
+
+def t_stall_timeout() -> None:
+    expect("STALL waits for its stall", _timeout_for("STALL UI 3000"), COMMAND_TIMEOUT_S + 3.0)
+    expect("a malformed STALL gets the plain timeout", _timeout_for("STALL UI x"),
+           COMMAND_TIMEOUT_S)
+
+
+def t_bench_verb_errors(fake, hmi, log) -> None:
+    hmi_ui = _hmi_ui()
+    fake.replies["POST RERUN"] = "ERR POST RERUN not wired in this firmware (C3 REQ-RUI-06)"
+    fake.replies["PERMIT POST"] = "ERR PERMIT POST refused"
+    fake.replies["CAL UNSAVED"] = "ERR bench verbs need CONFIG_HMI_BENCH_STICK_INJECT"
+    for call, missing in ((hmi.post_rerun, True), (lambda: hmi.permit("post", "pass"), False),
+                          (hmi.cal_unsaved, True)):
+        try:
+            call()
+        except hmi_ui.BenchVerbError as e:
+            expect(f"{e.command}: not in firmware", e.not_in_firmware, missing)
+        else:
+            raise AssertionError("an ERR reply did not raise")
+    expect("OK passes", hmi.stall("ui", 300), "OK")
+    expect("the command text", fake.seen[-1], "STALL UI 300")
+    fake.state = None
+    try:
+        hmi.state()
+    except hmi_ui.BenchVerbError as e:
+        expect("STATE that is not an object", e.reply, "OK null")
+    else:
+        raise AssertionError("STATE null was accepted")
+
+
 CASES = [
     ("UI-001 every command is logged with its times, duration, gap and reply",
      _with_fake(t_logged)),
@@ -388,6 +456,13 @@ CASES = [
     ("UI-004 a retry that times out too raises RemoteUiError", _with_fake(t_retry_fails_too)),
     ("UI-005 SHOT and SWIPE get longer timeouts", t_shot_timeout_longer),
     ("UI-006 ping polls PING until OK, or reports what it last saw", t_ping),
+    ("UI-007 STATE comes back as a dict and is asked again after a timeout",
+     _with_fake(t_state)),
+    ("UI-008 STICK, PERMIT and CAL are retried; POST RERUN, CRASH and STALL are not",
+     _with_fake(t_bench_verbs_retry_policy)),
+    ("UI-009 STALL's timeout is the command timeout plus its stall", t_stall_timeout),
+    ("UI-010 a bench verb's ERR raises, and says whether the firmware lacks it",
+     _with_fake(t_bench_verb_errors)),
 ]
 
 
