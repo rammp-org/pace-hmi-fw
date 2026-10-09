@@ -36,7 +36,8 @@ idf_component_register(SRCS "src/about_view.cpp"
                             "src/update_view.cpp"
                             "src/widget_tree.cpp"
                        INCLUDE_DIRS "include"
-                       REQUIRES drive_adapter
+                       REQUIRES control
+                                drive_adapter
                                 drive_session
                                 drive_ui
                                 esp_driver_ppa

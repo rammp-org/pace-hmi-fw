@@ -4,6 +4,7 @@
 // RTPS participant. Messages: messages/joystick_message.hpp (the shared rammp-rtps spec)
 // plus this HMI's hmi_rtps_spec.hpp.
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -70,8 +71,18 @@ std::string rtps_comms_link_state_meaning(RtpsLinkState state); ///< the likely 
 // Handlers: register before rtps_comms_start(). They run on the RTPS receive task,
 // so they reach the UI only through subjects, under lvgl_mutex.
 void rtps_comms_on_brightness(std::function<void(float percent)> handler);
-/// The MIB's whole state: what the chair is doing, where the seat is, the clock.
+/// The MIB's whole state: what the chair is doing, where the seat is, the clock. Called first
+/// for every MibStatus, before rtps_comms' own lock and log (hazard fix C4, REQ-CTL-04: the
+/// handler stores the motion guard's state and stamp before anything else).
 void rtps_comms_on_mib_status(std::function<void(const MIB::MibStatus &)> handler);
+/// The link's lock-free flags, for the motion guard's LINK_DOWN (hazard fix C4, C4-b): net
+/// failed, link up, IP held. Any task, acquire loads; the atomics live as long as the firmware.
+struct RtpsLinkFlags {
+  const std::atomic<bool> &net_failed;
+  const std::atomic<bool> &link_up;
+  const std::atomic<bool> &got_ip;
+};
+RtpsLinkFlags rtps_comms_link_flags();
 void rtps_comms_on_diagnostics(std::function<void(const rammp::Diagnostics &)> handler);
 void rtps_comms_on_selftest_run(std::function<void(uint8_t run_id)> handler);
 /// `peer_rx`: the peer's count of pings received; -1 when the pong was a plain echo.

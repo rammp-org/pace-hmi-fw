@@ -13,6 +13,7 @@
 #include "logger.hpp"
 #include "lvgl.h"
 
+#include "control/motion_guard.hpp"
 #include "messages/joystick_message.hpp"
 #include "messages/mib_message.hpp"
 #include "settings.hpp"
@@ -140,6 +141,16 @@ public:
   /// The stick output permit's channels (stick/permit_hooks.hpp): the POST gate, stick health
   /// and the hold reason. Any task, each through its own end (the table there).
   [[nodiscard]] constexpr hmi::stick::PermitHooks &permit_hooks() noexcept { return permit_hooks_; }
+  /// The motion guard's sources (control/motion_guard.hpp, hazard-c4-spec.md §3.1): the UI
+  /// heartbeat and its watchdog flag (lv_task), the newest MibStatus state and stamp (the RTPS
+  /// receive task); read by the ADC task. Any task, each value with its one writer.
+  [[nodiscard]] constexpr hmi::control::GuardSources &guard_sources() noexcept {
+    return guard_sources_;
+  }
+  /// The motion guard's observability, written by the ADC task only (C4 §3.1).
+  [[nodiscard]] constexpr hmi::control::GuardTelemetry &guard_telemetry() noexcept {
+    return guard_telemetry_;
+  }
   /// The refusal banner up (`refused`, a Refused value) as of its last change. Any task (an
   /// acquire load): the bench's STATE line reads it from the remote-UI task.
   [[nodiscard]] int32_t refused_any_task() const {
@@ -233,6 +244,9 @@ private:
   // The stick output permit's channels, shared with the ADC task (hazard-c1-spec.md §3.2,
   // hazard-c3-spec.md §2.4): constant initialised with the rest of UiApp.
   hmi::stick::PermitHooks permit_hooks_{};
+  // The motion guard's channels (hazard-c4-spec.md §3.1): constant initialised too.
+  hmi::control::GuardSources guard_sources_{};
+  hmi::control::GuardTelemetry guard_telemetry_{};
   // The quick POST (hazard-c3-spec.md §2.3): the POST gate's only writer.
   PostStage post_stage_{{
       .port = config_.post,

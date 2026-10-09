@@ -12,6 +12,7 @@ UiIsland::UiIsland(const Config &config)
     : cycle_(config.cycle)
     , period_(config.period)
     , fps_meter_(config.fps_meter)
+    , heartbeat_(config.heartbeat)
     , task_({.callback = [this](std::mutex &m, std::condition_variable &cv) -> bool {
                // steady_clock, never high_resolution_clock: on ESP-IDF that one is the
                // wall clock, which the MCB's time moves (see "TopBar clock"), and
@@ -19,6 +20,9 @@ UiIsland::UiIsland(const Config &config)
                // - the screen froze for as long as the clock went back.
                auto start_time = std::chrono::steady_clock::now();
                cycle_();
+               if (heartbeat_ != nullptr) {
+                 heartbeat_(); // hazard fix C4: this cycle completed (REQ-UI-24)
+               }
                if (fps_meter_ != nullptr) {
                  fps_meter_->report_if_due();
                }

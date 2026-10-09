@@ -23,6 +23,9 @@ public:
     std::chrono::milliseconds period;
     /// Reported after every cycle when not null (CONFIG_HMI_DEBUG_FPS).
     FpsMeter *fps_meter;
+    /// Hazard fix C4 (REQ-UI-24): stores the UI heartbeat, after every completed cycle; may
+    /// be null.
+    void (*heartbeat)();
   };
 
   /// @brief Stores the config; starts nothing.
@@ -47,6 +50,7 @@ private:
   void (*cycle_)();
   std::chrono::milliseconds period_;
   FpsMeter *fps_meter_;
+  void (*heartbeat_)();
   espp::Task task_;
 };
 

@@ -199,8 +199,8 @@ static hmi::stick::StickPipeline::Config stick_pipeline_config(const JoystickCal
 }
 
 // The ADC side's clock (hazard-fixes.md §10 item 22): one uint32 ms count, from this one
-// function, for the output permit (and, later, C4's motion guard and C2's monitor). Durations
-// on it are taken modulo 2^32.
+// function, for the output permit, C4's motion guard and its writers (the UI heartbeat, the
+// MibStatus stamp), and later C2's monitor. Durations on it are taken modulo 2^32.
 static uint32_t adc_clock_ms() { return static_cast<uint32_t>(esp_timer_get_time() / 1000); }
 
 // The ADC task's side of StickPipeline::cycle. Runs on the ADC task only; every
@@ -1083,6 +1083,8 @@ extern "C" void app_main(void) {
       .cycle = lvgl_cycle,
       .period = 8ms,
       .fps_meter = kFpsInstrument ? &fps_meter : nullptr,
+      // The motion guard's UI heartbeat (hazard-c4-spec.md §3.1), on the ADC side's clock.
+      .heartbeat = [] { ui_app.guard_sources().note_ui_cycle(adc_clock_ms()); },
   });
   if (!ui_island.start()) {
     logger.error("Failed to start LVGL task!");
@@ -1192,6 +1194,9 @@ extern "C" void app_main(void) {
   // the LVGL lock, because lv_subject_set_int runs the observers synchronously on this task
   // and they touch widgets.
   rtps_comms_on_mib_status([&system_clock](const MIB::MibStatus &status) {
+    // First, before any lock: the motion guard's state, then its stamp (C4 §3.1, REQ-CTL-04).
+    ui_app.guard_sources().note_mib_status(static_cast<uint8_t>(status.systemState),
+                                           adc_clock_ms());
     system_clock.note_mcb_time(status); // no LVGL: sets the system clock and the RTC
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
     ui_app.rtps_bridge().apply_mib_status(status);

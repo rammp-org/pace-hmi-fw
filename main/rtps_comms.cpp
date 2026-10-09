@@ -202,6 +202,11 @@ void note_mcb_status(int64_t now_us, uint8_t seq) {
 void on_mib_status(const MIB::MibStatus &s) {
   const int64_t now = esp_timer_get_time();
   last_status_us = now; // liveness, stamped before a slow handler can age it
+  // The handler first (hazard fix C4, REQ-CTL-04): its first step stores the motion guard's
+  // state and stamp, before any lock or log. The stats and the log below use `now`.
+  if (mib_status_handler) {
+    mib_status_handler(s);
+  }
   note_mcb_status(now, s.seq);
   // It repeats every kMibStatusPeriod: log only what changed. The seat is deliberately
   // not in here - it moves while a button is held, and would bury everything else.
@@ -215,9 +220,6 @@ void on_mib_status(const MIB::MibStatus &s) {
                 rammp::to_string(s.systemState), s.status_text, rammp::to_string(s.activeProfile),
                 s.speed, s.error_message, s.error_footer);
     last = s;
-  }
-  if (mib_status_handler) {
-    mib_status_handler(s);
   }
 }
 
@@ -647,6 +649,9 @@ void rtps_comms_on_brightness(std::function<void(float)> handler) {
 }
 void rtps_comms_on_mib_status(std::function<void(const MIB::MibStatus &)> handler) {
   mib_status_handler = std::move(handler);
+}
+RtpsLinkFlags rtps_comms_link_flags() {
+  return {.net_failed = net_failed, .link_up = link_up, .got_ip = got_ip};
 }
 void rtps_comms_on_diagnostics(std::function<void(const rammp::Diagnostics &)> handler) {
   diagnostics_handler = std::move(handler);
