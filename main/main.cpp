@@ -53,6 +53,7 @@
 
 #include "esp_lcd_mipi_dsi.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 
 #include "drive_ui/drive_port.hpp"
 #include "hmi_format/topbar.hpp"
@@ -162,6 +163,7 @@ static void refusal_feedback();
 // adds StickSlot: the pipeline, or with CONFIG_HMI_BENCH_STICK_INJECT the bench
 // stick injection in front of it.
 #include "control/stick_island.hpp"
+#include "stick/output_permit.hpp"
 #include "stick_inject.hpp"
 
 static_assert(hmi::stick::SENSITIVITY_MIN == SETTINGS_STICK_SENSITIVITY_MIN &&
@@ -188,20 +190,30 @@ static hmi::stick::StickPipeline::Config stick_pipeline_config(const JoystickCal
       {.up = LV_KEY_UP, .down = LV_KEY_DOWN, .right = LV_KEY_RIGHT, .left = LV_KEY_LEFT});
 }
 
+// The ADC side's clock (hazard-fixes.md §10 item 22): one uint32 ms count, from this one
+// function, for the output permit (and, later, C4's motion guard and C2's monitor). Durations
+// on it are taken modulo 2^32.
+static uint32_t adc_clock_ms() { return static_cast<uint32_t>(esp_timer_get_time() / 1000); }
+
 // The ADC task's side of StickPipeline::cycle. Runs on the ADC task only; every
 // member is what the stick block of adc_task_fn did inline before.
 struct AdcStickIo {
   // What the ADC task keeps across cycles beside the pipeline: app_main's, handed to the
-  // island at start (hazard fixes C1 and C3 keep the output permit and the POST rest window
-  // here).
-  struct State {};
+  // island at start.
+  struct State {
+    hmi::stick::OutputPermit permit; // the output permit and its neutral latch (C1 §3)
+  };
 
   espp::SimpleLowpassFilter &twist_lowpass;
   State &state;
 
   // Every cycle, valid or not, before the pipeline: the reads it gets (after the bench
-  // injection).
-  void note_reads(const hmi::stick::RawReadsMv & /*reads*/) {}
+  // injection). An invalid cycle restarts the permit's neutral wait (REQ-STK-12).
+  void note_reads(const hmi::stick::RawReadsMv &reads) {
+    if (!(reads.horizontal_mv && reads.vertical_mv && reads.twist_mv)) {
+      state.permit.invalid_cycle();
+    }
+  }
 
   // A calibration run just finished: the pipeline switches to it between two
   // samples, on the task that owns the stick.
@@ -241,16 +253,20 @@ struct AdcStickIo {
     }
   }
   int drive_speed() { return applied_settings.drive_speed(); }
-  // The gate. The MCB gets a centred stick whenever the stick is doing something
-  // else: while a calibration run sweeps it (the pipeline does not read this
-  // then), and whenever it is walking the UI rather than driving -- any screen
-  // but Drive, or Drive with the menu open. Drive stays ACTIVE across the menu
-  // and the other screens, as the spec draws it, so this is what keeps a push
-  // meant for the next row from moving the chair. The bars keep moving.
-  bool stick_drives() { return ::stick_drives.load(); }
+  // The output permit (hazard-c1-spec.md §3): the stick drives only with every condition
+  // met, in the hold-reason order, else the MCB gets a literal 0 and XYTwist keeps flowing.
+  // 1 the gate: the stick may drive only from Drive with the menu shut (`stick_drives`); a
+  //   push meant for the next row must never move the chair. The bars keep moving.
+  // 2 C4's motion guard: not fitted until C4, so OK (decision D2).
+  // 3 no calibration run (the user is pushing it to every end in turn); 4 a measured
+  //   calibration (G5); 5 POST passed (G3, C3); 6, 7 stick health (C2; NOT_MONITORED passes
+  //   until then, D2); 8 the stick centred for kNeutralHold since the last hold (G1).
+  // The first failing one goes to the Drive notice (hold_reason). Lock-free reads only.
+  // Defined after the UiApp, which owns the permit's channels.
+  hmi::stick::Permit output_permit(const hmi::stick::Position &mounted);
   bool button_pressed() { return joy_button_pressed.load(); }
   // The MCB gets the same calibrated -1..+1 values the bars show (+Y forward,
-  // deadzones applied), scaled by Settings "Speed sensitivity" and the gate, so
+  // deadzones applied), scaled by Settings "Speed sensitivity" (0 when held), so
   // it needs no calibration of its own. Quiet no-op until RTPS is up and a
   // subscriber is discovered.
   bool publish(const hmi::stick::Command &command, bool button) {
@@ -422,6 +438,23 @@ static_assert(hmi::drive_adapter::DrivePort<hmi::ui::DrivePort<hmi::ui::DriveUi>
 // kDriveAnswer and kDriveWait (pinned to the RTPS spec in hmi_ui's ui_app.cpp).
 static hmi::drive_adapter::DriveAdapter<hmi::ui::DrivePort<hmi::ui::DriveUi>> drive_adapter{
     {.view = drive_port}};
+
+// AdcStickIo's output permit (its comment above): ADC task, lock-free reads of the UiApp's
+// permit channels only.
+inline hmi::stick::Permit AdcStickIo::output_permit(const hmi::stick::Position &mounted) {
+  hmi::stick::PermitHooks &hooks = ui_app.permit_hooks();
+  const hmi::stick::PermitInputs in{
+      .gate_open = ::stick_drives.load(),
+      .motion_guard_ok = true,
+      .calibrating = joystick_cal_running(),
+      .calibration_measured = joystick_cal_measured(),
+      .post = hooks.post_gate.read(),
+      .health = hooks.stick_health.read(),
+  };
+  const hmi::stick::Permit permit = state.permit.cycle(in, mounted, adc_clock_ms());
+  hooks.hold_reason.write(permit.reason);
+  return permit;
+}
 
 static bool drive_session_input(hmi::drive_session::Input input) {
   return drive_adapter.input(input);

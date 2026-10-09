@@ -50,6 +50,11 @@ JoystickCal joystick_cal_load(const JoystickCal &defaults);
 /// compiled-in defaults. Any task.
 bool joystick_cal_saved();
 
+/// Whether the calibration in use was measured: loaded valid from flash, or completed by a run
+/// in this boot (saved or not); false while the compiled-in defaults are in use (G5,
+/// REQ-CAL-08). Lock-free: the ADC task reads it every cycle. Any task.
+bool joystick_cal_measured();
+
 /// The calibration in use. Any task.
 JoystickCal joystick_cal_current();
 
