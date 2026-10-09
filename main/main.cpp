@@ -768,10 +768,25 @@ static hmi::bench_verbs::CalRecord bench_cal_record() {
   return out;
 }
 
+// The drive table's side of the bench STATE line (L1, hazard-c1-spec.md §6): the session's
+// phase, the Drive notice, the menu and the refusal banner, each an atomic mirror the UI task
+// writes (no LVGL lock on the remote-UI task).
+static void add_drive_hooks(hmi::bench_verbs::Hooks &h) {
+  h.phase = [] {
+    return std::string(hmi::drive_session::to_string(drive_adapter.published_phase()));
+  };
+  h.notice = [] {
+    return std::string(hmi::drive_adapter::to_string(drive_adapter.published_notice()));
+  };
+  h.menu_open = [] { return ui_app.menu_open_any_task(); };
+  h.banner = [] { return std::string(hmi::ui::refused_name(ui_app.refused_any_task())); };
+}
+
 static hmi::bench_verbs::Hooks bench_verb_hooks() {
   using hmi::bench_verbs::PostGateName;
   using hmi::bench_verbs::StickHealthName;
   hmi::bench_verbs::Hooks h;
+  add_drive_hooks(h);
   h.hold_reason = [] {
     return std::string(hmi::stick::to_string(ui_app.permit_hooks().hold_reason.read()));
   };
