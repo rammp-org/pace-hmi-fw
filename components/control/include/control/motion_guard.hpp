@@ -174,6 +174,8 @@ struct GuardTelemetry {
   std::array<std::atomic<std::uint32_t>, kGuardReasonCount> trips{}; ///< onsets per reason
   std::atomic<std::uint32_t> ui_age_max_ms{0};                       ///< largest heartbeat age
   std::atomic<std::uint32_t> ui_stalls_drive{0}; ///< UI_STALE onsets while driving
+  /// The ADC task's TWDT subscription succeeded (stored once, at its first cycle).
+  std::atomic<bool> adc_wdt_ok{false};
 };
 
 /// The guard. One instance, owned by the ADC task; evaluate() once per cycle (REQ-CTL-01).

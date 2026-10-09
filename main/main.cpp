@@ -203,6 +203,15 @@ static hmi::stick::StickPipeline::Config stick_pipeline_config(const JoystickCal
 // MibStatus stamp), and later C2's monitor. Durations on it are taken modulo 2^32.
 static uint32_t adc_clock_ms() { return static_cast<uint32_t>(esp_timer_get_time() / 1000); }
 
+// The stick task's side of the board (StickIsland's Ports, hazard fix C4): its clock and the
+// task watchdog. The watchdog is not wired yet (hazard-c4-spec.md §9.2 commit 5): subscribing
+// reports success and a reset does nothing, so the guard's WDT_MISSING cannot hold.
+struct StickPorts {
+  static uint32_t now_ms() { return adc_clock_ms(); }
+  static bool watchdog_subscribe() { return true; }
+  static void watchdog_reset() {}
+};
+
 // The ADC task's side of StickPipeline::cycle. Runs on the ADC task only; every
 // member is what the stick block of adc_task_fn did inline before.
 struct AdcStickIo {
@@ -214,10 +223,16 @@ struct AdcStickIo {
     hmi::fw::Writer<hmi::ui::RestWindowMailbox> windows; // to the POST runner (UI task)
     hmi::post::RestWindowMsg window{}; // the window being sent: here, not on the task's stack
     hmi::stick::PostGate post_seen = hmi::stick::PostGate::NOT_RUN; // the gate, last cycle
+    // C4's motion guard: this cycle's verdict (ControlCycle hands it over before the pipeline)
+    hmi::control::GuardReason guard = hmi::control::GuardReason::WDT_MISSING;
   };
 
   espp::SimpleLowpassFilter &twist_lowpass;
   State &state;
+
+  // The motion guard's verdict for this cycle (hazard-c4-spec.md §2.1): the output permit's
+  // condition 2. Every cycle, valid or not, before the pipeline.
+  void set_motion_verdict(hmi::control::GuardReason verdict) { state.guard = verdict; }
 
   // Every cycle, valid or not, before the pipeline: the reads it gets (after the bench
   // injection). An invalid cycle restarts the permit's neutral wait (REQ-STK-12).
@@ -279,7 +294,8 @@ struct AdcStickIo {
   // met, in the hold-reason order, else the MCB gets a literal 0 and XYTwist keeps flowing.
   // 1 the gate: the stick may drive only from Drive with the menu shut (`stick_drives`); a
   //   push meant for the next row must never move the chair. The bars keep moving.
-  // 2 C4's motion guard: not fitted until C4, so OK (decision D2).
+  // 2 C4's motion guard (hazard-c4-spec.md §2): the UI heartbeat, the link, the MibStatus age
+  //   and the MCB state, judged by the ADC task itself this cycle (set_motion_verdict).
   // 3 no calibration run (the user is pushing it to every end in turn); 4 a measured
   //   calibration (G5); 5 POST passed (G3, C3); 6, 7 stick health (C2; NOT_MONITORED passes
   //   until then, D2); 8 the stick centred for kNeutralHold since the last hold (G1).
@@ -571,7 +587,7 @@ inline hmi::stick::Permit AdcStickIo::output_permit(const hmi::stick::Position &
   hmi::stick::PermitHooks &hooks = ui_app.permit_hooks();
   const hmi::stick::PermitInputs in{
       .gate_open = ::stick_drives.load(),
-      .motion_guard_ok = true,
+      .motion_guard_ok = state.guard == hmi::control::GuardReason::OK,
       .calibrating = joystick_cal_running(),
       .calibration_measured = joystick_cal_measured(),
       .post = hooks.post_gate.read(),
@@ -1037,6 +1053,14 @@ extern "C" void app_main(void) {
   // handlers.
   SelfTestPlatform selftest_board = selftest_platform(feedback, found_addresses, direct_render);
   selftest_board.lvgl_mutex = &lvgl_mutex;
+  selftest_board.motion_guard = [] {
+    const hmi::control::GuardTelemetry &t = ui_app.guard_telemetry();
+    const bool watched = t.adc_wdt_ok.load(std::memory_order_relaxed) &&
+                         ui_app.guard_sources().ui_wdt_ok.load(std::memory_order_acquire);
+    return std::array<int32_t, 3>{
+        watched ? 1 : 0, static_cast<int32_t>(t.ui_age_max_ms.load(std::memory_order_relaxed)),
+        static_cast<int32_t>(t.ui_stalls_drive.load(std::memory_order_relaxed))};
+  };
   selftest_init(selftest_board);
 
   ui_app.build_on_demand_parts();
@@ -1140,7 +1164,11 @@ extern "C" void app_main(void) {
       // enough that the chair does not feel late to turn.
       .twist_oversample = 8,
   };
-  hmi::control::StickIsland<StickSlot, AdcStickIo, kStickCycle> stick_island({
+  // The motion guard's link flags (C4-b): rtps_comms' atomics, alive as long as the firmware.
+  const RtpsLinkFlags link_flags = rtps_comms_link_flags();
+  // Until the UI task subscribes to the task watchdog (C4 §9.2 commit 5): its flag reads true.
+  ui_app.guard_sources().note_ui_wdt(true);
+  hmi::control::StickIsland<StickSlot, AdcStickIo, kStickCycle, StickPorts> stick_island({
       .task =
           {
               .name = "Read ADC",
@@ -1161,6 +1189,12 @@ extern "C" void app_main(void) {
               .window_size_bytes = 1024,
               .log_level = espp::Logger::Verbosity::WARN},
       .twist_lowpass = {.time_constant = 0.08f},
+      .guard = {.sources = &ui_app.guard_sources(),
+                .flags = {.net_failed = link_flags.net_failed,
+                          .link_up = link_flags.link_up,
+                          .got_ip = link_flags.got_ip,
+                          .stick_drives = stick_drives},
+                .telemetry = &ui_app.guard_telemetry()},
   });
 
   // Joystick calibration: where each axis rests and the two ends of its travel,

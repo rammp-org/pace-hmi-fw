@@ -52,5 +52,8 @@
 {"order": 50, "id": "JOY_X_CAL", "name": "joy.x_cal_off", "unit": "mV", "lo": 0, "hi": 40, "need": "optional", "why": "X rest vs its calibrated centre"},
 {"order": 51, "id": "JOY_Y_CAL", "name": "joy.y_cal_off", "unit": "mV", "lo": 0, "hi": 40, "need": "optional", "why": "Y rest vs its calibrated centre"},
 {"order": 52, "id": "JOY_TWIST_CAL", "name": "joy.twist_cal_off", "unit": "mV", "lo": 0, "hi": 50, "need": "optional", "why": "Twist rest vs saved centre"},
-{"order": 53, "id": "JOY_BUTTON", "name": "joy.button_idle", "unit": "", "lo": 1, "hi": 1, "need": "required", "why": "Stick button not stuck pressed"}
+{"order": 53, "id": "JOY_BUTTON", "name": "joy.button_idle", "unit": "", "lo": 1, "hi": 1, "need": "required", "why": "Stick button not stuck pressed"},
+{"order": 54, "id": "CTL_WDT", "name": "ctl.wdt", "unit": "", "lo": 1, "hi": 1, "need": "required", "why": "Stick and UI tasks on the task watchdog"},
+{"order": 55, "id": "CTL_UI_AGE_MAX", "name": "ctl.ui_age_max", "unit": "ms", "lo": 0, "hi": 1000, "need": "required", "why": "Longest UI heartbeat age the stick saw"},
+{"order": 56, "id": "CTL_UI_STALLS_DRIVE", "name": "ctl.ui_stalls_drive", "unit": "", "lo": 0, "hi": 0, "need": "required", "why": "UI stalls that paused the stick in Drive"}
 ]

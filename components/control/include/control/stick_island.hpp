@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "continuous_adc.hpp"
+#include "control/cycle.hpp"
 #include "logger.hpp"
 #include "oneshot_adc.hpp"
 #include "simple_lowpass_filter.hpp"
@@ -46,8 +47,20 @@ struct Cycle {
 ///         the cycle (note_reads()), and told about every cycle, valid or not, through
 ///         note_cycle().
 /// @tparam kCycle The cycle's period and twist read (Cycle).
-template <typename Stick, typename Io, Cycle kCycle> class StickIsland {
+/// @tparam Ports The board's side of each cycle, as static functions (direct calls, no
+///         indirection on the ADC path): `std::uint32_t now_ms()` (the ADC side's clock),
+///         `bool watchdog_subscribe()` and `void watchdog_reset()` (the task watchdog; hazard
+///         fix C4, §4.3). The cycle itself is ControlCycle (cycle.hpp): the motion guard, the
+///         stick, note_cycle, the watchdog reset.
+template <typename Stick, typename Io, Cycle kCycle, typename Ports> class StickIsland {
 public:
+  /// @brief The motion guard's channels (hazard fix C4, §3.1); every one outlives the task.
+  struct Guard {
+    const GuardSources *sources; ///< the UI heartbeat, the MibStatus state and stamp
+    GuardFlags flags;            ///< the link's flags and the UI's gate
+    GuardTelemetry *telemetry;   ///< where the guard's observability goes
+  };
+
   struct Config {
     /// The task, as a literal copy of today's, espp's defaults written out.
     espp::Task::BaseConfig task;
@@ -57,6 +70,8 @@ public:
     espp::ContinuousAdc::Config adc;
     /// The twist's lowpass, after the average.
     espp::SimpleLowpassFilter::Config twist_lowpass;
+    /// The motion guard's channels.
+    Guard guard;
   };
 
   /// @brief Brings the continuous ADC up and starts it, then the twist's oneshot ADC; starts
@@ -66,6 +81,8 @@ public:
       : channels_(config.adc.channels)
       , twist_lowpass_config_(config.twist_lowpass)
       , adc_(config.adc)
+      , control_(watchdog_, PortClock{}, *config.guard.sources, config.guard.flags,
+                 *config.guard.telemetry)
       , task_({.callback = [this](std::mutex &m, std::condition_variable &cv) -> bool {
                  // see the AXIS WIRING note at the calibrations: CH1 is horizontal, CH0 is
                  // vertical
@@ -78,15 +95,15 @@ public:
                  // hmi::stick::StickPipeline (components/stick), fed through Io. Only a
                  // cycle with all three reads does anything; otherwise nothing is published.
                  // The Io is handed the reads the pipeline gets (after the bench injection)
-                 // first, valid or not.
+                 // first, valid or not. ControlCycle runs, every cycle, valid or not: the
+                 // motion guard (its verdict to the Io: the permit's condition 2), this
+                 // cycle, note_cycle on the ADC's reads, the watchdog reset (hazard fix C4).
                  Io stick_io{*twist_lowpass_, *io_state_};
-                 const bool adc_published = cycle_on(
-                     stick_io,
-                     {.horizontal_mv = horiz_mv, .vertical_mv = vert_mv, .twist_mv = twist_mv});
-                 // Every cycle, valid or not. X is the horizontal channel, as everywhere above.
-                 stick_io.note_cycle(vert_mv && horiz_mv && twist_mv, horiz_mv.value_or(0.0f),
-                                     vert_mv.value_or(0.0f), twist_mv.value_or(0.0f),
-                                     adc_published);
+                 Step step{this};
+                 static_cast<void>(control_.run(step, stick_io,
+                                                hmi::stick::RawReadsMv{.horizontal_mv = horiz_mv,
+                                                                       .vertical_mv = vert_mv,
+                                                                       .twist_mv = twist_mv}));
 
                  // NOTE: sleeping in this way allows the sleep to exit early when the
                  // task is being stopped / destroyed
@@ -122,6 +139,22 @@ public:
   }
 
 private:
+  // The Ports as ControlCycle's watchdog and clock.
+  struct PortWatchdog {
+    bool subscribe() { return Ports::watchdog_subscribe(); }
+    void reset() { Ports::watchdog_reset(); }
+  };
+  struct PortClock {
+    std::uint32_t operator()() const { return Ports::now_ms(); }
+  };
+  // The stick as ControlCycle sees it: one cycle_on.
+  struct Step {
+    StickIsland *island;
+    [[gnu::always_inline]] bool cycle(Io &stick_io, const hmi::stick::RawReadsMv &raw) {
+      return island->cycle_on(stick_io, raw);
+    }
+  };
+
   // One cycle of the stick on the ADC's reads @p raw, through @p stick_io: the reads the
   // pipeline gets are the Stick's own (the bench injection's) when it has `reads`, else @p raw
   // itself (no copy). The Io is handed them before the cycle.
@@ -173,6 +206,8 @@ private:
   std::optional<Stick> stick_;
   typename Io::State *io_state_ = nullptr;
   std::optional<espp::SimpleLowpassFilter> twist_lowpass_;
+  PortWatchdog watchdog_;
+  ControlCycle<PortWatchdog, PortClock> control_;
   espp::Task task_;
 };
 

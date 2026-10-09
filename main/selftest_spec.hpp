@@ -190,6 +190,9 @@ enum class Id : uint8_t {
   JOY_Y_CAL,
   JOY_TWIST_CAL,
   JOY_BUTTON,
+  CTL_WDT,
+  CTL_UI_AGE_MAX,
+  CTL_UI_STALLS_DRIVE,
   COUNT, ///< not a check: how many there are (asserted equal to kChecks.size())
 };
 
@@ -284,6 +287,10 @@ inline constexpr std::array kChecks{
     Check{Id::JOY_Y_CAL,       "joy.y_cal_off",     "mV",   0,     40,     Need::OPTIONAL, "Y rest vs its calibrated centre"},
     Check{Id::JOY_TWIST_CAL,   "joy.twist_cal_off", "mV",   0,     50,     Need::OPTIONAL, "Twist rest vs saved centre"},
     Check{Id::JOY_BUTTON,      "joy.button_idle",   "",     1,     1,      Need::REQUIRED, "Stick button not stuck pressed"},
+    // the stick task's motion guard and the task watchdog (hazard-c4-spec.md §8 B3)
+    Check{Id::CTL_WDT,         "ctl.wdt",           "",     1,     1,      Need::REQUIRED, "Stick and UI tasks on the task watchdog"},
+    Check{Id::CTL_UI_AGE_MAX,  "ctl.ui_age_max",    "ms",   0,     1000,   Need::REQUIRED, "Longest UI heartbeat age the stick saw"},
+    Check{Id::CTL_UI_STALLS_DRIVE, "ctl.ui_stalls_drive", "", 0,   0,      Need::REQUIRED, "UI stalls that paused the stick in Drive"},
 };
 // clang-format on
 

@@ -4,8 +4,8 @@
 // order, on every cycle, valid or not. A template with no espp or ESP-IDF type, so the host
 // tests drive it on fake time with fakes for the stick, its Io and the watchdog.
 //
-// Not used by the firmware yet (C4 commit 1). C4 commit 3 makes StickIsland call it, and
-// main's AdcStickIo feeds the verdict to C1's output permit as its condition 2.
+// StickIsland (stick_island.hpp) runs it every cycle; main's AdcStickIo feeds the verdict to
+// C1's output permit as its condition 2 (hazard-c4-spec.md §2.1).
 
 #include <cstdint>
 
@@ -51,6 +51,7 @@ public:
     if (!started_) {
       started_ = true;
       adc_wdt_ok_ = watchdog_.subscribe(); // start-up only (CS-SAF-04): the port logs a failure
+      telemetry_.adc_wdt_ok.store(adc_wdt_ok_, std::memory_order_relaxed);
     }
     std::uint32_t now_ms = 0;
     const GuardInputs in = load_guard_inputs(sources_, flags_, adc_wdt_ok_, clock_, now_ms);

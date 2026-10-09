@@ -78,6 +78,15 @@ REPORT_ONLY_PREFIXES = ("pwr.",)
 REPORT_ONLY_WHY = "report-only: owner P3, board 2 has no battery (PoE); see project-profile Bench"
 
 
+# Checks added after the baseline was taken, each a declared change approved with its spec
+# (hazard-decisions.md G1): accepted as extra IDs after the baseline's, in this order, and graded
+# against their own limits (there is no baseline value). Remove a name once a new baseline
+# carries it.
+DECLARED_NEW = (
+    "ctl.wdt", "ctl.ui_age_max", "ctl.ui_stalls_drive",  # hazard-c4-spec.md §8 B3, §9.2
+)
+
+
 def report_only(name: str) -> bool:
     return name.startswith(REPORT_ONLY_PREFIXES)
 
@@ -116,9 +125,13 @@ def compare(run: dict, base: dict) -> dict:
     problems, rows = [], []
     got = {r["name"]: r for r in run.get("results", [])}
     want = {r["name"]: r for r in base.get("results", [])}
-    if list(got) != list(want):
-        missing = [n for n in want if n not in got]
-        extra = [n for n in got if n not in want]
+    new = [n for n in got if n in DECLARED_NEW and n not in want]
+    if new != [n for n in DECLARED_NEW if n in got and n not in want] or             list(got)[len(got) - len(new):] != new:
+        problems.append(f"declared new checks out of order or not last: {new}")
+    got_old = {n: r for n, r in got.items() if n not in new}
+    if list(got_old) != list(want):
+        missing = [n for n in want if n not in got_old]
+        extra = [n for n in got_old if n not in want]
         problems.append(f"check IDs differ: missing {missing}, extra {extra}"
                         + ("" if missing or extra else " (order)"))
     if run.get("verdict") != base.get("verdict"):
@@ -141,6 +154,15 @@ def compare(run: dict, base: dict) -> dict:
             if not ok:
                 row["problem"] = why
         if "problem" in row:
+            problems.append(f"{name}: {row['problem']}")
+        rows.append(row)
+    for name in new:
+        g = got[name]
+        row = {"name": name, "result": g.get("result"), "value": g.get("value"),
+               "baseline": None, "band": "limits", "note": "declared new check, no baseline"}
+        ok, why = in_band("limits", g, {})
+        if g.get("result") != "PASS" or not ok:
+            row["problem"] = why or f"verdict {g.get('result')}"
             problems.append(f"{name}: {row['problem']}")
         rows.append(row)
     return {"verdict": "PASS" if not problems else "FAIL", "problems": problems, "checks": rows}
@@ -234,6 +256,26 @@ def t_vbat_must_still_be_there() -> None:
             "FAIL")
 
 
+def t_declared_new_checks() -> None:
+    base = _baseline()
+    run = copy.deepcopy(base)
+    run["results"] += [{"name": "ctl.wdt", "result": "PASS", "value": 1, "lo": 1, "hi": 1},
+                       {"name": "ctl.ui_age_max", "result": "PASS", "value": 40, "lo": 0,
+                        "hi": 1000},
+                       {"name": "ctl.ui_stalls_drive", "result": "PASS", "value": 0, "lo": 0,
+                        "hi": 0}]
+    _expect("C4's three declared checks appended", compare(run, base)["verdict"], "PASS")
+    bad = copy.deepcopy(run)
+    bad["results"][-1].update(result="FAIL", value=2)
+    _expect("a declared check out of its limits", compare(bad, base)["verdict"], "FAIL")
+    moved = copy.deepcopy(run)
+    moved["results"].insert(0, moved["results"].pop())
+    _expect("a declared check not at the end", compare(moved, base)["verdict"], "FAIL")
+    other = copy.deepcopy(base)
+    other["results"].append({"name": "x.new", "result": "PASS", "value": 1})
+    _expect("an undeclared extra check", compare(other, base)["verdict"], "FAIL")
+
+
 CASES = [
     ("CMP-001 a run equal to the baseline passes", t_equal_passes),
     ("CMP-002 pwr.vbat SKIP vs baseline PASS does not fail; the row shows it (owner P3)",
@@ -243,6 +285,8 @@ CASES = [
     ("CMP-004 SKIP vs baseline PASS on any other check still fails", t_other_skip_still_fails),
     ("CMP-005 report-only does not drop the check from the ID comparison",
      t_vbat_must_still_be_there),
+    ("CMP-006 the declared new checks (C4's ctl.*) are accepted last, graded by their limits",
+     t_declared_new_checks),
 ]
 
 

@@ -55,17 +55,25 @@ const char *need_name(Need need) {
 // Id's enumerator names, in declaration order, so a row's `Id::X` can be compared with
 // the golden "X". Kept by hand like Id itself; SST-001 fails if the two drift.
 constexpr std::string_view kIdNames[] = {
-    "SYS_RESET",     "SYS_CPU",        "SYS_UPTIME",      "LOG_CAPTURE",     "NET_LINK",
-    "NET_IP",        "NET_WIFI_RSSI",  "RTPS_LINK",       "RTPS_MCB_PERIOD", "RTPS_MCB_GAP",
-    "RTPS_MCB_LOSS", "RTPS_ADC_HZ",    "RTPS_RTT_P50",    "RTPS_RTT_P99",    "RTPS_PING_LOSS",
-    "MEM_INT_FREE",  "MEM_INT_MIN",    "MEM_INT_BLOCK",   "MEM_DMA_FREE",    "MEM_DMA_MIN",
-    "MEM_DMA_BLOCK", "MEM_PSRAM_FREE", "MEM_HEAP_OK",     "MEM_STK_LVGL",    "MEM_STK_ADC",
-    "MEM_STK_RTPS",  "I2C_MISSING",    "I2C_COUNT",       "IMU_ACCEL",       "RTC_TICK",
-    "PWR_VBAT",      "HAP_DRV_ID",     "HAP_DRV_FAULT",   "HAP_DRV_PLAY",    "HAP_DA7280",
-    "DISP_DIRECT",   "DISP_BACKLIGHT", "TIME_RENDER_AVG", "TIME_RENDER_MAX", "TIME_UI_STALL",
-    "TIME_ADC_AVG",  "TIME_ADC_MAX",   "JOY_VALID",       "JOY_X",           "JOY_Y",
-    "JOY_TWIST",     "JOY_X_NOISE",    "JOY_Y_NOISE",     "JOY_TWIST_NOISE", "JOY_CAL",
-    "JOY_X_CAL",     "JOY_Y_CAL",      "JOY_TWIST_CAL",   "JOY_BUTTON",
+    "SYS_RESET",       "SYS_CPU",         "SYS_UPTIME",
+    "LOG_CAPTURE",     "NET_LINK",        "NET_IP",
+    "NET_WIFI_RSSI",   "RTPS_LINK",       "RTPS_MCB_PERIOD",
+    "RTPS_MCB_GAP",    "RTPS_MCB_LOSS",   "RTPS_ADC_HZ",
+    "RTPS_RTT_P50",    "RTPS_RTT_P99",    "RTPS_PING_LOSS",
+    "MEM_INT_FREE",    "MEM_INT_MIN",     "MEM_INT_BLOCK",
+    "MEM_DMA_FREE",    "MEM_DMA_MIN",     "MEM_DMA_BLOCK",
+    "MEM_PSRAM_FREE",  "MEM_HEAP_OK",     "MEM_STK_LVGL",
+    "MEM_STK_ADC",     "MEM_STK_RTPS",    "I2C_MISSING",
+    "I2C_COUNT",       "IMU_ACCEL",       "RTC_TICK",
+    "PWR_VBAT",        "HAP_DRV_ID",      "HAP_DRV_FAULT",
+    "HAP_DRV_PLAY",    "HAP_DA7280",      "DISP_DIRECT",
+    "DISP_BACKLIGHT",  "TIME_RENDER_AVG", "TIME_RENDER_MAX",
+    "TIME_UI_STALL",   "TIME_ADC_AVG",    "TIME_ADC_MAX",
+    "JOY_VALID",       "JOY_X",           "JOY_Y",
+    "JOY_TWIST",       "JOY_X_NOISE",     "JOY_Y_NOISE",
+    "JOY_TWIST_NOISE", "JOY_CAL",         "JOY_X_CAL",
+    "JOY_Y_CAL",       "JOY_TWIST_CAL",   "JOY_BUTTON",
+    "CTL_WDT",         "CTL_UI_AGE_MAX",  "CTL_UI_STALLS_DRIVE",
 };
 static_assert(std::size(kIdNames) == kChecks.size());
 

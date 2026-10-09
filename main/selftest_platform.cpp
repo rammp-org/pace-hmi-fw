@@ -68,5 +68,6 @@ SelfTestPlatform selftest_platform(hmi::feedback::Feedback *feedback,
         return std::array<float, 3>{cal[JOY_HORIZONTAL].center_mv, cal[JOY_VERTICAL].center_mv,
                                     cal[JOY_TWIST].center_mv};
       },
+      .motion_guard = {}, // app_main's, from the UiApp's motion guard channels
   };
 }

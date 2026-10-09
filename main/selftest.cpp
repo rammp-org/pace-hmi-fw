@@ -292,6 +292,7 @@ public:
     check_haptic_play();
 
     check_log();
+    check_control();
     // last, so the low-water mark and the stacks cover everything above
     check_memory();
 
@@ -776,6 +777,20 @@ private:
     check_stack(Id::MEM_STK_LVGL, "lv_task");
     check_stack(Id::MEM_STK_ADC, "Read ADC");
     check_stack(Id::MEM_STK_RTPS, "rtps_pub");
+  }
+
+  // The motion guard's observability since boot (hazard-c4-spec.md §8 B3).
+  void check_control() {
+    if (!platform.motion_guard) {
+      for (const Id id : {Id::CTL_WDT, Id::CTL_UI_AGE_MAX, Id::CTL_UI_STALLS_DRIVE}) {
+        unmeasurable(id, "no motion guard");
+      }
+      return;
+    }
+    const std::array<int32_t, 3> guard = platform.motion_guard();
+    record(Id::CTL_WDT, guard[0]);
+    record(Id::CTL_UI_AGE_MAX, guard[1]);
+    record(Id::CTL_UI_STALLS_DRIVE, guard[2]);
   }
 
   void check_stack(Id id, const char *task_name) {

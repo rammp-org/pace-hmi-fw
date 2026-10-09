@@ -15,10 +15,11 @@ function-local statics, are members.
 | `include/control/windowed_adc.hpp` | `WindowedContinuousAdc`: espp's `ContinuousAdc` (vendored, `components/espp_adc`) plus `get_windows(configs)`, each channel's newest window (mean, max, sequence) from one publish, read lock-free from `components/adc_window` (hazard fix C2, REQ-CTL-16). Not used by the firmware yet |
 | `include/control/cycle.hpp` | `ControlCycle<Watchdog, Clock>`: one ADC cycle after the reads, in C4's order: (first cycle) subscribe to the task watchdog, evaluate the guard once, hand the verdict to the Io, one `Stick::cycle`, `Io::note_cycle`, reset the watchdog. No espp or IDF type, so the host tests drive it |
 
-**Status (2026-10-08).** `motion_guard.hpp` and `cycle.hpp` are C4's first commit: tested on
-the host, not used by the firmware yet. Wiring the verdict into C1's output permit (condition
-2), the UI heartbeat and MibStatus writers, the task row and the task watchdog are C4's later
-commits, after C1 and C3 merge (hazard-decisions.md §4).
+**Status (2026-10-09).** The motion guard runs on the stick task: `StickIsland` runs one
+`ControlCycle` per cycle (its `Ports` give the clock and the task watchdog), and main's
+`AdcStickIo` feeds the verdict to C1's output permit as condition 2. The UI heartbeat and the
+MibStatus state and stamp are written by the UI and RTPS receive tasks into the UiApp's
+`GuardSources`.
 
 Header-only. `StickIsland` is a template on main's stick (`StickSlot`: the pipeline, or the
 bench injection in front of it) and main's `AdcStickIo`, so it is instantiated in main's unit
@@ -32,8 +33,9 @@ The Read ADC task's read, pipeline, gate and publish stay on this task (app-main
 The pipeline's own requirements are `components/stick`'s. The rows below are hazard fix C4's
 (hazard-c4-spec.md §6, reconciled in hazard-fixes.md §10); test IDs `CTL-0nn` are cases of the
 host app `test/` (`tests/manifest.d/control.yaml`, L1-CTL). Cases CTL-012, 013, 015, 016, 020
-and 021 run the guard through C1's output permit and come with the wiring commit (C4 commit
-3); B-steps are bench checks (hazard-c4-spec.md §8). REQ-CTL-15 and 16 are hazard fix C2's
+and 021 (test_guard_permit.cpp) run the guard through ControlCycle, the real StickPipeline and
+C1's real OutputPermit, as main's AdcStickIo wires them; B-steps are bench checks
+(hazard-c4-spec.md §8). REQ-CTL-15 and 16 are hazard fix C2's
 (hazard-c2-spec.md §7.2); CTL-022 and 023 come with C2's island commit.
 
 | ID | Requirement | Tests |

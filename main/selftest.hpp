@@ -53,6 +53,10 @@ struct SelfTestPlatform {
   /// twist) in the saved calibration; nullopt while the compiled-in defaults
   /// are in use because nothing is saved.
   std::function<std::optional<std::array<float, 3>>()> joystick_cal_centers_mv;
+  /// The stick task's motion guard (hazard fix C4): both stick and UI tasks subscribed to the
+  /// task watchdog (1/0), the longest UI heartbeat age it saw (ms), and its UI stalls while
+  /// the stick was driving.
+  std::function<std::array<int32_t, 3>()> motion_guard;
 };
 
 enum class SelfTestTrigger {

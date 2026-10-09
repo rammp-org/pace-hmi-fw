@@ -14,10 +14,11 @@ MC := $(REPO)/managed_components
 
 ALLOC_GUARD := 1
 
-# The real stick pipeline runs inside the cycle (CTL-014, CTL-018, CTL-019): its source is
-# linked as it is (tested by L1-STK), with the joystick mapping engine and espp's logger as
-# third party, as the stick app does.
+# The real stick pipeline runs inside the cycle (CTL-012..021), behind the real output permit
+# in test_guard_permit.cpp: its source is linked as it is (tested by L1-STK), with the joystick
+# mapping engine and espp's logger as third party, as the stick app does.
 TEST_SRCS        := $(HERE)/test_motion_guard.cpp $(HERE)/test_cycle.cpp $(HERE)/test_adc_window.cpp \
+                    $(HERE)/test_guard_permit.cpp \
                     $(REPO)/components/stick/src/stick_pipeline.cpp
 THIRD_PARTY_SRCS := $(REPO)/components/joystick/src/joystick.cpp $(MC)/espp__logger/src/logger.cpp
 # adc_window.hpp: the continuous ADC's window bookkeeping (CTL-024, CTL-027, REQ-CTL-16).

@@ -7,8 +7,9 @@
   title: motion guard verdicts, stale latches, counters and the per-cycle sequence (C4)
   level: L1
   path: components/control/test
-  requirements: [REQ-CTL-01, REQ-CTL-03, REQ-CTL-04, REQ-CTL-05, REQ-CTL-06, REQ-CTL-07,
-                 REQ-CTL-08, REQ-CTL-10, REQ-CTL-11, REQ-CTL-12, REQ-CTL-16]
+  requirements: [REQ-CTL-01, REQ-CTL-02, REQ-CTL-03, REQ-CTL-04, REQ-CTL-05, REQ-CTL-06,
+                 REQ-CTL-07, REQ-CTL-08, REQ-CTL-09, REQ-CTL-10, REQ-CTL-11, REQ-CTL-12,
+                 REQ-CTL-14, REQ-CTL-16]
   resources: [host]
   timeout_s: 300
   expected_s: 60
