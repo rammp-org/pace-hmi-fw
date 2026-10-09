@@ -35,4 +35,6 @@ UiIsland::UiIsland(const Config &config)
 
 bool UiIsland::start() { return task_.start(); }
 
+bool UiIsland::stop() { return task_.stop(); }
+
 } // namespace hmi::ui

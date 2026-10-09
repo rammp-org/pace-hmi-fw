@@ -38,6 +38,11 @@ public:
   /// @return Whether the task started.
   bool start();
 
+  /// @brief Stops the task and waits for it to end, as the destructor does (app_main, when a
+  /// boot that stops after start() ends the UI).
+  /// @return Whether the task stopped.
+  bool stop();
+
 private:
   void (*cycle_)();
   std::chrono::milliseconds period_;
