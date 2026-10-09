@@ -1,210 +1,62 @@
-diff --git b/include/adc_window.hpp b/include/adc_window.hpp
-new file mode 100644
-index 0000000..921aa25
---- /dev/null
-+++ b/include/adc_window.hpp
-@@ -0,0 +1,72 @@
-+#pragma once
-+
-+// pace-hmi-fw addition to the vendored espp adc (not upstream; components/espp_adc/README.md):
-+// the bookkeeping of one continuous-ADC window per channel, pulled out of
-+// ContinuousAdc::update_task so the host tests can run it (hazard fix C2, REQ-CTL-16, CTL-024).
-+// Plain C++: no ESP-IDF include.
-+
-+#include <cstdint>
-+
-+namespace espp {
-+
-+/**
-+ * @brief One channel's conversions within one window: what update_task sums. The mean is
-+ *        espp's (the sum over the count, as floats); the maximum is new.
-+ */
-+struct AdcWindowAccumulator {
-+  uint32_t sum{0};     /**< Sum of the raw conversions. */
-+  uint32_t count{0};   /**< Number of raw conversions. */
-+  uint32_t max_raw{0}; /**< Largest raw conversion. */
-+
-+  /// Starts a new window.
-+  void clear() {
-+    sum = 0;
-+    count = 0;
-+    max_raw = 0;
-+  }
-+  /// Adds one raw conversion.
-+  void add(uint32_t data) {
-+    sum += data;
-+    count++;
-+    if (data > max_raw) {
-+      max_raw = data;
-+    }
-+  }
-+};
-+
-+/**
-+ * @brief A channel's newest window: espp's filtered value (the window mean) and, new, the
-+ *        window's largest conversion and a sequence number. Both values are in mV, or raw when
-+ *        the channel could not be calibrated (as get_mv()).
-+ */
-+struct AdcWindowReading {
-+  float mean_mv{0};     /**< The window's mean, as get_mv() returns it. */
-+  float max_mv{0};      /**< The window's largest conversion. */
-+  uint32_t sequence{0}; /**< +1 for each window holding at least one conversion; wraps. */
-+};
-+
-+/**
-+ * @brief Closes one channel's window into @p reading. With at least one conversion: the mean
-+ *        exactly as espp computes it (`float(sum) / float(count)`, then @p to_mv), the maximum
-+ *        through the same @p to_mv, and the sequence + 1. Without any: @p reading is left as it
-+ *        was (the previous window's values and sequence).
-+ * @param acc The window's conversions.
-+ * @param to_mv Raw (as a float) to the reported unit: espp's calibration, or the raw value.
-+ * @param reading The channel's newest window, updated in place.
-+ * @return Whether the window held a conversion of this channel.
-+ */
-+template <typename ToMv>
-+bool close_window(const AdcWindowAccumulator &acc, ToMv &&to_mv, AdcWindowReading &reading) {
-+  if (acc.count == 0) {
-+    return false;
-+  }
-+  float num_samples = static_cast<float>(acc.count);
-+  float sum = static_cast<float>(acc.sum);
-+  float average = sum / num_samples;
-+  reading.mean_mv = to_mv(average);
-+  reading.max_mv = to_mv(static_cast<float>(acc.max_raw));
-+  reading.sequence++;
-+  return true;
-+}
-+
-+} // namespace espp
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index b7d911c..d4a47ed 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1,3 +1,3 @@
+ idf_component_register(
+   INCLUDE_DIRS "include"
+-  REQUIRES base_component task esp_adc)
++  REQUIRES base_component task esp_adc adc_window)
 diff --git a/include/continuous_adc.hpp b/include/continuous_adc.hpp
-index 3531bb9..a7134c0 100644
+index 3531bb9..88ae7bd 100644
 --- a/include/continuous_adc.hpp
 +++ b/include/continuous_adc.hpp
 @@ -19,6 +19,7 @@
  #endif
  
  #include "adc_types.hpp"
-+#include "adc_window.hpp"
++#include "adc_window/adc_window.hpp" // pace-hmi-fw: window max and sequence (REQ-CTL-16)
  #include "base_component.hpp"
  #include "task.hpp"
  
-@@ -252,6 +253,32 @@ public:
-     return actual_rates_[index];
-   }
- 
-+  /**
-+   * @brief pace-hmi-fw addition (REQ-CTL-16, not upstream): the newest window of each channel
-+   *        in \p configs - its mean (what get_mv() returns), its largest conversion and its
-+   *        sequence number - all read under one lock, so the channels come from the same
-+   *        moment.
-+   * @param configs The configs used to initialize the channels.
-+   * @return Per channel, its newest window (a sequence of 0 means no window yet), or nullopt
-+   *         if it was not configured or the adc is not running.
-+   */
-+  template <size_t N>
-+  std::array<std::optional<AdcWindowReading>, N>
-+  get_windows(const std::array<AdcConfig, N> &configs) {
-+    std::array<std::optional<AdcWindowReading>, N> out{};
-+    if (!running_) {
-+      return out;
-+    }
-+    std::lock_guard<std::mutex> lock{data_mutex_};
-+    for (size_t i = 0; i < N; i++) {
-+      auto index = get_index(configs[i]);
-+      if (index != INVALID_INDEX) {
-+        out[i] = readings_[index];
-+      }
-+    }
-+    return out;
-+  }
-+
- protected:
-   // Unique id for a (unit, channel) pair. 32 is larger than the number of
-   // channels on any ESP32 chip, so the id is unique across units. The id
-@@ -296,8 +323,9 @@ protected:
-       return false; // don't want to stop the task
-     }
-     auto current_timestamp = std::chrono::high_resolution_clock::now();
--    std::fill(sums_.begin(), sums_.end(), 0);
--    std::fill(num_samples_.begin(), num_samples_.end(), 0);
-+    for (auto &window : windows_) {
-+      window.clear();
-+    }
-     esp_err_t ret;
-     uint32_t ret_num = 0;
-     ret = adc_continuous_read(handle_, result_data_.data(), window_size_bytes_, &ret_num, 0);
-@@ -355,8 +383,7 @@ protected:
-                                   parsed_unit, parsed_channel, data);
+@@ -356,6 +357,7 @@ protected:
          continue;
        }
--      sums_[index] += data;
--      num_samples_[index]++;
-+      windows_[index].add(data);
+       sums_[index] += data;
++      windows_.add(index, data); // pace-hmi-fw (REQ-CTL-16)
+       num_samples_[index]++;
      } // for()
      // measure elapsed time
-     float elapsed_seconds =
-@@ -370,26 +397,27 @@ protected:
-     {
-       std::lock_guard<std::mutex> lk(data_mutex_);
-       for (size_t index = 0; index < num_channels_; index++) {
--        float num_samples = num_samples_[index];
--        if (num_samples > 0) {
--          float sum = sums_[index];
--          // note: the data collected above is uncalibrated (raw) values
--          // TODO: use ESP32 hardware-accelerated filter
--          // simple filter
--          float average = sum / num_samples;
--          if (cali_handles_[index] != nullptr) {
-+        // note: the data collected above is uncalibrated (raw) values
-+        // TODO: use ESP32 hardware-accelerated filter
-+        // simple filter: the window's mean (close_window, adc_window.hpp); pace-hmi-fw adds
-+        // the window's maximum and a sequence number there (REQ-CTL-16)
-+        adc_cali_handle_t cali_handle = cali_handles_[index];
-+        auto to_mv = [cali_handle](float raw) {
-+          if (cali_handle != nullptr) {
-             // convert to millivolts
-             int millivolts = 0;
--            adc_cali_raw_to_voltage(cali_handles_[index], static_cast<int>(average), &millivolts);
--            values_[index] = float(millivolts);
--          } else {
--            // no calibration available for this channel; report the raw value
--            values_[index] = average;
-+            adc_cali_raw_to_voltage(cali_handle, static_cast<int>(raw), &millivolts);
-+            return float(millivolts);
-           }
--          actual_rates_[index] = num_samples / elapsed_seconds;
-+          // no calibration available for this channel; report the raw value
-+          return raw;
-+        };
-+        if (close_window(windows_[index], to_mv, readings_[index])) {
-+          values_[index] = readings_[index].mean_mv;
-+          actual_rates_[index] = static_cast<float>(windows_[index].count) / elapsed_seconds;
-         }
-         logger_.debug_rate_limited("CH {} - {}, {}, {:.2f}, {:.2f}", (int)configs_[index].channel,
--                                   sums_[index], num_samples_[index], values_[index],
-+                                   windows_[index].sum, windows_[index].count, values_[index],
+@@ -393,11 +395,24 @@ protected:
                                     actual_rates_[index]);
        }
      }
-@@ -536,8 +564,8 @@ protected:
-     // allocate the (dense) per-channel data, indexed by the position of the
-     // channel in the configured channel list
-     cali_handles_.resize(num_channels_, nullptr);
--    sums_.resize(num_channels_, 0);
--    num_samples_.resize(num_channels_, 0);
-+    windows_.resize(num_channels_);
-+    readings_.resize(num_channels_);
-     values_.resize(num_channels_, 0);
-     actual_rates_.resize(num_channels_, 0);
++    // pace-hmi-fw (REQ-CTL-16): the window's max and sequence, published lock-free
++    windows_.close_and_publish(num_channels_, [this](size_t i, float r) { return to_mv(i, r); });
  
-@@ -661,8 +689,8 @@ protected:
-   // these vectors are indexed by the position of the channel in the
-   // configured channel list
-   std::vector<adc_cali_handle_t> cali_handles_;
--  std::vector<uint32_t> sums_;
--  std::vector<uint32_t> num_samples_;
-+  std::vector<AdcWindowAccumulator> windows_; // pace-hmi-fw: was sums_ and num_samples_
-+  std::vector<AdcWindowReading> readings_;    // pace-hmi-fw: each channel's newest window
+     // don't want to stop the task
+     return false;
+   }
+ 
++  // pace-hmi-fw (REQ-CTL-16): one raw value of channel `index` in mV, the conversion the update
++  // task uses for values_ (the raw value when the channel has no calibration)
++  float to_mv(size_t index, float raw) const {
++    if (cali_handles_[index] == nullptr) {
++      return raw;
++    }
++    int millivolts = 0;
++    adc_cali_raw_to_voltage(cali_handles_[index], static_cast<int>(raw), &millivolts);
++    return static_cast<float>(millivolts);
++  }
++
+ #if !CONFIG_IDF_TARGET_ESP32
+   static bool check_valid_data(const adc_digi_output_data_t *data) {
+ #if SOC_ADC_PERIPH_NUM > 1
+@@ -665,5 +680,7 @@ protected:
+   std::vector<uint32_t> num_samples_;
    std::vector<float> values_;
    std::vector<float> actual_rates_;
++  // pace-hmi-fw (REQ-CTL-16): every channel's window, read lock-free (WindowedContinuousAdc)
++  hmi::adc::AdcWindowBoard windows_;
  };
+ } // namespace espp

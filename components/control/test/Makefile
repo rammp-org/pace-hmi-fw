@@ -20,9 +20,9 @@ ALLOC_GUARD := 1
 TEST_SRCS        := $(HERE)/test_motion_guard.cpp $(HERE)/test_cycle.cpp $(HERE)/test_adc_window.cpp \
                     $(REPO)/components/stick/src/stick_pipeline.cpp
 THIRD_PARTY_SRCS := $(REPO)/components/joystick/src/joystick.cpp $(MC)/espp__logger/src/logger.cpp
-# adc_window.hpp is the vendored ContinuousAdc's pure bookkeeping (CTL-024, REQ-CTL-16).
+# adc_window.hpp: the continuous ADC's window bookkeeping (CTL-024, CTL-027, REQ-CTL-16).
 INCLUDES         := $(REPO)/components/control/include $(REPO)/components/stick/include \
-                    $(REPO)/components/espp_adc/include \
+                    $(REPO)/components/adc_window/include \
                     $(REPO)/components/hmi_rtps_spec/include $(HERE)
 SYS_INCLUDES     := $(REPO)/external/rammp-rtps/components/rammp_rtps_messages/include \
                     $(REPO)/components/joystick/include \
@@ -33,7 +33,7 @@ SYS_INCLUDES     := $(REPO)/external/rammp-rtps/components/rammp_rtps_messages/i
                     $(MC)/espp__math/include
 GUARD_HEADER     := $(REPO)/components/control/include/control/motion_guard.hpp
 CYCLE_HEADER     := $(REPO)/components/control/include/control/cycle.hpp
-WINDOW_HEADER    := $(REPO)/components/espp_adc/include/adc_window.hpp
+WINDOW_HEADER    := $(REPO)/components/adc_window/include/adc_window/adc_window.hpp
 COVER_SRCS       := $(GUARD_HEADER) $(CYCLE_HEADER) $(WINDOW_HEADER)
 
 include $(REPO)/tests/host/common.mk

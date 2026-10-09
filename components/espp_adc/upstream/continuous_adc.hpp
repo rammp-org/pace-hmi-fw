@@ -19,7 +19,6 @@
 #endif
 
 #include "adc_types.hpp"
-#include "adc_window/adc_window.hpp" // pace-hmi-fw: window max and sequence (REQ-CTL-16)
 #include "base_component.hpp"
 #include "task.hpp"
 
@@ -357,7 +356,6 @@ protected:
         continue;
       }
       sums_[index] += data;
-      windows_.add(index, data); // pace-hmi-fw (REQ-CTL-16)
       num_samples_[index]++;
     } // for()
     // measure elapsed time
@@ -395,22 +393,9 @@ protected:
                                    actual_rates_[index]);
       }
     }
-    // pace-hmi-fw (REQ-CTL-16): the window's max and sequence, published lock-free
-    windows_.close_and_publish(num_channels_, [this](size_t i, float r) { return to_mv(i, r); });
 
     // don't want to stop the task
     return false;
-  }
-
-  // pace-hmi-fw (REQ-CTL-16): one raw value of channel `index` in mV, the conversion the update
-  // task uses for values_ (the raw value when the channel has no calibration)
-  float to_mv(size_t index, float raw) const {
-    if (cali_handles_[index] == nullptr) {
-      return raw;
-    }
-    int millivolts = 0;
-    adc_cali_raw_to_voltage(cali_handles_[index], static_cast<int>(raw), &millivolts);
-    return static_cast<float>(millivolts);
   }
 
 #if !CONFIG_IDF_TARGET_ESP32
@@ -680,7 +665,5 @@ protected:
   std::vector<uint32_t> num_samples_;
   std::vector<float> values_;
   std::vector<float> actual_rates_;
-  // pace-hmi-fw (REQ-CTL-16): every channel's window, read lock-free (WindowedContinuousAdc)
-  hmi::adc::AdcWindowBoard windows_;
 };
 } // namespace espp
