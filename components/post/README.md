@@ -85,7 +85,7 @@ only D2 and D3 today.
 | REQ-POST-17 | At PASS or FAIL the runner prints the TS-POST-05 lines once, in table order (hazard-c3-spec.md §2.7). A LATCHED check without a measurement prints FAIL, a LIVE one SKIP. The reset reason line is printed at every boot. | POST-045, POST-051 |
 | REQ-POST-18 | `post_indicator` gives NONE, CHECKING, WAITING, FAILED or NOT_RUN per hazard-c3-spec.md §2.8. | POST-040, POST-042, POST-046 |
 | REQ-POST-19 | The IDF adapter converts `esp_reset_reason()` and the OTA state with `static_assert`ed enum values; `verified` is true only when the build has no bootloader skip-validate option; memory and stack values saturate to `int32`. | POST-050 (main's static_asserts, the firmware build) |
-| REQ-POST-20 | The ADC task feeds the accumulator on every cycle, valid or not, with the reads passed to the stick pipeline; it writes the window mailbox once per window and never waits; it stops once the gate is PASS or FAIL; it allocates nothing. | POST-048; SU (frames), review |
+| REQ-POST-20 | The ADC task feeds the accumulator on every cycle, valid or not, with the reads passed to the stick pipeline; it writes the window mailbox once per window and never waits; it stops once the gate is PASS or FAIL; it allocates nothing. | POST-048, POST-054; SU (frames), review |
 
 The safe state for every requirement is "overall not PASS": no motion once C3 wires this in.
 
