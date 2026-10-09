@@ -23,7 +23,7 @@ graded clean-up, Locked. "Forward" = the vertical pot at its calibrated min (y =
 | B5''-6 | s | Drive throughout; >= 90 % non-zero; 18-22 DISABLEs in 5 s, gaps <= 0.4 s; STOPPING by 0.5 s, MCB_DID_NOT_STOP at 5.0..5.5 s; gaps 0.85..1.3 s after 5.5 s |
 | B5''-6b | s off | Locked within 1.5 s; notice NONE; <= 1 DISABLE after Locked; none from Locked + 2 s |
 | B5''-7 | drop 3 | Locked within 2.0 s of the first DISABLE; >= 4 DISABLEs |
-| B5''-8 | s | as 6 with the burger key; then s off: Locked with the menu open |
+| B5''-8 | s | as 6 with the burger key; then s off: Locked with the menu closed (owner decision 2026-10-09: keep the table; C1 §6 said "open") |
 | B5''-9 | a | Joystick screen and calibrating for 5 s; no non-zero XYTwist; after the cancel DriveScreen within 3.0 s |
 | B5''-10 | a | after CAL UNSAVED: DriveScreen within 3.0 s; notice NOT_CALIBRATED; no non-zero XYTwist |
 | B5''-11 | a | PERMIT POST pending: zero, notice POST_NOT_PASSED; zero 1 s after pass; y > 0 within 0.3 s at the end |
@@ -75,10 +75,17 @@ def driving_forward(rig: Rig, label: str = "enter") -> None:
 
 
 def watch_disables(rig: Rig, after: str, within: float = 3.0) -> float | None:
-    """Wait for the sim to log the first DISABLE after mark `after`; its stamp."""
-    e = rig.sim.wait_event(lambda e: e.get("ev") == "drive_command"
-                           and e.get("request") == "DISABLE", within, after)
-    return None if e is None else e["mono"]
+    """Wait for the sim to log the first DISABLE after mark `after`, polling STATE all the
+    while (the notice that comes with that DISABLE is graded against its time); its stamp."""
+    deadline = time.monotonic() + within
+    while True:
+        e = next((e for e in rig.sim.events(after) if e.get("ev") == "drive_command"
+                  and e.get("request") == "DISABLE"), None)
+        if e is not None:
+            return e["mono"]
+        if time.monotonic() >= deadline:
+            return None
+        rig.watch(0.1)  # one STATE poll per period until the DISABLE is in the sim's log
 
 
 # ---------------------------------------------------------------- graders (pure)
@@ -111,10 +118,25 @@ def check_no_nonzero(st: HazardStep, what: str, tr: hg.Trace, t0: float, t1: flo
              + (f", first {list(bad[0])}" if bad else ""))
 
 
+# C1 §3.3: GATE_SHUT and CALIBRATING have no notice text (the Drive screen is not up yet,
+# or the calibration screen is): with either as the hold reason the notice is NONE.
+NO_TEXT_REASONS = ("GATE_SHUT", "CALIBRATING")
+
+
+def notice_as_spec(notice: str):
+    """The Drive notice C1 §2.7/§3.3 asks for: `notice`, or NONE while the hold reason is
+    one §3.3 gives no text (e.g. GATE_SHUT until the Drive screen's fade has opened the
+    gate, about 0.4 s after STATE first shows DriveScreen)."""
+    return lambda s: s.get("notice") == notice or (
+        s.get("notice") == "NONE" and s.get("hold_reason") in NO_TEXT_REASONS)
+
+
 def check_notice_all(st: HazardStep, tr: hg.Trace, notice: str, t0: float, t1: float) -> None:
-    ok, n, bad = hg.all_states(tr.states, hg.field_is("notice", notice), t0, t1)
-    st.check(f"STATE notice {notice}", ok,
-             f"{n} polls in [{t0:.2f}, {t1:.2f}]" + (f"; first other {bad[0]}" if bad else ""))
+    ok, n, bad = hg.all_states(tr.states, notice_as_spec(notice), t0, t1)
+    shown = sum(1 for t, s in hg.states_in(tr.states, t0, t1) if s.get("notice") == notice)
+    st.check(f"STATE notice {notice}", ok and shown > 0,
+             f"{n} polls in [{t0:.2f}, {t1:.2f}], {shown} show it"
+             + (f"; first other {bad[0]}" if bad else ""))
 
 
 def grade_b1(st: HazardStep, tr: hg.Trace, p: dict) -> None:
@@ -284,11 +306,19 @@ def grade_b7(st: HazardStep, tr: hg.Trace, p: dict) -> None:
 
 def grade_b8(st: HazardStep, tr: hg.Trace, p: dict) -> None:
     grade_ignored_stop(st, tr, "exit", "drives")
+    # Owner decision 2026-10-09, hazard-decisions.md (keep the table): after a refused
+    # burger-key stop the session ends on Locked with the menu CLOSED (C1 §2.3 row 9,
+    # F2 -> F2 + SEND_DISABLE, CLEAR_STOP_FAULT: no menu-on-arrival from EXIT_REFUSED; the
+    # TABLE.md invariant). C1 §6's "Locked with the menu open" is superseded.
     off = tr.mark("s-off")
-    s = hg.first_state(tr.states, lambda s: s.get("screen") == LOCKED and s.get("menu_open")
-                       is True, off)
-    st.check("then Locked with the menu open (STATE)", s is not None,
-             "never" if s is None else f"after {s[0] - off:.2f} s")
+    s = hg.first_state(tr.states, hg.screen_is(LOCKED), off)
+    if not st.check("then Locked (STATE)", s is not None,
+                    "never" if s is None else f"after {s[0] - off:.2f} s"):
+        return
+    ok, n, bad = hg.all_states(tr.states, lambda x: x.get("screen") == LOCKED
+                               and x.get("menu_open") is False, s[0], float("inf"))
+    st.check("with the menu closed (owner decision 2026-10-09)", ok,
+             f"{n} polls; first other {bad}")
 
 
 def grade_b9(st: HazardStep, tr: hg.Trace, p: dict) -> None:
@@ -507,8 +537,8 @@ def s_b8(rig: Rig) -> dict:
     _ignored_stop(rig, "burger")
     rig.mark("s-off")
     rig.sim_toggle("s", False)
-    rig.watch(4.0, until=lambda s: s.get("screen") == LOCKED and s.get("menu_open") is True)
-    rig.watch(0.5)
+    rig.watch(4.0, until=hg.screen_is(LOCKED))
+    rig.watch(1.0)  # it stays Locked with the menu closed
     return {}
 
 

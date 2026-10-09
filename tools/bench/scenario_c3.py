@@ -413,35 +413,79 @@ def s_b18c(rig: Rig) -> dict:
     return {}
 
 
-def seat_press(rig: Rig) -> None:
-    """On the Seat screen: the focused function button (ENTER) opens its adjustment page;
-    up to the back row, down to '-' and '+', ENTER on the first: one seat request."""
-    for key in ("ENTER", "UP", "UP", "DOWN", "ENTER"):
-        if key == "ENTER":
-            rig.hmi.command("KEY ENTER")
-        else:
-            rig.hmi.nudge(key)
-        time.sleep(0.3)  # one keypad read and the page change
-    rig.st.records.setdefault("seat_focus", []).append(rig.focus())
+SEAT_BUTTONS = 6  # SeatView's function grid: 3 rows of 2 (seat_view.cpp fill_grids)
+SEAT_ADJUST = 6   # its adjustment page: back; "-", "+"; three presets
+
+
+def centre_of(focus: tuple) -> tuple[int, int]:
+    """The middle of a FOCUS rect (x, y, w, h, groupsize)."""
+    x, y, w, h = focus[:4]
+    return x + w // 2, y + h // 2
+
+
+def check_seat_targets(buttons: tuple | None, minus: tuple | None) -> None:
+    """The two widgets B5''-19 presses, as FOCUS reported them with the stick centred:
+    the Seat screen's first function button (Elevation, ui_SeatButton1: the cursor's place
+    on arrival) and its adjustment page's "-" (ui_SeatAdjustmentButton1). Anything else is
+    a rig fault, never a firmware verdict (on 2026-10-09 a keypad walk under the bumped
+    stick ended on the burger key)."""
+    # The keypad group may hold one more object than the grid (05c22b5: 7 for 6 buttons);
+    # the button itself is checked by its size (ui_SeatButton1: 320x162).
+    if buttons is None or buttons[4] < SEAT_BUTTONS or tuple(buttons[2:4]) != (320, 162):
+        raise NotRun("bench", f"Seat screen: the function grid is not focused (FOCUS {buttons})")
+    if minus is None or minus[4] < SEAT_ADJUST:
+        raise NotRun("bench", f"Seat screen: the adjustment page is not focused (FOCUS {minus})")
+    if tuple(minus[:4]) == tuple(buttons[:4]) or minus[2] >= 720:
+        raise NotRun("bench", f"Seat screen: '-' not found (FOCUS {minus}, button {buttons})")
+
+
+def seat_targets(rig: Rig) -> tuple[int, int]:
+    """With the stick centred (no stick keys): open the Seat screen, read Elevation's place
+    (FOCUS), tap it by touch, walk the adjustment page's focus to '-' (up to the back row,
+    one down) and read its place; the page stays open. Returns where '-' is."""
+    rig.go("Seat Functions")
+    if rig.watch(3.0, until=hg.screen_is("SeatScreen")) is None:
+        raise NotRun("bench", "could not open the Seat screen")
+    buttons = rig.focus()
+    if buttons is None or buttons[4] < SEAT_BUTTONS or tuple(buttons[2:4]) != (320, 162):
+        check_seat_targets(buttons, None)  # raises: not the function grid
+    rig.tap(*centre_of(buttons))
+    time.sleep(0.3)  # the page change
+    for key in ("UP", "UP", "DOWN"):
+        rig.hmi.nudge(key)
+        time.sleep(0.2)  # one keypad read
+    minus = rig.focus()
+    rig.st.record("seat_targets", {"elevation": buttons, "minus": minus})
+    check_seat_targets(buttons, minus)
+    return centre_of(minus)
+
+
+def seat_press(rig: Rig, minus: tuple[int, int]) -> None:
+    """One seat request by touch: '-' on the open adjustment page. The target is checked
+    first: still the Seat screen, no menu over it."""
+    s = rig.state()
+    if s.get("screen") != "SeatScreen" or s.get("menu_open"):
+        raise NotRun("bench", f"seat press: not on the Seat screen ({s.get('screen')}, "
+                     f"menu {s.get('menu_open')})")
+    rig.tap(*minus)
 
 
 def s_b19(rig: Rig) -> dict:
     rig.begin()
     rig.need("banner")
+    minus = seat_targets(rig)  # stick centred: no stick key moves the focus
     rig.inject(*bumped(rig.cal))
     rig.mark("rerun")
     rig.bench_verb(rig.hmi.post_rerun, "POST RERUN")
-    rig.go("Seat Functions")
-    rig.watch(3.0, until=hg.screen_is("SeatScreen"))
     rig.watch(2.0, until=_post("PENDING"))
     rig.mark("seat-1")
-    seat_press(rig)
+    seat_press(rig, minus)
     rig.watch(2.0)
     rig.mark("centred")
     rig.centre()
     rig.watch(3.0, until=_post("PASS"))
     rig.mark("seat-2")
-    rig.hmi.command("KEY ENTER")  # the same row, now with POST passed
+    seat_press(rig, minus)  # the same "-", now with POST passed
     rig.watch(2.1)
     rig.home()
     return {}

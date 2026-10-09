@@ -562,12 +562,27 @@ class Rig:
         return out
 
     def hold_button(self, ms: int = HOLD_MS) -> float:
-        """The stick button held `ms` (unlock, exit or calibrate hold); returns the press time."""
+        """The stick button held `ms` (unlock, exit or calibrate hold), STATE polled every
+        POLL_S through it: a hold completes (and the firmware acts) 1.5 s in, while the
+        button is still down, so a grader timing from that moment needs polls then (on
+        2026-10-09 a hold with no poll left a 3.16 s gap and B5''-6's "STOPPING by
+        t1 + 0.5 s" was read late). Returns the press time."""
         t = time.monotonic()
         self.hmi.command("BTN 1")
-        time.sleep(ms / 1000.0)  # the hold itself
+        while time.monotonic() - t < ms / 1000.0:
+            self.state()
+            time.sleep(max(0.0, min(POLL_S, t + ms / 1000.0 - time.monotonic())))  # poll period
         self.hmi.command("BTN 0")
         return t
+
+    def key_enter(self) -> None:
+        """One press of the stick button through the keypad (KEY ENTER), always released
+        with KEY NONE (an unreleased ENTER stayed held 4.7 s on 2026-10-09)."""
+        try:
+            self.hmi.command("KEY ENTER")
+            time.sleep(0.12)  # one keypad read
+        finally:
+            self.hmi.command("KEY NONE")
 
     def burger(self) -> None:
         self.tap(*MENU_KEY)
@@ -780,7 +795,7 @@ class Rig:
             self._modes_off()
             self.sim_cmd("ok")
             s = self.watch(3.0, until=hg.screen_is("LockedScreen"))
-            if s is not None and s.get("menu_open"):
+            if s is None or s.get("menu_open"):  # another screen, or a menu over Locked
                 self.home()
                 s = self.watch(3.0, until=lambda s: s.get("screen") == "LockedScreen"
                                and not s.get("menu_open"))
