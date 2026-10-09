@@ -38,7 +38,7 @@ using ds::Phase;
 // ----
 constexpr unsigned HIDDEN_COMBOS = 1U << static_cast<unsigned>(std::popcount(ds::kHiddenGuards));
 constexpr std::size_t ENV_COUNT =
-    2 * os::MIBS.size() * os::SCREENS.size() * 2 * 8 * 4 * os::RESENDS.size();
+    2 * os::MIBS.size() * os::SCREENS.size() * 2 * 8 * 4 * os::RESENDS.size() * 2;
 
 Env env_at(std::size_t i) {
   const bool link = (i % 2) != 0;
@@ -62,7 +62,8 @@ Env env_at(std::size_t i) {
              .giveup_elapsed = (deadlines & 4U) != 0,
              .calibrating = (stop & 1U) != 0,
              .stop_fault_elapsed = (stop & 2U) != 0,
-             .resend = os::RESENDS[i % os::RESENDS.size()]};
+             .resend = os::RESENDS[i % os::RESENDS.size()],
+             .post_ok = (i / os::RESENDS.size()) % 2 != 0};
 }
 
 GuardMask hidden_at(unsigned i) {

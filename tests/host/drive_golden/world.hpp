@@ -57,6 +57,8 @@ struct World {
   // hold reason (hmi::stick::HoldReason's value), and the notice last shown.
   bool live_link = false;
   bool calibrating = false;
+  // C3: the POST gate (hmi::stick::PostGate's value; PASS unless a scenario says otherwise).
+  std::uint8_t post_gate = 2;
   // The next DriveCommand publish blocks this long (the clock moves by it), then 0 again.
   std::int64_t publish_delay_us = 0;
   std::uint8_t hold = 0;

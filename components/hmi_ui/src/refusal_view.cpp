@@ -129,6 +129,18 @@ void hmi::ui::RefusalView::refused_panel_observer(lv_observer_t *observer, lv_su
     shown(true);
     return;
   }
+  // C3: asked to drive before the start-up check passed. Not the MCB's doing: it names the
+  // check, for its window or until the check passes (poll clears it).
+  if (refused == REFUSED_POST) {
+    lv_label_set_text(ui_comp_get_child(panel, UI_COMP_ERRORBANNER_BANNERTITLE),
+                      view->config_.texts->refused_post_title);
+    const char *reason = view->config_.post_reason();
+    lv_label_set_text(ui_comp_get_child(panel, UI_COMP_ERRORBANNER_BANNERBOX_BANNERMESSAGE),
+                      reason != nullptr ? reason : "");
+    lv_label_set_text(ui_comp_get_child(panel, UI_COMP_ERRORBANNER_BANNERBOX_BANNERFOOTER), "");
+    shown(true);
+    return;
+  }
   if (view->config_.mcb_ready()) {
     shown(false);
     return;
@@ -253,7 +265,8 @@ void hmi::ui::RefusalView::poll() {
   } else if ((refused == REFUSED_DRIVE && (refused != page || config_.mcb_ready())) ||
              ((refused == REFUSED_SEAT || refused == REFUSED_DRIVE_LOST ||
                refused == REFUSED_DRIVE_MENU) &&
-              config_.mcb_ready())) {
+              config_.mcb_ready()) ||
+             (refused == REFUSED_POST && config_.post_passed())) {
     // A refused drive is tied to the push on the Locked screen, so it goes
     // with it. A refused seat comes from the menu -- no push to hold it up --
     // so it stays its window (the dwell timer) unless the cause clears.

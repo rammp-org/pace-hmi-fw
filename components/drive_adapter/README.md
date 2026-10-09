@@ -44,7 +44,7 @@ does is dropped and logged, see REQ-DAD-03).
 
 | Method | Action(s) | DrivePort (drive_ui) does |
 | --- | --- | --- |
-| `sample()` | every input | the link live (`rtps_comms_link_state`, REQ-UI-18), `mib_state_subject`, `lv_screen_active()`, `nav_menu_open`, `joystick_cal_running()`, the stick's hold reason, in that order |
+| `sample()` | every input | the link live (`rtps_comms_link_state`, REQ-UI-18), `mib_state_subject`, `lv_screen_active()`, `nav_menu_open`, `joystick_cal_running()`, the stick's hold reason, the POST gate (PASS: `post_ok`, C3), in that order |
 | `now_us()` | every input; SEND_ENABLE; ARM_EXIT_DEADLINE | `esp_timer_get_time()` |
 | `publish(enable)` | SEND_ENABLE, SEND_DISABLE, PUBLISH_DRIVE | `rtps_comms_publish_drive(request, drive_profile_published)`; returns its result, which the adapter does not use yet (H6) |
 | `ring_wait()`, `ring_rest()` | RING_WAIT, RING_REST | `lock_visual_wait()`, `lock_visual_rest()` |
@@ -54,7 +54,7 @@ does is dropped and logged, see REQ-DAD-03).
 | `gate_update()` | GATE_UPDATE | `nav_update_stick_gate()` |
 | `menu_on_arrival(open)` | OPEN/CLEAR_MENU_ON_ARRIVAL | `nav_menu_on_arrival = open` |
 | `go_locked_screen()`, `go_drive_screen()`, `nav_home()` | GO_LOCKED_SCREEN, GO_DRIVE_SCREEN, NAV_HOME | `locked_screen_go()`, fade to Drive over kUnlockDissolveMs, `nav_home()` |
-| `show_banner(banner)` | SHOW_* | `entry_refused_show(kRefused*, dwell)` |
+| `show_banner(banner)` | SHOW_* (C3: SHOW_REFUSED_POST, REFUSED_POST) | `entry_refused_show(kRefused*, dwell)` |
 | `refusal_feedback()` | REFUSAL_FEEDBACK | `refusal_feedback()` |
 | `show_notice(notice)` | after every input and tick, on a change | the Drive screen's notice slot (hmi_ui's DriveNoticeView) |
 

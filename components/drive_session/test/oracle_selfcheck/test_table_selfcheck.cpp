@@ -39,7 +39,7 @@ template <typename F> void for_each_env(F &&f) {
     for (MibState mib : kMib) {
       for (Screen s : kScreens) {
         for (bool menu : {false, true}) {
-          for (unsigned t = 0; t < 32; ++t) {
+          for (unsigned t = 0; t < 64; ++t) {
             for (ds::Resend r : kResend) {
               const Env e{.link_connected = link,
                           .mib = mib,
@@ -50,7 +50,8 @@ template <typename F> void for_each_env(F &&f) {
                           .giveup_elapsed = (t & 4u) != 0,
                           .calibrating = (t & 8u) != 0,
                           .stop_fault_elapsed = (t & 16u) != 0,
-                          .resend = r};
+                          .resend = r,
+                          .post_ok = (t & 32u) != 0};
               f(ds::env_guards(e));
             }
           }
@@ -110,18 +111,18 @@ template <typename F> void for_each_valid(F &&f) {
 // The cases register through tests/host/test_case.hpp and run from tests/host/test_main.cpp
 // (host L1 contract, TS-UNIT-02), which also defines setUp/tearDown.
 TEST_CASE("DSO-001 the tables have their declared sizes", "[drive_session_table]") {
-  TEST_ASSERT_EQUAL_size_t(49, ds::TRANSITIONS.size());
-  TEST_ASSERT_EQUAL_size_t(13, ds::kInputCount);
-  TEST_ASSERT_EQUAL_size_t(21, ds::kGuardCount);
-  TEST_ASSERT_EQUAL_INT(15, std::popcount(ds::kEnvGuards));
-  TEST_ASSERT_EQUAL_INT(6, std::popcount(ds::kHiddenGuards));
-  TEST_ASSERT_EQUAL_size_t(39, ds::kActionCount);
+  TEST_ASSERT_EQUAL_size_t(54, ds::TRANSITIONS.size());
+  TEST_ASSERT_EQUAL_size_t(14, ds::kInputCount);
+  TEST_ASSERT_EQUAL_size_t(23, ds::kGuardCount);
+  TEST_ASSERT_EQUAL_INT(16, std::popcount(ds::kEnvGuards));
+  TEST_ASSERT_EQUAL_INT(7, std::popcount(ds::kHiddenGuards));
+  TEST_ASSERT_EQUAL_size_t(41, ds::kActionCount);
   TEST_ASSERT_EQUAL_size_t(12, ds::kMaxActions);
   TEST_ASSERT_EQUAL_size_t(ds::kTransitionCount, ds::TRANSITIONS.size());
   TEST_ASSERT_EQUAL_size_t(11, ds::HOLD_TRANSITIONS.size());
   TEST_ASSERT_EQUAL_size_t(ds::kPhaseCount, ds::PHASE_INVARIANTS.size());
   TEST_ASSERT_EQUAL_size_t(ds::kInputCount, ds::INPUT_PRECONDITIONS.size());
-  TEST_ASSERT_EQUAL_size_t(6, ds::TICK_SEQUENCE.size());
+  TEST_ASSERT_EQUAL_size_t(7, ds::TICK_SEQUENCE.size());
   TEST_ASSERT_EQUAL_size_t(0, ds::KNOWN_GAPS.size());
   TEST_ASSERT_EQUAL_size_t(5, ds::GATE_TRIGGERS.size());
 }
@@ -256,7 +257,8 @@ TEST_CASE("DSO-010 every row cites its code, or the hazard spec that added it",
   // a row a hazard fix added (42 on) has no code of e2047a4 to cite and cites its spec.
   for (std::size_t i = 0; i < ds::TRANSITIONS.size(); ++i) {
     const auto &t = ds::TRANSITIONS[i];
-    const bool spec = t.code.find("hazard-c1-spec.md") != std::string_view::npos;
+    const bool spec = t.code.find("hazard-c1-spec.md") != std::string_view::npos ||
+                      t.code.find("hazard-c3-spec.md") != std::string_view::npos;
     if (i < 41) {
       TEST_ASSERT_TRUE(t.code.find("frag_") != std::string_view::npos);
       TEST_ASSERT_TRUE(t.code.find("orig ") != std::string_view::npos);
@@ -402,7 +404,7 @@ TEST_CASE("DSO-015 every row from an unlocked phase to LOCKED has SEND_DISABLE a
 }
 
 TEST_CASE("DSO-016 SEND_ENABLE only in rows 18, 31 and 32; rows 31-32 need DRIVING_OK",
-          "[drive_session_table][REQ-DRV-33]") {
+          "[drive_session_table][REQ-DRV-37]") {
   std::size_t enables = 0;
   for (const auto &t : ds::TRANSITIONS) {
     if (!row_has(t, ds::Action::SEND_ENABLE)) {
@@ -420,7 +422,7 @@ TEST_CASE("DSO-016 SEND_ENABLE only in rows 18, 31 and 32; rows 31-32 need DRIVI
 
 TEST_CASE("DSO-017 rows 1-2 read !CALIBRATING !ON_BOOT_SCREEN; ARM_STOP_TIMER only on "
           "UNLOCKING/DRIVING -> EXITING",
-          "[drive_session_table][REQ-DRV-22]") {
+          "[drive_session_table][REQ-DRV-35]") {
   for (std::size_t i : {std::size_t{0}, std::size_t{1}}) {
     const auto &t = ds::TRANSITIONS[i];
     TEST_ASSERT_TRUE(t.input == Input::TICK_FOLLOW && t.to == Phase::UNLOCKING);
@@ -439,12 +441,13 @@ TEST_CASE("DSO-017 rows 1-2 read !CALIBRATING !ON_BOOT_SCREEN; ARM_STOP_TIMER on
   TEST_ASSERT_EQUAL_size_t(4, arms); // rows 21, 22, 25, 26
 }
 
-TEST_CASE("DSO-018 TICK_SEQUENCE is exactly follow, exit due, stop fault due, stop re-send, warn "
-          "due, give-up due",
-          "[drive_session_table][REQ-DRV-32]") {
-  constexpr std::array kWant{Input::TICK_FOLLOW,         Input::TICK_EXIT_DUE,
-                             Input::TICK_STOP_FAULT_DUE, Input::TICK_STOP_RESEND,
-                             Input::TICK_WARN_DUE,       Input::TICK_GIVEUP_DUE};
+TEST_CASE("DSO-018 TICK_SEQUENCE is exactly follow, boot stop, exit due, stop fault due, stop "
+          "re-send, warn due, give-up due",
+          "[drive_session_table][REQ-DRV-36]") {
+  constexpr std::array kWant{Input::TICK_FOLLOW,      Input::TICK_BOOT_STOP,
+                             Input::TICK_EXIT_DUE,    Input::TICK_STOP_FAULT_DUE,
+                             Input::TICK_STOP_RESEND, Input::TICK_WARN_DUE,
+                             Input::TICK_GIVEUP_DUE};
   TEST_ASSERT_EQUAL_size_t(kWant.size(), ds::TICK_SEQUENCE.size());
   for (std::size_t i = 0; i < kWant.size(); ++i) {
     TEST_ASSERT_TRUE(ds::TICK_SEQUENCE[i] == kWant[i]);
@@ -459,4 +462,61 @@ TEST_CASE("DSO-019 the stop's D4 constants: 250, 5000, 1000 and 125 ms; the re-s
   TEST_ASSERT_EQUAL_INT64(1000, ds::kStopResendSlow.count());
   TEST_ASSERT_EQUAL_INT64(125, ds::kStopResendSlack.count());
   TEST_ASSERT_TRUE(ds::kStopResend == ds::kTickPeriod);
+}
+
+// ---- The hazard fix C3 (docs/plans/hazard-c3-spec.md §6.1) ----------------------------------
+
+TEST_CASE("DSO-020 BOOT_STOP_DONE is true in every unlocked phase; MARK_BOOT_STOP only in rows "
+          "50-51",
+          "[drive_session_table][REQ-DRV-39]") {
+  for (const auto &inv : ds::PHASE_INVARIANTS) {
+    const bool must = (inv.must_true & ds::bit(ds::Guard::BOOT_STOP_DONE)) != 0;
+    TEST_ASSERT_EQUAL(!ds::is_locked_phase(inv.phase), must);
+  }
+  std::size_t marks = 0;
+  for (const auto &t : ds::TRANSITIONS) {
+    if (row_has(t, ds::Action::MARK_BOOT_STOP)) {
+      ++marks;
+      TEST_ASSERT_TRUE(row_number(t) == 50 || row_number(t) == 51);
+    }
+  }
+  TEST_ASSERT_EQUAL_size_t(2, marks);
+  TEST_ASSERT_TRUE(
+      std::ranges::find(ds::DriveSession::SAFE_STATE_ACTIONS, ds::Action::MARK_BOOT_STOP) ==
+      ds::DriveSession::SAFE_STATE_ACTIONS.end());
+}
+
+TEST_CASE("DSO-021 every SEND_ENABLE row needs POST_OK (rows 18, 31, 32)",
+          "[drive_session_table][REQ-DRV-37]") {
+  std::size_t enables = 0;
+  for (const auto &t : ds::TRANSITIONS) {
+    if (row_has(t, ds::Action::SEND_ENABLE)) {
+      ++enables;
+      TEST_ASSERT_TRUE(needs_true(t, ds::Guard::POST_OK));
+    }
+  }
+  TEST_ASSERT_EQUAL_size_t(3, enables);
+}
+
+TEST_CASE("DSO-022 rows 1-2 read +BOOT_STOP_DONE and do not read POST_OK",
+          "[drive_session_table][REQ-DRV-35]") {
+  for (std::size_t i : {std::size_t{0}, std::size_t{1}}) {
+    const auto &t = ds::TRANSITIONS[i];
+    TEST_ASSERT_TRUE(needs_true(t, ds::Guard::BOOT_STOP_DONE));
+    TEST_ASSERT_FALSE(needs_true(t, ds::Guard::POST_OK) || needs_false(t, ds::Guard::POST_OK));
+  }
+}
+
+TEST_CASE("DSO-023 UNLOCK_APPLIES needs POST_OK; SHOW_REFUSED_POST only with !POST_OK",
+          "[drive_session_table][REQ-DRV-40][REQ-DRV-41]") {
+  TEST_ASSERT_TRUE((ds::UNLOCK_APPLIES.guard.need_true & ds::bit(ds::Guard::POST_OK)) != 0);
+  std::size_t refusals = 0;
+  for (const auto &t : ds::TRANSITIONS) {
+    if (row_has(t, ds::Action::SHOW_REFUSED_POST)) {
+      ++refusals;
+      TEST_ASSERT_TRUE(needs_false(t, ds::Guard::POST_OK));
+      TEST_ASSERT_TRUE(needs_true(t, ds::Guard::MCB_READY));
+    }
+  }
+  TEST_ASSERT_EQUAL_size_t(3, refusals); // rows 52-54
 }

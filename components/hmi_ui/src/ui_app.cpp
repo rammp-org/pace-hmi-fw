@@ -63,6 +63,11 @@ static_assert(ACTION_COUNT == 5, "every actions_spec.h entry needs its function 
 bool UiApp::mcb_ready() { return hmi::ui::mcb_ready(shared_); }
 bool UiApp::seat_ready() { return hmi::ui::seat_ready(shared_); }
 hmi::stick::HoldReason UiApp::hold_reason() const { return permit_hooks_.hold_reason.read(); }
+hmi::stick::PostGate UiApp::post_gate() const { return permit_hooks_.post_gate.read(); }
+bool UiApp::post_passed() const { return hmi::stick::post_passed(post_gate()); }
+// The blocking check's own words come from the POST's TopBar indicator (hazard-c3-spec.md §2.8)
+// once that is wired; until then the gate's own words.
+const char *UiApp::post_reason() const { return post_reason_text(post_gate(), nullptr); }
 
 // PUBLISH_DRIVE: the drive request as it stands, with the new profile.
 void UiApp::profile_clicked() {
@@ -79,9 +84,12 @@ void UiApp::hold_confirm() {
   config_.cues->click();
 }
 
+// The drive table's UNLOCK_APPLIES: C3 adds POST passed (the hold does not fill before it; a
+// push says why, row 53).
 bool UiApp::unlock_applies() {
   return lv_subject_get_int(&locked_) != 0 && !drive_ui_.lock_waiting() &&
-         lv_screen_active() == ui_LockedScreen && nav_menu_open == nullptr && mcb_ready();
+         lv_screen_active() == ui_LockedScreen && nav_menu_open == nullptr && mcb_ready() &&
+         post_passed();
 }
 
 bool UiApp::drive_exit_applies() {

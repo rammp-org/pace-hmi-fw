@@ -24,7 +24,7 @@ const char *input_name(std::int64_t in) {
       "TICK_FOLLOW",      "TICK_EXIT_DUE",  "TICK_WARN_DUE",  "TICK_GIVEUP_DUE",
       "UNLOCK_HOLD_DONE", "EXIT_HOLD_DONE", "MENU_KEY_DRIVE", "PROFILE_CLICK",
       "UNLOCK_TIMER",     "ENTRY_PUSH",     "MENU_ROW_DRIVE", "TICK_STOP_FAULT_DUE",
-      "TICK_STOP_RESEND"};
+      "TICK_STOP_RESEND", "TICK_BOOT_STOP"};
   return in >= 0 && static_cast<std::size_t>(in) < kNames.size()
              ? kNames[static_cast<std::size_t>(in)]
              : "CORRUPTED";
@@ -55,6 +55,7 @@ Step calibrating(bool on) { return {Op::CALIBRATING, on ? 1 : 0}; }
 Step hold(std::uint8_t reason) { return {Op::HOLD, reason}; }
 Step live_link(bool up) { return {Op::LIVE_LINK, up ? 1 : 0}; }
 Step publish_delay(std::int64_t us) { return {Op::PUBLISH_DELAY, us}; }
+Step post(std::uint8_t gate) { return {Op::POST, gate}; }
 
 namespace {
 
@@ -72,10 +73,11 @@ std::vector<Step> seq(std::initializer_list<std::initializer_list<Step>> parts) 
 
 // Common openings.
 const std::initializer_list<Step> kReady{link(true), mib(Mib::IDLE)};
-// The MIB enables unasked (row 1), the advance lands, Drive fades in: DRIVING.
+// The MIB enables unasked (row 1, the tick after the boot DISABLE, row 50), the advance
+// lands, Drive fades in: DRIVING.
 const std::initializer_list<Step> kDriving{
-    link(true),    mib(Mib::ENABLED), tick(), advance(1000 * kMs),
-    timer_fires(), frame_step(),      tick()};
+    link(true),          mib(Mib::ENABLED), tick(),       tick(),
+    advance(1000 * kMs), timer_fires(),     frame_step(), tick()};
 // Asked: the unlock hold with the MCB ready (row 18).
 const std::initializer_list<Step> kAsking{link(true), mib(Mib::IDLE), tick(), unlock_hold()};
 
@@ -144,6 +146,17 @@ void add_c1_scenarios(std::vector<Scenario> &s) {
                      mib(Mib::ENABLED), tick(), screen(ScreenId::LOCKED), tick()}})});
   s.push_back({"C1: the exit hold while locked and while asking (rows 42, 43)",
                seq({kReady, {tick(), exit_hold(), unlock_hold(), exit_hold(), tick()}})});
+  // C3's rows: the boot DISABLE (50, 51) and the refusals before POST pass (52-54).
+  s.push_back(
+      {"C3: the boot DISABLE, asked before the first tick (rows 51, then 2)",
+       seq({{link(true), mib(Mib::IDLE), unlock_hold(), tick(), mib(Mib::ENABLED), tick()}})});
+  s.push_back({"C3: the boot DISABLE on the first CONNECTED tick, then no entry before it (row 50)",
+               seq({{link(false), mib(Mib::ENABLED), tick(), link(true), tick(), tick()}})});
+  s.push_back({"C3: before POST pass, the unlock hold, the push and the DRIVE row are refused "
+               "(rows 52, 53, 54), then the hold asks (row 18)",
+               seq({kReady,
+                    {tick(), post(1), unlock_hold(), input(Input::ENTRY_PUSH),
+                     input(Input::MENU_ROW_DRIVE), post(2), unlock_hold()}})});
   s.push_back({"C1: a profile tap after the MCB stopped, before the tick (rows 32 held, 5, 29)",
                seq({kDriving,
                     {profile(Profile::HIGH), mib(Mib::IDLE), profile(Profile::LOW), tick(),
@@ -176,12 +189,12 @@ std::vector<Scenario> hand_written() {
                      frame_step(),
                      tick()}})});
   s.push_back({"the MIB enables unasked, then the link goes (rows 1, 4)",
-               seq({{link(true), mib(Mib::ENABLED), tick(), advance(250 * kMs), link(false), tick(),
-                     frame_step(), tick()}})});
+               seq({{link(true), mib(Mib::ENABLED), tick(), tick(), advance(250 * kMs), link(false),
+                     tick(), frame_step(), tick()}})});
   s.push_back(
       {"stopped while unlocking (row 3), then while driving (row 5)",
-       seq({{link(true), mib(Mib::ENABLED), tick(), mib(Mib::IDLE), tick(), mib(Mib::ENABLED),
-             tick()},
+       seq({{link(true), mib(Mib::ENABLED), tick(), tick(), mib(Mib::IDLE), tick(),
+             mib(Mib::ENABLED), tick()},
             {advance(1000 * kMs), timer_fires(), frame_step(), tick(), mib(Mib::ERROR), tick()}})});
   s.push_back({"the link lost while driving (row 6)", seq({kDriving, {link(false), tick()}})});
   s.push_back({"the burger key on Drive: stop, then the menu over Locked (rows 26, 27, 7)",
@@ -195,14 +208,14 @@ std::vector<Scenario> hand_written() {
                      input(MENU_KEY_DRIVE), to_exit(0), tick(), mib(Mib::IDLE), tick(),
                      frame_step(), tick()}})});
   s.push_back({"while the unlock timer is armed: profile, exit hold, advance (rows 31, 21, 36)",
-               seq({{link(true), mib(Mib::ENABLED), tick(), profile(Profile::HIGH), exit_hold(),
-                     timer_fires(), frame_step(), tick()}})});
+               seq({{link(true), mib(Mib::ENABLED), tick(), tick(), profile(Profile::HIGH),
+                     exit_hold(), timer_fires(), frame_step(), tick()}})});
   s.push_back({"an exit refused while the unlock timer is armed, then it fires (rows 21, 14, 37)",
-               seq({{link(true), mib(Mib::ENABLED), tick(), exit_hold(), to_exit(0), tick(),
+               seq({{link(true), mib(Mib::ENABLED), tick(), tick(), exit_hold(), to_exit(0), tick(),
                      timer_fires(), frame_step(), tick()}})});
   s.push_back({"the burger key while the unlock timer is armed (row 25)",
-               seq({{link(true), mib(Mib::ENABLED), tick(), input(MENU_KEY_DRIVE), timer_fires(),
-                     frame_step(), tick(), mib(Mib::IDLE), tick()}})});
+               seq({{link(true), mib(Mib::ENABLED), tick(), tick(), input(MENU_KEY_DRIVE),
+                     timer_fires(), frame_step(), tick(), mib(Mib::IDLE), tick()}})});
   s.push_back({"on the Seat screen without the MCB, locked (row 10) and asking (row 11)",
                seq({{screen(ScreenId::SEAT), tick(), frame_step()},
                     kReady,
@@ -287,10 +300,14 @@ constexpr std::array<ScreenId, 5> kScreens{ScreenId::BOOT, ScreenId::LOCKED, Scr
 
 Step random_step(Rng &r) {
   using enum Input;
-  const std::int64_t k = r.pick(105);
+  const std::int64_t k = r.pick(106);
   if (k >= 100) {
-    // C1's step kinds: a calibration starting or stopping, a slow publish.
-    return k < 103 ? calibrating(r.pick(2) != 0) : publish_delay(r.pick(2) * 150 * kMs);
+    // C1's step kinds: a calibration starting or stopping, a slow publish; C3's: the POST gate.
+    if (k < 102) {
+      return calibrating(r.pick(2) != 0);
+    }
+    return k < 103 ? publish_delay(r.pick(2) * 150 * kMs)
+                   : post(static_cast<std::uint8_t>(r.pick(4)));
   }
   if (k < 20) {
     return tick();
@@ -396,6 +413,10 @@ void play_c1(const Step &step) {
     w.publish_delay_us = step.arg;
     both(std::format("> publish delay {}", step.arg));
     break;
+  case Op::POST:
+    w.post_gate = static_cast<std::uint8_t>(step.arg);
+    both(std::format("> post {}", step.arg));
+    break;
   default:
     break;
   }
@@ -476,6 +497,7 @@ void play(const Step &step, const Target &t) {
   case Op::HOLD:
   case Op::LIVE_LINK:
   case Op::PUBLISH_DELAY:
+  case Op::POST:
     play_c1(step);
     break;
   }

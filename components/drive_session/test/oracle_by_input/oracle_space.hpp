@@ -2,8 +2,9 @@
 // The by-input oracle's state space (TS-UNIT-08, TS-UNIT-09; docs/plans/hazard-fixes.md B3).
 //
 // The full-product oracle (test/oracle_full, DRV-001..012, on demand) drives every (phase,
-// input, hidden mask, Env): 6 x 11 x 32 x 640 = 1,351,680 steps on the AS-IS table, and
-// 6 x 13 x 64 x 7,680 = 38,338,560 with C1. Each new hidden bit doubles that. This oracle
+// input, hidden mask, Env): 6 x 11 x 32 x 640 = 1,351,680 steps on the AS-IS table,
+// 6 x 13 x 64 x 7,680 = 38,338,560 with C1, and 6 x 14 x 128 x 15,360 = 165,150,720 with C3.
+// Each new hidden bit doubles that. This oracle
 // splits the guard bits, per input, into the ones the table reads for that input (any row of
 // the input, and its precondition) and the rest:
 //
@@ -57,7 +58,7 @@ inline constexpr std::array SCREENS{ds::Screen::BOOT, ds::Screen::LOCKED, ds::Sc
 
 // ---- Dimensions -----------------------------------------------------------------------------
 
-inline constexpr std::size_t kEnvDims = 9;
+inline constexpr std::size_t kEnvDims = 10;
 inline constexpr std::size_t kHiddenDims = std::popcount(ds::kHiddenGuards);
 inline constexpr std::size_t kDims = kEnvDims + kHiddenDims;
 // More than 32 dimensions does not fit DimSet: a compile error, not a silent cut.
@@ -104,6 +105,8 @@ constexpr std::array<Dim, kDims> make_dims() noexcept {
   d[6] = Dim{2, ds::bit(ds::Guard::CALIBRATING), 1};
   d[7] = Dim{2, ds::bit(ds::Guard::STOP_FAULT_ELAPSED), 1};
   d[8] = Dim{3, ds::mask({ds::Guard::RESEND_FAST_DUE, ds::Guard::RESEND_SLOW_DUE}), 2};
+  // C3: the POST gate PASS at the sample.
+  d[9] = Dim{2, ds::bit(ds::Guard::POST_OK), 1};
   for (std::size_t k = 0; k < kHiddenDims; ++k) {
     d[kEnvDims + k] = Dim{2, hidden_bit(k), 1};
   }
@@ -143,7 +146,8 @@ inline Point point_of(const Values &v) noexcept {
                     .giveup_elapsed = v[5] != 0,
                     .calibrating = v[6] != 0,
                     .stop_fault_elapsed = v[7] != 0,
-                    .resend = RESENDS[v[8]]};
+                    .resend = RESENDS[v[8]],
+                    .post_ok = v[9] != 0};
   ds::GuardMask hidden = 0;
   for (std::size_t k = 0; k < kHiddenDims; ++k) {
     hidden |= v[kEnvDims + k] != 0 ? hidden_bit(k) : 0;

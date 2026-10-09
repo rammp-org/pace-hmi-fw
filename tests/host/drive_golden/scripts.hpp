@@ -52,6 +52,8 @@ enum class Op : std::uint8_t {
   HOLD,          // arg: hmi::stick::HoldReason's value: the stick's hold reason
   LIVE_LINK,     // arg: 0/1: the live link read alone (the rtps_link subject keeps its value)
   PUBLISH_DELAY, // arg: us: the next DriveCommand publish blocks this long (the clock moves)
+  // C3 (hazard-c3-spec.md §6.2)
+  POST, // arg: hmi::stick::PostGate's value: the POST gate
 };
 
 struct Step {
@@ -95,5 +97,6 @@ Step calibrating(bool on);
 Step hold(std::uint8_t reason);
 Step live_link(bool up);
 Step publish_delay(std::int64_t us);
+Step post(std::uint8_t gate);
 
 } // namespace golden

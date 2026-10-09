@@ -62,7 +62,7 @@ constexpr std::array SCREENS{Screen::BOOT, Screen::LOCKED, Screen::DRIVE, Screen
                              Screen::OTHER};
 constexpr std::array RESENDS{ds::Resend::NOT_DUE, ds::Resend::FAST, ds::Resend::SLOW};
 constexpr unsigned HIDDEN_COMBOS = 1U << static_cast<unsigned>(std::popcount(ds::kHiddenGuards));
-constexpr std::size_t ENV_COUNT = 2 * MIBS.size() * SCREENS.size() * 2 * 8 * 4 * RESENDS.size();
+constexpr std::size_t ENV_COUNT = 2 * MIBS.size() * SCREENS.size() * 2 * 8 * 4 * RESENDS.size() * 2;
 
 // Every distinct Env, by index (0 .. ENV_COUNT-1).
 Env env_at(std::size_t i) {
@@ -87,7 +87,8 @@ Env env_at(std::size_t i) {
              .giveup_elapsed = (deadlines & 4U) != 0,
              .calibrating = (stop & 1U) != 0,
              .stop_fault_elapsed = (stop & 2U) != 0,
-             .resend = RESENDS[i % RESENDS.size()]};
+             .resend = RESENDS[i % RESENDS.size()],
+             .post_ok = (i / RESENDS.size()) % 2 != 0};
 }
 
 // Spread an index over the hidden guard bits, in bit order.

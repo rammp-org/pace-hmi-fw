@@ -72,7 +72,8 @@ struct Port {
                          .screen = ds::Screen::LOCKED,
                          .menu_open = false,
                          .calibrating = false,
-                         .hold = HoldReason::NONE};
+                         .hold = HoldReason::NONE,
+                         .post_ok = true};
   DriveBanner last_banner = DriveBanner::REFUSED_DRIVE;
   std::size_t banners = 0;
   std::array<DriveNotice, 64> notices{};
@@ -165,8 +166,16 @@ void fresh_port() { g_port = Port{}; }
 
 constexpr std::int64_t kMsUs = 1000;
 
-// DRIVING: the MIB enables (row 1), the advance fires (row 35), the Drive screen is up.
+// Booted: the first CONNECTED tick's boot DISABLE (C3, row 50), then the port's record cleared
+// (the "booted" preamble of hazard-c3-spec.md F1).
+void boot(Adapter &adapter) {
+  adapter.tick();
+  g_port.count = 0;
+}
+
+// DRIVING: booted, the MIB enables (row 1), the advance fires (row 35), the Drive screen is up.
 void drive(Adapter &adapter) {
+  boot(adapter);
   g_port.sample.mib = ds::MibState::ENABLED;
   adapter.tick();
   (void)adapter.input(Input::UNLOCK_TIMER);
@@ -189,6 +198,7 @@ TEST_CASE("DAD-002 an input re-entered from a port method is dropped and the one
   fresh_port();
   Adapter adapter{{.view = FakeView{}}};
   g_adapter = &adapter;
+  boot(adapter);
   g_port.sample.mib = ds::MibState::ENABLED; // row 1: LOCKED + DRIVING_OK -> UNLOCKING (F1)
   g_port.on_gate_update = [] { return g_adapter->input(Input::PROFILE_CLICK); };
   adapter.tick();
@@ -235,6 +245,7 @@ TEST_CASE("DAD-005 a corrupted input performs the session's safe state through t
           "[drive_adapter]") {
   fresh_port();
   Adapter adapter{{.view = FakeView{}}};
+  boot(adapter);
   g_port.sample.mib = ds::MibState::ENABLED;
   adapter.tick(); // unlocked
   TEST_ASSERT_FALSE(adapter.locked());

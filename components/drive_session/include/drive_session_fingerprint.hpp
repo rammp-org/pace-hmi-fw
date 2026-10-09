@@ -155,7 +155,7 @@ constexpr void add_stop(Fnv1a &f) noexcept {
 }
 
 /// @brief The reviewed table's fingerprint. Changes only together with a reviewed row change.
-inline constexpr std::uint64_t TABLE_FINGERPRINT = 0x534DA7D8A9777031ULL;
+inline constexpr std::uint64_t TABLE_FINGERPRINT = 0x573722FFCE41FB3CULL;
 
 static_assert(table_fingerprint() == TABLE_FINGERPRINT,
               "the drive session table's data changed: a row change needs the owner's approval "

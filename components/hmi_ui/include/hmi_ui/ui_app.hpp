@@ -164,6 +164,13 @@ private:
   bool seat_ready();
   /// The stick's hold reason as the ADC task last stored it (acquire), for the drive sample.
   hmi::stick::HoldReason hold_reason() const;
+  /// The POST gate as the POST runner last stored it (acquire): the drive table's POST_OK, the
+  /// unlock hold's applies() and the POST refusal's words (C3).
+  hmi::stick::PostGate post_gate() const;
+  bool post_passed() const;
+  /// Why POST has not passed, in words: hmi_ui's post_reason_text over the gate (the Drive
+  /// notice and the REFUSED_POST banner). Null when it has passed.
+  const char *post_reason() const;
   void profile_clicked();
   bool entry_push();
   void hold_confirm();
@@ -310,6 +317,8 @@ private:
       // A push is decided by the drive session (rows 38-39: locked, on the Locked screen, no
       // menu, MCB not ready).
       .entry_push = hmi::ui::bind<&UiApp::entry_push>(this),
+      .post_passed = hmi::ui::bind<&UiApp::post_passed>(this),
+      .post_reason = hmi::ui::bind<&UiApp::post_reason>(this),
       .grace_ms = HOLD_GRACE_MS,
   }};
   // Locked means "not driving", and the Locked screen is where that changes.
@@ -326,7 +335,9 @@ private:
   // Locked screen back with the reason on its banner.
   // The Drive screen's notice slot (C1 §2.7): the user's stop and why the stick is held, its
   // own place, apart from the refusal banner. The drive adapter's port shows it.
-  DriveNoticeView drive_notice_view_{};
+  DriveNoticeView drive_notice_view_{{
+      .post_reason = hmi::ui::bind<&UiApp::post_reason>(this),
+  }};
   DriveUi drive_ui_{{
       .shared = &shared_,
       .refused = &refused_,
@@ -338,6 +349,7 @@ private:
       .link_state = config_.link->state,
       .calibrating = config_.screens->calibrating,
       .hold_reason = hmi::ui::bind<&UiApp::hold_reason>(this),
+      .post_gate = hmi::ui::bind<&UiApp::post_gate>(this),
       .show_notice = hmi::ui::bind<&DriveNoticeView::show>(&drive_notice_view_),
       .input = config_.drive->input,
       .stick_drives = &stick_drives,

@@ -178,6 +178,11 @@ TEST_CASE("DRV-115 TICK_STOP_RESEND, by input: the table's row or no change",
   expect_by_input(Input::TICK_STOP_RESEND);
 }
 
+TEST_CASE("DRV-117 TICK_BOOT_STOP, by input: the table's row (50, 51) or no change",
+          "[drive][safety][oracle][REQ-DRV-39]") {
+  expect_by_input(Input::TICK_BOOT_STOP);
+}
+
 // ---- What the by-input oracle visits -----------------------------------------------------
 
 namespace {
@@ -217,7 +222,8 @@ bool same_state(const os::Point &a, const os::Point &b) {
          a.env.menu_open == b.env.menu_open && a.env.exit_elapsed == b.env.exit_elapsed &&
          a.env.warn_elapsed == b.env.warn_elapsed && a.env.giveup_elapsed == b.env.giveup_elapsed &&
          a.env.calibrating == b.env.calibrating &&
-         a.env.stop_fault_elapsed == b.env.stop_fault_elapsed && a.env.resend == b.env.resend;
+         a.env.stop_fault_elapsed == b.env.stop_fault_elapsed && a.env.resend == b.env.resend &&
+         a.env.post_ok == b.env.post_ok;
 }
 
 os::Values high_corner() {
@@ -334,9 +340,9 @@ TEST_CASE("DRV-113 the oracle's dimensions are faithful: each decides only its o
           "[drive][oracle]") {
   const DimCheck c = check_dimensions();
   TEST_ASSERT_EQUAL_UINT64(0, c.bad_dimensions);
-  // The full-product oracle's space: 2 x 4 MIB states x 5 screens x 2^6 flags x 3 re-send
-  // states x 2^6 masks.
-  TEST_ASSERT_EQUAL_UINT64(std::size_t{2} * os::MIBS.size() * os::SCREENS.size() * 64U *
+  // The full-product oracle's space: 2 x 4 MIB states x 5 screens x 2^7 flags x 3 re-send
+  // states x 2^7 masks.
+  TEST_ASSERT_EQUAL_UINT64(std::size_t{2} * os::MIBS.size() * os::SCREENS.size() * 128U *
                                os::RESENDS.size() * (std::size_t{1} << os::kHiddenDims),
                            os::product_size(os::kAllDims));
   // The corner sample: distinct points, each within kMaxDistance of a corner, as many as the

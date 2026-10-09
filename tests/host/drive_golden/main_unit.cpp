@@ -49,8 +49,9 @@ void set_profile(Profile p) { drive_profile_published.store(static_cast<MIB::Dri
 Deadlines deadlines() { return hmi::drive_adapter::DriveAdapterTestPeer::deadlines(drive_adapter); }
 } // namespace
 
-// GLD-116: the port's sample as the adapter would take it.
+// GLD-116, GLD-125: the port's sample as the adapter would take it.
 bool port_sample_link_connected() { return drive_port.sample().link_connected; }
+bool port_sample_post_ok() { return drive_port.sample().post_ok; }
 
 Target main_unit_target() {
   return Target{&reset,          &input,       &tick,     &unlock_hold_done,

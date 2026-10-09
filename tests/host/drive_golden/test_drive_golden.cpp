@@ -11,21 +11,26 @@
 //                 filtered log the spec writes for each step;
 //   GLD-115       the hand-written scenarios and the seeded walks (scripts.cpp) take every row of
 //                 the drive table; no log is compared;
-//   GLD-116       DrivePort's sample reads the link live, not from the rtps_link subject.
+//   GLD-116       DrivePort's sample reads the link live, not from the rtps_link subject;
+//   GLD-117..124  C3's hand-written goldens (the boot DISABLE, the refusals before POST pass);
+//   GLD-125       DrivePort's sample reads the POST gate live.
 
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <string>
 
 #include "goldens.hpp"
 #include "probe.hpp"
 #include "scripts.hpp"
+#include "stick/permit_types.hpp"
 #include "test_case.hpp"
 #include "world.hpp"
 
 namespace golden {
 Target main_unit_target();
 bool port_sample_link_connected();
+bool port_sample_post_ok();
 } // namespace golden
 
 namespace {
@@ -112,7 +117,8 @@ TEST_CASE("GLD-114 a corrupted input during a stop gives the safe state and repo
   expect_golden("GLD-114");
 }
 
-TEST_CASE("GLD-115 the scenarios and the seeded walks take every row of the drive table",
+TEST_CASE("GLD-115 the scenarios and the seeded walks take every row of the drive table (C1 and "
+          "C3)",
           "[drive_golden]") {
   golden::run_all(golden::main_unit_target());
   const auto &hits = golden::row_hits();
@@ -142,4 +148,56 @@ TEST_CASE("GLD-116 DrivePort's sample reads the link live: the subject CONNECTED
   const bool live = golden::port_sample_link_connected();
   TEST_ASSERT_FALSE(stale_subject);
   TEST_ASSERT_TRUE(live);
+}
+
+// ---- The hazard fix C3 (hazard-c3-spec.md §6.2) --------------------------------------------
+
+TEST_CASE("GLD-117 boot with the link down, then up: one DISABLE on the first CONNECTED tick",
+          "[drive_golden]") {
+  expect_golden("GLD-117");
+}
+
+TEST_CASE("GLD-118 boot with the MCB ENABLED: the boot DISABLE, the entry a tick later, no ENABLE",
+          "[drive_golden]") {
+  expect_golden("GLD-118");
+}
+
+TEST_CASE("GLD-119 boot with the MCB ENABLED, IDLE before the next tick: the boot DISABLE only",
+          "[drive_golden]") {
+  expect_golden("GLD-119");
+}
+
+TEST_CASE("GLD-120 the unlock hold before POST pass is refused with REFUSED_POST",
+          "[drive_golden]") {
+  expect_golden("GLD-120");
+}
+
+TEST_CASE("GLD-121 the MCB ENABLED before POST pass enters Drive; a profile tap waits for PASS",
+          "[drive_golden]") {
+  expect_golden("GLD-121");
+}
+
+TEST_CASE("GLD-122 with POST failed, the push and the DRIVE row are refused with REFUSED_POST",
+          "[drive_golden]") {
+  expect_golden("GLD-122");
+}
+
+TEST_CASE("GLD-123 the boot DISABLE ignores the Boot screen; no entry behind it",
+          "[drive_golden]") {
+  expect_golden("GLD-123");
+}
+
+TEST_CASE("GLD-124 the unlock hold before the first tick: no boot DISABLE", "[drive_golden]") {
+  expect_golden("GLD-124");
+}
+
+TEST_CASE("GLD-125 DrivePort's sample reads the POST gate live: PENDING not passed, PASS passed",
+          "[drive_golden]") {
+  golden::reset_world();
+  golden::world().post_gate = static_cast<std::uint8_t>(hmi::stick::PostGate::PENDING);
+  const bool pending = golden::port_sample_post_ok();
+  golden::world().post_gate = static_cast<std::uint8_t>(hmi::stick::PostGate::PASS);
+  const bool pass = golden::port_sample_post_ok();
+  TEST_ASSERT_FALSE(pending);
+  TEST_ASSERT_TRUE(pass);
 }

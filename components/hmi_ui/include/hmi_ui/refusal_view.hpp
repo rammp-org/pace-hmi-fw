@@ -42,6 +42,7 @@ struct RefusalTexts {
   const char *seat_link_refused_title, *seat_mcb_refused_title;
   const char *drive_lost_link_title, *drive_lost_mcb_title;
   const char *link_lost_title, *mcb_fault_title; ///< a drive cut short
+  const char *refused_post_title; ///< C3: a drive asked for before the start-up check passed
 };
 
 /// One instance for every refusal banner. `refused` records only THAT a request was refused;
@@ -63,6 +64,10 @@ public:
     bool (*menu_open)();                      ///< the burger menu is open
     /// The drive session's ENTRY_PUSH input; true when its row acted (a refusal was raised).
     Fn<bool()> entry_push;
+    /// C3: the start-up check has passed (the POST gate PASS), and why it has not, in words
+    /// (UiApp::post_reason): REFUSED_POST's body.
+    Fn<bool()> post_passed;
+    Fn<const char *()> post_reason;
     uint32_t grace_ms; ///< a press shorter than this is a tap, not a push (kBarGraceMs)
   };
 

@@ -23,9 +23,11 @@ std::string joined(const std::vector<std::string> &tokens) {
 } // namespace
 
 Golden golden_by_id(const std::string &id) {
-  for (Golden &g : c1_goldens()) {
-    if (g.name.starts_with(id + " ")) {
-      return std::move(g);
+  for (std::vector<Golden> set : {c1_goldens(), c3_goldens()}) {
+    for (Golden &g : set) {
+      if (g.name.starts_with(id + " ")) {
+        return std::move(g);
+      }
     }
   }
   return Golden{};

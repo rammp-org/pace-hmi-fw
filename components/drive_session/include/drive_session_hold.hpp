@@ -159,11 +159,12 @@ struct HoldApplies {
   GuardExpr guard;
   std::string_view code;
 };
-// unlock: locked && !lock_waiting (= LOCKED) && Locked screen && no menu && mcb_ready.
+// unlock: locked && !lock_waiting (= LOCKED) && Locked screen && no menu && mcb_ready, and
+// (C3) POST passed: the hold does not fill before POST pass; ENTRY_PUSH (row 53) says why.
 inline constexpr HoldApplies UNLOCK_APPLIES{
     "unlock", pset({Phase::LOCKED}),
-    when({Guard::ON_LOCKED_SCREEN, Guard::MCB_READY}, {Guard::MENU_OPEN}),
-    "frag_lock.inc:96-97 (orig 1161-1162)"};
+    when({Guard::ON_LOCKED_SCREEN, Guard::MCB_READY, Guard::POST_OK}, {Guard::MENU_OPEN}),
+    "frag_lock.inc:96-97 (orig 1161-1162); hazard-c3-spec.md 4.4"};
 // exit: Drive screen && no menu. No lock or phase condition in the code; the
 // phase set is where the Drive screen can be up (see TABLE.md U3).
 inline constexpr HoldApplies EXIT_APPLIES{"exit", kAllPhases,

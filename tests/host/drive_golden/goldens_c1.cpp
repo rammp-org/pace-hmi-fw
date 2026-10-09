@@ -1,4 +1,7 @@
-// The hazard fix C1's hand-written goldens, GLD-101..114 (docs/plans/hazard-c1-spec.md §5.2).
+// The hazard fixes' hand-written goldens: C1's GLD-101..114 (docs/plans/hazard-c1-spec.md §5.2)
+// and C3's GLD-117..124 (hazard-c3-spec.md §6.2). Since C3, C1's run after the "booted"
+// preamble (C3 F1: the POST gate PASS, link up, MIB IDLE, one tick, not compared); their
+// expected lines are unchanged.
 //
 // Each golden is a list of steps played against the firmware's drive code (drive_ui's
 // DrivePort over the recording shims, and the one DriveAdapter, main_unit.cpp). A checked
@@ -14,7 +17,10 @@
 
 #include "goldens.hpp"
 
+#include "stick/permit_types.hpp"
+
 #include <cstddef>
+#include <cstdint>
 #include <format>
 #include <initializer_list>
 #include <string>
@@ -26,6 +32,12 @@ namespace golden {
 namespace {
 
 using hmi::drive_session::Input;
+using hmi::stick::PostGate;
+
+// The POST gate's values for the post() step.
+constexpr std::uint8_t kPostPending = static_cast<std::uint8_t>(PostGate::PENDING);
+constexpr std::uint8_t kPostPass = static_cast<std::uint8_t>(PostGate::PASS);
+constexpr std::uint8_t kPostFail = static_cast<std::uint8_t>(PostGate::FAIL);
 
 using Tokens = std::vector<std::string>;
 
@@ -62,14 +74,25 @@ public:
     run({at(ms)});
     return check(s, std::move(expect));
   }
-  // The DRIVING opening (§5.2); T0 at its end.
+  // The "booted" preamble (hazard-c3-spec.md F1): the POST gate PASS, link up, MIB IDLE, one
+  // tick (the boot DISABLE, row 50); not compared, so the expected lines do not change.
+  Builder &booted() {
+    return run({post(kPostPass), link(true), mib(Mib::IDLE), screen(ScreenId::LOCKED), tick()});
+  }
+  // The DRIVING opening (§5.2) after the preamble; T0 at its end.
   Builder &driving() {
+    booted();
     run({link(true), mib(Mib::ENABLED), screen(ScreenId::LOCKED), tick(), advance(1'000'000),
          timer_fires(), frame_step(), mark_t0()});
     return *this;
   }
-  // T0 now, for a golden with no DRIVING opening.
-  Builder &start() { return run({mark_t0()}); }
+  // The preamble, then T0, for a golden with no DRIVING opening.
+  Builder &start() {
+    booted();
+    return run({mark_t0()});
+  }
+  // T0 at boot: no preamble (C3's goldens of the boot itself).
+  Builder &boot() { return run({mark_t0()}); }
 
   [[nodiscard]] Golden done() { return std::move(g_); }
 
@@ -260,6 +283,90 @@ std::vector<Golden> c1_goldens() {
     g.steps.insert(g.steps.end(), tail.steps.begin(), tail.steps.end());
     out.push_back(std::move(g));
   }
+  return out;
+}
+
+std::vector<Golden> c3_goldens() {
+  std::vector<Golden> out;
+
+  {
+    Builder b("GLD-117 boot with the link down, then up: one DISABLE on the first CONNECTED tick");
+    b.boot().run({link(false)});
+    for (int i = 0; i < 3; ++i) {
+      b.check(tick(), kNothing);
+    }
+    b.check(link(true), kNothing).check(mib(Mib::IDLE), kNothing);
+    b.check(screen(ScreenId::LOCKED), kNothing).check(tick(), {"P(D)"});
+    for (int i = 0; i < 2; ++i) { // the 2nd and 3rd of the 3 ticks
+      b.check(tick(), kNothing);
+    }
+    out.push_back(b.done());
+  }
+
+  out.push_back(Builder("GLD-118 boot with the MCB ENABLED: the boot DISABLE, the entry a tick "
+                        "later, never an ENABLE")
+                    .boot()
+                    .run({link(true), mib(Mib::ENABLED), screen(ScreenId::LOCKED)})
+                    .check(tick(), {"P(D)"})
+                    .check(tick(), kEntry)
+                    .check(advance(1'000'000), kNothing)
+                    .check(timer_fires(), {"Dv"})
+                    .done());
+
+  out.push_back(Builder("GLD-119 boot with the MCB ENABLED, IDLE before the next tick: the boot "
+                        "DISABLE, then nothing")
+                    .boot()
+                    .run({link(true), mib(Mib::ENABLED), screen(ScreenId::LOCKED)})
+                    .check(tick(), {"P(D)"})
+                    .check(mib(Mib::IDLE), kNothing)
+                    .check(tick(), kNothing)
+                    .done());
+
+  out.push_back(Builder("GLD-120 the unlock hold before POST pass: refused, no DriveCommand")
+                    .start()
+                    .run({post(kPostPending), mib(Mib::IDLE), screen(ScreenId::LOCKED)})
+                    .check(unlock_hold(), {"ring_rest", "B:REFUSED_POST"})
+                    .done());
+
+  out.push_back(Builder("GLD-121 the MCB ENABLED before POST pass: the entry (M1), a profile tap "
+                        "sends nothing until POST passes")
+                    .start()
+                    .run({post(kPostPending)})
+                    .check(mib(Mib::ENABLED), kNothing)
+                    .check(tick(), kEntry)
+                    .check(advance(1'000'000), kNothing)
+                    .check(timer_fires(), {"Dv"})
+                    .check(profile(Profile::LOW), kNothing)
+                    .check(post(kPostPass), kNothing)
+                    .check(profile(Profile::LOW), {"P(E,LOW)"})
+                    .done());
+
+  out.push_back(Builder("GLD-122 POST failed: the push and the DRIVE row are refused, no "
+                        "DriveCommand")
+                    .start()
+                    .run({post(kPostFail), mib(Mib::IDLE), screen(ScreenId::LOCKED)})
+                    .check(input(Input::ENTRY_PUSH), {"B:REFUSED_POST"})
+                    .check(input(Input::MENU_ROW_DRIVE), {"B:REFUSED_POST"})
+                    .done());
+
+  {
+    Builder b("GLD-123 boot behind the Boot screen with the MCB ENABLED: the boot DISABLE, no "
+              "entry until the Locked screen");
+    b.boot().run({screen(ScreenId::BOOT), link(true), mib(Mib::ENABLED)});
+    for (std::int64_t t = 0; t <= 1000; t += 250) {
+      b.tick_at(t, t == 0 ? Tokens{"P(D)"} : kNothing);
+    }
+    b.check(screen(ScreenId::LOCKED), kNothing).check(tick(), kEntry);
+    out.push_back(b.done());
+  }
+
+  out.push_back(Builder("GLD-124 the unlock hold before the first tick: the user's ENABLE wins, "
+                        "no boot DISABLE")
+                    .boot()
+                    .run({link(true), mib(Mib::IDLE), screen(ScreenId::LOCKED)})
+                    .check(unlock_hold(), {"ring_wait", "P(E)"})
+                    .check(tick(), kNothing)
+                    .done());
   return out;
 }
 

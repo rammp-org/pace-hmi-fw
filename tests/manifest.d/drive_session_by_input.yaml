@@ -1,5 +1,5 @@
 # L1 host app for components/drive_session: the transition-table oracle by input (TS-UNIT-08,
-# TS-UNIT-09; docs/plans/hazard-fixes.md B3). Cases DRV-101..115 in
+# TS-UNIT-09; docs/plans/hazard-fixes.md B3). Cases DRV-101..115 and DRV-117 in
 # test/oracle_by_input/test_drive_session_oracle_by_input.cpp. Per input, every value of every
 # guard dimension the table reads for it, in every phase, crossed with all (or, above 256
 # points, a distance-3 corner sample plus seeded random points) of the dimensions it does not
@@ -10,9 +10,10 @@
   title: DriveSession against its transition table, by input (read guards in full, the rest sampled)
   level: L1
   path: components/drive_session/test/oracle_by_input
-  requirements: [REQ-DRV-04, REQ-DRV-06, REQ-DRV-07, REQ-DRV-08, REQ-DRV-12, REQ-DRV-13,
-                 REQ-DRV-14, REQ-DRV-15, REQ-DRV-16, REQ-DRV-22, REQ-DRV-23, REQ-DRV-24,
-                 REQ-DRV-25, REQ-DRV-26, REQ-DRV-27, REQ-DRV-28, REQ-DRV-30]
+  requirements: [REQ-DRV-04, REQ-DRV-06, REQ-DRV-07, REQ-DRV-12, REQ-DRV-13, REQ-DRV-14,
+                 REQ-DRV-15, REQ-DRV-16, REQ-DRV-23, REQ-DRV-24, REQ-DRV-25, REQ-DRV-26,
+                 REQ-DRV-27, REQ-DRV-28, REQ-DRV-35, REQ-DRV-38, REQ-DRV-39, REQ-DRV-40,
+                 REQ-DRV-41, REQ-DRV-42]
   resources: [host]
   timeout_s: 300
   expected_s: 30

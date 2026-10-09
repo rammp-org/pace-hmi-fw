@@ -23,10 +23,12 @@ struct Golden {
   std::vector<GoldenStep> steps;
 };
 
-// C1's GLD-101..114 (hazard-c1-spec.md §5.2).
+// C1's GLD-101..114 (hazard-c1-spec.md §5.2), after C3's "booted" preamble.
 std::vector<Golden> c1_goldens();
+// C3's GLD-117..124 (hazard-c3-spec.md §6.2).
+std::vector<Golden> c3_goldens();
 
-// The golden named by its ID ("GLD-104b"), from c1_goldens(); an empty name when there is none.
+// The golden named by its ID ("GLD-104b"); an empty name when there is none.
 Golden golden_by_id(const std::string &id);
 
 // Plays a golden from a fresh world and drive state; returns the number of checked steps whose

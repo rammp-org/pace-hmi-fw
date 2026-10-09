@@ -1,5 +1,5 @@
 // L1 host app for drive_session: the session's sequences, the safe state, the stick gate and
-// the hazard fix C1's cases (DRV-013..021, DRV-023..028, DRV-116). The full-product oracle
+// the hazard fix C1's cases (DRV-013..021, DRV-023..034, DRV-116). The full-product oracle
 // (DRV-001..012) is ../oracle_full, run on demand
 // (`make full`, owner decision G2); CI runs the by-input oracle (../oracle_by_input).
 
@@ -51,7 +51,7 @@ constexpr std::array SCREENS{Screen::BOOT, Screen::LOCKED, Screen::DRIVE, Screen
                              Screen::OTHER};
 constexpr std::array RESENDS{ds::Resend::NOT_DUE, ds::Resend::FAST, ds::Resend::SLOW};
 constexpr unsigned HIDDEN_COMBOS = 1U << static_cast<unsigned>(std::popcount(ds::kHiddenGuards));
-constexpr std::size_t ENV_COUNT = 2 * MIBS.size() * SCREENS.size() * 2 * 8 * 4 * RESENDS.size();
+constexpr std::size_t ENV_COUNT = 2 * MIBS.size() * SCREENS.size() * 2 * 8 * 4 * RESENDS.size() * 2;
 
 // Every distinct Env, by index (0 .. ENV_COUNT-1).
 Env env_at(std::size_t i) {
@@ -76,7 +76,8 @@ Env env_at(std::size_t i) {
              .giveup_elapsed = (deadlines & 4U) != 0,
              .calibrating = (stop & 1U) != 0,
              .stop_fault_elapsed = (stop & 2U) != 0,
-             .resend = RESENDS[i % RESENDS.size()]};
+             .resend = RESENDS[i % RESENDS.size()],
+             .post_ok = (i / RESENDS.size()) % 2 != 0};
 }
 
 // Spread an index over the hidden guard bits, in bit order.
@@ -120,7 +121,8 @@ Env make_env(bool link, MibState mib, Screen screen) {
              .giveup_elapsed = false,
              .calibrating = false,
              .stop_fault_elapsed = false,
-             .resend = ds::Resend::NOT_DUE};
+             .resend = ds::Resend::NOT_DUE,
+             .post_ok = true};
 }
 
 // The actions of each sub-step of one tick, in TICK_SEQUENCE order.
@@ -162,9 +164,18 @@ std::uint64_t splitmix64(std::uint64_t &state) {
   return z ^ (z >> 31U);
 }
 
+// A session after the boot DISABLE (C3, row 50): LOCKED, BOOT_STOP_DONE (the "booted"
+// preamble of hazard-c3-spec.md F1).
+DriveSession booted() {
+  DriveSession s;
+  (void)tick(s, make_env(true, MibState::IDLE, Screen::LOCKED));
+  TEST_ASSERT_EQUAL_HEX32(ds::bit(ds::Guard::BOOT_STOP_DONE), s.hidden());
+  return s;
+}
+
 // A session DRIVING with the Drive screen up (rows 1, 35).
 DriveSession driving() {
-  DriveSession s;
+  DriveSession s = booted();
   Actions out{};
   (void)tick(s, make_env(true, MibState::ENABLED, Screen::LOCKED));
   TEST_ASSERT_TRUE(
@@ -179,7 +190,7 @@ DriveSession driving() {
 
 TEST_CASE("DRV-013 an unlock asked, granted, driven and exited follows the table's path",
           "[drive][safety]") {
-  DriveSession s;
+  DriveSession s = booted();
   Actions out{};
   const Env idle_locked = make_env(true, MibState::IDLE, Screen::LOCKED);
   TEST_ASSERT_TRUE(s.step(Input::UNLOCK_HOLD_DONE, idle_locked, out));
@@ -210,7 +221,7 @@ TEST_CASE("DRV-013 an unlock asked, granted, driven and exited follows the table
 
 TEST_CASE("DRV-014 an unanswered ask warns on one tick, rests the ring on the next, then gives up",
           "[drive][safety]") {
-  DriveSession s;
+  DriveSession s = booted();
   Actions out{};
   TEST_ASSERT_TRUE(
       s.step(Input::UNLOCK_HOLD_DONE, make_env(true, MibState::IDLE, Screen::LOCKED), out));
@@ -226,7 +237,7 @@ TEST_CASE("DRV-014 an unanswered ask warns on one tick, rests the ring on the ne
   steps = tick(s, late);
   TEST_ASSERT_TRUE(contains(steps[step_of(Input::TICK_GIVEUP_DUE)], Action::SEND_DISABLE));
   TEST_ASSERT_FALSE(s.request_enable());
-  TEST_ASSERT_EQUAL_HEX32(0, s.hidden());
+  TEST_ASSERT_EQUAL_HEX32(ds::bit(ds::Guard::BOOT_STOP_DONE), s.hidden()); // only the boot stop
 }
 
 TEST_CASE("DRV-015 a seeded random walk keeps the phase invariants and matches the table at "
@@ -362,10 +373,10 @@ TEST_CASE("DRV-021 a new session is LOCKED, asks nothing and has nothing armed",
 
 TEST_CASE("DRV-023 the MCB ENABLED while calibrating or on the Boot screen: no row, nothing; the "
           "next tick after either clears unlocks",
-          "[drive][safety][REQ-DRV-22]") {
+          "[drive][safety][REQ-DRV-35]") {
   for (const bool on_boot : {false, true}) {
     for (const Phase from : {Phase::LOCKED, Phase::ASKING}) {
-      DriveSession s;
+      DriveSession s = booted();
       Actions out{};
       if (from == Phase::ASKING) {
         TEST_ASSERT_TRUE(
@@ -481,8 +492,8 @@ TEST_CASE("DRV-026 every relock from an unlocked phase sends DISABLE and leaves 
 }
 
 TEST_CASE("DRV-027 over every state, ENABLE is sent only by rows 18, 31 and 32, and by 31-32 "
-          "only with the MCB ENABLED on a CONNECTED link",
-          "[drive][safety][REQ-DRV-33]") {
+          "only with the MCB ENABLED on a CONNECTED link and POST passed",
+          "[drive][safety][REQ-DRV-37]") {
   unsigned long enables = 0;
   unsigned long bad = 0;
   for (std::size_t pi = 0; pi < ds::kPhaseCount; ++pi) {
@@ -504,10 +515,11 @@ TEST_CASE("DRV-027 over every state, ENABLE is sent only by rows 18, 31 and 32, 
             continue;
           }
           ++enables;
-          const bool hold = p == Phase::LOCKED && in == Input::UNLOCK_HOLD_DONE; // row 18
-          const bool tap = (p == Phase::UNLOCKING || p == Phase::DRIVING) &&     // rows 31-32
+          const bool hold = p == Phase::LOCKED && in == Input::UNLOCK_HOLD_DONE && // row 18
+                            env.post_ok;
+          const bool tap = (p == Phase::UNLOCKING || p == Phase::DRIVING) && // rows 31-32
                            in == Input::PROFILE_CLICK && env.link_connected &&
-                           env.mib == MibState::ENABLED;
+                           env.mib == MibState::ENABLED && env.post_ok;
           bad += hold || tap ? 0UL : 1UL;
         }
       }
@@ -541,9 +553,10 @@ TEST_CASE("DRV-028 the exit hold while locked sends one DISABLE (row 42); while 
 
 // ---- The tick's two Envs (README "Model", TABLE.md section 1) --------------------------------
 
-TEST_CASE("DRV-116 a tick runs its sub-steps in TICK_SEQUENCE order on two Envs: a re-send due "
-          "between the samples is sent the same tick; a relock on the first means no re-send",
-          "[drive][safety][REQ-DRV-32]") {
+TEST_CASE("DRV-116 a tick runs its sub-steps in TICK_SEQUENCE order on two Envs: the first "
+          "CONNECTED tick sends the boot DISABLE and does not enter; a re-send due between the "
+          "samples is sent the same tick; a relock on the first means no re-send",
+          "[drive][safety][REQ-DRV-36]") {
   using ds::Resend;
   // The warn deadline passing between the two samples: NOT_GRANTED in the same tick (as before).
   const Env at_start = make_env(true, MibState::IDLE, Screen::LOCKED);
@@ -578,8 +591,146 @@ TEST_CASE("DRV-116 a tick runs its sub-steps in TICK_SEQUENCE order on two Envs:
   steps = tick(stop, idle, due);
   TEST_ASSERT_EQUAL(Phase::LOCKED, stop.phase());
   TEST_ASSERT_TRUE(steps[step_of(Input::TICK_STOP_RESEND)] == Actions{});
+  // C3: the first CONNECTED tick with the MIB ENABLED: the boot DISABLE, no F1; entry on the
+  // next tick.
+  DriveSession fresh;
+  const Env mib_enabled = make_env(true, MibState::ENABLED, Screen::LOCKED);
+  steps = tick(fresh, mib_enabled);
+  TEST_ASSERT_EQUAL(Phase::LOCKED, fresh.phase());
+  TEST_ASSERT_TRUE(contains(steps[step_of(Input::TICK_BOOT_STOP)], Action::SEND_DISABLE));
+  TEST_ASSERT_FALSE(any_contains(steps, Action::SET_UNLOCKED));
+  (void)tick(fresh, mib_enabled);
+  TEST_ASSERT_EQUAL(Phase::UNLOCKING, fresh.phase());
   // The order itself (DSO-018 pins the data).
   TEST_ASSERT_EQUAL(0, step_of(Input::TICK_FOLLOW));
+  TEST_ASSERT_EQUAL(1, step_of(Input::TICK_BOOT_STOP));
   TEST_ASSERT_TRUE(step_of(Input::TICK_EXIT_DUE) < step_of(Input::TICK_STOP_FAULT_DUE));
   TEST_ASSERT_TRUE(step_of(Input::TICK_STOP_FAULT_DUE) < step_of(Input::TICK_STOP_RESEND));
+}
+
+// ---- The hazard fix C3 (docs/plans/hazard-c3-spec.md §6.1) ----------------------------------
+
+TEST_CASE("DRV-029 the link down for three ticks, then up with the MIB IDLE: one DISABLE on the "
+          "first CONNECTED tick, nothing after",
+          "[drive][safety][REQ-DRV-39]") {
+  DriveSession s;
+  unsigned long disables = 0;
+  unsigned long other = 0;
+  for (int i = 0; i < 3; ++i) {
+    for (const Actions &a : tick(s, make_env(false, MibState::IDLE, Screen::LOCKED))) {
+      other += a == Actions{} ? 0UL : 1UL;
+    }
+  }
+  const auto first = tick(s, make_env(true, MibState::IDLE, Screen::LOCKED));
+  disables += contains(first[1], Action::SEND_DISABLE) ? 1UL : 0UL;
+  for (std::size_t i = 0; i < first.size(); ++i) {
+    other += i == 1 || first[i] == Actions{} ? 0UL : 1UL;
+  }
+  for (int i = 0; i < 4; ++i) {
+    for (const Actions &a : tick(s, make_env(true, MibState::IDLE, Screen::LOCKED))) {
+      other += a == Actions{} ? 0UL : 1UL;
+    }
+  }
+  TEST_ASSERT_EQUAL_UINT64(1, disables);
+  TEST_ASSERT_EQUAL_UINT64(0, other);
+  TEST_ASSERT_EQUAL(Phase::LOCKED, s.phase());
+}
+
+TEST_CASE("DRV-030 the unlock hold before any tick (ASKING), then a tick: no DISABLE, the boot "
+          "stop marked, the ask stands",
+          "[drive][safety][REQ-DRV-39]") {
+  DriveSession s;
+  Actions out{};
+  const Env env = make_env(true, MibState::IDLE, Screen::LOCKED);
+  TEST_ASSERT_TRUE(s.step(Input::UNLOCK_HOLD_DONE, env, out));
+  TEST_ASSERT_EQUAL(Phase::ASKING, s.phase());
+  const auto steps = tick(s, env);
+  TEST_ASSERT_FALSE(any_contains(steps, Action::SEND_DISABLE));
+  TEST_ASSERT_TRUE(contains(steps[step_of(Input::TICK_BOOT_STOP)], Action::MARK_BOOT_STOP));
+  TEST_ASSERT_TRUE((s.hidden() & ds::bit(ds::Guard::BOOT_STOP_DONE)) != 0);
+  TEST_ASSERT_EQUAL(Phase::ASKING, s.phase());
+  TEST_ASSERT_TRUE(s.request_enable());
+}
+
+TEST_CASE("DRV-031 over every state inside the phase invariants with POST_OK false, no row "
+          "sends ENABLE",
+          "[drive][safety][REQ-DRV-37]") {
+  unsigned long checked = 0;
+  unsigned long bad = 0;
+  for (std::size_t pi = 0; pi < ds::kPhaseCount; ++pi) {
+    const auto p = static_cast<Phase>(pi);
+    for (unsigned hi = 0; hi < HIDDEN_COMBOS; ++hi) {
+      const GuardMask hidden = hidden_at(hi);
+      if (!ds::hidden_valid(p, hidden)) {
+        continue;
+      }
+      for (std::size_t ii = 0; ii < ds::kInputCount; ++ii) {
+        for (std::size_t ei = 0; ei < ENV_COUNT; ++ei) {
+          const Env env = env_at(ei);
+          if (env.post_ok) {
+            continue;
+          }
+          DriveSession s;
+          DriveSessionTestPeer::set(s, p, hidden);
+          Actions out{};
+          (void)s.step(static_cast<Input>(ii), env, out);
+          ++checked;
+          bad += contains(out, Action::SEND_ENABLE) ? 1UL : 0UL;
+        }
+      }
+    }
+  }
+  std::printf("DRV-031 %lu steps without POST checked\n", checked);
+  TEST_ASSERT_EQUAL_UINT64(0, bad);
+}
+
+TEST_CASE("DRV-032 the POST refusals (rows 52, 53, 54) and their !RDY twins (19, 38, 40) fire "
+          "exactly where their guards say, never both",
+          "[drive][safety][REQ-DRV-40][REQ-DRV-41][REQ-DRV-42]") {
+  unsigned long bad = 0;
+  unsigned long fired = 0;
+  for (const Input in : {Input::UNLOCK_HOLD_DONE, Input::ENTRY_PUSH, Input::MENU_ROW_DRIVE}) {
+    for (std::size_t ei = 0; ei < ENV_COUNT; ++ei) {
+      const Env env = env_at(ei);
+      const GuardMask g = ds::env_guards(env);
+      const bool rdy = (g & ds::bit(ds::Guard::MCB_READY)) != 0;
+      const bool here = in != Input::ENTRY_PUSH || (env.screen == Screen::LOCKED && !env.menu_open);
+      DriveSession s;
+      Actions out{};
+      (void)s.step(in, env, out);
+      const bool post_refusal = contains(out, Action::SHOW_REFUSED_POST);
+      const bool mcb_refusal = contains(out, Action::SHOW_REFUSED_DRIVE) ||
+                               contains(out, Action::SHOW_REFUSED_DRIVE_MENU);
+      fired += post_refusal ? 1UL : 0UL;
+      bad += post_refusal == (here && rdy && !env.post_ok) ? 0UL : 1UL;
+      bad += mcb_refusal == (here && !rdy) ? 0UL : 1UL;
+      bad += post_refusal && mcb_refusal ? 1UL : 0UL;
+    }
+  }
+  TEST_ASSERT_TRUE(fired > 0);
+  TEST_ASSERT_EQUAL_UINT64(0, bad);
+}
+
+TEST_CASE("DRV-033 the MIB ENABLED before POST pass, the boot stop done, on the Locked screen: "
+          "row 1 enters Drive (M1 before POST)",
+          "[drive][safety][REQ-DRV-35]") {
+  DriveSession s = booted();
+  Env env = make_env(true, MibState::ENABLED, Screen::LOCKED);
+  env.post_ok = false;
+  const auto steps = tick(s, env);
+  TEST_ASSERT_EQUAL(Phase::UNLOCKING, s.phase());
+  TEST_ASSERT_TRUE(steps[0] == ds::TRANSITIONS[0].actions);
+}
+
+TEST_CASE("DRV-034 a safe state before the first link: the first CONNECTED tick still sends the "
+          "boot DISABLE",
+          "[drive][safety][REQ-DRV-39]") {
+  DriveSession s;
+  Actions out{};
+  (void)tick(s, make_env(false, MibState::IDLE, Screen::LOCKED));
+  s.enter_safe_state(out);
+  TEST_ASSERT_EQUAL_HEX32(0, s.hidden() & ds::bit(ds::Guard::BOOT_STOP_DONE));
+  const auto steps = tick(s, make_env(true, MibState::IDLE, Screen::LOCKED));
+  TEST_ASSERT_TRUE(contains(steps[step_of(Input::TICK_BOOT_STOP)], Action::SEND_DISABLE));
+  TEST_ASSERT_TRUE((s.hidden() & ds::bit(ds::Guard::BOOT_STOP_DONE)) != 0);
 }

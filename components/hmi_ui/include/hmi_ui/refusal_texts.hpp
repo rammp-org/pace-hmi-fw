@@ -52,6 +52,7 @@ inline constexpr RefusalTexts REFUSAL_TEXTS{
     .drive_lost_mcb_title = rammp::kHmiDriveLostMcbTitle,
     .link_lost_title = rammp::kHmiLinkLostTitle,
     .mcb_fault_title = rammp::kHmiMcbFaultTitle,
+    .refused_post_title = rammp::kHmiRefusedPostTitle,
 };
 
 } // namespace hmi::ui

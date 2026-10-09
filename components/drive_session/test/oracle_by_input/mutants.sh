@@ -25,7 +25,7 @@ NEW=$REPO/components/drive_session/test/oracle_by_input
 # name|table or code|sed expression (applied to drive_session_table.hpp or drive_session.cpp)
 MUTANTS=(
   # Table rows (TABLE.md section 2 row numbers).
-  'T01-row1-no-boot-guard|table|0,/when({Guard::DRIVING_OK}, {Guard::CALIBRATING, Guard::ON_BOOT_SCREEN}),/s//when({Guard::DRIVING_OK}, {Guard::CALIBRATING}),/'
+  'T01-row1-no-boot-guard|table|0,/                    {Guard::CALIBRATING, Guard::ON_BOOT_SCREEN}),/s//                    {Guard::CALIBRATING}),/'
   'T02-row3-banner-lost|table|0,/Phase::LOCKED, kF2LockStopped,/s//Phase::LOCKED, kF2LockLost,/'
   'T03-row8-exit-banner|table|0,/Phase::LOCKED, kF2LockAsked,/s//Phase::LOCKED, kF2LockStopped,/'
   'T04-row9-needs-link|table|s/Transition{Phase::EXIT_REFUSED, Input::TICK_FOLLOW, when({}, {Guard::DRIVING_OK}),/Transition{Phase::EXIT_REFUSED, Input::TICK_FOLLOW, when({Guard::LINK_CONNECTED}, {Guard::DRIVING_OK}),/'
@@ -42,6 +42,8 @@ MUTANTS=(
   # The hazard fix C1's rows (hazard-c1-spec.md §2.3).
   'T15-row46-waits-for-slow|table|0,/when({Guard::RESEND_FAST_DUE}, {Guard::STOP_FAULT}), Phase::EXITING,/s//when({Guard::RESEND_SLOW_DUE}, {Guard::STOP_FAULT}), Phase::EXITING,/'
   'T16-effect-fault-sets-nothing|table|s/ActionEffect{Action::RAISE_STOP_FAULT, bit(Guard::STOP_FAULT), 0},/ActionEffect{Action::RAISE_STOP_FAULT, 0, 0},/'
+  # The hazard fix C3's rows (hazard-c3-spec.md §4).
+  'T17-row50-without-link|table|0,/when({Guard::LINK_CONNECTED}, {Guard::BOOT_STOP_DONE}), Phase::LOCKED,/s//when({}, {Guard::BOOT_STOP_DONE}), Phase::LOCKED,/'
   # Code that reads a guard bit the table does not read for that input: the by-input oracle
   # only samples those (oracle_space.hpp), so these test the sample.
   'C01-unlock-reads-menu|code|0,/^  if (on(g, Guard::DRIVING_OK)) {/s//  if (on(g, Guard::DRIVING_OK) \&\& !on(g, Guard::MENU_OPEN)) {/'
@@ -53,6 +55,7 @@ MUTANTS=(
   # Code that gets a row wrong where the table reads the bit.
   'C07-giveup-ignores-elapsed|code|0,/    if (on(g, Guard::GIVEUP_ARMED) && on(g, Guard::GIVEUP_ELAPSED)) {/s//    if (on(g, Guard::GIVEUP_ARMED)) {/'
   'C08-effect-cancel-keeps-timer|code|s/    {Action::CANCEL_UNLOCK_TIMER, clears(Guard::UNLOCK_TIMER_ARMED)},/    {Action::CANCEL_UNLOCK_TIMER, NO_EFFECT},/'
+  'C10-row51-sends-disable|code|s|BOOT_STOP_MOOT); // row 51|BOOT_STOP); // row 51|'
   'C09-resend-fast-after-fault|code|s/      on(g, Guard::STOP_FAULT) ? on(g, Guard::RESEND_SLOW_DUE) :/      on(g, Guard::STOP_FAULT) ? on(g, Guard::RESEND_FAST_DUE) :/'
 )
 

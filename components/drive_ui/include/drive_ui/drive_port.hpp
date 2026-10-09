@@ -76,7 +76,8 @@ inline constexpr uint32_t UNLOCK_DISSOLVE_MS = 280;
 /// `Ui` provides, each a direct call on the UI task:
 ///  - the sample's live reads (C1 §2.9): `link_state_now()` (rtps_comms_link_state, the same
 ///    read the 250 ms poll makes: CONNECTED means a MibStatus less than 2 s old),
-///    `calibrating()` (joystick_cal_running) and `hold_reason()` (the stick's, acquire);
+///    `calibrating()` (joystick_cal_running), `hold_reason()` (the stick's, acquire) and
+///    `post_gate()` (the POST gate, acquire; C3);
 ///  - the Drive notice slot: `show_drive_notice(notice)`;
 ///  - the subjects: `rtps_link_subject()`, `mib_state_subject()`, `locked_subject()`,
 ///    `entry_refused_subject()`, and the refusal banners' dwell timer `refused_timer()`;
@@ -93,7 +94,8 @@ public:
 
   // The link (live, not the rtps_link subject: an input between two polls must not see a
   // status up to 2.25 s old, C1 §2.9 G2), the MIB subject, the screen, the menu, the
-  // calibration and the stick's hold reason as they are now, read in this order.
+  // calibration, the stick's hold reason and the POST gate (C3: PASS only) as they are now,
+  // read in this order.
   [[nodiscard]] hmi::drive_adapter::DriveSample sample() const {
     return hmi::drive_adapter::DriveSample{
         .link_connected = ui_->link_state_now() == LinkState::CONNECTED,
@@ -103,6 +105,7 @@ public:
         .menu_open = ui_->nav_menu_open() != nullptr,
         .calibrating = ui_->calibrating(),
         .hold = ui_->hold_reason(),
+        .post_ok = hmi::stick::post_passed(ui_->post_gate()),
     };
   }
   [[nodiscard]] int64_t now_us() const { return esp_timer_get_time(); }
@@ -143,7 +146,7 @@ public:
   void nav_home() const { ui_->nav_home(); }
   // Each banner with its dwell (show_refused), indexed by DriveBanner.
   void show_banner(hmi::drive_adapter::DriveBanner banner) const {
-    static constexpr std::array<std::pair<int32_t, uint32_t>, 7> kBanners{{
+    static constexpr std::array<std::pair<int32_t, uint32_t>, 8> kBanners{{
         {REFUSED_DRIVE, DRIVE_REFUSED_SHOW_MS},
         {REFUSED_SEAT, DRIVE_REFUSED_SHOW_MS},
         {REFUSED_DRIVE_NOT_GRANTED, DRIVE_REFUSED_SHOW_MS},
@@ -151,6 +154,7 @@ public:
         {REFUSED_EXIT, EXIT_REFUSED_SHOW_MS},
         {REFUSED_DRIVE_LOST, DRIVE_REFUSED_SHOW_MS},
         {REFUSED_DRIVE_MENU, DRIVE_REFUSED_SHOW_MS},
+        {REFUSED_POST, DRIVE_REFUSED_SHOW_MS},
     }};
     const auto index = static_cast<size_t>(banner);
     if (index < kBanners.size()) {

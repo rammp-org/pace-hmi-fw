@@ -22,6 +22,9 @@ enum Refused : int32_t {
   /// Drive picked from the menu while the MCB could not drive. Like REFUSED_SEAT: no push
   /// holds it up, so it stays its window unless the cause clears.
   REFUSED_DRIVE_MENU = 7,
+  /// C3: driving asked for (the unlock hold, a push on the Locked screen, the menu's DRIVE row)
+  /// before the start-up check passed. Stays its window, or until the check passes.
+  REFUSED_POST = 8,
 };
 
 /// How long one refusal stays up (ms).

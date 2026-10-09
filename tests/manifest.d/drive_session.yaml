@@ -1,15 +1,15 @@
 # L1 host app for components/drive_session: the session's sequences, the safe state and the
-# stick gate. Cases DRV-013..021, DRV-023..028 and DRV-116 in
+# stick gate. Cases DRV-013..021, DRV-023..034 and DRV-116 in
 # test/oracle/test_drive_session_oracle.cpp.
 # spec-deviation(TS-UNIT-01): host-native g++ in WSL, not the IDF linux target (owner, 2026-10-06).
 - id: DRV-L1
   title: DriveSession sequences, safe state and stick gate against its transition table
   level: L1
   path: components/drive_session/test/oracle
-  requirements: [REQ-DRV-01, REQ-DRV-04, REQ-DRV-06, REQ-DRV-07, REQ-DRV-08, REQ-DRV-12,
-                 REQ-DRV-17, REQ-DRV-19, REQ-DRV-20, REQ-DRV-22, REQ-DRV-23, REQ-DRV-25,
-                 REQ-DRV-26, REQ-DRV-27, REQ-DRV-28, REQ-DRV-29, REQ-DRV-31, REQ-DRV-32,
-                 REQ-DRV-33, REQ-DRV-34]
+  requirements: [REQ-DRV-01, REQ-DRV-04, REQ-DRV-06, REQ-DRV-07, REQ-DRV-12, REQ-DRV-17,
+                 REQ-DRV-19, REQ-DRV-20, REQ-DRV-23, REQ-DRV-25, REQ-DRV-26, REQ-DRV-27,
+                 REQ-DRV-28, REQ-DRV-29, REQ-DRV-31, REQ-DRV-34, REQ-DRV-35, REQ-DRV-36,
+                 REQ-DRV-37, REQ-DRV-39, REQ-DRV-40, REQ-DRV-41, REQ-DRV-42]
   resources: [host]
   timeout_s: 300
   expected_s: 15
@@ -28,9 +28,10 @@
   title: DriveSession against its transition table, every phase x hidden x env x input (on demand)
   level: L1
   path: components/drive_session/test/oracle_full
-  requirements: [REQ-DRV-04, REQ-DRV-06, REQ-DRV-07, REQ-DRV-08, REQ-DRV-12, REQ-DRV-13,
-                 REQ-DRV-14, REQ-DRV-15, REQ-DRV-16, REQ-DRV-22, REQ-DRV-23, REQ-DRV-24,
-                 REQ-DRV-25, REQ-DRV-26, REQ-DRV-27, REQ-DRV-28, REQ-DRV-30]
+  requirements: [REQ-DRV-04, REQ-DRV-06, REQ-DRV-07, REQ-DRV-12, REQ-DRV-13, REQ-DRV-14,
+                 REQ-DRV-15, REQ-DRV-16, REQ-DRV-23, REQ-DRV-24, REQ-DRV-25, REQ-DRV-26,
+                 REQ-DRV-27, REQ-DRV-28, REQ-DRV-35, REQ-DRV-38, REQ-DRV-39, REQ-DRV-40,
+                 REQ-DRV-41, REQ-DRV-42]
   resources: [host]
   timeout_s: 3600
   expected_s: 600

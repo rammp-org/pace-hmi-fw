@@ -222,6 +222,12 @@ inline constexpr char kHmiNoticeStopping[] = "Stopping: waiting for the MCB";   
 inline constexpr char kHmiNoticeWaitingForMcb[] = "Waiting for the MCB";                   // C4
 inline constexpr char kHmiNoticeNotCalibrated[] = "The joystick must be calibrated first"; // C1
 inline constexpr char kHmiNoticePostNotRun[] = "Start-up check not run";                   // C1
+// C3 (hazard-c3-spec.md §1, §2.8): the POST gate PENDING on a latched check, or FAIL, when the
+// blocking check's own words are not given (the TopBar indicator's per-check texts are).
+inline constexpr char kHmiNoticePostRunning[] = "Start-up check running"; // C3
+inline constexpr char kHmiNoticePostFailed[] = "Start-up check failed";   // C3
+// C3 §4.5: the refusal of a drive asked for before POST passed (its body: the check's words).
+inline constexpr char kHmiRefusedPostTitle[] = "Not ready to drive";            // C3
 inline constexpr char kHmiNoticeStickFault[] = "Joystick fault";                // C1, until C2
 inline constexpr char kHmiNoticeStickCheck[] = "Checking the joystick";         // C2
 inline constexpr char kHmiNoticeCentreFirst[] = "Centre the joystick to drive"; // C1

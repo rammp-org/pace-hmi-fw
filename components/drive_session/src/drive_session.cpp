@@ -92,6 +92,13 @@ constexpr Actions STOP_WHILE_ASKING{Action::SEND_DISABLE, Action::CLEAR_WARN, Ac
                                     Action::RING_REST};
 constexpr Actions STOP_FAULT_RAISED{Action::RAISE_STOP_FAULT};
 constexpr Actions RESEND_DISABLE{Action::SEND_DISABLE};
+// C3 (rows 50-54): the boot DISABLE, and the refusals before POST pass.
+constexpr Actions BOOT_STOP{Action::SEND_DISABLE, Action::MARK_BOOT_STOP};
+constexpr Actions BOOT_STOP_MOOT{Action::MARK_BOOT_STOP};
+constexpr Actions UNLOCK_REFUSED_POST{Action::RING_REST, Action::SHOW_REFUSED_POST,
+                                      Action::REFUSAL_FEEDBACK};
+constexpr Actions ENTRY_REFUSED_POST{Action::SHOW_REFUSED_POST, Action::REFUSAL_FEEDBACK};
+constexpr Actions MENU_ROW_REFUSED_POST{Action::REFUSAL_FEEDBACK, Action::SHOW_REFUSED_POST};
 constexpr Actions NOTHING{};
 
 // What an action does to the hidden variables. Only these actions touch them; every other
@@ -114,7 +121,7 @@ struct ActionEffectEntry {
   Action action;
   Effect effect;
 };
-constexpr std::array<ActionEffectEntry, 13> EFFECTS{{
+constexpr std::array<ActionEffectEntry, 14> EFFECTS{{
     {Action::SEND_ENABLE, sets(Guard::REQUEST_ENABLE)},
     {Action::SEND_DISABLE, clears(Guard::REQUEST_ENABLE)},
     {Action::ARM_WARN, sets(Guard::WARN_ARMED)},
@@ -128,6 +135,7 @@ constexpr std::array<ActionEffectEntry, 13> EFFECTS{{
     {Action::UNLOCK_TIMER_DONE, clears(Guard::UNLOCK_TIMER_ARMED)},
     {Action::RAISE_STOP_FAULT, sets(Guard::STOP_FAULT)},
     {Action::CLEAR_STOP_FAULT, clears(Guard::STOP_FAULT)},
+    {Action::MARK_BOOT_STOP, sets(Guard::BOOT_STOP_DONE)},
 }};
 
 [[nodiscard]] constexpr Effect effect_of(Action a) noexcept {
@@ -175,9 +183,10 @@ DriveSession::Outcome DriveSession::decide(Input in, GuardMask g) const noexcept
 DriveSession::Outcome DriveSession::stay() const noexcept { return go(phase_, NOTHING); }
 
 // Rows 1-2 (M1): the MCB ENABLED on a CONNECTED link enters Drive, asked or not, unless a
-// calibration runs (G5) or the Boot screen is up (U4).
+// calibration runs (G5), the Boot screen is up (U4) or the boot DISABLE has not gone (C3).
+// POST is not read (G3).
 DriveSession::Outcome DriveSession::follow_enters(GuardMask g) const noexcept {
-  if (!on(g, Guard::CALIBRATING) && !on(g, Guard::ON_BOOT_SCREEN)) {
+  if (!on(g, Guard::CALIBRATING) && !on(g, Guard::ON_BOOT_SCREEN) && on(g, Guard::BOOT_STOP_DONE)) {
     return go(Phase::UNLOCKING, UNLOCK_ON_DRIVING); // rows 1-2 (M1)
   }
   return stay(); // no entry; DRIVING_OK also keeps rows 10-13 out
@@ -194,8 +203,8 @@ DriveSession::Outcome DriveSession::locked_follow(GuardMask g) const noexcept {
   return stay();
 }
 
-// LOCKED's asks to drive: the unlock hold (rows 18, 19), the push (row 38) and the menu's
-// DRIVE row (row 40). Refused without the MCB ready.
+// LOCKED's asks to drive: the unlock hold (rows 18, 19, 52), the push (rows 38, 53) and the
+// menu's DRIVE row (rows 40, 54). Refused without the MCB ready, or (C3) before POST pass.
 DriveSession::Outcome DriveSession::locked_drive_ask(Input in, GuardMask g) const noexcept {
   if (in == Input::ENTRY_PUSH && (!on(g, Guard::ON_LOCKED_SCREEN) || on(g, Guard::MENU_OPEN))) {
     return stay();
@@ -207,8 +216,15 @@ DriveSession::Outcome DriveSession::locked_drive_ask(Input in, GuardMask g) cons
     return go(Phase::LOCKED, in == Input::ENTRY_PUSH ? ENTRY_REFUSED      // row 38
                                                      : MENU_ROW_REFUSED); // row 40
   }
-  return in == Input::UNLOCK_HOLD_DONE ? go(Phase::ASKING, ASK_ENABLE) // row 18
-                                       : stay();
+  if (on(g, Guard::POST_OK)) {
+    return in == Input::UNLOCK_HOLD_DONE ? go(Phase::ASKING, ASK_ENABLE) // row 18
+                                         : stay();
+  }
+  if (in == Input::UNLOCK_HOLD_DONE) {
+    return go(Phase::LOCKED, UNLOCK_REFUSED_POST); // row 52 (C3, H2)
+  }
+  return go(Phase::LOCKED, in == Input::ENTRY_PUSH ? ENTRY_REFUSED_POST      // row 53 (C3)
+                                                   : MENU_ROW_REFUSED_POST); // row 54 (C3)
 }
 
 DriveSession::Outcome DriveSession::on_locked(Input in, GuardMask g) const noexcept {
@@ -223,11 +239,16 @@ DriveSession::Outcome DriveSession::on_locked(Input in, GuardMask g) const noexc
   case Input::UNLOCK_HOLD_DONE:
   case Input::ENTRY_PUSH:
   case Input::MENU_ROW_DRIVE:
-    return locked_drive_ask(in, g); // rows 18, 19, 38, 40
+    return locked_drive_ask(in, g); // rows 18, 19, 38, 40, 52-54
   case Input::PROFILE_CLICK:
     return go(Phase::LOCKED, PUBLISH); // row 29 (H5)
   case Input::EXIT_HOLD_DONE:
     return go(Phase::LOCKED, STOP_WHILE_LOCKED); // row 42 (was U3)
+  case Input::TICK_BOOT_STOP:
+    if (on(g, Guard::LINK_CONNECTED) && !on(g, Guard::BOOT_STOP_DONE)) {
+      return go(Phase::LOCKED, BOOT_STOP); // row 50 (C3)
+    }
+    return stay();
   case Input::TICK_EXIT_DUE:
   case Input::TICK_WARN_DUE:
   case Input::MENU_KEY_DRIVE:
@@ -283,7 +304,12 @@ DriveSession::Outcome DriveSession::on_asking(Input in, GuardMask g) const noexc
     return stay();
   case Input::EXIT_HOLD_DONE:
     return go(Phase::LOCKED, STOP_WHILE_ASKING); // row 43: the stop wins over the ask
-  case Input::UNLOCK_HOLD_DONE:                  // row 20: "already asked", nothing
+  case Input::TICK_BOOT_STOP:
+    if (on(g, Guard::LINK_CONNECTED) && !on(g, Guard::BOOT_STOP_DONE)) {
+      return go(Phase::ASKING, BOOT_STOP_MOOT); // row 51 (C3): the user's ENABLE wins
+    }
+    return stay();
+  case Input::UNLOCK_HOLD_DONE: // row 20: "already asked", nothing
   case Input::TICK_EXIT_DUE:
   case Input::MENU_KEY_DRIVE:
   case Input::UNLOCK_TIMER:
@@ -309,10 +335,10 @@ DriveSession::Outcome DriveSession::on_unlocking(Input in, GuardMask g) const no
   case Input::MENU_KEY_DRIVE:
     return go(Phase::EXITING, FIRST_ASK_EXIT_THEN_MENU); // row 25
   case Input::PROFILE_CLICK:
-    if (on(g, Guard::DRIVING_OK)) {
+    if (on(g, Guard::DRIVING_OK) && on(g, Guard::POST_OK)) {
       return go(Phase::UNLOCKING, ENABLE_PROFILE); // row 31
     }
-    return stay(); // never re-send a stale request (H5)
+    return stay(); // never re-send a stale request (H5), no ENABLE before POST pass (H2)
   case Input::UNLOCK_TIMER:
     if (on(g, Guard::UNLOCK_TIMER_ARMED)) {
       return go(Phase::DRIVING, ADVANCE); // row 35
@@ -326,6 +352,7 @@ DriveSession::Outcome DriveSession::on_unlocking(Input in, GuardMask g) const no
   case Input::MENU_ROW_DRIVE:
   case Input::TICK_STOP_FAULT_DUE:
   case Input::TICK_STOP_RESEND:
+  case Input::TICK_BOOT_STOP:
     return stay();
   default:
     break; // corrupted input: safe state
@@ -346,10 +373,10 @@ DriveSession::Outcome DriveSession::on_driving(Input in, GuardMask g) const noex
   case Input::MENU_KEY_DRIVE:
     return go(Phase::EXITING, FIRST_ASK_EXIT_THEN_MENU); // row 26
   case Input::PROFILE_CLICK:
-    if (on(g, Guard::DRIVING_OK)) {
+    if (on(g, Guard::DRIVING_OK) && on(g, Guard::POST_OK)) {
       return go(Phase::DRIVING, ENABLE_PROFILE); // row 32
     }
-    return stay(); // never re-send a stale request (H5)
+    return stay(); // never re-send a stale request (H5), no ENABLE before POST pass (H2)
   case Input::TICK_EXIT_DUE:
   case Input::TICK_WARN_DUE:
   case Input::TICK_GIVEUP_DUE:
@@ -359,6 +386,7 @@ DriveSession::Outcome DriveSession::on_driving(Input in, GuardMask g) const noex
   case Input::MENU_ROW_DRIVE:
   case Input::TICK_STOP_FAULT_DUE:
   case Input::TICK_STOP_RESEND:
+  case Input::TICK_BOOT_STOP:
     return stay();
   default:
     break; // corrupted input: safe state
@@ -394,6 +422,7 @@ DriveSession::Outcome DriveSession::on_exiting(Input in, GuardMask g) const noex
   case Input::TICK_STOP_RESEND:
     return stop_resend(g);    // rows 46-47
   case Input::MENU_KEY_DRIVE: // row 27: deadline armed, the key does nothing
+  case Input::TICK_BOOT_STOP:
   case Input::TICK_WARN_DUE:
   case Input::TICK_GIVEUP_DUE:
   case Input::UNLOCK_HOLD_DONE:
@@ -429,6 +458,7 @@ DriveSession::Outcome DriveSession::on_exit_refused(Input in, GuardMask g) const
   case Input::TICK_STOP_RESEND:
     return stop_resend(g);   // rows 48-49
   case Input::TICK_EXIT_DUE: // no timeout here: the stop re-sends until the MCB stops (G4)
+  case Input::TICK_BOOT_STOP:
   case Input::TICK_WARN_DUE:
   case Input::TICK_GIVEUP_DUE:
   case Input::UNLOCK_HOLD_DONE:

@@ -103,6 +103,8 @@ inline const char *banner_name(std::int32_t which) {
     return "DRIVE_LOST";
   case 7:
     return "REFUSED_DRIVE_MENU";
+  case 8:
+    return "REFUSED_POST";
   default:
     return "?";
   }
@@ -378,6 +380,11 @@ inline bool calibrating() {
   golden::raw(std::format("joystick_cal_running -> {}", int{golden::world().calibrating}));
   return golden::world().calibrating;
 }
+inline hmi::stick::PostGate post_gate() {
+  const auto g = static_cast<hmi::stick::PostGate>(golden::world().post_gate);
+  golden::raw(std::format("post_gate -> {}", hmi::stick::to_string(g)));
+  return g;
+}
 inline hmi::stick::HoldReason hold_reason() {
   const auto r = static_cast<hmi::stick::HoldReason>(golden::world().hold);
   golden::raw(std::format("hold_reason -> {}", hmi::stick::to_string(r)));
@@ -448,6 +455,7 @@ struct MainUnitUi {
   hmi::ui::LinkState link_state_now() const { return shim::link_state_now(); }
   bool calibrating() const { return shim::calibrating(); }
   hmi::stick::HoldReason hold_reason() const { return shim::hold_reason(); }
+  hmi::stick::PostGate post_gate() const { return shim::post_gate(); }
   void show_drive_notice(hmi::drive_adapter::DriveNotice notice) const {
     shim::show_drive_notice(notice);
   }
