@@ -15,6 +15,7 @@ and a new table (CS-SAF-05).
 | --- | --- |
 | The spec: transition table, invariants, hold gestures, stick gate (`constexpr`, CS-SAF-02) | `include/drive_session_table.hpp`, read as [TABLE.md](TABLE.md) |
 | The table's vocabulary: the Phase, Input, Guard and Action enums, Env, the row structs | `include/drive_session_types.hpp` |
+| The hold gestures' tables (HOLD_TRANSITIONS, UNLOCK_APPLIES, EXIT_APPLIES, HOLD_POLL_SEQUENCE), part of the spec, included by the table header | `include/drive_session_hold.hpp` |
 | The code: `DriveSession`, the hand-written transition function | `include/drive_session.hpp`, `src/drive_session.cpp` |
 | The table's fingerprint: one 64-bit number over every row, pinned by a `static_assert` | `include/drive_session_fingerprint.hpp` |
 | The table's own invariants (DSO-001..019) | `test/oracle_selfcheck` |

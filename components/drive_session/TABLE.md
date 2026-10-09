@@ -14,7 +14,8 @@ relock (frag_drive.inc:75, orig 1598); the table recorded only the `true` case (
 firmware's behaviour does not change; the table now says what it does.
 
 The data is `include/drive_session_table.hpp`, namespace `hmi::drive_session`; its enums and row
-structs are in `include/drive_session_types.hpp`. Those headers win
+structs are in `include/drive_session_types.hpp`, the hold gestures' tables (§3) in
+`include/drive_session_hold.hpp`. Those headers win
 over this page. This page is the same table for reading, plus a D4 diagram, the hazards, and the
 questions left open. The agent that writes the extraction never edits the header (CORE never-list:
 declarations).
