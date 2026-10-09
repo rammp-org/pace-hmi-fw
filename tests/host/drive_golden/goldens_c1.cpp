@@ -106,9 +106,7 @@ Tokens relock(const char *menu_flag, const char *publish) {
   return {menu_flag, "ring_rest", "L", "lock(1)", "gate", publish};
 }
 Tokens with(Tokens t, std::initializer_list<const char *> more) {
-  for (const char *m : more) {
-    t.emplace_back(m);
-  }
+  t.insert(t.end(), more.begin(), more.end());
   return t;
 }
 const Tokens kEntry{"open", "lock(0)", "gate"}; // F1 (rows 1-2)

@@ -855,14 +855,10 @@ constexpr bool every_enable_needs_post() noexcept {
 
 // Rows 1-2 read +BOOT_STOP_DONE and do not read POST_OK (M1 enters before POST pass, G3).
 constexpr bool entry_waits_for_boot_stop() noexcept {
-  for (const std::size_t i : {std::size_t{0}, std::size_t{1}}) {
-    const Transition &t = TRANSITIONS[i];
-    if ((t.guard.need_true & bit(Guard::BOOT_STOP_DONE)) == 0 ||
-        ((t.guard.need_true | t.guard.need_false) & bit(Guard::POST_OK)) != 0) {
-      return false;
-    }
-  }
-  return true;
+  return std::ranges::all_of(std::array{TRANSITIONS[0], TRANSITIONS[1]}, [](const Transition &t) {
+    return (t.guard.need_true & bit(Guard::BOOT_STOP_DONE)) != 0 &&
+           ((t.guard.need_true | t.guard.need_false) & bit(Guard::POST_OK)) == 0;
+  });
 }
 
 // MARK_BOOT_STOP only in rows 50-51; SHOW_REFUSED_POST only with !POST_OK.

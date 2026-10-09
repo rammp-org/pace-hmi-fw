@@ -2,7 +2,9 @@
 
 #include "goldens.hpp"
 
+#include <algorithm>
 #include <cstdio>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -23,14 +25,11 @@ std::string joined(const std::vector<std::string> &tokens) {
 } // namespace
 
 Golden golden_by_id(const std::string &id) {
-  for (std::vector<Golden> set : {c1_goldens(), c3_goldens()}) {
-    for (Golden &g : set) {
-      if (g.name.starts_with(id + " ")) {
-        return std::move(g);
-      }
-    }
-  }
-  return Golden{};
+  std::vector<Golden> all = c1_goldens();
+  std::ranges::move(c3_goldens(), std::back_inserter(all));
+  const auto it =
+      std::ranges::find_if(all, [&id](const Golden &g) { return g.name.starts_with(id + " "); });
+  return it == all.end() ? Golden{} : *it;
 }
 
 std::size_t run_golden(const Golden &g, const Target &target) {

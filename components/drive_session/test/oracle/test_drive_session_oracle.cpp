@@ -616,10 +616,12 @@ TEST_CASE("DRV-029 the link down for three ticks, then up with the MIB IDLE: one
   DriveSession s;
   unsigned long disables = 0;
   unsigned long other = 0;
+  const auto acted = [](const TickOut &steps) {
+    return static_cast<unsigned long>(
+        std::ranges::count_if(steps, [](const Actions &a) { return a != Actions{}; }));
+  };
   for (int i = 0; i < 3; ++i) {
-    for (const Actions &a : tick(s, make_env(false, MibState::IDLE, Screen::LOCKED))) {
-      other += a == Actions{} ? 0UL : 1UL;
-    }
+    other += acted(tick(s, make_env(false, MibState::IDLE, Screen::LOCKED)));
   }
   const auto first = tick(s, make_env(true, MibState::IDLE, Screen::LOCKED));
   disables += contains(first[1], Action::SEND_DISABLE) ? 1UL : 0UL;
@@ -627,9 +629,7 @@ TEST_CASE("DRV-029 the link down for three ticks, then up with the MIB IDLE: one
     other += i == 1 || first[i] == Actions{} ? 0UL : 1UL;
   }
   for (int i = 0; i < 4; ++i) {
-    for (const Actions &a : tick(s, make_env(true, MibState::IDLE, Screen::LOCKED))) {
-      other += a == Actions{} ? 0UL : 1UL;
-    }
+    other += acted(tick(s, make_env(true, MibState::IDLE, Screen::LOCKED)));
   }
   TEST_ASSERT_EQUAL_UINT64(1, disables);
   TEST_ASSERT_EQUAL_UINT64(0, other);
