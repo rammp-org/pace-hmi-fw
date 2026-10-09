@@ -944,12 +944,10 @@ def t_injector() -> None:
         expect("one one-cycle message, then the standing target again",
                (len(once), sent[-1][1:5]), (1, (1507, 1510, 1477, 0)))
         expect("sequence numbers go up", [r[5] for r in sent] == sorted({r[5] for r in sent}), True)
-        expect("no lapse", inj.lapses, [])
         block.set()
         time.sleep(1.0)
         block.clear()
         time.sleep(0.2)
-        expect("a held connection is a recorded lapse", bool(inj.lapses), True)
         inj.pause()
         k = len(sent)
         time.sleep(0.3)
@@ -986,11 +984,15 @@ class FakeSim:
     """peers.SimChild's surface for the rig's start-up."""
     started: list["FakeSim"] = []
 
-    def __init__(self, ip, tree, log_path=None, event_log=None, ready=True):
+    def __init__(self, ip, tree, log_path=None, event_log=None, ready=True, exits=False):
         self.ready = ready
         self.stopped = False
-        self.proc = type("P", (), {"pid": 4242})()
+        self.proc = type("P", (), {"pid": 4242, "poll": lambda me, exits=exits: 1 if exits
+                                   else None})()
         FakeSim.started.append(self)
+
+    def xy_count(self, timeout=5.0):
+        return 1
 
     def wait_ready(self, timeout=45.0):
         return self.ready
@@ -1036,6 +1038,36 @@ def t_rig_start_failure_stops_sim() -> None:
         hazard_rig.peers.SimChild, common.stray_peers, hazard_rig.ui_client.open_hmi = saved
 
 
+def t_serial_watch_and_sim_retry() -> None:
+    def capture(port, seconds, reset=False, on_line=None, stop=None):
+        on_line(None, "POST RESULT PASS 19/19 1300")
+        while not stop.is_set():
+            time.sleep(0.01)  # a quiet board: no more lines, the window still open
+    w = hazard_rig.SerialWatch("COMX", 120.0, capture=capture)
+    time.sleep(0.05)
+    t0 = time.monotonic()
+    text = w.stop()
+    expect("stop() ends a quiet capture at once and keeps its lines",
+           (text, time.monotonic() - t0 < 1.0), ("POST RESULT PASS 19/19 1300\n", True))
+    saved = (hazard_rig.peers.SimChild, hazard_rig.SIM_RETRY_S)
+    made = []
+
+    def sim(*a, **k):
+        made.append(FakeSim(*a, exits=not made, **k))
+        return made[-1]
+    hazard_rig.peers.SimChild, hazard_rig.SIM_RETRY_S = sim, 0.0
+    try:
+        with quiet(), tempfile.TemporaryDirectory() as tmp:
+            st = hazard_rig.HazardStep("x", pathlib.Path(tmp))
+            rig = hazard_rig.Rig("1.2.3.4", common.REPO, pathlib.Path(tmp), st, set(), proven="p")
+            got = rig._start_sim()
+        expect("a sim that exits at once is stopped and started once more",
+               ([m.stopped for m in made], got is made[-1], "sim_retry" in st.records),
+               ([True, False], True, True))
+    finally:
+        hazard_rig.peers.SimChild, hazard_rig.SIM_RETRY_S = saved
+
+
 def t_forced_stop_kills_tree() -> None:
     import peers
     killed = []
@@ -1063,6 +1095,21 @@ def t_forced_stop_kills_tree() -> None:
         common.kill_tree = saved
     expect("a sim that does not quit is killed as a tree, not by its launcher pid", killed,
            [777])
+
+
+def t_stick_lapses() -> None:
+    import datetime as dt
+    t0 = dt.datetime(2026, 10, 9, 3, 0, 0)
+
+    def row(ms: int, cmd: str = "STICK 1 2 3 0 1", **kw) -> dict:
+        return {"cmd": cmd, "sent": (t0 + dt.timedelta(milliseconds=ms)).isoformat(), **kw}
+    rows = [row(0), row(100), row(150, "STATE"), row(200), row(480), row(600, error="x"),
+            row(900), row(1000)]
+    expect("gaps between STICK sends over 0.28 s", hazard_rig.stick_lapses(rows, []),
+           [((t0 + dt.timedelta(milliseconds=900)).isoformat(timespec="milliseconds"), 0.42)])
+    expect("a pause in between is not a lapse",
+           hazard_rig.stick_lapses(rows, [t0 + dt.timedelta(milliseconds=700)]), [])
+    expect("0.28 s exactly is not", hazard_rig.stick_lapses([row(0), row(280)], []), [])
 
 
 def t_restart_tile_and_refresh() -> None:
@@ -1136,6 +1183,10 @@ CASES = [
     ("BENCH-049 a sim that does not quit is killed with its whole tree", t_forced_stop_kills_tree),
     ("BENCH-050 Restart HMI's tile from the tree's actions_spec.h; a refresh goes before any "
      "command once 50 ms old", t_restart_tile_and_refresh),
+    ("BENCH-052 a serial watch frees the port at stop() even on a quiet board; a sim that exits "
+     "at once is started once more", t_serial_watch_and_sim_retry),
+    ("BENCH-051 injection lapses come from the STICK send times in the remote-UI log, not "
+     "the injector's own clock; a pause is not a lapse", t_stick_lapses),
 ]
 
 

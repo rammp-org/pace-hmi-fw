@@ -399,6 +399,7 @@ def s_b18b(rig: Rig) -> dict:
 
 def s_b18c(rig: Rig) -> dict:
     rig.begin()
+    rig.need("phase")
     rig.sim_ongone("keep")
     to_drive_by_mcb(rig)
     rig.inj.pause()
@@ -525,5 +526,7 @@ STEPS = {
     "B5''-22": (s_b22, grade_b22, "POST budget (all reads fail)"),
     "B5''-22b": (s_b22b, grade_b22b, "one bad read in the first window"),
 }
-NEEDS_SERIAL = {"B5''-16", "B5''-18b", "B5''-21"}
+# B5''-18b and -18c restart the HMI from DriveScreen, where the burger key is a stop
+# request and the menu cannot be reached: they restart through the port (an RTS reset).
+NEEDS_SERIAL = {"B5''-16", "B5''-18b", "B5''-18c", "B5''-21"}
 CLEANUP = {"B5''-22": restart_cleanup, "B5''-22b": restart_cleanup}

@@ -602,6 +602,10 @@ def s_b14(rig: Rig) -> dict:
     return {}
 
 
+# B5''-15 restarts from DriveScreen: through the port (hazard_rig.Rig.restart_hmi).
+NEEDS_SERIAL = {"B5''-15"}
+
+
 def s_b15(rig: Rig) -> dict:
     rig.begin()
     rig.sim_ongone("keep")

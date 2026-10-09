@@ -30,6 +30,7 @@ a step that reads the serial log): neither is a verdict on the firmware.
 
 from __future__ import annotations
 
+import datetime
 import importlib
 import itertools
 import json
@@ -56,6 +57,7 @@ HOLD_MS = 2000            # the unlock and exit holds: 1.5 s fill plus margin
 SKEW_LIMIT_S = 0.25       # a mark's stamp vs the runner's send time
 BACK_WITHIN_S = 90.0      # a restart: remote UI back
 SIM_READY_S = 45.0
+SIM_RETRY_S = 15.0
 
 MENU_KEY = (360, 1198)                 # scripts/hmi_ui.py MENU_KEY
 PROFILE_Y = 195 + 675 + 162 // 2       # scenario_hazards: DriveScreen's profile buttons
@@ -165,7 +167,10 @@ class Injector:
         self._once: tuple[int, int, int, int] | None = None
         self._seq = itertools.count(1)  # thread-safe enough: next() is atomic in CPython
         self._last: float | None = None
-        self.lapses: list[tuple[float, float]] = []   # (t, gap) over INJECT_LAPSE_S
+        # (sent, gap) over INJECT_LAPSE_S between STICK sends, from the remote-UI log
+        # (stick_lapses, at collect); pauses (wall clock) end a run of refreshes on purpose.
+        self.lapses: list[tuple[str, float]] = []
+        self.pauses: list[datetime.datetime] = []
         self.log: list[tuple[float, int, int, int, int]] = []
         self.error: str | None = None
         self._stop = threading.Event()
@@ -188,8 +193,6 @@ class Injector:
     def _push(self, target: tuple[int, int, int, int]) -> float:
         t = time.monotonic()
         self._send(*target, next(self._seq))
-        if self._last is not None and t - self._last > INJECT_LAPSE_S:
-            self.lapses.append((round(t, 3), round(t - self._last, 3)))
         self._last = t
         self.log.append((round(t, 3), *target))
         return t
@@ -214,6 +217,7 @@ class Injector:
         with self._lock:
             self._target = None
             self._last = None
+            self.pauses.append(datetime.datetime.now())
 
     def _run(self) -> None:
         while not self._stop.is_set():
@@ -236,6 +240,23 @@ class Injector:
         self._thread.join(timeout=2.0)
 
 
+def stick_lapses(rows: list[dict], pauses: list[datetime.datetime],
+                 limit: float = INJECT_LAPSE_S) -> list[tuple[str, float]]:
+    """Gaps over `limit` between consecutive STICK sends in the remote-UI log (rows with
+    "cmd" and "sent", ui_client's CommandLog), except across a pause. The send times are
+    what the board sees (its injection expires 300 ms after the last one): the injector's
+    own clock counts the wait for the connection too, and on 2026-10-09 it reported a
+    0.48 s lapse where the log shows no send gap over 0.27 s."""
+    sends = [datetime.datetime.fromisoformat(r["sent"]) for r in rows
+             if str(r.get("cmd", "")).startswith("STICK") and "error" not in r]
+    out = []
+    for a, b in zip(sends, sends[1:]):
+        gap = (b - a).total_seconds()
+        if gap > limit and not any(a <= p <= b for p in pauses):
+            out.append((b.isoformat(timespec="milliseconds"), round(gap, 3)))
+    return out
+
+
 # ---------------------------------------------------------------- serial
 
 
@@ -244,17 +265,23 @@ class SerialWatch:
     `lines` keeps each line's arrival time on the runner's clock (time.monotonic()), the
     clock the sim's log and the STATE polls use."""
 
-    def __init__(self, port: str, seconds: float):
+    def __init__(self, port: str, seconds: float, capture: Callable | None = None):
         import board
         self.text = ""
         self.lines: list[tuple[float, str]] = []
         self._stop = threading.Event()
+        capture = capture or board.capture
+
+        def keep(cap, line: str) -> bool:
+            # Kept as it arrives: stop() never depends on the capture thread finishing.
+            self.lines.append((round(time.monotonic(), 4), line))
+            return self._stop.is_set()
 
         def run() -> None:
-            cap = board.capture(port, seconds, reset=False,
-                                on_line=lambda c, line: self._stop.is_set())
-            self.lines = [(round(cap.started + t, 4), line) for t, line in cap.lines]
-            self.text = cap.text()
+            # `stop` ends the capture within one read timeout and frees the port for the
+            # next watch (on 2026-10-09 a watch on a quiet board held it for its whole
+            # window, so the next boot's watch read nothing).
+            capture(port, seconds, reset=False, on_line=keep, stop=self._stop)
 
         self._thread = threading.Thread(target=run, daemon=True)
         self._thread.start()
@@ -262,6 +289,7 @@ class SerialWatch:
     def stop(self) -> str:
         self._stop.set()
         self._thread.join(timeout=10.0)
+        self.text = "\n".join(line for _, line in self.lines) + ("\n" if self.lines else "")
         return self.text
 
 
@@ -302,8 +330,7 @@ class Rig:
         self.st.record("sole_sim_proof", self.proof)
         sys.path.insert(0, str(self.tree / "scripts"))
         self._hmi_ui = importlib.import_module("hmi_ui")
-        self.sim = peers.SimChild(self.ip, self.tree, self.out / "sim.log",
-                                  event_log=self.out / "sim-events.jsonl")
+        self.sim = self._start_sim()
         try:
             if not self.sim.wait_ready(SIM_READY_S):
                 raise NotRun("bench", self.sim.not_ready_reason(SIM_READY_S))
@@ -321,6 +348,23 @@ class Rig:
             self.__exit__(None, None, None)
             raise
         return self
+
+    def _start_sim(self) -> peers.SimChild:
+        """This step's sim. One that exits at once without finding the board (the board
+        still coming back from the previous step's restart: B5''-22b, 2026-10-09) is
+        started once more after SIM_RETRY_S."""
+        sim = peers.SimChild(self.ip, self.tree, self.out / "sim.log",
+                             event_log=self.out / "sim-events.jsonl")
+        deadline = time.monotonic() + 15.0
+        while time.monotonic() < deadline and sim.proc.poll() is None and not sim.xy_count(1.0):
+            time.sleep(0.5)  # poll period, bounded by the deadline
+        if sim.proc.poll() is None:
+            return sim
+        self.st.record("sim_retry", sim.not_ready_reason())
+        sim.stop()
+        time.sleep(SIM_RETRY_S)  # let the board finish coming back
+        return peers.SimChild(self.ip, self.tree, self.out / "sim.log",
+                              event_log=self.out / "sim-events.jsonl")
 
     def __exit__(self, *_: object) -> None:
         if self.inj is not None:
@@ -520,6 +564,8 @@ class Rig:
     def restart_hmi(self) -> float:
         """The Restart HMI tile (Skunk Works, the fifth): a software reset. Returns the tap
         time. The connection is closed; wait_back() reconnects."""
+        if self.state().get("screen") == "DriveScreen":
+            return self._restart_by_port()
         actions = skunk_actions(self.tree)
         if RESTART_ACTION not in actions:
             raise NotRun("bench", f"no {RESTART_ACTION} in the tree's actions_spec.h")
@@ -540,6 +586,19 @@ class Rig:
         except ui_client.RemoteUiError:
             pass  # the board may restart before answering the RELEASE
         self._drop_hmi()
+        return t
+
+    def _restart_by_port(self) -> float:
+        """From DriveScreen the menu is out of reach (the burger key asks to stop there):
+        reset the chip through the port (B2's RTS pulse; reset reason USB, a clean one)."""
+        if not self.port:
+            raise NotRun("bench", "restarting from DriveScreen needs the board's port")
+        import board
+        self.st.record("restart", "RTS reset through the port (from DriveScreen)")
+        self.inj.pause()
+        self._drop_hmi()
+        t = time.monotonic()
+        board.capture(self.port, 0.5, reset=True)
         return t
 
     def crash(self) -> float:
@@ -646,6 +705,10 @@ class Rig:
             raise NotRun("bench", f"the sim's clock and the runner's differ by "
                          f"{max(skews):.3f} s (> {SKEW_LIMIT_S} s)")
         if self.inj is not None:
+            log = self.out / "remote-ui.jsonl"
+            rows = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()
+                    if line.strip()] if log.exists() else []
+            self.inj.lapses = stick_lapses(rows, self.inj.pauses)
             self.st.record("injection_lapses", self.inj.lapses)
         (self.out / "states.jsonl").write_text(
             "".join(json.dumps([t, s]) + "\n" for t, s in self.trace.states), encoding="utf-8")
