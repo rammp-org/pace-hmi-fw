@@ -338,8 +338,10 @@ void UiApp::enter_screen(const lv_obj_t *screen) {
   }
 }
 
-// The PIN is asked again on every visit rather than latching once per boot.
+// Every screen load is logged (the bench times the MCB-initiated entry from it: B5''-18b). The
+// PIN is asked again on every visit rather than latching once per boot.
 void UiApp::arrived(const lv_obj_t *screen) {
+  config_.nav_log->info("screen -> {}", NavView::screen_name(screen));
   if (screen == ui_BenchGateScreen) {
     bench_pin_view_.reset();
   }

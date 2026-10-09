@@ -77,10 +77,10 @@ public:
     const BoardPort *board;               ///< backlight, panel, restart
     const MainScreens *screens;           ///< the screens whose adapters stay in main
     const std::atomic<bool> *clock_valid; ///< the system clock holds a real time (housekeeping)
-    espp::Logger *nav_log;                ///< "nav": the lost-cursor backstop's warning
-    espp::Logger *flip_log;               ///< "flip": the screen flip
-    espp::Logger *overdraw_log;           ///< "overdraw": what the overdraw pass cleared
-    const PostPort *post;                 ///< the quick POST's IDF facts (main)
+    espp::Logger *nav_log;      ///< "nav": every screen load (INFO), the lost-cursor backstop
+    espp::Logger *flip_log;     ///< "flip": the screen flip
+    espp::Logger *overdraw_log; ///< "overdraw": what the overdraw pass cleared
+    const PostPort *post;       ///< the quick POST's IDF facts (main)
   };
 
   /// The Settings page of the actuator rows, after the settings_spec.hpp pages.
