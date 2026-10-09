@@ -37,7 +37,7 @@ MUTANTS=(
   'T10-row27-asks-again|table|s/Transition{Phase::EXITING, Input::MENU_KEY_DRIVE, kAlways, Phase::EXITING, kNoActions,/Transition{Phase::EXITING, Input::MENU_KEY_DRIVE, kAlways, Phase::EXITING, kExitAskMenu,/'
   'T11-row29-needs-link|table|s/Transition{Phase::LOCKED, Input::PROFILE_CLICK, kAlways, Phase::LOCKED,/Transition{Phase::LOCKED, Input::PROFILE_CLICK, when({Guard::LINK_CONNECTED}), Phase::LOCKED,/'
   'T12-row38-menu-ignored|table|0,/when({Guard::ON_LOCKED_SCREEN}, {Guard::MENU_OPEN, Guard::MCB_READY}), Phase::LOCKED,/s//when({Guard::ON_LOCKED_SCREEN}, {Guard::MCB_READY}), Phase::LOCKED,/'
-  'T13-row40-link-not-mcb|table|s/Transition{Phase::LOCKED, Input::MENU_ROW_DRIVE, when({}, {Guard::MCB_READY}), Phase::LOCKED,/Transition{Phase::LOCKED, Input::MENU_ROW_DRIVE, when({}, {Guard::LINK_CONNECTED}), Phase::LOCKED,/'
+  'T13-row40-also-needs-link-down|table|s/Transition{Phase::LOCKED, Input::MENU_ROW_DRIVE, when({}, {Guard::MCB_READY}), Phase::LOCKED,/Transition{Phase::LOCKED, Input::MENU_ROW_DRIVE, when({}, {Guard::MCB_READY, Guard::LINK_CONNECTED}), Phase::LOCKED,/'
   'T14-effect-enable-sets-nothing|table|s/ActionEffect{Action::SEND_ENABLE, bit(Guard::REQUEST_ENABLE), 0},/ActionEffect{Action::SEND_ENABLE, 0, 0},/'
   # The hazard fix C1's rows (hazard-c1-spec.md §2.3).
   'T15-row46-waits-for-slow|table|0,/when({Guard::RESEND_FAST_DUE}, {Guard::STOP_FAULT}), Phase::EXITING,/s//when({Guard::RESEND_SLOW_DUE}, {Guard::STOP_FAULT}), Phase::EXITING,/'
