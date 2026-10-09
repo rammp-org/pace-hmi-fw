@@ -5,7 +5,7 @@
  * THIS FILE IS THE SPEC. A firmware change is checked by running the self test
  * and reading PASS/FAIL against these rows, not by reading the code:
  *
- *   - on the device:  Settings -> SELF TEST (results on screen and serial)
+ *   - on the device:  Skunk Works -> Self test (results on screen and serial)
  *   - from a PC:      python scripts/rtps_selftest.py  (exit 0 = all passed)
  *
  * To tighten or loosen a check, change its limits here. To add one, add a row
@@ -24,7 +24,7 @@
  *   Need::OPTIONAL  SKIP - fitted on some units only
  *   Need::REMOTE    FAIL when the run was requested over RTPS (a self-test peer
  *                   is known to be there), SKIP when started from the HMI's own
- *                   settings row. Only the ping checks use it: they need a peer
+ *                   Skunk Works tile. Only the ping checks use it: they need a peer
  *                   that answers self-test pings, which a production MCB does not.
  *                   Everything that needs the MCB itself (McbStatus arriving, its
  *                   timing, a subscriber for the joystick stream) is REQUIRED, so

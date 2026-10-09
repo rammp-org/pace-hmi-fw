@@ -60,7 +60,7 @@ extern hmi::settings::AppliedSettings applied_settings;
 extern lv_obj_t *nav_menu_open;
 
 /// Whether the stick may drive the chair right now: Drive screen up, menu shut, drive active.
-/// Written on the LVGL task (nav_update_stick_gate), read by the ADC task.
+/// Written on the LVGL task (DriveUi::update_stick_gate), read by the ADC task.
 extern std::atomic<bool> stick_drives;
 
 /// Open the menu on the next screen to load (the burger key on Drive). LVGL task.

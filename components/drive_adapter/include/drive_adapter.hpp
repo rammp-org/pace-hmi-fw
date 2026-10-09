@@ -10,8 +10,9 @@
 /// DriveCommand requests and the relocks the session decides.
 ///
 /// The adapter calls nothing but its port, `View`, a class that meets `DrivePort`: the
-/// firmware's is `MainDriveView` in main/frag_drive.inc (the LVGL and rtps_comms calls); the
-/// host tests use a fake. `View` is a template parameter, so every port call is a direct call
+/// firmware's is `hmi::ui::DrivePort<DriveUi>` in
+/// components/drive_ui/include/drive_ui/drive_port.hpp (the LVGL and rtps_comms calls); the host
+/// tests use a fake. `View` is a template parameter, so every port call is a direct call
 /// (CS-SAF-08). No LVGL, no ESP-IDF, nothing from main/.
 ///
 /// Contract for every method here and every port method: called on the LVGL task (lv_task)

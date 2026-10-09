@@ -8,16 +8,18 @@ see [tools/gen_diagrams/README.md](../tools/gen_diagrams/README.md).
 ## Today vs target
 
 For a file-by-file walk through the code as it is today (boot, tasks, the motion path, the drive
-state machine, every fragment), read [how-the-firmware-works.md](how-the-firmware-works.md).
+state machine, where each part of the old `main.cpp` went), read [how-the-firmware-works.md](how-the-firmware-works.md).
 
-- **Today:** almost everything is one component, `main` (a `main.cpp` split into one-TU
-  `frag_*.inc` fragments, plus the screen, network, OTA and self-test files). Tasks share state
-  through statics and a global recursive `lvgl_mutex`. There are no islands, no channels and no
-  `topology.hpp` yet. The first components have moved out: `fw_core` (channel and ownership
-  helpers) and `hmi_format` (screen text formatting).
+- **Today:** `main` wires and the work lives in `components/*` (no `frag_*.inc` fragments any
+  more). `main.cpp` builds the UI, stick and housekeeping islands from their `Config`s and
+  fills the UI's ports; the network link and RTPS, the self test and the calibration stay in
+  `main/` as approved deviations. Tasks share state through atomics, LVGL subjects and a global
+  recursive `lvgl_mutex`. `fw_core` channels exist only in the bench stick injection, and
+  `topology` and `post` are built and tested but not wired. The layout, task by task, is in
+  [how-the-firmware-works.md](how-the-firmware-works.md).
 - **Target:** the islands, adapters and channels of
   [docs/plans/refactor.md §2.1–2.3](plans/refactor.md#2-target-design), wired by
-  `components/topology/include/topology.hpp`. D2 below appears when that file lands; D3 grows as
+  `components/topology/include/topology.hpp`. D2 below is generated from that file; D3 grows as
   components move out of `main`. The target sketches of D2 and D3 are in
   [§2.5](plans/refactor.md#25-diagrams).
 - D4 (state machines inside a component) does not exist yet: the drive session, link and seat
