@@ -1,22 +1,4 @@
 dependencies:
-  espp/adc:
-    component_hash: ff4f840bd92d3fbcb16d54a677075c61c5b318bcefea14d3c3f163e692a9ea01
-    dependencies:
-    - name: espp/base_component
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=1.0'
-    - name: espp/task
-      registry_url: https://components.espressif.com
-      require: private
-      version: '>=1.0'
-    - name: idf
-      require: private
-      version: '>=5.0'
-    source:
-      registry_url: https://components.espressif.com/
-      type: service
-    version: 1.3.2
   espp/base_component:
     component_hash: 9ec8a3ed77c6d401498f772f76aa0422eda439de8b3ac42ebb018aaa567b25c2
     dependencies:
@@ -851,7 +833,6 @@ dependencies:
       type: service
     version: 9.5.0
 direct_dependencies:
-- espp/adc
 - espp/base_component
 - espp/base_peripheral
 - espp/bmi270
@@ -896,6 +877,6 @@ direct_dependencies:
 - espressif/w5500
 - idf
 - lvgl/lvgl
-manifest_hash: dd416bd8441c75e793fc2b0fe65ffa874d0e92562f7a20a061dc67baccbd0747
+manifest_hash: d44f6d6219284a837efa33a0dfe2b329904fd20bf45b7fd9cbfcee62f674d497
 target: esp32p4
 version: 3.0.0

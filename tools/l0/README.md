@@ -23,6 +23,7 @@ the top of `ratchet.py`.
 | `mutable_globals` | mutable namespace-scope variables (CS-CMP-03) |
 | `locks` | mutexes, lock guards, semaphores (CS-OWN-08); allowed in the fw_core channel helpers and as the espp Task callback's own `(std::mutex &m, std::condition_variable &cv)` with `std::unique_lock<std::mutex> lock(m); cv.wait_for(lock, …)` (exact idiom) |
 | `lv_outside_ui` | `lv_*` outside a UI path: `components/hmi_ui/`, `components/drive_ui/` (owner, 2026-10-08), `components/ui/`, the main unit, `log_view`, `joystick_cal`, the frozen `main/{about,internet,update}_ui.{cpp,hpp}`, `components/remote_ui/src/remote_ui.cpp` and `components/remote_ui/include/remote_ui.hpp` (moved from `main/remote_ui.*` with their status; no other file there), and legacy `main/sample_ui_*` |
+| vendored | `components/m5stack-tab5` is out of scope; in `components/espp_adc` only the upstream files are, by name (`VENDORED_FILES`); `continuous_adc.hpp` carries our hook lines and may hold no more of any metric than its pristine copy in `upstream/` (`VENDORED_MODIFIED`; `lines` keeps its usual limit) |
 | `if_config` | `#if…CONFIG_` forbidden, except in a component's `include/**/config.hpp` (CS-TYP-05) |
 | others | `std_thread`, `xtaskcreate`, `vtaskdelay`, `sleep_this_thread`, `esp_timer_create`, `log_direct`, `heap_raw`, `typedef`, `assert`, `esp_error_check`, `c_cast`: forbidden |
 
