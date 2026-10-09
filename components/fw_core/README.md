@@ -4,8 +4,9 @@ The shared helpers every island and adapter builds on (CS-OWN-10): the `Message`
 channels (`Mailbox`, `Queue`, `AtomicValue`) with their narrow handles, `ThreadChecker`,
 `Owned<T>`, the recovering `check()` and the context-token base. Namespace `hmi::fw`.
 
-Status: new, **not wired into the firmware yet** (no other component requires it). The
-`Topology` that will own every channel and hand out the handles is a later step.
+Status: in use by the bench stick injection only. `main` and `remote_ui` require it;
+`remote_ui`'s `stick_inject.hpp` uses its `Mailbox` and `AtomicValue`. The other channels and the
+`Topology` that will own every channel and hand out the handles are a later step.
 
 ## Requirements
 
