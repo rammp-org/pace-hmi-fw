@@ -12,9 +12,9 @@
 ///          release build compiles none of this (CS-LAY-09, CS-TYP-05) and app_main is unchanged
 ///          (the L0 ratchet holds main.cpp's lines and statics).
 ///
-///          In a bench inject build it is StickInjectBench, a StickPipeline whose cycle() first
-///          swaps the ADC task's RawReadsMv for the injected ones (StickInjector::apply), then
-///          runs the real pipeline: calibration, mapping, keys, gate, XYTwist.
+///          In a bench inject build it is StickInjectBench, a StickPipeline whose reads() swaps
+///          the ADC task's RawReadsMv for the injected ones (StickInjector::apply); the island
+///          runs the real pipeline on them: calibration, mapping, keys, gate, XYTwist.
 ///
 ///          Who touches what (CS-OWN; one writer and one reader per channel):
 ///
@@ -58,8 +58,8 @@ using StickInjectActiveReader = hmi::fw::Reader<StickInjectActive>;
 /// @param active The injection-active flag's read end.
 void remote_ui_attach_stick_inject(StickInjectWriter writer, StickInjectActiveReader active);
 
-/// @brief The ADC task's stick with the bench injection in front of its reads. See the file
-///        comment.
+/// @brief The ADC task's stick with the bench injection in front of its reads (reads()). See
+///        the file comment.
 class StickInjectBench : public hmi::stick::StickPipeline {
 public:
   /// @brief The stick pipeline on @p config, and the channel ends handed to the remote UI.
@@ -74,18 +74,13 @@ public:
   StickInjectBench &operator=(StickInjectBench &&) = delete;
   ~StickInjectBench() = default;
 
-  /// @brief One ADC cycle (ADC task only), as StickPipeline::cycle, on the injected reads while
-  ///        an injection holds (until 300 ms after the last STICK), else on @p raw.
-  /// @param io What the cycle talks to (AdcStickIo).
-  /// @param raw This cycle's ADC reads.
-  /// @return Whether XYTwist was published.
-  template <typename Io> [[nodiscard]] bool cycle(Io &io, const hmi::stick::RawReadsMv &raw) {
-    return StickPipeline::cycle(io, apply(raw));
-  }
-
-private:
-  /// ADC task only (the mailbox's one reader): drains the mailbox, never blocking.
-  [[nodiscard]] hmi::stick::RawReadsMv apply(const hmi::stick::RawReadsMv &real) noexcept {
+  /// @brief The reads this cycle uses (ADC task only, once per cycle, before the cycle): the
+  ///        injected ones while an injection holds (until 300 ms after the last STICK), else
+  ///        @p real. The island passes them to StickPipeline::cycle and to its Io.
+  ///        Drains the mailbox (its one reader), never blocking.
+  /// @param real This cycle's ADC reads.
+  /// @return The reads for the pipeline.
+  [[nodiscard]] hmi::stick::RawReadsMv reads(const hmi::stick::RawReadsMv &real) noexcept {
     const auto now = std::chrono::steady_clock::now();
     hmi::stick::StickInjectMsg msg{};
     switch (mailbox_.read(msg)) {
@@ -102,6 +97,7 @@ private:
     return injector_.apply(real, now);
   }
 
+private:
   StickInjectMailbox mailbox_{StickInjectMailbox::Config{}};
   hmi::stick::StickInjector injector_;
   StickInjectActive active_{{.initial = false}};

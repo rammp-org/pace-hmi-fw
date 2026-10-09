@@ -2,4 +2,4 @@
 # pipeline (CS-LAY-02). Header-only: StickIsland is a template instantiated in main's unit.
 # README.md says what is in it.
 idf_component_register(INCLUDE_DIRS "include"
-                       REQUIRES adc filters logger task)
+                       REQUIRES adc filters logger stick task)

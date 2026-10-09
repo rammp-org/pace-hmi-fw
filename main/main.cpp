@@ -191,7 +191,17 @@ static hmi::stick::StickPipeline::Config stick_pipeline_config(const JoystickCal
 // The ADC task's side of StickPipeline::cycle. Runs on the ADC task only; every
 // member is what the stick block of adc_task_fn did inline before.
 struct AdcStickIo {
+  // What the ADC task keeps across cycles beside the pipeline: app_main's, handed to the
+  // island at start (hazard fixes C1 and C3 keep the output permit and the POST rest window
+  // here).
+  struct State {};
+
   espp::SimpleLowpassFilter &twist_lowpass;
+  State &state;
+
+  // Every cycle, valid or not, before the pipeline: the reads it gets (after the bench
+  // injection).
+  void note_reads(const hmi::stick::RawReadsMv & /*reads*/) {}
 
   // A calibration run just finished: the pipeline switches to it between two
   // samples, on the task that owns the stick.
@@ -832,7 +842,8 @@ extern "C" void app_main(void) {
   // calibration, the key trigger and the gate, owned by the island's task. A
   // StickSlot is the StickPipeline itself, or with CONFIG_HMI_BENCH_STICK_INJECT
   // the bench stick injection in front of its reads (stick_inject.hpp).
-  stick_island.start(stick_pipeline_config(joystick_cal));
+  AdcStickIo::State adc_state; // app_main never returns once the tasks run
+  stick_island.start(stick_pipeline_config(joystick_cal), adc_state);
 
   // bring up W5500 Ethernet + RTPS last so a missing cable / module can't
   // delay the HMI; on failure the UI keeps running without comms
