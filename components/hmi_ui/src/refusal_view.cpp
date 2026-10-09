@@ -204,6 +204,14 @@ void hmi::ui::RefusalView::lost_panel_observer(lv_observer_t *observer, lv_subje
     view->show(panel, true);
     return;
   }
+  // C3 §2.10: a seat press before the start-up check passed, for its window or until the
+  // check passes (poll clears it).
+  if (lv_subject_get_int(view->config_.refused) == REFUSED_POST &&
+      lv_obj_get_screen(panel) == ui_SeatScreen) {
+    view->fill_post_refused(panel, view->config_.texts->refused_post_seat_title);
+    view->show(panel, true);
+    return;
+  }
   if (view->config_.mcb_ready()) {
     view->show(panel, false);
     return;

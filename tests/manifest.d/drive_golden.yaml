@@ -8,7 +8,7 @@
   title: the drive code's port calls equal the hand-written C1 goldens; every table row taken
   level: L1
   path: tests/host/drive_golden
-  requirements: [REQ-DAD-07, REQ-DRV-16, REQ-UI-18]
+  requirements: [REQ-DAD-07, REQ-DRV-16, REQ-UI-18, REQ-UI-22]
   resources: [host]
   timeout_s: 300
   expected_s: 20

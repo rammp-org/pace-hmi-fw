@@ -102,6 +102,11 @@ dwells), `drive_ui/shared_subjects.hpp` (`SharedSubjects`) and `drive_ui/hold_ra
 | REQ-UI-16 | The calibrate hold applies only while locked (`locked` subject 1), on the Joystick screen, with no menu (hazard-c1-spec.md §2.8, G5) | bench B5''-9 (hazard-c1-spec.md §6) |
 | REQ-UI-17 | The Drive screen shows the drive adapter's notice in its own slot (DriveNoticeView, hmi_rtps_spec's kHmiNotice* texts), separate from the refusal banner, within 250 ms of a change; nothing while it is NONE. The hold poll (33 ms) hands the drive adapter the stick's hold reason (`DriveInputs::refresh_notice`), so a hold reason that changes between two ticks reaches the slot within one hold poll | DAD-012; bench B5''-1, B5''-6, B5''-10 (hazard-c1-spec.md §6) |
 | REQ-UI-18 | `DrivePort::sample` computes link CONNECTED at the sample (rtps_comms_link_state: a MibStatus less than 2 s old), not from the rtps_link subject | GLD-116 |
+| REQ-UI-19 | The TopBar shows the POST indicator on every screen but Boot, within 250 ms of a change; no banner hides it and it cannot be dismissed (hazard-c3-spec.md §2.8) | bench B5''-17, B5''-20, B5''-21 (hazard-c3-spec.md §7) |
+| REQ-UI-20 | A seat request (`UiApp::seat_request`, the only SeatCommand publish: the Seat screen and the Actuators page) publishes a SeatCommand only when the POST gate is PASS; otherwise it publishes nothing, raises REFUSED_POST (Seat screen and Actuators page: "Seat not ready", the blocking check's words) and gives the refusal feedback (hazard-c3-spec.md §2.10) | bench B5''-19 (hazard-c3-spec.md §7) |
+| REQ-UI-21 | The About screen shows the last reset's reason (hazard-c3-spec.md §2.9) | bench B5''-21 (hazard-c3-spec.md §7) |
+| REQ-UI-22 | `DrivePort::sample` reads the POST gate live (acquire); `post_ok` is true only for PASS | GLD-125 |
+| REQ-UI-23 | Each UI poll tick runs the POST runner, then the drive adapter's tick, then the indicator (`UiPoll::poll`) | review; no host test (ui_poll.cpp needs LVGL) |
 
 ## Tasks and dependencies
 

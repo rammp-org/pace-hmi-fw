@@ -186,8 +186,14 @@ void UiApp::seat_apply_state(const MIB::seatState &seat) {
 }
 
 // One seat request: an absolute target, clamped to the axis' range, so a lost or repeated
-// message cannot drift the seat.
+// message cannot drift the seat. Before the start-up check passed (the POST gate not PASS) no
+// SeatCommand goes out: the press is refused, felt and named (C3 §2.10, REQ-UI-20).
 void UiApp::seat_request(rammp::SeatAxis axis, int32_t target) {
+  if (!post_passed()) {
+    config_.cues->refused();
+    DrivePort<DriveUi>{&drive_ui_}.show_refused(REFUSED_POST, DRIVE_REFUSED_SHOW_MS);
+    return;
+  }
   const rammp::SeatAxisSpec &spec = rammp::kSeatAxes[rammp::index_of(axis)];
   (void)config_.link->publish_seat(
       axis, rammp::seat_units(spec, std::clamp(target, spec.min_value, spec.max_value)));
@@ -226,12 +232,21 @@ void UiApp::store_setting(int param, int32_t value) {
 }
 
 // ErrorBanner6. Raised only on a page that needs the MCB - the actuators - and then exactly as
-// on the drive and seat screens: while the link is down or the MCB's state is not OK. User data
-// is the app.
+// on the drive and seat screens: while the link is down or the MCB's state is not OK; or, for its
+// window, when a press there came before the start-up check passed (C3). User data is the app.
 void UiApp::setting_warning_observer(lv_observer_t *observer, lv_subject_t *) {
   UiApp *self = static_cast<UiApp *>(lv_observer_get_user_data(observer));
   lv_obj_t *panel = lv_observer_get_target_obj(observer);
-  if (lv_subject_get_int(self->settings_view_.page()) != ACTUATORS_PAGE || self->seat_ready()) {
+  if (lv_subject_get_int(self->settings_view_.page()) != ACTUATORS_PAGE) {
+    self->refusal_view_.show(panel, false);
+    return;
+  }
+  if (lv_subject_get_int(self->drive_ui_.entry_refused_subject()) == REFUSED_POST) {
+    self->refusal_view_.fill_post_refused(panel, rammp::kHmiRefusedPostSeatTitle);
+    self->refusal_view_.show(panel, true);
+    return;
+  }
+  if (self->seat_ready()) {
     self->refusal_view_.show(panel, false);
     return;
   }
@@ -376,6 +391,8 @@ void UiApp::settings_bound() {
   refusal_view_.bind_to_cause(ui_ErrorBanner6, setting_warning_observer, this);
   lv_subject_add_observer_obj(settings_view_.page(), setting_warning_observer, ui_ErrorBanner6,
                               this);
+  lv_subject_add_observer_obj(drive_ui_.entry_refused_subject(), setting_warning_observer,
+                              ui_ErrorBanner6, this);
 }
 
 void UiApp::diagnostics_bound() {

@@ -230,6 +230,7 @@ inline constexpr char kHmiNoticePostRunning[] = "Start-up check running"; // C3
 inline constexpr char kHmiNoticePostFailed[] = "Start-up check failed";   // C3
 // C3 §4.5: the refusal of a drive asked for before POST passed (its body: the check's words).
 inline constexpr char kHmiRefusedPostTitle[] = "Not ready to drive";            // C3
+inline constexpr char kHmiRefusedPostSeatTitle[] = "Seat not ready";            // C3, a seat press
 inline constexpr char kHmiNoticeStickFault[] = "Joystick fault";                // C1, until C2
 inline constexpr char kHmiNoticeStickCheck[] = "Checking the joystick";         // C2
 inline constexpr char kHmiNoticeCentreFirst[] = "Centre the joystick to drive"; // C1

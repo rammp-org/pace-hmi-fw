@@ -42,7 +42,8 @@ struct RefusalTexts {
   const char *seat_link_refused_title, *seat_mcb_refused_title;
   const char *drive_lost_link_title, *drive_lost_mcb_title;
   const char *link_lost_title, *mcb_fault_title; ///< a drive cut short
-  const char *refused_post_title; ///< C3: a drive asked for before the start-up check passed
+  const char *refused_post_title;      ///< C3: a drive asked for before the start-up check passed
+  const char *refused_post_seat_title; ///< C3: a seat press before the start-up check passed
 };
 
 /// One instance for every refusal banner. `refused` records only THAT a request was refused;
