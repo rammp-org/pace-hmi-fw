@@ -121,8 +121,9 @@ void hmi::ui::DriveUi::locked_screen_go() {
 // the next row must not also move the chair. The ADC task reads this and sends
 // the MCB a centred stick whenever it is false.
 // The rule is the drive session's pure stick_drives (drive_session_table.hpp).
-void hmi::ui::DriveUi::update_stick_gate() const {
+void hmi::ui::DriveUi::update_stick_gate() {
+  const bool menu = *config_.menu_open != nullptr;
   config_.stick_drives->store(hmi::drive_session::stick_drives(
-      lv_subject_get_int(config_.shared->locked) != 0, drive_screen_of(lv_screen_active()),
-      *config_.menu_open != nullptr));
+      lv_subject_get_int(config_.shared->locked) != 0, drive_screen_of(lv_screen_active()), menu));
+  menu_open_pub_.store(menu, std::memory_order_release);
 }

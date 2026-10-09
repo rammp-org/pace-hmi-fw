@@ -138,6 +138,13 @@ public:
   /// The stick output permit's channels (stick/permit_hooks.hpp): the POST gate, stick health
   /// and the hold reason. Any task, each through its own end (the table there).
   [[nodiscard]] constexpr hmi::stick::PermitHooks &permit_hooks() noexcept { return permit_hooks_; }
+  /// The refusal banner up (`refused`, a Refused value) as of its last change. Any task (an
+  /// acquire load): the bench's STATE line reads it from the remote-UI task.
+  [[nodiscard]] int32_t refused_any_task() const {
+    return refused_pub_.load(std::memory_order_acquire);
+  }
+  /// The drive UI's menu mirror (DriveUi::menu_open_any_task). Any task.
+  [[nodiscard]] bool menu_open_any_task() const { return drive_ui_.menu_open_any_task(); }
 
   /// @brief The joystick's LVGL keypad read: moves the cursor through each screen's focus
   ///        group. It drains the latch the ADC task fills, so one flick of the stick = one
@@ -197,6 +204,7 @@ private:
   static void action_ready_observer(lv_observer_t *observer, lv_subject_t *subject);
   void action_seat_up();
   static void diag_freq_observer(lv_observer_t *observer, lv_subject_t *subject);
+  static void refused_mirror_observer(lv_observer_t *observer, lv_subject_t *subject);
 
   // Navigation and the screens built on demand.
   void refuse_seat();
@@ -223,10 +231,11 @@ private:
 
   // The subjects several views read (were main's mib_state_subject, rtps_link_subject,
   // locked_subject, entry_refused_subject, seat_axis_value).
-  lv_subject_t mib_state_{}; ///< int: MIB::MibSystemState, as the MIB last reported it
-  lv_subject_t rtps_link_{}; ///< int: LinkState
-  lv_subject_t locked_{};    ///< int: 1 = locked, 0 = unlocked (set_locked)
-  lv_subject_t refused_{};   ///< int: Refused; refusal panels up unless REFUSED_NONE
+  lv_subject_t mib_state_{};            ///< int: MIB::MibSystemState, as the MIB last reported it
+  lv_subject_t rtps_link_{};            ///< int: LinkState
+  lv_subject_t locked_{};               ///< int: 1 = locked, 0 = unlocked (set_locked)
+  lv_subject_t refused_{};              ///< int: Refused; refusal panels up unless REFUSED_NONE
+  std::atomic<int32_t> refused_pub_{0}; ///< `refused`, for other tasks (refused_any_task)
   /// Raw value per seat axis, in the table's units, as the MCB last reported it.
   lv_subject_t seat_axis_value_[rammp::kSeatAxisCount]{};
   uint8_t seat_axis_count_ = 0; ///< actuators in the table

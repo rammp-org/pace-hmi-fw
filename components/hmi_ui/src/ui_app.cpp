@@ -249,6 +249,12 @@ void UiApp::action_ready_observer(lv_observer_t *observer, lv_subject_t *) {
 // the MCB agrees, and a refusal flashes on that page.
 void UiApp::action_seat_up() { seat_step(rammp::index_of(rammp::SeatAxis::ELEVATION), +1); }
 
+// The refusal banner's value, mirrored for other tasks (refused_any_task). User data is the app.
+void UiApp::refused_mirror_observer(lv_observer_t *observer, lv_subject_t *subject) {
+  static_cast<UiApp *>(lv_observer_get_user_data(observer))
+      ->refused_pub_.store(lv_subject_get_int(subject), std::memory_order_release);
+}
+
 // DiagnosticsFreqLabel: the rate, or "No data" while stale. User data is the app.
 void UiApp::diag_freq_observer(lv_observer_t *observer, lv_subject_t *) {
   static_cast<UiApp *>(lv_observer_get_user_data(observer))

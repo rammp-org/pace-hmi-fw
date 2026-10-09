@@ -129,6 +129,7 @@ public:
     const std::int64_t now = view_.now_us();
     const bool acted = apply(in, env(now), now);
     update_notice();
+    publish_state();
     busy_ = false;
     return acted;
   }
@@ -151,6 +152,7 @@ public:
       (void)apply(TICK_SEQUENCE[i], e, now);
     }
     update_notice();
+    publish_state();
     busy_ = false;
   }
 
@@ -168,6 +170,15 @@ public:
   [[nodiscard]] std::uint32_t publish_failures() const { return publish_failures_; }
   /// @brief Stops the MCB did not obey within kStopFaultAfter ("MCB did not stop"), since start.
   [[nodiscard]] std::uint32_t stop_faults() const { return stop_faults_; }
+  /// @brief The phase as of the last input or tick. Any task (an acquire load): the bench's
+  ///        STATE line reads it from the remote-UI task.
+  [[nodiscard]] hmi::drive_session::Phase published_phase() const {
+    return phase_pub_.load(std::memory_order_acquire);
+  }
+  /// @brief The Drive notice as of the last input or tick. Any task, as published_phase.
+  [[nodiscard]] DriveNotice published_notice() const {
+    return notice_pub_.load(std::memory_order_acquire);
+  }
 
 private:
   friend struct DriveAdapterTestPeer; // test-only access, defined in the test tree
@@ -238,6 +249,12 @@ private:
       notice_ = n;
       view_.show_notice(n);
     }
+  }
+
+  // The phase and the notice for other tasks (published_phase, published_notice).
+  void publish_state() {
+    phase_pub_.store(session_.phase(), std::memory_order_release);
+    notice_pub_.store(notice_, std::memory_order_release);
   }
 
   // One action, by the family that owns it. NONE and a value that is no Action: nothing.
@@ -475,6 +492,11 @@ private:
   // The stick's hold reason from the latest sample, and the notice last shown.
   hmi::stick::HoldReason hold_ = hmi::stick::HoldReason::NONE;
   DriveNotice notice_ = DriveNotice::NONE;
+  // The same, for other tasks (one byte each: lock-free).
+  std::atomic<hmi::drive_session::Phase> phase_pub_{hmi::drive_session::Phase::LOCKED};
+  std::atomic<DriveNotice> notice_pub_{DriveNotice::NONE};
+  static_assert(std::atomic<hmi::drive_session::Phase>::is_always_lock_free &&
+                std::atomic<DriveNotice>::is_always_lock_free);
   bool busy_ = false; // an input is being performed (re-entry check)
   espp::Logger logger_;
 };

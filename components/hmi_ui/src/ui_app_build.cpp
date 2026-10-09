@@ -103,6 +103,8 @@ void UiApp::bind_banners() {
   // observer already on it with it, and the lost panels bound below watch this one so the
   // drive screen can show a refused exit.
   lv_subject_init_int(&refused_, 0);
+  // Mirrored for other tasks (refused_any_task: the bench's STATE line).
+  lv_subject_add_observer(&refused_, refused_mirror_observer, this);
   refusal_view_.start_timer(DRIVE_REFUSED_SHOW_MS);
 
   // The resident screens' error banners (RefusalView).

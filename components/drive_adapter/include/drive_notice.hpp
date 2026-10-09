@@ -7,6 +7,7 @@
 /// @details Pure: the C++ standard library, the drive table's types and the stick's hold reason.
 
 #include <cstdint>
+#include <string_view>
 
 #include "drive_session_types.hpp"
 #include "stick/permit_types.hpp"
@@ -28,6 +29,31 @@ enum class DriveNotice : std::uint8_t {
   STICK_CHECK,      ///< hold reason STICK_CHECK (C2)
   CENTRE_FIRST,     ///< hold reason CENTRE_FIRST (G1)
 };
+
+/// @brief A notice's name, for logs and the bench's STATE line; "?" outside the enum.
+[[nodiscard]] constexpr std::string_view to_string(DriveNotice notice) noexcept {
+  switch (notice) {
+  case DriveNotice::NONE:
+    return "NONE";
+  case DriveNotice::MCB_DID_NOT_STOP:
+    return "MCB_DID_NOT_STOP";
+  case DriveNotice::STOPPING:
+    return "STOPPING";
+  case DriveNotice::MOTION_GUARD:
+    return "MOTION_GUARD";
+  case DriveNotice::NOT_CALIBRATED:
+    return "NOT_CALIBRATED";
+  case DriveNotice::POST_NOT_PASSED:
+    return "POST_NOT_PASSED";
+  case DriveNotice::STICK_FAULT:
+    return "STICK_FAULT";
+  case DriveNotice::STICK_CHECK:
+    return "STICK_CHECK";
+  case DriveNotice::CENTRE_FIRST:
+    return "CENTRE_FIRST";
+  }
+  return "?";
+}
 
 /// @brief The Drive notice from the stop notice and the hold reason (hazard-c1-spec.md §2.7):
 ///        MCB did not stop > Stopping > the hold reason in §3.3's order > none.

@@ -120,7 +120,12 @@ public:
   ///        (drive_session's stick_drives). Called at exactly the GATE_TRIGGERS sites
   ///        (drive_session_table.hpp): the drive session's GATE_UPDATE and NavView's
   ///        `gate_update`.
-  void update_stick_gate() const;
+  void update_stick_gate();
+  /// @brief The menu open (an overlay up) as of the last gate update, which every menu open and
+  ///        close runs (GATE_TRIGGERS). Any task (an acquire load): the bench's STATE line.
+  [[nodiscard]] bool menu_open_any_task() const {
+    return menu_open_pub_.load(std::memory_order_acquire);
+  }
   void nav_home() const { config_.nav_home(); }
   void refusal_feedback() const { config_.refusal_feedback(); }
   void haptic_click() const { config_.haptic_click(); }
@@ -163,6 +168,8 @@ private:
   // 33 ms -- so a completed touch hold was armed again at once, and one long press
   // started a run and then cancelled it.
   bool calibrate_armed_ = true;
+  // The menu as of the last gate update, for other tasks (menu_open_any_task).
+  std::atomic<bool> menu_open_pub_{false};
 };
 
 } // namespace hmi::ui

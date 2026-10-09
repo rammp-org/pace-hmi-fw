@@ -383,6 +383,11 @@ TEST_CASE("DAD-010 the Drive notice reaches the port once per change, the stop b
   adapter.exit_hold_done(); // the stop ranks above the hold reason
   TEST_ASSERT_EQUAL_UINT(2, g_port.notice_count);
   TEST_ASSERT_TRUE(g_port.notices[1] == DriveNotice::STOPPING);
+  // The same, for other tasks (the bench's STATE line).
+  TEST_ASSERT_TRUE(adapter.published_notice() == DriveNotice::STOPPING);
+  TEST_ASSERT_TRUE(adapter.published_phase() == ds::Phase::EXITING);
+  TEST_ASSERT_TRUE(da::to_string(adapter.published_notice()) == "STOPPING");
+  TEST_ASSERT_TRUE(ds::to_string(adapter.published_phase()) == "EXITING");
   g_port.sample.mib = ds::MibState::IDLE;
   g_port.sample.hold = HoldReason::GATE_SHUT;
   adapter.tick(); // relock: the stop ends; the gate is shut: no text

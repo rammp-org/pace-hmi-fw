@@ -63,6 +63,25 @@ constexpr Phase phase_of(const CodeVars &v) noexcept {
   return v.unlock_timer_armed ? Phase::UNLOCKING : Phase::DRIVING;
 }
 
+/// @brief A phase's name, for logs and the bench's STATE line; "?" outside the enum.
+constexpr std::string_view to_string(Phase p) noexcept {
+  switch (p) {
+  case Phase::LOCKED:
+    return "LOCKED";
+  case Phase::ASKING:
+    return "ASKING";
+  case Phase::UNLOCKING:
+    return "UNLOCKING";
+  case Phase::DRIVING:
+    return "DRIVING";
+  case Phase::EXITING:
+    return "EXITING";
+  case Phase::EXIT_REFUSED:
+    return "EXIT_REFUSED";
+  }
+  return "?";
+}
+
 constexpr bool is_locked_phase(Phase p) noexcept {
   return p == Phase::LOCKED || p == Phase::ASKING;
 }
