@@ -29,9 +29,10 @@ public:
     T initial{}; ///< The value before the first write.
   };
 
-  /// @brief Creates the value.
+  /// @brief Creates the value. constexpr, so an AtomicValue can be a member of a constant
+  ///        initialised object (no global constructor).
   /// @param config The configuration.
-  explicit AtomicValue(const Config &config) noexcept
+  constexpr explicit AtomicValue(const Config &config) noexcept
       : value_(config.initial) {}
 
   AtomicValue(const AtomicValue &) = delete;

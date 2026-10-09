@@ -770,6 +770,9 @@ TEST_CASE("STK-100 10,000 cycles of monitor + pipeline under the armed allocatio
     void show(const Position &) {}
     int drive_speed() { return 10; }
     bool stick_drives() { return true; }
+    Permit output_permit(const Position &) const {
+      return {.output = true, .button = true, .reason = HoldReason::NONE}; // allowed
+    }
     bool button_pressed() { return false; }
     bool publish(const Command &, bool) { return true; }
   };

@@ -11,10 +11,13 @@ REPO ?= $(abspath $(HERE)/../../..)
 
 COMP := $(REPO)/components/post
 
-SRCS_UNDER_TEST := $(COMP)/src/post.cpp
+SRCS_UNDER_TEST := $(COMP)/src/post.cpp $(COMP)/src/runner.cpp $(COMP)/src/indicator.cpp
 TEST_SRCS       := $(HERE)/test_post.cpp \
-                   $(HERE)/test_idf_parity.cpp
-INCLUDES        := $(HERE) $(COMP)/include
+                   $(HERE)/test_idf_parity.cpp \
+                   $(HERE)/test_runner.cpp
+INCLUDES        := $(HERE) $(COMP)/include $(REPO)/components/stick/include
+# POST-048: the accumulator and the runner under the host allocation guard (TS-DET-08).
+ALLOC_GUARD     := 1
 
 include $(REPO)/tests/host/common.mk
 
@@ -24,3 +27,6 @@ $(call obj_of,$(SRCS_UNDER_TEST)): CXX_WARN := $(WARN_FLAGS) -Wswitch-enum
 
 IDF_ROOT ?= $(abspath $(UNITY_DIR)/../../../..)
 $(call obj_of,$(HERE)/test_idf_parity.cpp): CXXFLAGS_ALL += -DPOST_IDF_ROOT='"$(IDF_ROOT)"'
+
+# POST-051 reads main/selftest.cpp's reset_reason_name, to keep the copy in step.
+$(call obj_of,$(HERE)/test_runner.cpp): CXXFLAGS_ALL += -DPOST_REPO_ROOT='"$(REPO)"'

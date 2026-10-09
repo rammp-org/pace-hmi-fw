@@ -11,9 +11,11 @@
 
 #pragma once
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <string>
 #include <string_view>
 
@@ -213,6 +215,27 @@ static_assert(sizeof(kHmiDriveNotGrantedText) <= kErrorTextLen &&
                   sizeof(kHmiDriveStoppedText) <= kErrorTextLen &&
                   sizeof(kHmiExitRefusedText) <= kErrorTextLen,
               "refusal body outgrows the banner it shares with MIB faults");
+
+/* The Drive screen's notice (docs/plans/hazard-c1-spec.md §2.7, §3.3; texts approved by the
+   owner, decision F1, 2026-10-08): the user's stop, then why the stick is held. Its own slot,
+   not the refusal banner. One table for every hazard fix; each text has one owner spec. */
+inline constexpr char kHmiNoticeMcbDidNotStop[] = "MCB did not stop";                      // C1
+inline constexpr char kHmiNoticeStopping[] = "Stopping: waiting for the MCB";              // C1
+inline constexpr char kHmiNoticeWaitingForMcb[] = "Waiting for the MCB";                   // C4
+inline constexpr char kHmiNoticeNotCalibrated[] = "The joystick must be calibrated first"; // C1
+inline constexpr char kHmiNoticePostNotRun[] = "Start-up check not run";                   // C1
+// C3 (hazard-c3-spec.md §1, §2.8): the POST gate PENDING on a latched check, or FAIL, when the
+// blocking check's own words are not given (the TopBar indicator's per-check texts are).
+inline constexpr char kHmiNoticePostRunning[] = "Start-up check running"; // C3
+inline constexpr char kHmiNoticePostFailed[] = "Start-up check failed";   // C3
+// C3 §4.5: the refusal of a drive asked for before POST passed (its body: the check's words).
+inline constexpr char kHmiRefusedPostTitle[] = "Not ready to drive";            // C3
+inline constexpr char kHmiRefusedPostSeatTitle[] = "Seat not ready";            // C3, a seat press
+inline constexpr char kHmiNoticeStickFault[] = "Joystick fault";                // C1, until C2
+inline constexpr char kHmiNoticeStickCheck[] = "Checking the joystick";         // C2
+inline constexpr char kHmiNoticeCentreFirst[] = "Centre the joystick to drive"; // C1
+static_assert(sizeof(kHmiNoticeNotCalibrated) <= kErrorTextLen,
+              "a Drive notice outgrows the width its slot is drawn for");
 static_assert(sizeof(kHmiDriveNotGrantedFooter) <= kErrorFooterLen &&
                   sizeof(kHmiDriveStoppedFooter) <= kErrorFooterLen &&
                   sizeof(kHmiExitRefusedFooter) <= kErrorFooterLen,
@@ -238,5 +261,60 @@ static_assert(std::string_view(kHmiNoPeerFooter).ends_with(MIB::kMibStatus.name)
 
 /* ERROR with an empty error_message: printf(state number, to_string(state)) */
 inline constexpr char kHmiMcbNoTextFmt[] = "systemState=%u (%s), error_message empty";
+
+/* ==== The quick POST's words (hazard-c3-spec.md §2.8, §2.12; owner F1, 2026-10-08) ======
+   The TopBar's persistent indicator and the About screen. One text per check, keyed by the
+   check's name in components/post's table; a FAIL adds what to do unless the text says it. */
+
+inline constexpr char kPostChecking[] = "Start-up check";       // a latched check gathering
+inline constexpr char kPostNotRun[] = "Start-up check not run"; // the runner never ran
+inline constexpr char kPostFailedPrefix[] = "Start-up check failed: ";
+inline constexpr char kPostTimedOutPrefix[] = "Start-up check timed out: ";
+inline constexpr char kPostTurnOffAndOn[] = ". Turn the HMI off and on";
+inline constexpr char kPostCalSavedRestart[] = "Calibration saved. Restart the HMI to drive";
+// After "Joystick read failed" when the POST timed out and Read ADC is not running (owner,
+// 2026-10-08).
+inline constexpr char kPostStickTaskMissing[] = ": stick task not running";
+inline constexpr char kPostLastResetKey[] = "Last reset"; // the About row: "Last reset: <name>"
+
+/* A check's words. A FAIL adds the reset's name when `names_reset`, then "Turn the HMI off and
+   on" when `turn_off_and_on` (not when the text already says what to do). No enum here:
+   scripts/rammp_rtps.py scrapes this header's enums as wire values. */
+struct PostCheckText {
+  std::string_view check; // the check's name (components/post CHECKS)
+  const char *text;
+  bool names_reset;     // the unclean-reset text: the reset's name follows
+  bool turn_off_and_on; // a FAIL ends "... Turn the HMI off and on"
+};
+
+inline constexpr PostCheckText kPostCheckTexts[] = {
+    {"adc.valid", "Joystick read failed", false, true},
+    {"joy.cal_saved", "The joystick must be calibrated first", false, false},
+    {"joy.cal_span", "Joystick calibration too small: calibrate again", false, false},
+    {"i2c.missing", "Internal device missing", false, true},
+    {"sys.clean_reset", "Restarted after a fault: ", true, true},
+    {"img.ok", "Firmware image not valid", false, true},
+    {"mem.int_min", "Low memory", false, true},
+    {"mem.int_block", "Low memory", false, true},
+    {"mem.dma_min", "Low memory", false, true},
+    {"mem.psram_free", "Low memory", false, true},
+    {"stk.adc", "Low memory", false, true},
+    {"stk.ui", "Low memory", false, true},
+    {"joy.x_cal_off", "Centre the joystick", false, false},
+    {"joy.y_cal_off", "Centre the joystick", false, false},
+    {"joy.twist_cal_off", "Centre the joystick", false, false},
+    {"joy.x_noise", "Centre the joystick", false, false},
+    {"joy.y_noise", "Centre the joystick", false, false},
+    {"joy.twist_noise", "Centre the joystick", false, false},
+    {"joy.button_idle", "Release the joystick button", false, false},
+};
+
+/* A check's text, or nullptr for a name the table does not hold. */
+constexpr const PostCheckText *post_check_text(std::string_view check) {
+  const auto *const end = std::end(kPostCheckTexts);
+  const auto *const it = std::find_if(std::begin(kPostCheckTexts), end,
+                                      [check](const PostCheckText &t) { return t.check == check; });
+  return it == end ? nullptr : it;
+}
 
 } // namespace rammp

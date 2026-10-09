@@ -8,4 +8,4 @@
 # library takes no PRIVATE options, so fw_component_options() does not apply here.
 idf_component_register(
   INCLUDE_DIRS "include"
-  REQUIRES drive_session logger)
+  REQUIRES drive_session logger stick)

@@ -17,19 +17,29 @@ the drive table review (CS-SAF-05, two approvals; D1: the owner is the only appr
 | `DriveAdapter<View>`, the `DrivePort` concept, `DriveSample`, `DriveBanner` | `include/drive_adapter.hpp` |
 | The firmware's port, `hmi::ui::DrivePort<DriveUi>` (the LVGL and rtps_comms calls; moved from main.cpp's former `MainDriveView`) | `components/drive_ui/include/drive_ui/drive_port.hpp` |
 | The one instance | `main/main.cpp` |
-| The adapter's own contract (DAD-001..006) | `test/` |
-| The goldens: the drive code before the move vs after, at the port and at the lv_/rtps boundary (GLD-001..004) | `tests/host/drive_golden` |
+| The Drive notice (`DriveNotice`, `drive_notice()`), its own header so a port can name it | `include/drive_notice.hpp` |
+| The adapter's own contract (DAD-001..005, DAD-007..011) | `test/` |
+| The goldens: the hazard fix C1's hand-written scenarios at the port (GLD-101..116); GLD-001/002/004, which pinned the move, are retired and their logs kept as history | `tests/host/drive_golden` |
 
 ## Model
 
 `input(in)`: read the clock (`now_us`), sample the port (`sample`), build the session's `Env`
 (each deadline against that `now`), `step`, then perform each action in order. `tick()`: the
-same for TICK_FOLLOW; then one more clock read and sample shared by TICK_EXIT_DUE, TABLE.md U3's
-locked exit deadline, TICK_WARN_DUE and TICK_GIVEUP_DUE (two Envs per tick, DRV-022).
-`exit_hold_done()` while locked is TABLE.md U3, kept as it was and outside the table (parked
-for the owner). The adapter keeps the deadlines (`wait_warn`, `wait_until`, `exit_until`), the
-exit latches, the time of the last ask and the DriveCommand request; the session keeps the
-phase and its hidden variables.
+same for TICK_FOLLOW (`TICK_SEQUENCE[0]`); then one more clock read and sample shared by the
+other sub-steps of `TICK_SEQUENCE`, in its order (TICK_EXIT_DUE, TICK_STOP_FAULT_DUE,
+TICK_STOP_RESEND, TICK_WARN_DUE, TICK_GIVEUP_DUE: two Envs per tick, DRV-116).
+`exit_hold_done()` is a plain input in every phase (C1: rows 42-43 replace TABLE.md U3). After
+every input and tick the Drive notice (`drive_notice`: MCB did not stop > Stopping > the stick's
+hold reason in its order > none) is handed to the port once per change; so is it after
+`refresh_notice(hold)`, which the UI calls every hold poll (33 ms) with the stick's hold reason
+as it is now, so the screen follows the ADC task between two ticks (REQ-UI-17). That steps
+nothing and is dropped while an input is performed. `published_phase()`, `published_notice()`
+and `notice_for(hold)` are for other tasks (atomics): `notice_for` combines the stop notice as of
+the last input or tick with a hold reason the caller read (the bench's STATE line). The adapter
+keeps the deadlines (`wait_warn`, `wait_until`, `exit_until`), the exit latches, the time of the last ask,
+the DriveCommand request, and (C1) the stop timer (`stop_first_us`, ARM_STOP_TIMER /
+CLEAR_STOP_FAULT), the last DISABLE published (the re-send counts from it), the publish failures
+and the stop faults; the session keeps the phase and its hidden variables.
 
 ## The port (`DrivePort`)
 
@@ -39,9 +49,9 @@ does is dropped and logged, see REQ-DAD-03).
 
 | Method | Action(s) | DrivePort (drive_ui) does |
 | --- | --- | --- |
-| `sample()` | every input | `rtps_link_subject`, `mib_state_subject`, `lv_screen_active()`, `nav_menu_open`, in that order |
-| `now_us()` | every input; SEND_ENABLE; ARM_EXIT_DEADLINE; U3 | `esp_timer_get_time()` |
-| `publish(enable)` | SEND_ENABLE, SEND_DISABLE, PUBLISH_DRIVE | `rtps_comms_publish_drive(request, drive_profile_published)` (result ignored: H6) |
+| `sample()` | every input | the link live (`rtps_comms_link_state`, REQ-UI-18), `mib_state_subject`, `lv_screen_active()`, `nav_menu_open`, `joystick_cal_running()`, the stick's hold reason, the POST gate (PASS: `post_ok`, C3), in that order |
+| `now_us()` | every input; SEND_ENABLE; ARM_EXIT_DEADLINE | `esp_timer_get_time()` |
+| `publish(enable)` | SEND_ENABLE, SEND_DISABLE, PUBLISH_DRIVE | `rtps_comms_publish_drive(request, drive_profile_published)`; returns its result, which the adapter does not use yet (H6) |
 | `ring_wait()`, `ring_rest()` | RING_WAIT, RING_REST | `lock_visual_wait()`, `lock_visual_rest()` |
 | `lock_open_visual()` | LOCK_OPEN_VISUAL | ring full, shackle up, STRONG_CLICK |
 | `unlock_timer_start/cancel/forget()` | START_UNLOCK_TIMER, CANCEL_UNLOCK_TIMER, UNLOCK_TIMER_DONE | `unlock_timer_start()`, `unlock_timer_cancel()`, `unlock_advance_timer = nullptr` |
@@ -49,19 +59,24 @@ does is dropped and logged, see REQ-DAD-03).
 | `gate_update()` | GATE_UPDATE | `DriveUi::update_stick_gate()` |
 | `menu_on_arrival(open)` | OPEN/CLEAR_MENU_ON_ARRIVAL | `nav_menu_on_arrival = open` |
 | `go_locked_screen()`, `go_drive_screen()`, `nav_home()` | GO_LOCKED_SCREEN, GO_DRIVE_SCREEN, NAV_HOME | `locked_screen_go()`, fade to Drive over kUnlockDissolveMs, `nav_home()` |
-| `show_banner(banner)` | SHOW_* | `DrivePort::show_refused(kRefused*, dwell)` |
+| `show_banner(banner)` | SHOW_* (C3: SHOW_REFUSED_POST, REFUSED_POST) | `DrivePort::show_refused(kRefused*, dwell)` |
 | `refusal_feedback()` | REFUSAL_FEEDBACK | `refusal_feedback()` |
+| `show_notice(notice)` | after every input, tick and `refresh_notice`, on a change | the Drive screen's notice slot (hmi_ui's DriveNoticeView) |
 
 ## Requirements
 
 | ID | Requirement | Tests |
 | --- | --- | --- |
-| REQ-DAD-01 | Driven by the same inputs, the adapter (through the port) makes the same port calls, clock reads, samples and lv_/rtps calls, in the same order, as the main.cpp drive code before the move | GLD-001, GLD-002, GLD-004 (GLD-003: the scenarios take all 41 rows) |
+| REQ-DAD-01 | RETIRED 2026-10-08, superseded by REQ-DAD-07. Driven by the same inputs, the adapter (through MainDriveView) makes the same port calls, clock reads, samples and lv_/rtps calls, in the same order, as the main.cpp drive code before the move | – |
 | REQ-DAD-02 | A new adapter is LOCKED with DISABLE as the request and calls nothing until an input | DAD-001 |
 | REQ-DAD-03 | An input that arrives while another is being performed is dropped and logged; the one in progress completes and the adapter stays usable | DAD-002 |
 | REQ-DAD-04 | The warn and give-up deadlines count from the ask by the configured windows, which default to the table's kDriveAnswer (750 ms) and kDriveWait (2 s) | DAD-003, DAD-004 |
 | REQ-DAD-05 | A corrupted input performs the session's safe state through the port and is logged | DAD-005 |
-| REQ-DAD-06 | The exit hold while locked (TABLE.md U3) sends DISABLE, and its deadline raises EXIT_REFUSED once | DAD-006 |
+| REQ-DAD-06 | RETIRED 2026-10-08, superseded by REQ-DRV-25. The exit hold while locked (TABLE.md U3) sends DISABLE, and its deadline raises EXIT_REFUSED once | – |
+| REQ-DAD-07 | Driven by the C1 golden scenarios, the adapter makes the port calls hazard-c1-spec.md §5.2 writes | GLD-101..114 (GLD-115: the scenarios take every row) |
+| REQ-DAD-08 | The stop timer starts at the first stop of an exit and is not reset by a repeated stop; the last-DISABLE time is every DISABLE published; the Env's stop and re-send guards follow hazard-c1-spec.md §2.1 exactly at their boundaries | DAD-007, DAD-008, DAD-011 |
+| REQ-DAD-09 | Every DriveCommand publish result is checked; a failure is counted and logged at most once a second, and the re-send schedule does not change | DAD-009 |
+| REQ-DAD-10 | After every input and tick, the Drive notice (MCB did not stop > Stopping > the hold reason in its order > none) is handed to the port once per change | DAD-010, DAD-012 |
 
 ## Tasks
 

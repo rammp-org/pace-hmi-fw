@@ -1,9 +1,17 @@
-# Drive session: as-is transition table (oracle)
+# Drive session: transition table (oracle)
 
-Status: **AI-derived, unreviewed** (2026-10-06, agent O). Characterises the code at e2047a4
-(`main.cpp` split into `main/frag_*.inc`, one translation unit, verbatim). It pins today's
-behaviour, hazards included. It is not a design. Fixing a row is a behaviour change: it needs two
-human approvals (CS-SAF-05) and a new table.
+Status: rows 1-41 are the AS-IS characterisation of the code at e2047a4 (`main.cpp` split into
+`main/frag_*.inc`, one translation unit, verbatim; agent O, 2026-10-06). The hazard fix C1
+(`docs/plans/hazard-c1-spec.md`, approved by the owner on 2026-10-08) changes rows 1-9, 21, 22,
+25, 26, 31 and 32 and appends rows 42-49: the MCB is the authority on driving (M1), every
+relock sends one DISABLE (H5), the user's stop is re-sent until the MCB stops (G4), and no entry
+happens during a calibration or behind the Boot screen (G5, U4). Any further row change is a
+behaviour change: it needs the owner's approval (CS-SAF-05) and a new fingerprint.
+
+The hazard fix C3 (`docs/plans/hazard-c3-spec.md`, approved the same day) changes rows 1, 2, 18,
+31 and 32 and appends rows 50-54: one DISABLE on the first fresh link after boot (rows 50-51),
+entry only once it is done, and no ENABLE before the POST gate is PASS (H2), with the refusals
+REFUSED_POST (rows 52-54). POST is not a phase: it is the Env guard `POST_OK`, read live.
 
 Correction (2026-10-06, agent A2, for the owner's review): rows 3–6, 8 and 9 gain
 CLEAR_MENU_ON_ARRIVAL. The code has always written `nav_menu_on_arrival := then_menu` on every
@@ -11,7 +19,8 @@ relock (frag_drive.inc:75, orig 1598); the table recorded only the `true` case (
 firmware's behaviour does not change; the table now says what it does.
 
 The data is `include/drive_session_table.hpp`, namespace `hmi::drive_session`; its enums and row
-structs are in `include/drive_session_types.hpp`. Those headers win
+structs are in `include/drive_session_types.hpp`, the hold gestures' tables (§3) in
+`include/drive_session_hold.hpp`. Those headers win
 over this page. This page is the same table for reading, plus a D4 diagram, the hazards, and the
 questions left open. The agent that writes the extraction never edits the header (CORE never-list:
 declarations).
@@ -31,10 +40,10 @@ orig 1067. In today's residual `main.cpp`, every line after the fragment include
 | Part | What it is |
 | --- | --- |
 | **Phase** | `LOCKED`, `ASKING`, `UNLOCKING`, `DRIVING`, `EXITING`, `EXIT_REFUSED`: the plan's six phases, kept because the code supports exactly these. Each is a projection of five code variables (`phase_of`, §1.1). |
-| **Hidden** | The session variables that Phase does not hold: `WARN_ARMED`, `GIVEUP_ARMED`, `THEN_MENU`, `REQUEST_ENABLE` (the value of `drive_request`), and `UNLOCK_TIMER_ARMED`. They are guard bits, so rows can test them. Actions set and clear them (`ACTION_EFFECTS`). Each phase has an invariant over them (`PHASE_INVARIANTS`, §1.2). |
-| **Env** | Sampled when the input arrives: link `CONNECTED`; the MIB state (→ `DRIVING_OK`, `MCB_READY`); the screen (`ON_LOCKED/DRIVE/SEAT_SCREEN`); `MENU_OPEN`; and `now` against each deadline (`EXIT/WARN/GIVEUP_ELAPSED`). `env_guards(Env)` derives the bits, so impossible combinations never come up. |
+| **Hidden** | The session variables that Phase does not hold: `WARN_ARMED`, `GIVEUP_ARMED`, `THEN_MENU`, `REQUEST_ENABLE` (the value of `drive_request`), `UNLOCK_TIMER_ARMED`, and (C1) `STOP_FAULT` ("MCB did not stop" raised for this stop), and (C3) `BOOT_STOP_DONE` (the boot DISABLE went, or the user's ENABLE made it moot). They are guard bits, so rows can test them. Actions set and clear them (`ACTION_EFFECTS`). Each phase has an invariant over them (`PHASE_INVARIANTS`, §1.2). |
+| **Env** | Sampled when the input arrives: link `CONNECTED` (read live: a MibStatus less than 2 s old); the MIB state (→ `DRIVING_OK`, `MCB_READY`); the screen (`ON_LOCKED/DRIVE/SEAT/BOOT_SCREEN`); `MENU_OPEN`; `now` against each deadline (`EXIT/WARN/GIVEUP_ELAPSED`); and (C1) `CALIBRATING`, `STOP_FAULT_ELAPSED` (the stop timer armed and `kStopFaultAfter` passed) and the re-send (`RESEND_FAST_DUE`: `kStopResend − kStopResendSlack` since the last DISABLE; `RESEND_SLOW_DUE`: `kStopResendSlow − kStopResendSlack`, which implies FAST); and (C3) `POST_OK` (the POST gate PASS, read live). `env_guards(Env)` derives the bits, so impossible combinations never come up. |
 | **Input** | There is **no MIB_UPDATE event.** A MibStatus only writes subjects (`main.cpp:1647`, orig 6269, RTPS task, under `lvgl_mutex`). The session looks at those subjects on the 250 ms tick (`rtps_poll_cb`, `frag_rtps_poll.inc:37-45`, orig 674-682), or when a user input arrives. |
-| **TICK** | Not a single input. `drive_wait_poll` (`frag_drive.inc:99-122`, orig 1622-1645) runs `drive_screen_follow_state` **first** and then three deadline checks, each one seeing the state the previous step left. So one TICK is `TICK_SEQUENCE` = `TICK_FOLLOW`, `TICK_EXIT_DUE`, `TICK_WARN_DUE`, `TICK_GIVEUP_DUE`, applied in that order with **two Envs**: `TICK_FOLLOW` on the Env sampled when the tick starts; the three deadline checks on one Env sampled after follow-state's actions ran (`now` is read once, after follow-state, as `drive_wait_poll` always did). A deadline that passes between the two samples is acted on in the same tick. The deadline rows read only `*_ELAPSED` and hidden bits, so the second Env differs from the first only in time. Pinned by DRV-022. |
+| **TICK** | Not a single input. `drive_wait_poll` (`frag_drive.inc:99-122`, orig 1622-1645) runs `drive_screen_follow_state` **first** and then the other sub-steps, each one seeing the state the previous step left. So one TICK is `TICK_SEQUENCE` = `TICK_FOLLOW`, `TICK_BOOT_STOP`, `TICK_EXIT_DUE`, `TICK_STOP_FAULT_DUE`, `TICK_STOP_RESEND`, `TICK_WARN_DUE`, `TICK_GIVEUP_DUE`, applied in that order with **two Envs**: `TICK_FOLLOW` on the Env sampled when the tick starts; the other six on one Env sampled after follow-state's actions ran (`now` is read once, after follow-state). A deadline or re-send that falls due between the two samples is acted on in the same tick; a relock on the first Env ends the stop before any re-send. Pinned by DRV-116 and DSO-018. |
 | **Priority** | Within one (from, input), rows are pairwise exclusive. This is checked by `static_assert` (syntactically) and by DSO-002 (by brute force), so order inside a group does not matter. Order matters only between the steps of one tick (`TICK_SEQUENCE`) and between the steps of one hold poll (`HOLD_POLL_SEQUENCE`). Rows are listed in the order the code evaluates them. |
 | **Oracle contract** | For every (phase, hidden, input, env) that satisfies `hidden_valid` and `INPUT_PRECONDITIONS`, at most one row matches (`find_row`). If one matches, the phase becomes `to`, hidden becomes `apply(actions, hidden)`, and the actions happen in row order. If none matches, nothing changes, and nothing is sent or shown (TS-UNIT-08). |
 
@@ -53,12 +62,12 @@ orig 1067. In today's residual `main.cpp`, every line after the fragment include
 
 | Phase | Always true | Always false |
 | --- | --- | --- |
-| LOCKED | – | WARN_ARMED, THEN_MENU, UNLOCK_TIMER_ARMED |
-| ASKING | – | THEN_MENU, UNLOCK_TIMER_ARMED |
-| UNLOCKING | UNLOCK_TIMER_ARMED | WARN_ARMED, GIVEUP_ARMED, THEN_MENU |
-| DRIVING | – | WARN_ARMED, GIVEUP_ARMED, THEN_MENU, UNLOCK_TIMER_ARMED |
-| EXITING | – | WARN_ARMED, GIVEUP_ARMED, REQUEST_ENABLE |
-| EXIT_REFUSED | – | WARN_ARMED, GIVEUP_ARMED, THEN_MENU, REQUEST_ENABLE |
+| LOCKED | – | WARN_ARMED, THEN_MENU, UNLOCK_TIMER_ARMED, STOP_FAULT |
+| ASKING | – | THEN_MENU, UNLOCK_TIMER_ARMED, STOP_FAULT |
+| UNLOCKING | UNLOCK_TIMER_ARMED, BOOT_STOP_DONE | WARN_ARMED, GIVEUP_ARMED, THEN_MENU, STOP_FAULT |
+| DRIVING | BOOT_STOP_DONE | WARN_ARMED, GIVEUP_ARMED, THEN_MENU, UNLOCK_TIMER_ARMED, STOP_FAULT |
+| EXITING | BOOT_STOP_DONE | WARN_ARMED, GIVEUP_ARMED, REQUEST_ENABLE |
+| EXIT_REFUSED | BOOT_STOP_DONE | WARN_ARMED, GIVEUP_ARMED, THEN_MENU, REQUEST_ENABLE |
 
 Why each one holds:
 - WARN_ARMED ⇒ ASKING. Only `drive_request_enter` arms it, right after `lock_visual_wait`. ASKING
@@ -70,58 +79,66 @@ Why each one holds:
   ENABLE while unlocked.
 - UNLOCK_TIMER_ARMED is armed only by `set_locked(false)`. It is cleared by any `set_locked` and
   when it fires, and it survives UNLOCKING → EXITING.
+- STOP_FAULT ⇒ EXITING or EXIT_REFUSED (C1). It is raised only there (rows 44-45) and cleared by
+  every row from them to LOCKED (rows 7-9) and by the safe state (DSO-014).
+- BOOT_STOP_DONE in every unlocked phase (C3): only rows 1-2 leave the locked phases and both need
+  it; nothing clears it, and the safe state does not set it (DSO-020).
 
-## 2. Transition table (41 rows)
+## 2. Transition table (54 rows)
 
 Guards are written `+X` (X must be true) and `!X` (X must be false). `—` means always.
-Abbreviations: DOK = DRIVING_OK, RDY = MCB_READY, LINK = LINK_CONNECTED.
+Abbreviations: DOK = DRIVING_OK, RDY = MCB_READY, LINK = LINK_CONNECTED, CAL = CALIBRATING,
+BOOT = ON_BOOT_SCREEN, SFE = STOP_FAULT_ELAPSED, SF = STOP_FAULT, FAST/SLOW = RESEND_FAST_DUE /
+RESEND_SLOW_DUE, POST = POST_OK, BSD = BOOT_STOP_DONE. **C1** / **C3** mark a row the hazard
+fix C1 / C3 changed or added.
 
 Action groups, expanded in the header:
 - **F1** = CLEAR_WARN, CLEAR_GIVEUP, CLEAR_EXIT_DEADLINE, CLEAR_EXIT_REQUESTED, CLEAR_THEN_MENU,
   LOCK_OPEN_VISUAL, CANCEL_UNLOCK_TIMER, START_UNLOCK_TIMER, SET_UNLOCKED, GATE_UPDATE.
 - **F2** = CLEAR_EXIT_DEADLINE, CLEAR_EXIT_REQUESTED, CLEAR_THEN_MENU,
   OPEN_MENU_ON_ARRIVAL or CLEAR_MENU_ON_ARRIVAL, CANCEL_UNLOCK_TIMER, RING_REST, GO_LOCKED_SCREEN,
-  SET_LOCKED, GATE_UPDATE, [banner]. It never sends DISABLE. The menu flag is
+  SET_LOCKED, GATE_UPDATE, **SEND_DISABLE** (C1: one DISABLE, after the gate shuts), then the
+  banner (rows 3-6) or **CLEAR_STOP_FAULT** (rows 7-9: the stop ends). The menu flag is
   `nav_menu_on_arrival := then_menu` (frag_drive.inc:75, orig 1598), written before the load:
   OPEN only in row 7, CLEAR in every other relock (DSO-013).
 - **ASK(m)** = SEND_DISABLE, SET_EXIT_REQUESTED, (m ? SET_THEN_MENU : CLEAR_THEN_MENU),
-  ARM_EXIT_DEADLINE.
+  ARM_EXIT_DEADLINE. **ASK1(m)** = ASK(m), ARM_STOP_TIMER: the first stop of an exit (C1).
 - **ADV** = UNLOCK_TIMER_DONE, GO_DRIVE_SCREEN.
 
 | # | from | input | guard | to | actions | code |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | LOCKED | TICK_FOLLOW | +DOK | UNLOCKING | F1 **(H1: unlocks with no request)** | frag_drive.inc:51-62 (orig 1574-1585) |
-| 2 | ASKING | TICK_FOLLOW | +DOK | UNLOCKING | F1 | frag_drive.inc:51-62 (orig 1574-1585) |
-| 3 | UNLOCKING | TICK_FOLLOW | +LINK !DOK | LOCKED | F2 with CLEAR_MENU_ON_ARRIVAL + SHOW_DRIVE_STOPPED **(H5)** | frag_drive.inc:64-83 (orig 1587-1606) |
-| 4 | UNLOCKING | TICK_FOLLOW | !DOK !LINK | LOCKED | F2 with CLEAR_MENU_ON_ARRIVAL + SHOW_DRIVE_LOST **(H5)** | frag_drive.inc:64-83 (orig 1587-1606) |
-| 5 | DRIVING | TICK_FOLLOW | +LINK !DOK | LOCKED | F2 with CLEAR_MENU_ON_ARRIVAL + SHOW_DRIVE_STOPPED **(H5)** | frag_drive.inc:64-83 (orig 1587-1606) |
-| 6 | DRIVING | TICK_FOLLOW | !DOK !LINK | LOCKED | F2 with CLEAR_MENU_ON_ARRIVAL + SHOW_DRIVE_LOST **(H5)** | frag_drive.inc:64-83 (orig 1587-1606) |
-| 7 | EXITING | TICK_FOLLOW | +THEN_MENU !DOK | LOCKED | F2 with OPEN_MENU_ON_ARRIVAL, no banner | frag_drive.inc:64-83 (orig 1587-1606) |
-| 8 | EXITING | TICK_FOLLOW | !DOK !THEN_MENU | LOCKED | F2 with CLEAR_MENU_ON_ARRIVAL, no banner (link loss counts as the user's exit) | frag_drive.inc:64-83 (orig 1587-1606) |
-| 9 | EXIT_REFUSED | TICK_FOLLOW | !DOK | LOCKED | F2 with CLEAR_MENU_ON_ARRIVAL, no banner, no menu | frag_drive.inc:64-83 (orig 1587-1606) |
+| 1 | LOCKED | TICK_FOLLOW | +DOK +BSD !CAL !BOOT | UNLOCKING | F1 (M1: asked or not, H1 accepted; POST not read) **C1 C3** | frag_drive.inc:51-62 (orig 1574-1585) |
+| 2 | ASKING | TICK_FOLLOW | +DOK +BSD !CAL !BOOT | UNLOCKING | F1 **C1 C3** | frag_drive.inc:51-62 (orig 1574-1585) |
+| 3 | UNLOCKING | TICK_FOLLOW | +LINK !DOK | LOCKED | F2 with CLEAR_MENU_ON_ARRIVAL, SEND_DISABLE + SHOW_DRIVE_STOPPED **C1** | frag_drive.inc:64-83 (orig 1587-1606) |
+| 4 | UNLOCKING | TICK_FOLLOW | !DOK !LINK | LOCKED | F2 with CLEAR_MENU_ON_ARRIVAL, SEND_DISABLE + SHOW_DRIVE_LOST **C1** | frag_drive.inc:64-83 (orig 1587-1606) |
+| 5 | DRIVING | TICK_FOLLOW | +LINK !DOK | LOCKED | F2 with CLEAR_MENU_ON_ARRIVAL, SEND_DISABLE + SHOW_DRIVE_STOPPED **C1** | frag_drive.inc:64-83 (orig 1587-1606) |
+| 6 | DRIVING | TICK_FOLLOW | !DOK !LINK | LOCKED | F2 with CLEAR_MENU_ON_ARRIVAL, SEND_DISABLE + SHOW_DRIVE_LOST **C1** | frag_drive.inc:64-83 (orig 1587-1606) |
+| 7 | EXITING | TICK_FOLLOW | +THEN_MENU !DOK | LOCKED | F2 with OPEN_MENU_ON_ARRIVAL, SEND_DISABLE, CLEAR_STOP_FAULT, no banner **C1** | frag_drive.inc:64-83 (orig 1587-1606) |
+| 8 | EXITING | TICK_FOLLOW | !DOK !THEN_MENU | LOCKED | F2 with CLEAR_MENU_ON_ARRIVAL, SEND_DISABLE, CLEAR_STOP_FAULT, no banner (link loss ends the stop) **C1** | frag_drive.inc:64-83 (orig 1587-1606) |
+| 9 | EXIT_REFUSED | TICK_FOLLOW | !DOK | LOCKED | F2 with CLEAR_MENU_ON_ARRIVAL, SEND_DISABLE, CLEAR_STOP_FAULT, no banner, no menu **C1** | frag_drive.inc:64-83 (orig 1587-1606) |
 | 10 | LOCKED | TICK_FOLLOW | +ON_SEAT !DOK !RDY | LOCKED | NAV_HOME, SHOW_REFUSED_SEAT | frag_drive.inc:87-90 (orig 1610-1613) |
 | 11 | ASKING | TICK_FOLLOW | +ON_SEAT !DOK !RDY | ASKING | NAV_HOME, SHOW_REFUSED_SEAT (returns before F4: ring rest waits a tick) | frag_drive.inc:87-90 (orig 1610-1613) |
 | 12 | ASKING | TICK_FOLLOW | !DOK !WARN_ARMED !ON_SEAT | LOCKED | RING_REST | frag_drive.inc:94-96 (orig 1617-1619) |
 | 13 | ASKING | TICK_FOLLOW | +ON_SEAT +RDY !DOK !WARN_ARMED | LOCKED | RING_REST | frag_drive.inc:94-96 (orig 1617-1619) |
-| 14 | EXITING | TICK_EXIT_DUE | +EXIT_ELAPSED | EXIT_REFUSED | CLEAR_EXIT_DEADLINE, CLEAR_THEN_MENU, SHOW_EXIT_REFUSED **(H6: no re-send)** | frag_drive.inc:102-109 (orig 1625-1632) |
+| 14 | EXITING | TICK_EXIT_DUE | +EXIT_ELAPSED | EXIT_REFUSED | CLEAR_EXIT_DEADLINE, CLEAR_THEN_MENU, SHOW_EXIT_REFUSED (the re-send goes on: rows 48-49) | frag_drive.inc:102-109 (orig 1625-1632) |
 | 15 | ASKING | TICK_WARN_DUE | +WARN_ARMED +WARN_ELAPSED | ASKING | CLEAR_WARN, SHOW_NOT_GRANTED | frag_drive.inc:110-115 (orig 1633-1638) |
 | 16 | LOCKED | TICK_GIVEUP_DUE | +GIVEUP_ARMED +GIVEUP_ELAPSED | LOCKED | CLEAR_GIVEUP, SEND_DISABLE | frag_drive.inc:116-121 (orig 1639-1644) |
 | 17 | ASKING | TICK_GIVEUP_DUE | +GIVEUP_ARMED +GIVEUP_ELAPSED | ASKING | CLEAR_GIVEUP, SEND_DISABLE | frag_drive.inc:116-121 (orig 1639-1644) |
-| 18 | LOCKED | UNLOCK_HOLD_DONE | +RDY | ASKING | RING_WAIT, SEND_ENABLE, ARM_WARN, ARM_GIVEUP | frag_drive.inc:154-155,134-137 (orig 1677-1678,1657-1660) |
+| 18 | LOCKED | UNLOCK_HOLD_DONE | +RDY +POST | ASKING | RING_WAIT, SEND_ENABLE, ARM_WARN, ARM_GIVEUP **C3** | frag_drive.inc:154-155,134-137 (orig 1677-1678,1657-1660) |
 | 19 | LOCKED | UNLOCK_HOLD_DONE | !RDY | LOCKED | RING_REST, SHOW_REFUSED_DRIVE, REFUSAL_FEEDBACK | frag_drive.inc:148-152 (orig 1671-1675) |
 | 20 | ASKING | UNLOCK_HOLD_DONE | — | ASKING | none ("already asked") | frag_drive.inc:145-146 (orig 1668-1669); frag_lock.inc:96 (orig 1161) |
-| 21 | UNLOCKING | EXIT_HOLD_DONE | — | EXITING | ASK(false) | frag_drive.inc:198,177-182 (orig 1721,1700-1705) |
-| 22 | DRIVING | EXIT_HOLD_DONE | — | EXITING | ASK(false) | frag_drive.inc:198,177-182 (orig 1721,1700-1705) |
+| 21 | UNLOCKING | EXIT_HOLD_DONE | — | EXITING | ASK1(false) **C1** | frag_drive.inc:198,177-182 (orig 1721,1700-1705) |
+| 22 | DRIVING | EXIT_HOLD_DONE | — | EXITING | ASK1(false) **C1** | frag_drive.inc:198,177-182 (orig 1721,1700-1705) |
 | 23 | EXITING | EXIT_HOLD_DONE | — | EXITING | ASK(false): re-sends DISABLE, resets the deadline, **overwrites then_menu := false** | frag_drive.inc:198,177-182 (orig 1721,1700-1705) |
 | 24 | EXIT_REFUSED | EXIT_HOLD_DONE | — | EXITING | ASK(false): re-sends DISABLE, fresh deadline | frag_drive.inc:198,177-182 (orig 1721,1700-1705) |
-| 25 | UNLOCKING | MENU_KEY_DRIVE | — | EXITING | ASK(true) | frag_nav.inc:491-495 (orig 3719-3723) |
-| 26 | DRIVING | MENU_KEY_DRIVE | — | EXITING | ASK(true) | frag_nav.inc:491-495 (orig 3719-3723) |
+| 25 | UNLOCKING | MENU_KEY_DRIVE | — | EXITING | ASK1(true) **C1** | frag_nav.inc:491-495 (orig 3719-3723) |
+| 26 | DRIVING | MENU_KEY_DRIVE | — | EXITING | ASK1(true) **C1** | frag_nav.inc:491-495 (orig 3719-3723) |
 | 27 | EXITING | MENU_KEY_DRIVE | — | EXITING | none (deadline ≠ 0: no menu, no re-send) | frag_nav.inc:492,495 (orig 3720,3723) |
 | 28 | EXIT_REFUSED | MENU_KEY_DRIVE | — | EXITING | ASK(true): deadline is 0 here, so it re-sends DISABLE | frag_nav.inc:491-495 (orig 3719-3723) |
-| 29 | LOCKED | PROFILE_CLICK | — | LOCKED | PUBLISH_DRIVE (drive_request as it is) **(H5)** | frag_drive_band.inc:22-23 (orig 587-588) |
+| 29 | LOCKED | PROFILE_CLICK | — | LOCKED | PUBLISH_DRIVE (drive_request as it is; with rows 3-9 sending DISABLE it is ENABLE only while an ask is outstanding) | frag_drive_band.inc:22-23 (orig 587-588) |
 | 30 | ASKING | PROFILE_CLICK | — | ASKING | PUBLISH_DRIVE | frag_drive_band.inc:22-23 (orig 587-588) |
-| 31 | UNLOCKING | PROFILE_CLICK | — | UNLOCKING | PUBLISH_DRIVE | frag_drive_band.inc:22-23 (orig 587-588) |
-| 32 | DRIVING | PROFILE_CLICK | — | DRIVING | PUBLISH_DRIVE | frag_drive_band.inc:22-23 (orig 587-588) |
+| 31 | UNLOCKING | PROFILE_CLICK | +DOK +POST | UNLOCKING | SEND_ENABLE (with the new profile) **C1 C3** | frag_drive_band.inc:22-23 (orig 587-588) |
+| 32 | DRIVING | PROFILE_CLICK | +DOK +POST | DRIVING | SEND_ENABLE (with the new profile) **C1 C3** | frag_drive_band.inc:22-23 (orig 587-588) |
 | 33 | EXITING | PROFILE_CLICK | — | EXITING | PUBLISH_DRIVE | frag_drive_band.inc:22-23 (orig 587-588) |
 | 34 | EXIT_REFUSED | PROFILE_CLICK | — | EXIT_REFUSED | PUBLISH_DRIVE | frag_drive_band.inc:22-23 (orig 587-588) |
 | 35 | UNLOCKING | UNLOCK_TIMER | +UNLOCK_TIMER_ARMED | DRIVING | ADV | frag_lock.inc:14-18 (orig 1079-1083) |
@@ -131,14 +148,35 @@ Action groups, expanded in the header:
 | 39 | ASKING | ENTRY_PUSH | +ON_LOCKED !MENU_OPEN !RDY | ASKING | SHOW_REFUSED_DRIVE, REFUSAL_FEEDBACK (lock_waiting is not checked) | frag_refusal.inc:293-304 (orig 1484-1495) |
 | 40 | LOCKED | MENU_ROW_DRIVE | !RDY | LOCKED | REFUSAL_FEEDBACK, SHOW_REFUSED_DRIVE_MENU | frag_nav.inc:463-467 (orig 3691-3695) |
 | 41 | ASKING | MENU_ROW_DRIVE | !RDY | ASKING | REFUSAL_FEEDBACK, SHOW_REFUSED_DRIVE_MENU | frag_nav.inc:463-467 (orig 3691-3695) |
+| 42 | LOCKED | EXIT_HOLD_DONE | — | LOCKED | SEND_DISABLE, CLEAR_GIVEUP (was U3: no latch, no deadline, no banner) **C1** | hazard-c1-spec.md 2.3 row 42 |
+| 43 | ASKING | EXIT_HOLD_DONE | — | LOCKED | SEND_DISABLE, CLEAR_WARN, CLEAR_GIVEUP, RING_REST (the stop wins over the ask) **C1** | hazard-c1-spec.md 2.3 row 43 |
+| 44 | EXITING | TICK_STOP_FAULT_DUE | +SFE !SF | EXITING | RAISE_STOP_FAULT ("MCB did not stop") **C1** | hazard-c1-spec.md 2.3 row 44 |
+| 45 | EXIT_REFUSED | TICK_STOP_FAULT_DUE | +SFE !SF | EXIT_REFUSED | RAISE_STOP_FAULT **C1** | hazard-c1-spec.md 2.3 row 45 |
+| 46 | EXITING | TICK_STOP_RESEND | +FAST !SF | EXITING | SEND_DISABLE (every 250 ms) **C1** | hazard-c1-spec.md 2.3 row 46 |
+| 47 | EXITING | TICK_STOP_RESEND | +SLOW +SF | EXITING | SEND_DISABLE (1 Hz after the fault) **C1** | hazard-c1-spec.md 2.3 row 47 |
+| 48 | EXIT_REFUSED | TICK_STOP_RESEND | +FAST !SF | EXIT_REFUSED | SEND_DISABLE **C1** | hazard-c1-spec.md 2.3 row 48 |
+| 49 | EXIT_REFUSED | TICK_STOP_RESEND | +SLOW +SF | EXIT_REFUSED | SEND_DISABLE **C1** | hazard-c1-spec.md 2.3 row 49 |
+| 50 | LOCKED | TICK_BOOT_STOP | +LINK !BSD | LOCKED | SEND_DISABLE, MARK_BOOT_STOP (the boot DISABLE) **C3** | hazard-c3-spec.md 4.3 row 50 |
+| 51 | ASKING | TICK_BOOT_STOP | +LINK !BSD | ASKING | MARK_BOOT_STOP (the user's ENABLE wins) **C3** | hazard-c3-spec.md 4.3 row 51 |
+| 52 | LOCKED | UNLOCK_HOLD_DONE | +RDY !POST | LOCKED | RING_REST, SHOW_REFUSED_POST, REFUSAL_FEEDBACK **C3** | hazard-c3-spec.md 4.3 row 52 |
+| 53 | LOCKED | ENTRY_PUSH | +ON_LOCKED !MENU_OPEN +RDY !POST | LOCKED | SHOW_REFUSED_POST, REFUSAL_FEEDBACK **C3** | hazard-c3-spec.md 4.3 row 53 |
+| 54 | LOCKED | MENU_ROW_DRIVE | +RDY !POST | LOCKED | REFUSAL_FEEDBACK, SHOW_REFUSED_POST **C3** | hazard-c3-spec.md 4.3 row 54 |
 
 Row # is the index in `TRANSITIONS` plus one.
+
+Row 47 needs a DISABLE at least 875 ms old while the exit deadline (750 ms after the stop that
+sent it) still runs: only when the UI task stalls more than 125 ms between a stop's DISABLE and
+its deadline's clock read (a slow publish). GLD-115 reaches it that way.
+
+`stop_notice(phase, hidden)` (C1 §2.6): MCB_DID_NOT_STOP in EXITING or EXIT_REFUSED with
+STOP_FAULT, STOPPING in them without it, NONE otherwise. The adapter shows it, ahead of the
+stick's hold reason, on the Drive screen's notice slot.
 
 ### 2.1 Inputs and where they come from
 
 | Input | Source | code |
 | --- | --- | --- |
-| TICK_* | `rtps_poll_cb` → `drive_wait_poll`, every 250 ms (`kRtpsPollMs`) | frag_rtps_poll.inc:45 (orig 682); timer main.cpp:676 (orig 5298) |
+| TICK_* | `rtps_poll_cb` → `drive_wait_poll`, every 250 ms (`kRtpsPollMs`); TICK_STOP_FAULT_DUE and TICK_STOP_RESEND are C1's sub-steps | frag_rtps_poll.inc:45 (orig 682); timer main.cpp:676 (orig 5298) |
 | UNLOCK_HOLD_DONE | `unlock_gesture` completed → `activate_drive` | frag_lock.inc:99 (orig 1164) |
 | EXIT_HOLD_DONE | `drive_exit_gesture` completed → `drive_exit_ask(false)` | frag_drive.inc:198 (orig 1721) |
 | MENU_KEY_DRIVE | `nav_key_cb` with its menu shut, on the Drive screen, unlocked | frag_nav.inc:491 (orig 3719) |
@@ -149,11 +187,11 @@ Row # is the index in `TRANSITIONS` plus one.
 
 ### 2.2 Input preconditions and excluded combinations
 
-The oracle drives only the combinations in `INPUT_PRECONDITIONS`. The excluded ones:
+The oracle drives only the combinations in `INPUT_PRECONDITIONS`. The excluded ones (C1 removed
+EXIT_HOLD_DONE's: an exit hold while locked is rows 42-43, U3 closed):
 
 | Input | Excluded | Why |
 | --- | --- | --- |
-| EXIT_HOLD_DONE | LOCKED, ASKING | Out of the Phase model. See U3. |
 | MENU_KEY_DRIVE | locked phases; off the Drive screen; menu open | The input is defined by `frag_nav.inc:491`. In those cases `nav_key_cb` only navigates (GATE_TRIGGERS). |
 | UNLOCK_TIMER | `!UNLOCK_TIMER_ARMED` (so LOCKED, ASKING, DRIVING) | Any `set_locked` cancels the timer (`frag_lock.inc:65-68`), and it fires once. |
 
@@ -183,7 +221,8 @@ level, ARMED = `joy_button_armed`, APPLIES = the gesture's `applies()`:
 | h11 | FILLING | FILL_DONE | — | IDLE | CLEAR_ARMED, CANCEL_FILL, CONFIRM, COMPLETE | frag_hold.inc:36-53 (orig 988-1005) |
 
 `applies()`:
-- **unlock**: locked && !lock_waiting (that is, LOCKED) && Locked screen && no menu && `mcb_ready`.
+- **unlock**: locked && !lock_waiting (that is, LOCKED) && Locked screen && no menu && `mcb_ready`
+  && (C3) the POST gate PASS.
   frag_lock.inc:96-97 (orig 1161-1162).
 - **exit**: Drive screen && no menu. There is no lock or phase condition.
   frag_drive.inc:194 (orig 1717).
@@ -196,9 +235,11 @@ changes. The calibrate gesture has its own latch (`calibrate_armed`) and is out 
 
 `stick_drives(locked, screen, menu_open) = !locked && screen == DRIVE && !menu_open`, from
 `nav_update_stick_gate` (frag_nav.inc:190-193, orig 3418-3421). It is stored in an
-`std::atomic<bool>` (frag_state.inc:143, orig 249, initially false). The ADC task reads it:
-`scale = calibrating || !stick_drives ? 0 : speed` (main.cpp:1605, orig 6227). The gate is a
-multiply, so a NaN passes through it. That is pinned, not fixed.
+`std::atomic<bool>` (frag_state.inc:143, orig 249, initially false). The ADC task reads it as
+condition 1 of the stick's output permit (C1 §3, `hmi::stick::OutputPermit`): a held command is a
+literal (+0.0, +0.0, +0.0), not a multiply (REQ-STK-10). The AS-IS multiply
+(`scale = calibrating || !stick_drives ? 0 : speed`, where a NaN passed an open gate) is gone, and
+with it `stick_scale` and REQ-DRV-20.
 
 The gate is re-evaluated only at these triggers:
 
@@ -221,24 +262,30 @@ These are **not** triggers:
 ```mermaid
 stateDiagram-v2
     [*] --> LOCKED
-    LOCKED --> ASKING: UNLOCK_HOLD_DONE [RDY] / ENABLE, warn+giveup (18)
+    LOCKED --> ASKING: UNLOCK_HOLD_DONE [RDY, POST] / ENABLE, warn+giveup (18)
+    LOCKED --> LOCKED: TICK_BOOT_STOP [LINK, !BSD] / the boot DISABLE (50)
+    LOCKED --> LOCKED: UNLOCK_HOLD_DONE, ENTRY_PUSH, MENU_ROW_DRIVE [RDY, !POST] / REFUSED_POST (52-54)
     LOCKED --> LOCKED: UNLOCK_HOLD_DONE [!RDY] / REFUSED_DRIVE (19)
-    LOCKED --> UNLOCKING: TICK_FOLLOW [DOK] / F1, no request needed (1, H1)
-    ASKING --> UNLOCKING: TICK_FOLLOW [DOK] / F1 (2)
+    LOCKED --> UNLOCKING: TICK_FOLLOW [DOK, BSD, !CAL, !BOOT] / F1, asked or not (1, M1)
+    ASKING --> UNLOCKING: TICK_FOLLOW [DOK, BSD, !CAL, !BOOT] / F1 (2)
     ASKING --> LOCKED: TICK_FOLLOW [!DOK, !WARN_ARMED] / RING_REST (12, 13)
+    ASKING --> LOCKED: EXIT_HOLD_DONE / DISABLE, ask withdrawn (43)
     ASKING --> ASKING: TICK_WARN_DUE / NOT_GRANTED (15)
     LOCKED --> LOCKED: TICK_GIVEUP_DUE / DISABLE (16)
     ASKING --> ASKING: TICK_GIVEUP_DUE / DISABLE (17)
     UNLOCKING --> DRIVING: UNLOCK_TIMER / Drive screen (35)
-    UNLOCKING --> LOCKED: TICK_FOLLOW [!DOK] / F2 + STOPPED or LOST, no DISABLE (3, 4, H5)
-    DRIVING --> LOCKED: TICK_FOLLOW [!DOK] / F2 + STOPPED or LOST, no DISABLE (5, 6, H5)
-    UNLOCKING --> EXITING: EXIT_HOLD_DONE or MENU_KEY_DRIVE / DISABLE (21, 25)
-    DRIVING --> EXITING: EXIT_HOLD_DONE or MENU_KEY_DRIVE / DISABLE (22, 26)
+    UNLOCKING --> LOCKED: TICK_FOLLOW [!DOK] / F2, one DISABLE, STOPPED or LOST (3, 4)
+    DRIVING --> LOCKED: TICK_FOLLOW [!DOK] / F2, one DISABLE, STOPPED or LOST (5, 6)
+    UNLOCKING --> EXITING: EXIT_HOLD_DONE or MENU_KEY_DRIVE / DISABLE, stop timer (21, 25)
+    DRIVING --> EXITING: EXIT_HOLD_DONE or MENU_KEY_DRIVE / DISABLE, stop timer (22, 26)
     EXITING --> EXITING: EXIT_HOLD_DONE / DISABLE again, then_menu false (23)
-    EXITING --> EXIT_REFUSED: TICK_EXIT_DUE / EXIT_REFUSED, no re-send (14, H6)
+    EXITING --> EXITING: STOP_RESEND / DISABLE every 250 ms, 1 Hz after the fault (46, 47)
+    EXITING --> EXITING: STOP_FAULT_DUE / MCB did not stop (44)
+    EXITING --> EXIT_REFUSED: TICK_EXIT_DUE / EXIT_REFUSED banner (14)
+    EXIT_REFUSED --> EXIT_REFUSED: STOP_RESEND, STOP_FAULT_DUE / as in EXITING (45, 48, 49)
     EXIT_REFUSED --> EXITING: EXIT_HOLD_DONE or MENU_KEY_DRIVE / DISABLE (24, 28)
-    EXITING --> LOCKED: TICK_FOLLOW [!DOK] / F2, menu if then_menu (7, 8)
-    EXIT_REFUSED --> LOCKED: TICK_FOLLOW [!DOK] / F2 (9)
+    EXITING --> LOCKED: TICK_FOLLOW [!DOK] / F2, one DISABLE, the stop ends, menu if then_menu (7, 8)
+    EXIT_REFUSED --> LOCKED: TICK_FOLLOW [!DOK] / F2, one DISABLE, the stop ends (9)
     EXITING --> EXITING: UNLOCK_TIMER / Drive screen (36)
     EXIT_REFUSED --> EXIT_REFUSED: UNLOCK_TIMER / Drive screen (37)
 ```
@@ -247,8 +294,10 @@ Self-loops left out of the diagram:
 - rows 10–11 (Seat refusal);
 - row 20 (no-op);
 - row 27 (no-op);
-- rows 29–34 (PROFILE_CLICK re-publishes `drive_request`);
-- rows 38–41 (refusal banners).
+- rows 29–34 (PROFILE_CLICK: the request as it stands; ENABLE with the profile while unlocked
+  and DOK);
+- rows 38–41 (refusal banners);
+- row 42 (exit hold while LOCKED: one DISABLE).
 
 ## 6. CS-SAF-02: a way out of every phase
 
@@ -262,9 +311,20 @@ to a different phase whose guard is an error or a timeout. `static_assert` and D
 | UNLOCKING | rows 3–4 (error); row 35 (timer) |
 | DRIVING | rows 5–6 (error) |
 | EXITING | row 14 (timeout); rows 7–8 (error) |
-| EXIT_REFUSED | row 9, on error **only**. It has no timeout, and the stick still drives (H6). |
+| EXIT_REFUSED | row 9, on error **only** (the MCB not ENABLED, or the link stale). By design under G4: the MCB wins, the stick still drives, and the HMI re-sends DISABLE (rows 48-49) and raises "MCB did not stop" (row 45) until it stops. |
 
 ## 7. Hazards visible in this table
+
+After C3 (2026-10-08): **H2** is closed: no ENABLE before the POST gate is PASS (rows 18, 31,
+32; refusals 52-54), the stick held until then (the stick's permit), one DISABLE on the first
+fresh link after boot (rows 50-51).
+
+After C1 (2026-10-08): **H1** is accepted by design (M1: the MCB decides; rows 1-2 still unlock
+with no request, but never during a calibration or behind the Boot screen, and the stick output
+waits for the stick centred, C1 §3). **H5** is closed: every relock sends one DISABLE (rows 3-9)
+and a profile tap no longer re-sends a stale request (rows 31-32). **H6** is closed: the stop is
+re-sent until the MCB stops (rows 46-49), the publish result is counted and logged (the
+adapter). **H7** stays open. The notes below are the AS-IS analysis, kept for the record.
 
 - **H1** (rows 1–2):
   - LOCKED + `DRIVING_OK` unlocks with no request outstanding: after a link blip, after an HMI
@@ -328,7 +388,8 @@ to a different phase whose guard is an error or a timeout. `static_assert` and D
   - Question: does `_ui_screen_change` to the screen that is already active (row 36/37: the advance
     firing on Drive) fire SCREEN_LOADED again, or is it skipped? The table only records
     GO_DRIVE_SCREEN.
-- **U3. EXIT_HOLD_DONE while locked** (excluded from the oracle).
+- **U3. EXIT_HOLD_DONE while locked.** Closed by C1: rows 42-43 (one DISABLE; from ASKING the
+  ask is withdrawn). The analysis below is the AS-IS record.
   - The exit gesture's `applies()` has no lock check, and FILL_DONE does not re-check `applies()`.
     Two ways in:
     - a relock (rows 3–9 on the 250 ms tick) lands between the last 33 ms hold poll and the fill's
@@ -339,7 +400,7 @@ to a different phase whose guard is an error or a timeout. `static_assert` and D
     where the entry banner hides it, and the latch stays until the next F1.
   - Question: must the extraction reproduce this race exactly, or may it be recorded as a parked
     fix?
-- **U4. F1 during boot.**
+- **U4. F1 during boot.** Closed by C1: rows 1-2 need `!ON_BOOT_SCREEN`.
   - `rtps_poll_cb` is created (main.cpp:676, orig 5298) before the 1.2 s boot hold ends
     (main.cpp:1013-1020, orig 5635-5642).
   - If the MIB reports ENABLED that early, row 1 unlocks behind BootScreen. The boot timer later
@@ -370,5 +431,5 @@ to a different phase whose guard is an error or a timeout. `static_assert` and D
 - Menu open and close, and screen changes that are not session actions. These are navigation;
   they reach the session only through the guards (screen, MENU_OPEN) and the gate (§4).
 - The calibrate gesture.
-- The stick pipeline beyond the gate multiply.
+- The stick pipeline beyond the gate (its output permit is components/stick's).
 - The link state machine (plan table B).

@@ -35,6 +35,17 @@ public:
     const std::string line = std::format("log.error[{}] {}", tag_, text);
     golden::port(line);
     golden::raw(line);
+    ++golden::world().errors;
+  }
+
+  template <typename... Args> void warn(std::string_view rt_fmt_str, Args &&...args) const {
+    if (level_ > Verbosity::WARN) {
+      return;
+    }
+    const std::string text = std::vformat(rt_fmt_str, std::make_format_args(args...));
+    const std::string line = std::format("log.warn[{}] {}", tag_, text);
+    golden::port(line);
+    golden::raw(line);
   }
 
 private:

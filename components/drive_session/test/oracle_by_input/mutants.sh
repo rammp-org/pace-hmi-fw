@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # `make mutants` (docs/plans/hazard-fixes.md B3): one-line mutations of the drive session
-# table and of its code. Each mutant is built into BOTH oracles, the full product (../oracle,
-# DRV-001..022) and the by-input one (this folder, DRV-101..113), and each oracle must reject
+# table and of its code. Each mutant is built into BOTH oracles, the full product (../oracle_full,
+# DRV-001..012) and the by-input one (this folder, DRV-101..113), and each oracle must reject
 # it: Unity reports failures. A mutant that does not compile is a bad mutant (the table's own
 # static_asserts are `make mnc`'s job in ../oracle_selfcheck), and fails this script.
 #
@@ -19,44 +19,51 @@ OUT=$2
 UNITY=$3
 INC=$REPO/components/drive_session/include
 SRC=$REPO/components/drive_session/src/drive_session.cpp
-OLD=$REPO/components/drive_session/test/oracle
+OLD=$REPO/components/drive_session/test/oracle_full
 NEW=$REPO/components/drive_session/test/oracle_by_input
 
 # name|table or code|sed expression (applied to drive_session_table.hpp or drive_session.cpp)
 MUTANTS=(
   # Table rows (TABLE.md section 2 row numbers).
-  'T01-row1-guard-mcb-ready|table|0,/when({Guard::DRIVING_OK}), Phase::UNLOCKING,/s//when({Guard::MCB_READY}), Phase::UNLOCKING,/'
+  'T01-row1-no-boot-guard|table|0,/                    {Guard::CALIBRATING, Guard::ON_BOOT_SCREEN}),/s//                    {Guard::CALIBRATING}),/'
   'T02-row3-banner-lost|table|0,/Phase::LOCKED, kF2LockStopped,/s//Phase::LOCKED, kF2LockLost,/'
-  'T03-row8-exit-banner|table|0,/Phase::LOCKED, kF2LockAsked,/s//Phase::LOCKED, kF2LockStopped,/'
+  'T03-row8-opens-menu|table|0,/Phase::LOCKED, kF2LockAsked,/s//Phase::LOCKED, kF2LockAskedMenu,/'
   'T04-row9-needs-link|table|s/Transition{Phase::EXIT_REFUSED, Input::TICK_FOLLOW, when({}, {Guard::DRIVING_OK}),/Transition{Phase::EXIT_REFUSED, Input::TICK_FOLLOW, when({Guard::LINK_CONNECTED}, {Guard::DRIVING_OK}),/'
   'T05-row14-always|table|s/Phase::EXITING, Input::TICK_EXIT_DUE, when({Guard::EXIT_ELAPSED}), Phase::EXIT_REFUSED,/Phase::EXITING, Input::TICK_EXIT_DUE, kAlways, Phase::EXIT_REFUSED,/'
   'T06-row15-no-warn-armed|table|s/when({Guard::WARN_ARMED, Guard::WARN_ELAPSED}),/when({Guard::WARN_ELAPSED}),/'
   'T07-row16-no-disable|table|0,/acts({Action::CLEAR_GIVEUP, Action::SEND_DISABLE})/s//acts({Action::CLEAR_GIVEUP})/'
   'T08-row18-order|table|s/acts({Action::RING_WAIT, Action::SEND_ENABLE, Action::ARM_WARN, Action::ARM_GIVEUP})/acts({Action::RING_WAIT, Action::SEND_ENABLE, Action::ARM_GIVEUP, Action::ARM_WARN})/'
-  'T09-row21-then-menu|table|s/Transition{Phase::UNLOCKING, Input::EXIT_HOLD_DONE, kAlways, Phase::EXITING, kExitAskHold,/Transition{Phase::UNLOCKING, Input::EXIT_HOLD_DONE, kAlways, Phase::EXITING, kExitAskMenu,/'
+  'T09-row21-then-menu|table|s/Transition{Phase::UNLOCKING, Input::EXIT_HOLD_DONE, kAlways, Phase::EXITING, kFirstExitAskHold,/Transition{Phase::UNLOCKING, Input::EXIT_HOLD_DONE, kAlways, Phase::EXITING, kFirstExitAskMenu,/'
   'T10-row27-asks-again|table|s/Transition{Phase::EXITING, Input::MENU_KEY_DRIVE, kAlways, Phase::EXITING, kNoActions,/Transition{Phase::EXITING, Input::MENU_KEY_DRIVE, kAlways, Phase::EXITING, kExitAskMenu,/'
   'T11-row29-needs-link|table|s/Transition{Phase::LOCKED, Input::PROFILE_CLICK, kAlways, Phase::LOCKED,/Transition{Phase::LOCKED, Input::PROFILE_CLICK, when({Guard::LINK_CONNECTED}), Phase::LOCKED,/'
   'T12-row38-menu-ignored|table|0,/when({Guard::ON_LOCKED_SCREEN}, {Guard::MENU_OPEN, Guard::MCB_READY}), Phase::LOCKED,/s//when({Guard::ON_LOCKED_SCREEN}, {Guard::MCB_READY}), Phase::LOCKED,/'
-  'T13-row40-link-not-mcb|table|s/Transition{Phase::LOCKED, Input::MENU_ROW_DRIVE, when({}, {Guard::MCB_READY}), Phase::LOCKED,/Transition{Phase::LOCKED, Input::MENU_ROW_DRIVE, when({}, {Guard::LINK_CONNECTED}), Phase::LOCKED,/'
+  'T13-row40-also-needs-link-down|table|s/Transition{Phase::LOCKED, Input::MENU_ROW_DRIVE, when({}, {Guard::MCB_READY}), Phase::LOCKED,/Transition{Phase::LOCKED, Input::MENU_ROW_DRIVE, when({}, {Guard::MCB_READY, Guard::LINK_CONNECTED}), Phase::LOCKED,/'
   'T14-effect-enable-sets-nothing|table|s/ActionEffect{Action::SEND_ENABLE, bit(Guard::REQUEST_ENABLE), 0},/ActionEffect{Action::SEND_ENABLE, 0, 0},/'
+  # The hazard fix C1's rows (hazard-c1-spec.md §2.3).
+  'T15-row46-waits-for-slow|table|0,/when({Guard::RESEND_FAST_DUE}, {Guard::STOP_FAULT}), Phase::EXITING,/s//when({Guard::RESEND_SLOW_DUE}, {Guard::STOP_FAULT}), Phase::EXITING,/'
+  'T16-effect-fault-sets-nothing|table|s/ActionEffect{Action::RAISE_STOP_FAULT, bit(Guard::STOP_FAULT), 0},/ActionEffect{Action::RAISE_STOP_FAULT, 0, 0},/'
+  # The hazard fix C3's rows (hazard-c3-spec.md §4).
+  'T17-row50-without-link|table|0,/when({Guard::LINK_CONNECTED}, {Guard::BOOT_STOP_DONE}), Phase::LOCKED,/s//when({}, {Guard::BOOT_STOP_DONE}), Phase::LOCKED,/'
   # Code that reads a guard bit the table does not read for that input: the by-input oracle
   # only samples those (oracle_space.hpp), so these test the sample.
-  'C01-unlock-reads-menu|code|0,/    if (on(g, Guard::DRIVING_OK)) {/s//    if (on(g, Guard::DRIVING_OK) \&\& !on(g, Guard::MENU_OPEN)) {/'
+  'C01-unlock-reads-menu|code|0,/^  if (on(g, Guard::DRIVING_OK)) {/s//  if (on(g, Guard::DRIVING_OK) \&\& !on(g, Guard::MENU_OPEN)) {/'
   'C02-publish-reads-giveup-elapsed|code|s|    return go(Phase::LOCKED, PUBLISH); // row 29 (H5)|    return on(g, Guard::GIVEUP_ELAPSED) ? stay() : go(Phase::LOCKED, PUBLISH); // row 29|'
-  'C03-exit-reads-two-set|code|s|    return go(Phase::EXITING, ASK_EXIT); // row 22|    return (on(g, Guard::MENU_OPEN) \&\& on(g, Guard::WARN_ELAPSED)) ? stay() : go(Phase::EXITING, ASK_EXIT); // row 22|'
-  'C04-menu-key-reads-two-clear|code|s|    return go(Phase::EXITING, ASK_EXIT_THEN_MENU); // row 26|    return (!on(g, Guard::THEN_MENU) \&\& !on(g, Guard::GIVEUP_ARMED)) ? stay() : go(Phase::EXITING, ASK_EXIT_THEN_MENU); // row 26|'
-  'C05-publish-reads-three-set|code|s|    return go(Phase::UNLOCKING, PUBLISH); // row 31|    return (on(g, Guard::MENU_OPEN) \&\& on(g, Guard::EXIT_ELAPSED) \&\& on(g, Guard::GIVEUP_ARMED)) ? stay() : go(Phase::UNLOCKING, PUBLISH); // row 31|'
-  'C06-publish-reads-three-set-three-clear|code|s|    return go(Phase::DRIVING, PUBLISH); // row 32|    return (on(g, Guard::MENU_OPEN) \&\& on(g, Guard::EXIT_ELAPSED) \&\& on(g, Guard::REQUEST_ENABLE) \&\& !on(g, Guard::WARN_ELAPSED) \&\& !on(g, Guard::GIVEUP_ELAPSED) \&\& !on(g, Guard::LINK_CONNECTED)) ? stay() : go(Phase::DRIVING, PUBLISH); // row 32|'
+  'C03-exit-reads-two-set|code|s|    return go(Phase::EXITING, FIRST_ASK_EXIT); // row 22|    return (on(g, Guard::MENU_OPEN) \&\& on(g, Guard::WARN_ELAPSED)) ? stay() : go(Phase::EXITING, FIRST_ASK_EXIT); // row 22|'
+  'C04-menu-key-reads-two-clear|code|s|    return go(Phase::EXITING, FIRST_ASK_EXIT_THEN_MENU); // row 26|    return (!on(g, Guard::THEN_MENU) \&\& !on(g, Guard::GIVEUP_ARMED)) ? stay() : go(Phase::EXITING, FIRST_ASK_EXIT_THEN_MENU); // row 26|'
+  'C05-publish-reads-three-set|code|s|      return go(Phase::UNLOCKING, ENABLE_PROFILE); // row 31|      return (on(g, Guard::MENU_OPEN) \&\& on(g, Guard::EXIT_ELAPSED) \&\& on(g, Guard::GIVEUP_ARMED)) ? stay() : go(Phase::UNLOCKING, ENABLE_PROFILE); // row 31|'
+  'C06-publish-reads-three-set-three-clear|code|s|      return go(Phase::DRIVING, ENABLE_PROFILE); // row 32|      return (on(g, Guard::MENU_OPEN) \&\& on(g, Guard::EXIT_ELAPSED) \&\& on(g, Guard::REQUEST_ENABLE) \&\& !on(g, Guard::WARN_ELAPSED) \&\& !on(g, Guard::GIVEUP_ELAPSED) \&\& !on(g, Guard::CALIBRATING)) ? stay() : go(Phase::DRIVING, ENABLE_PROFILE); // row 32|'
   # Code that gets a row wrong where the table reads the bit.
   'C07-giveup-ignores-elapsed|code|0,/    if (on(g, Guard::GIVEUP_ARMED) && on(g, Guard::GIVEUP_ELAPSED)) {/s//    if (on(g, Guard::GIVEUP_ARMED)) {/'
-  'C08-effect-cancel-keeps-timer|code|s/  case Action::CANCEL_UNLOCK_TIMER:/  case Action::CANCEL_UNLOCK_TIMER: return NO_EFFECT;/'
+  'C08-effect-cancel-keeps-timer|code|s/    {Action::CANCEL_UNLOCK_TIMER, clears(Guard::UNLOCK_TIMER_ARMED)},/    {Action::CANCEL_UNLOCK_TIMER, NO_EFFECT},/'
+  'C10-row51-sends-disable|code|s|BOOT_STOP_MOOT); // row 51|BOOT_STOP); // row 51|'
+  'C09-resend-fast-after-fault|code|s/      on(g, Guard::STOP_FAULT) ? on(g, Guard::RESEND_SLOW_DUE) :/      on(g, Guard::STOP_FAULT) ? on(g, Guard::RESEND_FAST_DUE) :/'
 )
 
 # run_app <app dir> <include dir> <source> <build dir>: prints PASS, REJECTED, CRASHED or
 # NO-BUILD, and leaves the log in <build dir>.log
 run_app() {
   local log=$4.log
-  make --no-print-directory -j4 -C "$1" test REPO="$REPO" UNITY_DIR="$UNITY" INCLUDES="$2" \
+  make --no-print-directory -j2 -C "$1" test REPO="$REPO" UNITY_DIR="$UNITY" INCLUDES="$2" \
     SRCS_UNDER_TEST="$3" BUILD_DIR="$4" > "$log" 2>&1
   local rc=$?
   local summary

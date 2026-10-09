@@ -22,7 +22,37 @@ enum Refused : int32_t {
   /// Drive picked from the menu while the MCB could not drive. Like REFUSED_SEAT: no push
   /// holds it up, so it stays its window unless the cause clears.
   REFUSED_DRIVE_MENU = 7,
+  /// C3: driving asked for (the unlock hold, a push on the Locked screen, the menu's DRIVE row)
+  /// before the start-up check passed. Stays its window, or until the check passes.
+  REFUSED_POST = 8,
 };
+
+/// @brief A `refused` value's name, for logs and the bench's STATE line ("NONE" for
+///        REFUSED_NONE, "?" for a value that is none of them).
+[[nodiscard]] constexpr const char *refused_name(int32_t refused) {
+  switch (refused) {
+  case REFUSED_NONE:
+    return "NONE";
+  case REFUSED_DRIVE:
+    return "REFUSED_DRIVE";
+  case REFUSED_SEAT:
+    return "REFUSED_SEAT";
+  case REFUSED_DRIVE_NOT_GRANTED:
+    return "NOT_GRANTED";
+  case REFUSED_DRIVE_STOPPED:
+    return "DRIVE_STOPPED";
+  case REFUSED_EXIT:
+    return "EXIT_REFUSED";
+  case REFUSED_DRIVE_LOST:
+    return "DRIVE_LOST";
+  case REFUSED_DRIVE_MENU:
+    return "REFUSED_DRIVE_MENU";
+  case REFUSED_POST:
+    return "REFUSED_POST";
+  default:
+    return "?";
+  }
+}
 
 /// How long one refusal stays up (ms).
 inline constexpr uint32_t DRIVE_REFUSED_SHOW_MS = 3000;

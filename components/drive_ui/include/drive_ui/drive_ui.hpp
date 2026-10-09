@@ -12,9 +12,12 @@
 #include "messages/joystick_message.hpp"
 #include "messages/mib_message.hpp"
 
+#include "drive_notice.hpp"
 #include "drive_session.hpp"
 #include "drive_ui/fn.hpp"
+#include "drive_ui/link_state.hpp"
 #include "drive_ui/shared_subjects.hpp"
+#include "stick/permit_types.hpp"
 
 namespace hmi::ui {
 
@@ -41,8 +44,18 @@ public:
     /// The drive profile the user picked, mirrored for the ADC task (app_state's
     /// drive_profile_published).
     const std::atomic<MIB::DriveProfile> *profile;
-    /// The DriveCommand (main's rtps_comms_publish_drive). Result ignored (H6).
+    /// The DriveCommand (main's rtps_comms_publish_drive): true when handed to RTPS.
     bool (*publish_drive)(rammp::DriveRequest request, MIB::DriveProfile profile);
+    /// The link state now (main's rtps_comms_link_state), read live at every drive sample.
+    LinkState (*link_state)();
+    /// A calibration run owns the stick (main's joystick_cal_running).
+    bool (*calibrating)();
+    /// The stick's hold reason, as the ADC task last stored it (the permit hooks', acquire).
+    Fn<hmi::stick::HoldReason()> hold_reason;
+    /// The POST gate (the permit hooks', acquire): the drive table's POST_OK (C3).
+    Fn<hmi::stick::PostGate()> post_gate;
+    /// The Drive screen's notice slot (hmi_ui); empty: the notice is not shown.
+    Fn<void(hmi::drive_adapter::DriveNotice)> show_notice;
     /// The drive session's input (main's one DriveAdapter); true when its row acted.
     bool (*input)(hmi::drive_session::Input input);
     /// The stick gate: whether the stick may drive the chair now. Written here (the UI task),
@@ -94,11 +107,25 @@ public:
   bool publish_drive(rammp::DriveRequest request, MIB::DriveProfile profile) const {
     return config_.publish_drive(request, profile);
   }
+  [[nodiscard]] LinkState link_state_now() const { return config_.link_state(); }
+  [[nodiscard]] bool calibrating() const { return config_.calibrating(); }
+  [[nodiscard]] hmi::stick::HoldReason hold_reason() const { return config_.hold_reason(); }
+  [[nodiscard]] hmi::stick::PostGate post_gate() const { return config_.post_gate(); }
+  void show_drive_notice(hmi::drive_adapter::DriveNotice notice) const {
+    if (config_.show_notice) {
+      config_.show_notice(notice);
+    }
+  }
   /// @brief Writes the stick gate from the lock, the screen and the menu as they are now
   ///        (drive_session's stick_drives). Called at exactly the GATE_TRIGGERS sites
   ///        (drive_session_table.hpp): the drive session's GATE_UPDATE and NavView's
   ///        `gate_update`.
-  void update_stick_gate() const;
+  void update_stick_gate();
+  /// @brief The menu open (an overlay up) as of the last gate update, which every menu open and
+  ///        close runs (GATE_TRIGGERS). Any task (an acquire load): the bench's STATE line.
+  [[nodiscard]] bool menu_open_any_task() const {
+    return menu_open_pub_.load(std::memory_order_acquire);
+  }
   void nav_home() const { config_.nav_home(); }
   void refusal_feedback() const { config_.refusal_feedback(); }
   void haptic_click() const { config_.haptic_click(); }
@@ -141,6 +168,8 @@ private:
   // 33 ms -- so a completed touch hold was armed again at once, and one long press
   // started a run and then cancelled it.
   bool calibrate_armed_ = true;
+  // The menu as of the last gate update, for other tasks (menu_open_any_task).
+  std::atomic<bool> menu_open_pub_{false};
 };
 
 } // namespace hmi::ui

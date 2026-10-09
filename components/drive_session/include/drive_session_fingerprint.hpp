@@ -5,9 +5,10 @@
 // table_fingerprint() is a 64-bit FNV-1a hash, at compile time, over every field of every
 // row of the spec in drive_session_table.hpp: TRANSITIONS, HOLD_TRANSITIONS,
 // PHASE_INVARIANTS, ACTION_EFFECTS, INPUT_PRECONDITIONS, TICK_SEQUENCE, HOLD_POLL_SEQUENCE,
-// UNLOCK_APPLIES and EXIT_APPLIES. Enumerators and masks go in as their numeric values, each
-// action list as its length and its actions (the NONE padding is left out), and each code
-// citation as its length and its characters.
+// UNLOCK_APPLIES and EXIT_APPLIES; and (hazard fix C1) the stop constants, in ms, and
+// stop_notice over every phase with and without the stop fault. Enumerators and masks go in as
+// their numeric values, each action list as its length and its actions (the NONE padding is
+// left out), and each code citation as its length and its characters.
 //
 // The static_assert below pins the value of the reviewed table. A change that moves
 // declarations around (a refactor) keeps the value, which is what proves that no row moved.
@@ -128,6 +129,18 @@ constexpr void add_sequences_and_applies(Fnv1a &f) noexcept {
   }
 }
 
+// The user's stop (C1): its timing constants and what the Drive screen says in each phase.
+constexpr void add_stop(Fnv1a &f) noexcept {
+  for (const milliseconds ms : {kStopResend, kStopFaultAfter, kStopResendSlow, kStopResendSlack}) {
+    f.value(ms.count());
+  }
+  for (std::size_t p = 0; p < kPhaseCount; ++p) {
+    for (const GuardMask hidden : {GuardMask{0}, bit(Guard::STOP_FAULT)}) {
+      f.value(stop_notice(static_cast<Phase>(p), hidden));
+    }
+  }
+}
+
 } // namespace fingerprint_detail
 
 /// @brief The fingerprint of the table's data (see the file comment for what it covers).
@@ -137,11 +150,12 @@ constexpr void add_sequences_and_applies(Fnv1a &f) noexcept {
   fingerprint_detail::add_hold_transitions(f);
   fingerprint_detail::add_invariants_and_effects(f);
   fingerprint_detail::add_sequences_and_applies(f);
+  fingerprint_detail::add_stop(f);
   return f.hash();
 }
 
 /// @brief The reviewed table's fingerprint. Changes only together with a reviewed row change.
-inline constexpr std::uint64_t TABLE_FINGERPRINT = 0xD8AAB0E61BE44A91ULL;
+inline constexpr std::uint64_t TABLE_FINGERPRINT = 0x573722FFCE41FB3CULL;
 
 static_assert(table_fingerprint() == TABLE_FINGERPRINT,
               "the drive session table's data changed: a row change needs the owner's approval "

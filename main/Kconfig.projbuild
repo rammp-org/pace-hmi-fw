@@ -52,6 +52,15 @@ menu "RAMMP HMI"
         default 1 if HMI_BENCH_STICK_INJECT
         default 0
 
+    # Hidden: 1 when the bootloader may skip validating the app image (any
+    # BOOTLOADER_SKIP_VALIDATE_* option). The quick POST's img.ok takes "verified" from
+    # the bootloader's own validation and static_asserts this is 0 (hazard-c3-spec.md
+    # Q10, decision C7 a), so a build that skips it does not compile.
+    config HMI_BOOTLOADER_SKIPS_VALIDATE_AS_INT
+        int
+        default 1 if BOOTLOADER_SKIP_VALIDATE_ALWAYS || BOOTLOADER_SKIP_VALIDATE_ON_POWER_ON || BOOTLOADER_SKIP_VALIDATE_IN_DEEP_SLEEP
+        default 0
+
     config HMI_WIFI_SSID
         string "WiFi network name (SSID)"
         default ""

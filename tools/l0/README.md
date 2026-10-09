@@ -26,6 +26,7 @@ the top of `ratchet.py`.
 | vendored | `components/m5stack-tab5` is out of scope; in `components/espp_adc` only the upstream files are, by name (`VENDORED_FILES`); `continuous_adc.hpp` carries our hook lines and may hold no more of any metric than its pristine copy in `upstream/` (`VENDORED_MODIFIED`; `lines` keeps its usual limit) |
 | `if_config` | `#if…CONFIG_` forbidden, except in a component's `include/**/config.hpp` (CS-TYP-05) |
 | others | `std_thread`, `xtaskcreate`, `vtaskdelay`, `sleep_this_thread`, `esp_timer_create`, `log_direct`, `heap_raw`, `typedef`, `assert`, `esp_error_check`, `c_cast`: forbidden |
+| `heap_raw` | `new`, `malloc`/`calloc`/`realloc`/`free`/`aligned_alloc`/`strdup` calls and every `heap_caps_*` call, except the read-only `heap_caps_get_*` queries (free size, minimum free, largest block, info), which allocate nothing: exempt by the owner's decision of 2026-10-08 (the quick POST's memory facts, hazard-c3-spec.md §2.2). `heap_caps_malloc`, `_calloc`, `_free` and the rest still count |
 
 `main/main.cpp` and every `main/frag_*.inc` are one unit named `main/main.cpp`.
 

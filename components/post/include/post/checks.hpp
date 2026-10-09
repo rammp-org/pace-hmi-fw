@@ -7,8 +7,8 @@
 //   LIVE     the stick at rest: re-judged on every rest window. A FAIL only delays the POST,
 //            so a stick bumped at power-on never locks the user out.
 //
-// Limits marked "D4" are placeholders until the owner decides them (hazard-fixes section 1 D4).
-// Each picks the stricter side of what is known today, and says where it comes from.
+// Limits marked "D4 approved 2026-10-08" are the owner's values (hazard-fixes.md §9 D4,
+// post-limits-proposal.md; hazard-c3-spec.md §3). Each says where it comes from.
 
 #include <algorithm>
 #include <array>
@@ -24,44 +24,48 @@ inline constexpr int32_t ANY_HI = std::numeric_limits<int32_t>::max();
 
 // --- limits --------------------------------------------------------------------------------
 
-/// D4: shortest rest window judged, in ADC task cycles (and samples per axis). About 0.8 s at
-/// today's 33 ms cycle; hazard-fixes B2 asks for about 1 s. Fewer is PENDING, never FAIL.
-inline constexpr int32_t WINDOW_MIN_SAMPLES = 25;
-/// D4: least share of ADC cycles that read all three axes, in 0.1 %. 990 = the self test's
-/// joy.valid 99 %, which allows no failed read in a window under 100 cycles.
+/// D4 approved 2026-10-08: shortest rest window judged, in ADC task cycles (and samples per
+/// axis). 1.05 s at the measured 35 ms cycle (33 ms wait after the work); hazard-fixes B2 asks
+/// for about 1 s. Fewer is PENDING, never FAIL.
+inline constexpr int32_t WINDOW_MIN_SAMPLES = 30;
+/// D4 approved 2026-10-08: least share of ADC cycles that read all three axes, in 0.1 %. 990 = the
+/// self test's joy.valid 99 %, which allows no failed read in a window under 100 cycles.
 inline constexpr int32_t ADC_VALID_MIN_PERMILLE = 990;
 /// Least travel either side of centre for a calibration to count (joystick_cal.cpp's
 /// kFullTravelMv: the firmware already refuses a saved file with less).
 inline constexpr int32_t CAL_MIN_HALF_SPAN_MV = 1000;
-/// D4: the internal bus devices expected at boot: board 2's boot scan, every bench boot of
-/// 2026-10-06 (C:/b/bench/results/*/boot-candidate.log). Not yet split into required and
-/// board-optional (board 1 has no haptic answering, 0x5a).
+/// D4 approved 2026-10-08: the internal bus devices expected at boot: board 2's boot scan, every
+/// bench boot of 2026-10-06 (C:/b/bench/results/*/boot-candidate.log). Not split into required and
+/// board-optional: board 1 has no haptic answering at 0x5a (decision C5: measure boards 1 and
+/// 3 first, then decide).
 inline constexpr std::array<uint8_t, 11> EXPECTED_I2C{0x10, 0x28, 0x32, 0x36, 0x40, 0x41,
                                                       0x43, 0x44, 0x55, 0x5a, 0x68};
-/// D4: least internal RAM free since boot (the self test's mem.int_min, 12 KB).
+/// D4 approved 2026-10-08: least internal RAM free since boot (the self test's mem.int_min, 12 KB).
 inline constexpr int32_t MEM_INT_MIN_B = 12 * 1024;
-/// D4: least largest free internal block (the self test's mem.int_block, 12 KB).
+/// D4 approved 2026-10-08: least largest free internal block (the self test's mem.int_block, 12
+/// KB).
 inline constexpr int32_t MEM_INT_BLOCK_B = 12 * 1024;
-/// D4: least DMA-capable RAM free since boot (the self test's mem.dma_min, 1536 B).
+/// D4 approved 2026-10-08: least DMA-capable RAM free since boot (the self test's mem.dma_min, 1536
+/// B).
 inline constexpr int32_t MEM_DMA_MIN_B = 1536;
-/// D4: least PSRAM free (the self test's mem.psram_free, 8 MiB).
+/// D4 approved 2026-10-08: least PSRAM free (the self test's mem.psram_free, 8 MiB).
 inline constexpr int32_t MEM_PSRAM_FREE_B = 8 * 1024 * 1024;
-/// D4: least stack never used by the ADC task (the self test's mem.stk_adc; 1496 B was
-/// measured free at the end of a self test on board 2, 2026-10-06).
+/// D4 approved 2026-10-08: least stack never used by the ADC task (the self test's mem.stk_adc;
+/// 1496 B was measured free at the end of a self test on board 2, 2026-10-06).
 inline constexpr int32_t STK_ADC_MIN_B = 1024;
-/// D4: least stack never used by the LVGL task (the self test's mem.stk_lvgl).
+/// D4 approved 2026-10-08: least stack never used by the LVGL task (the self test's mem.stk_lvgl).
 inline constexpr int32_t STK_UI_MIN_B = 2048;
-/// D4: most X or Y rest offset from the calibrated centre, mV (the self test's
+/// D4 approved 2026-10-08: most X or Y rest offset from the calibrated centre, mV (the self test's
 /// joy.*_cal_off; inside the stick's 0.10 radial dead zone, see the static_asserts).
 inline constexpr int32_t REST_XY_MAX_MV = 40;
-/// D4: most twist rest offset from the calibrated centre, mV (the self test's
+/// D4 approved 2026-10-08: most twist rest offset from the calibrated centre, mV (the self test's
 /// joy.twist_cal_off; inside the 60 mV twist centre dead band).
 inline constexpr int32_t REST_TWIST_MAX_MV = 50;
-/// D4: most X or Y peak-to-peak over the window, mV (the self test's joy.*_noise, ~1 mV
-/// measured): a hand moving the stick through centre is not at rest.
+/// D4 approved 2026-10-08: most X or Y peak-to-peak over the window, mV (the self test's
+/// joy.*_noise, ~1 mV measured): a hand moving the stick through centre is not at rest.
 inline constexpr int32_t STILL_XY_MAX_MV = 30;
-/// D4: most twist peak-to-peak over the window, mV (the self test's joy.twist_noise; the
-/// twist pot reads ~60 mV peak-to-peak at rest on ADC2).
+/// D4 approved 2026-10-08: most twist peak-to-peak over the window, mV (the self test's
+/// joy.twist_noise; the twist pot reads ~60 mV peak-to-peak at rest on ADC2).
 inline constexpr int32_t STILL_TWIST_MAX_MV = 120;
 
 /// The stick's centre dead zone, in 0.1 % of the half-span (main: kStickCenterDeadzoneRadius

@@ -16,11 +16,30 @@ extraction (`test/golden_stick.inc`, frozen). They are not a reviewed specificat
 | REQ-STK-01 | Raw mV maps to a position in [-1, 1] per axis through `espp::Joystick`: X/Y with a circular dead zone and a range dead zone, the vertical pot inverted (+y up), twist on its own range mapper with its own mV dead bands. | STK-001, STK-002 |
 | REQ-STK-02 | The mounted stick is swapped first, then mirrored per axis; twist is untouched. | STK-002, STK-034 |
 | REQ-STK-03 | The key is a Schmitt trigger on the larger axis, with thresholds set by the sensitivity (1..10, clamped); a calibration run releases it; the remote key overrides it; a new key is latched as a flick. | STK-019, STK-022, STK-023, STK-030..032, STK-036 |
-| REQ-STK-04 | The command is the mounted position times a scale: 0 while calibrating or while the gate (`stick_drives`) is closed, else drive speed / 10 (1..10, clamped). The 0 is a multiply. | STK-016..018, STK-033, STK-035 |
+| REQ-STK-04 | RETIRED 2026-10-08, superseded by REQ-STK-10. The command is the mounted position times a scale: 0 while calibrating or while the gate (`stick_drives`) is closed, else drive speed / 10 (1..10, clamped). The 0 is a multiply. | – |
 | REQ-STK-05 | A cycle with any of the three reads missing publishes nothing and calls nothing else. | STK-005, STK-015 |
 | REQ-STK-06 | A cycle calls its `Io` in the order of the original code. | STK-003, STK-004 |
 | REQ-STK-08 | `pipeline_config` gives the HMI's mounting: center dead zone radius 0.10, range dead zone 0.05, twist dead bands 60 mV (center) and 40 mV (range), with the caller's calibration and key codes (the values main passed before they moved here). | STK-037 |
 | REQ-STK-09 | A stick-button release within SELECT_MAX_US (500 ms) of its press selects; every press more than COUNT_DEBOUNCE_US (30 ms) after the last counted press counts (only the counter is debounced). | STK-050..052 |
+
+## The output permit (hazard-c1-spec.md §3, approved 2026-10-08)
+
+`stick/output_permit.hpp`: `OutputPermit`, the one gate between the stick and XYTwist for the
+hazard fixes C1, C3, C4 and C2. The pipeline asks its Io `output_permit(mounted)` on every
+valid cycle, where it asked `stick_drives()` before; a held stick sends `HELD_COMMAND`, a
+literal (+0.0, +0.0, +0.0). Its hooks (`stick/permit_types.hpp`, `stick/permit_hooks.hpp`):
+the POST gate (NOT_RUN until C3's runner), stick health (NOT_MONITORED, which passes, until
+C2), the hold reason it publishes, and C4's motion guard (an input of the cycle, OK until C4).
+Main's `AdcStickIo` owns the permit and gives it the ADC task's `uint32` ms clock.
+
+| ID | Requirement | Tests |
+| --- | --- | --- |
+| REQ-STK-10 | When the output permit is withheld, the command is exactly (+0.0, +0.0, +0.0), whatever the position (NaN and negatives included) | STK-002, STK-060 |
+| REQ-STK-11 | The output permit is the gate AND the motion guard's verdict OK AND no calibration AND a measured calibration AND POST PASS AND stick health allowing output AND the neutral latch | STK-064, STK-066, STK-067 |
+| REQ-STK-12 | The neutral latch sets after >= `kNeutralHold` (300 ms) of valid cycles all at x = y = twist = 0.0; a non-neutral, NaN or invalid cycle restarts the wait; any other permit condition failing clears it (and the wait); once set it stays while they hold | STK-061..065 |
+| REQ-STK-13 | The hold reason is the first failing condition in the order GATE_SHUT, MOTION_GUARD, CALIBRATING, NOT_CALIBRATED, POST_NOT_PASSED, STICK_FAULT, STICK_CHECK, CENTRE_FIRST, else NONE | STK-004, STK-066 |
+| REQ-STK-14 | POST gate NOT_RUN, PENDING and FAIL withhold output; PASS allows. Stick health FAULT (reason STICK_FAULT) and CHECK (reason STICK_CHECK) withhold; NOT_MONITORED and OK allow. The motion guard's verdict allows only OK; until C4 it is always OK | STK-067 |
+| REQ-STK-15 | While the POST gate is not PASS, XYTwist carries the stick button released; otherwise it carries the button as it reads, held or not (hazard-c3-spec.md §2.11, decisions D12 a, C3 Q11) | STK-068 |
 
 ## Bench stick injection (`stick/bench_inject.hpp`, hazard-fixes.md §3 B1)
 
@@ -92,8 +111,9 @@ the user's calibration (row 24) or a reboot. CALIBRATING ends by the run's own s
   (0 mV) commands full left, full **forward** or full counter-clockwise, and a short to
   3300 mV full right, reverse or clockwise (STK-010..014).
 - H9: an invalid ADC cycle publishes nothing rather than neutral (STK-015).
-- The gate is `x * 0.0f`: a negative deflection goes out as -0.0 and a NaN as NaN (STK-016,
-  STK-035). The stick button reaches the MCB with the gate closed (STK-017).
+- Fixed by C1: the gate was `x * 0.0f`, so a negative deflection went out as -0.0 and a NaN as
+  NaN (STK-016 and STK-035 pinned it; both retired, C1 E9). A held stick now sends a literal
+  +0.0 (REQ-STK-10). The stick button reaches the MCB with the gate closed (STK-017).
 
 ## Tests
 

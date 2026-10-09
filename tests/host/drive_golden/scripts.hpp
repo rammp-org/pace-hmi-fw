@@ -45,6 +45,15 @@ enum class Op : std::uint8_t {
   CLOCK_TO_WARN, // arg: delta; the clock to the warn deadline + delta (if armed)
   CLOCK_TO_GIVEUP,
   CLOCK_TO_EXIT,
+  // C1 (hazard-c1-spec.md §5.2)
+  MARK_T0,       // the scenario's T0 := the clock now (fixed clock from here on)
+  AT,            // arg: ms; the clock to T0 + arg
+  CALIBRATING,   // arg: 0/1: a calibration run stops or starts
+  HOLD,          // arg: hmi::stick::HoldReason's value: the stick's hold reason
+  LIVE_LINK,     // arg: 0/1: the live link read alone (the rtps_link subject keeps its value)
+  PUBLISH_DELAY, // arg: us: the next DriveCommand publish blocks this long (the clock moves)
+  // C3 (hazard-c3-spec.md §6.2)
+  POST, // arg: hmi::stick::PostGate's value: the POST gate
 };
 
 struct Step {
@@ -64,5 +73,30 @@ std::vector<Scenario> scenarios();
 // Plays every scenario against the target from a fresh world and drive state each; the logs
 // are left in port_log() and raw_log(), the row hits in row_hits().
 void run_all(const Target &target);
+
+// One step against the target, as run_all plays it (the logs record it).
+void play_step(const Step &step, const Target &target);
+
+// Step builders, for the hand-written goldens.
+Step tick();
+Step unlock_hold();
+Step exit_hold();
+Step input(hmi::drive_session::Input in);
+Step input_raw(std::int64_t in);
+Step profile(Profile p);
+Step timer_fires();
+Step link(bool up);
+Step mib(Mib m);
+Step screen(ScreenId s);
+Step menu(bool open);
+Step frame_step();
+Step advance(std::int64_t us);
+Step mark_t0();
+Step at(std::int64_t ms);
+Step calibrating(bool on);
+Step hold(std::uint8_t reason);
+Step live_link(bool up);
+Step publish_delay(std::int64_t us);
+Step post(std::uint8_t gate);
 
 } // namespace golden

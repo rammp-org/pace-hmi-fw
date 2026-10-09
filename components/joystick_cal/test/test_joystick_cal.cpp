@@ -898,3 +898,49 @@ TEST_CASE("CAL-036 HAZARD a NaN sample passes every hold check; a NaN rest ends 
   TEST_ASSERT_FALSE(joystick_cal_take_new().has_value());
   TEST_ASSERT_EQUAL_INT(writes, fake_storage::write_calls());
 }
+
+TEST_CASE("CAL-401 joystick_cal_measured: true after a valid load and after a completed run, "
+          "saved or not; false on the defaults",
+          "[cal][measured][REQ-CAL-08]") {
+  start_clean();
+  fake_storage::remove(kFileName);
+  {
+    StdoutCapture quiet;
+    (void)joystick_cal_load(kDefaults);
+    (void)quiet.stop();
+  }
+  TEST_ASSERT_FALSE(joystick_cal_measured()); // no file: the defaults
+  (void)load_text(kBoard2File);
+  TEST_ASSERT_TRUE(joystick_cal_measured()); // loaded valid from flash
+  TEST_ASSERT_TRUE(joystick_cal_saved());
+  fake_storage::remove(kFileName);
+  {
+    StdoutCapture quiet;
+    (void)joystick_cal_load(kDefaults);
+    (void)quiet.stop();
+  }
+  TEST_ASSERT_FALSE(joystick_cal_measured());
+  joystick_cal_toggle(); // a run that saves
+  do_rest();
+  do_directions();
+  do_release();
+  TEST_ASSERT_TRUE(joystick_cal_measured());
+  TEST_ASSERT_TRUE(joystick_cal_saved());
+  (void)joystick_cal_take_new();
+  fake_storage::remove(kFileName);
+  {
+    StdoutCapture quiet;
+    (void)joystick_cal_load(kDefaults);
+    (void)quiet.stop();
+  }
+  TEST_ASSERT_FALSE(joystick_cal_measured());
+  fake_storage::set_write_fails(true); // a run that cannot save still counts (decision C2 a)
+  joystick_cal_toggle();
+  do_rest();
+  do_directions();
+  do_release();
+  fake_storage::set_write_fails(false);
+  TEST_ASSERT_TRUE(joystick_cal_measured());
+  TEST_ASSERT_FALSE(joystick_cal_saved());
+  (void)joystick_cal_take_new();
+}

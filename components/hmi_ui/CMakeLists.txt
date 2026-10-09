@@ -9,6 +9,7 @@ idf_component_register(SRCS "src/about_view.cpp"
                             "src/diagnostics_view.cpp"
                             "src/display_flip.cpp"
                             "src/drive_band_view.cpp"
+                            "src/drive_notice_view.cpp"
                             "src/fps_meter.cpp"
                             "src/hold_gesture.cpp"
                             "src/internet_view.cpp"
@@ -17,6 +18,7 @@ idf_component_register(SRCS "src/about_view.cpp"
                             "src/nav_view.cpp"
                             "src/on_demand_screens.cpp"
                             "src/overdraw.cpp"
+                            "src/post_stage.cpp"
                             "src/refusal_view.cpp"
                             "src/resident_chrome.cpp"
                             "src/rtps_label_view.cpp"
@@ -34,7 +36,8 @@ idf_component_register(SRCS "src/about_view.cpp"
                             "src/update_view.cpp"
                             "src/widget_tree.cpp"
                        INCLUDE_DIRS "include"
-                       REQUIRES drive_session
+                       REQUIRES drive_adapter
+                                drive_session
                                 drive_ui
                                 esp_driver_ppa
                                 hmi_format
@@ -43,6 +46,7 @@ idf_component_register(SRCS "src/about_view.cpp"
                                 logger
                                 lvgl
                                 ota_parse
+                                post
                                 rammp_rtps_messages
                                 settings
                                 stick

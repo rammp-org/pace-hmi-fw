@@ -1,15 +1,16 @@
 // L1 host app for drive_session: the transition-table oracle by input (TS-UNIT-08, TS-UNIT-09;
 // docs/plans/hazard-fixes.md B3).
 //
-// The same verdict as the full-product oracle (test/oracle, DRV-001..012): where find_row()
-// finds a row, the phase must become the row's `to`, the hidden mask apply(row.actions, hidden)
-// and the actions the row's, in order; where it finds none, nothing may change and nothing may
-// be returned. What differs is the set of states: per input, every value of every dimension the
-// table reads for that input, in every phase, crossed with a fixed set of the other dimensions
-// (oracle_space.hpp says which). The full-product oracle stays, side by side, until the owner
-// retires it; `make equivalence` shows that this one visits every (phase, input, read-bit)
-// class the full product does, with the same row, and `make mutants` that both reject the same
-// table and code mutations.
+// The same verdict as the full-product oracle (test/oracle_full, DRV-001..012): where
+// find_row() finds a row, the phase must become the row's `to`, the hidden mask
+// apply(row.actions, hidden) and the actions the row's, in order; where it finds none, nothing
+// may change and nothing may be returned. What differs is the set of states: per input, every
+// value of every dimension the table reads for that input, in every phase, crossed with a fixed
+// set of the other dimensions (oracle_space.hpp says which). This is the oracle CI runs; the
+// full product runs on demand (`make full` in test/oracle_full, owner decision G2).
+// `make equivalence` shows that this one visits every (phase, input, read-bit) class the full
+// product does, with the same row, and `make mutants` that both reject the same table and code
+// mutations.
 
 #include "oracle_space.hpp"
 
@@ -167,6 +168,21 @@ TEST_CASE("DRV-111 MENU_ROW_DRIVE, by input: the table's row or no change",
   expect_by_input(Input::MENU_ROW_DRIVE);
 }
 
+TEST_CASE("DRV-114 TICK_STOP_FAULT_DUE, by input: the table's row or no change",
+          "[drive][safety][oracle][REQ-DRV-28]") {
+  expect_by_input(Input::TICK_STOP_FAULT_DUE);
+}
+
+TEST_CASE("DRV-115 TICK_STOP_RESEND, by input: the table's row or no change",
+          "[drive][safety][oracle][REQ-DRV-26]") {
+  expect_by_input(Input::TICK_STOP_RESEND);
+}
+
+TEST_CASE("DRV-117 TICK_BOOT_STOP, by input: the table's row (50, 51) or no change",
+          "[drive][safety][oracle][REQ-DRV-39]") {
+  expect_by_input(Input::TICK_BOOT_STOP);
+}
+
 // ---- What the by-input oracle visits -----------------------------------------------------
 
 namespace {
@@ -204,7 +220,10 @@ bool same_state(const os::Point &a, const os::Point &b) {
   return a.hidden == b.hidden && a.env.link_connected == b.env.link_connected &&
          a.env.mib == b.env.mib && a.env.screen == b.env.screen &&
          a.env.menu_open == b.env.menu_open && a.env.exit_elapsed == b.env.exit_elapsed &&
-         a.env.warn_elapsed == b.env.warn_elapsed && a.env.giveup_elapsed == b.env.giveup_elapsed;
+         a.env.warn_elapsed == b.env.warn_elapsed && a.env.giveup_elapsed == b.env.giveup_elapsed &&
+         a.env.calibrating == b.env.calibrating &&
+         a.env.stop_fault_elapsed == b.env.stop_fault_elapsed && a.env.resend == b.env.resend &&
+         a.env.post_ok == b.env.post_ok;
 }
 
 os::Values high_corner() {
@@ -321,9 +340,10 @@ TEST_CASE("DRV-113 the oracle's dimensions are faithful: each decides only its o
           "[drive][oracle]") {
   const DimCheck c = check_dimensions();
   TEST_ASSERT_EQUAL_UINT64(0, c.bad_dimensions);
-  // The full-product oracle's space: 2 x 4 MIB states x 5 screens x 2^4 flags x 2^5 masks.
-  TEST_ASSERT_EQUAL_UINT64(std::size_t{2} * os::MIBS.size() * os::SCREENS.size() * 16U *
-                               (std::size_t{1} << os::kHiddenDims),
+  // The full-product oracle's space: 2 x 4 MIB states x 5 screens x 2^7 flags x 3 re-send
+  // states x 2^7 masks.
+  TEST_ASSERT_EQUAL_UINT64(std::size_t{2} * os::MIBS.size() * os::SCREENS.size() * 128U *
+                               os::RESENDS.size() * (std::size_t{1} << os::kHiddenDims),
                            os::product_size(os::kAllDims));
   // The corner sample: distinct points, each within kMaxDistance of a corner, as many as the
   // two neighbourhoods hold (they cannot meet: the corners differ in every dimension, more

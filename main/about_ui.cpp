@@ -10,8 +10,10 @@
 
 #include "esp_app_desc.h"
 #include "esp_mac.h"
+#include "esp_system.h"
 #include "fw_info.hpp"
 #include "hmi_ui/about_view.hpp"
+#include "post/runner.hpp"
 #include "rtps_comms.hpp"
 
 #ifndef HMI_GIT_COMMIT
@@ -52,6 +54,12 @@ constinit hmi::ui::AboutView view{{
     .link_state = link_state,
     .ip = rtps_comms_ip,
     .hostname = rtps_comms_hostname,
+    .last_reset =
+        [] {
+          return hmi::post::reset_reason_name(
+                     static_cast<hmi::post::ResetReason>(esp_reset_reason()))
+              .data();
+        },
 }};
 
 } // namespace

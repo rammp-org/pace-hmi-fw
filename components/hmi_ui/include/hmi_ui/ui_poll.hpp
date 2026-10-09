@@ -1,6 +1,6 @@
 #pragma once
 // The UI island's 250 ms poll: the link indicator and its blink, the diagnostics' staleness, the
-// drive adapter's tick, and noticing a theme switch.
+// POST runner, the drive adapter's tick, the POST indicator, and noticing a theme switch.
 
 #include <cstdint>
 
@@ -31,9 +31,15 @@ public:
     void (*link_seen)(LinkState state);
     /// Diagnostics staleness (DiagnosticsView::poll). UI task, lvgl_mutex held.
     Fn<void()> diag_poll;
+    /// The POST runner's tick (UiApp's PostStage), before the drive tick so a pass seen on a
+    /// tick is used by that tick (hazard-c3-spec.md §2.3). UI task, lvgl_mutex held.
+    Fn<void()> post_tick;
     /// The drive adapter's tick (main's DriveAdapter, through UiApp's DriveInputs). UI task,
     /// lvgl_mutex held.
     void (*drive_tick)();
+    /// The POST's persistent indicator, after the drive tick (REQ-UI-23). UI task, lvgl_mutex
+    /// held.
+    Fn<void()> post_indicator;
     /// The theme was switched (by any route): main takes the redundant background fills out
     /// again and saves the setting. Called after the link subject is re-notified and before the
     /// Theme row's subject is set. UI task, lvgl_mutex held.
@@ -44,7 +50,7 @@ public:
       : config_(config) {}
 
   /// @brief One tick, in this order: the link state (seen, then into `rtps_link`), the blink
-  ///        phase, diag_poll, drive_tick, then the theme check.
+  ///        phase, diag_poll, post_tick, drive_tick, post_indicator, then the theme check.
   /// UI task (an LVGL timer callback), lvgl_mutex held by lv_task.
   void poll();
 

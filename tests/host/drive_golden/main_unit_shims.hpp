@@ -8,7 +8,8 @@
 //
 // Every call the port makes across this boundary appends one line to the boundary log
 // (golden 2), with its arguments and what it returned. A call that stands for a DrivePort
-// method also appends that method to the port log (golden 1):
+// method also appends that method to the port log (golden 1), and, when it is one the C1/C3
+// goldens compare, its token to the filtered log (world.hpp):
 //   esp_timer_get_time                      -> now_us
 //   lv_subject_get_int(rtps_link_subject)   -> sample (the first of drive_env's four reads)
 //   rtps_comms_publish_drive(r, profile)    -> publish(r)
@@ -32,8 +33,11 @@
 #include <format>
 #include <string>
 
+#include "drive_notice.hpp"
 #include "drive_session.hpp"
+#include "drive_ui/link_state.hpp"
 #include "logger.hpp"
+#include "stick/permit_types.hpp"
 #include "world.hpp"
 
 // --- types from rammp_rtps_messages, rtps_comms.hpp and espp, values as there ---------------
@@ -99,6 +103,8 @@ inline const char *banner_name(std::int32_t which) {
     return "DRIVE_LOST";
   case 7:
     return "REFUSED_DRIVE_MENU";
+  case 8:
+    return "REFUSED_POST";
   default:
     return "?";
   }
@@ -165,9 +171,11 @@ inline void lv_subject_set_int(lv_subject_t *subject, std::int32_t value) {
   golden::World &w = golden::world();
   if (subject == &locked_subject) {
     golden::port(std::format("set_locked({})", int{value != 0}));
+    golden::filtered(std::format("lock({})", int{value != 0}));
     w.locked = value != 0;
   } else if (subject == &entry_refused_subject) {
     golden::port(std::format("show_banner({})", shim::banner_name(value)));
+    golden::filtered(std::format("B:{}", shim::banner_name(value)));
     w.banner = value;
   }
 }
@@ -194,6 +202,7 @@ inline bool lv_anim_delete(const void *var, lv_anim_exec_xcb_t exec_cb) {
   golden::raw(std::format("lv_anim_delete({}, {})", shim::name_of(var),
                           exec_cb == &ring_spin_cb ? "ring_spin_cb" : "?"));
   golden::port("lock_open_visual");
+  golden::filtered("open");
   return true;
 }
 inline void lv_arc_set_rotation(lv_obj_t *obj, std::int32_t rotation) {
@@ -219,6 +228,7 @@ inline void _ui_screen_change(lv_obj_t **target, lv_screen_load_anim_t fademode,
       *target == ui_DriveScreen ? golden::ScreenId::DRIVE : golden::ScreenId::LOCKED;
   if (*target == ui_DriveScreen && fade) {
     golden::port("go_drive_screen");
+    golden::filtered("Dv");
   }
   if (fade) {
     golden::load_faded(s);
@@ -241,6 +251,12 @@ inline bool rtps_comms_publish_drive(rammp::DriveRequest request, MIB::DriveProf
   golden::raw(std::format("rtps_comms_publish_drive({}, {})", shim::request_name(request),
                           shim::profile_name(profile)));
   golden::port(std::format("publish({})", shim::request_name(request)));
+  golden::world().now += golden::world().publish_delay_us;
+  golden::world().publish_delay_us = 0;
+  const char *r = request == rammp::DriveRequest::ENABLE ? "E" : "D";
+  golden::filtered(golden::world().profile_picked
+                       ? std::format("P({},{})", r, shim::profile_name(profile))
+                       : std::format("P({})", r));
   return true;
 }
 
@@ -271,6 +287,7 @@ struct MenuOnArrivalProxy {
   MenuOnArrivalProxy &operator=(bool v) {
     golden::raw(std::format("nav_menu_on_arrival = {}", int{v}));
     golden::port(std::format("menu_on_arrival({})", int{v}));
+    golden::filtered(std::format("menu({})", int{v}));
     golden::world().menu_on_arrival = v;
     return *this;
   }
@@ -302,11 +319,13 @@ inline shim::UnlockTimerProxy unlock_advance_timer;
 inline void lock_visual_wait() {
   golden::raw("lock_visual_wait");
   golden::port("ring_wait");
+  golden::filtered("ring_wait");
   golden::world().lock_waiting = true;
 }
 inline void lock_visual_rest() {
   golden::raw("lock_visual_rest");
   golden::port("ring_rest");
+  golden::filtered("ring_rest");
   golden::world().lock_waiting = false;
 }
 inline void unlock_timer_cancel() {
@@ -323,10 +342,12 @@ inline void nav_update_stick_gate() {
   golden::gate_update();
   golden::raw(std::format("nav_update_stick_gate -> gate={}", int{golden::world().gate}));
   golden::port(std::format("gate_update -> gate={}", int{golden::world().gate}));
+  golden::filtered("gate");
 }
 inline void locked_screen_go() {
   golden::raw("locked_screen_go");
   golden::port("go_locked_screen");
+  golden::filtered("L");
   golden::load_instant(golden::ScreenId::LOCKED);
 }
 inline void nav_home() {
@@ -344,6 +365,62 @@ inline bool haptic_play(espp::Drv2605::Waveform w, std::uint8_t slots) {
                           slots));
   return true;
 }
+
+namespace shim {
+// The live link read (rtps_comms_link_state): the first read of a drive sample.
+inline hmi::ui::LinkState link_state_now() {
+  const golden::World &w = golden::world();
+  golden::port(std::format("sample -> link={} mib={} screen={} menu={}", int{w.live_link},
+                           golden::mib_name(w.mib), golden::screen_name(w.screen),
+                           int{w.menu_open}));
+  golden::raw(std::format("rtps_comms_link_state -> {}", w.live_link ? "CONNECTED" : "NO_PEER"));
+  return w.live_link ? hmi::ui::LinkState::CONNECTED : hmi::ui::LinkState::NO_PEER;
+}
+inline bool calibrating() {
+  golden::raw(std::format("joystick_cal_running -> {}", int{golden::world().calibrating}));
+  return golden::world().calibrating;
+}
+inline hmi::stick::PostGate post_gate() {
+  const auto g = static_cast<hmi::stick::PostGate>(golden::world().post_gate);
+  golden::raw(std::format("post_gate -> {}", hmi::stick::to_string(g)));
+  return g;
+}
+inline hmi::stick::HoldReason hold_reason() {
+  const auto r = static_cast<hmi::stick::HoldReason>(golden::world().hold);
+  golden::raw(std::format("hold_reason -> {}", hmi::stick::to_string(r)));
+  return r;
+}
+inline const char *notice_name(hmi::drive_adapter::DriveNotice n) {
+  using hmi::drive_adapter::DriveNotice;
+  switch (n) {
+  case DriveNotice::NONE:
+    return "NONE";
+  case DriveNotice::MCB_DID_NOT_STOP:
+    return "MCB_DID_NOT_STOP";
+  case DriveNotice::STOPPING:
+    return "STOPPING";
+  case DriveNotice::MOTION_GUARD:
+    return "MOTION_GUARD";
+  case DriveNotice::NOT_CALIBRATED:
+    return "NOT_CALIBRATED";
+  case DriveNotice::POST_NOT_PASSED:
+    return "POST_NOT_PASSED";
+  case DriveNotice::STICK_FAULT:
+    return "STICK_FAULT";
+  case DriveNotice::STICK_CHECK:
+    return "STICK_CHECK";
+  case DriveNotice::CENTRE_FIRST:
+    return "CENTRE_FIRST";
+  }
+  return "?";
+}
+inline void show_drive_notice(hmi::drive_adapter::DriveNotice n) {
+  golden::raw(std::format("drive_notice_show({})", notice_name(n)));
+  golden::port(std::format("show_notice({})", notice_name(n)));
+  golden::filtered(std::format("N:{}", notice_name(n)));
+  golden::world().notice = notice_name(n);
+}
+} // namespace shim
 
 // The Ui DrivePort is instantiated over (the firmware's is hmi::ui::DriveUi): each method is
 // the shim above of the name the drive code used in the main.cpp unit, so the boundary log
@@ -374,4 +451,12 @@ struct MainUnitUi {
   void refusal_feedback() const { ::refusal_feedback(); }
   void haptic_click() const { (void)haptic_play(espp::Drv2605::Waveform::STRONG_CLICK, 1); }
   static constexpr lv_anim_exec_xcb_t ring_spin_cb = &::ring_spin_cb;
+  // C1's live reads (drive_port.hpp's sample) and the Drive notice.
+  hmi::ui::LinkState link_state_now() const { return shim::link_state_now(); }
+  bool calibrating() const { return shim::calibrating(); }
+  hmi::stick::HoldReason hold_reason() const { return shim::hold_reason(); }
+  hmi::stick::PostGate post_gate() const { return shim::post_gate(); }
+  void show_drive_notice(hmi::drive_adapter::DriveNotice notice) const {
+    shim::show_drive_notice(notice);
+  }
 };

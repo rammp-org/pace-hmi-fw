@@ -100,6 +100,11 @@ struct FakeIo {
   void show(const hmi::stick::Position &) {}
   int drive_speed() { return 10; }
   bool stick_drives() const { return drives; }
+  // C1's output permit (stick/output_permit.hpp): always allowed here, so the cases test the
+  // guard and the cycle, not the permit.
+  hmi::stick::Permit output_permit(const hmi::stick::Position &) const {
+    return {.output = true, .button = true, .reason = hmi::stick::HoldReason::NONE};
+  }
   bool button_pressed() { return false; }
   bool publish(const hmi::stick::Command &c, bool) {
     trace->add('P');

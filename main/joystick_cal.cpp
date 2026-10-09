@@ -1,6 +1,7 @@
 #include "joystick_cal.hpp"
 
 #include <atomic>
+#include <cstdint>
 #include <cstdio>
 #include <fstream>
 #include <mutex>
@@ -30,8 +31,12 @@ using hmi::cal::kTickMs;
 
 // Shared between tasks.
 std::mutex cal_mutex;
-JoystickCal current{};              // in use
-bool current_saved = false;         // `current` is what the file holds
+JoystickCal current{}; // in use
+// What `current` is: the compiled-in defaults, a calibration measured this boot but not saved,
+// or the one the file holds. Atomic, so the ADC task reads it every cycle without a lock
+// (joystick_cal_measured, the output permit's condition 4).
+enum class InUse : uint8_t { DEFAULTS, MEASURED, SAVED };
+std::atomic<InUse> in_use{InUse::DEFAULTS};
 std::optional<JoystickCal> pending; // a finished run, for the ADC task to apply
 std::atomic<bool> running{false};
 std::atomic<float> latest_mv[3];
@@ -99,7 +104,7 @@ void complete() {
   {
     std::lock_guard<std::mutex> lock(cal_mutex);
     current = cal;
-    current_saved = saved;
+    in_use = saved ? InUse::SAVED : InUse::MEASURED;
     pending = cal;
   }
   logger.info("calibrated{}: {}", saved ? "" : " (NOT saved)", describe(cal));
@@ -192,11 +197,11 @@ JoystickCal joystick_cal_load(const JoystickCal &defaults) {
   std::lock_guard<std::mutex> lock(cal_mutex);
   if (saved && plausible(*saved)) {
     current = *saved;
-    current_saved = true;
+    in_use = InUse::SAVED;
     logger.info("loaded {}: {}", path, describe(current));
   } else {
     current = defaults;
-    current_saved = false;
+    in_use = InUse::DEFAULTS;
     if (saved) {
       logger.warn("{} ignored, travel under {:.0f} mV: {}", path, kFullTravelMv, describe(*saved));
     } else {
@@ -206,10 +211,11 @@ JoystickCal joystick_cal_load(const JoystickCal &defaults) {
   return current;
 }
 
-bool joystick_cal_saved() {
-  std::lock_guard<std::mutex> lock(cal_mutex);
-  return current_saved;
-}
+bool joystick_cal_saved() { return in_use.load() == InUse::SAVED; }
+
+bool joystick_cal_measured() { return in_use.load() != InUse::DEFAULTS; }
+
+void joystick_cal_forget_measured() { in_use = InUse::DEFAULTS; }
 
 JoystickCal joystick_cal_current() {
   std::lock_guard<std::mutex> lock(cal_mutex);

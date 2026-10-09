@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cmath>
 #include <ctime>
+#include <limits>
 #include <optional>
 #include <string>
 #include <vector>
@@ -31,6 +32,7 @@
 #include "keypad_input.hpp"
 
 #include "about_ui.hpp"
+#include "bench_verbs.hpp"
 #include "board/board.hpp"
 #include "board/board_port.hpp"
 #include "boot_logo.h"
@@ -51,8 +53,11 @@
 #include "storage.hpp"
 #include "update_ui.hpp"
 
+#include "esp_heap_caps.h"
 #include "esp_lcd_mipi_dsi.h"
+#include "esp_ota_ops.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -60,6 +65,7 @@
 #include "hmi_format/topbar.hpp"
 #include "hmi_ui/app_state.hpp"
 #include "hmi_ui/fps_meter.hpp"
+#include "hmi_ui/post_stage.hpp"
 #include "hmi_ui/ui_app.hpp"
 #include "hmi_ui/ui_build.hpp"
 #include "hmi_ui/ui_island.hpp"
@@ -164,6 +170,8 @@ static void refusal_feedback();
 // adds StickSlot: the pipeline, or with CONFIG_HMI_BENCH_STICK_INJECT the bench
 // stick injection in front of it.
 #include "control/stick_island.hpp"
+#include "post/rest_window.hpp"
+#include "stick/output_permit.hpp"
 #include "stick_inject.hpp"
 
 static_assert(hmi::stick::SENSITIVITY_MIN == SETTINGS_STICK_SENSITIVITY_MIN &&
@@ -190,10 +198,44 @@ static hmi::stick::StickPipeline::Config stick_pipeline_config(const JoystickCal
       {.up = LV_KEY_UP, .down = LV_KEY_DOWN, .right = LV_KEY_RIGHT, .left = LV_KEY_LEFT});
 }
 
+// The ADC side's clock (hazard-fixes.md §10 item 22): one uint32 ms count, from this one
+// function, for the output permit (and, later, C4's motion guard and C2's monitor). Durations
+// on it are taken modulo 2^32.
+static uint32_t adc_clock_ms() { return static_cast<uint32_t>(esp_timer_get_time() / 1000); }
+
 // The ADC task's side of StickPipeline::cycle. Runs on the ADC task only; every
 // member is what the stick block of adc_task_fn did inline before.
 struct AdcStickIo {
+  // What the ADC task keeps across cycles beside the pipeline: app_main's, handed to the
+  // island at start.
+  struct State {
+    hmi::stick::OutputPermit permit; // the output permit and its neutral latch (C1 §3)
+    hmi::post::RestWindow rest;      // the POST's rest window (C3 §2.2)
+    hmi::fw::Writer<hmi::ui::RestWindowMailbox> windows; // to the POST runner (UI task)
+    hmi::post::RestWindowMsg window{}; // the window being sent: here, not on the task's stack
+    hmi::stick::PostGate post_seen = hmi::stick::PostGate::NOT_RUN; // the gate, last cycle
+  };
+
   espp::SimpleLowpassFilter &twist_lowpass;
+  State &state;
+
+  // Every cycle, valid or not, before the pipeline: the reads it gets (after the bench
+  // injection). An invalid cycle restarts the permit's neutral wait (REQ-STK-12).
+  void note_reads(const hmi::stick::RawReadsMv &reads) {
+    if (!(reads.horizontal_mv && reads.vertical_mv && reads.twist_mv)) {
+      state.permit.invalid_cycle();
+    }
+    // A failed read goes over as NaN, which the rest window counts as a failed read: three
+    // floats in registers, so the task's frame holds no copy of the reads.
+    constexpr float FAILED = std::numeric_limits<float>::quiet_NaN();
+    feed_rest_window(state, reads.horizontal_mv.value_or(FAILED),
+                     reads.vertical_mv.value_or(FAILED), reads.twist_mv.value_or(FAILED),
+                     joy_button_pressed.load());
+  }
+  // Defined after the UiApp, which owns the POST gate.
+  [[gnu::noinline]] static inline void feed_rest_window(State &state, float horizontal_mv,
+                                                        float vertical_mv, float twist_mv,
+                                                        bool button);
 
   // A calibration run just finished: the pipeline switches to it between two
   // samples, on the task that owns the stick.
@@ -233,16 +275,20 @@ struct AdcStickIo {
     }
   }
   int drive_speed() { return applied_settings.drive_speed(); }
-  // The gate. The MCB gets a centred stick whenever the stick is doing something
-  // else: while a calibration run sweeps it (the pipeline does not read this
-  // then), and whenever it is walking the UI rather than driving -- any screen
-  // but Drive, or Drive with the menu open. Drive stays ACTIVE across the menu
-  // and the other screens, as the spec draws it, so this is what keeps a push
-  // meant for the next row from moving the chair. The bars keep moving.
-  bool stick_drives() { return ::stick_drives.load(); }
+  // The output permit (hazard-c1-spec.md §3): the stick drives only with every condition
+  // met, in the hold-reason order, else the MCB gets a literal 0 and XYTwist keeps flowing.
+  // 1 the gate: the stick may drive only from Drive with the menu shut (`stick_drives`); a
+  //   push meant for the next row must never move the chair. The bars keep moving.
+  // 2 C4's motion guard: not fitted until C4, so OK (decision D2).
+  // 3 no calibration run (the user is pushing it to every end in turn); 4 a measured
+  //   calibration (G5); 5 POST passed (G3, C3); 6, 7 stick health (C2; NOT_MONITORED passes
+  //   until then, D2); 8 the stick centred for kNeutralHold since the last hold (G1).
+  // The first failing one goes to the Drive notice (hold_reason). Lock-free reads only.
+  // Defined after the UiApp, which owns the permit's channels.
+  hmi::stick::Permit output_permit(const hmi::stick::Position &mounted);
   bool button_pressed() { return joy_button_pressed.load(); }
   // The MCB gets the same calibrated -1..+1 values the bars show (+Y forward,
-  // deadzones applied), scaled by Settings "Speed sensitivity" and the gate, so
+  // deadzones applied), scaled by Settings "Speed sensitivity" (0 when held), so
   // it needs no calibration of its own. Quiet no-op until RTPS is up and a
   // subscriber is discovered.
   bool publish(const hmi::stick::Command &command, bool button) {
@@ -318,6 +364,7 @@ static bool drive_session_input(hmi::drive_session::Input input);
 static void drive_wait_poll();
 static void drive_unlock_hold_done();
 static void drive_exit_hold_done();
+static void drive_refresh_notice(hmi::stick::HoldReason hold);
 static void log_screen_init();
 static void internet_screen_init();
 static void update_screen_init();
@@ -346,6 +393,7 @@ static constexpr hmi::ui::DriveInputs kDriveInputs{
     .tick = drive_wait_poll,
     .unlock_hold_done = drive_unlock_hold_done,
     .exit_hold_done = drive_exit_hold_done,
+    .refresh_notice = drive_refresh_notice,
 };
 
 static constexpr hmi::ui::CuesPort kCuesPort{
@@ -381,6 +429,107 @@ static constexpr hmi::ui::MainScreens kMainScreens{
     .update_on_load = update_ui_on_load,
     .calibration_init = calibration_screen_init,
     .calibration_toggle = joystick_cal_toggle,
+    .calibrating = joystick_cal_running,
+};
+
+// The quick POST's facts from ESP-IDF (hazard-c3-spec.md §2.2, REQ-POST-19), for the POST
+// runner on the UI task. post/facts.hpp mirrors the IDF enums value for value: the
+// static_asserts here are POST-050, built against the IDF this firmware uses.
+static_assert(static_cast<int>(hmi::post::ResetReason::UNKNOWN) == ESP_RST_UNKNOWN &&
+                  static_cast<int>(hmi::post::ResetReason::POWERON) == ESP_RST_POWERON &&
+                  static_cast<int>(hmi::post::ResetReason::EXT) == ESP_RST_EXT &&
+                  static_cast<int>(hmi::post::ResetReason::SW) == ESP_RST_SW &&
+                  static_cast<int>(hmi::post::ResetReason::PANIC) == ESP_RST_PANIC &&
+                  static_cast<int>(hmi::post::ResetReason::INT_WDT) == ESP_RST_INT_WDT &&
+                  static_cast<int>(hmi::post::ResetReason::TASK_WDT) == ESP_RST_TASK_WDT &&
+                  static_cast<int>(hmi::post::ResetReason::WDT) == ESP_RST_WDT &&
+                  static_cast<int>(hmi::post::ResetReason::DEEPSLEEP) == ESP_RST_DEEPSLEEP &&
+                  static_cast<int>(hmi::post::ResetReason::BROWNOUT) == ESP_RST_BROWNOUT &&
+                  static_cast<int>(hmi::post::ResetReason::SDIO) == ESP_RST_SDIO &&
+                  static_cast<int>(hmi::post::ResetReason::USB) == ESP_RST_USB &&
+                  static_cast<int>(hmi::post::ResetReason::JTAG) == ESP_RST_JTAG &&
+                  static_cast<int>(hmi::post::ResetReason::EFUSE) == ESP_RST_EFUSE &&
+                  static_cast<int>(hmi::post::ResetReason::PWR_GLITCH) == ESP_RST_PWR_GLITCH &&
+                  static_cast<int>(hmi::post::ResetReason::CPU_LOCKUP) == ESP_RST_CPU_LOCKUP,
+              "post::ResetReason must mirror esp_reset_reason_t (POST-050)");
+static_assert(static_cast<uint32_t>(hmi::post::OtaImageState::NEW) == ESP_OTA_IMG_NEW &&
+                  static_cast<uint32_t>(hmi::post::OtaImageState::PENDING_VERIFY) ==
+                      ESP_OTA_IMG_PENDING_VERIFY &&
+                  static_cast<uint32_t>(hmi::post::OtaImageState::VALID) == ESP_OTA_IMG_VALID &&
+                  static_cast<uint32_t>(hmi::post::OtaImageState::INVALID) == ESP_OTA_IMG_INVALID &&
+                  static_cast<uint32_t>(hmi::post::OtaImageState::ABORTED) == ESP_OTA_IMG_ABORTED &&
+                  static_cast<uint32_t>(hmi::post::OtaImageState::UNDEFINED) ==
+                      ESP_OTA_IMG_UNDEFINED,
+              "post::OtaImageState must mirror esp_ota_img_states_t (POST-050)");
+// img.ok's "verified" is the bootloader's own validation of the image (decision C7 a): true
+// only because no BOOTLOADER_SKIP_VALIDATE_* option is set, which this proves.
+static_assert(CONFIG_HMI_BOOTLOADER_SKIPS_VALIDATE_AS_INT == 0,
+              "the bootloader must validate the app image: img.ok relies on it (C3 Q10)");
+
+// A byte count as the POST's int32 facts carry it, saturated (REQ-POST-19).
+static int32_t saturated_b(size_t bytes) {
+  return bytes > static_cast<size_t>(INT32_MAX) ? INT32_MAX : static_cast<int32_t>(bytes);
+}
+
+static hmi::post::ImageFacts post_image() {
+  esp_ota_img_states_t state = ESP_OTA_IMG_UNDEFINED;
+  const esp_partition_t *running = esp_ota_get_running_partition();
+  if (running == nullptr || esp_ota_get_state_partition(running, &state) != ESP_OK) {
+    state = ESP_OTA_IMG_UNDEFINED; // a factory image or no OTA data: no OTA state
+  }
+  return {.verified = CONFIG_HMI_BOOTLOADER_SKIPS_VALIDATE_AS_INT == 0,
+          .state = static_cast<hmi::post::OtaImageState>(state)};
+}
+
+static hmi::post::Calibration post_calibration() {
+  const JoystickCal cal = joystick_cal_current();
+  const auto axis = [](const JoystickAxisCal &a) {
+    return hmi::post::AxisCal{.min_mv = static_cast<int32_t>(std::lround(a.min_mv)),
+                              .centre_mv = static_cast<int32_t>(std::lround(a.center_mv)),
+                              .max_mv = static_cast<int32_t>(std::lround(a.max_mv))};
+  };
+  return {.saved = joystick_cal_saved(),
+          .x = axis(cal[JOY_HORIZONTAL]),
+          .y = axis(cal[JOY_VERTICAL]),
+          .twist = axis(cal[JOY_TWIST])};
+}
+
+// Heap headroom (C3 §2.2): read-only heap_caps_get_* queries (they allocate nothing; the
+// ratchet exempts them, owner 2026-10-08).
+static std::optional<hmi::post::MemoryFacts> post_memory() {
+  constexpr uint32_t kInternal8Bit = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+  return hmi::post::MemoryFacts{
+      .internal_free_min_b = saturated_b(heap_caps_get_minimum_free_size(kInternal8Bit)),
+      .internal_largest_b = saturated_b(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)),
+      .dma_free_min_b = saturated_b(heap_caps_get_minimum_free_size(MALLOC_CAP_DMA)),
+      .psram_free_b = saturated_b(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+  };
+}
+
+static hmi::post::StackFacts post_stacks() {
+  TaskHandle_t adc = xTaskGetHandle("Read ADC");
+  return {.adc_free_b = adc == nullptr ? 0 : saturated_b(uxTaskGetStackHighWaterMark(adc)),
+          // the runner's own task: lv_task
+          .ui_free_b = saturated_b(uxTaskGetStackHighWaterMark(nullptr))};
+}
+
+// Whether the stick task (StickIsland's "Read ADC", app_main) exists. Until it does nothing
+// publishes XYTwist, so the chair cannot move; a failed start is logged by app_main and stays
+// false until reset. FreeRTOS's task list is the record, so there is no flag to keep in step.
+// Any task, not an ISR. For POST (hazard-c3-spec.md): kPostPort, read only at the budget. The name
+// is the task's in app_main's StickIsland config and in tools/guards/baselines/tasks.json: a rename
+// reads as "not running", the safe direction.
+static bool stick_task_running() { return xTaskGetHandle("Read ADC") != nullptr; }
+
+static constexpr hmi::ui::PostPort kPostPort{
+    .now_ms = [] { return static_cast<uint32_t>(esp_timer_get_time() / 1000); },
+    .reset_reason = [] { return static_cast<hmi::post::ResetReason>(esp_reset_reason()); },
+    .image = post_image,
+    .calibration = post_calibration,
+    .memory = post_memory,
+    .stacks = post_stacks,
+    .calibration_saved_now = joystick_cal_saved,
+    .stick_task_running = stick_task_running,
 };
 
 // The one UiApp: every view the UI task draws, wired (constinit: no global constructor).
@@ -395,6 +544,7 @@ static constinit hmi::ui::UiApp ui_app{{
     .nav_log = &logger_nav,
     .flip_log = &logger_flip,
     .overdraw_log = &logger_overdraw,
+    .post = &kPostPort,
 }};
 
 // The drive session: lock, ask, unlock, drive, ask to stop. The decisions live in
@@ -415,6 +565,46 @@ static_assert(hmi::drive_adapter::DrivePort<hmi::ui::DrivePort<hmi::ui::DriveUi>
 static hmi::drive_adapter::DriveAdapter<hmi::ui::DrivePort<hmi::ui::DriveUi>> drive_adapter{
     {.view = drive_port}};
 
+// AdcStickIo's output permit (its comment above): ADC task, lock-free reads of the UiApp's
+// permit channels only.
+inline hmi::stick::Permit AdcStickIo::output_permit(const hmi::stick::Position &mounted) {
+  hmi::stick::PermitHooks &hooks = ui_app.permit_hooks();
+  const hmi::stick::PermitInputs in{
+      .gate_open = ::stick_drives.load(),
+      .motion_guard_ok = true,
+      .calibrating = joystick_cal_running(),
+      .calibration_measured = joystick_cal_measured(),
+      .post = hooks.post_gate.read(),
+      .health = hooks.stick_health.read(),
+  };
+  const hmi::stick::Permit permit = state.permit.cycle(in, mounted, adc_clock_ms());
+  hooks.hold_reason.write(permit.reason);
+  return permit;
+}
+
+// The POST's rest window on the ADC task (hazard-c3-spec.md §2.2, §2.4, REQ-POST-20): every
+// cycle, valid or not, the reads the pipeline gets (a failed one as NaN); a window to the runner
+// once per WINDOW_MIN_SAMPLES cycles, never waiting (a one-slot mailbox). It stops once the gate is
+// PASS or FAIL; a gate that leaves PASS or FAIL, or comes back to NOT_RUN (bench builds:
+// POST RERUN), drops any partial window and waits again for a first all-valid cycle. Allocates
+// nothing, logs nothing, no lock.
+void AdcStickIo::feed_rest_window(State &state, float horizontal_mv, float vertical_mv,
+                                  float twist_mv, bool button) {
+  using hmi::stick::PostGate;
+  const PostGate gate = ui_app.permit_hooks().post_gate.read();
+  const bool rerun = hmi::post::rest_window_restarts(state.post_seen, gate);
+  state.post_seen = gate;
+  if (rerun) {
+    state.rest.reset();
+  }
+  if (!hmi::post::rest_window_feeds(gate)) {
+    return;
+  }
+  if (state.rest.add_into(horizontal_mv, vertical_mv, twist_mv, button, state.window.window)) {
+    state.windows.write(state.window);
+  }
+}
+
 static bool drive_session_input(hmi::drive_session::Input input) {
   return drive_adapter.input(input);
 }
@@ -423,6 +613,10 @@ static void drive_unlock_hold_done() { drive_adapter.unlock_hold_done(); }
 // Ask only. The session's relock (TICK_FOLLOW) closes the screen once the MIB actually stops
 // driving.
 static void drive_exit_hold_done() { drive_adapter.exit_hold_done(); }
+// The hold poll: the stick's hold reason between two ticks, for the Drive notice (C1 §2.7).
+static void drive_refresh_notice(hmi::stick::HoldReason hold) {
+  drive_adapter.refresh_notice(hold);
+}
 
 // How long an updated image runs before it keeps itself (github_ota_boot_confirm).
 static constexpr uint32_t kOtaConfirmAfterMs = 30'000;
@@ -558,6 +752,120 @@ static RemoteUiConfig remote_ui_config() {
   };
 }
 
+// The hazard bench verbs' hooks (components/remote_ui/include/bench_verbs.hpp), the fields of
+// the stick's output permit (C1) and the quick POST (C3). Bench inject builds only: app_main
+// hands them over inside `if constexpr (BENCH_STICK_INJECT)`. Each runs on the remote UI's
+// task: atomics only, no LVGL lock (the calibration record's copy takes joystick_cal's short
+// lock, as the ADC task's take_new does).
+static const char *post_indicator_name(hmi::post::IndicatorKind kind) {
+  switch (kind) {
+  case hmi::post::IndicatorKind::NONE:
+    return "NONE";
+  case hmi::post::IndicatorKind::CHECKING:
+    return "CHECKING";
+  case hmi::post::IndicatorKind::WAITING:
+    return "WAITING";
+  case hmi::post::IndicatorKind::FAILED:
+    return "FAILED";
+  case hmi::post::IndicatorKind::NOT_RUN:
+    return "NOT_RUN";
+  }
+  return "?";
+}
+
+static hmi::bench_verbs::CalRecord bench_cal_record() {
+  const JoystickCal cal = joystick_cal_current();
+  hmi::bench_verbs::CalRecord out{};
+  for (size_t i = 0; i < out.size(); ++i) {
+    out[i] = {.min_mv = static_cast<int32_t>(std::lround(cal[i].min_mv)),
+              .centre_mv = static_cast<int32_t>(std::lround(cal[i].center_mv)),
+              .max_mv = static_cast<int32_t>(std::lround(cal[i].max_mv))};
+  }
+  return out;
+}
+
+// The drive table's side of the bench STATE line (L1, hazard-c1-spec.md §6): the session's
+// phase, the Drive notice, the menu and the refusal banner, each from an atomic mirror the UI
+// task writes (no LVGL lock on the remote-UI task). The notice is §2.7's combination made at the
+// read: the stop notice as of the last input or tick first, else the stick's hold reason now, so
+// it agrees with the hold reason the same line reports.
+static void add_drive_hooks(hmi::bench_verbs::Hooks &h) {
+  h.phase = [] {
+    return std::string(hmi::drive_session::to_string(drive_adapter.published_phase()));
+  };
+  h.notice = [] {
+    const hmi::stick::HoldReason hold = ui_app.permit_hooks().hold_reason.read();
+    return std::string(hmi::drive_adapter::to_string(drive_adapter.notice_for(hold)));
+  };
+  h.menu_open = [] { return ui_app.menu_open_any_task(); };
+  h.banner = [] { return std::string(hmi::ui::refused_name(ui_app.refused_any_task())); };
+}
+
+static hmi::bench_verbs::Hooks bench_verb_hooks() {
+  using hmi::bench_verbs::PostGateName;
+  using hmi::bench_verbs::StickHealthName;
+  hmi::bench_verbs::Hooks h;
+  add_drive_hooks(h);
+  h.hold_reason = [] {
+    return std::string(hmi::stick::to_string(ui_app.permit_hooks().hold_reason.read()));
+  };
+  h.calibrating = [] { return joystick_cal_running(); };
+  h.cal = bench_cal_record;
+  h.post = [] {
+    return std::string(hmi::stick::to_string(ui_app.permit_hooks().post_gate.read()));
+  };
+  h.post_check = []() -> std::optional<std::string> {
+    const hmi::ui::PostStage::Shown shown = ui_app.post().shown();
+    if (!shown.check) {
+      return std::nullopt;
+    }
+    return std::string(hmi::post::check(*shown.check).name);
+  };
+  h.indicator = [] { return std::string(post_indicator_name(ui_app.post().shown().kind)); };
+  h.indicator_text = [] { return std::string(ui_app.post().text_now().text.data()); };
+  h.reset_reason = [] {
+    return std::string(
+        hmi::post::reset_reason_id(static_cast<hmi::post::ResetReason>(esp_reset_reason())));
+  };
+  // PERMIT POST: applied by the POST runner on its next tick (C3 §2.4), so the gate keeps one
+  // writer. PostGateName is PostGate's order (static_asserted below).
+  h.permit_post = [](PostGateName gate) {
+    ui_app.post().request_gate(static_cast<hmi::stick::PostGate>(gate));
+    return true;
+  };
+  // PERMIT STICK: C1 §3.2's other writer of stick health, bench builds only (gone with C2).
+  h.permit_stick = [](StickHealthName health) {
+    using hmi::stick::StickHealth;
+    const StickHealth value = health == StickHealthName::OK      ? StickHealth::OK
+                              : health == StickHealthName::FAULT ? StickHealth::FAULT
+                                                                 : StickHealth::NOT_MONITORED;
+    ui_app.permit_hooks().stick_health.write(value);
+    return true;
+  };
+  // CAL UNSAVED: RAM only, until reboot: joystick_cal_measured() and the POST's "saved" fact
+  // read false (C1 §6, REQ-RUI-06).
+  h.cal_unsaved = [] {
+    joystick_cal_forget_measured();
+    return true;
+  };
+  // POST RERUN: the runner restarts from NOT_RUN on its next tick; Read ADC sees the gate back
+  // at NOT_RUN and drops its partial window (C3 §2.4).
+  h.post_rerun = [] {
+    ui_app.post().request_rerun();
+    return true;
+  };
+  return h;
+}
+static_assert(static_cast<int>(hmi::bench_verbs::PostGateName::NOT_RUN) ==
+                      static_cast<int>(hmi::stick::PostGate::NOT_RUN) &&
+                  static_cast<int>(hmi::bench_verbs::PostGateName::PENDING) ==
+                      static_cast<int>(hmi::stick::PostGate::PENDING) &&
+                  static_cast<int>(hmi::bench_verbs::PostGateName::PASS) ==
+                      static_cast<int>(hmi::stick::PostGate::PASS) &&
+                  static_cast<int>(hmi::bench_verbs::PostGateName::FAIL) ==
+                      static_cast<int>(hmi::stick::PostGate::FAIL),
+              "PERMIT POST's names are PostGate's values");
+
 // app_main: LVGL in DIRECT render mode over the DSI panel's two frame buffers (see the
 // comment at the call). @return whether it came up; if not, the BSP's flush stays.
 static bool start_direct_render(espp::M5StackTab5 &tab5, espp::Logger &logger) {
@@ -592,14 +900,6 @@ static bool start_direct_render(espp::M5StackTab5 &tab5, espp::Logger &logger) {
     std::this_thread::sleep_for(1s);
   }
 }
-
-// Whether the stick task (StickIsland's "Read ADC", app_main) exists. Until it does nothing
-// publishes XYTwist, so the chair cannot move; a failed start is logged by app_main and stays
-// false until reset. FreeRTOS's task list is the record, so there is no flag to keep in step.
-// Any task, not an ISR. For POST (hazard-c3-spec.md); nothing else reads it yet. The name is the
-// task's in app_main's StickIsland config and in tools/guards/baselines/tasks.json: a rename
-// reads as "not running", the safe direction.
-[[maybe_unused]] static bool stick_task_running() { return xTaskGetHandle("Read ADC") != nullptr; }
 
 extern "C" void app_main(void) {
   // First, so the LogScreen has everything printed from here on - including
@@ -752,6 +1052,21 @@ extern "C" void app_main(void) {
   // The UI island: lv_task_handler every 8ms -- the refresh timer runs at 16ms
   // (60 fps), polling at twice that rate keeps its firing jitter well under a frame.
   logger.info("Starting LVGL task...");
+  // The POST's rest windows (hazard-c3-spec.md §2.4): the ADC task writes, the POST runner on
+  // the UI task reads (bound before lv_task starts). The ADC task's own state holds the write
+  // end and the output permit. Both live as long as app_main, which never returns.
+  hmi::ui::RestWindowMailbox rest_windows{hmi::ui::RestWindowMailbox::Config{}};
+  AdcStickIo::State adc_state{
+      .permit = {}, .rest = {}, .windows = hmi::fw::writer(rest_windows), .window = {}};
+  espp::Logger post_logger({.tag = "post", .level = espp::Logger::Verbosity::INFO});
+  {
+    hmi::post::I2cSet i2c_found;
+    for (const uint8_t address : found_addresses) {
+      i2c_found.add(address);
+    }
+    ui_app.post().attach(hmi::fw::reader(rest_windows), i2c_found, post_logger);
+  }
+
   hmi::ui::UiIsland ui_island({
       .task =
           {
@@ -861,7 +1176,7 @@ extern "C" void app_main(void) {
   // the bench stick injection in front of its reads (stick_inject.hpp).
   // Without the task the stick sends nothing, which is the safe direction: no XYTwist, no
   // motion. The boot goes on so the failure is seen: this line, and stick_task_running().
-  if (!stick_island.start(stick_pipeline_config(joystick_cal))) {
+  if (!stick_island.start(stick_pipeline_config(joystick_cal), adc_state)) {
     logger.error("Failed to start the Read ADC task: no stick output (XYTwist) until reset!");
   }
 
@@ -902,6 +1217,9 @@ extern "C" void app_main(void) {
   // because it drives everything above it: input goes into the same latches the
   // ADC task and the GPIO48 callback write, so what a script exercises is the
   // real handling and not a parallel path.
+  if constexpr (BENCH_STICK_INJECT) {
+    remote_ui_attach_bench_verbs(bench_verb_hooks()); // the one call, before the server starts
+  }
   remote_ui_start(remote_ui_config());
 
   park_main_task();

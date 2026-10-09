@@ -17,6 +17,7 @@
 #include "messages/mib_message.hpp"
 #include "settings.hpp"
 #include "settings_spec.hpp"
+#include "stick/permit_hooks.hpp"
 
 #include "drive_ui/drive_ui.hpp"
 #include "drive_ui/fn.hpp"
@@ -31,11 +32,13 @@
 #include "hmi_ui/diagnostics_view.hpp"
 #include "hmi_ui/display_flip.hpp"
 #include "hmi_ui/drive_band_view.hpp"
+#include "hmi_ui/drive_notice_view.hpp"
 #include "hmi_ui/hold_gesture.hpp"
 #include "hmi_ui/nav_port.hpp"
 #include "hmi_ui/nav_view.hpp"
 #include "hmi_ui/on_demand_screens.hpp"
 #include "hmi_ui/overdraw.hpp"
+#include "hmi_ui/post_stage.hpp"
 #include "hmi_ui/refusal_texts.hpp"
 #include "hmi_ui/refusal_view.hpp"
 #include "hmi_ui/rtps_label_view.hpp"
@@ -74,9 +77,10 @@ public:
     const BoardPort *board;               ///< backlight, panel, restart
     const MainScreens *screens;           ///< the screens whose adapters stay in main
     const std::atomic<bool> *clock_valid; ///< the system clock holds a real time (housekeeping)
-    espp::Logger *nav_log;                ///< "nav": the lost-cursor backstop's warning
-    espp::Logger *flip_log;               ///< "flip": the screen flip
-    espp::Logger *overdraw_log;           ///< "overdraw": what the overdraw pass cleared
+    espp::Logger *nav_log;      ///< "nav": every screen load (INFO), the lost-cursor backstop
+    espp::Logger *flip_log;     ///< "flip": the screen flip
+    espp::Logger *overdraw_log; ///< "overdraw": what the overdraw pass cleared
+    const PostPort *post;       ///< the quick POST's IDF facts (main)
   };
 
   /// The Settings page of the actuator rows, after the settings_spec.hpp pages.
@@ -133,6 +137,18 @@ public:
   [[nodiscard]] constexpr const RtpsUiBridge &rtps_bridge() const noexcept { return rtps_bridge_; }
   /// int: MIB::MibSystemState, as the MIB last reported it.
   [[nodiscard]] constexpr lv_subject_t *mib_state() noexcept { return &mib_state_; }
+  /// The stick output permit's channels (stick/permit_hooks.hpp): the POST gate, stick health
+  /// and the hold reason. Any task, each through its own end (the table there).
+  [[nodiscard]] constexpr hmi::stick::PermitHooks &permit_hooks() noexcept { return permit_hooks_; }
+  /// The refusal banner up (`refused`, a Refused value) as of its last change. Any task (an
+  /// acquire load): the bench's STATE line reads it from the remote-UI task.
+  [[nodiscard]] int32_t refused_any_task() const {
+    return refused_pub_.load(std::memory_order_acquire);
+  }
+  /// The drive UI's menu mirror (DriveUi::menu_open_any_task). Any task.
+  [[nodiscard]] bool menu_open_any_task() const { return drive_ui_.menu_open_any_task(); }
+  /// The quick POST on the UI task: its runner, the rest windows, the indicator's state.
+  [[nodiscard]] constexpr PostStage &post() noexcept { return post_stage_; }
 
   /// @brief The joystick's LVGL keypad read: moves the cursor through each screen's focus
   ///        group. It drains the latch the ADC task fills, so one flick of the stick = one
@@ -157,6 +173,15 @@ private:
   // Readiness, holds and drive inputs.
   bool mcb_ready();
   bool seat_ready();
+  /// The stick's hold reason as the ADC task last stored it (acquire), for the drive sample.
+  hmi::stick::HoldReason hold_reason() const;
+  /// The POST gate as the POST runner last stored it (acquire): the drive table's POST_OK, the
+  /// unlock hold's applies() and the POST refusal's words (C3).
+  hmi::stick::PostGate post_gate() const;
+  bool post_passed() const;
+  /// Why POST has not passed, in words: hmi_ui's post_reason_text over the gate (the Drive
+  /// notice and the REFUSED_POST banner). Null when it has passed.
+  const char *post_reason();
   void profile_clicked();
   bool entry_push();
   void hold_confirm();
@@ -183,6 +208,7 @@ private:
   static void action_ready_observer(lv_observer_t *observer, lv_subject_t *subject);
   void action_seat_up();
   static void diag_freq_observer(lv_observer_t *observer, lv_subject_t *subject);
+  static void refused_mirror_observer(lv_observer_t *observer, lv_subject_t *subject);
 
   // Navigation and the screens built on demand.
   void refuse_seat();
@@ -199,16 +225,28 @@ private:
   static void strip_screen(const lv_obj_t *screen);
   void strip_overdraw_logged();
   void theme_switched(uint8_t theme);
+  void post_indicator();
 
   // Members in dependency order: a view's Config may read only what is declared above it.
   Config config_;
 
+  // The stick output permit's channels, shared with the ADC task (hazard-c1-spec.md §3.2,
+  // hazard-c3-spec.md §2.4): constant initialised with the rest of UiApp.
+  hmi::stick::PermitHooks permit_hooks_{};
+  // The quick POST (hazard-c3-spec.md §2.3): the POST gate's only writer.
+  PostStage post_stage_{{
+      .port = config_.post,
+      .gate = &permit_hooks_.post_gate,
+  }};
+
   // The subjects several views read (were main's mib_state_subject, rtps_link_subject,
   // locked_subject, entry_refused_subject, seat_axis_value).
-  lv_subject_t mib_state_{}; ///< int: MIB::MibSystemState, as the MIB last reported it
-  lv_subject_t rtps_link_{}; ///< int: LinkState
-  lv_subject_t locked_{};    ///< int: 1 = locked, 0 = unlocked (set_locked)
-  lv_subject_t refused_{};   ///< int: Refused; refusal panels up unless REFUSED_NONE
+  lv_subject_t mib_state_{};            ///< int: MIB::MibSystemState, as the MIB last reported it
+  lv_subject_t rtps_link_{};            ///< int: LinkState
+  lv_subject_t locked_{};               ///< int: 1 = locked, 0 = unlocked (set_locked)
+  lv_subject_t refused_{};              ///< int: Refused; refusal panels up unless REFUSED_NONE
+  std::atomic<int32_t> refused_pub_{0}; ///< `refused`, for other tasks (refused_any_task)
+  PostText post_reason_words_{};        ///< the indicator's words, as post_reason last read them
   /// Raw value per seat axis, in the table's units, as the MCB last reported it.
   lv_subject_t seat_axis_value_[rammp::kSeatAxisCount]{};
   uint8_t seat_axis_count_ = 0; ///< actuators in the table
@@ -299,6 +337,8 @@ private:
       // A push is decided by the drive session (rows 38-39: locked, on the Locked screen, no
       // menu, MCB not ready).
       .entry_push = hmi::ui::bind<&UiApp::entry_push>(this),
+      .post_passed = hmi::ui::bind<&UiApp::post_passed>(this),
+      .post_reason = hmi::ui::bind<&UiApp::post_reason>(this),
       .grace_ms = HOLD_GRACE_MS,
   }};
   // Locked means "not driving", and the Locked screen is where that changes.
@@ -313,6 +353,11 @@ private:
   // Locking again is the MIB's call too: the chair stops, asked (the drive-exit
   // hold) or not (a fault, the link), and the drive session's relock (TICK_FOLLOW) brings the
   // Locked screen back with the reason on its banner.
+  // The Drive screen's notice slot (C1 §2.7): the user's stop and why the stick is held, its
+  // own place, apart from the refusal banner. The drive adapter's port shows it.
+  DriveNoticeView drive_notice_view_{{
+      .post_reason = hmi::ui::bind<&UiApp::post_reason>(this),
+  }};
   DriveUi drive_ui_{{
       .shared = &shared_,
       .refused = &refused_,
@@ -321,6 +366,11 @@ private:
       .menu_on_arrival = &nav_menu_on_arrival,
       .profile = &drive_profile_published,
       .publish_drive = config_.link->publish_drive,
+      .link_state = config_.link->state,
+      .calibrating = config_.screens->calibrating,
+      .hold_reason = hmi::ui::bind<&UiApp::hold_reason>(this),
+      .post_gate = hmi::ui::bind<&UiApp::post_gate>(this),
+      .show_notice = hmi::ui::bind<&DriveNoticeView::show>(&drive_notice_view_),
       .input = config_.drive->input,
       .stick_drives = &stick_drives,
       .nav_home = hmi::ui::bind<&NavView::home>(&nav_view_),
@@ -647,7 +697,9 @@ private:
       .link_state = config_.link->state,
       .link_seen = config_.link->seen,
       .diag_poll = hmi::ui::bind<&DiagnosticsView::poll>(&diag_view_), // staleness, same tick
+      .post_tick = hmi::ui::bind<&PostStage::tick>(&post_stage_),      // before the drive tick
       .drive_tick = config_.drive->tick, // and the wait for the MCB to drive
+      .post_indicator = hmi::ui::bind<&UiApp::post_indicator>(this), // after it
       // The theme switch restored the redundant background fills: take them out again, and
       // save the setting (the first place firmware sees the result of any route to it).
       .theme_switched = hmi::ui::bind<&UiApp::theme_switched>(this),

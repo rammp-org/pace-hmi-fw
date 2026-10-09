@@ -24,6 +24,7 @@ timer, the button), the file I/O and the log lines.
 | REQ-CAL-05 | Each step times out after 600 periods; cancel, time-out and rejection change nothing | CAL-029, CAL-030, CAL-036, CAL-304, CAL-305 |
 | REQ-CAL-06 | A finished run is used at once, handed to the ADC task exactly once, and saved; a failed save is shown | CAL-001, CAL-027, CAL-028 |
 | REQ-CAL-07 | `decide()` is the transition table | CAL-301, CAL-302 |
+| REQ-CAL-08 | `joystick_cal_measured()` is true when the calibration in use was loaded valid from flash or completed in this boot (saved or not), false while the compiled-in defaults are in use; it reads one atomic, no lock (the ADC task asks it every cycle: hazard-c1-spec.md §3.1 condition 4, G5) | CAL-401 |
 
 Known hazards, pinned as they are (behaviour changes, parked for two approvals):
 - H3: `plausible()` has no upper bound; a record far outside the ADC range is used

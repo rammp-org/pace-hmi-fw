@@ -2,7 +2,8 @@
 // the full-product oracle on today's table.
 //
 // For every input it walks both state sets:
-//   - the full product, enumerated exactly as test/oracle/test_drive_session_oracle.cpp does
+//   - the full product, enumerated exactly as test/oracle_full/test_drive_session_oracle_full.cpp
+//   does
 //     (env_at and hidden_at below are copied from it, lines 54-88);
 //   - the by-input set (oracle_space.hpp).
 // Each step is reduced to its class: (phase, the guard bits the input reads). It checks that:
@@ -17,6 +18,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -32,9 +34,11 @@ using ds::GuardMask;
 using ds::Input;
 using ds::Phase;
 
-// ---- Copied from test/oracle/test_drive_session_oracle.cpp (the full-product oracle) ----
-constexpr unsigned HIDDEN_COMBOS = 1U << 5U;
-constexpr std::size_t ENV_COUNT = 2 * os::MIBS.size() * os::SCREENS.size() * 2 * 8;
+// ---- Copied from test/oracle_full/test_drive_session_oracle_full.cpp (the full-product oracle)
+// ----
+constexpr unsigned HIDDEN_COMBOS = 1U << static_cast<unsigned>(std::popcount(ds::kHiddenGuards));
+constexpr std::size_t ENV_COUNT =
+    2 * os::MIBS.size() * os::SCREENS.size() * 2 * 8 * 4 * os::RESENDS.size() * 2;
 
 Env env_at(std::size_t i) {
   const bool link = (i % 2) != 0;
@@ -45,7 +49,21 @@ Env env_at(std::size_t i) {
   i /= os::SCREENS.size();
   const bool menu = (i % 2) != 0;
   i /= 2;
-  return Env{link, mib, screen, menu, (i & 1U) != 0, (i & 2U) != 0, (i & 4U) != 0};
+  const std::size_t deadlines = i % 8;
+  i /= 8;
+  const std::size_t stop = i % 4;
+  i /= 4;
+  return Env{.link_connected = link,
+             .mib = mib,
+             .screen = screen,
+             .menu_open = menu,
+             .exit_elapsed = (deadlines & 1U) != 0,
+             .warn_elapsed = (deadlines & 2U) != 0,
+             .giveup_elapsed = (deadlines & 4U) != 0,
+             .calibrating = (stop & 1U) != 0,
+             .stop_fault_elapsed = (stop & 2U) != 0,
+             .resend = os::RESENDS[i % os::RESENDS.size()],
+             .post_ok = (i / os::RESENDS.size()) % 2 != 0};
 }
 
 GuardMask hidden_at(unsigned i) {

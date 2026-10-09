@@ -1,14 +1,14 @@
-# L1 host app: the drive goldens (app-main-shrink.md S1 / V5). The drive code of the main.cpp
-# unit (main/frag_drive.inc, verbatim, over recording shims) against two frozen call logs, one
-# at the DrivePort and one at the lv_ / rtps_comms_publish_* boundary, over scripted scenarios
-# that take every row of the drive table; since the move also the DriveAdapter over a fake port.
-# Cases GLD-001..004 in tests/host/drive_golden.
+# L1 host app: the drive goldens. The firmware's drive code (drive_ui's DrivePort over recording
+# shims, and the one DriveAdapter) against the hazard fix C1's hand-written goldens, GLD-101..114
+# (hazard-c1-spec.md §5.2, expected data written from the spec), GLD-115 (the scenarios and
+# seeded walks take every row of the drive table) and GLD-116 (the sample reads the link live).
+# GLD-001..004 are retired (owner decision G1); their logs stay in the folder as history.
 # spec-deviation(TS-UNIT-01): host-native g++ in WSL, not the IDF linux target (owner, 2026-10-06).
 - id: GLD-L1
-  title: the drive code's port and boundary calls equal the goldens frozen before the move
+  title: the drive code's port calls equal the hand-written C1 goldens; every table row taken
   level: L1
   path: tests/host/drive_golden
-  requirements: [REQ-DAD-01]
+  requirements: [REQ-DAD-07, REQ-DRV-16, REQ-UI-18, REQ-UI-22]
   resources: [host]
   timeout_s: 300
   expected_s: 20

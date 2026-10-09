@@ -62,6 +62,16 @@ static_assert(ACTION_COUNT == 5, "every actions_spec.h entry needs its function 
 // Is the MCB fit to drive, or to move the seat (DriveUi's readiness checks).
 bool UiApp::mcb_ready() { return hmi::ui::mcb_ready(shared_); }
 bool UiApp::seat_ready() { return hmi::ui::seat_ready(shared_); }
+hmi::stick::HoldReason UiApp::hold_reason() const { return permit_hooks_.hold_reason.read(); }
+hmi::stick::PostGate UiApp::post_gate() const { return permit_hooks_.post_gate.read(); }
+bool UiApp::post_passed() const { return hmi::stick::post_passed(post_gate()); }
+// The blocking check's own words are the POST's TopBar indicator's (hazard-c3-spec.md §2.8,
+// §4.5); NOT_RUN reads C1's "Start-up check not run". UI task: the words are kept in a member.
+const char *UiApp::post_reason() {
+  post_reason_words_ = post_stage_.text_now();
+  const char *words = post_reason_words_.text.data();
+  return post_reason_text(post_gate(), words[0] != '\0' ? words : nullptr);
+}
 
 // PUBLISH_DRIVE: the drive request as it stands, with the new profile.
 void UiApp::profile_clicked() {
@@ -78,17 +88,24 @@ void UiApp::hold_confirm() {
   config_.cues->click();
 }
 
+// The drive table's UNLOCK_APPLIES: C3 adds POST passed (the hold does not fill before it; a
+// push says why, row 53).
 bool UiApp::unlock_applies() {
   return lv_subject_get_int(&locked_) != 0 && !drive_ui_.lock_waiting() &&
-         lv_screen_active() == ui_LockedScreen && nav_menu_open == nullptr && mcb_ready();
+         lv_screen_active() == ui_LockedScreen && nav_menu_open == nullptr && mcb_ready() &&
+         post_passed();
 }
 
 bool UiApp::drive_exit_applies() {
   return lv_screen_active() == ui_DriveScreen && nav_menu_open == nullptr;
 }
 
+// Only while locked (C1 §2.8, REQ-UI-16): with the drive table's entry rows needing no
+// calibration running, a calibration then only ever runs locked, so no screen change the
+// session makes can cut one short (G5).
 bool UiApp::calibrate_applies() {
-  return lv_screen_active() == ui_JoystickScreen && nav_menu_open == nullptr;
+  return lv_subject_get_int(&locked_) != 0 && lv_screen_active() == ui_JoystickScreen &&
+         nav_menu_open == nullptr;
 }
 
 // The stick's own button. Reads the level the button callback mirrors out, not the edge-latched
@@ -112,10 +129,13 @@ void UiApp::store_profile(int32_t profile) {
   drive_profile_published.store(static_cast<MIB::DriveProfile>(profile));
 }
 
-// The three gestures, polled by one shared timer; user data is the app.
+// The three gestures, polled by one shared timer; user data is the app. Then the Drive notice
+// takes the stick's hold reason as it is now, so the screen follows it within one hold poll
+// (REQ-UI-17), not one 250 ms tick.
 void UiApp::hold_poll_cb(lv_timer_t *timer) {
   UiApp *self = static_cast<UiApp *>(lv_timer_get_user_data(timer));
   self->hold_engine_.poll_all(self->hold_gestures_);
+  self->config_.drive->refresh_notice(self->hold_reason());
 }
 
 // The 250 ms poll; user data is the UiPoll.
@@ -166,8 +186,14 @@ void UiApp::seat_apply_state(const MIB::seatState &seat) {
 }
 
 // One seat request: an absolute target, clamped to the axis' range, so a lost or repeated
-// message cannot drift the seat.
+// message cannot drift the seat. Before the start-up check passed (the POST gate not PASS) no
+// SeatCommand goes out: the press is refused, felt and named (C3 §2.10, REQ-UI-20).
 void UiApp::seat_request(rammp::SeatAxis axis, int32_t target) {
+  if (!post_passed()) {
+    config_.cues->refused();
+    DrivePort<DriveUi>{&drive_ui_}.show_refused(REFUSED_POST, DRIVE_REFUSED_SHOW_MS);
+    return;
+  }
   const rammp::SeatAxisSpec &spec = rammp::kSeatAxes[rammp::index_of(axis)];
   (void)config_.link->publish_seat(
       axis, rammp::seat_units(spec, std::clamp(target, spec.min_value, spec.max_value)));
@@ -206,12 +232,21 @@ void UiApp::store_setting(int param, int32_t value) {
 }
 
 // ErrorBanner6. Raised only on a page that needs the MCB - the actuators - and then exactly as
-// on the drive and seat screens: while the link is down or the MCB's state is not OK. User data
-// is the app.
+// on the drive and seat screens: while the link is down or the MCB's state is not OK; or, for its
+// window, when a press there came before the start-up check passed (C3). User data is the app.
 void UiApp::setting_warning_observer(lv_observer_t *observer, lv_subject_t *) {
   UiApp *self = static_cast<UiApp *>(lv_observer_get_user_data(observer));
   lv_obj_t *panel = lv_observer_get_target_obj(observer);
-  if (lv_subject_get_int(self->settings_view_.page()) != ACTUATORS_PAGE || self->seat_ready()) {
+  if (lv_subject_get_int(self->settings_view_.page()) != ACTUATORS_PAGE) {
+    self->refusal_view_.show(panel, false);
+    return;
+  }
+  if (lv_subject_get_int(self->drive_ui_.entry_refused_subject()) == REFUSED_POST) {
+    self->refusal_view_.fill_post_refused(panel, rammp::kHmiRefusedPostSeatTitle);
+    self->refusal_view_.show(panel, true);
+    return;
+  }
+  if (self->seat_ready()) {
     self->refusal_view_.show(panel, false);
     return;
   }
@@ -235,6 +270,12 @@ void UiApp::action_ready_observer(lv_observer_t *observer, lv_subject_t *) {
 // An RTPS command: the request a "+" press on the actuators page makes. The seat moves only if
 // the MCB agrees, and a refusal flashes on that page.
 void UiApp::action_seat_up() { seat_step(rammp::index_of(rammp::SeatAxis::ELEVATION), +1); }
+
+// The refusal banner's value, mirrored for other tasks (refused_any_task). User data is the app.
+void UiApp::refused_mirror_observer(lv_observer_t *observer, lv_subject_t *subject) {
+  static_cast<UiApp *>(lv_observer_get_user_data(observer))
+      ->refused_pub_.store(lv_subject_get_int(subject), std::memory_order_release);
+}
 
 // DiagnosticsFreqLabel: the rate, or "No data" while stale. User data is the app.
 void UiApp::diag_freq_observer(lv_observer_t *observer, lv_subject_t *) {
@@ -319,8 +360,10 @@ void UiApp::enter_screen(const lv_obj_t *screen) {
   }
 }
 
-// The PIN is asked again on every visit rather than latching once per boot.
+// Every screen load is logged (the bench times the MCB-initiated entry from it: B5''-18b). The
+// PIN is asked again on every visit rather than latching once per boot.
 void UiApp::arrived(const lv_obj_t *screen) {
+  config_.nav_log->info("screen -> {}", NavView::screen_name(screen));
   if (screen == ui_BenchGateScreen) {
     bench_pin_view_.reset();
   }
@@ -348,6 +391,8 @@ void UiApp::settings_bound() {
   refusal_view_.bind_to_cause(ui_ErrorBanner6, setting_warning_observer, this);
   lv_subject_add_observer_obj(settings_view_.page(), setting_warning_observer, ui_ErrorBanner6,
                               this);
+  lv_subject_add_observer_obj(drive_ui_.entry_refused_subject(), setting_warning_observer,
+                              ui_ErrorBanner6, this);
 }
 
 void UiApp::diagnostics_bound() {
@@ -381,6 +426,29 @@ void UiApp::strip_overdraw_logged() {
 void UiApp::theme_switched(uint8_t theme) {
   strip_overdraw_logged();
   settings_set_theme(theme);
+}
+
+// The POST's persistent indicator on every TopBar (hazard-c3-spec.md §2.8, REQ-UI-19): the
+// indicator's state after this tick's runner and drive tick, in its words and colour.
+void UiApp::post_indicator() {
+  using hmi::post::IndicatorKind;
+  const PostStage::Shown shown = post_stage_.shown();
+  TopBarView::PostColour colour = TopBarView::PostColour::RED;
+  switch (shown.kind) {
+  case IndicatorKind::NONE:
+    colour = TopBarView::PostColour::NONE;
+    break;
+  case IndicatorKind::CHECKING:
+    colour = TopBarView::PostColour::GREY;
+    break;
+  case IndicatorKind::WAITING:
+    colour = TopBarView::PostColour::AMBER;
+    break;
+  case IndicatorKind::FAILED:
+  case IndicatorKind::NOT_RUN:
+    break;
+  }
+  topbar_view_.set_post(colour, post_stage_.text_now().text.data());
 }
 
 // The hmi_ui chrome views of one screen, in the order they have always been bound: the
