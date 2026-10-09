@@ -32,7 +32,8 @@ The pipeline's own requirements are `components/stick`'s. The rows below are haz
 (hazard-c4-spec.md §6, reconciled in hazard-fixes.md §10); test IDs `CTL-0nn` are cases of the
 host app `test/` (`tests/manifest.d/control.yaml`, L1-CTL). Cases CTL-012, 013, 015, 016, 020
 and 021 run the guard through C1's output permit and come with the wiring commit (C4 commit
-3); B-steps are bench checks (hazard-c4-spec.md §8).
+3); B-steps are bench checks (hazard-c4-spec.md §8). REQ-CTL-15 and 16 are hazard fix C2's
+(hazard-c2-spec.md §7.2); CTL-022 and 023 come with C2's island commit.
 
 | ID | Requirement | Tests |
 | --- | --- | --- |
@@ -50,6 +51,8 @@ and 021 run the guard through C1's output permit and come with the wiring commit
 | REQ-CTL-12 | The ADC task subscribes to the TWDT at its first cycle and resets it at the end of every cycle, valid or not. | CTL-019, B5j |
 | REQ-CTL-13 | `Read ADC` runs at priority 21, pinned to core 0, with a 6144 B stack. | G10, B3 |
 | REQ-CTL-14 | After any non-OK verdict, output resumes only through C1's neutral latch: the non-OK verdict clears it, and it sets again only after `kNeutralHold` of neutral cycles (REQ-STK-12). | CTL-020, CTL-021 |
+| REQ-CTL-15 | Each cycle the island reads both X/Y windows (mean, max, sequence) in one call, the twist's reads (mean, max, count), samples `calibrating` once, steps the monitor once, then runs the pipeline with the same `calibrating`. On valid and invalid cycles alike. (Hazard fix C2; C2 commit 4.) | CTL-022 |
+| REQ-CTL-16 | The vendored `ContinuousAdc` keeps espp's mean per window and adds, per channel, the window's largest conversion in mV and a `uint32` sequence that advances only for a window holding at least one conversion of that channel. Its `README.md` lists every change from espp. (Hazard fix C2.) | CTL-024 |
 
 How the guard reads the spec where it leaves a choice (C4 §2, §3):
 

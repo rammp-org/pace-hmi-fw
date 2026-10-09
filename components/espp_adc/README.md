@@ -28,8 +28,18 @@ Not copied: `example/` and `CHECKSUMS.json`. Local only: `.component_hash` (kept
 
 ## Changes vs upstream
 
-None yet: `CMakeLists.txt`, `idf_component.yml` and the three headers are byte-identical to
-upstream 1.3.2, and `upstream.diff` is empty.
+The full diff is `upstream.diff` (upstream 1.3.2 to this copy; `git apply -p1` from this
+folder on upstream). `CMakeLists.txt`, `idf_component.yml`, `adc_types.hpp` and
+`oneshot_adc.hpp` are byte-identical to upstream.
+
+| File | Change | Why |
+| --- | --- | --- |
+| `include/adc_window.hpp` (new) | `AdcWindowAccumulator` (one channel's sum, count and, new, largest raw conversion in a window), `AdcWindowReading` (mean, max, sequence), `close_window()`: espp's mean arithmetic unchanged (`float(sum) / float(count)`, then the calibration), the max through the same calibration, the sequence + 1 for a window holding a conversion of that channel. Plain C++, so the host app L1-CTL tests it (CTL-024) | REQ-CTL-16 |
+| `include/continuous_adc.hpp` | `update_task` keeps its per-channel sums in `AdcWindowAccumulator`s (was `sums_`, `num_samples_`) and closes each window with `close_window()` into `readings_`; `values_` and `actual_rates_` get exactly what they got before, so `get_mv()` and `get_rate()` return the same values. New `get_windows(configs)`: each channel's newest `AdcWindowReading`, all under one take of `data_mutex_`. Includes `adc_window.hpp` | REQ-CTL-16 |
+
+Cost: one more `adc_cali_raw_to_voltage` per channel per window (the max), on espp's
+`ContinuousAdc` task, not on the stick path. Nothing calls `get_windows()` yet (C2 commit 4
+makes the island read both X/Y windows with it).
 
 ## Tools
 

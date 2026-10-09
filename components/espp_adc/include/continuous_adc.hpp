@@ -19,6 +19,7 @@
 #endif
 
 #include "adc_types.hpp"
+#include "adc_window.hpp"
 #include "base_component.hpp"
 #include "task.hpp"
 
@@ -252,6 +253,32 @@ public:
     return actual_rates_[index];
   }
 
+  /**
+   * @brief pace-hmi-fw addition (REQ-CTL-16, not upstream): the newest window of each channel
+   *        in \p configs - its mean (what get_mv() returns), its largest conversion and its
+   *        sequence number - all read under one lock, so the channels come from the same
+   *        moment.
+   * @param configs The configs used to initialize the channels.
+   * @return Per channel, its newest window (a sequence of 0 means no window yet), or nullopt
+   *         if it was not configured or the adc is not running.
+   */
+  template <size_t N>
+  std::array<std::optional<AdcWindowReading>, N>
+  get_windows(const std::array<AdcConfig, N> &configs) {
+    std::array<std::optional<AdcWindowReading>, N> out{};
+    if (!running_) {
+      return out;
+    }
+    std::lock_guard<std::mutex> lock{data_mutex_};
+    for (size_t i = 0; i < N; i++) {
+      auto index = get_index(configs[i]);
+      if (index != INVALID_INDEX) {
+        out[i] = readings_[index];
+      }
+    }
+    return out;
+  }
+
 protected:
   // Unique id for a (unit, channel) pair. 32 is larger than the number of
   // channels on any ESP32 chip, so the id is unique across units. The id
@@ -296,8 +323,9 @@ protected:
       return false; // don't want to stop the task
     }
     auto current_timestamp = std::chrono::high_resolution_clock::now();
-    std::fill(sums_.begin(), sums_.end(), 0);
-    std::fill(num_samples_.begin(), num_samples_.end(), 0);
+    for (auto &window : windows_) {
+      window.clear();
+    }
     esp_err_t ret;
     uint32_t ret_num = 0;
     ret = adc_continuous_read(handle_, result_data_.data(), window_size_bytes_, &ret_num, 0);
@@ -355,8 +383,7 @@ protected:
                                   parsed_unit, parsed_channel, data);
         continue;
       }
-      sums_[index] += data;
-      num_samples_[index]++;
+      windows_[index].add(data);
     } // for()
     // measure elapsed time
     float elapsed_seconds =
@@ -370,26 +397,27 @@ protected:
     {
       std::lock_guard<std::mutex> lk(data_mutex_);
       for (size_t index = 0; index < num_channels_; index++) {
-        float num_samples = num_samples_[index];
-        if (num_samples > 0) {
-          float sum = sums_[index];
-          // note: the data collected above is uncalibrated (raw) values
-          // TODO: use ESP32 hardware-accelerated filter
-          // simple filter
-          float average = sum / num_samples;
-          if (cali_handles_[index] != nullptr) {
+        // note: the data collected above is uncalibrated (raw) values
+        // TODO: use ESP32 hardware-accelerated filter
+        // simple filter: the window's mean (close_window, adc_window.hpp); pace-hmi-fw adds
+        // the window's maximum and a sequence number there (REQ-CTL-16)
+        adc_cali_handle_t cali_handle = cali_handles_[index];
+        auto to_mv = [cali_handle](float raw) {
+          if (cali_handle != nullptr) {
             // convert to millivolts
             int millivolts = 0;
-            adc_cali_raw_to_voltage(cali_handles_[index], static_cast<int>(average), &millivolts);
-            values_[index] = float(millivolts);
-          } else {
-            // no calibration available for this channel; report the raw value
-            values_[index] = average;
+            adc_cali_raw_to_voltage(cali_handle, static_cast<int>(raw), &millivolts);
+            return float(millivolts);
           }
-          actual_rates_[index] = num_samples / elapsed_seconds;
+          // no calibration available for this channel; report the raw value
+          return raw;
+        };
+        if (close_window(windows_[index], to_mv, readings_[index])) {
+          values_[index] = readings_[index].mean_mv;
+          actual_rates_[index] = static_cast<float>(windows_[index].count) / elapsed_seconds;
         }
         logger_.debug_rate_limited("CH {} - {}, {}, {:.2f}, {:.2f}", (int)configs_[index].channel,
-                                   sums_[index], num_samples_[index], values_[index],
+                                   windows_[index].sum, windows_[index].count, values_[index],
                                    actual_rates_[index]);
       }
     }
@@ -536,8 +564,8 @@ protected:
     // allocate the (dense) per-channel data, indexed by the position of the
     // channel in the configured channel list
     cali_handles_.resize(num_channels_, nullptr);
-    sums_.resize(num_channels_, 0);
-    num_samples_.resize(num_channels_, 0);
+    windows_.resize(num_channels_);
+    readings_.resize(num_channels_);
     values_.resize(num_channels_, 0);
     actual_rates_.resize(num_channels_, 0);
 
@@ -661,8 +689,8 @@ protected:
   // these vectors are indexed by the position of the channel in the
   // configured channel list
   std::vector<adc_cali_handle_t> cali_handles_;
-  std::vector<uint32_t> sums_;
-  std::vector<uint32_t> num_samples_;
+  std::vector<AdcWindowAccumulator> windows_; // pace-hmi-fw: was sums_ and num_samples_
+  std::vector<AdcWindowReading> readings_;    // pace-hmi-fw: each channel's newest window
   std::vector<float> values_;
   std::vector<float> actual_rates_;
 };
