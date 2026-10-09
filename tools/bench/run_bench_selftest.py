@@ -288,8 +288,13 @@ def t_boot_check_on_ethernet() -> None:
     settings_re = boot_check.MARKERS[0][1]
     (_, base_settings), = boot_check.find(baseline.splitlines(), settings_re)[:1]
     wanted = boot_check.OVERRIDES.get("settings_loaded", {}).get("value", base_settings)
-    # A boot as board 2 logs it today, on each link.
-    wifi_log = baseline.replace(base_settings, wanted)
+    # A boot as board 2 logs it today, on each link: built from this tree, so the self test's
+    # count is the tree's and, with its idle-task checks off (C4), no task_wdt line.
+    count = boot_check.selftest_count(common.REPO)
+    wifi_log = baseline.replace(base_settings, wanted).replace("ready: 54 checks",
+                                                               f"ready: {count} checks")
+    if boot_check.idle_checks_off(common.REPO):
+        wifi_log = "\n".join(ln for ln in wifi_log.splitlines() if "task_wdt" not in ln)
     eth_log = wifi_log.replace(wanted, wanted[:-len("network 1")] + "network 0").replace(
         "Network: WiFi", "Network: Ethernet")
     saved = common.LINK
