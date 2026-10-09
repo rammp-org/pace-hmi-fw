@@ -13,7 +13,9 @@ REPO ?= $(abspath $(HERE)/../../..)
 MC := $(REPO)/managed_components
 
 SRCS_UNDER_TEST := $(wildcard $(REPO)/components/stick/src/*.cpp)
-TEST_SRCS       := $(HERE)/test_stick.cpp $(HERE)/legacy_adc_cycle.cpp
+TEST_SRCS       := $(HERE)/test_stick.cpp $(HERE)/test_stick_monitor.cpp $(HERE)/legacy_adc_cycle.cpp
+# STK-100 runs the monitor and the pipeline under the host allocation guard (TS-DET-08).
+ALLOC_GUARD     := 1
 # components/joystick is the mapping engine today; it is linked as it is (vendored legacy,
 # tested by its own app), and espp's logger is third party.
 THIRD_PARTY_SRCS := $(REPO)/components/joystick/src/joystick.cpp $(MC)/espp__logger/src/logger.cpp
@@ -27,7 +29,8 @@ SYS_INCLUDES    := $(REPO)/components/joystick/include \
 HEADER          := $(REPO)/components/stick/include/stick/stick_pipeline.hpp
 INJECT_HEADER   := $(REPO)/components/stick/include/stick/bench_inject.hpp
 PERMIT_HEADER   := $(REPO)/components/stick/include/stick/output_permit.hpp
-COVER_SRCS      := $(SRCS_UNDER_TEST) $(HEADER) $(INJECT_HEADER) $(PERMIT_HEADER)
+MONITOR_HEADER  := $(REPO)/components/stick/include/stick/stick_monitor.hpp
+COVER_SRCS      := $(SRCS_UNDER_TEST) $(HEADER) $(INJECT_HEADER) $(PERMIT_HEADER) $(MONITOR_HEADER)
 
 include $(REPO)/tests/host/common.mk
 
@@ -41,18 +44,25 @@ $(call obj_of,$(HERE)/legacy_adc_cycle.cpp): CXX_WARN := $(WARN_FLAGS) -Wno-conv
 # output_permit.hpp are header-only, so their counters live in test_stick.cpp's object. gcov_summary.py (common.mk's
 # `coverage`) reads <obj dir>/<source>.o and the .gcno/.gcda beside it; these links give each
 # header that name, so it is reported with the rest. The links are remade on every coverage
-# run (`coverage` deletes *.gcda).
+# run (`coverage` deletes *.gcda). stick_monitor.hpp is header-only too; its counters live in
+# test_stick_monitor.cpp's object.
 ifeq ($(COVERAGE),1)
 HEADER_OBJS := $(call obj_of,$(HEADER) $(INJECT_HEADER) $(PERMIT_HEADER))
 TEST_OBJ    := $(call obj_of,$(HERE)/test_stick.cpp)
+MONITOR_OBJ      := $(call obj_of,$(MONITOR_HEADER))
+MONITOR_TEST_OBJ := $(call obj_of,$(HERE)/test_stick_monitor.cpp)
 .PHONY: header-cov-links
-header-cov-links: $(TEST_OBJ)
+header-cov-links: $(TEST_OBJ) $(MONITOR_TEST_OBJ)
 	@for obj in $(HEADER_OBJS); do \
 	  mkdir -p $$(dirname $$obj) && \
 	  ln -sf $(TEST_OBJ) $$obj && \
 	  ln -sf $(TEST_OBJ:.o=.gcno) $${obj%.o}.gcno && \
 	  ln -sf $(TEST_OBJ:.o=.gcda) $${obj%.o}.gcda; \
 	done
+	@mkdir -p $(dir $(MONITOR_OBJ)) && \
+	  ln -sf $(MONITOR_TEST_OBJ) $(MONITOR_OBJ) && \
+	  ln -sf $(MONITOR_TEST_OBJ:.o=.gcno) $(MONITOR_OBJ:.o=.gcno) && \
+	  ln -sf $(MONITOR_TEST_OBJ:.o=.gcda) $(MONITOR_OBJ:.o=.gcda)
 test: header-cov-links
 endif
 

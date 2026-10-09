@@ -3,7 +3,7 @@
 idf_component_register(
   SRCS "src/cal_record.cpp" "src/cal_run.cpp"
   INCLUDE_DIRS "include"
-  REQUIRES format)
+  REQUIRES format stick)
 
 fw_component_options(${COMPONENT_LIB})
 

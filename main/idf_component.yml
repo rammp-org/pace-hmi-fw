@@ -19,7 +19,8 @@ dependencies:
   # config (num_fbs) and the LVGL draw-buffer allocation can be modified for
   # performance. Removed from the manifest so the component manager does not
   # also fetch it into managed_components/ and collide with the local copy.
-  espp/adc: '==1.3.2'
+  # espp/adc is vendored into components/espp_adc (hazard fix C2, REQ-CTL-16: the window
+  # maximum and sequence), removed here for the same reason as m5stack-tab5 above.
   espp/base_component: '==1.3.2'
   espp/button: '==1.3.2'
   espp/base_peripheral: '==1.3.2'

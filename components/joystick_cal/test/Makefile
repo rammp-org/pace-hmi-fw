@@ -28,7 +28,8 @@ TEST_SRCS        := $(HERE)/test_joystick_cal.cpp \
                     $(HERE)/fakes/fake_lvgl.cpp \
                     $(HERE)/fakes/fake_storage.cpp
 THIRD_PARTY_SRCS := $(MC)/espp__logger/src/logger.cpp
-INCLUDES         := $(HERE)/fakes $(CMP)/include $(REPO)/main $(REPO)/components/storage/include
+# valid() takes the rail limits from the stick monitor's header (header-only constants).
+INCLUDES         := $(HERE)/fakes $(CMP)/include $(REPO)/main $(REPO)/components/storage/include                     $(REPO)/components/stick/include
 SYS_INCLUDES     := $(MC)/espp__base_component/include \
                     $(MC)/espp__logger/include \
                     $(MC)/espp__format/include \
