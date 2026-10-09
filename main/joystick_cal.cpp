@@ -215,6 +215,8 @@ bool joystick_cal_saved() { return in_use.load() == InUse::SAVED; }
 
 bool joystick_cal_measured() { return in_use.load() != InUse::DEFAULTS; }
 
+void joystick_cal_forget_measured() { in_use = InUse::DEFAULTS; }
+
 JoystickCal joystick_cal_current() {
   std::lock_guard<std::mutex> lock(cal_mutex);
   return current;
