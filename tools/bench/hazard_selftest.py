@@ -1067,6 +1067,20 @@ def t_serial_watch_and_sim_retry() -> None:
     finally:
         hazard_rig.peers.SimChild, hazard_rig.SIM_RETRY_S = saved
 
+    class Boom(hazard_rig.Rig):
+        def __enter__(self):
+            raise PermissionError(13, "Access is denied")
+    saved_rig = hazard_rig.Rig
+    hazard_rig.Rig = Boom
+    try:
+        with quiet(), tempfile.TemporaryDirectory() as tmp:
+            r = hazard_steps.run_step("B5''-17", "1.2.3.4", pathlib.Path(tmp), common.REPO,
+                                      ["c3"], proven="p")
+    finally:
+        hazard_rig.Rig = saved_rig
+    expect("a rig fault (the port refused) ends the step NOT_RUN, not the run",
+           (r["verdict"], r["reason"].startswith("bench: PermissionError")), ("NOT_RUN", True))
+
 
 def t_forced_stop_kills_tree() -> None:
     import peers
@@ -1182,9 +1196,9 @@ CASES = [
     ("BENCH-048 a rig whose start-up fails stops the sim it started", t_rig_start_failure_stops_sim),
     ("BENCH-049 a sim that does not quit is killed with its whole tree", t_forced_stop_kills_tree),
     ("BENCH-050 Restart HMI's tile from the tree's actions_spec.h; a refresh goes before any "
-     "command once 50 ms old", t_restart_tile_and_refresh),
+     "command once it is 20 ms old", t_restart_tile_and_refresh),
     ("BENCH-052 a serial watch frees the port at stop() even on a quiet board; a sim that exits "
-     "at once is started once more", t_serial_watch_and_sim_retry),
+     "at once is started once more; a rig fault ends only its step", t_serial_watch_and_sim_retry),
     ("BENCH-051 injection lapses come from the STICK send times in the remote-UI log, not "
      "the injector's own clock; a pause is not a lapse", t_stick_lapses),
 ]

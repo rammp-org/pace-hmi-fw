@@ -66,7 +66,9 @@ PROFILE_LOW = (484 + 207 // 2, PROFILE_Y)
 # SkunkWorksScreen: actions_spec.h's five tiles (Restart HMI is the fifth), 320x240, two to
 # a row, 20 px apart, rows centred (ui_SkunkWorksScreen.c, ui_comp_slottile.c).
 RESTART_ACTION = "RESTART_HMI"
-PRE_REFRESH_S = 0.05      # a command waits for no refresh: one goes first if this one is due
+# A command never makes the stick wait: a refresh goes first once the last is this old (a
+# WiFi stall of 0.27 + 0.20 s on two commands in a row lapsed it on 2026-10-09 at 50 ms).
+PRE_REFRESH_S = 0.02
 
 
 def skunk_actions(tree: pathlib.Path) -> list[str]:
@@ -265,7 +267,8 @@ class SerialWatch:
     `lines` keeps each line's arrival time on the runner's clock (time.monotonic()), the
     clock the sim's log and the STATE polls use."""
 
-    def __init__(self, port: str, seconds: float, capture: Callable | None = None):
+    def __init__(self, port: str, seconds: float, capture: Callable | None = None,
+                 reset: bool = False):
         import board
         self.text = ""
         self.lines: list[tuple[float, str]] = []
@@ -281,7 +284,7 @@ class SerialWatch:
             # `stop` ends the capture within one read timeout and frees the port for the
             # next watch (on 2026-10-09 a watch on a quiet board held it for its whole
             # window, so the next boot's watch read nothing).
-            capture(port, seconds, reset=False, on_line=keep, stop=self._stop)
+            capture(port, seconds, reset=reset, on_line=keep, stop=self._stop)
 
         self._thread = threading.Thread(target=run, daemon=True)
         self._thread.start()
@@ -307,6 +310,7 @@ class Rig:
         self.st = step
         self.groups = set(groups)
         self.port = port
+        self.restart_watch: SerialWatch | None = None  # restart_hmi(serial_s) from Drive
         self.proof = proven
         self._sweep = sweep or (lambda: rtps_sweep(tree))
         self.trace = hg.Trace()
@@ -561,11 +565,12 @@ class Rig:
 
     # --- restarts ---------------------------------------------------------------------
 
-    def restart_hmi(self) -> float:
+    def restart_hmi(self, serial_s: float = 0.0) -> float:
         """The Restart HMI tile (Skunk Works, the fifth): a software reset. Returns the tap
         time. The connection is closed; wait_back() reconnects."""
+        self.restart_watch = None
         if self.state().get("screen") == "DriveScreen":
-            return self._restart_by_port()
+            return self._restart_by_port(serial_s)
         actions = skunk_actions(self.tree)
         if RESTART_ACTION not in actions:
             raise NotRun("bench", f"no {RESTART_ACTION} in the tree's actions_spec.h")
@@ -588,17 +593,23 @@ class Rig:
         self._drop_hmi()
         return t
 
-    def _restart_by_port(self) -> float:
+    def _restart_by_port(self, serial_s: float) -> float:
         """From DriveScreen the menu is out of reach (the burger key asks to stop there):
-        reset the chip through the port (B2's RTS pulse; reset reason USB, a clean one)."""
+        reset the chip through the port (B2's RTS pulse; reset reason USB, a clean one).
+        The same capture keeps reading the boot for `serial_s` (restart_watch): the port
+        has one owner at a time (a second open was refused, 2026-10-09)."""
         if not self.port:
             raise NotRun("bench", "restarting from DriveScreen needs the board's port")
-        import board
         self.st.record("restart", "RTS reset through the port (from DriveScreen)")
         self.inj.pause()
         self._drop_hmi()
         t = time.monotonic()
-        board.capture(self.port, 0.5, reset=True)
+        watch = SerialWatch(self.port, max(serial_s, 2.0), reset=True)
+        if serial_s > 0:
+            self.restart_watch = watch
+        else:
+            time.sleep(1.0)  # the reset pulse is sent; nothing to read
+            watch.stop()
         return t
 
     def crash(self) -> float:

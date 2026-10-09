@@ -142,6 +142,9 @@ def run_step(name: str, ip: str, out: pathlib.Path, tree: pathlib.Path,
         st.not_run = f"{e.kind}: {e.reason}"
     except ui_client.RemoteUiError as e:
         st.not_run = f"bench: remote UI: {e}"
+    except Exception as e:  # noqa: BLE001 - a rig fault ends this step, not the run
+        # (a serial port refused on 2026-10-09 made run_bench skip every later step)
+        st.not_run = f"bench: {type(e).__name__}: {e}"
     return st.result()
 
 

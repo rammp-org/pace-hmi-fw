@@ -303,9 +303,9 @@ def _serial(rig: Rig, seconds: float = SERIAL_S) -> SerialWatch:
     return SerialWatch(rig.port, seconds)
 
 
-def _reboot(rig: Rig, tag: str = "") -> float:
+def _reboot(rig: Rig, tag: str = "", serial_s: float = 0.0) -> float:
     rig.mark(f"restart{tag}")
-    t = rig.restart_hmi()
+    t = rig.restart_hmi(serial_s)
     rig.wait_back()
     rig.mark(f"back{tag}")
     return t
@@ -381,9 +381,11 @@ def s_b18b(rig: Rig) -> dict:
     rig.sim_ongone("keep")
     rig.sim_toggle("s", True)
     to_drive_by_mcb(rig)
-    watch = _serial(rig)
+    if not rig.port:
+        raise NotRun("bench", "this step reads the serial log: run it with the board's port")
     rig.inj.pause()
-    _reboot(rig)
+    _reboot(rig, serial_s=SERIAL_S)  # from DriveScreen: an RTS reset whose capture reads on
+    watch = rig.restart_watch
     rig.forward()  # "inject forward from the remote UI's reconnect"
     rig.watch(5.0, until=hg.screen_is(DRIVE))
     rig.watch(2.0)
