@@ -6,12 +6,13 @@
 // key trigger's one bit.
 //
 // Extracted from main.cpp's adc_task_fn (dev_refactor 7ea7592, lines 1481-1601) and
-// main/frag_stick_config.inc. REFACTOR ONLY: it reproduces that code's golden vectors
-// bit-exactly (components/stick/test), including what is unsafe today (refactor.md §1):
+// main/frag_stick_config.inc. It reproduces that code's golden vectors bit-exactly
+// (components/stick/test), including what is unsafe today (refactor.md §1):
 //   - H3: a pot outside its calibration is clamped to full deflection (open circuit = full);
-//   - H9: an invalid ADC cycle publishes nothing (no neutral);
-//   - the gate is a multiply (x * 0.0f): a negative deflection goes out as -0.0, a NaN as NaN.
-// Fixes are parked proposals (refactor.md §3.3) and need two approvals.
+//   - H9: an invalid ADC cycle publishes nothing (no neutral).
+// except where hazard fix C1 changed it (hazard-c1-spec.md §3, approved 2026-10-08): the gate
+// is no longer a multiply. The Io's output permit (stick/output_permit.hpp) decides, and a held
+// stick sends a literal (+0.0, +0.0, +0.0) (REQ-STK-10); the replays expect +0.0 there (E9).
 //
 // No LVGL, no ESP-IDF, no allocation after construction. The mapping engine is
 // components/joystick (espp::Joystick), as today.
@@ -22,6 +23,7 @@
 #include <optional>
 
 #include "joystick.hpp"
+#include "stick/permit_types.hpp"
 
 namespace hmi::stick {
 
@@ -71,6 +73,9 @@ struct Command {
   float twist;
 };
 
+/// The command a held stick sends: a literal (+0.0, +0.0, +0.0), not a multiply (REQ-STK-10).
+inline constexpr Command HELD_COMMAND{.x = 0.0f, .y = 0.0f, .twist = 0.0f};
+
 /// Fractions of the travel outside the dead zone where a key engages and lets go.
 struct KeyThresholds {
   float engage;
@@ -112,7 +117,8 @@ twist_config(const AxisCalMv &cal, float center_deadband_mv, float range_deadban
 /// Settings "Speed sensitivity" 1..10 (clamped) as a scale: 1.0 sends the stick as it is.
 [[nodiscard]] float drive_speed_scale(int drive_speed);
 
-/// The command: each axis times `scale`. A multiply, also when the gate makes it 0.
+/// The command: each axis times `scale`. Only for a stick the output permit allows; a held
+/// stick sends HELD_COMMAND (stick/output_permit.hpp), not a multiply by 0.
 [[nodiscard]] Command command(Position p, float scale);
 
 /// The pipeline. One instance, owned by the ADC task (it was app_main's `static
@@ -128,8 +134,12 @@ twist_config(const AxisCalMv &cal, float center_deadband_mv, float range_deadban
 ///   std::uint32_t joy_key(); std::uint32_t remote_key();
 ///   void set_joy_key(std::uint32_t); void set_joy_flick(std::uint32_t);
 ///   void show(const Position &mounted);                      // the bars
-///   int drive_speed(); bool stick_drives(); bool button_pressed();
+///   int drive_speed();
+///   Permit output_permit(const Position &mounted);           // the permit (C1 §3.4)
+///   bool button_pressed();
 ///   bool publish(const Command &command, bool button_pressed);  // XYTwist
+/// output_permit is asked on every valid cycle, where stick_drives() was asked before C1: it
+/// sees every condition (the gate, a calibration, ...) and times the neutral latch.
 class StickPipeline {
 public:
   struct Config {
@@ -205,10 +215,13 @@ template <typename Io> inline bool StickPipeline::cycle(Io &io, const RawReadsMv
   const Position mounted = mount(mapped, swap, invert_x, invert_y);
   update_keys(io, mounted, calibrating);
   io.show(mounted);
-  // The gate: a calibration run or a stick that is walking the UI sends 0 * the stick.
+  // The output permit (C1 §3): a held stick sends a literal 0, never 0 * the stick; the button
+  // bit is sent released until POST passes (REQ-STK-15).
   const float speed = drive_speed_scale(io.drive_speed());
-  const float scale = calibrating || !io.stick_drives() ? 0.0f : speed;
-  return io.publish(command(mounted, scale), io.button_pressed());
+  const Permit permit = io.output_permit(mounted);
+  const bool button = io.button_pressed();
+  return io.publish(permit.output ? command(mounted, speed) : HELD_COMMAND,
+                    permit.button && button);
 }
 
 template <typename Io>

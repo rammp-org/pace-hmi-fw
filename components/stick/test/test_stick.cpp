@@ -8,6 +8,9 @@
 // STK-030..039  the extracted pure stages, one behaviour each
 // STK-040..     bench stick injection (stick/bench_inject.hpp, REQ-STK-07): the STICK verb's
 //               parser, the expiry, fail_mask, and injected reads through the real pipeline
+// STK-060..067  the output permit (hazard-c1-spec.md §3, REQ-STK-10..14): literal 0, the
+//               neutral latch, the hold reason order, the hooks. STK-016 and STK-035 (they
+//               pinned the gate's multiply) are retired by C1 E9.
 
 #include <array>
 #include <bit>
@@ -25,6 +28,7 @@
 #include "legacy_adc_cycle.hpp"
 #include "stick/bench_inject.hpp"
 #include "stick/button_edges.hpp"
+#include "stick/output_permit.hpp"
 #include "stick/stick_pipeline.hpp"
 #include "stick_vectors.hpp"
 #include "test_case.hpp"
@@ -184,9 +188,27 @@ struct FakeIo {
     trace.add('d');
     return in->drive_speed;
   }
-  bool stick_drives() {
+  // The output permit (C1 §3.4), asked where stick_drives() was asked before C1. By default it
+  // holds exactly where the golden vectors were gated (calibrating, or the gate shut), so the
+  // replays read the pipeline's literal 0 there; with `permit_in` set, a real OutputPermit
+  // decides on those conditions at `now_ms`.
+  std::optional<hmi::stick::PermitInputs> permit_in;
+  hmi::stick::OutputPermit permit;
+  std::uint32_t now_ms = 0;
+  hmi::stick::Permit last_permit{};
+  hmi::stick::Permit output_permit(const hmi::stick::Position &mounted) {
     trace.add('g');
-    return in->drives;
+    if (permit_in) {
+      last_permit = permit.cycle(*permit_in, mounted, now_ms);
+    } else {
+      const bool open = in->drives && !in->calibrating;
+      last_permit = {.output = open,
+                     .button = true,
+                     .reason = !in->drives       ? hmi::stick::HoldReason::GATE_SHUT
+                               : in->calibrating ? hmi::stick::HoldReason::CALIBRATING
+                                                 : hmi::stick::HoldReason::NONE};
+    }
+    return last_permit;
   }
   bool button_pressed() {
     trace.add('b');
@@ -251,12 +273,30 @@ TEST_CASE("STK-001 the legacy harness reproduces every frozen golden row bit-exa
   TEST_ASSERT_EQUAL_size_t(0, failures);
 }
 
-TEST_CASE("STK-002 StickPipeline reproduces every frozen golden row bit-exactly",
-          "[stick][golden][safety]") {
+namespace {
+
+/// A golden row as the pipeline must give it after C1 (hazard-c1-spec.md §5.4 E9): where the
+/// row was gated (the gate shut, or calibrating) the command is a literal +0.0, not the
+/// legacy multiply (-0.0, NaN); everything else is the frozen row. golden_stick.inc itself is
+/// not edited: it pins the legacy code (STK-001).
+StickVector after_c1(StickVector want) {
+  if (want.published && (!want.drives || want.calibrating)) {
+    want.cmd_x = bits(0.0f);
+    want.cmd_y = bits(0.0f);
+    want.cmd_twist = bits(0.0f);
+  }
+  return want;
+}
+
+} // namespace
+
+TEST_CASE("STK-002 StickPipeline reproduces every frozen golden row bit-exactly, a literal +0.0 "
+          "where the row is gated",
+          "[stick][golden][safety][REQ-STK-10]") {
   PipelineRunner runner;
   std::size_t failures = 0;
   for (std::size_t i = 0; i < GOLDEN.size(); ++i) {
-    if (!same(i, GOLDEN[i], runner.cycle(GOLDEN[i]))) {
+    if (!same(i, after_c1(GOLDEN[i]), runner.cycle(GOLDEN[i]))) {
       ++failures;
     }
   }
@@ -280,12 +320,16 @@ TEST_CASE("STK-003 a valid cycle calls its Io in today's order", "[stick][order]
   TEST_ASSERT_EQUAL_STRING("TSNCwxyskrKkBdgbP", runner.io.trace.c_str());
 }
 
-TEST_CASE("STK-004 while calibrating the gate's stick_drives is not read", "[stick][order]") {
+TEST_CASE("STK-004 while calibrating the pipeline still asks the output permit, which holds",
+          "[stick][order]") {
+  // Before C1 the gate's stick_drives was not read while calibrating ("...Bdb P"); the permit
+  // is asked on every valid cycle (C1 §3.1 condition 3), and holds with CALIBRATING.
   PipelineRunner runner;
   StickVector v = GOLDEN[stick_test::ROW_CALIBRATING_FULL_RIGHT];
   v.reset = true;
   (void)runner.cycle(v);
-  TEST_ASSERT_EQUAL_STRING("TSNCwxyskrKkBdbP", runner.io.trace.c_str());
+  TEST_ASSERT_EQUAL_STRING("TSNCwxyskrKkBdgbP", runner.io.trace.c_str());
+  TEST_ASSERT_TRUE(runner.io.last_permit.reason == hmi::stick::HoldReason::CALIBRATING);
 }
 
 TEST_CASE("STK-005 an invalid cycle calls nothing on its Io", "[stick][order][safety]") {
@@ -349,15 +393,6 @@ TEST_CASE("STK-015 today an invalid ADC cycle publishes nothing and keeps the la
   TEST_ASSERT_FALSE(r.published);
   TEST_ASSERT_FALSE(r.bars_set);
   TEST_ASSERT_EQUAL_UINT32(stick_test::KEY_RIGHT, r.joy_key);
-}
-
-TEST_CASE("STK-016 the closed gate is a multiply: a negative deflection is sent as -0.0",
-          "[stick][gate][safety]") {
-  const StickVector &r = GOLDEN[stick_test::ROW_GATE_CLOSED_NEGATIVE_BUTTON];
-  TEST_ASSERT_FALSE(r.drives);
-  TEST_ASSERT_TRUE(r.published);
-  TEST_ASSERT_EQUAL_HEX32(bits(-0.0f), r.cmd_x);
-  TEST_ASSERT_EQUAL_HEX32(bits(-0.0f), r.cmd_y);
 }
 
 TEST_CASE("STK-017 the stick button reaches the MCB with the gate closed",
@@ -480,15 +515,6 @@ TEST_CASE("STK-034 mount swaps first, then mirrors, and leaves twist alone", "[s
   const hmi::stick::Position n = hmi::stick::mount(p, false, false, true);
   TEST_ASSERT_EQUAL_HEX32(bits(0.25f), bits(n.x));
   TEST_ASSERT_EQUAL_HEX32(bits(0.5f), bits(n.y));
-}
-
-TEST_CASE("STK-035 the command is a multiply: a NaN passes a closed gate as NaN",
-          "[stick][gate][safety]") {
-  const float nan = std::numeric_limits<float>::quiet_NaN();
-  const hmi::stick::Command c = hmi::stick::command({.x = nan, .y = -0.5f, .twist = 0.5f}, 0.0f);
-  TEST_ASSERT_TRUE(std::isnan(c.x));
-  TEST_ASSERT_EQUAL_HEX32(bits(-0.0f), bits(c.y));
-  TEST_ASSERT_EQUAL_HEX32(bits(0.0f), bits(c.twist));
 }
 
 // ---------------------------------------------------------------- bench injection (REQ-STK-07)
@@ -738,4 +764,286 @@ TEST_CASE("STK-052 the first press after start counts, and a bounce re-arms the 
   (void)e.edge(false, t + 10); // bounce: a release inside the window selects
   (void)e.edge(true, t + 20);  // the window restarts at the bounce's press
   TEST_ASSERT_TRUE(e.edge(false, t + 20 + hmi::stick::SELECT_MAX_US - 1).select);
+}
+
+// ---------------------------------------------------------------- the output permit (C1 §3)
+
+namespace {
+
+using hmi::stick::HoldReason;
+using hmi::stick::kNeutralHold;
+using hmi::stick::OutputPermit;
+using hmi::stick::Permit;
+using hmi::stick::PermitInputs;
+using hmi::stick::Position;
+using hmi::stick::PostGate;
+using hmi::stick::StickHealth;
+
+/// Conditions 1-7 all met.
+constexpr PermitInputs ALL_MET{.gate_open = true,
+                               .motion_guard_ok = true,
+                               .calibrating = false,
+                               .calibration_measured = true,
+                               .post = PostGate::PASS,
+                               .health = StickHealth::NOT_MONITORED};
+constexpr Position CENTRED{.x = 0.0f, .y = 0.0f, .twist = 0.0f};
+constexpr Position FORWARD{.x = 0.0f, .y = 1.0f, .twist = 0.0f};
+constexpr std::uint32_t CYCLE_MS = 33; // the ADC cycle's wait (C1 §3.1)
+constexpr std::uint32_t T_START = 1'000'000;
+
+/// Condition k (1..7) of the permit failing, the rest met.
+PermitInputs failing(int k) {
+  PermitInputs in = ALL_MET;
+  switch (k) {
+  case 1:
+    in.gate_open = false;
+    break;
+  case 2:
+    in.motion_guard_ok = false;
+    break;
+  case 3:
+    in.calibrating = true;
+    break;
+  case 4:
+    in.calibration_measured = false;
+    break;
+  case 5:
+    in.post = PostGate::PENDING;
+    break;
+  case 6:
+    in.health = StickHealth::FAULT;
+    break;
+  default:
+    in.health = StickHealth::CHECK;
+    break;
+  }
+  return in;
+}
+
+/// Runs the permit on centred 33 ms cycles from `t0`; returns the first cycle time at which it
+/// allowed output, or 0 if none within `cycles`.
+std::uint32_t first_allowed(OutputPermit &p, std::uint32_t t0, int cycles) {
+  for (int i = 0; i < cycles; ++i) {
+    const std::uint32_t t = t0 + CYCLE_MS * static_cast<std::uint32_t>(i);
+    if (p.cycle(ALL_MET, CENTRED, t).output) {
+      return t;
+    }
+  }
+  return 0;
+}
+
+/// Whether the permit allows output within two seconds of centred 33 ms cycles on `in`.
+bool first_allowed_with(OutputPermit &p, const PermitInputs &in) {
+  for (std::uint32_t t = 0; t < 2000; t += CYCLE_MS) {
+    if (p.cycle(in, CENTRED, T_START + t).output) {
+      return true;
+    }
+  }
+  return false;
+}
+
+} // namespace
+
+TEST_CASE("STK-060 a held stick sends exactly +0.0 on every axis, whatever its position "
+          "(NaN and negatives included)",
+          "[stick][permit][safety][REQ-STK-10]") {
+  StickVector v{};
+  v.power_on_cal = stick_test::CAL_IDEAL;
+  v.sensitivity = 9;
+  v.drive_speed = 10;
+  v.drives = true;
+  StickPipeline pipeline(pipeline_config(stick_test::CAL_IDEAL));
+  FakeIo io;
+  io.in = &v;
+  io.permit_in = failing(1);
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  // full left / reverse / counter-clockwise, full right / forward / clockwise, and NaN reads
+  const std::array<RawReadsMv, 3> reads{{
+      {.horizontal_mv = 0.0f, .vertical_mv = 3300.0f, .twist_mv = 0.0f},
+      {.horizontal_mv = 3300.0f, .vertical_mv = 0.0f, .twist_mv = 3300.0f},
+      {.horizontal_mv = nan, .vertical_mv = nan, .twist_mv = nan},
+  }};
+  for (const RawReadsMv &raw : reads) {
+    io.out = StickOutputs{};
+    TEST_ASSERT_TRUE(pipeline.cycle(io, raw));
+    TEST_ASSERT_EQUAL_HEX32(0x00000000U, io.out.cmd_x); // +0.0: not -0.0, not NaN
+    TEST_ASSERT_EQUAL_HEX32(0x00000000U, io.out.cmd_y);
+    TEST_ASSERT_EQUAL_HEX32(0x00000000U, io.out.cmd_twist);
+  }
+  static_assert(std::bit_cast<std::uint32_t>(hmi::stick::HELD_COMMAND.x) == 0U &&
+                std::bit_cast<std::uint32_t>(hmi::stick::HELD_COMMAND.y) == 0U &&
+                std::bit_cast<std::uint32_t>(hmi::stick::HELD_COMMAND.twist) == 0U);
+}
+
+TEST_CASE("STK-061 centred on 33 ms cycles from t = 0: held until the first cycle at 300 ms or "
+          "later, the stick's value from then",
+          "[stick][permit][safety][REQ-STK-12]") {
+  static_assert(kNeutralHold == std::chrono::milliseconds{300}, "G1, D4: 300 ms");
+  OutputPermit p;
+  for (std::uint32_t t = 0; t < 300; t += CYCLE_MS) { // 0, 33, ..., 297: held
+    const Permit got = p.cycle(ALL_MET, CENTRED, T_START + t);
+    TEST_ASSERT_FALSE(got.output);
+    TEST_ASSERT_TRUE(got.reason == HoldReason::CENTRE_FIRST);
+  }
+  const Permit at330 = p.cycle(ALL_MET, CENTRED, T_START + 330); // the first at >= 300 ms
+  TEST_ASSERT_TRUE(at330.output);
+  TEST_ASSERT_TRUE(at330.reason == HoldReason::NONE);
+  TEST_ASSERT_TRUE(p.cycle(ALL_MET, FORWARD, T_START + 363).output); // the stick's value
+}
+
+TEST_CASE("STK-062 a non-neutral cycle at 200 ms restarts the wait; a NaN cycle counts as "
+          "non-neutral",
+          "[stick][permit][safety][REQ-STK-12]") {
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  const std::array<Position, 3> bumps{{{.x = 0.0f, .y = 0.2f, .twist = 0.0f},
+                                       {.x = nan, .y = 0.0f, .twist = 0.0f},
+                                       {.x = 0.0f, .y = 0.0f, .twist = -0.1f}}};
+  for (const Position &bump : bumps) {
+    OutputPermit p;
+    for (std::uint32_t t = 0; t <= 165; t += CYCLE_MS) {
+      TEST_ASSERT_FALSE(p.cycle(ALL_MET, CENTRED, T_START + t).output);
+    }
+    TEST_ASSERT_FALSE(p.cycle(ALL_MET, bump, T_START + 198).output); // the bump at ~200 ms
+    // centred again from 231: the wait restarts there, so 528 is held and 561 allowed
+    for (std::uint32_t t = 231; t <= 528; t += CYCLE_MS) {
+      TEST_ASSERT_FALSE(p.cycle(ALL_MET, CENTRED, T_START + t).output);
+    }
+    TEST_ASSERT_TRUE(p.cycle(ALL_MET, CENTRED, T_START + 561).output);
+  }
+}
+
+TEST_CASE("STK-063 an invalid cycle restarts the wait", "[stick][permit][safety][REQ-STK-12]") {
+  OutputPermit p;
+  for (std::uint32_t t = 0; t <= 165; t += CYCLE_MS) {
+    TEST_ASSERT_FALSE(p.cycle(ALL_MET, CENTRED, T_START + t).output);
+  }
+  p.invalid_cycle(); // at 198: a read failed, the pipeline did not run
+  for (std::uint32_t t = 231; t <= 528; t += CYCLE_MS) {
+    TEST_ASSERT_FALSE(p.cycle(ALL_MET, CENTRED, T_START + t).output);
+  }
+  TEST_ASSERT_TRUE(p.cycle(ALL_MET, CENTRED, T_START + 561).output);
+  p.invalid_cycle(); // once latched, an invalid cycle does not clear it (only 1-7 do)
+  TEST_ASSERT_TRUE(p.cycle(ALL_MET, FORWARD, T_START + 627).output);
+}
+
+TEST_CASE("STK-064 each of conditions 1-7 failing for one cycle clears the latch: held until "
+          "centred 300 ms again",
+          "[stick][permit][safety][REQ-STK-12]") {
+  for (int k = 1; k <= 7; ++k) {
+    OutputPermit p;
+    TEST_ASSERT_EQUAL_UINT32(T_START + 330, first_allowed(p, T_START, 20));
+    const Permit held = p.cycle(failing(k), CENTRED, T_START + 363); // one cycle
+    TEST_ASSERT_FALSE(held.output);
+    TEST_ASSERT_FALSE(p.latched());
+    // met again from 396, centred throughout: allowed at the first cycle >= 696, that is 726
+    TEST_ASSERT_EQUAL_UINT32(T_START + 726, first_allowed(p, T_START + 396, 20));
+  }
+}
+
+TEST_CASE("STK-065 once latched, full deflection keeps its output while conditions 1-7 hold",
+          "[stick][permit][safety][REQ-STK-12]") {
+  OutputPermit p;
+  TEST_ASSERT_EQUAL_UINT32(T_START + 330, first_allowed(p, T_START, 20));
+  for (std::uint32_t i = 1; i <= 300; ++i) { // ten seconds at full deflection
+    const Position deflected{.x = (i % 2 == 0) ? 1.0f : -1.0f, .y = 1.0f, .twist = -1.0f};
+    const Permit got = p.cycle(ALL_MET, deflected, T_START + 330 + CYCLE_MS * i);
+    TEST_ASSERT_TRUE(got.output);
+    TEST_ASSERT_TRUE(got.reason == HoldReason::NONE);
+  }
+  // The clock wraps through 2^32 during the wait: the wait is timed modulo 2^32.
+  OutputPermit wrap;
+  const std::uint32_t near_wrap = 0xFFFFFF00U;
+  TEST_ASSERT_EQUAL_UINT32(near_wrap + 330U, first_allowed(wrap, near_wrap, 20));
+}
+
+TEST_CASE("STK-066 the hold reason is the first failing condition, over every combination",
+          "[stick][permit][safety][REQ-STK-13]") {
+  // hazard-c1-spec.md §3.3's order, written out: GATE_SHUT, MOTION_GUARD, CALIBRATING,
+  // NOT_CALIBRATED, POST_NOT_PASSED, STICK_FAULT, STICK_CHECK, then CENTRE_FIRST or NONE.
+  const std::array<PostGate, 4> posts{PostGate::NOT_RUN, PostGate::PENDING, PostGate::PASS,
+                                      PostGate::FAIL};
+  const std::array<StickHealth, 4> healths{StickHealth::NOT_MONITORED, StickHealth::OK,
+                                           StickHealth::CHECK, StickHealth::FAULT};
+  int cases = 0;
+  for (unsigned flags = 0; flags < 16U; ++flags) {
+    for (const PostGate post : posts) {
+      for (const StickHealth health : healths) {
+        const PermitInputs in{.gate_open = (flags & 1U) != 0U,
+                              .motion_guard_ok = (flags & 2U) != 0U,
+                              .calibrating = (flags & 4U) != 0U,
+                              .calibration_measured = (flags & 8U) != 0U,
+                              .post = post,
+                              .health = health};
+        HoldReason want = HoldReason::CENTRE_FIRST; // a fresh permit: not waited yet
+        if (!in.gate_open) {
+          want = HoldReason::GATE_SHUT;
+        } else if (!in.motion_guard_ok) {
+          want = HoldReason::MOTION_GUARD;
+        } else if (in.calibrating) {
+          want = HoldReason::CALIBRATING;
+        } else if (!in.calibration_measured) {
+          want = HoldReason::NOT_CALIBRATED;
+        } else if (post != PostGate::PASS) {
+          want = HoldReason::POST_NOT_PASSED;
+        } else if (health == StickHealth::FAULT) {
+          want = HoldReason::STICK_FAULT;
+        } else if (health == StickHealth::CHECK) {
+          want = HoldReason::STICK_CHECK;
+        }
+        OutputPermit p;
+        const Permit got = p.cycle(in, FORWARD, T_START);
+        TEST_ASSERT_EQUAL_UINT8(static_cast<std::uint8_t>(want),
+                                static_cast<std::uint8_t>(got.reason));
+        TEST_ASSERT_FALSE(got.output);
+        ++cases;
+      }
+    }
+  }
+  TEST_ASSERT_EQUAL_INT(256, cases);
+  OutputPermit p; // all met and latched: NONE
+  TEST_ASSERT_EQUAL_UINT32(T_START + 330, first_allowed(p, T_START, 20));
+  TEST_ASSERT_TRUE(p.cycle(ALL_MET, FORWARD, T_START + 363).reason == HoldReason::NONE);
+}
+
+TEST_CASE("STK-067 POST gate NOT_RUN, PENDING and FAIL hold, PASS allows; stick health FAULT "
+          "and CHECK hold, NOT_MONITORED and OK allow; the motion guard allows only OK",
+          "[stick][permit][safety][REQ-STK-14]") {
+  struct Gate {
+    PostGate post;
+    bool allows;
+  };
+  const std::array<Gate, 6> gates{{{PostGate::NOT_RUN, false},
+                                   {PostGate::PENDING, false},
+                                   {PostGate::PASS, true},
+                                   {PostGate::FAIL, false},
+                                   {static_cast<PostGate>(4), false},
+                                   {static_cast<PostGate>(255), false}}};
+  for (const Gate &g : gates) {
+    PermitInputs in = ALL_MET;
+    in.post = g.post;
+    OutputPermit p;
+    TEST_ASSERT_EQUAL(g.allows, first_allowed_with(p, in));
+  }
+  struct Health {
+    StickHealth health;
+    bool allows;
+    HoldReason reason;
+  };
+  const std::array<Health, 5> healths{
+      {{StickHealth::NOT_MONITORED, true, HoldReason::NONE},
+       {StickHealth::OK, true, HoldReason::NONE},
+       {StickHealth::CHECK, false, HoldReason::STICK_CHECK},
+       {StickHealth::FAULT, false, HoldReason::STICK_FAULT},
+       {static_cast<StickHealth>(9), false, HoldReason::STICK_CHECK}}};
+  for (const Health &h : healths) {
+    PermitInputs in = ALL_MET;
+    in.health = h.health;
+    OutputPermit p;
+    TEST_ASSERT_EQUAL(h.allows, first_allowed_with(p, in));
+    TEST_ASSERT_TRUE(p.cycle(in, CENTRED, T_START + 2000).reason == h.reason);
+  }
+  PermitInputs guard = ALL_MET;
+  guard.motion_guard_ok = false; // until C4 main passes OK (decision D2)
+  OutputPermit p;
+  TEST_ASSERT_FALSE(first_allowed_with(p, guard));
 }

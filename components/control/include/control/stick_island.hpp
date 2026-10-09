@@ -14,6 +14,7 @@
 #include "logger.hpp"
 #include "oneshot_adc.hpp"
 #include "simple_lowpass_filter.hpp"
+#include "stick/stick_pipeline.hpp"
 #include "task.hpp"
 
 namespace hmi::control {
@@ -37,9 +38,13 @@ struct Cycle {
 /// publish, all on this task (app-main-shrink V10). Built once, an app_main local (V6): the
 /// constructor brings the ADC drivers up, start() builds the stick on its calibration and
 /// starts the task.
-/// @tparam Stick The stick pipeline (main's StickSlot): `bool cycle(Io &, const RawReadsMv &)`.
+/// @tparam Stick The stick pipeline (main's StickSlot): `bool cycle(Io &, const RawReadsMv &)`,
+///         and optionally `RawReadsMv reads(const RawReadsMv &)`, the reads its cycle will use
+///         (the bench injection's; without it the ADC's reads are used as they are).
 /// @tparam Io What one cycle talks to (main's AdcStickIo): built every cycle on the twist's
-///         lowpass, and told about every cycle, valid or not, through note_cycle().
+///         lowpass and the task's own `Io::State`, handed the reads the pipeline gets before
+///         the cycle (note_reads()), and told about every cycle, valid or not, through
+///         note_cycle().
 /// @tparam kCycle The cycle's period and twist read (Cycle).
 template <typename Stick, typename Io, Cycle kCycle> class StickIsland {
 public:
@@ -72,8 +77,10 @@ public:
                  // raw mV -> calibrated stick -> the keypad key, the bars and XYTwist:
                  // hmi::stick::StickPipeline (components/stick), fed through Io. Only a
                  // cycle with all three reads does anything; otherwise nothing is published.
-                 Io stick_io{*twist_lowpass_};
-                 const bool adc_published = stick_->cycle(
+                 // The Io is handed the reads the pipeline gets (after the bench injection)
+                 // first, valid or not.
+                 Io stick_io{*twist_lowpass_, *io_state_};
+                 const bool adc_published = cycle_on(
                      stick_io,
                      {.horizontal_mv = horiz_mv, .vertical_mv = vert_mv, .twist_mv = twist_mv});
                  // Every cycle, valid or not. X is the horizontal channel, as everywhere above.
@@ -105,14 +112,31 @@ public:
   /// @brief Builds the stick on @p stick_config (its calibration), then the twist's lowpass,
   /// and starts the task (app_main, after the calibration is loaded).
   /// @param stick_config The stick pipeline's configuration.
+  /// @param io_state The Io's state across cycles; it must outlive the task (app_main's).
   /// @return Whether the task started.
-  bool start(const typename Stick::Config &stick_config) {
+  bool start(const typename Stick::Config &stick_config, typename Io::State &io_state) {
+    io_state_ = &io_state;
     stick_.emplace(stick_config);
     twist_lowpass_.emplace(twist_lowpass_config_);
     return task_.start();
   }
 
 private:
+  // One cycle of the stick on the ADC's reads @p raw, through @p stick_io: the reads the
+  // pipeline gets are the Stick's own (the bench injection's) when it has `reads`, else @p raw
+  // itself (no copy). The Io is handed them before the cycle.
+  [[gnu::always_inline]] bool cycle_on(Io &stick_io, const hmi::stick::RawReadsMv &raw) {
+    if constexpr (requires { stick_->reads(raw); }) {
+      return cycle_with(stick_io, stick_->reads(raw));
+    } else {
+      return cycle_with(stick_io, raw);
+    }
+  }
+  [[gnu::always_inline]] bool cycle_with(Io &stick_io, const hmi::stick::RawReadsMv &reads) {
+    stick_io.note_reads(reads);
+    return stick_->cycle(stick_io, reads);
+  }
+
   // The twist pot's reading for the Read ADC task: kCycle.twist_oversample oneshot reads
   // on ADC2, averaged; nullopt if none succeeded.
   //
@@ -147,6 +171,7 @@ private:
   espp::ContinuousAdc adc_;
   std::optional<espp::OneshotAdc> twist_adc_;
   std::optional<Stick> stick_;
+  typename Io::State *io_state_ = nullptr;
   std::optional<espp::SimpleLowpassFilter> twist_lowpass_;
   espp::Task task_;
 };

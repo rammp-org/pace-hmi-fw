@@ -402,6 +402,29 @@ void UiApp::theme_switched(uint8_t theme) {
   settings_set_theme(theme);
 }
 
+// The POST's persistent indicator on every TopBar (hazard-c3-spec.md §2.8, REQ-UI-19): the
+// indicator's state after this tick's runner and drive tick, in its words and colour.
+void UiApp::post_indicator() {
+  using hmi::post::IndicatorKind;
+  const PostStage::Shown shown = post_stage_.shown();
+  TopBarView::PostColour colour = TopBarView::PostColour::RED;
+  switch (shown.kind) {
+  case IndicatorKind::NONE:
+    colour = TopBarView::PostColour::NONE;
+    break;
+  case IndicatorKind::CHECKING:
+    colour = TopBarView::PostColour::GREY;
+    break;
+  case IndicatorKind::WAITING:
+    colour = TopBarView::PostColour::AMBER;
+    break;
+  case IndicatorKind::FAILED:
+  case IndicatorKind::NOT_RUN:
+    break;
+  }
+  topbar_view_.set_post(colour, post_stage_.text_now().text.data());
+}
+
 // The hmi_ui chrome views of one screen, in the order they have always been bound: the
 // DriveBand's status cells, then the TopBar's RTPS label, then its clock and link.
 void UiApp::bind_chrome_views(lv_obj_t *band, lv_obj_t *bar) {

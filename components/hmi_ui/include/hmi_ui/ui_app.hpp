@@ -38,6 +38,7 @@
 #include "hmi_ui/nav_view.hpp"
 #include "hmi_ui/on_demand_screens.hpp"
 #include "hmi_ui/overdraw.hpp"
+#include "hmi_ui/post_stage.hpp"
 #include "hmi_ui/refusal_texts.hpp"
 #include "hmi_ui/refusal_view.hpp"
 #include "hmi_ui/rtps_label_view.hpp"
@@ -79,6 +80,7 @@ public:
     espp::Logger *nav_log;                ///< "nav": the lost-cursor backstop's warning
     espp::Logger *flip_log;               ///< "flip": the screen flip
     espp::Logger *overdraw_log;           ///< "overdraw": what the overdraw pass cleared
+    const PostPort *post;                 ///< the quick POST's IDF facts (main)
   };
 
   /// The Settings page of the actuator rows, after the settings_spec.hpp pages.
@@ -145,6 +147,8 @@ public:
   }
   /// The drive UI's menu mirror (DriveUi::menu_open_any_task). Any task.
   [[nodiscard]] bool menu_open_any_task() const { return drive_ui_.menu_open_any_task(); }
+  /// The quick POST on the UI task: its runner, the rest windows, the indicator's state.
+  [[nodiscard]] constexpr PostStage &post() noexcept { return post_stage_; }
 
   /// @brief The joystick's LVGL keypad read: moves the cursor through each screen's focus
   ///        group. It drains the latch the ADC task fills, so one flick of the stick = one
@@ -221,6 +225,7 @@ private:
   static void strip_screen(const lv_obj_t *screen);
   void strip_overdraw_logged();
   void theme_switched(uint8_t theme);
+  void post_indicator();
 
   // Members in dependency order: a view's Config may read only what is declared above it.
   Config config_;
@@ -228,6 +233,11 @@ private:
   // The stick output permit's channels, shared with the ADC task (hazard-c1-spec.md §3.2,
   // hazard-c3-spec.md §2.4): constant initialised with the rest of UiApp.
   hmi::stick::PermitHooks permit_hooks_{};
+  // The quick POST (hazard-c3-spec.md §2.3): the POST gate's only writer.
+  PostStage post_stage_{{
+      .port = config_.post,
+      .gate = &permit_hooks_.post_gate,
+  }};
 
   // The subjects several views read (were main's mib_state_subject, rtps_link_subject,
   // locked_subject, entry_refused_subject, seat_axis_value).
@@ -686,7 +696,9 @@ private:
       .link_state = config_.link->state,
       .link_seen = config_.link->seen,
       .diag_poll = hmi::ui::bind<&DiagnosticsView::poll>(&diag_view_), // staleness, same tick
+      .post_tick = hmi::ui::bind<&PostStage::tick>(&post_stage_),      // before the drive tick
       .drive_tick = config_.drive->tick, // and the wait for the MCB to drive
+      .post_indicator = hmi::ui::bind<&UiApp::post_indicator>(this), // after it
       // The theme switch restored the redundant background fills: take them out again, and
       // save the setting (the first place firmware sees the result of any route to it).
       .theme_switched = hmi::ui::bind<&UiApp::theme_switched>(this),

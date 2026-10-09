@@ -18,6 +18,7 @@ idf_component_register(SRCS "src/about_view.cpp"
                             "src/nav_view.cpp"
                             "src/on_demand_screens.cpp"
                             "src/overdraw.cpp"
+                            "src/post_stage.cpp"
                             "src/refusal_view.cpp"
                             "src/resident_chrome.cpp"
                             "src/rtps_label_view.cpp"
@@ -45,6 +46,7 @@ idf_component_register(SRCS "src/about_view.cpp"
                                 logger
                                 lvgl
                                 ota_parse
+                                post
                                 rammp_rtps_messages
                                 settings
                                 stick
