@@ -105,6 +105,11 @@ public:
   ///        caller's (a refused push and a drive cut short read differently).
   /// UI task, lvgl_mutex held.
   void fill_drive_blocked(lv_obj_t *panel, const char *link_title, const char *mcb_title);
+  /// @brief Fills a banner with a request refused before the start-up check passed (C3,
+  ///        REFUSED_POST): `title`, the blocking check's words (post_reason) as the body, no
+  ///        footer.
+  /// UI task, lvgl_mutex held.
+  void fill_post_refused(lv_obj_t *panel, const char *title);
   /// @brief Binds `cb` on `panel` (object-bound, with `user_data`) to every subject the cause
   ///        depends on: link, MIB state, error text and footer. Also for other views' banners
   ///        that word the same cause.
