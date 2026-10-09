@@ -633,7 +633,7 @@ extern "C" void app_main(void) {
 
   // run the LVGL refresh timer at 60 fps — the espp lv_conf.h compiles in a
   // 33 ms (30 fps) default period; the lv_task loop below already calls
-  // lv_task_handler every 16 ms so it can keep up
+  // lv_task_handler every 8 ms so it can keep up
   lv_display_t *const display = lv_display_get_default();
   lv_timer_set_period(lv_display_get_refr_timer(display), 16);
 
@@ -838,9 +838,9 @@ extern "C" void app_main(void) {
   // bring up W5500 Ethernet + RTPS last so a missing cable / module can't
   // delay the HMI; on failure the UI keeps running without comms
   logger.info("Starting RTPS comms...");
-  // remote LCD brightness (rtps_brightness.py on the PC); floor at 5% so a
-  // remote command can't turn the screen fully off. brightness() drives the
-  // backlight directly (no LVGL), so it's safe from the RTPS receive task.
+  // remote LCD brightness (kHmiBrightness); floor at 5% so a remote command
+  // can't turn the screen fully off. brightness_set takes the LVGL lock and
+  // sets the brightness subject, so it is safe from the RTPS receive task.
   rtps_comms_on_brightness(
       [](float percent) { brightness_set(static_cast<int>(std::lround(percent))); });
   // RTPS handlers run on the RTPS receive task: subjects only (UiApp's RtpsUiBridge), under

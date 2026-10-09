@@ -15,7 +15,7 @@ the drive table review (CS-SAF-05, two approvals; D1: the owner is the only appr
 | Part | File |
 | --- | --- |
 | `DriveAdapter<View>`, the `DrivePort` concept, `DriveSample`, `DriveBanner` | `include/drive_adapter.hpp` |
-| The firmware's port, `hmi::ui::DrivePort<DriveUi>` (the LVGL and rtps_comms calls; moved from `main/frag_drive.inc`'s MainDriveView) | `components/drive_ui/include/drive_ui/drive_port.hpp` |
+| The firmware's port, `hmi::ui::DrivePort<DriveUi>` (the LVGL and rtps_comms calls; moved from main.cpp's former `MainDriveView`) | `components/drive_ui/include/drive_ui/drive_port.hpp` |
 | The one instance | `main/main.cpp` |
 | The Drive notice (`DriveNotice`, `drive_notice()`), its own header so a port can name it | `include/drive_notice.hpp` |
 | The adapter's own contract (DAD-001..005, DAD-007..011) | `test/` |
@@ -51,10 +51,10 @@ does is dropped and logged, see REQ-DAD-03).
 | `lock_open_visual()` | LOCK_OPEN_VISUAL | ring full, shackle up, STRONG_CLICK |
 | `unlock_timer_start/cancel/forget()` | START_UNLOCK_TIMER, CANCEL_UNLOCK_TIMER, UNLOCK_TIMER_DONE | `unlock_timer_start()`, `unlock_timer_cancel()`, `unlock_advance_timer = nullptr` |
 | `set_locked(locked)` | SET_LOCKED, SET_UNLOCKED | `lv_subject_set_int(&locked_subject, 1/0)` |
-| `gate_update()` | GATE_UPDATE | `nav_update_stick_gate()` |
+| `gate_update()` | GATE_UPDATE | `DriveUi::update_stick_gate()` |
 | `menu_on_arrival(open)` | OPEN/CLEAR_MENU_ON_ARRIVAL | `nav_menu_on_arrival = open` |
 | `go_locked_screen()`, `go_drive_screen()`, `nav_home()` | GO_LOCKED_SCREEN, GO_DRIVE_SCREEN, NAV_HOME | `locked_screen_go()`, fade to Drive over kUnlockDissolveMs, `nav_home()` |
-| `show_banner(banner)` | SHOW_* (C3: SHOW_REFUSED_POST, REFUSED_POST) | `entry_refused_show(kRefused*, dwell)` |
+| `show_banner(banner)` | SHOW_* (C3: SHOW_REFUSED_POST, REFUSED_POST) | `DrivePort::show_refused(kRefused*, dwell)` |
 | `refusal_feedback()` | REFUSAL_FEEDBACK | `refusal_feedback()` |
 | `show_notice(notice)` | after every input and tick, on a change | the Drive screen's notice slot (hmi_ui's DriveNoticeView) |
 
@@ -82,7 +82,7 @@ thread-safe; one owner. The request is kept in a `std::atomic<bool>` as before t
 
 The instance is built at namespace scope in the main.cpp unit, where `drive_state` was, so the
 static-initialisation order is unchanged. Its constructor builds only an `espp::Logger` (no
-hardware, LVGL, flash or calibration); `MainDriveView` is stateless. Nothing is allocated after
+hardware, LVGL, flash or calibration); `DrivePort` is stateless. Nothing is allocated after
 construction (CS-SAF-04), the fault paths included.
 
 ## Dependencies

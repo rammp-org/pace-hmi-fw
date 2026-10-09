@@ -13,6 +13,7 @@ here as pure functions and small classes, so it can be tested on inline inputs:
   (`ongone keep`: stays ENABLED across an HMI reset; `ongone idle`: drops to IDLE);
 - XyTwistLog: the per-second XYTwist summary plus every non-zero sample;
 - EventLog: the timestamped JSONL log (rtps_mcb_sim.py --event-log PATH);
+- mib_publish_event(): the log record of every MibStatus publish (hazard-c4-spec.md B5f);
 - parse_mode_command(): the stdin commands above, parsed.
 
     python scripts/mcb_sim_logic.py selftest      # cases SIM-001.., Unity's output format
@@ -256,6 +257,18 @@ class XyTwistLog:
         self.start = None
         self._reset()
         return record
+
+
+# ---------------------------------------------------------------- MibStatus publishes
+
+
+def mib_publish_event(state: int, seq: int, targets: int) -> dict:
+    """The event-log record of one MibStatus put on the wire (C4 B5f/B5g: the bench grades
+    XYTwist against the time of the first IDLE publish and of the last publish before a
+    pause, so every publish is logged, not only state changes). `targets` 0 means nobody
+    subscribed yet: the sample went nowhere, and the record says so."""
+    return {"ev": "mib_publish", "state": state_name(state), "seq": seq & 0xFF,
+            "targets": targets}
 
 
 # ---------------------------------------------------------------- event log
@@ -576,6 +589,23 @@ def t_parse_mode_command() -> None:
                                    ("ign 1", "drop", "ongone idle", "mark x", "modes")), True)
 
 
+def t_mib_publish_event() -> None:
+    expect("IDLE to one subscriber", mib_publish_event(IDLE, 7, 1),
+           {"ev": "mib_publish", "state": "IDLE", "seq": 7, "targets": 1})
+    expect("ENABLED, seq wraps at a byte, nobody listening",
+           mib_publish_event(ENABLED, 256 + 3, 0),
+           {"ev": "mib_publish", "state": "ENABLED", "seq": 3, "targets": 0})
+    expect("an unknown state keeps its number", mib_publish_event(250, 0, 2)["state"], "250")
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "events.jsonl")
+        log = EventLog(path, clock=lambda: 5.0)
+        log.record(mib_publish_event(ERROR, 9, 1))
+        log.close()
+        events = read_events(path)
+    expect("logged with its time", [(e["ev"], e["mono"], e["state"], e["seq"]) for e in events],
+           [("mib_publish", 5.0, "ERROR", 9)])
+
+
 CASES = [
     ("SIM-001 ENABLE gives ENABLED and DISABLE gives IDLE from IDLE or ENABLED",
      t_plain_requests),
@@ -596,6 +626,8 @@ CASES = [
      t_xytwist_log),
     ("SIM-012 the event log writes one timestamped JSON object per line", t_event_log),
     ("SIM-013 the mode commands parse and reject bad arguments", t_parse_mode_command),
+    ("SIM-014 every MibStatus publish is an event-log record with its state and seq",
+     t_mib_publish_event),
 ]
 
 
