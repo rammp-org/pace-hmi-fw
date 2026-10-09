@@ -31,6 +31,7 @@ a step that reads the serial log): neither is a verdict on the firmware.
 from __future__ import annotations
 
 import importlib
+import itertools
 import json
 import math
 import os
@@ -62,8 +63,28 @@ PROFILE_NORMAL = (257 + 207 // 2, PROFILE_Y)
 PROFILE_LOW = (484 + 207 // 2, PROFILE_Y)
 # SkunkWorksScreen: actions_spec.h's five tiles (Restart HMI is the fifth), 320x240, two to
 # a row, 20 px apart, rows centred (ui_SkunkWorksScreen.c, ui_comp_slottile.c).
-RESTART_TILE_INDEX = 4
-SKUNK_TILES = 5
+RESTART_ACTION = "RESTART_HMI"
+PRE_REFRESH_S = 0.05      # a command waits for no refresh: one goes first if this one is due
+
+
+def skunk_actions(tree: pathlib.Path) -> list[str]:
+    """The Skunk Works tiles in draw order, from the tree's actions_spec.h (the image's
+    own table: the grid's size and Restart HMI's place come from it, not from a constant)."""
+    import re
+    path = tree / "components" / "hmi_ui" / "include" / "hmi_ui" / "actions_spec.h"
+    return re.findall(r"^\s*X\((\w+),", path.read_text(encoding="utf-8"), re.M)
+
+
+def tile_centre(index: int, count: int, tile0: tuple[int, int, int, int],
+                width: int = 720, gap: int = 20) -> tuple[int, int]:
+    """Where tile `index` of `count` sits in the wrapping, centred flex grid whose first
+    tile FOCUS reported at (x, y, w, h)."""
+    _, y0, w, h = tile0
+    cols = max(1, (width + gap) // (w + gap))
+    row, col = divmod(index, cols)
+    in_row = min(cols, count - row * cols)
+    left = (width - (in_row * w + (in_row - 1) * gap)) // 2
+    return left + col * (w + gap) + w // 2, y0 + row * (h + gap) + h // 2
 
 
 class NotRun(Exception):
@@ -142,7 +163,7 @@ class Injector:
         self._lock = threading.Lock()
         self._target: tuple[int, int, int, int] | None = None
         self._once: tuple[int, int, int, int] | None = None
-        self._seq = 0
+        self._seq = itertools.count(1)  # thread-safe enough: next() is atomic in CPython
         self._last: float | None = None
         self.lapses: list[tuple[float, float]] = []   # (t, gap) over INJECT_LAPSE_S
         self.log: list[tuple[float, int, int, int, int]] = []
@@ -152,10 +173,21 @@ class Injector:
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
+    def due(self, age: float) -> tuple[int, int, int, int] | None:
+        """The standing target when its last refresh is at least `age` s old, else None."""
+        target, last = self._target, self._last
+        if target is None or last is None or time.monotonic() - last < age:
+            return None
+        return target
+
+    def push_inline(self, target: tuple[int, int, int, int]) -> float:
+        """A refresh sent by the thread that holds the connection, just before its own
+        command (Rig: no command makes the stick wait out a slow round trip)."""
+        return self._push(target)
+
     def _push(self, target: tuple[int, int, int, int]) -> float:
-        self._seq += 1
         t = time.monotonic()
-        self._send(*target, self._seq)
+        self._send(*target, next(self._seq))
         if self._last is not None and t - self._last > INJECT_LAPSE_S:
             self.lapses.append((round(t, 3), round(t - self._last, 3)))
         self._last = t
@@ -254,7 +286,7 @@ class Rig:
         self.sim: peers.SimChild | None = None
         self.hmi = None
         self.inj: Injector | None = None
-        self._io = threading.Lock()
+        self._io = threading.RLock()  # re-entered by the inline refresh before a command
         self._hmi_ui = None
         self._t0 = time.monotonic()
 
@@ -305,6 +337,11 @@ class Rig:
 
         def locked_call(*a, **k):
             with self._io:
+                inj = self.inj
+                if inj is not None and a and not str(a[0]).startswith("STICK"):
+                    target = inj.due(PRE_REFRESH_S)
+                    if target is not None:
+                        inj.push_inline(target)
                 return raw_call(*a, **k)
 
         hmi._call = locked_call
@@ -483,17 +520,18 @@ class Rig:
     def restart_hmi(self) -> float:
         """The Restart HMI tile (Skunk Works, the fifth): a software reset. Returns the tap
         time. The connection is closed; wait_back() reconnects."""
+        actions = skunk_actions(self.tree)
+        if RESTART_ACTION not in actions:
+            raise NotRun("bench", f"no {RESTART_ACTION} in the tree's actions_spec.h")
         self.go("Skunk Works")
+        if self.watch(3.0, until=hg.screen_is("SkunkWorksScreen")) is None:
+            raise NotRun("bench", "could not open Skunk Works")
         f0 = self.focus()
-        if f0 is None or f0[4] != SKUNK_TILES:
+        # The keypad group may hold more than the tiles (it did on 9e0fb77: 6 for 5 tiles);
+        # the first tile is what places the grid.
+        if f0 is None or f0[4] < len(actions):
             raise NotRun("bench", f"Skunk Works' tile grid not as expected (FOCUS {f0})")
-        x0, y0, w, h, _ = f0
-        cols = max(1, (720 + 20) // (w + 20))
-        row, col = divmod(RESTART_TILE_INDEX, cols)
-        in_row = min(cols, SKUNK_TILES - row * cols)
-        left = (720 - (in_row * w + (in_row - 1) * 20)) // 2
-        x = left + col * (w + 20) + w // 2
-        y = y0 + row * (h + 20) + h // 2
+        x, y = tile_centre(actions.index(RESTART_ACTION), len(actions), f0[:4])
         self.st.record("restart_tile", {"tile0": f0[:4], "tap": [x, y]})
         self.inj.pause()
         t = time.monotonic()
@@ -552,6 +590,12 @@ class Rig:
                            and s.get("menu_open") is not True)
             self.st.check("set-up: Locked", s is not None,
                           f"screen {self.state().get('screen')}")
+        failed = [c["check"] for c in self.st.checks if c["check"].startswith("set-up")
+                  and not c["ok"]]
+        if failed:
+            # A step does nothing on a board that is not where it starts (on 2026-10-09 a
+            # B5''-21 whose start failed went on to CRASH the board for the next step).
+            raise NotRun("bench", f"set-up failed: {failed}")
 
     def _modes_off(self) -> None:
         self.sim_count("ign", 0)

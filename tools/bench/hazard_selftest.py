@@ -1065,6 +1065,31 @@ def t_forced_stop_kills_tree() -> None:
            [777])
 
 
+def t_restart_tile_and_refresh() -> None:
+    names = hazard_rig.skunk_actions(common.REPO)
+    expect("the tree's Skunk Works tiles", names[-1], "RESTART_HMI")
+    expect("5 tiles, 320x240, two a row: Restart HMI alone and centred on row 3",
+           hazard_rig.tile_centre(4, 5, (30, 342, 320, 240)), (360, 342 + 2 * 260 + 120))
+    expect("6 tiles: the sixth on the right of row 3",
+           hazard_rig.tile_centre(5, 6, (30, 342, 320, 240)), (370 + 160, 342 + 2 * 260 + 120))
+    expect("the first tile", hazard_rig.tile_centre(0, 5, (30, 342, 320, 240)), (190, 462))
+    sent = []
+    inj = hazard_rig.Injector(lambda h, v, tw, mask, seq: sent.append((time.monotonic(), seq)))
+    try:
+        inj.set(1507, 1510, 1477)
+        expect("just refreshed: not due", inj.due(0.05), None)
+        time.sleep(0.06)
+        target = inj.due(0.05)
+        expect("due after 50 ms", target, (1507, 1510, 1477, 0))
+        inj.push_inline(target)
+        expect("the inline refresh is a STICK with a fresh sequence number",
+               len({seq for _, seq in sent}), len(sent))
+        inj.pause()
+        expect("paused: nothing due", inj.due(0.0), None)
+    finally:
+        inj.stop()
+
+
 CASES = [
     ("BENCH-015 the hazard steps: only behind --hazard or --steps; retired as the fixes land; "
      "B5pp names", t_plan),
@@ -1109,6 +1134,8 @@ CASES = [
      "base-interpreter child), not its pid alone", t_process_tree),
     ("BENCH-048 a rig whose start-up fails stops the sim it started", t_rig_start_failure_stops_sim),
     ("BENCH-049 a sim that does not quit is killed with its whole tree", t_forced_stop_kills_tree),
+    ("BENCH-050 Restart HMI's tile from the tree's actions_spec.h; a refresh goes before any "
+     "command once 50 ms old", t_restart_tile_and_refresh),
 ]
 
 
