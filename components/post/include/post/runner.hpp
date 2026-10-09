@@ -94,6 +94,10 @@ struct Line {
 /// @return the line
 [[nodiscard]] Line waiting_line(const Check &row, const Result &result) noexcept;
 
+/// The cause line when the POST fails by its budget with no window and the stick task
+/// (Read ADC) is not running (owner, 2026-10-08): its own line, the TS-POST-05 lines unchanged.
+inline constexpr std::string_view STICK_TASK_CAUSE_LINE = "POST cause: Read ADC not running";
+
 /// @brief Whether a LATCHED check is still PENDING (what the budget fails).
 /// @param report a report
 /// @return true when some LATCHED row's verdict is PENDING
@@ -108,8 +112,9 @@ concept PostPort = requires(P &port, PostGate gate, std::string_view line) {
   { port.memory() } -> std::same_as<std::optional<MemoryFacts>>; // nothing: not measurable
   { port.stacks() } -> std::same_as<StackFacts>;
   { port.i2c() } -> std::same_as<I2cSet>;
-  port.store_gate(gate); // release store of the POST gate
-  port.print(line);      // one line on the serial log
+  { port.stick_task_running() } -> std::same_as<bool>; // read only at the budget
+  port.store_gate(gate);                               // release store of the POST gate
+  port.print(line);                                    // one line on the serial log
 };
 
 /// @brief The POST runner. One instance, on the UI task.
@@ -149,6 +154,9 @@ public:
         latched_pending(latched_)) {
       latched_.overall = Overall::FAIL; // TS-POST-03: no measurement is a FAIL
       timed_out_ = true;
+      // No window ever came: was the stick task started at all? Asked only now, at the
+      // budget: Read ADC starts after the runner's first ticks (owner, 2026-10-08).
+      stick_task_missing_ = !gathered_ && !port_.stick_task_running();
     }
     store(gate_of(next_overall(overall_, latched_.overall)));
     if (decided()) {
@@ -168,6 +176,7 @@ public:
     started_ = false;
     gathered_ = false;
     timed_out_ = false;
+    stick_task_missing_ = false;
     waiting_on_.reset();
     store(PostGate::NOT_RUN);
   }
@@ -189,6 +198,9 @@ public:
   [[nodiscard]] const Report &report() const noexcept { return latched_; }
   /// @return true when the POST failed by its budget
   [[nodiscard]] bool timed_out() const noexcept { return timed_out_; }
+  /// @return true when it failed by its budget with no window and the stick task not running:
+  ///         the cause of the adc.valid FAIL
+  [[nodiscard]] bool stick_task_missing() const noexcept { return stick_task_missing_; }
   /// @return the facts gathered so far
   [[nodiscard]] const Facts &facts() const noexcept { return facts_; }
   /// @brief Time since the runner's first tick; 0 before it.
@@ -241,6 +253,9 @@ private:
     for (std::size_t i = 0; i < CHECK_COUNT; ++i) {
       port_.print(check_line(CHECKS[i], latched_.results[i]).view());
     }
+    if (stick_task_missing_) {
+      port_.print(STICK_TASK_CAUSE_LINE);
+    }
     port_.print(result_line(latched_, elapsed_ms).view());
   }
 
@@ -264,7 +279,8 @@ private:
   bool started_ = false;
   bool gathered_ = false;
   bool timed_out_ = false;
-  bool forced_ = false; ///< a bench override holds the gate
+  bool stick_task_missing_ = false; ///< the budget found no window and no Read ADC task
+  bool forced_ = false;             ///< a bench override holds the gate
   std::optional<Id> waiting_on_;
 };
 

@@ -271,6 +271,9 @@ inline constexpr char kPostFailedPrefix[] = "Start-up check failed: ";
 inline constexpr char kPostTimedOutPrefix[] = "Start-up check timed out: ";
 inline constexpr char kPostTurnOffAndOn[] = ". Turn the HMI off and on";
 inline constexpr char kPostCalSavedRestart[] = "Calibration saved. Restart the HMI to drive";
+// After "Joystick read failed" when the POST timed out and Read ADC is not running (owner,
+// 2026-10-08).
+inline constexpr char kPostStickTaskMissing[] = ": stick task not running";
 inline constexpr char kPostLastResetKey[] = "Last reset"; // the About row: "Last reset: <name>"
 
 /* A check's words. A FAIL adds the reset's name when `names_reset`, then "Turn the HMI off and
