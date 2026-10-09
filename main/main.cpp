@@ -32,6 +32,7 @@
 #include "keypad_input.hpp"
 
 #include "about_ui.hpp"
+#include "bench_verbs.hpp"
 #include "board/board.hpp"
 #include "board/board_port.hpp"
 #include "boot_logo.h"
@@ -735,6 +736,102 @@ static RemoteUiConfig remote_ui_config() {
   };
 }
 
+// The hazard bench verbs' hooks (components/remote_ui/include/bench_verbs.hpp), the fields of
+// the stick's output permit (C1) and the quick POST (C3). Bench inject builds only: app_main
+// hands them over inside `if constexpr (BENCH_STICK_INJECT)`. Each runs on the remote UI's
+// task: atomics only, no LVGL lock (the calibration record's copy takes joystick_cal's short
+// lock, as the ADC task's take_new does).
+static const char *post_indicator_name(hmi::post::IndicatorKind kind) {
+  switch (kind) {
+  case hmi::post::IndicatorKind::NONE:
+    return "NONE";
+  case hmi::post::IndicatorKind::CHECKING:
+    return "CHECKING";
+  case hmi::post::IndicatorKind::WAITING:
+    return "WAITING";
+  case hmi::post::IndicatorKind::FAILED:
+    return "FAILED";
+  case hmi::post::IndicatorKind::NOT_RUN:
+    return "NOT_RUN";
+  }
+  return "?";
+}
+
+static hmi::bench_verbs::CalRecord bench_cal_record() {
+  const JoystickCal cal = joystick_cal_current();
+  hmi::bench_verbs::CalRecord out{};
+  for (size_t i = 0; i < out.size(); ++i) {
+    out[i] = {.min_mv = static_cast<int32_t>(std::lround(cal[i].min_mv)),
+              .centre_mv = static_cast<int32_t>(std::lround(cal[i].center_mv)),
+              .max_mv = static_cast<int32_t>(std::lround(cal[i].max_mv))};
+  }
+  return out;
+}
+
+static hmi::bench_verbs::Hooks bench_verb_hooks() {
+  using hmi::bench_verbs::PostGateName;
+  using hmi::bench_verbs::StickHealthName;
+  hmi::bench_verbs::Hooks h;
+  h.hold_reason = [] {
+    return std::string(hmi::stick::to_string(ui_app.permit_hooks().hold_reason.read()));
+  };
+  h.calibrating = [] { return joystick_cal_running(); };
+  h.cal = bench_cal_record;
+  h.post = [] {
+    return std::string(hmi::stick::to_string(ui_app.permit_hooks().post_gate.read()));
+  };
+  h.post_check = []() -> std::optional<std::string> {
+    const hmi::ui::PostStage::Shown shown = ui_app.post().shown();
+    if (!shown.check) {
+      return std::nullopt;
+    }
+    return std::string(hmi::post::check(*shown.check).name);
+  };
+  h.indicator = [] { return std::string(post_indicator_name(ui_app.post().shown().kind)); };
+  h.indicator_text = [] { return std::string(ui_app.post().text_now().text.data()); };
+  h.reset_reason = [] {
+    return std::string(
+        hmi::post::reset_reason_id(static_cast<hmi::post::ResetReason>(esp_reset_reason())));
+  };
+  // PERMIT POST: applied by the POST runner on its next tick (C3 §2.4), so the gate keeps one
+  // writer. PostGateName is PostGate's order (static_asserted below).
+  h.permit_post = [](PostGateName gate) {
+    ui_app.post().request_gate(static_cast<hmi::stick::PostGate>(gate));
+    return true;
+  };
+  // PERMIT STICK: C1 §3.2's other writer of stick health, bench builds only (gone with C2).
+  h.permit_stick = [](StickHealthName health) {
+    using hmi::stick::StickHealth;
+    const StickHealth value = health == StickHealthName::OK      ? StickHealth::OK
+                              : health == StickHealthName::FAULT ? StickHealth::FAULT
+                                                                 : StickHealth::NOT_MONITORED;
+    ui_app.permit_hooks().stick_health.write(value);
+    return true;
+  };
+  // CAL UNSAVED: RAM only, until reboot: joystick_cal_measured() and the POST's "saved" fact
+  // read false (C1 §6, REQ-RUI-06).
+  h.cal_unsaved = [] {
+    joystick_cal_forget_measured();
+    return true;
+  };
+  // POST RERUN: the runner restarts from NOT_RUN on its next tick; Read ADC sees the gate back
+  // at NOT_RUN and drops its partial window (C3 §2.4).
+  h.post_rerun = [] {
+    ui_app.post().request_rerun();
+    return true;
+  };
+  return h;
+}
+static_assert(static_cast<int>(hmi::bench_verbs::PostGateName::NOT_RUN) ==
+                      static_cast<int>(hmi::stick::PostGate::NOT_RUN) &&
+                  static_cast<int>(hmi::bench_verbs::PostGateName::PENDING) ==
+                      static_cast<int>(hmi::stick::PostGate::PENDING) &&
+                  static_cast<int>(hmi::bench_verbs::PostGateName::PASS) ==
+                      static_cast<int>(hmi::stick::PostGate::PASS) &&
+                  static_cast<int>(hmi::bench_verbs::PostGateName::FAIL) ==
+                      static_cast<int>(hmi::stick::PostGate::FAIL),
+              "PERMIT POST's names are PostGate's values");
+
 // app_main: LVGL in DIRECT render mode over the DSI panel's two frame buffers (see the
 // comment at the call). @return whether it came up; if not, the BSP's flush stays.
 static bool start_direct_render(espp::M5StackTab5 &tab5, espp::Logger &logger) {
@@ -1065,6 +1162,9 @@ extern "C" void app_main(void) {
   // because it drives everything above it: input goes into the same latches the
   // ADC task and the GPIO48 callback write, so what a script exercises is the
   // real handling and not a parallel path.
+  if constexpr (BENCH_STICK_INJECT) {
+    remote_ui_attach_bench_verbs(bench_verb_hooks()); // the one call, before the server starts
+  }
   remote_ui_start(remote_ui_config());
 
   // loop forever

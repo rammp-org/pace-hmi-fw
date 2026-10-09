@@ -55,6 +55,11 @@ bool joystick_cal_saved();
 /// REQ-CAL-08). Lock-free: the ADC task reads it every cycle. Any task.
 bool joystick_cal_measured();
 
+/// Bench only (the CAL UNSAVED verb, CONFIG_HMI_BENCH_STICK_INJECT): from now until reboot the
+/// calibration in use counts as neither measured nor saved (RAM only; the file is untouched).
+/// Any task.
+void joystick_cal_forget_measured();
+
 /// The calibration in use. Any task.
 JoystickCal joystick_cal_current();
 
