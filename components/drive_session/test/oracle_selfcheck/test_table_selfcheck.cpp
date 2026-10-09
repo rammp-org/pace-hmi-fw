@@ -246,9 +246,6 @@ TEST_CASE("DSO-009 the stick gate opens in exactly one case", "[drive_session_ta
   }
   TEST_ASSERT_EQUAL_INT(1, open);
   TEST_ASSERT_TRUE(ds::stick_drives(false, Screen::DRIVE, false));
-  TEST_ASSERT_EQUAL_FLOAT(0.0f, ds::stick_scale(true, true, 0.5f));
-  TEST_ASSERT_EQUAL_FLOAT(0.0f, ds::stick_scale(false, false, 0.5f));
-  TEST_ASSERT_EQUAL_FLOAT(0.5f, ds::stick_scale(false, true, 0.5f));
 }
 
 TEST_CASE("DSO-010 every row cites its code, or the hazard spec that added it",

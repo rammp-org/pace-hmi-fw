@@ -926,11 +926,6 @@ static_assert(!stick_drives(true, Screen::DRIVE, false));
 static_assert(!stick_drives(false, Screen::DRIVE, true));
 static_assert(!stick_drives(false, Screen::LOCKED, false));
 
-// The stick multiplier in the ADC task, as written (a multiply: NaN passes, R-S F12).
-constexpr float stick_scale(bool calibrating, bool gate, float speed) noexcept {
-  return calibrating || !gate ? 0.0f : speed;
-}
-
 struct GateTrigger {
   std::string_view function;
   std::string_view code;
@@ -952,8 +947,11 @@ inline constexpr std::array GATE_TRIGGERS{
         "every LV_EVENT_SCREEN_LOADED (screen_loaded_cb, main.cpp:992 orig 5614; "
         "frag_screens_on_demand.inc:60,89,127), and by hand from nav_go (frag_nav.inc:426)"},
 };
-inline constexpr std::string_view kGateReader = "ADC task lambda, main.cpp:1605 (orig 6227): scale "
-                                                "= calibrating || !stick_drives.load() ? 0 : speed";
+// The gate's reader: the ADC task's output permit (hmi::stick::OutputPermit, hazard-c1-spec.md
+// §3), condition 1 of its rule; a held command is a literal 0, not a multiply (REQ-STK-10). The
+// AS-IS multiply (stick_scale, REQ-DRV-20) is gone with it.
+inline constexpr std::string_view kGateReader =
+    "ADC task, hmi::stick::OutputPermit: condition 1 of the output permit (C1 §3.1)";
 // NOT triggers (each is a hazard or a lag): the self-test overlay (H7: the
 // gate stays open behind it), unlock_advance_cb itself (the gate opens at the
 // Drive screen's SCREEN_LOADED, after the kUnlockDissolve fade), the

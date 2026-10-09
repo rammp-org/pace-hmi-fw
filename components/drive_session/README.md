@@ -21,7 +21,7 @@ first fresh link (rows 50-51; entry waits for it) and no ENABLE before POST pass
 | The code: `DriveSession`, the hand-written transition function | `include/drive_session.hpp`, `src/drive_session.cpp` |
 | The table's fingerprint: one 64-bit number over every row, pinned by a `static_assert` | `include/drive_session_fingerprint.hpp` |
 | The table's own invariants (DSO-001..023) | `test/oracle_selfcheck` |
-| The sequences, the safe state, the stick gate and the hazard fixes' cases (DRV-013..021, DRV-023..034, DRV-116) | `test/oracle` |
+| The sequences, the safe state, the stick gate and the hazard fixes' cases (DRV-013..019, DRV-021, DRV-023..034, DRV-116) | `test/oracle` |
 | The full-product oracle: the code against the table in every state (DRV-001..012, TS-UNIT-08), on demand (`make full`, owner decision G2) | `test/oracle_full` |
 | The oracle by input: the same check over only the guards each input reads, the rest sampled (DRV-101..115, DRV-117, TS-UNIT-09) | `test/oracle_by_input` |
 
@@ -84,7 +84,7 @@ oracle by input (DRV-101..115, DRV-117) checks the same in CI, over the states d
 | REQ-DRV-17 | Every state reachable from the start keeps the phase invariants (`PHASE_INVARIANTS`) | all | DRV-015 |
 | REQ-DRV-18 | RETIRED 2026-10-08, superseded by REQ-DRV-31. A corrupted phase or input sends the session to the safe state (LOCKED; DISABLE sent; waits, exit latch, menu flag, menu-on-arrival flag and advance timer cleared; ring at rest; Locked screen; gate updated) and `step` returns false so the caller reports it | – | – |
 | REQ-DRV-19 | The stick drives only when unlocked, on the Drive screen, with no menu open (`stick_drives`) | §4 | DRV-019 |
-| REQ-DRV-20 | The stick scale is 0 while calibrating or gated, else the speed; a NaN speed passes an open gate (pinned as-is) | §4 | DRV-020 |
+| REQ-DRV-20 | RETIRED 2026-10-08, superseded by REQ-STK-11. The stick scale is 0 while calibrating or gated, else the speed; a NaN speed passes an open gate (pinned as-is) | §4 | – |
 | REQ-DRV-21 | RETIRED 2026-10-08, superseded by REQ-DRV-36 (C1: REQ-DRV-32, itself retired by C3). A tick decides TICK_FOLLOW on the Env sampled at its start and the three deadline checks on one Env sampled after follow-state's actions: a deadline that passes in between is acted on in the same tick, and an ENABLED that arrives in between is seen by follow-state only on the next tick | `TICK_SEQUENCE` | – |
 | REQ-DRV-22 | RETIRED 2026-10-08, superseded by REQ-DRV-35. On a tick, LOCKED or ASKING with the MCB ENABLED on a CONNECTED link unlocks (F1), asked or not (M1), unless a calibration is running or the Boot screen is up | 1–2 | – |
 | REQ-DRV-23 | On a tick, an unlocked session whose MCB is not ENABLED on a CONNECTED link relocks: the menu-on-arrival flag is set when the burger key asked for the exit and cleared otherwise, Locked screen, gate updated, one DISABLE sent (the request is DISABLE after), and the banner DRIVE_STOPPED (link up) or DRIVE_LOST (link down) unless the user asked for the exit. From the exit phases it also clears the stop fault | 3–9 | DRV-001, DRV-101, DRV-013, DRV-026, GLD-102, GLD-103, GLD-107 |

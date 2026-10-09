@@ -235,9 +235,11 @@ changes. The calibrate gesture has its own latch (`calibrate_armed`) and is out 
 
 `stick_drives(locked, screen, menu_open) = !locked && screen == DRIVE && !menu_open`, from
 `nav_update_stick_gate` (frag_nav.inc:190-193, orig 3418-3421). It is stored in an
-`std::atomic<bool>` (frag_state.inc:143, orig 249, initially false). The ADC task reads it:
-`scale = calibrating || !stick_drives ? 0 : speed` (main.cpp:1605, orig 6227). The gate is a
-multiply, so a NaN passes through it. That is pinned, not fixed.
+`std::atomic<bool>` (frag_state.inc:143, orig 249, initially false). The ADC task reads it as
+condition 1 of the stick's output permit (C1 §3, `hmi::stick::OutputPermit`): a held command is a
+literal (+0.0, +0.0, +0.0), not a multiply (REQ-STK-10). The AS-IS multiply
+(`scale = calibrating || !stick_drives ? 0 : speed`, where a NaN passed an open gate) is gone, and
+with it `stick_scale` and REQ-DRV-20.
 
 The gate is re-evaluated only at these triggers:
 
@@ -429,5 +431,5 @@ adapter). **H7** stays open. The notes below are the AS-IS analysis, kept for th
 - Menu open and close, and screen changes that are not session actions. These are navigation;
   they reach the session only through the guards (screen, MENU_OPEN) and the gate (§4).
 - The calibrate gesture.
-- The stick pipeline beyond the gate multiply.
+- The stick pipeline beyond the gate (its output permit is components/stick's).
 - The link state machine (plan table B).

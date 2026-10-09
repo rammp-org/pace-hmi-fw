@@ -1,5 +1,5 @@
 // L1 host app for drive_session: the session's sequences, the safe state, the stick gate and
-// the hazard fix C1's cases (DRV-013..021, DRV-023..034, DRV-116). The full-product oracle
+// the hazard fix C1's cases (DRV-013..019, DRV-021, DRV-023..034, DRV-116). The full-product oracle
 // (DRV-001..012) is ../oracle_full, run on demand
 // (`make full`, owner decision G2); CI runs the by-input oracle (../oracle_by_input).
 
@@ -8,11 +8,9 @@
 #include <algorithm>
 #include <array>
 #include <bit>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <limits>
 
 #include "test_case.hpp"
 
@@ -328,7 +326,7 @@ TEST_CASE("DRV-018 a value outside the Action enum changes no hidden variable", 
   TEST_ASSERT_EQUAL(Phase::ASKING, s.phase());
 }
 
-// ---- Stick gate and scale (pure functions, CS-SAF-02) ----------------------------------------
+// ---- Stick gate (pure function, CS-SAF-02) ----------------------------------------
 
 TEST_CASE("DRV-019 the stick drives only unlocked, on the Drive screen, with no menu",
           "[drive][safety][gate]") {
@@ -345,19 +343,6 @@ TEST_CASE("DRV-019 the stick drives only unlocked, on the Drive screen, with no 
     DriveSessionTestPeer::set(s, static_cast<Phase>(pi), 0);
     TEST_ASSERT_EQUAL(ds::is_locked_phase(s.phase()), s.locked());
   }
-}
-
-TEST_CASE("DRV-020 the stick scale is zero when calibrating or gated, else the speed",
-          "[drive][safety][gate]") {
-  TEST_ASSERT_EQUAL_FLOAT(0.0f, ds::stick_scale(true, true, 0.7f));
-  TEST_ASSERT_EQUAL_FLOAT(0.0f, ds::stick_scale(false, false, 0.7f));
-  TEST_ASSERT_EQUAL_FLOAT(0.0f, ds::stick_scale(true, false, 0.7f));
-  TEST_ASSERT_EQUAL_FLOAT(0.7f, ds::stick_scale(false, true, 0.7f));
-  // Pinned as-is (TABLE.md section 4): the gate is a multiply, so a NaN speed passes through.
-  TEST_ASSERT_TRUE(
-      std::isnan(ds::stick_scale(false, true, std::numeric_limits<float>::quiet_NaN())));
-  TEST_ASSERT_EQUAL_FLOAT(0.0f,
-                          ds::stick_scale(false, false, std::numeric_limits<float>::quiet_NaN()));
 }
 
 TEST_CASE("DRV-021 a new session is LOCKED, asks nothing and has nothing armed",
