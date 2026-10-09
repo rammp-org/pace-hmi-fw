@@ -582,8 +582,11 @@ static bool start_direct_render(espp::M5StackTab5 &tab5, espp::Logger &logger) {
   return false;
 }
 
-// app_main's end: its task sleeps here for good, which keeps every app_main local alive for
-// the tasks that use them.
+// app_main's end, and where a boot that stops early ends: app_main never returns. Its task
+// sleeps here for good, which keeps every app_main local alive for the tasks that use them.
+// From the side button on (phase 3), the BSP's tasks call into them: the side button
+// app_main's logger, the touch task the Board's TouchClick and through it the cues, and the
+// BSP has no call that stops either. A return would leave them calling destroyed objects.
 [[noreturn]] static void park_main_task() {
   while (true) {
     std::this_thread::sleep_for(1s);
@@ -626,8 +629,8 @@ extern "C" void app_main(void) {
 
   // The haptic and sound cues: the DRV2605 comes up here (the HAPTIC TEST slot,
   // the unlock and hold clicks, a refusal); the click's samples load after the
-  // LVGL task starts. Lives as long as app_main, which never returns once the UI
-  // runs; the unit reaches it through `feedback`.
+  // LVGL task starts. Lives as long as app_main, which never returns
+  // (park_main_task); the unit reaches it through `feedback`.
   hmi::feedback::Feedback cues({.i2c = i2c, .boot_log = logger, .sound = click_sound_config()});
   feedback = &cues;
 
@@ -636,7 +639,7 @@ extern "C" void app_main(void) {
   hmi::feedback::run_da7280_bench(logger, i2c, found_addresses);
 
   if (!board.start_io_expanders() || !board.start_display()) {
-    return;
+    park_main_task();
   }
 
   // Switch LVGL to DIRECT render mode over the panel's own frame buffers. The
@@ -675,16 +678,16 @@ extern "C" void app_main(void) {
   });
 
   if (!board.start_imu(housekeeping.orientation_filter())) {
-    return;
+    park_main_task();
   }
   board.start_sdcard();
 
   // The system clock and the RTC, kept to the MCB's time (housekeeping). Lives as long
-  // as app_main, which never returns once RTPS runs.
+  // as app_main, which never returns (park_main_task).
   hmi::housekeeping::SystemClock system_clock({.valid = &clock_valid, .max_drift_s = 2});
 
   if (!board.start_rtc(system_clock) || !board.start_battery() || !board.start_audio()) {
-    return;
+    park_main_task();
   }
   board.start_side_button();
 
@@ -739,7 +742,7 @@ extern "C" void app_main(void) {
   ui_app.build_on_demand_parts();
 
   if (!board.start_touch()) {
-    return;
+    park_main_task();
   }
   if (auto touchpad = tab5.touchpad_input()) {
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
@@ -768,7 +771,7 @@ extern "C" void app_main(void) {
   });
   if (!ui_island.start()) {
     logger.error("Failed to start LVGL task!");
-    return;
+    park_main_task();
   }
 
   // load the audio file (wav file bundled in memory)
@@ -776,7 +779,10 @@ extern "C" void app_main(void) {
   size_t wav_sample_rate = 0;
   if (!load_audio(wav_size, wav_sample_rate)) {
     logger.error("Failed to load audio file!");
-    return;
+    // The boot stops here with the UI stopped, as it always has (the return destroyed the
+    // UiIsland); the tasks already started keep running, on live objects.
+    (void)ui_island.stop();
+    park_main_task();
   }
   logger.info("Loaded {} bytes of audio", wav_size);
 
