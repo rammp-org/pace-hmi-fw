@@ -120,6 +120,8 @@ struct Tally {
 };
 constinit unsigned long g_contract_total = 0;
 constinit unsigned long g_all_total = 0;
+// The inputs run_oracle has driven (each once).
+constinit std::array<bool, ds::kInputCount> g_input_done{};
 
 // One combination: the session against the table. Returns true when they agree.
 bool agrees(Phase p, GuardMask hidden, Input in, const Env &env, bool &matched) {
@@ -163,6 +165,7 @@ Tally run_oracle(Input in) {
               static_cast<unsigned>(in), t.all, t.contract, t.matched);
   g_contract_total += t.contract;
   g_all_total += t.all;
+  g_input_done[static_cast<std::size_t>(in)] = true;
   return t;
 }
 
@@ -234,16 +237,22 @@ TEST_CASE("DRV-011 MENU_ROW_DRIVE gives the table's row or changes nothing",
   expect_oracle(Input::MENU_ROW_DRIVE);
 }
 
-TEST_CASE("DRV-012 the oracle drove every input and every row of the table",
+TEST_CASE("DRV-012 the oracle drove every input and every row of the table; the hazard fixes' "
+          "inputs give the table's row or change nothing",
           "[drive][safety][oracle]") {
-  // Runs after DRV-001..011 in declared order; with a shuffled order it recomputes.
-  if (g_all_total != ds::kInputCount * ds::kPhaseCount * HIDDEN_COMBOS * ENV_COUNT) {
-    g_all_total = 0;
-    g_contract_total = 0;
-    for (std::size_t i = 0; i < ds::kInputCount; ++i) {
-      (void)run_oracle(static_cast<Input>(i)); // totals only; verdicts are DRV-001..011
+  // DRV-001..011 have the AS-IS inputs; the inputs the hazard fixes appended (C1:
+  // TICK_STOP_FAULT_DUE, TICK_STOP_RESEND; C3: TICK_BOOT_STOP) are driven here, with their
+  // verdict. An input not driven yet (a shuffled order) is driven now: totals only for the
+  // AS-IS ones, whose verdicts are their own cases'.
+  unsigned long mismatches = 0;
+  for (std::size_t i = 0; i < ds::kInputCount; ++i) {
+    if (g_input_done[i]) {
+      continue;
     }
+    const Tally t = run_oracle(static_cast<Input>(i));
+    mismatches += i > static_cast<std::size_t>(Input::MENU_ROW_DRIVE) ? t.mismatches : 0UL;
   }
+  TEST_ASSERT_EQUAL_UINT64(0, mismatches);
   std::printf("ORACLE total: %lu combinations driven, %lu of them in the table's contract\n",
               g_all_total, g_contract_total);
   TEST_ASSERT_EQUAL_UINT64(ds::kInputCount * ds::kPhaseCount * HIDDEN_COMBOS * ENV_COUNT,

@@ -27,7 +27,7 @@ MUTANTS=(
   # Table rows (TABLE.md section 2 row numbers).
   'T01-row1-no-boot-guard|table|0,/                    {Guard::CALIBRATING, Guard::ON_BOOT_SCREEN}),/s//                    {Guard::CALIBRATING}),/'
   'T02-row3-banner-lost|table|0,/Phase::LOCKED, kF2LockStopped,/s//Phase::LOCKED, kF2LockLost,/'
-  'T03-row8-exit-banner|table|0,/Phase::LOCKED, kF2LockAsked,/s//Phase::LOCKED, kF2LockStopped,/'
+  'T03-row8-opens-menu|table|0,/Phase::LOCKED, kF2LockAsked,/s//Phase::LOCKED, kF2LockAskedMenu,/'
   'T04-row9-needs-link|table|s/Transition{Phase::EXIT_REFUSED, Input::TICK_FOLLOW, when({}, {Guard::DRIVING_OK}),/Transition{Phase::EXIT_REFUSED, Input::TICK_FOLLOW, when({Guard::LINK_CONNECTED}, {Guard::DRIVING_OK}),/'
   'T05-row14-always|table|s/Phase::EXITING, Input::TICK_EXIT_DUE, when({Guard::EXIT_ELAPSED}), Phase::EXIT_REFUSED,/Phase::EXITING, Input::TICK_EXIT_DUE, kAlways, Phase::EXIT_REFUSED,/'
   'T06-row15-no-warn-armed|table|s/when({Guard::WARN_ARMED, Guard::WARN_ELAPSED}),/when({Guard::WARN_ELAPSED}),/'
