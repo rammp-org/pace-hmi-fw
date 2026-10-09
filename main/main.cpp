@@ -53,6 +53,8 @@
 
 #include "esp_lcd_mipi_dsi.h"
 #include "esp_system.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include "drive_ui/drive_port.hpp"
 #include "hmi_format/topbar.hpp"
@@ -588,6 +590,14 @@ static bool start_direct_render(espp::M5StackTab5 &tab5, espp::Logger &logger) {
   }
 }
 
+// Whether the stick task (StickIsland's "Read ADC", app_main) exists. Until it does nothing
+// publishes XYTwist, so the chair cannot move; a failed start is logged by app_main and stays
+// false until reset. FreeRTOS's task list is the record, so there is no flag to keep in step.
+// Any task, not an ISR. For POST (hazard-c3-spec.md); nothing else reads it yet. The name is the
+// task's in app_main's StickIsland config and in tools/guards/baselines/tasks.json: a rename
+// reads as "not running", the safe direction.
+[[maybe_unused]] static bool stick_task_running() { return xTaskGetHandle("Read ADC") != nullptr; }
+
 extern "C" void app_main(void) {
   // First, so the LogScreen has everything printed from here on - including
   // what the tasks started below print.
@@ -775,7 +785,10 @@ extern "C" void app_main(void) {
   // (brightness is the saved setting, applied when the BrightnessView adds its observer)
 
   logger.info("Starting data display task...");
-  housekeeping.start();
+  if (!housekeeping.start()) {
+    // The boot goes on: the IMU, battery and RTC are then not read again after boot.
+    logger.error("Failed to start the data display task!");
+  }
 
   // guards the joystick range-mapping math (center/range deadbands, circular
   // clamp, and that twist stays independent of the X/Y gimbal). Asserts, so it
@@ -840,7 +853,11 @@ extern "C" void app_main(void) {
   // calibration, the key trigger and the gate, owned by the island's task. A
   // StickSlot is the StickPipeline itself, or with CONFIG_HMI_BENCH_STICK_INJECT
   // the bench stick injection in front of its reads (stick_inject.hpp).
-  stick_island.start(stick_pipeline_config(joystick_cal));
+  // Without the task the stick sends nothing, which is the safe direction: no XYTwist, no
+  // motion. The boot goes on so the failure is seen: this line, and stick_task_running().
+  if (!stick_island.start(stick_pipeline_config(joystick_cal))) {
+    logger.error("Failed to start the Read ADC task: no stick output (XYTwist) until reset!");
+  }
 
   // bring up W5500 Ethernet + RTPS last so a missing cable / module can't
   // delay the HMI; on failure the UI keeps running without comms

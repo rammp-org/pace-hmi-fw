@@ -237,8 +237,8 @@ flowchart TD
 | 5 | `:684-710` | **GPIO48 `Button` task starts** (its callback takes `lvgl_mutex`). `KeypadInput` for the stick. `UiApp::build_input`: nav groups and the 500 ms backstop, the padlock and the three holds (**33 ms hold poll**), Log/Seat/Internet/About, Update (its **30 s OTA confirm** one-shot), seat values and screen-loaded hooks, `finish_build` (perf overlay hidden, overdraw pass, **1.2 s boot→Locked** one-shot) | the Button task is live while `app_main` keeps building the UI without the lock (H15) |
 | 6 | `:712-721` | `selftest_platform` + `selftest_init` (registers the self test's RTPS handlers, so before RTPS starts). `build_on_demand_parts` (PIN pad, Settings, Skunk Works, Diagnostics parts that outlive their screens) | |
 | 7 | `:723-754` | `start_touch` (BSP touch task; each press clicks). The touch input is wrapped for the flip, under the lock. **`UiIsland::start`: `lv_task` runs** | from here every LVGL call must hold `lvgl_mutex` |
-| 8 | `:756-775` | `load_audio` (click.wav), `start_speaker` (60 %). `housekeeping.start()` (the 20 ms task). `espp::joystick_selftest()` (asserts; nothing under `NDEBUG`) | a failed audio load `return`s, which destroys the UI task (see below) |
-| 9 | `:777-835` | `StickIsland` built: the continuous ADC (ADC1 CH0/CH1, 1 kHz) starts with its own task, then the twist's oneshot ADC (ADC2 CH3). `joystick_cal_load` (ideal 0/1650/3300 mV if no valid file). `stick_island.start`: the `StickPipeline` on that calibration, **the `Read ADC` task** | the result of `start` is not checked |
+| 8 | `:756-775` | `load_audio` (click.wav), `start_speaker` (60 %). `housekeeping.start()` (the 20 ms task). `espp::joystick_selftest()` (asserts; nothing under `NDEBUG`) | a failed audio load `return`s, which destroys the UI task (see below). A housekeeping task that fails to start is logged (error) and the boot goes on |
+| 9 | `:777-835` | `StickIsland` built: the continuous ADC (ADC1 CH0/CH1, 1 kHz) starts with its own task, then the twist's oneshot ADC (ADC2 CH3). `joystick_cal_load` (ideal 0/1650/3300 mV if no valid file). `stick_island.start`: the `StickPipeline` on that calibration, **the `Read ADC` task** | a failed start is logged (error) and the boot goes on with no `XYTwist` (no motion); `stick_task_running()` reads whether the task exists |
 | 10 | `:837-868` | RTPS handlers: brightness, MibStatus (sets the clock outside the lock, then the subjects under it), diagnostics. `rtps_comms_start` with the network setting. TopBar link label, under the lock. `fw_info_start` (hashes the image on a low-priority thread, after the W5500 is up) | a network failure only warns |
 | 11 | `:870-879` | `remote_ui_start` (no-op unless `HMI_REMOTE_UI`), then `while (true) sleep(1s)` | the loop keeps every `app_main` local alive |
 
@@ -252,9 +252,11 @@ Things to keep in mind:
   touch task calls the `Board`'s `TouchClick` and, through it, `feedback`. Nothing in the code
   stops those tasks on a `return`. Unclear from the code whether this has ever happened on a
   board.
-- **Two task starts are unchecked.** `housekeeping.start()` and `stick_island.start()` return
-  whether the task started; `app_main` ignores both. A Read ADC task that failed to start
-  would mean no `XYTwist` at all, with no log line from `app_main`.
+- **Every task start is checked.** A `housekeeping.start()` or `stick_island.start()` that
+  fails logs an error on `main` and the boot goes on, as before. A Read ADC task that failed to
+  start means no `XYTwist` at all, so no motion (the MCB's `XYTwist` timeout holds the chair).
+  `stick_task_running()` (main.cpp) says whether the task exists, from FreeRTOS's task list,
+  for POST to read.
 - **Timers count from creation.** The 250 ms poll, the 1.2 s boot→Locked and the 30 s OTA
   confirm are created in phases 4–5, before `lv_task` runs them. If phases 5–7 took more than
   1.2 s, the boot screen would leave on the first handler pass. Unclear from the code how long
@@ -976,7 +978,7 @@ Found while writing this; none is a hazard on its own.
   from reading the code, not seen on hardware.
 - **RTPS callbacks block** on `lvgl_mutex`, on threads espp asks to return quickly.
 - **The ADC period drifts.** It is 33 ms *after* the work, not a fixed rate.
-- **Unchecked starts and dangling locals** at boot: see [§3](#3-boot-app_main-step-by-step).
+- **Dangling locals** after an early return at boot: see [§3](#3-boot-app_main-step-by-step).
 
 ## 18. Where to start reading
 
