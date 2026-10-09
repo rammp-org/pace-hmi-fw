@@ -131,8 +131,11 @@ REGEX_METRICS: dict[str, re.Pattern[str]] = {
         r"\b(?:recursive_|timed_|shared_|recursive_timed_)?mutex\b|\block_guard\b|\bunique_lock\b"
         r"|\bscoped_lock\b|\bxSemaphore\w*|\bportMUX\w*"
     ),
+    # heap_caps_get_* are read-only queries that allocate nothing (free size, minimum free,
+    # largest block, info): exempt (owner, 2026-10-08, for the quick POST's memory facts).
+    # heap_caps_malloc, _calloc, _free and every other heap_caps_ call still count.
     "heap_raw": re.compile(
-        r"\bnew\b|\b(?:malloc|calloc|realloc|free|aligned_alloc|strdup)\s*\(|\bheap_caps_\w+"
+        r"\bnew\b|\b(?:malloc|calloc|realloc|free|aligned_alloc|strdup)\s*\(|\bheap_caps_(?!get_)\w+"
     ),
     "typedef": re.compile(r"\btypedef\b"),
     "assert": re.compile(r"\bassert\s*\("),
@@ -1228,6 +1231,30 @@ SAMPLE_EXPECT = {
 }
 
 
+def _selftest_heap_queries(expect: Expect) -> None:
+    """heap_raw: the read-only heap_caps_get_* queries do not count; allocation and free do."""
+    queries = (
+        "void f() {\n"
+        "  size_t a = heap_caps_get_free_size(MALLOC_CAP_DMA);\n"
+        "  size_t b = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);\n"
+        "  size_t c = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);\n"
+        "  multi_heap_info_t i; heap_caps_get_info(&i, MALLOC_CAP_SPIRAM);\n"
+        "}\n"
+    )
+    expect("heap_caps_get_* queries are not heap_raw", measure("main/x.cpp", queries)["heap_raw"], 0)
+    allocs = (
+        "void g() {\n"
+        "  void *p = heap_caps_malloc(8, MALLOC_CAP_DMA);\n"
+        "  void *q = heap_caps_calloc(1, 8, MALLOC_CAP_DMA);\n"
+        "  void *r = heap_caps_aligned_alloc(16, 8, MALLOC_CAP_SPIRAM);\n"
+        "  heap_caps_free(p);\n"
+        "  heap_caps_check_integrity_all(true);\n"
+        "}\n"
+    )
+    expect("heap_caps_ allocation, free and other calls stay heap_raw",
+           measure("main/x.cpp", allocs)["heap_raw"], 5)
+
+
 def _long_fn(name: str, body_lines: int) -> str:
     return f"void {name}() {{\n" + "  x();\n" * body_lines + "}\n"
 
@@ -1724,6 +1751,7 @@ def selftest() -> int:
 
     _selftest_strict_functions(expect)
     _selftest_app_main(expect)
+    _selftest_heap_queries(expect)
     _selftest_task_idiom(expect)
     _selftest_ui_paths(expect)
     _selftest_transfer(expect)
