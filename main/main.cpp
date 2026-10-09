@@ -510,6 +510,14 @@ static hmi::post::StackFacts post_stacks() {
           .ui_free_b = saturated_b(uxTaskGetStackHighWaterMark(nullptr))};
 }
 
+// Whether the stick task (StickIsland's "Read ADC", app_main) exists. Until it does nothing
+// publishes XYTwist, so the chair cannot move; a failed start is logged by app_main and stays
+// false until reset. FreeRTOS's task list is the record, so there is no flag to keep in step.
+// Any task, not an ISR. For POST (hazard-c3-spec.md): kPostPort, read only at the budget. The name
+// is the task's in app_main's StickIsland config and in tools/guards/baselines/tasks.json: a rename
+// reads as "not running", the safe direction.
+static bool stick_task_running() { return xTaskGetHandle("Read ADC") != nullptr; }
+
 static constexpr hmi::ui::PostPort kPostPort{
     .now_ms = [] { return static_cast<uint32_t>(esp_timer_get_time() / 1000); },
     .reset_reason = [] { return static_cast<hmi::post::ResetReason>(esp_reset_reason()); },
@@ -518,6 +526,7 @@ static constexpr hmi::ui::PostPort kPostPort{
     .memory = post_memory,
     .stacks = post_stacks,
     .calibration_saved_now = joystick_cal_saved,
+    .stick_task_running = stick_task_running,
 };
 
 // The one UiApp: every view the UI task draws, wired (constinit: no global constructor).
@@ -865,14 +874,6 @@ static bool start_direct_render(espp::M5StackTab5 &tab5, espp::Logger &logger) {
     std::this_thread::sleep_for(1s);
   }
 }
-
-// Whether the stick task (StickIsland's "Read ADC", app_main) exists. Until it does nothing
-// publishes XYTwist, so the chair cannot move; a failed start is logged by app_main and stays
-// false until reset. FreeRTOS's task list is the record, so there is no flag to keep in step.
-// Any task, not an ISR. For POST (hazard-c3-spec.md); nothing else reads it yet. The name is the
-// task's in app_main's StickIsland config and in tools/guards/baselines/tasks.json: a rename
-// reads as "not running", the safe direction.
-[[maybe_unused]] static bool stick_task_running() { return xTaskGetHandle("Read ADC") != nullptr; }
 
 extern "C" void app_main(void) {
   // First, so the LogScreen has everything printed from here on - including

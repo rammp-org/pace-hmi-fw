@@ -32,6 +32,7 @@ struct PostPort {
   std::optional<hmi::post::MemoryFacts> (*memory)(); ///< heap headroom; nothing: unmeasured
   hmi::post::StackFacts (*stacks)();                 ///< stack headroom of Read ADC, lv_task
   bool (*calibration_saved_now)();                   ///< a calibration is saved now; any task
+  bool (*stick_task_running)(); ///< Read ADC exists; asked only at the budget (UI task)
 };
 
 /// The one-slot channel of rest windows: Read ADC writes, the runner (UI task) reads.
@@ -56,6 +57,7 @@ public:
     hmi::post::IndicatorKind kind = hmi::post::IndicatorKind::CHECKING;
     std::optional<hmi::post::Id> check; ///< the blocking check, if the gate names one
     bool timed_out = false;
+    bool stick_task_missing = false; ///< timed out with no Read ADC task: the cause
   };
 
   constexpr explicit PostStage(const Config &config) noexcept
@@ -106,6 +108,7 @@ private:
     std::optional<hmi::post::MemoryFacts> memory() { return stage->config_.port->memory(); }
     hmi::post::StackFacts stacks() { return stage->config_.port->stacks(); }
     [[nodiscard]] hmi::post::I2cSet i2c() const { return stage->i2c_; }
+    bool stick_task_running() { return stage->config_.port->stick_task_running(); }
     void store_gate(hmi::stick::PostGate gate) { stage->config_.gate->write(gate); }
     void print(std::string_view line) {
       if (stage->log_ != nullptr) {
@@ -124,7 +127,8 @@ private:
   std::optional<hmi::fw::Reader<RestWindowMailbox>> windows_;
   bool not_run_seen_ = false;          ///< the gate was NOT_RUN at the last tick
   std::uint32_t not_run_since_ms_ = 0; ///< since when
-  /// The indicator packed: kind | check << 8 (0xFF: none) | timed_out << 16.
+  /// The indicator packed: kind | check << 8 (0xFF: none) | timed_out << 16
+  /// | stick_task_missing << 17.
   hmi::fw::AtomicValue<std::uint32_t> shown_{{.initial = 0xFF01U}}; // CHECKING, no check
   /// A bench request, written by the remote UI's task only: sequence << 8 | what (1 rerun,
   /// 2 + PostGate a forced gate). The runner applies each sequence number once.

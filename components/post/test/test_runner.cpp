@@ -71,6 +71,8 @@ struct World {
   int memory_calls = 0;
   int stacks_calls = 0;
   int i2c_calls = 0;
+  bool stick_running = true; ///< Read ADC exists
+  int stick_running_calls = 0;
   std::array<PostGate, 16> stored{};
   std::size_t stores = 0;
   std::array<std::array<char, 128>, 48> lines{};
@@ -112,6 +114,10 @@ struct FakePort {
   hmi::post::I2cSet i2c() {
     ++world->i2c_calls;
     return *world->board.i2c;
+  }
+  bool stick_task_running() {
+    ++world->stick_running_calls;
+    return world->stick_running;
   }
   void store_gate(PostGate gate) {
     if (world->stores < world->stored.size()) {
@@ -678,4 +684,44 @@ TEST_CASE("POST-052 bench only: PERMIT POST forces the gate through the runner a
   runner.tick(T0 + 1000, good_window());
   TEST_ASSERT_TRUE(runner.gate() == PostGate::PASS);
   TEST_ASSERT_EQUAL_INT(2, world.reset_calls); // the boot facts gathered again
+}
+
+TEST_CASE("POST-053 at the budget with no window, a stick task that is not running is named as "
+          "the cause in its own line; asked only at the budget",
+          "[post][runner][budget][REQ-POST-16]") {
+  World world;
+  world.stick_running = false; // Read ADC never started
+  Runner runner{FakePort{&world}};
+  runner.tick(T0, std::nullopt);
+  for (std::uint32_t t = 250; t < 3000; t += 250) {
+    runner.tick(T0 + t, std::nullopt);
+  }
+  TEST_ASSERT_EQUAL_INT(0, world.stick_running_calls); // early ticks never ask
+  runner.tick(T0 + 3000, std::nullopt);
+  TEST_ASSERT_TRUE(runner.gate() == PostGate::FAIL);
+  TEST_ASSERT_TRUE(runner.stick_task_missing());
+  TEST_ASSERT_TRUE(hmi::post::blocking_check(runner.report()) == Id::ADC_VALID);
+  // the 19 check lines are TS-POST-05's as ever, then the cause, then the result
+  TEST_ASSERT_EQUAL_size_t(22, world.line_count);
+  TEST_ASSERT_EQUAL_STRING("POST adc.valid FAIL 0 0.1% [990,1000]",
+                           std::string(world.line(1)).c_str());
+  TEST_ASSERT_EQUAL_STRING("POST cause: Read ADC not running", std::string(world.line(20)).c_str());
+  TEST_ASSERT_EQUAL_STRING("POST RESULT FAIL 0/19 3000", std::string(world.line(21)).c_str());
+
+  World running; // the same boot with the task running: no cause line
+  Runner other{FakePort{&running}};
+  other.tick(T0, std::nullopt);
+  other.tick(T0 + 3000, std::nullopt);
+  TEST_ASSERT_FALSE(other.stick_task_missing());
+  TEST_ASSERT_FALSE(running.printed("POST cause: Read ADC not running"));
+  TEST_ASSERT_EQUAL_INT(1, running.stick_running_calls);
+
+  World windowed; // a window came: the task runs, nothing to ask
+  windowed.board.cal->saved = true;
+  Runner third{FakePort{&windowed}};
+  third.tick(T0, std::nullopt);
+  third.tick(T0 + 250, window_off_centre(400));
+  windowed.board.memory.reset(); // not reached: the facts are gathered at the first window
+  third.tick(T0 + 3000, std::nullopt);
+  TEST_ASSERT_EQUAL_INT(0, windowed.stick_running_calls);
 }

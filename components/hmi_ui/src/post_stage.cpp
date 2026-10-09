@@ -26,7 +26,7 @@ constexpr std::uint32_t NO_CHECK = 0xFFU;
 std::uint32_t pack(const hmi::ui::PostStage::Shown &shown) {
   const std::uint32_t check = shown.check ? static_cast<std::uint32_t>(*shown.check) : NO_CHECK;
   return static_cast<std::uint32_t>(shown.kind) | (check << 8U) |
-         ((shown.timed_out ? 1U : 0U) << 16U);
+         ((shown.timed_out ? 1U : 0U) << 16U) | ((shown.stick_task_missing ? 1U : 0U) << 17U);
 }
 
 /// Appends @p text to @p out at @p at; returns the new end (clipped to the buffer).
@@ -86,7 +86,10 @@ void hmi::ui::PostStage::publish_shown(std::uint32_t now_ms) {
   }
   const hmi::post::Indicator shown = hmi::post::post_indicator(
       gate, runner_.report(), runner_.timed_out(), now_ms - not_run_since_ms_);
-  shown_.write(pack({.kind = shown.kind, .check = shown.check, .timed_out = shown.timed_out}));
+  shown_.write(pack({.kind = shown.kind,
+                     .check = shown.check,
+                     .timed_out = shown.timed_out,
+                     .stick_task_missing = runner_.stick_task_missing()}));
 }
 
 hmi::ui::PostStage::Shown hmi::ui::PostStage::shown() const {
@@ -98,6 +101,7 @@ hmi::ui::PostStage::Shown hmi::ui::PostStage::shown() const {
     out.check = static_cast<hmi::post::Id>(check);
   }
   out.timed_out = ((packed >> 16U) & 1U) != 0U;
+  out.stick_task_missing = ((packed >> 17U) & 1U) != 0U;
   return out;
 }
 
@@ -134,6 +138,9 @@ hmi::ui::PostText hmi::ui::PostStage::text(const Shown &shown, hmi::post::ResetR
   std::size_t at =
       append(out, 0, shown.timed_out ? rammp::kPostTimedOutPrefix : rammp::kPostFailedPrefix);
   at = append(out, at, words->text);
+  if (shown.stick_task_missing) {
+    at = append(out, at, rammp::kPostStickTaskMissing); // the cause of the adc.valid FAIL
+  }
   if (words->names_reset) {
     at = append(out, at, hmi::post::reset_reason_name(reset));
   }
