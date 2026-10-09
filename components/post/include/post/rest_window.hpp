@@ -14,6 +14,7 @@
 
 #include "post/checks.hpp"
 #include "post/facts.hpp"
+#include "stick/permit_types.hpp"
 
 namespace hmi::post {
 
@@ -24,6 +25,30 @@ struct RestWindowMsg {
   StickWindow window;                      ///< the window
 };
 static_assert(sizeof(RestWindowMsg) <= 128, "a message is at most 128 bytes (CS-OWN-05)");
+
+/// @brief Whether the ADC task feeds the rest window under this POST gate: not once the POST
+///        is decided (PASS or FAIL hold until reset), so it stops there (REQ-POST-20).
+/// @param gate the POST gate as loaded this cycle
+/// @return true while the gate is NOT_RUN or PENDING (or any byte outside the enum)
+[[nodiscard]] constexpr bool rest_window_feeds(hmi::stick::PostGate gate) noexcept {
+  return gate != hmi::stick::PostGate::PASS && gate != hmi::stick::PostGate::FAIL;
+}
+
+/// @brief Whether the ADC task drops its partial window and waits again for a first all-valid
+///        cycle (C3 §2.4, bench builds: POST RERUN): when the gate leaves PASS or FAIL, or comes
+///        back to NOT_RUN. The runner may store NOT_RUN and PENDING on one UI tick, so the ADC
+///        task can see PASS then PENDING with no NOT_RUN between; leaving PASS or FAIL alone
+///        must restart the window.
+/// @param seen the gate the ADC task loaded on its previous cycle
+/// @param now the gate it loaded this cycle
+/// @return true when the window restarts
+[[nodiscard]] constexpr bool rest_window_restarts(hmi::stick::PostGate seen,
+                                                  hmi::stick::PostGate now) noexcept {
+  const bool left_decided = !rest_window_feeds(seen) && rest_window_feeds(now);
+  const bool back_to_not_run =
+      now == hmi::stick::PostGate::NOT_RUN && seen != hmi::stick::PostGate::NOT_RUN;
+  return left_decided || back_to_not_run;
+}
 
 /// @brief The accumulator. One instance, owned by the ADC task.
 /// @details The first window starts at the first cycle with all three reads valid, so the

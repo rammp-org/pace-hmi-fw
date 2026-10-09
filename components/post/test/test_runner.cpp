@@ -725,3 +725,39 @@ TEST_CASE("POST-053 at the budget with no window, a stick task that is not runni
   third.tick(T0 + 3000, std::nullopt);
   TEST_ASSERT_EQUAL_INT(0, windowed.stick_running_calls);
 }
+
+TEST_CASE("POST-054 a gate that leaves PASS or FAIL restarts the rest window: after a rerun, "
+          "failed reads only never start one (C3 section 2.4)",
+          "[post][window][bench][REQ-POST-20]") {
+  using hmi::post::rest_window_feeds;
+  using hmi::post::rest_window_restarts;
+  // The feeding rule: NOT_RUN and PENDING feed, PASS and FAIL stop it.
+  TEST_ASSERT_TRUE(rest_window_feeds(PostGate::NOT_RUN));
+  TEST_ASSERT_TRUE(rest_window_feeds(PostGate::PENDING));
+  TEST_ASSERT_FALSE(rest_window_feeds(PostGate::PASS));
+  TEST_ASSERT_FALSE(rest_window_feeds(PostGate::FAIL));
+  // The restart rule, every pair: leaving PASS or FAIL, or coming back to NOT_RUN.
+  const std::array<PostGate, 4> gates{PostGate::NOT_RUN, PostGate::PENDING, PostGate::PASS,
+                                      PostGate::FAIL};
+  for (const PostGate seen : gates) {
+    for (const PostGate now : gates) {
+      const bool decided_before = seen == PostGate::PASS || seen == PostGate::FAIL;
+      const bool decided_now = now == PostGate::PASS || now == PostGate::FAIL;
+      const bool want = (decided_before && !decided_now) ||
+                        (now == PostGate::NOT_RUN && seen != PostGate::NOT_RUN);
+      TEST_ASSERT_EQUAL(want, rest_window_restarts(seen, now));
+    }
+  }
+  // The board's sequence (B5''-22, run l3-c3d-9e0fb77): a window part full when POST passed,
+  // then POST RERUN seen as PASS -> PENDING (the runner stores NOT_RUN and PENDING on one UI
+  // tick), then every read fails (fail_mask 7): no window may ever come (the budget fails it).
+  RestWindow w;
+  for (int i = 0; i < 12; ++i) {
+    TEST_ASSERT_FALSE(feed(w, 1507.0f, 1510.0f, 1477.0f).has_value());
+  }
+  TEST_ASSERT_TRUE(rest_window_restarts(PostGate::PASS, PostGate::PENDING));
+  w.reset();
+  for (int i = 0; i < 200; ++i) {
+    TEST_ASSERT_FALSE(feed_invalid(w).has_value());
+  }
+}

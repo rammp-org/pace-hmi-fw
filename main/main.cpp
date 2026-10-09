@@ -583,18 +583,19 @@ inline hmi::stick::Permit AdcStickIo::output_permit(const hmi::stick::Position &
 // The POST's rest window on the ADC task (hazard-c3-spec.md §2.2, §2.4, REQ-POST-20): every
 // cycle, valid or not, the reads the pipeline gets (a failed one as NaN); a window to the runner
 // once per WINDOW_MIN_SAMPLES cycles, never waiting (a one-slot mailbox). It stops once the gate is
-// PASS or FAIL; a gate back at NOT_RUN (bench builds: POST RERUN) drops any partial window and
-// waits again for a first all-valid cycle. Allocates nothing, logs nothing, no lock.
+// PASS or FAIL; a gate that leaves PASS or FAIL, or comes back to NOT_RUN (bench builds:
+// POST RERUN), drops any partial window and waits again for a first all-valid cycle. Allocates
+// nothing, logs nothing, no lock.
 void AdcStickIo::feed_rest_window(State &state, float horizontal_mv, float vertical_mv,
                                   float twist_mv, bool button) {
   using hmi::stick::PostGate;
   const PostGate gate = ui_app.permit_hooks().post_gate.read();
-  const bool rerun = gate == PostGate::NOT_RUN && state.post_seen != PostGate::NOT_RUN;
+  const bool rerun = hmi::post::rest_window_restarts(state.post_seen, gate);
   state.post_seen = gate;
   if (rerun) {
     state.rest.reset();
   }
-  if (gate == PostGate::PASS || gate == PostGate::FAIL) {
+  if (!hmi::post::rest_window_feeds(gate)) {
     return;
   }
   if (state.rest.add_into(horizontal_mv, vertical_mv, twist_mv, button, state.window.window)) {
