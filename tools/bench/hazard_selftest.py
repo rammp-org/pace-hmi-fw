@@ -1254,6 +1254,44 @@ def t_sim_carry_over() -> None:
            (r["verdict"], "RTPS rediscovery not supported" in r["detail"]), ("PASS", True))
 
 
+def t_seat_targets_and_key_enter() -> None:
+    elevation, minus = (30, 380, 320, 162, 6), (30, 520, 320, 162, 6)
+    c3.check_seat_targets(elevation, minus)
+    expect("touch points are the widgets' middles", c3.centre_of(minus), (190, 601))
+    for what, b, m in (("the burger key, not '-' (the 2026-10-09 walk)", elevation,
+                        (0, 1116, 720, 164, 6)),
+                       ("no focus on the page", elevation, None),
+                       ("not the function grid", (0, 1116, 720, 164, 1), minus),
+                       ("the page did not open", elevation, elevation)):
+        try:
+            c3.check_seat_targets(b, m)
+        except hazard_rig.NotRun as e:
+            expect(f"{what}: a rig fault", e.kind, "bench")
+            continue
+        raise AssertionError(f"{what}: accepted")
+    sent: list[str] = []
+
+    class Hmi:
+        def command(self, text):
+            sent.append(text)
+            if text == "KEY ENTER" and len(sent) > 2:
+                raise OSError("lost")
+            return "OK"
+    with quiet(), tempfile.TemporaryDirectory() as tmp:
+        st = hazard_rig.HazardStep("x", pathlib.Path(tmp))
+        rig = hazard_rig.Rig("1.2.3.4", common.REPO, pathlib.Path(tmp), st, set(), proven="p")
+        rig.hmi = Hmi()
+        rig.key_enter()
+        try:
+            rig.key_enter()
+        except OSError:
+            pass
+    expect("every KEY ENTER is released with KEY NONE, even when it fails", sent,
+           ["KEY ENTER", "KEY NONE", "KEY ENTER", "KEY NONE"])
+    sources = [pathlib.Path(m.__file__).read_text(encoding="utf-8") for m in (c1, c2, c3, c4)]
+    expect("no step sends a bare KEY ENTER", any('"KEY ENTER"' in src for src in sources), False)
+
+
 CASES = [
     ("BENCH-015 the hazard steps: only behind --hazard or --steps; retired as the fixes land; "
      "B5pp names", t_plan),
@@ -1310,6 +1348,8 @@ CASES = [
      "(GATE_SHUT, CALIBRATING; C1 3.3), the notice shown after", t_b1_gate_shut),
     ("BENCH-056 STATE is polled through every button hold, so a stop's notice is timed from "
      "the hold's completion", t_hold_polls),
+    ("BENCH-057 B5''-19 presses the Seat screen by touch on widgets FOCUS placed, checked "
+     "first (a wrong one is NOT_RUN); KEY ENTER is always released", t_seat_targets_and_key_enter),
     ("BENCH-051 injection lapses come from the STICK send times in the remote-UI log, not "
      "the injector's own clock; a pause is not a lapse", t_stick_lapses),
 ]

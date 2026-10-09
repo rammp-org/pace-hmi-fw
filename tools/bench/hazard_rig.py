@@ -575,6 +575,15 @@ class Rig:
         self.hmi.command("BTN 0")
         return t
 
+    def key_enter(self) -> None:
+        """One press of the stick button through the keypad (KEY ENTER), always released
+        with KEY NONE (an unreleased ENTER stayed held 4.7 s on 2026-10-09)."""
+        try:
+            self.hmi.command("KEY ENTER")
+            time.sleep(0.12)  # one keypad read
+        finally:
+            self.hmi.command("KEY NONE")
+
     def burger(self) -> None:
         self.tap(*MENU_KEY)
 
