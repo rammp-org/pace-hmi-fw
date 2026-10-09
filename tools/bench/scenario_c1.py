@@ -341,7 +341,8 @@ def grade_b13(st: HazardStep, tr: hg.Trace, p: dict) -> None:
 
 def grade_b14(st: HazardStep, tr: hg.Trace, p: dict) -> None:
     a = tr.mark("enter")
-    seat = hg.first_state(tr.states, hg.screen_is("SeatScreen"), a - 30.0, a)
+    # the mark follows the poll that showed SeatScreen; the two clocks tick in 16 ms steps
+    seat = hg.first_state(tr.states, hg.screen_is("SeatScreen"), a - 30.0, a + 0.3)
     st.check("set-up: on the Seat screen before sim a", seat is not None, "")
     check_within(st, "DriveScreen after sim a from the Seat screen", _drive_after(tr, a), a, 3.0)
 

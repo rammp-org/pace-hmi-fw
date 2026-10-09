@@ -166,7 +166,8 @@ def grade_b18(st: HazardStep, tr: hg.Trace, p: dict) -> None:
 
 
 def _link_after(tr: hg.Trace, r: float) -> float | None:
-    e = hg.first_event(tr.events, lambda e: e.get("ev") == "hmi_back", r)
+    # hmi_back from a sim that saw the reboot; hmi_seen from the sim that replaced it
+    e = hg.first_event(tr.events, lambda e: e.get("ev") in ("hmi_back", "hmi_seen"), r)
     return None if e is None else e["mono"]
 
 

@@ -987,9 +987,26 @@ class FakeSim:
     def __init__(self, ip, tree, log_path=None, event_log=None, ready=True, exits=False):
         self.ready = ready
         self.stopped = False
+        self.exits = exits
+        self.sent: list[str] = []
+        self.marks: list[str] = []
         self.proc = type("P", (), {"pid": 4242, "poll": lambda me, exits=exits: 1 if exits
                                    else None})()
         FakeSim.started.append(self)
+
+    def wait_for(self, regex, timeout, since=0):
+        return None if self.exits else True
+
+    def mark(self):
+        return 0
+
+    def reply(self, cmd, regex, timeout=5.0):
+        import re
+        return re.search(regex, "refuse ENABLE=False refuse DISABLE=True ignore next 0 "
+                                "DISABLE(s), drop next 0 DISABLE(s), on HMI gone: keep")
+
+    def events(self, after=None):
+        return [{"ev": "mib_publish", "state": "ENABLED", "mono": 1.0, "targets": 1}]
 
     def xy_count(self, timeout=5.0):
         return 1
@@ -1001,10 +1018,11 @@ class FakeSim:
         return "the simulated MCB got no XYTwist (fake)"
 
     def event_mark(self, label, timeout=5.0):
+        self.marks.append(label)
         return True
 
     def send(self, cmd):
-        pass
+        self.sent.append(cmd)
 
     def stop(self):
         self.stopped = True
@@ -1062,8 +1080,8 @@ def t_serial_watch_and_sim_retry() -> None:
             rig = hazard_rig.Rig("1.2.3.4", common.REPO, pathlib.Path(tmp), st, set(), proven="p")
             got = rig._start_sim()
         expect("a sim that exits at once is stopped and started once more",
-               ([m.stopped for m in made], got is made[-1], "sim_retry" in st.records),
-               ([True, False], True, True))
+               ([m.stopped for m in made], got is made[-1], st.records.get("sim_tries")),
+               ([True, False], True, 2))
     finally:
         hazard_rig.peers.SimChild, hazard_rig.SIM_RETRY_S = saved
 
@@ -1080,6 +1098,31 @@ def t_serial_watch_and_sim_retry() -> None:
         hazard_rig.Rig = saved_rig
     expect("a rig fault (the port refused) ends the step NOT_RUN, not the run",
            (r["verdict"], r["reason"].startswith("bench: PermissionError")), ("NOT_RUN", True))
+
+
+def t_sim_replaced_at_reboot() -> None:
+    saved = (hazard_rig.peers.SimChild, common.stray_peers)
+    FakeSim.started = []
+    hazard_rig.peers.SimChild = lambda *a, **k: FakeSim(*a, **k)
+    common.stray_peers = lambda *a, **k: []
+    try:
+        with quiet(), tempfile.TemporaryDirectory() as tmp:
+            st = hazard_rig.HazardStep("x", pathlib.Path(tmp))
+            rig = hazard_rig.Rig("1.2.3.4", common.REPO, pathlib.Path(tmp), st, set(), proven="p")
+            rig.sim = old = FakeSim("1.2.3.4", common.REPO)
+            rig._save_samples = lambda path: None
+            rig._retire_sim()
+            expect("the old sim stops at the reboot, before the HMI is back",
+                   (old.stopped, rig.sim), (True, None))
+            rig._relaunch_sim()
+            new = rig.sim
+        expect("the new sim gets the old modes and ENABLED before it is ready, then a mark",
+               (new.sent[:4], new.marks), (["ongone keep", "ign 0", "drop 0", "s"],
+                                           ["sim-restarted"]))
+        expect("ENABLED carried", new.sent[4], "a")
+        expect("the verdict detail", st.details, [hazard_rig.SIM_RESTART_NOTE])
+    finally:
+        hazard_rig.peers.SimChild, common.stray_peers = saved
 
 
 def t_forced_stop_kills_tree() -> None:
@@ -1227,6 +1270,8 @@ CASES = [
      "at once is started once more; a rig fault ends only its step", t_serial_watch_and_sim_retry),
     ("BENCH-053 after an HMI reboot the new sim gets the old one's modes and MCB state; the "
      "verdict detail says so", t_sim_carry_over),
+    ("BENCH-054 at an HMI reboot the sim is retired at once and its successor gets the old "
+     "modes and state before it can publish", t_sim_replaced_at_reboot),
     ("BENCH-051 injection lapses come from the STICK send times in the remote-UI log, not "
      "the injector's own clock; a pause is not a lapse", t_stick_lapses),
 ]

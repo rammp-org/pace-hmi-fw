@@ -57,7 +57,8 @@ HOLD_MS = 2000            # the unlock and exit holds: 1.5 s fill plus margin
 SKEW_LIMIT_S = 0.25       # a mark's stamp vs the runner's send time
 BACK_WITHIN_S = 90.0      # a restart: remote UI back
 SIM_READY_S = 45.0
-SIM_RETRY_S = 15.0
+SIM_RETRY_S = 3.0
+SIM_FIND_S = 90.0
 
 MENU_KEY = (360, 1198)                 # scripts/hmi_ui.py MENU_KEY
 PROFILE_Y = 195 + 675 + 162 // 2       # scenario_hazards: DriveScreen's profile buttons
@@ -344,6 +345,8 @@ class Rig:
         self.port = port
         self.restart_watch: SerialWatch | None = None  # restart_hmi(serial_s) from Drive
         self._sample_parts: list[pathlib.Path] = []  # samples of sims replaced after a reboot
+        self._carry: list[str] = []
+        self._carry_state: str | None = None
         self.proof = proven
         self._sweep = sweep or (lambda: rtps_sweep(tree))
         self.trace = hg.Trace()
@@ -386,22 +389,31 @@ class Rig:
             raise
         return self
 
-    def _start_sim(self) -> peers.SimChild:
-        """This step's sim. One that exits at once without finding the board (the board
-        still coming back from the previous step's restart: B5''-22b, 2026-10-09) is
-        started once more after SIM_RETRY_S."""
-        sim = peers.SimChild(self.ip, self.tree, self.out / "sim.log",
-                             event_log=self.out / "sim-events.jsonl")
-        deadline = time.monotonic() + 15.0
-        while time.monotonic() < deadline and sim.proc.poll() is None and not sim.xy_count(1.0):
-            time.sleep(0.5)  # poll period, bounded by the deadline
-        if sim.proc.poll() is None:
-            return sim
-        self.st.record("sim_retry", sim.not_ready_reason())
-        sim.stop()
-        time.sleep(SIM_RETRY_S)  # let the board finish coming back
-        return peers.SimChild(self.ip, self.tree, self.out / "sim.log",
-                              event_log=self.out / "sim-events.jsonl")
+    def _start_sim(self, carry: list[str] | None = None) -> peers.SimChild:
+        """A sim for this step. Until it has found the board (its "board <ip> via" line) it
+        may exit at once ("Could not find the board": the board still booting); it is then
+        started again, for up to SIM_FIND_S. `carry` (carry_over's commands) goes to it as
+        soon as it has found the board, before it can publish to the HMI."""
+        deadline = time.monotonic() + SIM_FIND_S
+        tries = 0
+        while True:
+            tries += 1
+            log = self.out / ("sim.log" if tries == 1 and carry is None
+                              else f"sim-{len(self._sample_parts)}-{tries}.log")
+            sim = peers.SimChild(self.ip, self.tree, log, event_log=self.out / "sim-events.jsonl")
+            found = sim.wait_for(r"^board \S+ via ", min(15.0, max(1.0, deadline - time.monotonic())))
+            if found and sim.proc.poll() is None:
+                for cmd in carry or []:
+                    sim.send(cmd)
+                if tries > 1:
+                    self.st.record("sim_tries", tries)
+                return sim
+            reason = sim.not_ready_reason()
+            sim.stop()
+            if time.monotonic() >= deadline:
+                raise NotRun("bench", f"the sim could not find the board in {SIM_FIND_S:.0f} s "
+                             f"({tries} tries): {reason}")
+            time.sleep(SIM_RETRY_S)  # the board is still coming back
 
     def __exit__(self, *_: object) -> None:
         if self.inj is not None:
@@ -411,6 +423,7 @@ class Rig:
             self.hmi.close()
         if self.sim is not None:
             self.sim.stop()
+            self.sim = None
 
     def _connect(self) -> None:
         hmi = ui_client.open_hmi(self._hmi_ui, self.ip, self.out / "remote-ui.jsonl")
@@ -624,6 +637,7 @@ class Rig:
         except ui_client.RemoteUiError:
             pass  # the board may restart before answering the RELEASE
         self._drop_hmi()
+        self._retire_sim()
         return t
 
     def _restart_by_port(self, serial_s: float) -> float:
@@ -638,6 +652,7 @@ class Rig:
         self._drop_hmi()
         t = time.monotonic()
         watch = SerialWatch(self.port, max(serial_s, 2.0), reset=True)
+        self._retire_sim()
         if serial_s > 0:
             self.restart_watch = watch
         else:
@@ -653,6 +668,7 @@ class Rig:
         except Exception:  # noqa: BLE001 - the board aborts; its answer may be lost
             pass
         self._drop_hmi()
+        self._retire_sim()
         return t
 
     def _drop_hmi(self) -> None:
@@ -670,7 +686,8 @@ class Rig:
         if not ok:
             raise NotRun("bench", f"the board did not come back: {detail}")
         self._connect()
-        self._restart_sim()
+        if self.sim is None:
+            self._relaunch_sim()
         return time.monotonic()
 
     def _save_samples(self, path: pathlib.Path) -> None:
@@ -679,12 +696,15 @@ class Rig:
         if self.sim.wait_for(r"^JSAVED \d+ ", 20.0, at) is None:
             raise NotRun("bench", "the sim did not save its XYTwist samples")
 
-    def _restart_sim(self) -> None:
-        """After an HMI reboot the sim hears nothing more from the board: its RTPS
-        discovery does not re-match a restarted participant (2026-10-09). Replace it with a
-        fresh one that carries its modes and MCB state over (an approximation, shown in
-        the verdict's detail), keeping the old sim's samples for collect()."""
+    def _retire_sim(self) -> None:
+        """Right after an HMI reboot is triggered. The sim hears nothing more from a
+        restarted board (its RTPS discovery does not re-match a restarted participant,
+        2026-10-09), so it is replaced: this one's samples are kept for collect(), its
+        modes and MCB state are kept for the next (carry_over), and it stops now, so the
+        HMI's first MibStatus after its boot (and its boot DISABLE) is the new sim's."""
         old = self.sim
+        if old is None:
+            return
         part = self.out / f"xytwist-{len(self._sample_parts) + 1}.jsonl"
         self._save_samples(part)
         self._sample_parts.append(part)
@@ -693,13 +713,18 @@ class Rig:
         state = next((e["state"] for e in reversed(events) if e.get("ev") == "mib_publish"),
                      None)
         pauses = [e["ev"] for e in events if e.get("ev") in ("pause", "resume")]
-        commands = carry_over(modes.group(1) if modes else "", state,
-                              bool(pauses) and pauses[-1] == "pause")
+        self._carry = carry_over(modes.group(1) if modes else "", state,
+                                 bool(pauses) and pauses[-1] == "pause")
+        self._carry_state = state
         old.stop()
-        self.sim = peers.SimChild(self.ip, self.tree, self.out / f"sim-{len(self._sample_parts) + 1}.log",
-                                  event_log=self.out / "sim-events.jsonl")
-        for cmd in commands:
-            self.sim.send(cmd)
+        self.sim = None
+
+    def _relaunch_sim(self) -> None:
+        """The new sim after a reboot, with the old one's modes and state (an
+        approximation, shown in the verdict's detail)."""
+        commands = self._carry
+        state = self._carry_state
+        self.sim = self._start_sim(commands)
         if not self.sim.wait_ready(SIM_READY_S):
             raise NotRun("bench", "after the HMI reboot: " + self.sim.not_ready_reason())
         strays = common.stray_peers(exclude_trees={self.sim.proc.pid})
