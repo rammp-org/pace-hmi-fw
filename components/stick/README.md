@@ -39,6 +39,7 @@ Main's `AdcStickIo` owns the permit and gives it the ADC task's `uint32` ms cloc
 | REQ-STK-12 | The neutral latch sets after >= `kNeutralHold` (300 ms) of valid cycles all at x = y = twist = 0.0; a non-neutral, NaN or invalid cycle restarts the wait; any other permit condition failing clears it (and the wait); once set it stays while they hold | STK-061..065 |
 | REQ-STK-13 | The hold reason is the first failing condition in the order GATE_SHUT, MOTION_GUARD, CALIBRATING, NOT_CALIBRATED, POST_NOT_PASSED, STICK_FAULT, STICK_CHECK, CENTRE_FIRST, else NONE | STK-004, STK-066 |
 | REQ-STK-14 | POST gate NOT_RUN, PENDING and FAIL withhold output; PASS allows. Stick health FAULT (reason STICK_FAULT) and CHECK (reason STICK_CHECK) withhold; NOT_MONITORED and OK allow. The motion guard's verdict allows only OK; until C4 it is always OK | STK-067 |
+| REQ-STK-15 | While the POST gate is not PASS, XYTwist carries the stick button released; otherwise it carries the button as it reads, held or not (hazard-c3-spec.md §2.11, decisions D12 a, C3 Q11) | STK-068 |
 
 ## Bench stick injection (`stick/bench_inject.hpp`, hazard-fixes.md §3 B1)
 

@@ -23,7 +23,8 @@
 ///          change from held to allowed needs the stick centred first (decision D1). Once set,
 ///          the latch stays while 1-7 hold, whatever the stick does.
 ///
-///          The stick button bit passes, held or not (STK-017).
+///          The stick button bit is sent released while the POST gate is not PASS
+///          (REQ-STK-15, decisions D12 a and C3 Q11); otherwise it passes, held or not (STK-017).
 ///
 ///          Pure: no ESP-IDF, no allocation, no logging, no lock, no indirect call. The clock
 ///          is the ADC task's `uint32_t` ms count, passed in; durations are modulo 2^32.
@@ -96,7 +97,7 @@ public:
   /// @return whether the stick may drive, whether the button bit passes, and the hold reason
   [[nodiscard]] Permit cycle(const PermitInputs &in, const Position &mounted,
                              std::uint32_t now_ms) noexcept {
-    const bool button = true; // the button bit reaches XYTwist as it reads (STK-017)
+    const bool button = post_passed(in.post); // released before POST pass (REQ-STK-15)
     const HoldReason failing = first_failing(in);
     if (failing != HoldReason::NONE) {
       latched_ = false;

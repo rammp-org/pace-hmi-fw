@@ -1047,3 +1047,43 @@ TEST_CASE("STK-067 POST gate NOT_RUN, PENDING and FAIL hold, PASS allows; stick 
   OutputPermit p;
   TEST_ASSERT_FALSE(first_allowed_with(p, guard));
 }
+
+TEST_CASE("STK-068 the stick button bit is sent released while the POST gate is PENDING, and "
+          "pressed once it is PASS",
+          "[stick][permit][safety][REQ-STK-15]") {
+  StickVector v{};
+  v.power_on_cal = stick_test::CAL_IDEAL;
+  v.sensitivity = 9;
+  v.drive_speed = 10;
+  v.drives = true;
+  v.button = true; // pressed throughout
+  StickPipeline pipeline(pipeline_config(stick_test::CAL_IDEAL));
+  FakeIo io;
+  io.in = &v;
+  PermitInputs pending = ALL_MET;
+  pending.post = PostGate::PENDING;
+  io.permit_in = pending;
+  const RawReadsMv centred{.horizontal_mv = 1650.0f, .vertical_mv = 1650.0f, .twist_mv = 1650.0f};
+  io.out = StickOutputs{};
+  TEST_ASSERT_TRUE(pipeline.cycle(io, centred));
+  TEST_ASSERT_EQUAL_UINT32(0U, io.out.buttons); // released: rammp::Buttons::NONE
+  for (const PostGate other : {PostGate::NOT_RUN, PostGate::FAIL}) {
+    PermitInputs held = ALL_MET;
+    held.post = other;
+    io.permit_in = held;
+    io.out = StickOutputs{};
+    TEST_ASSERT_TRUE(pipeline.cycle(io, centred));
+    TEST_ASSERT_EQUAL_UINT32(0U, io.out.buttons);
+  }
+  io.permit_in = ALL_MET; // PASS
+  io.now_ms = 40;
+  io.out = StickOutputs{};
+  TEST_ASSERT_TRUE(pipeline.cycle(io, centred));
+  TEST_ASSERT_EQUAL_UINT32(1U, io.out.buttons); // pressed: rammp::Buttons::JOYSTICK
+  PermitInputs gate_shut = ALL_MET; // held for another reason: the bit still passes (STK-017)
+  gate_shut.gate_open = false;
+  io.permit_in = gate_shut;
+  io.out = StickOutputs{};
+  TEST_ASSERT_TRUE(pipeline.cycle(io, centred));
+  TEST_ASSERT_EQUAL_UINT32(1U, io.out.buttons);
+}
