@@ -564,7 +564,7 @@ bool start_participant() {
     return false;
   }
 
-  // 5 writers + 5 readers, plus SPDP's pair: the budget set in sdkconfig.defaults
+  // 5 writers + 4 readers, plus SPDP's pair: the budget set in sdkconfig.defaults
   bool ok = false;
   {
     std::lock_guard<std::mutex> lock(endpoints_mutex);
