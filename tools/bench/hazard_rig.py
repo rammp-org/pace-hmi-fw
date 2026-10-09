@@ -108,12 +108,15 @@ class HazardStep(scenario_hazards.Step):
         super().__init__(name, out)
         self.not_verified = []
         self.not_run: str | None = None
+        self.details: list[str] = []  # verdict details shown with the verdict
         # A criterion the step could only observe indirectly (B5''-18b's fallback): the step
         # is never PASS on it; with every graded check passed it is NOT_RUN, "partial: ...".
         self.partial: str | None = None
 
     def result(self, characterisation: bool = False) -> dict:
         out = super().result(characterisation)
+        if self.details:
+            out["detail"] = "; ".join(self.details)
         if self.partial is not None:
             out["partial"] = self.partial
             if out["verdict"] == "PASS":
@@ -259,6 +262,35 @@ def stick_lapses(rows: list[dict], pauses: list[datetime.datetime],
     return out
 
 
+SIM_RESTART_NOTE = "sim restarted after HMI reboot (RTPS rediscovery not supported by the sim)"
+STATE_COMMANDS = {"ENABLED": "a", "IDLE": "ok", "ERROR": "e", "INITIALIZING": "z"}
+
+
+def carry_over(modes_line: str, state: str | None, paused: bool) -> list[str]:
+    """The stdin commands that give a fresh sim the old one's modes and MCB state: its
+    `modes` answer (rtps_mcb_sim.describe_modes), the last MibStatus state it published,
+    and whether MibStatus was paused. Sent before the new sim has found the HMI, so the
+    HMI's first MibStatus after its reboot already carries the old state."""
+    import re
+    m = re.search(r"refuse ENABLE=(True|False) refuse DISABLE=(True|False) ignore next "
+                  r"(\d+) DISABLE\(s\), drop next (\d+) DISABLE\(s\), on HMI gone: (\w+)",
+                  modes_line)
+    if m is None:
+        raise NotRun("bench", f"cannot read the sim's modes to carry over: {modes_line!r}")
+    out = [f"ongone {m.group(5)}", f"ign {m.group(3)}", f"drop {m.group(4)}"]
+    if m.group(1) == "True":
+        out.append("x")  # a new sim starts with both refusals off: one toggle sets each
+    if m.group(2) == "True":
+        out.append("s")
+    if state is not None:
+        if state not in STATE_COMMANDS:
+            raise NotRun("bench", f"cannot carry the sim's state {state!r} over")
+        out.append(STATE_COMMANDS[state])
+    if paused:
+        out.append("p")
+    return out
+
+
 # ---------------------------------------------------------------- serial
 
 
@@ -311,6 +343,7 @@ class Rig:
         self.groups = set(groups)
         self.port = port
         self.restart_watch: SerialWatch | None = None  # restart_hmi(serial_s) from Drive
+        self._sample_parts: list[pathlib.Path] = []  # samples of sims replaced after a reboot
         self.proof = proven
         self._sweep = sweep or (lambda: rtps_sweep(tree))
         self.trace = hg.Trace()
@@ -637,7 +670,46 @@ class Rig:
         if not ok:
             raise NotRun("bench", f"the board did not come back: {detail}")
         self._connect()
+        self._restart_sim()
         return time.monotonic()
+
+    def _save_samples(self, path: pathlib.Path) -> None:
+        at = self.sim.mark()
+        self.sim.send(f"jsave {path}")
+        if self.sim.wait_for(r"^JSAVED \d+ ", 20.0, at) is None:
+            raise NotRun("bench", "the sim did not save its XYTwist samples")
+
+    def _restart_sim(self) -> None:
+        """After an HMI reboot the sim hears nothing more from the board: its RTPS
+        discovery does not re-match a restarted participant (2026-10-09). Replace it with a
+        fresh one that carries its modes and MCB state over (an approximation, shown in
+        the verdict's detail), keeping the old sim's samples for collect()."""
+        old = self.sim
+        part = self.out / f"xytwist-{len(self._sample_parts) + 1}.jsonl"
+        self._save_samples(part)
+        self._sample_parts.append(part)
+        modes = old.reply("modes", r"(refuse ENABLE=.*)$")
+        events = old.events()
+        state = next((e["state"] for e in reversed(events) if e.get("ev") == "mib_publish"),
+                     None)
+        pauses = [e["ev"] for e in events if e.get("ev") in ("pause", "resume")]
+        commands = carry_over(modes.group(1) if modes else "", state,
+                              bool(pauses) and pauses[-1] == "pause")
+        old.stop()
+        self.sim = peers.SimChild(self.ip, self.tree, self.out / f"sim-{len(self._sample_parts) + 1}.log",
+                                  event_log=self.out / "sim-events.jsonl")
+        for cmd in commands:
+            self.sim.send(cmd)
+        if not self.sim.wait_ready(SIM_READY_S):
+            raise NotRun("bench", "after the HMI reboot: " + self.sim.not_ready_reason())
+        strays = common.stray_peers(exclude_trees={self.sim.proc.pid})
+        if strays:
+            raise NotRun("bench", "another RTPS peer beside the restarted sim: " + "; ".join(strays))
+        self.sim.event_mark("sim-restarted")
+        self.sim.send("jstart")
+        self.st.record("sim_restart", {"carried": commands, "state": state})
+        if SIM_RESTART_NOTE not in self.st.details:
+            self.st.details.append(SIM_RESTART_NOTE)
 
     # --- the start and end every step shares ----------------------------------------
 
@@ -698,12 +770,10 @@ class Rig:
     def collect(self) -> hg.Trace:
         """The step's samples and sim events into the trace; the marks from the log."""
         path = self.out / "xytwist.jsonl"
-        at = self.sim.mark()
-        self.sim.send(f"jsave {path}")
-        if self.sim.wait_for(r"^JSAVED \d+ ", 20.0, at) is None:
-            raise NotRun("bench", "the sim did not save its XYTwist samples")
+        self._save_samples(path)
         import sim_child
-        self.trace.samples = sim_child.read_samples(path)
+        self.trace.samples = [s for part in [*self._sample_parts, path]
+                              for s in sim_child.read_samples(part)]
         events = self.sim.events("step-start")
         self.trace.events = events
         self.trace.marks = {e["label"]: e["mono"] for e in events if e.get("ev") == "mark"}

@@ -1151,6 +1151,32 @@ def t_restart_tile_and_refresh() -> None:
         inj.stop()
 
 
+def t_sim_carry_over() -> None:
+    line = ("refuse ENABLE=False refuse DISABLE=True ignore next 3 DISABLE(s), drop next 0 "
+            "DISABLE(s), on HMI gone: keep, HMI back 1 time(s)")
+    expect("ENABLED, refusing DISABLE, 3 ignores left: all carried, the state last",
+           hazard_rig.carry_over(line, "ENABLED", False),
+           ["ongone keep", "ign 3", "drop 0", "s", "a"])
+    idle = line.replace("refuse ENABLE=False", "refuse ENABLE=True").replace(
+        "refuse DISABLE=True", "refuse DISABLE=False").replace("keep", "idle")
+    expect("IDLE, refusing ENABLE, paused", hazard_rig.carry_over(idle, "IDLE", True),
+           ["ongone idle", "ign 3", "drop 0", "x", "ok", "p"])
+    expect("no publish seen: modes only", hazard_rig.carry_over(line, None, False)[-1], "s")
+    for bad in (("garbage", "IDLE"), (line, "BOOTING")):
+        try:
+            hazard_rig.carry_over(*bad, False)
+        except hazard_rig.NotRun:
+            continue
+        raise AssertionError(f"{bad} was carried")
+    with quiet(), tempfile.TemporaryDirectory() as tmp:
+        st = hazard_rig.HazardStep("x", pathlib.Path(tmp))
+        st.details.append(hazard_rig.SIM_RESTART_NOTE)
+        st.check("c", True, "")
+        r = st.result()
+    expect("the approximation is in the verdict's detail",
+           (r["verdict"], "RTPS rediscovery not supported" in r["detail"]), ("PASS", True))
+
+
 CASES = [
     ("BENCH-015 the hazard steps: only behind --hazard or --steps; retired as the fixes land; "
      "B5pp names", t_plan),
@@ -1199,6 +1225,8 @@ CASES = [
      "command once it is 20 ms old", t_restart_tile_and_refresh),
     ("BENCH-052 a serial watch frees the port at stop() even on a quiet board; a sim that exits "
      "at once is started once more; a rig fault ends only its step", t_serial_watch_and_sim_retry),
+    ("BENCH-053 after an HMI reboot the new sim gets the old one's modes and MCB state; the "
+     "verdict detail says so", t_sim_carry_over),
     ("BENCH-051 injection lapses come from the STICK send times in the remote-UI log, not "
      "the injector's own clock; a pause is not a lapse", t_stick_lapses),
 ]
