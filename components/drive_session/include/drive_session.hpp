@@ -101,6 +101,10 @@ private:
   [[nodiscard]] Outcome on_exit_refused(Input in, GuardMask g) const noexcept;
   [[nodiscard]] Outcome stay() const noexcept;
   [[nodiscard]] Outcome stop_fault_due(GuardMask g) const noexcept;
+  [[nodiscard]] Outcome follow_enters(GuardMask g) const noexcept;
+  [[nodiscard]] Outcome locked_follow(GuardMask g) const noexcept;
+  [[nodiscard]] Outcome asking_follow(GuardMask g) const noexcept;
+  [[nodiscard]] Outcome locked_drive_ask(Input in, GuardMask g) const noexcept;
   [[nodiscard]] Outcome stop_resend(GuardMask g) const noexcept;
   void perform(const Outcome &o, Actions &out) noexcept;
 

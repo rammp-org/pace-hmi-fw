@@ -44,7 +44,7 @@ MUTANTS=(
   'T16-effect-fault-sets-nothing|table|s/ActionEffect{Action::RAISE_STOP_FAULT, bit(Guard::STOP_FAULT), 0},/ActionEffect{Action::RAISE_STOP_FAULT, 0, 0},/'
   # Code that reads a guard bit the table does not read for that input: the by-input oracle
   # only samples those (oracle_space.hpp), so these test the sample.
-  'C01-unlock-reads-menu|code|0,/    if (on(g, Guard::DRIVING_OK)) {/s//    if (on(g, Guard::DRIVING_OK) \&\& !on(g, Guard::MENU_OPEN)) {/'
+  'C01-unlock-reads-menu|code|0,/^  if (on(g, Guard::DRIVING_OK)) {/s//  if (on(g, Guard::DRIVING_OK) \&\& !on(g, Guard::MENU_OPEN)) {/'
   'C02-publish-reads-giveup-elapsed|code|s|    return go(Phase::LOCKED, PUBLISH); // row 29 (H5)|    return on(g, Guard::GIVEUP_ELAPSED) ? stay() : go(Phase::LOCKED, PUBLISH); // row 29|'
   'C03-exit-reads-two-set|code|s|    return go(Phase::EXITING, FIRST_ASK_EXIT); // row 22|    return (on(g, Guard::MENU_OPEN) \&\& on(g, Guard::WARN_ELAPSED)) ? stay() : go(Phase::EXITING, FIRST_ASK_EXIT); // row 22|'
   'C04-menu-key-reads-two-clear|code|s|    return go(Phase::EXITING, FIRST_ASK_EXIT_THEN_MENU); // row 26|    return (!on(g, Guard::THEN_MENU) \&\& !on(g, Guard::GIVEUP_ARMED)) ? stay() : go(Phase::EXITING, FIRST_ASK_EXIT_THEN_MENU); // row 26|'
@@ -52,7 +52,7 @@ MUTANTS=(
   'C06-publish-reads-three-set-three-clear|code|s|      return go(Phase::DRIVING, ENABLE_PROFILE); // row 32|      return (on(g, Guard::MENU_OPEN) \&\& on(g, Guard::EXIT_ELAPSED) \&\& on(g, Guard::REQUEST_ENABLE) \&\& !on(g, Guard::WARN_ELAPSED) \&\& !on(g, Guard::GIVEUP_ELAPSED) \&\& !on(g, Guard::CALIBRATING)) ? stay() : go(Phase::DRIVING, ENABLE_PROFILE); // row 32|'
   # Code that gets a row wrong where the table reads the bit.
   'C07-giveup-ignores-elapsed|code|0,/    if (on(g, Guard::GIVEUP_ARMED) && on(g, Guard::GIVEUP_ELAPSED)) {/s//    if (on(g, Guard::GIVEUP_ARMED)) {/'
-  'C08-effect-cancel-keeps-timer|code|s/  case Action::CANCEL_UNLOCK_TIMER:/  case Action::CANCEL_UNLOCK_TIMER: return NO_EFFECT;/'
+  'C08-effect-cancel-keeps-timer|code|s/    {Action::CANCEL_UNLOCK_TIMER, clears(Guard::UNLOCK_TIMER_ARMED)},/    {Action::CANCEL_UNLOCK_TIMER, NO_EFFECT},/'
   'C09-resend-fast-after-fault|code|s/      on(g, Guard::STOP_FAULT) ? on(g, Guard::RESEND_SLOW_DUE) :/      on(g, Guard::STOP_FAULT) ? on(g, Guard::RESEND_FAST_DUE) :/'
 )
 
