@@ -80,15 +80,15 @@ the check. The stick task then takes no lock to read the ADC at all.
 
 | Task | Name | Stack | Priority | Core | Period |
 | --- | --- | --- | --- | --- | --- |
-| the island's own | `Read ADC` | 4096 B | 0 (runs at IDF's pthread default, 5) | -1 (pinned by its first FPU use: core 0 on the board) | 33 ms |
+| the island's own | `Read ADC` | 6144 B | 21 | 0 | 33 ms |
 
-`Config::task` is that row as a literal, espp's defaults written out, copied from the code it
-replaced, so the G10 task dump (`tools/guards/baselines/tasks.json`) is unchanged. The
-topology's `control` row (`components/topology`, CS-CON-02) is the target design: another
-name, priority, core and stack (hazard H11, C4). Taking `Config::task` from
-`topo.task_config(...)` is a later step, made once the owner has reviewed the TASKS rows; it
-changes the task's behaviour, so it comes with its own G10 baseline. The continuous ADC's own
-task is espp's (`ContinuousAdc`, priority 5).
+`Config::task` is that row as a literal (hazard fix C4, hazard-c4-spec.md §5, REQ-CTL-13): priority
+21, above every application task and `sys_evt`/`tcpip` on core 0 and below IDF's timing
+services; pinned to core 0, away from `lv_task` and `tab5_audio`; 6144 B. The G10 task dump
+(`tools/guards/baselines/tasks.json`) holds the same row. The topology's `control` row
+(`components/topology`, CS-CON-02) is the islands work's target (it says priority 22; C4 O2:
+21, align the draft). The continuous ADC's own task is espp's (`ContinuousAdc`, priority 5,
+unpinned; C4 O9 / C2 O14: not changed).
 
 ## Dependencies
 

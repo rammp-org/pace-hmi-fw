@@ -1172,12 +1172,14 @@ extern "C" void app_main(void) {
       .task =
           {
               .name = "Read ADC",
-              // espp's defaults, written out. Priority 0 runs at IDF's pthread default
-              // (5), and unpinned the task is pinned by its first FPU use (core 0 on the
-              // board): H11 is the fix, not this.
-              .stack_size_bytes = 4096,
-              .priority = 0,
-              .core_id = -1,
+              // Hazard fix C4 (H11, hazard-c4-spec.md §5, REQ-CTL-13): above every
+              // application task and sys_evt/tcpip on core 0, below IDF's timing services
+              // (esp_timer 22, esp_hosted 23, ipc0 24); pinned to core 0, away from lv_task
+              // and tab5_audio (20, core 1); 6144 B = room over 1.5x the stress high-water
+              // mark (2908 B used of 4096, CS-MEM-04) for the guard and C2.
+              .stack_size_bytes = 6144,
+              .priority = 21,
+              .core_id = 0,
           },
       .task_log_level = espp::Logger::Verbosity::INFO,
       // this initailizes the DMA and filter task for the continuous adc
