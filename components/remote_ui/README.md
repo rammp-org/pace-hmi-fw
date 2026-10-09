@@ -46,6 +46,8 @@ ADC and UI tasks), and land with it. `CRASH` is the remote UI's own: it replies,
 `STALL` blocks the server for its time (the PC sees the reply when the stall ends). The PC end
 is `scripts/hmi_ui.py` (`state`, `permit`, ...) and the scenario scripts in `tools/bench`.
 When C2 lands, `PERMIT STICK` goes (REQ-RUI-08 retires REQ-RUI-05).
+`STATE`'s `banner` (the refusal banner up, by name, or NONE) is the owner's addition of
+2026-10-08, so the bench grades the banners the specs name (REFUSED_POST, STICK_FAULT).
 
 The headers keep their names: `main.cpp` and `frag_stick_config.inc` only gained the
 component dependency.

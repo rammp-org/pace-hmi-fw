@@ -26,6 +26,8 @@
 ///          - screen: the active screen's name, as SCREEN (C1 6)
 ///          - phase: LOCKED, ASKING, UNLOCKING, DRIVING, EXITING, EXIT_REFUSED (C1 6)
 ///          - notice: the Drive notice: NONE, STOPPING, MCB_DID_NOT_STOP or a hold reason (C1 2.7)
+///          - banner: the refusal banner showing, by its name (REFUSED_POST, STICK_FAULT,
+///            DRIVE_STOPPED, ...), or NONE (owner, 2026-10-08: graded on the bench)
 ///          - hold_reason: the stick's hold reason, C1 3.3's names
 ///          - calibrating, menu_open: booleans (C1 6)
 ///          - cal: {"h", "v", "twist"}, each [min, centre, max] mV in use (C1 6)
@@ -119,6 +121,7 @@ struct State {
   std::optional<std::string> screen;
   std::optional<std::string> phase;
   std::optional<std::string> notice;
+  std::optional<std::string> banner;
   std::optional<std::string> hold_reason;
   std::optional<bool> calibrating;
   std::optional<bool> menu_open;
@@ -137,6 +140,7 @@ struct Hooks {
   // STATE fields
   std::function<std::string()> phase;                     ///< C1: the drive session's phase
   std::function<std::string()> notice;                    ///< C1: the adapter's last Drive notice
+  std::function<std::string()> banner;                    ///< the refusal banner up, or NONE
   std::function<std::string()> hold_reason;               ///< C1: OutputPermit's hold-reason atomic
   std::function<bool()> calibrating;                      ///< C1: joystick_cal_running()
   std::function<bool()> menu_open;                        ///< C1: the burger menu
@@ -461,6 +465,7 @@ template <typename T, typename Fn> [[nodiscard]] std::optional<T> call(const Fn 
   detail::put_opt(out, "screen", state.screen);
   detail::put_opt(out, "phase", state.phase);
   detail::put_opt(out, "notice", state.notice);
+  detail::put_opt(out, "banner", state.banner);
   detail::put_opt(out, "hold_reason", state.hold_reason);
   detail::put_opt(out, "calibrating", state.calibrating);
   detail::put_opt(out, "menu_open", state.menu_open);
@@ -484,6 +489,7 @@ template <typename T, typename Fn> [[nodiscard]] std::optional<T> call(const Fn 
   s.screen = std::move(screen);
   s.phase = detail::call<std::string>(hooks.phase);
   s.notice = detail::call<std::string>(hooks.notice);
+  s.banner = detail::call<std::string>(hooks.banner);
   s.hold_reason = detail::call<std::string>(hooks.hold_reason);
   s.calibrating = detail::call<bool>(hooks.calibrating);
   s.menu_open = detail::call<bool>(hooks.menu_open);

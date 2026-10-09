@@ -204,7 +204,7 @@ class Hmi:
         return reply
 
     def state(self) -> dict:
-        """STATE: the HMI's state as one dict (screen, phase, notice, hold_reason,
+        """STATE: the HMI's state as one dict (screen, phase, notice, banner, hold_reason,
         calibrating, menu_open, cal, post, post_check, indicator, indicator_text,
         reset_reason, stick); a field whose hook is not in this firmware is None."""
         return parse_state(self.command("STATE"))

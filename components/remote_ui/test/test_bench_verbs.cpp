@@ -37,6 +37,7 @@ bv::Hooks all_hooks() {
   bv::Hooks h;
   h.phase = [] { return std::string("DRIVING"); };
   h.notice = [] { return std::string("CENTRE_FIRST"); };
+  h.banner = [] { return std::string("REFUSED_POST"); };
   h.hold_reason = [] { return std::string("CENTRE_FIRST"); };
   h.calibrating = [] { return false; };
   h.menu_open = [] { return true; };
@@ -169,7 +170,9 @@ TEST_CASE("RUI-004 STATE with no hook wired reports the screen and null for ever
   const std::string got =
       bv::answer(request_of("STATE"), bv::Hooks{}, std::optional<std::string>{"LockedScreen"});
   TEST_ASSERT_EQUAL_STRING(
-      "OK {\"screen\":\"LockedScreen\",\"phase\":null,\"notice\":null,\"hold_reason\":null,"
+      "OK "
+      "{\"screen\":\"LockedScreen\",\"phase\":null,\"notice\":null,\"banner\":null,\"hold_reason\":"
+      "null,"
       "\"calibrating\":null,\"menu_open\":null,\"cal\":null,\"post\":null,\"post_check\":null,"
       "\"indicator\":null,\"indicator_text\":null,\"reset_reason\":null,\"stick\":null}",
       got.c_str());
@@ -180,7 +183,9 @@ TEST_CASE("RUI-005 STATE with every hook wired is one JSON line in the documente
   const std::string got =
       bv::answer(request_of("STATE"), all_hooks(), std::optional<std::string>{"DriveScreen"});
   TEST_ASSERT_EQUAL_STRING(
-      "OK {\"screen\":\"DriveScreen\",\"phase\":\"DRIVING\",\"notice\":\"CENTRE_FIRST\","
+      "OK "
+      "{\"screen\":\"DriveScreen\",\"phase\":\"DRIVING\",\"notice\":\"CENTRE_FIRST\",\"banner\":"
+      "\"REFUSED_POST\","
       "\"hold_reason\":\"CENTRE_FIRST\",\"calibrating\":false,\"menu_open\":true,"
       "\"cal\":{\"h\":[11,1507,2971],\"v\":[6,1510,2962],\"twist\":[10,1477,2960]},"
       "\"post\":\"PASS\",\"post_check\":null,\"indicator\":\"NONE\",\"indicator_text\":\"\","
@@ -201,7 +206,7 @@ TEST_CASE("RUI-006 STATE escapes quotes, backslashes and control characters in i
   const std::string got =
       bv::answer(request_of("STATE"), h, std::optional<std::string>{"a\"b\\c\x01"});
   TEST_ASSERT_EQUAL_STRING(
-      "OK {\"screen\":\"a\\\"b\\\\c\\u0001\",\"phase\":null,\"notice\":null,"
+      "OK {\"screen\":\"a\\\"b\\\\c\\u0001\",\"phase\":null,\"notice\":null,\"banner\":null,"
       "\"hold_reason\":null,\"calibrating\":true,\"menu_open\":null,\"cal\":null,\"post\":null,"
       "\"post_check\":\"joy.y_cal_off\",\"indicator\":null,"
       "\"indicator_text\":\"Restarted after a fault: \\\"PANIC\\\"\\\\\\u000a\\u0009\","
