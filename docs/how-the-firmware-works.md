@@ -44,8 +44,10 @@ is built but not wired.
   - **UI task** (`lv_task`, priority 20, core 1, every 8 ms): `hmi_ui`'s `UiIsland` runs
     `lv_task_handler()` under the one global `lvgl_mutex`. Every screen, timer, button press
     and the drive session run here.
-  - **Read ADC** (`control`'s `StickIsland`, priority 5, core picked at boot, every 33 ms
-    after the work): reads the stick, runs `stick`'s `StickPipeline`, and publishes `XYTwist`.
+  - **Read ADC** (`control`'s `StickIsland`, priority 21, core 0, every 33 ms after the work):
+    reads the stick, checks the motion guard (UI heartbeat, link, MibStatus age, MCB state;
+    hazard fix C4), runs `stick`'s `StickPipeline`, publishes `XYTwist`, and resets the task
+    watchdog.
   - **RTPS receive** (espp's `rtps_worker_0/1`, priority 5): takes `MibStatus` from the MIB
     and writes it into LVGL subjects under `lvgl_mutex`.
 - **Motion is gated by one atomic.** `stick_drives` (in `hmi_ui/app_state.hpp`) is true only
@@ -274,7 +276,7 @@ at its first FPU use, so it can differ from boot to boot. Priority 0 given to an
 | Task | Prio | Core | Stack | Created | Runs |
 | --- | --- | --- | --- | --- | --- |
 | `lv_task` | 20 | 1 | 16384 | `main.cpp:755-775` (`hmi::ui::UiIsland`) | `lvgl_cycle`: `lv_task_handler()` under `lvgl_mutex`, then sleep to 8 ms after the start (at least 1 ms). All UI, all LVGL timers, the drive session |
-| `Read ADC` | 5 (asked 0) | fpu (0 on the board) | 4096 | `main.cpp:826-866` (`hmi::control::StickIsland`) | three pot reads, one `StickPipeline` cycle, `XYTwist`; then waits 33 ms |
+| `Read ADC` | 21 | 0 | 6144 | `main.cpp` app_main (`hmi::control::StickIsland`) | three pot reads, the motion guard, one `StickPipeline` cycle, `XYTwist`, the task-watchdog reset (`ControlCycle`); then waits 33 ms |
 | `ContinuousAdc T` | 5 | fpu | 4096 | espp, built by `StickIsland` | ADC1 DMA at 1 kHz, X and Y |
 | `Button` | 5 | any | 4096 | `main.cpp:710-721` (`espp::Button`) | GPIO48 edges → `stick_button_edge` |
 | `tab5 interrupts` | 5 | any | 4096 | BSP | touch reports (`TouchClick`) and the side button (`SideButton`) |
@@ -296,9 +298,10 @@ here: the last measured dump is from `cb9226e`, before the moves.
 
 What this table shows:
 
-- **The stick reader runs below the UI.** `Read ADC` (priority 5) sits below `lv_task`
-  (priority 20) and has no watchdog. H11 is about exactly that; `control`'s README says its
-  `Config::task` is a literal copy of the old task until C4 changes it.
+- **The stick reader runs above the UI** (hazard fix C4, H11). `Read ADC` (priority 21, core 0)
+  sits above `lv_task` (20, core 1) and checks the UI's heartbeat itself: a UI cycle 200 ms
+  late or more sends the literal 0 (the permit's condition 2, `MOTION_GUARD`). Both tasks are
+  on the task watchdog (2 s; phase 1 reports a trip, phase 2 will panic).
 - **The UI and housekeeping share core 1.** So do the audio tasks.
 
 ### 4.2 How they talk
@@ -310,7 +313,7 @@ flowchart LR
     hk["Data Display · prio 10 · IMU, RTC, battery"]
   end
   subgraph c0["core picked at boot"]
-    adc["Read ADC · prio 5 · StickPipeline"]:::safety
+    adc["Read ADC · prio 21 · core 0 · guard + StickPipeline"]:::safety
   end
   subgraph any["any core"]
     btn["Button · GPIO48"]:::safety

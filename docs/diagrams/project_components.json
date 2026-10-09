@@ -23,14 +23,16 @@
         "espp__logger",
         "espp__task",
         "espp_adc",
-        "hmi_rtps_spec"
+        "hmi_rtps_spec",
+        "stick"
       ],
       "priv_reqs": []
     },
     "drive_adapter": {
       "reqs": [
         "drive_session",
-        "espp__logger"
+        "espp__logger",
+        "stick"
       ],
       "priv_reqs": []
     },
@@ -88,6 +90,8 @@
     },
     "hmi_ui": {
       "reqs": [
+        "control",
+        "drive_adapter",
         "drive_session",
         "drive_ui",
         "esp_driver_ppa",
@@ -98,6 +102,7 @@
         "hmi_rtps_spec",
         "lvgl__lvgl",
         "ota_parse",
+        "post",
         "rammp_rtps_messages",
         "settings",
         "stick"
@@ -235,7 +240,9 @@
       ]
     },
     "post": {
-      "reqs": [],
+      "reqs": [
+        "stick"
+      ],
       "priv_reqs": []
     },
     "remote_ui": {
@@ -262,6 +269,7 @@
     },
     "stick": {
       "reqs": [
+        "fw_core",
         "joystick"
       ],
       "priv_reqs": []

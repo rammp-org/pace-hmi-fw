@@ -203,8 +203,10 @@ flowchart LR
   c_control -.-> c_adc_window
   c_control -.-> c_espp_adc
   c_control -.-> c_hmi_rtps_spec
+  c_control -.-> c_stick
   c_control -.-> g_espp
   c_drive_adapter -.-> c_drive_session
+  c_drive_adapter -.-> c_stick
   c_drive_adapter -.-> g_espp
   c_drive_ui -.-> c_drive_adapter
   c_drive_ui -.-> c_drive_session
@@ -218,12 +220,15 @@ flowchart LR
   c_fw_core -.-> g_ESP_IDF
   c_fw_core -.-> g_espp
   c_hmi_rtps_spec -.-> c_rammp_rtps_messages
+  c_hmi_ui -.-> c_control
+  c_hmi_ui -.-> c_drive_adapter
   c_hmi_ui -.-> c_drive_session
   c_hmi_ui -.-> c_drive_ui
   c_hmi_ui -.-> c_hmi_format
   c_hmi_ui -.-> c_hmi_models
   c_hmi_ui -.-> c_hmi_rtps_spec
   c_hmi_ui -.-> c_ota_parse
+  c_hmi_ui -.-> c_post
   c_hmi_ui -.-> c_rammp_rtps_messages
   c_hmi_ui -.-> c_settings
   c_hmi_ui -.-> c_stick
@@ -272,6 +277,7 @@ flowchart LR
   c_ota -.-> g_espp
   c_ota -.-> g_Espressif_registry
   c_ota_parse -.-> g_Espressif_registry
+  c_post -.-> c_stick
   c_remote_ui -.-> c_fw_core
   c_remote_ui -.-> c_stick
   c_remote_ui -.-> c_ui
@@ -279,6 +285,7 @@ flowchart LR
   c_remote_ui -.-> g_LVGL
   c_settings -.-> c_storage
   c_settings -.-> g_espp
+  c_stick -.-> c_fw_core
   c_stick -.-> c_joystick
   c_storage -.-> g_ESP_IDF
   c_storage -.-> g_espp
