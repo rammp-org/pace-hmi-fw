@@ -11,6 +11,7 @@
 // snapshot of the channels it asks for, or nothing after kReadTries torn attempts. No lock, no
 // allocation, no logging, no ESP-IDF.
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstddef>
@@ -118,10 +119,8 @@ public:
   template <std::size_t N>
   [[nodiscard]] bool read(const std::array<std::size_t, N> &indices,
                           std::array<AdcWindowReading, N> &out) const noexcept {
-    for (const std::size_t index : indices) {
-      if (index >= kMaxChannels) {
-        return false;
-      }
+    if (std::ranges::any_of(indices, [](std::size_t index) { return index >= kMaxChannels; })) {
+      return false;
     }
     for (int attempt = 0; attempt < kReadTries; ++attempt) {
       if (try_read(indices, out)) {
