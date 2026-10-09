@@ -157,6 +157,15 @@ python tools\bench\run_bench.py selftest     # BENCH-001.., step sequencing on a
 image. Children run with `PYTHONDONTWRITEBYTECODE=1`.
 
 ## Decisions to revisit
+- **The sim does not follow an HMI reboot** (found 2026-10-09): after the HMI restarts, the
+  sim's RTPS discovery never re-matches the new participant, so it hears no XYTwist or
+  DriveCommand again. Until rtps_host and the sim rediscover a restarted peer (the proper
+  fix, a follow-up), the hazard rig replaces the sim after each HMI reboot with a fresh one
+  that carries the old one's modes and MCB state (ENABLED included), sent before the new sim
+  finds the HMI; both sims' samples are merged. Each affected step's verdict detail says
+  "sim restarted after HMI reboot (RTPS rediscovery not supported by the sim)". It is an
+  approximation of "the MCB stayed ENABLED across the HMI's reset": the MCB's participant
+  is new to the HMI.
 - **No "joystick self test passed" line exists** in the baseline boot. B2 uses the nearest
   boot-time evidence: `Adding joystick keypad input device...` and
   `selftest/I ready: <n> checks (selftest_spec.h)`, <n> read from the tree's

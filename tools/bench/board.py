@@ -20,6 +20,7 @@ import os
 import pathlib
 import sys
 import tempfile
+import threading
 import time
 from typing import Callable
 
@@ -72,9 +73,11 @@ class Capture:
 
 
 def capture(port: str, seconds: float, reset: bool = False,
-            on_line: Callable[[Capture, str], bool] | None = None) -> Capture:
+            on_line: Callable[[Capture, str], bool] | None = None,
+            stop: "threading.Event | None" = None) -> Capture:
     """Read `seconds` of output. With reset, pulse EN first. `on_line` may return
-    True to end the capture early. A port that drops (USB re-enumeration) is
+    True to end the capture early; `stop` (set from another thread) ends it within one
+    read timeout even when no line comes. A port that drops (USB re-enumeration) is
     reopened, still without a reset, until the window ends."""
     cap = Capture()
     end = time.monotonic() + seconds
@@ -93,7 +96,7 @@ def capture(port: str, seconds: float, reset: bool = False,
             s.dtr = s.dtr
             cap.notes.append("reset pulse sent (RTS 200 ms, DTR low, DTR rewritten)")
         partial = b""
-        while time.monotonic() < end:
+        while time.monotonic() < end and not (stop is not None and stop.is_set()):
             try:
                 chunk = s.read(4096)
             except (serial.SerialException, OSError) as e:
@@ -103,7 +106,8 @@ def capture(port: str, seconds: float, reset: bool = False,
                 except Exception:
                     pass
                 s = None
-                while time.monotonic() < end and s is None:
+                while time.monotonic() < end and s is None and not (
+                        stop is not None and stop.is_set()):
                     try:
                         s = _open(port)
                         cap.notes.append(f"{time.monotonic() - cap.started:.1f}s port reopened")

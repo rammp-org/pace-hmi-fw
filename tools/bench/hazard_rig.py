@@ -30,7 +30,9 @@ a step that reads the serial log): neither is a verdict on the firmware.
 
 from __future__ import annotations
 
+import datetime
 import importlib
+import itertools
 import json
 import math
 import os
@@ -55,6 +57,8 @@ HOLD_MS = 2000            # the unlock and exit holds: 1.5 s fill plus margin
 SKEW_LIMIT_S = 0.25       # a mark's stamp vs the runner's send time
 BACK_WITHIN_S = 90.0      # a restart: remote UI back
 SIM_READY_S = 45.0
+SIM_RETRY_S = 3.0
+SIM_FIND_S = 90.0
 
 MENU_KEY = (360, 1198)                 # scripts/hmi_ui.py MENU_KEY
 PROFILE_Y = 195 + 675 + 162 // 2       # scenario_hazards: DriveScreen's profile buttons
@@ -62,8 +66,30 @@ PROFILE_NORMAL = (257 + 207 // 2, PROFILE_Y)
 PROFILE_LOW = (484 + 207 // 2, PROFILE_Y)
 # SkunkWorksScreen: actions_spec.h's five tiles (Restart HMI is the fifth), 320x240, two to
 # a row, 20 px apart, rows centred (ui_SkunkWorksScreen.c, ui_comp_slottile.c).
-RESTART_TILE_INDEX = 4
-SKUNK_TILES = 5
+RESTART_ACTION = "RESTART_HMI"
+# A command never makes the stick wait: a refresh goes first once the last is this old (a
+# WiFi stall of 0.27 + 0.20 s on two commands in a row lapsed it on 2026-10-09 at 50 ms).
+PRE_REFRESH_S = 0.02
+
+
+def skunk_actions(tree: pathlib.Path) -> list[str]:
+    """The Skunk Works tiles in draw order, from the tree's actions_spec.h (the image's
+    own table: the grid's size and Restart HMI's place come from it, not from a constant)."""
+    import re
+    path = tree / "components" / "hmi_ui" / "include" / "hmi_ui" / "actions_spec.h"
+    return re.findall(r"^\s*X\((\w+),", path.read_text(encoding="utf-8"), re.M)
+
+
+def tile_centre(index: int, count: int, tile0: tuple[int, int, int, int],
+                width: int = 720, gap: int = 20) -> tuple[int, int]:
+    """Where tile `index` of `count` sits in the wrapping, centred flex grid whose first
+    tile FOCUS reported at (x, y, w, h)."""
+    _, y0, w, h = tile0
+    cols = max(1, (width + gap) // (w + gap))
+    row, col = divmod(index, cols)
+    in_row = min(cols, count - row * cols)
+    left = (width - (in_row * w + (in_row - 1) * gap)) // 2
+    return left + col * (w + gap) + w // 2, y0 + row * (h + gap) + h // 2
 
 
 class NotRun(Exception):
@@ -83,12 +109,15 @@ class HazardStep(scenario_hazards.Step):
         super().__init__(name, out)
         self.not_verified = []
         self.not_run: str | None = None
+        self.details: list[str] = []  # verdict details shown with the verdict
         # A criterion the step could only observe indirectly (B5''-18b's fallback): the step
         # is never PASS on it; with every graded check passed it is NOT_RUN, "partial: ...".
         self.partial: str | None = None
 
     def result(self, characterisation: bool = False) -> dict:
         out = super().result(characterisation)
+        if self.details:
+            out["detail"] = "; ".join(self.details)
         if self.partial is not None:
             out["partial"] = self.partial
             if out["verdict"] == "PASS":
@@ -142,9 +171,12 @@ class Injector:
         self._lock = threading.Lock()
         self._target: tuple[int, int, int, int] | None = None
         self._once: tuple[int, int, int, int] | None = None
-        self._seq = 0
+        self._seq = itertools.count(1)  # thread-safe enough: next() is atomic in CPython
         self._last: float | None = None
-        self.lapses: list[tuple[float, float]] = []   # (t, gap) over INJECT_LAPSE_S
+        # (sent, gap) over INJECT_LAPSE_S between STICK sends, from the remote-UI log
+        # (stick_lapses, at collect); pauses (wall clock) end a run of refreshes on purpose.
+        self.lapses: list[tuple[str, float]] = []
+        self.pauses: list[datetime.datetime] = []
         self.log: list[tuple[float, int, int, int, int]] = []
         self.error: str | None = None
         self._stop = threading.Event()
@@ -152,12 +184,21 @@ class Injector:
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
+    def due(self, age: float) -> tuple[int, int, int, int] | None:
+        """The standing target when its last refresh is at least `age` s old, else None."""
+        target, last = self._target, self._last
+        if target is None or last is None or time.monotonic() - last < age:
+            return None
+        return target
+
+    def push_inline(self, target: tuple[int, int, int, int]) -> float:
+        """A refresh sent by the thread that holds the connection, just before its own
+        command (Rig: no command makes the stick wait out a slow round trip)."""
+        return self._push(target)
+
     def _push(self, target: tuple[int, int, int, int]) -> float:
-        self._seq += 1
         t = time.monotonic()
-        self._send(*target, self._seq)
-        if self._last is not None and t - self._last > INJECT_LAPSE_S:
-            self.lapses.append((round(t, 3), round(t - self._last, 3)))
+        self._send(*target, next(self._seq))
         self._last = t
         self.log.append((round(t, 3), *target))
         return t
@@ -182,6 +223,7 @@ class Injector:
         with self._lock:
             self._target = None
             self._last = None
+            self.pauses.append(datetime.datetime.now())
 
     def _run(self) -> None:
         while not self._stop.is_set():
@@ -204,6 +246,52 @@ class Injector:
         self._thread.join(timeout=2.0)
 
 
+def stick_lapses(rows: list[dict], pauses: list[datetime.datetime],
+                 limit: float = INJECT_LAPSE_S) -> list[tuple[str, float]]:
+    """Gaps over `limit` between consecutive STICK sends in the remote-UI log (rows with
+    "cmd" and "sent", ui_client's CommandLog), except across a pause. The send times are
+    what the board sees (its injection expires 300 ms after the last one): the injector's
+    own clock counts the wait for the connection too, and on 2026-10-09 it reported a
+    0.48 s lapse where the log shows no send gap over 0.27 s."""
+    sends = [datetime.datetime.fromisoformat(r["sent"]) for r in rows
+             if str(r.get("cmd", "")).startswith("STICK") and "error" not in r]
+    out = []
+    for a, b in zip(sends, sends[1:]):
+        gap = (b - a).total_seconds()
+        if gap > limit and not any(a <= p <= b for p in pauses):
+            out.append((b.isoformat(timespec="milliseconds"), round(gap, 3)))
+    return out
+
+
+SIM_RESTART_NOTE = "sim restarted after HMI reboot (RTPS rediscovery not supported by the sim)"
+STATE_COMMANDS = {"ENABLED": "a", "IDLE": "ok", "ERROR": "e", "INITIALIZING": "z"}
+
+
+def carry_over(modes_line: str, state: str | None, paused: bool) -> list[str]:
+    """The stdin commands that give a fresh sim the old one's modes and MCB state: its
+    `modes` answer (rtps_mcb_sim.describe_modes), the last MibStatus state it published,
+    and whether MibStatus was paused. Sent before the new sim has found the HMI, so the
+    HMI's first MibStatus after its reboot already carries the old state."""
+    import re
+    m = re.search(r"refuse ENABLE=(True|False) refuse DISABLE=(True|False) ignore next "
+                  r"(\d+) DISABLE\(s\), drop next (\d+) DISABLE\(s\), on HMI gone: (\w+)",
+                  modes_line)
+    if m is None:
+        raise NotRun("bench", f"cannot read the sim's modes to carry over: {modes_line!r}")
+    out = [f"ongone {m.group(5)}", f"ign {m.group(3)}", f"drop {m.group(4)}"]
+    if m.group(1) == "True":
+        out.append("x")  # a new sim starts with both refusals off: one toggle sets each
+    if m.group(2) == "True":
+        out.append("s")
+    if state is not None:
+        if state not in STATE_COMMANDS:
+            raise NotRun("bench", f"cannot carry the sim's state {state!r} over")
+        out.append(STATE_COMMANDS[state])
+    if paused:
+        out.append("p")
+    return out
+
+
 # ---------------------------------------------------------------- serial
 
 
@@ -212,17 +300,24 @@ class SerialWatch:
     `lines` keeps each line's arrival time on the runner's clock (time.monotonic()), the
     clock the sim's log and the STATE polls use."""
 
-    def __init__(self, port: str, seconds: float):
+    def __init__(self, port: str, seconds: float, capture: Callable | None = None,
+                 reset: bool = False):
         import board
         self.text = ""
         self.lines: list[tuple[float, str]] = []
         self._stop = threading.Event()
+        capture = capture or board.capture
+
+        def keep(cap, line: str) -> bool:
+            # Kept as it arrives: stop() never depends on the capture thread finishing.
+            self.lines.append((round(time.monotonic(), 4), line))
+            return self._stop.is_set()
 
         def run() -> None:
-            cap = board.capture(port, seconds, reset=False,
-                                on_line=lambda c, line: self._stop.is_set())
-            self.lines = [(round(cap.started + t, 4), line) for t, line in cap.lines]
-            self.text = cap.text()
+            # `stop` ends the capture within one read timeout and frees the port for the
+            # next watch (on 2026-10-09 a watch on a quiet board held it for its whole
+            # window, so the next boot's watch read nothing).
+            capture(port, seconds, reset=reset, on_line=keep, stop=self._stop)
 
         self._thread = threading.Thread(target=run, daemon=True)
         self._thread.start()
@@ -230,6 +325,7 @@ class SerialWatch:
     def stop(self) -> str:
         self._stop.set()
         self._thread.join(timeout=10.0)
+        self.text = "\n".join(line for _, line in self.lines) + ("\n" if self.lines else "")
         return self.text
 
 
@@ -247,6 +343,10 @@ class Rig:
         self.st = step
         self.groups = set(groups)
         self.port = port
+        self.restart_watch: SerialWatch | None = None  # restart_hmi(serial_s) from Drive
+        self._sample_parts: list[pathlib.Path] = []  # samples of sims replaced after a reboot
+        self._carry: list[str] = []
+        self._carry_state: str | None = None
         self.proof = proven
         self._sweep = sweep or (lambda: rtps_sweep(tree))
         self.trace = hg.Trace()
@@ -254,7 +354,7 @@ class Rig:
         self.sim: peers.SimChild | None = None
         self.hmi = None
         self.inj: Injector | None = None
-        self._io = threading.Lock()
+        self._io = threading.RLock()  # re-entered by the inline refresh before a command
         self._hmi_ui = None
         self._t0 = time.monotonic()
 
@@ -270,18 +370,50 @@ class Rig:
         self.st.record("sole_sim_proof", self.proof)
         sys.path.insert(0, str(self.tree / "scripts"))
         self._hmi_ui = importlib.import_module("hmi_ui")
-        self.sim = peers.SimChild(self.ip, self.tree, self.out / "sim.log",
-                                  event_log=self.out / "sim-events.jsonl")
-        if not self.sim.wait_ready(SIM_READY_S):
-            raise NotRun("bench", self.sim.not_ready_reason(SIM_READY_S))
-        strays = common.stray_peers({self.sim.proc.pid})
-        if strays:
-            raise NotRun("bench", "another RTPS peer started beside this run's sim: "
-                         + "; ".join(strays))
-        self.sim.event_mark("step-start")
-        self.sim.send("jstart")
-        self._connect()
+        self.sim = self._start_sim()
+        try:
+            if not self.sim.wait_ready(SIM_READY_S):
+                raise NotRun("bench", self.sim.not_ready_reason(SIM_READY_S))
+            # This run's sim is a process tree under a venv (launcher + base interpreter).
+            strays = common.stray_peers(exclude_trees={self.sim.proc.pid})
+            if strays:
+                raise NotRun("bench", "another RTPS peer started beside this run's sim: "
+                             + "; ".join(strays))
+            self.sim.event_mark("step-start")
+            self.sim.send("jstart")
+            self._connect()
+        except BaseException:
+            # __exit__ does not run when __enter__ raises: a sim left running here kept the
+            # board's XYTwist and starved every later step's sim (bench run 2026-10-08).
+            self.__exit__(None, None, None)
+            raise
         return self
+
+    def _start_sim(self, carry: list[str] | None = None) -> peers.SimChild:
+        """A sim for this step. Until it has found the board (its "board <ip> via" line) it
+        may exit at once ("Could not find the board": the board still booting); it is then
+        started again, for up to SIM_FIND_S. `carry` (carry_over's commands) goes to it as
+        soon as it has found the board, before it can publish to the HMI."""
+        deadline = time.monotonic() + SIM_FIND_S
+        tries = 0
+        while True:
+            tries += 1
+            log = self.out / ("sim.log" if tries == 1 and carry is None
+                              else f"sim-{len(self._sample_parts)}-{tries}.log")
+            sim = peers.SimChild(self.ip, self.tree, log, event_log=self.out / "sim-events.jsonl")
+            found = sim.wait_for(r"^board \S+ via ", min(15.0, max(1.0, deadline - time.monotonic())))
+            if found and sim.proc.poll() is None:
+                for cmd in carry or []:
+                    sim.send(cmd)
+                if tries > 1:
+                    self.st.record("sim_tries", tries)
+                return sim
+            reason = sim.not_ready_reason()
+            sim.stop()
+            if time.monotonic() >= deadline:
+                raise NotRun("bench", f"the sim could not find the board in {SIM_FIND_S:.0f} s "
+                             f"({tries} tries): {reason}")
+            time.sleep(SIM_RETRY_S)  # the board is still coming back
 
     def __exit__(self, *_: object) -> None:
         if self.inj is not None:
@@ -291,6 +423,7 @@ class Rig:
             self.hmi.close()
         if self.sim is not None:
             self.sim.stop()
+            self.sim = None
 
     def _connect(self) -> None:
         hmi = ui_client.open_hmi(self._hmi_ui, self.ip, self.out / "remote-ui.jsonl")
@@ -298,6 +431,11 @@ class Rig:
 
         def locked_call(*a, **k):
             with self._io:
+                inj = self.inj
+                if inj is not None and a and not str(a[0]).startswith("STICK"):
+                    target = inj.due(PRE_REFRESH_S)
+                    if target is not None:
+                        inj.push_inline(target)
                 return raw_call(*a, **k)
 
         hmi._call = locked_call
@@ -473,20 +611,24 @@ class Rig:
 
     # --- restarts ---------------------------------------------------------------------
 
-    def restart_hmi(self) -> float:
+    def restart_hmi(self, serial_s: float = 0.0) -> float:
         """The Restart HMI tile (Skunk Works, the fifth): a software reset. Returns the tap
         time. The connection is closed; wait_back() reconnects."""
+        self.restart_watch = None
+        if self.state().get("screen") == "DriveScreen":
+            return self._restart_by_port(serial_s)
+        actions = skunk_actions(self.tree)
+        if RESTART_ACTION not in actions:
+            raise NotRun("bench", f"no {RESTART_ACTION} in the tree's actions_spec.h")
         self.go("Skunk Works")
+        if self.watch(3.0, until=hg.screen_is("SkunkWorksScreen")) is None:
+            raise NotRun("bench", "could not open Skunk Works")
         f0 = self.focus()
-        if f0 is None or f0[4] != SKUNK_TILES:
+        # The keypad group may hold more than the tiles (it did on 9e0fb77: 6 for 5 tiles);
+        # the first tile is what places the grid.
+        if f0 is None or f0[4] < len(actions):
             raise NotRun("bench", f"Skunk Works' tile grid not as expected (FOCUS {f0})")
-        x0, y0, w, h, _ = f0
-        cols = max(1, (720 + 20) // (w + 20))
-        row, col = divmod(RESTART_TILE_INDEX, cols)
-        in_row = min(cols, SKUNK_TILES - row * cols)
-        left = (720 - (in_row * w + (in_row - 1) * 20)) // 2
-        x = left + col * (w + 20) + w // 2
-        y = y0 + row * (h + 20) + h // 2
+        x, y = tile_centre(actions.index(RESTART_ACTION), len(actions), f0[:4])
         self.st.record("restart_tile", {"tile0": f0[:4], "tap": [x, y]})
         self.inj.pause()
         t = time.monotonic()
@@ -495,6 +637,27 @@ class Rig:
         except ui_client.RemoteUiError:
             pass  # the board may restart before answering the RELEASE
         self._drop_hmi()
+        self._retire_sim()
+        return t
+
+    def _restart_by_port(self, serial_s: float) -> float:
+        """From DriveScreen the menu is out of reach (the burger key asks to stop there):
+        reset the chip through the port (B2's RTS pulse; reset reason USB, a clean one).
+        The same capture keeps reading the boot for `serial_s` (restart_watch): the port
+        has one owner at a time (a second open was refused, 2026-10-09)."""
+        if not self.port:
+            raise NotRun("bench", "restarting from DriveScreen needs the board's port")
+        self.st.record("restart", "RTS reset through the port (from DriveScreen)")
+        self.inj.pause()
+        self._drop_hmi()
+        t = time.monotonic()
+        watch = SerialWatch(self.port, max(serial_s, 2.0), reset=True)
+        self._retire_sim()
+        if serial_s > 0:
+            self.restart_watch = watch
+        else:
+            time.sleep(1.0)  # the reset pulse is sent; nothing to read
+            watch.stop()
         return t
 
     def crash(self) -> float:
@@ -505,6 +668,7 @@ class Rig:
         except Exception:  # noqa: BLE001 - the board aborts; its answer may be lost
             pass
         self._drop_hmi()
+        self._retire_sim()
         return t
 
     def _drop_hmi(self) -> None:
@@ -522,7 +686,55 @@ class Rig:
         if not ok:
             raise NotRun("bench", f"the board did not come back: {detail}")
         self._connect()
+        if self.sim is None:
+            self._relaunch_sim()
         return time.monotonic()
+
+    def _save_samples(self, path: pathlib.Path) -> None:
+        at = self.sim.mark()
+        self.sim.send(f"jsave {path}")
+        if self.sim.wait_for(r"^JSAVED \d+ ", 20.0, at) is None:
+            raise NotRun("bench", "the sim did not save its XYTwist samples")
+
+    def _retire_sim(self) -> None:
+        """Right after an HMI reboot is triggered. The sim hears nothing more from a
+        restarted board (its RTPS discovery does not re-match a restarted participant,
+        2026-10-09), so it is replaced: this one's samples are kept for collect(), its
+        modes and MCB state are kept for the next (carry_over), and it stops now, so the
+        HMI's first MibStatus after its boot (and its boot DISABLE) is the new sim's."""
+        old = self.sim
+        if old is None:
+            return
+        part = self.out / f"xytwist-{len(self._sample_parts) + 1}.jsonl"
+        self._save_samples(part)
+        self._sample_parts.append(part)
+        modes = old.reply("modes", r"(refuse ENABLE=.*)$")
+        events = old.events()
+        state = next((e["state"] for e in reversed(events) if e.get("ev") == "mib_publish"),
+                     None)
+        pauses = [e["ev"] for e in events if e.get("ev") in ("pause", "resume")]
+        self._carry = carry_over(modes.group(1) if modes else "", state,
+                                 bool(pauses) and pauses[-1] == "pause")
+        self._carry_state = state
+        old.stop()
+        self.sim = None
+
+    def _relaunch_sim(self) -> None:
+        """The new sim after a reboot, with the old one's modes and state (an
+        approximation, shown in the verdict's detail)."""
+        commands = self._carry
+        state = self._carry_state
+        self.sim = self._start_sim(commands)
+        if not self.sim.wait_ready(SIM_READY_S):
+            raise NotRun("bench", "after the HMI reboot: " + self.sim.not_ready_reason())
+        strays = common.stray_peers(exclude_trees={self.sim.proc.pid})
+        if strays:
+            raise NotRun("bench", "another RTPS peer beside the restarted sim: " + "; ".join(strays))
+        self.sim.event_mark("sim-restarted")
+        self.sim.send("jstart")
+        self.st.record("sim_restart", {"carried": commands, "state": state})
+        if SIM_RESTART_NOTE not in self.st.details:
+            self.st.details.append(SIM_RESTART_NOTE)
 
     # --- the start and end every step shares ----------------------------------------
 
@@ -545,6 +757,12 @@ class Rig:
                            and s.get("menu_open") is not True)
             self.st.check("set-up: Locked", s is not None,
                           f"screen {self.state().get('screen')}")
+        failed = [c["check"] for c in self.st.checks if c["check"].startswith("set-up")
+                  and not c["ok"]]
+        if failed:
+            # A step does nothing on a board that is not where it starts (on 2026-10-09 a
+            # B5''-21 whose start failed went on to CRASH the board for the next step).
+            raise NotRun("bench", f"set-up failed: {failed}")
 
     def _modes_off(self) -> None:
         self.sim_count("ign", 0)
@@ -577,12 +795,10 @@ class Rig:
     def collect(self) -> hg.Trace:
         """The step's samples and sim events into the trace; the marks from the log."""
         path = self.out / "xytwist.jsonl"
-        at = self.sim.mark()
-        self.sim.send(f"jsave {path}")
-        if self.sim.wait_for(r"^JSAVED \d+ ", 20.0, at) is None:
-            raise NotRun("bench", "the sim did not save its XYTwist samples")
+        self._save_samples(path)
         import sim_child
-        self.trace.samples = sim_child.read_samples(path)
+        self.trace.samples = [s for part in [*self._sample_parts, path]
+                              for s in sim_child.read_samples(part)]
         events = self.sim.events("step-start")
         self.trace.events = events
         self.trace.marks = {e["label"]: e["mono"] for e in events if e.get("ev") == "mark"}
@@ -595,6 +811,10 @@ class Rig:
             raise NotRun("bench", f"the sim's clock and the runner's differ by "
                          f"{max(skews):.3f} s (> {SKEW_LIMIT_S} s)")
         if self.inj is not None:
+            log = self.out / "remote-ui.jsonl"
+            rows = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()
+                    if line.strip()] if log.exists() else []
+            self.inj.lapses = stick_lapses(rows, self.inj.pauses)
             self.st.record("injection_lapses", self.inj.lapses)
         (self.out / "states.jsonl").write_text(
             "".join(json.dumps([t, s]) + "\n" for t, s in self.trace.states), encoding="utf-8")

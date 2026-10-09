@@ -166,7 +166,8 @@ def grade_b18(st: HazardStep, tr: hg.Trace, p: dict) -> None:
 
 
 def _link_after(tr: hg.Trace, r: float) -> float | None:
-    e = hg.first_event(tr.events, lambda e: e.get("ev") == "hmi_back", r)
+    # hmi_back from a sim that saw the reboot; hmi_seen from the sim that replaced it
+    e = hg.first_event(tr.events, lambda e: e.get("ev") in ("hmi_back", "hmi_seen"), r)
     return None if e is None else e["mono"]
 
 
@@ -303,9 +304,9 @@ def _serial(rig: Rig, seconds: float = SERIAL_S) -> SerialWatch:
     return SerialWatch(rig.port, seconds)
 
 
-def _reboot(rig: Rig, tag: str = "") -> float:
+def _reboot(rig: Rig, tag: str = "", serial_s: float = 0.0) -> float:
     rig.mark(f"restart{tag}")
-    t = rig.restart_hmi()
+    t = rig.restart_hmi(serial_s)
     rig.wait_back()
     rig.mark(f"back{tag}")
     return t
@@ -360,6 +361,7 @@ def s_b17b(rig: Rig) -> dict:
 
 def s_b18(rig: Rig) -> dict:
     rig.begin()
+    rig.need("notice")  # "notice names the check": an image without the hook is NOT_RUN
     rig.sim_toggle("s", True)
     to_drive_by_mcb(rig)
     rig.watch(0.5)  # centred
@@ -381,9 +383,11 @@ def s_b18b(rig: Rig) -> dict:
     rig.sim_ongone("keep")
     rig.sim_toggle("s", True)
     to_drive_by_mcb(rig)
-    watch = _serial(rig)
+    if not rig.port:
+        raise NotRun("bench", "this step reads the serial log: run it with the board's port")
     rig.inj.pause()
-    _reboot(rig)
+    _reboot(rig, serial_s=SERIAL_S)  # from DriveScreen: an RTS reset whose capture reads on
+    watch = rig.restart_watch
     rig.forward()  # "inject forward from the remote UI's reconnect"
     rig.watch(5.0, until=hg.screen_is(DRIVE))
     rig.watch(2.0)
@@ -399,6 +403,7 @@ def s_b18b(rig: Rig) -> dict:
 
 def s_b18c(rig: Rig) -> dict:
     rig.begin()
+    rig.need("phase")
     rig.sim_ongone("keep")
     to_drive_by_mcb(rig)
     rig.inj.pause()
@@ -525,5 +530,7 @@ STEPS = {
     "B5''-22": (s_b22, grade_b22, "POST budget (all reads fail)"),
     "B5''-22b": (s_b22b, grade_b22b, "one bad read in the first window"),
 }
-NEEDS_SERIAL = {"B5''-16", "B5''-18b", "B5''-21"}
+# B5''-18b and -18c restart the HMI from DriveScreen, where the burger key is a stop
+# request and the menu cannot be reached: they restart through the port (an RTS reset).
+NEEDS_SERIAL = {"B5''-16", "B5''-18b", "B5''-18c", "B5''-21"}
 CLEANUP = {"B5''-22": restart_cleanup, "B5''-22b": restart_cleanup}

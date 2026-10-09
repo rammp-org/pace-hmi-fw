@@ -148,8 +148,12 @@ class SimChild:
             self.send("q")
             self.proc.wait(timeout=5)
         except Exception:
-            self.proc.kill()
-            self.proc.wait(timeout=5)
+            # The whole tree: under a venv the sim runs in the launcher's child process.
+            common.log(f"sim: forced stop: {common.kill_tree(self.proc.pid)}")
+            try:
+                self.proc.wait(timeout=5)
+            except Exception:  # noqa: BLE001 - kill_tree did what can be done
+                self.proc.kill()
         if self.log_path is not None:
             self.log_path.parent.mkdir(parents=True, exist_ok=True)
             self.log_path.write_text("\n".join(f"{t:8.2f} {l}" for t, l in self.lines) + "\n",

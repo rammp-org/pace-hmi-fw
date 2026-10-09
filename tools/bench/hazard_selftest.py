@@ -944,12 +944,10 @@ def t_injector() -> None:
         expect("one one-cycle message, then the standing target again",
                (len(once), sent[-1][1:5]), (1, (1507, 1510, 1477, 0)))
         expect("sequence numbers go up", [r[5] for r in sent] == sorted({r[5] for r in sent}), True)
-        expect("no lapse", inj.lapses, [])
         block.set()
         time.sleep(1.0)
         block.clear()
         time.sleep(0.2)
-        expect("a held connection is a recorded lapse", bool(inj.lapses), True)
         inj.pause()
         k = len(sent)
         time.sleep(0.3)
@@ -961,6 +959,265 @@ def t_injector() -> None:
                                      "twist": [10, 1477, 2960]}})
     expect("forward is the vertical at its min", cal.forward(), (1507, 6, 1477))
     expect("no cal", hg.Cal.from_state({"cal": None}), None)
+
+
+def t_process_tree() -> None:
+    # A venv launcher (10) runs the base interpreter (11) that is this run's sim; 20/21 is
+    # another sim, 30 an unrelated python, 12 a grandchild of the launcher.
+    table = [(10, 1, r"C:\v\Scripts\python.exe sim_child.py --tree T"),
+             (11, 10, r"C:\Espressif\tools\python\python.exe sim_child.py --tree T"),
+             (12, 11, "python.exe -c pass"),
+             (20, 1, r"C:\v\Scripts\python.exe sim_child.py --tree U"),
+             (21, 20, r"C:\Espressif\tools\python\python.exe sim_child.py --tree U"),
+             (30, 1, "python.exe lsp_server.py")]
+    expect("the launcher's tree", common.descendants({10}, table), {10, 11, 12})
+    expect("no roots", common.descendants(set(), table), set())
+    strays = common.stray_peers(exclude_trees={10}, table=table)
+    expect("this run's sim (launcher and child) is not a stray; another sim is",
+           [s.split(":")[0] for s in strays], ["20", "21"])
+    old = common.stray_peers({10}, table=table)
+    expect("excluding the launcher pid alone reports its child (the 2026-10-08 NOT_RUN)",
+           [s.split(":")[0] for s in old], ["11", "20", "21"])
+
+
+class FakeSim:
+    """peers.SimChild's surface for the rig's start-up."""
+    started: list["FakeSim"] = []
+
+    def __init__(self, ip, tree, log_path=None, event_log=None, ready=True, exits=False):
+        self.ready = ready
+        self.stopped = False
+        self.exits = exits
+        self.sent: list[str] = []
+        self.marks: list[str] = []
+        self.proc = type("P", (), {"pid": 4242, "poll": lambda me, exits=exits: 1 if exits
+                                   else None})()
+        FakeSim.started.append(self)
+
+    def wait_for(self, regex, timeout, since=0):
+        return None if self.exits else True
+
+    def mark(self):
+        return 0
+
+    def reply(self, cmd, regex, timeout=5.0):
+        import re
+        return re.search(regex, "refuse ENABLE=False refuse DISABLE=True ignore next 0 "
+                                "DISABLE(s), drop next 0 DISABLE(s), on HMI gone: keep")
+
+    def events(self, after=None):
+        return [{"ev": "mib_publish", "state": "ENABLED", "mono": 1.0, "targets": 1}]
+
+    def xy_count(self, timeout=5.0):
+        return 1
+
+    def wait_ready(self, timeout=45.0):
+        return self.ready
+
+    def not_ready_reason(self, timeout=45.0):
+        return "the simulated MCB got no XYTwist (fake)"
+
+    def event_mark(self, label, timeout=5.0):
+        self.marks.append(label)
+        return True
+
+    def send(self, cmd):
+        self.sent.append(cmd)
+
+    def stop(self):
+        self.stopped = True
+
+
+def t_rig_start_failure_stops_sim() -> None:
+    saved = (hazard_rig.peers.SimChild, common.stray_peers, hazard_rig.ui_client.open_hmi)
+    cases = (("not ready", dict(ready=False), [], None),
+             ("a stray beside it", {}, ["99: sim_child.py --tree X"], None),
+             ("the remote UI does not answer", {}, [], OSError("refused")))
+    try:
+        for what, kw, strays, ui_error in cases:
+            FakeSim.started = []
+            hazard_rig.peers.SimChild = lambda *a, kw=kw, **k: FakeSim(*a, **k, **kw)
+            common.stray_peers = lambda *a, strays=strays, **k: list(strays)
+
+            def open_hmi(*a, ui_error=ui_error, **k):
+                raise ui_error
+            hazard_rig.ui_client.open_hmi = open_hmi
+            with quiet(), tempfile.TemporaryDirectory() as tmp:
+                st = hazard_rig.HazardStep("x", pathlib.Path(tmp))
+                rig = hazard_rig.Rig("1.2.3.4", common.REPO, pathlib.Path(tmp), st, set(),
+                                     proven="proof")
+                try:
+                    with rig:
+                        raise AssertionError(f"{what}: the rig started")
+                except (hazard_rig.NotRun, OSError):
+                    pass
+            expect(f"{what}: the sim is stopped", [s.stopped for s in FakeSim.started], [True])
+    finally:
+        hazard_rig.peers.SimChild, common.stray_peers, hazard_rig.ui_client.open_hmi = saved
+
+
+def t_serial_watch_and_sim_retry() -> None:
+    def capture(port, seconds, reset=False, on_line=None, stop=None):
+        on_line(None, "POST RESULT PASS 19/19 1300")
+        while not stop.is_set():
+            time.sleep(0.01)  # a quiet board: no more lines, the window still open
+    w = hazard_rig.SerialWatch("COMX", 120.0, capture=capture)
+    time.sleep(0.05)
+    t0 = time.monotonic()
+    text = w.stop()
+    expect("stop() ends a quiet capture at once and keeps its lines",
+           (text, time.monotonic() - t0 < 1.0), ("POST RESULT PASS 19/19 1300\n", True))
+    saved = (hazard_rig.peers.SimChild, hazard_rig.SIM_RETRY_S)
+    made = []
+
+    def sim(*a, **k):
+        made.append(FakeSim(*a, exits=not made, **k))
+        return made[-1]
+    hazard_rig.peers.SimChild, hazard_rig.SIM_RETRY_S = sim, 0.0
+    try:
+        with quiet(), tempfile.TemporaryDirectory() as tmp:
+            st = hazard_rig.HazardStep("x", pathlib.Path(tmp))
+            rig = hazard_rig.Rig("1.2.3.4", common.REPO, pathlib.Path(tmp), st, set(), proven="p")
+            got = rig._start_sim()
+        expect("a sim that exits at once is stopped and started once more",
+               ([m.stopped for m in made], got is made[-1], st.records.get("sim_tries")),
+               ([True, False], True, 2))
+    finally:
+        hazard_rig.peers.SimChild, hazard_rig.SIM_RETRY_S = saved
+
+    class Boom(hazard_rig.Rig):
+        def __enter__(self):
+            raise PermissionError(13, "Access is denied")
+    saved_rig = hazard_rig.Rig
+    hazard_rig.Rig = Boom
+    try:
+        with quiet(), tempfile.TemporaryDirectory() as tmp:
+            r = hazard_steps.run_step("B5''-17", "1.2.3.4", pathlib.Path(tmp), common.REPO,
+                                      ["c3"], proven="p")
+    finally:
+        hazard_rig.Rig = saved_rig
+    expect("a rig fault (the port refused) ends the step NOT_RUN, not the run",
+           (r["verdict"], r["reason"].startswith("bench: PermissionError")), ("NOT_RUN", True))
+
+
+def t_sim_replaced_at_reboot() -> None:
+    saved = (hazard_rig.peers.SimChild, common.stray_peers)
+    FakeSim.started = []
+    hazard_rig.peers.SimChild = lambda *a, **k: FakeSim(*a, **k)
+    common.stray_peers = lambda *a, **k: []
+    try:
+        with quiet(), tempfile.TemporaryDirectory() as tmp:
+            st = hazard_rig.HazardStep("x", pathlib.Path(tmp))
+            rig = hazard_rig.Rig("1.2.3.4", common.REPO, pathlib.Path(tmp), st, set(), proven="p")
+            rig.sim = old = FakeSim("1.2.3.4", common.REPO)
+            rig._save_samples = lambda path: None
+            rig._retire_sim()
+            expect("the old sim stops at the reboot, before the HMI is back",
+                   (old.stopped, rig.sim), (True, None))
+            rig._relaunch_sim()
+            new = rig.sim
+        expect("the new sim gets the old modes and ENABLED before it is ready, then a mark",
+               (new.sent[:4], new.marks), (["ongone keep", "ign 0", "drop 0", "s"],
+                                           ["sim-restarted"]))
+        expect("ENABLED carried", new.sent[4], "a")
+        expect("the verdict detail", st.details, [hazard_rig.SIM_RESTART_NOTE])
+    finally:
+        hazard_rig.peers.SimChild, common.stray_peers = saved
+
+
+def t_forced_stop_kills_tree() -> None:
+    import peers
+    killed = []
+
+    class Proc:
+        pid = 777
+        waits = 0
+
+        def wait(self, timeout=None):
+            Proc.waits += 1
+            if Proc.waits == 1:
+                raise TimeoutError("the sim did not quit")
+
+        def kill(self):
+            killed.append("kill-launcher-only")
+    sim = peers.SimChild.__new__(peers.SimChild)
+    sim.proc, sim.log_path, sim.lines = Proc(), None, []
+    sim.send = lambda cmd: None
+    saved = common.kill_tree
+    common.kill_tree = lambda pid: killed.append(pid) or "killed"
+    try:
+        with quiet():
+            sim.stop()
+    finally:
+        common.kill_tree = saved
+    expect("a sim that does not quit is killed as a tree, not by its launcher pid", killed,
+           [777])
+
+
+def t_stick_lapses() -> None:
+    import datetime as dt
+    t0 = dt.datetime(2026, 10, 9, 3, 0, 0)
+
+    def row(ms: int, cmd: str = "STICK 1 2 3 0 1", **kw) -> dict:
+        return {"cmd": cmd, "sent": (t0 + dt.timedelta(milliseconds=ms)).isoformat(), **kw}
+    rows = [row(0), row(100), row(150, "STATE"), row(200), row(480), row(600, error="x"),
+            row(900), row(1000)]
+    expect("gaps between STICK sends over 0.28 s", hazard_rig.stick_lapses(rows, []),
+           [((t0 + dt.timedelta(milliseconds=900)).isoformat(timespec="milliseconds"), 0.42)])
+    expect("a pause in between is not a lapse",
+           hazard_rig.stick_lapses(rows, [t0 + dt.timedelta(milliseconds=700)]), [])
+    expect("0.28 s exactly is not", hazard_rig.stick_lapses([row(0), row(280)], []), [])
+
+
+def t_restart_tile_and_refresh() -> None:
+    names = hazard_rig.skunk_actions(common.REPO)
+    expect("the tree's Skunk Works tiles", names[-1], "RESTART_HMI")
+    expect("5 tiles, 320x240, two a row: Restart HMI alone and centred on row 3",
+           hazard_rig.tile_centre(4, 5, (30, 342, 320, 240)), (360, 342 + 2 * 260 + 120))
+    expect("6 tiles: the sixth on the right of row 3",
+           hazard_rig.tile_centre(5, 6, (30, 342, 320, 240)), (370 + 160, 342 + 2 * 260 + 120))
+    expect("the first tile", hazard_rig.tile_centre(0, 5, (30, 342, 320, 240)), (190, 462))
+    sent = []
+    inj = hazard_rig.Injector(lambda h, v, tw, mask, seq: sent.append((time.monotonic(), seq)))
+    try:
+        inj.set(1507, 1510, 1477)
+        expect("just refreshed: not due", inj.due(0.05), None)
+        time.sleep(0.06)
+        target = inj.due(0.05)
+        expect("due after 50 ms", target, (1507, 1510, 1477, 0))
+        inj.push_inline(target)
+        expect("the inline refresh is a STICK with a fresh sequence number",
+               len({seq for _, seq in sent}), len(sent))
+        inj.pause()
+        expect("paused: nothing due", inj.due(0.0), None)
+    finally:
+        inj.stop()
+
+
+def t_sim_carry_over() -> None:
+    line = ("refuse ENABLE=False refuse DISABLE=True ignore next 3 DISABLE(s), drop next 0 "
+            "DISABLE(s), on HMI gone: keep, HMI back 1 time(s)")
+    expect("ENABLED, refusing DISABLE, 3 ignores left: all carried, the state last",
+           hazard_rig.carry_over(line, "ENABLED", False),
+           ["ongone keep", "ign 3", "drop 0", "s", "a"])
+    idle = line.replace("refuse ENABLE=False", "refuse ENABLE=True").replace(
+        "refuse DISABLE=True", "refuse DISABLE=False").replace("keep", "idle")
+    expect("IDLE, refusing ENABLE, paused", hazard_rig.carry_over(idle, "IDLE", True),
+           ["ongone idle", "ign 3", "drop 0", "x", "ok", "p"])
+    expect("no publish seen: modes only", hazard_rig.carry_over(line, None, False)[-1], "s")
+    for bad in (("garbage", "IDLE"), (line, "BOOTING")):
+        try:
+            hazard_rig.carry_over(*bad, False)
+        except hazard_rig.NotRun:
+            continue
+        raise AssertionError(f"{bad} was carried")
+    with quiet(), tempfile.TemporaryDirectory() as tmp:
+        st = hazard_rig.HazardStep("x", pathlib.Path(tmp))
+        st.details.append(hazard_rig.SIM_RESTART_NOTE)
+        st.check("c", True, "")
+        r = st.result()
+    expect("the approximation is in the verdict's detail",
+           (r["verdict"], "RTPS rediscovery not supported" in r["detail"]), ("PASS", True))
 
 
 CASES = [
@@ -1003,6 +1260,20 @@ CASES = [
     ("BENCH-045 C2-13 is NOT_RUN (no calibration that writes flash); the C2 clean-up reboots; "
      "C2-14 grader: boot", t_c2_13_14),
     ("BENCH-046 C2-15, 16 graders: the soak's self test, ContinuousAdc starvation", t_c2_15_16),
+    ("BENCH-047 stray peers exclude this run's sim as a process tree (venv launcher and its "
+     "base-interpreter child), not its pid alone", t_process_tree),
+    ("BENCH-048 a rig whose start-up fails stops the sim it started", t_rig_start_failure_stops_sim),
+    ("BENCH-049 a sim that does not quit is killed with its whole tree", t_forced_stop_kills_tree),
+    ("BENCH-050 Restart HMI's tile from the tree's actions_spec.h; a refresh goes before any "
+     "command once it is 20 ms old", t_restart_tile_and_refresh),
+    ("BENCH-052 a serial watch frees the port at stop() even on a quiet board; a sim that exits "
+     "at once is started once more; a rig fault ends only its step", t_serial_watch_and_sim_retry),
+    ("BENCH-053 after an HMI reboot the new sim gets the old one's modes and MCB state; the "
+     "verdict detail says so", t_sim_carry_over),
+    ("BENCH-054 at an HMI reboot the sim is retired at once and its successor gets the old "
+     "modes and state before it can publish", t_sim_replaced_at_reboot),
+    ("BENCH-051 injection lapses come from the STICK send times in the remote-UI log, not "
+     "the injector's own clock; a pause is not a lapse", t_stick_lapses),
 ]
 
 

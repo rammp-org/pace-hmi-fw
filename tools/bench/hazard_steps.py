@@ -51,7 +51,7 @@ STEP_GROUP = {s: g for g in GROUP_ORDER for s in GROUPS[g]}
 # Retired by a later fix: (step, the fix that retires it, why).
 RETIRED_BY = {"B5''-15": ("c3", "C3 F5: replaced by B5''-18b"),
               "B5''-12": ("c2", "C2 E9: PERMIT STICK is gone, the monitor writes stick health")}
-NEEDS_SERIAL = scenario_c3.NEEDS_SERIAL | scenario_c4.NEEDS_SERIAL
+NEEDS_SERIAL = scenario_c1.NEEDS_SERIAL | scenario_c3.NEEDS_SERIAL | scenario_c4.NEEDS_SERIAL
 # Steps whose injection is expected to lapse: a STALL blocks the remote-UI connection.
 ALLOW_LAPSE = {"B5i", "B5j", "C2-16"}
 
@@ -142,6 +142,9 @@ def run_step(name: str, ip: str, out: pathlib.Path, tree: pathlib.Path,
         st.not_run = f"{e.kind}: {e.reason}"
     except ui_client.RemoteUiError as e:
         st.not_run = f"bench: remote UI: {e}"
+    except Exception as e:  # noqa: BLE001 - a rig fault ends this step, not the run
+        # (a serial port refused on 2026-10-09 made run_bench skip every later step)
+        st.not_run = f"bench: {type(e).__name__}: {e}"
     return st.result()
 
 
