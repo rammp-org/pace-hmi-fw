@@ -978,7 +978,6 @@ Found while writing this; none is a hazard on its own.
   injection uses its `Mailbox` and `AtomicValue`.
 - `README.md` and `architecture.md` ("Today vs target") still describe `main.cpp` as
   `frag_*.inc` fragments.
-- `tools/split_main.py` and `tools/split_guard.py` remain, with no fragments left to split.
 
 **Dead or unused:**
 
