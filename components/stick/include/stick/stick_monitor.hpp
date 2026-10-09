@@ -117,6 +117,16 @@ struct SampleReason {
 };
 inline constexpr SampleReason kPlausible{SampleFault::NONE, StickAxis::NONE};
 
+namespace classify_detail {
+// The first of the three axes (0 horizontal, 1 vertical, 2 twist) for which @p fails holds,
+// or 3 when none does.
+template <typename Fails> [[nodiscard]] constexpr std::size_t first_axis(Fails fails) noexcept {
+  constexpr std::array<std::size_t, 3> kAxes{0, 1, 2};
+  const auto it = std::ranges::find_if(kAxes, fails);
+  return it == kAxes.end() ? kAxes.size() : *it;
+}
+} // namespace classify_detail
+
 /// The sample's reason: the first failing check in P1..P6 order, axes horizontal, vertical,
 /// twist; kPlausible when every check holds. 0 mV up to the calibrated min is plausible on
 /// purpose (D2 residual). `stale_h` / `stale_v`: P5 for that channel, judged by the monitor.
@@ -128,25 +138,23 @@ inline constexpr SampleReason kPlausible{SampleFault::NONE, StickAxis::NONE};
   const std::array<float, 3> maxes{s.horizontal.max_mv, s.vertical.max_mv, s.twist_max_mv};
   const std::array<float, 3> limit{limits.horizontal, limits.vertical, limits.twist};
   const std::array<StickAxis, 3> axes{StickAxis::HORIZONTAL, StickAxis::VERTICAL, StickAxis::TWIST};
-  for (std::size_t i = 0; i < 3; ++i) { // P1
-    if (!means[i]->has_value()) {
-      return {MISSING, axes[i]};
-    }
+  using classify_detail::first_axis;
+  if (const std::size_t i = first_axis([&](std::size_t a) { return !means[a]->has_value(); });
+      i < axes.size()) { // P1
+    return {MISSING, axes[i]};
   }
-  for (std::size_t i = 0; i < 3; ++i) { // P2
-    if (!std::isfinite(**means[i]) || !std::isfinite(maxes[i])) {
-      return {NAN_VALUE, axes[i]};
-    }
+  if (const std::size_t i = first_axis(
+          [&](std::size_t a) { return !std::isfinite(**means[a]) || !std::isfinite(maxes[a]); });
+      i < axes.size()) { // P2
+    return {NAN_VALUE, axes[i]};
   }
-  for (std::size_t i = 0; i < 3; ++i) { // P3
-    if (**means[i] < 0.0f) {
-      return {NEGATIVE, axes[i]};
-    }
+  if (const std::size_t i = first_axis([&](std::size_t a) { return **means[a] < 0.0f; });
+      i < axes.size()) { // P3
+    return {NEGATIVE, axes[i]};
   }
-  for (std::size_t i = 0; i < 3; ++i) { // P4
-    if (maxes[i] > limit[i]) {
-      return {HIGH, axes[i]};
-    }
+  if (const std::size_t i = first_axis([&](std::size_t a) { return maxes[a] > limit[a]; });
+      i < axes.size()) { // P4
+    return {HIGH, axes[i]};
   }
   if (stale_h || stale_v) { // P5
     return {STALE, stale_h ? StickAxis::HORIZONTAL : StickAxis::VERTICAL};
@@ -172,10 +180,10 @@ inline constexpr std::size_t kMonitorInputCount = 3;
 /// runs and the state is CALIBRATING; SAMPLE otherwise. `calibrating` is sampled once a cycle
 /// and the same value goes to the pipeline (REQ-CTL-15).
 [[nodiscard]] constexpr MonitorInput select_input(bool calibrating, MonitorState state) {
-  const bool in_cal = state == MonitorState::CALIBRATING;
-  return calibrating && !in_cal   ? MonitorInput::CAL_START
-         : !calibrating && in_cal ? MonitorInput::CAL_END
-                                  : MonitorInput::SAMPLE;
+  if (state == MonitorState::CALIBRATING) {
+    return calibrating ? MonitorInput::SAMPLE : MonitorInput::CAL_END;
+  }
+  return calibrating ? MonitorInput::CAL_START : MonitorInput::SAMPLE;
 }
 
 /// The guards (§3.3), one bit each.
@@ -296,12 +304,13 @@ inline constexpr std::array<MonitorTransition, 26> STICK_MONITOR_TRANSITIONS = [
 
 /// The oracle's lookup: the one matching row, or row 0 (nothing changes).
 [[nodiscard]] constexpr MonitorDecision find_row(MonitorState s, MonitorInput in, GuardBits g) {
-  for (const MonitorTransition &t : STICK_MONITOR_TRANSITIONS) {
-    if (t.from == s && t.input == in && matches(t.guard, g)) {
-      return {t.row, t.to, t.actions};
-    }
+  const auto it = std::ranges::find_if(STICK_MONITOR_TRANSITIONS, [=](const MonitorTransition &t) {
+    return t.from == s && t.input == in && matches(t.guard, g);
+  });
+  if (it == STICK_MONITOR_TRANSITIONS.end()) {
+    return {0, s, monitor_detail::kNo};
   }
-  return {0, s, monitor_detail::kNo};
+  return {it->row, it->to, it->actions};
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -607,11 +616,12 @@ private:
     if (d.row == 0) {
       return;
     }
-    for (const MonitorAction a : d.actions) {
-      if (!perform(a, reason, cal_generation)) {
-        enter_safe_state();
-        return;
-      }
+    // Left to right; all_of stops at the first action it cannot perform.
+    const bool done = std::ranges::all_of(
+        d.actions, [&](MonitorAction a) { return perform(a, reason, cal_generation); });
+    if (!done) {
+      enter_safe_state();
+      return;
     }
     state_ = d.to;
   }

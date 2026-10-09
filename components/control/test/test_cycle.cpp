@@ -88,18 +88,18 @@ struct FakeIo {
   std::optional<hmi::stick::CalibrationMv> take_new_calibration() { return std::nullopt; }
   float smooth_twist_mv(float twist_mv) { return twist_mv; }
   void note_raw_mv(float, float, float) {}
-  bool calibrating() { return is_calibrating; }
+  bool calibrating() const { return is_calibrating; }
   bool swap() { return false; }
   bool invert_x() { return false; }
   bool invert_y() { return false; }
   int sensitivity() { return 5; }
-  std::uint32_t joy_key() { return key; }
+  std::uint32_t joy_key() const { return key; }
   std::uint32_t remote_key() { return 0; }
   void set_joy_key(std::uint32_t k) { key = k; }
   void set_joy_flick(std::uint32_t) {}
   void show(const hmi::stick::Position &) {}
   int drive_speed() { return 10; }
-  bool stick_drives() { return drives; }
+  bool stick_drives() const { return drives; }
   bool button_pressed() { return false; }
   bool publish(const hmi::stick::Command &c, bool) {
     trace->add('P');

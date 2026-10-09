@@ -763,7 +763,7 @@ TEST_CASE("STK-100 10,000 cycles of monitor + pipeline under the armed allocatio
     bool invert_x() { return false; }
     bool invert_y() { return false; }
     int sensitivity() { return 5; }
-    std::uint32_t joy_key() { return key; }
+    std::uint32_t joy_key() const { return key; }
     std::uint32_t remote_key() { return 0; }
     void set_joy_key(std::uint32_t k) { key = k; }
     void set_joy_flick(std::uint32_t) {}
@@ -777,10 +777,10 @@ TEST_CASE("STK-100 10,000 cycles of monitor + pipeline under the armed allocatio
       {11.0f, 1507.0f, 2971.0f}, {6.0f, 1510.0f, 2962.0f}, {10.0f, 1477.0f, 2960.0f}};
   StickPipeline pipeline(pipeline_config(board2, {1, 2, 3, 4}));
   StickMonitor monitor;
-  Io io;
   unsigned hits = 0;
   unsigned published = 0;
   {
+    Io io;
     host_test::NoAlloc scope;
     for (std::uint32_t i = 0; i < 10'000; ++i) {
       // A new window every 4th cycle; a failed read every 97th; a calibration now and then.
