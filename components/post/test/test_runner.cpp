@@ -558,21 +558,35 @@ TEST_CASE("POST-048 1000 accumulator cycles and 100 runner ticks allocate nothin
           "[post][alloc][REQ-POST-20]") {
   RestWindow w;
   unsigned windows = 0;
-  TEST_ASSERT_NO_ALLOC(for (int i = 0; i < 1000; ++i) {
-    if (w.add(1650.0f, 1650.0f + static_cast<float>(i % 7),
-              i % 13 == 0 ? std::nullopt : std::optional<float>{1500.0f}, i % 97 == 0)) {
-      ++windows;
+  unsigned window_allocs = 0;
+  {
+    host_test::NoAlloc scope;
+    for (int i = 0; i < 1000; ++i) {
+      const std::optional<float> twist = i % 13 == 0 ? std::nullopt : std::optional<float>{1500.0f};
+      if (w.add(1650.0f, 1650.0f + static_cast<float>(i % 7), twist, i % 97 == 0)) {
+        ++windows;
+      }
     }
-  });
+    window_allocs = scope.count();
+  }
+  TEST_ASSERT_EQUAL_UINT(0U, window_allocs);
   TEST_ASSERT_EQUAL_UINT(1000U / N, windows);
   World world;
   world.board.reset = ResetReason::POWERON;
   Runner runner{FakePort{&world}};
-  TEST_ASSERT_NO_ALLOC(for (std::uint32_t i = 0; i < 100; ++i) {
-    runner.tick(T0 + 250U * i, (i % 4 == 3) ? std::optional<StickWindow>{window_off_centre(
-                                                  static_cast<std::int32_t>(i < 60 ? 400 : 0))}
-                                            : std::nullopt);
-  });
+  unsigned runner_allocs = 0;
+  {
+    host_test::NoAlloc scope;
+    for (std::uint32_t i = 0; i < 100; ++i) {
+      std::optional<StickWindow> window;
+      if (i % 4 == 3) {
+        window = window_off_centre(i < 60 ? 400 : 0);
+      }
+      runner.tick(T0 + 250U * i, window);
+    }
+    runner_allocs = scope.count();
+  }
+  TEST_ASSERT_EQUAL_UINT(0U, runner_allocs);
   TEST_ASSERT_TRUE(runner.gate() == PostGate::PASS);
 }
 
