@@ -181,7 +181,7 @@ private:
   bool post_passed() const;
   /// Why POST has not passed, in words: hmi_ui's post_reason_text over the gate (the Drive
   /// notice and the REFUSED_POST banner). Null when it has passed.
-  const char *post_reason() const;
+  const char *post_reason();
   void profile_clicked();
   bool entry_push();
   void hold_confirm();
@@ -246,6 +246,7 @@ private:
   lv_subject_t locked_{};               ///< int: 1 = locked, 0 = unlocked (set_locked)
   lv_subject_t refused_{};              ///< int: Refused; refusal panels up unless REFUSED_NONE
   std::atomic<int32_t> refused_pub_{0}; ///< `refused`, for other tasks (refused_any_task)
+  PostText post_reason_words_{};        ///< the indicator's words, as post_reason last read them
   /// Raw value per seat axis, in the table's units, as the MCB last reported it.
   lv_subject_t seat_axis_value_[rammp::kSeatAxisCount]{};
   uint8_t seat_axis_count_ = 0; ///< actuators in the table

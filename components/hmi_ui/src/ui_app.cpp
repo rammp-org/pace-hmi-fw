@@ -65,9 +65,13 @@ bool UiApp::seat_ready() { return hmi::ui::seat_ready(shared_); }
 hmi::stick::HoldReason UiApp::hold_reason() const { return permit_hooks_.hold_reason.read(); }
 hmi::stick::PostGate UiApp::post_gate() const { return permit_hooks_.post_gate.read(); }
 bool UiApp::post_passed() const { return hmi::stick::post_passed(post_gate()); }
-// The blocking check's own words come from the POST's TopBar indicator (hazard-c3-spec.md §2.8)
-// once that is wired; until then the gate's own words.
-const char *UiApp::post_reason() const { return post_reason_text(post_gate(), nullptr); }
+// The blocking check's own words are the POST's TopBar indicator's (hazard-c3-spec.md §2.8,
+// §4.5); NOT_RUN reads C1's "Start-up check not run". UI task: the words are kept in a member.
+const char *UiApp::post_reason() {
+  post_reason_words_ = post_stage_.text_now();
+  const char *words = post_reason_words_.text.data();
+  return post_reason_text(post_gate(), words[0] != '\0' ? words : nullptr);
+}
 
 // PUBLISH_DRIVE: the drive request as it stands, with the new profile.
 void UiApp::profile_clicked() {

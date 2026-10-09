@@ -91,6 +91,6 @@ void hmi::ui::DriveNoticeView::observer(lv_observer_t *observer, lv_subject_t *s
     lv_obj_add_flag(label, LV_OBJ_FLAG_HIDDEN);
     return;
   }
-  lv_label_set_text_static(label, text);
+  lv_label_set_text(label, text); // copied: the POST words change under the same pointer
   lv_obj_remove_flag(label, LV_OBJ_FLAG_HIDDEN);
 }
