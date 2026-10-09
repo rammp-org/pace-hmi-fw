@@ -28,5 +28,5 @@ $(call obj_of,$(SRCS_UNDER_TEST)): CXX_WARN := $(WARN_FLAGS) -Wswitch-enum
 IDF_ROOT ?= $(abspath $(UNITY_DIR)/../../../..)
 $(call obj_of,$(HERE)/test_idf_parity.cpp): CXXFLAGS_ALL += -DPOST_IDF_ROOT='"$(IDF_ROOT)"'
 
-# POST-051 reads main/selftest.cpp's reset_reason_name, to keep the copy in step.
+# POST-051 reads main/selftest_names.cpp's reset_reason_name, to keep the copy in step.
 $(call obj_of,$(HERE)/test_runner.cpp): CXXFLAGS_ALL += -DPOST_REPO_ROOT='"$(REPO)"'

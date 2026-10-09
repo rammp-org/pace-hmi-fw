@@ -607,11 +607,11 @@ TEST_CASE("POST-049 Overall maps onto PostGate one to one; a value outside the e
   TEST_ASSERT_TRUE(hmi::post::gate_of(static_cast<Overall>(9)) == PostGate::FAIL);
 }
 
-TEST_CASE("POST-051 the reset reason names are the self test's (main/selftest.cpp), value for "
-          "value",
+TEST_CASE("POST-051 the reset reason names are the self test's (main/selftest_names.cpp), value "
+          "for value",
           "[post][reset][REQ-POST-17]") {
   // The self test's reset_reason_name: `case ESP_RST_<X>: return "<name>";`, default "other".
-  std::ifstream in(std::string(POST_REPO_ROOT) + "/main/selftest.cpp");
+  std::ifstream in(std::string(POST_REPO_ROOT) + "/main/selftest_names.cpp");
   std::ostringstream text;
   text << in.rdbuf();
   const std::string src = text.str();

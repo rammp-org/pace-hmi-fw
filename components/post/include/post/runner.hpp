@@ -54,7 +54,7 @@ static_assert(gate_of(Overall::PENDING) == PostGate::PENDING &&
               "Overall maps onto PostGate one to one (POST-049)");
 
 /// @brief A reset reason's name for the logs and the About screen: the self test's
-///        `reset_reason_name` (main/selftest.cpp), kept in step by a parity test (POST-047).
+///        `reset_reason_name` (main/selftest_names.cpp), kept in step by a parity test (POST-047).
 /// @param reason the reason
 /// @return its name; "other" for a reason the self test does not name
 [[nodiscard]] std::string_view reset_reason_name(ResetReason reason) noexcept;
