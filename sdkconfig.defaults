@@ -339,3 +339,13 @@ CONFIG_LCD_DSI_ISR_CACHE_SAFE=y
 # TLS to GitHub takes ~40 KB while a download runs. Internal RAM is the DMA pool
 # the W5500 and the C6's SDIO live on, so mbedTLS allocates from PSRAM.
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+
+# Task watchdog, hazard fix C4 phase 1 (hazard-c4-spec.md §4.2; owner answers E2-E4): the
+# Read ADC and lv_task tasks subscribe; a 2 s timeout; the idle tasks are not watched; a trip
+# reports only. Phase 2 (CONFIG_ESP_TASK_WDT_PANIC=y) is its own change, after a clean soak.
+CONFIG_ESP_TASK_WDT_EN=y
+CONFIG_ESP_TASK_WDT_INIT=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=2
+# CONFIG_ESP_TASK_WDT_PANIC is not set
+# CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0 is not set
+# CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1 is not set

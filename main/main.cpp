@@ -57,6 +57,7 @@
 #include "esp_lcd_mipi_dsi.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
+#include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -203,13 +204,18 @@ static hmi::stick::StickPipeline::Config stick_pipeline_config(const JoystickCal
 // MibStatus stamp), and later C2's monitor. Durations on it are taken modulo 2^32.
 static uint32_t adc_clock_ms() { return static_cast<uint32_t>(esp_timer_get_time() / 1000); }
 
+// The calling task on the task watchdog (hazard-c4-spec.md §4.3; phase 1: a trip reports
+// only). Subscribe at the task's first cycle; reset at the end of every cycle. A reset's error
+// (the task was never subscribed) changes nothing: the guard already holds WDT_MISSING.
+static bool task_watchdog_subscribe() { return esp_task_wdt_add(nullptr) == ESP_OK; }
+static void task_watchdog_reset() { static_cast<void>(esp_task_wdt_reset()); }
+
 // The stick task's side of the board (StickIsland's Ports, hazard fix C4): its clock and the
-// task watchdog. The watchdog is not wired yet (hazard-c4-spec.md §9.2 commit 5): subscribing
-// reports success and a reset does nothing, so the guard's WDT_MISSING cannot hold.
+// task watchdog.
 struct StickPorts {
   static uint32_t now_ms() { return adc_clock_ms(); }
-  static bool watchdog_subscribe() { return true; }
-  static void watchdog_reset() {}
+  static bool watchdog_subscribe() { return task_watchdog_subscribe(); }
+  static void watchdog_reset() { task_watchdog_reset(); }
 };
 
 // The ADC task's side of StickPipeline::cycle. Runs on the ADC task only; every
@@ -1109,6 +1115,11 @@ extern "C" void app_main(void) {
       .fps_meter = kFpsInstrument ? &fps_meter : nullptr,
       // The motion guard's UI heartbeat (hazard-c4-spec.md §3.1), on the ADC side's clock.
       .heartbeat = [] { ui_app.guard_sources().note_ui_cycle(adc_clock_ms()); },
+      // The task watchdog (C4 §4.3): the UI task subscribes at its first cycle; the result is
+      // the motion guard's ui_wdt_ok.
+      .watchdog_subscribe = task_watchdog_subscribe,
+      .watchdog_subscribed = [](bool ok) { ui_app.guard_sources().note_ui_wdt(ok); },
+      .watchdog_reset = task_watchdog_reset,
   });
   if (!ui_island.start()) {
     logger.error("Failed to start LVGL task!");
@@ -1166,8 +1177,6 @@ extern "C" void app_main(void) {
   };
   // The motion guard's link flags (C4-b): rtps_comms' atomics, alive as long as the firmware.
   const RtpsLinkFlags link_flags = rtps_comms_link_flags();
-  // Until the UI task subscribes to the task watchdog (C4 §9.2 commit 5): its flag reads true.
-  ui_app.guard_sources().note_ui_wdt(true);
   hmi::control::StickIsland<StickSlot, AdcStickIo, kStickCycle, StickPorts> stick_island({
       .task =
           {

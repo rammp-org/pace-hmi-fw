@@ -4,6 +4,7 @@
 #include <chrono>
 
 #include "hmi_ui/fps_meter.hpp"
+#include "logger.hpp"
 #include "task.hpp"
 
 namespace hmi::ui {
@@ -26,6 +27,12 @@ public:
     /// Hazard fix C4 (REQ-UI-24): stores the UI heartbeat, after every completed cycle; may
     /// be null.
     void (*heartbeat)();
+    /// Hazard fix C4 (REQ-UI-24, §4.3): the task watchdog. `watchdog_subscribe` runs at the
+    /// first cycle and its result goes to `watchdog_subscribed` (the motion guard's
+    /// ui_wdt_ok); `watchdog_reset` after every cycle and the FPS report. Each may be null.
+    bool (*watchdog_subscribe)();
+    void (*watchdog_subscribed)(bool subscribed);
+    void (*watchdog_reset)();
   };
 
   /// @brief Stores the config; starts nothing.
@@ -51,7 +58,14 @@ private:
   std::chrono::milliseconds period_;
   FpsMeter *fps_meter_;
   void (*heartbeat_)();
+  bool (*watchdog_subscribe_)();
+  void (*watchdog_subscribed_)(bool subscribed);
+  void (*watchdog_reset_)();
+  bool started_ = false;
+  espp::Logger logger_{{.tag = "ui_island", .level = espp::Logger::Verbosity::WARN}};
   espp::Task task_;
+
+  void first_cycle();
 };
 
 } // namespace hmi::ui

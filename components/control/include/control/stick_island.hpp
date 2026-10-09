@@ -139,9 +139,17 @@ public:
   }
 
 private:
-  // The Ports as ControlCycle's watchdog and clock.
+  // The Ports as ControlCycle's watchdog and clock. A failed subscription is logged once, at
+  // the task's first cycle (start-up, CS-SAF-04); the guard then holds WDT_MISSING.
   struct PortWatchdog {
-    bool subscribe() { return Ports::watchdog_subscribe(); }
+    espp::Logger *logger;
+    bool subscribe() {
+      const bool ok = Ports::watchdog_subscribe();
+      if (!ok) {
+        logger->error("Read ADC: task watchdog subscription failed: stick held (WDT_MISSING)");
+      }
+      return ok;
+    }
     void reset() { Ports::watchdog_reset(); }
   };
   struct PortClock {
@@ -206,7 +214,8 @@ private:
   std::optional<Stick> stick_;
   typename Io::State *io_state_ = nullptr;
   std::optional<espp::SimpleLowpassFilter> twist_lowpass_;
-  PortWatchdog watchdog_;
+  espp::Logger logger_{{.tag = "stick_island", .level = espp::Logger::Verbosity::WARN}};
+  PortWatchdog watchdog_{&logger_};
   ControlCycle<PortWatchdog, PortClock> control_;
   espp::Task task_;
 };

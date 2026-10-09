@@ -107,6 +107,7 @@ dwells), `drive_ui/shared_subjects.hpp` (`SharedSubjects`) and `drive_ui/hold_ra
 | REQ-UI-21 | The About screen shows the last reset's reason (hazard-c3-spec.md §2.9) | bench B5''-21 (hazard-c3-spec.md §7) |
 | REQ-UI-22 | `DrivePort::sample` reads the POST gate live (acquire); `post_ok` is true only for PASS | GLD-125 |
 | REQ-UI-23 | Each UI poll tick runs the POST runner, then the drive adapter's tick, then the indicator (`UiPoll::poll`) | review; no host test (ui_poll.cpp needs LVGL) |
+| REQ-UI-24 | The UI task stores the heartbeat after every completed cycle, subscribes to the task watchdog at its first cycle and resets it after every cycle (hazard fix C4, `UiIsland`; hazard-c4-spec.md §4.3) | B3 (`ctl.ui_age_max`), B5i |
 
 ## Tasks and dependencies
 
