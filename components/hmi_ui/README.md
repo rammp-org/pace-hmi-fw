@@ -60,7 +60,7 @@ dwells), `drive_ui/shared_subjects.hpp` (`SharedSubjects`) and `drive_ui/hold_ra
 | `include/hmi_ui/refusal_texts.hpp` | `REFUSAL_TEXTS`: the refusal banners' words from `hmi_rtps_spec` (was main's kRefusalTexts) |
 | `include/hmi_ui/actions_spec.h` | The Skunk Works tiles' X-macro table (moved from `main/actions_spec.h`) |
 | `include/hmi_ui/ui_build.hpp`, `src/ui_build.cpp` | `build_screens`, `finish_build`, `perf_overlay_font`, `PerfOverlay` (the FPS counter slot's toggle, from `main/frag_status_band.inc`): the UI build's steps that need only what they are passed (every screen ui_init builds less the on-demand ones, the boot logo; the perf overlay hidden, the overdraw pass, the boot screen's exit; the overlay's font). Called by app_main in its order (from main.cpp's wiring) |
-| `include/hmi_ui/ui_island.hpp`, `src/ui_island.cpp` | `UiIsland`: the task that runs LVGL (today's `lv_task`): one LVGL cycle every 8 ms at most, then it yields at least a tick (from app_main). The cycle itself, `lv_task_handler` under `lvgl_mutex`, is main's `lvgl_cycle`, passed in its Config, so the island takes no lock |
+| `include/hmi_ui/ui_island.hpp`, `src/ui_island.cpp` | `UiIsland`: the task that runs LVGL (today's `lv_task`): one LVGL cycle every 8 ms at most, then it yields at least a tick (from app_main). `stop` ends it as the destructor would (app_main, when the boot stops after the UI started). The cycle itself, `lv_task_handler` under `lvgl_mutex`, is main's `lvgl_cycle`, passed in its Config, so the island takes no lock |
 | `include/hmi_ui/ui_poll.hpp`, `src/ui_poll.cpp` | `UiPoll`: the island's 250 ms tick: link indicator and blink, diagnostics staleness, the drive adapter's tick, theme switch (from `main/frag_rtps_poll.inc`) |
 
 ## Rules for code here

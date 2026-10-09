@@ -580,6 +580,14 @@ static bool start_direct_render(espp::M5StackTab5 &tab5, espp::Logger &logger) {
   return false;
 }
 
+// app_main's end: its task sleeps here for good, which keeps every app_main local alive for
+// the tasks that use them.
+[[noreturn]] static void park_main_task() {
+  while (true) {
+    std::this_thread::sleep_for(1s);
+  }
+}
+
 extern "C" void app_main(void) {
   // First, so the LogScreen has everything printed from here on - including
   // what the tasks started below print.
@@ -873,10 +881,7 @@ extern "C" void app_main(void) {
   // real handling and not a parallel path.
   remote_ui_start(remote_ui_config());
 
-  // loop forever
-  while (true) {
-    std::this_thread::sleep_for(1s);
-  }
+  park_main_task();
 }
 
 // The click sound's samples: click.wav, embedded by main/CMakeLists.txt
