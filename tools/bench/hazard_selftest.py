@@ -296,12 +296,14 @@ def t_b6_b6b_b8() -> None:
     fails("B5''-6b late DISABLE", c1.grade_b6b, b(TB(), extra=2.5).build(),
           "none from Locked + 2 s")
 
-    def e(tb: TB, menu: bool = True) -> TB:
+    def e(tb: TB, menu: bool = False) -> TB:
         tr_b6(tb)
         off = 801.6 + 7.3
         return tb.mark("s-off", off).polls(off + 1.0, off + 3.0, menu_open=menu)
-    passes("B5''-8", c1.grade_b8, e(TB()).build())
-    fails("B5''-8 no menu", c1.grade_b8, e(TB(), menu=False).build(), "menu open")
+    passes("B5''-8: Locked, menu closed (owner decision 2026-10-09)", c1.grade_b8, e(TB()).build())
+    fails("B5''-8: the menu opened", c1.grade_b8, e(TB(), menu=True).build(), "menu closed")
+    fails("B5''-8: never Locked", c1.grade_b8,
+          with_(tr_b6, lambda tb: tb.mark("s-off", 801.6 + 7.3)), "then Locked")
 
 
 def t_b7() -> None:
