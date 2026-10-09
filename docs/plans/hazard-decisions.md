@@ -57,6 +57,10 @@ Nothing here changes a §9 decision.
 - C5 (board 1, I2C 0x5a): measure boards 1 and 3 first (M5), then decide.
 - D3 (rail limits): approved as proposed, to revisit after the owner's measurements M2-M4.
 - Any single answer can be changed later by ID.
+- **B5''-8 conflict (2026-10-09):** C1 §2.3 keeps the exit-refused row clearing THEN_MENU (TABLE.md:
+  no THEN_MENU in EXIT_REFUSED; row 9 F2 → F2), while C1 §6 B5''-8 expected "Locked with the menu
+  open". Owner: **keep the table**; B5''-8 expects Locked with the menu closed. In EXIT_REFUSED a second
+  burger-key press still asks again with the menu (row 28).
 
 ## 2. How to answer
 
