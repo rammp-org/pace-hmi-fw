@@ -46,6 +46,14 @@ B5a..B5e scenario_hazards.py, the drive path against the sim's fault modes (exit
     (2026-10-06, final-a9a040f). B5e is a characterisation: RECORD, not PASS/FAIL.
     RECORD counts as passing for the run's verdict and exit code, and for
     last-good when its own graded checks (set-up, clean-up) all passed.
+B5''-1..22, B5f..B5j, C2-1..16: the hazard fixes' bench steps (hazard_steps.py; C1, C3,
+    C4, C2 specs). Not in the default list: they need firmware with the fixes' bench verbs
+    (a stick-injection build). `--hazard c1,c3` (the fixes the image has) adds their steps
+    after B5e and tells B2 and the steps what to expect (C3's POST markers and start
+    condition); `--steps` can also name them (B5pp-N for B5''-N). Before the first of them
+    the runner proves the sim is the only RTPS participant (no stray peer process, an RTPS
+    sweep finds only the board); if not, every hazard step is INVALID and nothing is
+    injected. Their serial steps use the port B0 found.
 Last-good (with --flash, without --no-save): saved when every step recorded is
     PASS, or RECORD with a non-empty `checks` list that all passed and no
     `problems` (last_good_decision). SKIP, NOT_RUN, FAIL, INVALID, or a RECORD
@@ -73,6 +81,8 @@ import boot_check  # noqa: E402
 import common  # noqa: E402
 import compare_selftest  # noqa: E402
 import flash  # noqa: E402
+import hazard_rig  # noqa: E402
+import hazard_steps  # noqa: E402
 import lease  # noqa: E402
 import scenario_drive  # noqa: E402
 import scenario_hazards  # noqa: E402
@@ -82,13 +92,16 @@ import walk_check  # noqa: E402
 
 # The sim-mode steps (scenario_hazards.py) were opt-in until their first board runs.
 SIM_MODE_STEPS = list(scenario_hazards.STEPS)
-ALL_STEPS = ["B0", "B1", "B2", "B3", "B4", "B4b", "B5", *SIM_MODE_STEPS]
+DEFAULT_STEPS = ["B0", "B1", "B2", "B3", "B4", "B4b", "B5", *SIM_MODE_STEPS]
+# The hazard fixes' steps follow, in landing order; only run when named (--hazard, --steps).
+HAZARD_STEPS = list(hazard_steps.ALL_STEPS)
+ALL_STEPS = [*DEFAULT_STEPS, *HAZARD_STEPS]
 BOOT_CAPTURE_S = 90.0
 NO_IP_AFTER_JOIN_S = 60.0
 PING_WITHIN_S = 30.0
 GOT_IP_RE = re.compile(r"Got IP (\d+\.\d+\.\d+\.\d+)")
 # Steps that need the app running on the board (and its IP).
-APP_STEPS = ("B3", "B4", "B4b", "B5", *SIM_MODE_STEPS)
+APP_STEPS = ("B3", "B4", "B4b", "B5", *SIM_MODE_STEPS, *HAZARD_STEPS)
 
 
 class Run:
@@ -104,6 +117,11 @@ class Run:
         # Set by a step whose esptool call reset the board ("B0: ..."); cleared by
         # B2's boot or by wait_board_back().
         self.reset_pending: str | None = None
+        # The fixes in the image (--hazard), and the sole-sim proof for the hazard steps:
+        # (ok, detail), taken once before the first of them.
+        self.groups: list[str] = list(getattr(a, "hazard_groups", []) or [])
+        self.summary["hazard_groups"] = self.groups
+        self.sole_sim: tuple[bool, str] | None = None
 
     def record(self, step: str, verdict: str, **detail: object) -> str:
         self.summary["steps"][step] = {"verdict": verdict, **detail}
@@ -242,7 +260,7 @@ class Run:
         (self.dir / f"boot-{tag}.log").write_text(text, encoding="utf-8")
         baseline = (common.BASELINE_DIR / "boot-board2.log").read_text(encoding="utf-8",
                                                                         errors="replace")
-        report = boot_check.analyse(text, baseline)
+        report = boot_check.analyse(text, baseline, tree=self.a.tree, groups=self.groups)
         report["joined_wifi"] = state["joined"] is not None
         return report, notes
 
@@ -337,6 +355,26 @@ class Run:
                                            self.a.tree)
         return self.record(step, report.pop("verdict"), **report)
 
+    def hazard_step(self, step: str) -> str:
+        """A hazard fix's bench step, after the sole-sim proof (once per run)."""
+        if self.sole_sim is None:
+            self.sole_sim = hazard_rig.sole_sim_proof(self.ip, self.rtps_sweep)
+            self.summary["sole_sim_proof"] = {"ok": self.sole_sim[0],
+                                              "detail": self.sole_sim[1]}
+        ok, detail = self.sole_sim
+        if not ok:
+            return self.record(step, "INVALID", reason=f"injection preflight: {detail}")
+        port = self.port
+        if port is None and step in hazard_steps.NEEDS_SERIAL:
+            try:
+                port = self.port = board.find_port()
+            except board.NoBoard:
+                port = None
+        out = self.dir / "hazard" / step.replace("''", "pp").lower()
+        report = hazard_steps.run_step(step, self.ip, out, self.a.tree, self.groups, port,
+                                       detail, sweep=self.rtps_sweep)
+        return self.record(step, report.pop("verdict"), **report)
+
 
 def only_ip_missing(report: dict) -> bool:
     return all("got_ip" in p for p in report["problems"])
@@ -362,14 +400,20 @@ def last_good_decision(steps: dict) -> tuple[bool, str]:
     return True, "every step PASS, or RECORD with its graded checks passed"
 
 
-def plan_steps(steps_arg: str | None) -> tuple[list[str], list[str]]:
+def plan_steps(steps_arg: str | None,
+               groups: list[str] | None = None) -> tuple[list[str], list[str]]:
     """(sequence, steps): the order steps run in, and the ones asked for (names in any
-    case). ValueError on a name that is not a step."""
+    case; B5pp-N for B5''-N). Without --steps: the default list, plus the hazard steps of
+    `groups` (--hazard). ValueError on a name that is not a step."""
     sequence = list(ALL_STEPS)
     if steps_arg is None:
-        steps_arg = ",".join(sequence)
-    by_upper = {s.upper(): s for s in ALL_STEPS}
-    steps = [by_upper.get(s.strip().upper(), s.strip()) for s in steps_arg.split(",") if s.strip()]
+        steps_arg = ",".join([*DEFAULT_STEPS, *hazard_steps.plan(groups or [])])
+    by_upper = {s.upper(): s for s in DEFAULT_STEPS}
+
+    def name_of(text: str) -> str:
+        return by_upper.get(text.upper()) or hazard_steps.canonical(text) or text
+
+    steps = [name_of(s.strip()) for s in steps_arg.split(",") if s.strip()]
     unknown = [s for s in steps if s not in ALL_STEPS]
     if unknown:
         raise ValueError(f"unknown steps {unknown}; known: {','.join(ALL_STEPS)}")
@@ -382,6 +426,8 @@ def run_steps(run: Run, sequence: list[str], steps: list[str]) -> None:
              "B4b": run.b4b, "B5": run.b5}
     for step in SIM_MODE_STEPS:
         order[step] = lambda step=step: run.sim_mode_step(step)
+    for step in HAZARD_STEPS:
+        order[step] = lambda step=step: run.hazard_step(step)
     stop_reason = None
     for step in sequence:
         if step not in steps:
@@ -422,7 +468,11 @@ def main() -> int:
     p.add_argument("--label", required=True)
     p.add_argument("--flash", action="store_true")
     p.add_argument("--steps", default=None,
-                   help=f"comma-separated (default {','.join(ALL_STEPS)})")
+                   help=f"comma-separated (default {','.join(DEFAULT_STEPS)}, plus the "
+                        "--hazard steps)")
+    p.add_argument("--hazard", default="",
+                   help="the hazard fixes in the image: c1,c3,c4,c2 or all. Adds their bench "
+                        "steps (hazard_steps.py) and their B2 markers; not run otherwise")
     p.add_argument("--no-save", action="store_true",
                    help="never save this build as last-good (drafts that must not stay on the board)")
     p.add_argument("--tree", type=pathlib.Path, default=common.REPO,
@@ -435,7 +485,8 @@ def main() -> int:
                         "(kept so older command lines still run)")
     a = p.parse_args()
     try:
-        sequence, steps = plan_steps(a.steps)
+        a.hazard_groups = hazard_steps.parse_groups(a.hazard)
+        sequence, steps = plan_steps(a.steps, a.hazard_groups)
     except ValueError as e:
         p.error(str(e))
     if "B0" not in steps and (a.flash or "B1" in steps):

@@ -7,5 +7,29 @@
       "why": "The owner set the Night theme (theme 0) on board 2 on 2026-10-06 and it stays; read on final-a9a040f at 11:36.",
       "approved": "owner, 2026-10-06, relayed by the orchestrator"
     }
-  }
+  },
+  "selftest_ready": {
+    "note": "B2's 'ready: <n> checks' marker takes <n> from the tree's main/selftest_spec.hpp (boot_check.py). Only these counts are declared; another count is a B2 problem.",
+    "declared": {
+      "54": "baseline e2047a4",
+      "57": "hazard-c4-spec.md B2 and §9.2: ctl.wdt, ctl.ui_age_max, ctl.ui_stalls_drive (owner, hazard-decisions.md G1, 2026-10-08)",
+      "60": "hazard-c2-spec.md E10: joy.health, joy.bad_samples, joy.xy_age_max, after C4's 57 (owner, hazard-decisions.md G1, 2026-10-08)"
+    }
+  },
+  "added_markers": [
+    {
+      "name": "post_result",
+      "group": "c3",
+      "regex": "(POST RESULT (?:PASS|FAIL)) \\d+/\\d+ \\d+",
+      "value": "POST RESULT PASS",
+      "spec": "hazard-c3-spec.md F4, §2.7 (POST RESULT <PASS|FAIL> <passed>/19 <ms>)"
+    },
+    {
+      "name": "post_reset_reason",
+      "group": "c3",
+      "regex": "POST reset reason: (\\S+(?: \\S+)*) \\(\\d+\\)",
+      "value": null,
+      "spec": "hazard-c3-spec.md F4, §2.7 (POST reset reason: <name> (<esp_reset_reason value>))"
+    }
+  ]
 }
