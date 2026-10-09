@@ -15,7 +15,7 @@ the drive table review (CS-SAF-05, two approvals; D1: the owner is the only appr
 | Part | File |
 | --- | --- |
 | `DriveAdapter<View>`, the `DrivePort` concept, `DriveSample`, `DriveBanner` | `include/drive_adapter.hpp` |
-| The firmware's port, `hmi::ui::DrivePort<DriveUi>` (the LVGL and rtps_comms calls; moved from `main/frag_drive.inc`'s MainDriveView) | `components/drive_ui/include/drive_ui/drive_port.hpp` |
+| The firmware's port, `hmi::ui::DrivePort<DriveUi>` (the LVGL and rtps_comms calls; moved from main.cpp's former `MainDriveView`) | `components/drive_ui/include/drive_ui/drive_port.hpp` |
 | The one instance | `main/main.cpp` |
 | The adapter's own contract (DAD-001..006) | `test/` |
 | The goldens: the drive code before the move vs after, at the port and at the lv_/rtps boundary (GLD-001..004) | `tests/host/drive_golden` |
@@ -46,17 +46,17 @@ does is dropped and logged, see REQ-DAD-03).
 | `lock_open_visual()` | LOCK_OPEN_VISUAL | ring full, shackle up, STRONG_CLICK |
 | `unlock_timer_start/cancel/forget()` | START_UNLOCK_TIMER, CANCEL_UNLOCK_TIMER, UNLOCK_TIMER_DONE | `unlock_timer_start()`, `unlock_timer_cancel()`, `unlock_advance_timer = nullptr` |
 | `set_locked(locked)` | SET_LOCKED, SET_UNLOCKED | `lv_subject_set_int(&locked_subject, 1/0)` |
-| `gate_update()` | GATE_UPDATE | `nav_update_stick_gate()` |
+| `gate_update()` | GATE_UPDATE | `DriveUi::update_stick_gate()` |
 | `menu_on_arrival(open)` | OPEN/CLEAR_MENU_ON_ARRIVAL | `nav_menu_on_arrival = open` |
 | `go_locked_screen()`, `go_drive_screen()`, `nav_home()` | GO_LOCKED_SCREEN, GO_DRIVE_SCREEN, NAV_HOME | `locked_screen_go()`, fade to Drive over kUnlockDissolveMs, `nav_home()` |
-| `show_banner(banner)` | SHOW_* | `entry_refused_show(kRefused*, dwell)` |
+| `show_banner(banner)` | SHOW_* | `DrivePort::show_refused(kRefused*, dwell)` |
 | `refusal_feedback()` | REFUSAL_FEEDBACK | `refusal_feedback()` |
 
 ## Requirements
 
 | ID | Requirement | Tests |
 | --- | --- | --- |
-| REQ-DAD-01 | Driven by the same inputs, the adapter (through MainDriveView) makes the same port calls, clock reads, samples and lv_/rtps calls, in the same order, as the main.cpp drive code before the move | GLD-001, GLD-002, GLD-004 (GLD-003: the scenarios take all 41 rows) |
+| REQ-DAD-01 | Driven by the same inputs, the adapter (through the port) makes the same port calls, clock reads, samples and lv_/rtps calls, in the same order, as the main.cpp drive code before the move | GLD-001, GLD-002, GLD-004 (GLD-003: the scenarios take all 41 rows) |
 | REQ-DAD-02 | A new adapter is LOCKED with DISABLE as the request and calls nothing until an input | DAD-001 |
 | REQ-DAD-03 | An input that arrives while another is being performed is dropped and logged; the one in progress completes and the adapter stays usable | DAD-002 |
 | REQ-DAD-04 | The warn and give-up deadlines count from the ask by the configured windows, which default to the table's kDriveAnswer (750 ms) and kDriveWait (2 s) | DAD-003, DAD-004 |
@@ -72,7 +72,7 @@ thread-safe; one owner. The request is kept in a `std::atomic<bool>` as before t
 
 The instance is built at namespace scope in the main.cpp unit, where `drive_state` was, so the
 static-initialisation order is unchanged. Its constructor builds only an `espp::Logger` (no
-hardware, LVGL, flash or calibration); `MainDriveView` is stateless. Nothing is allocated after
+hardware, LVGL, flash or calibration); `DrivePort` is stateless. Nothing is allocated after
 construction (CS-SAF-04), the fault paths included.
 
 ## Dependencies
