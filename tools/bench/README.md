@@ -93,10 +93,13 @@ hazard-c2-spec.md §9. Each step's pass criteria are in its scenario file's tabl
   poll that shows the result (C3 §7).
 - **Verdicts:** PASS / FAIL on the graded checks; NOT_RUN when the image lacks a verb or a
   STATE field the step needs (the hook another change wires has not landed: "not wired"), or
-  the rig could not do its part. Banners are not in STATE: recorded as not verified.
+  the rig could not do its part. Banners are STATE's `banner` (owner, 2026-10-08). B5''-18b
+  times DriveScreen from the firmware's serial screen-change line; with only a STATE poll it
+  is never PASS (NOT_RUN, "partial: remote UI up after the window").
 - **Clean-up:** every step ends Locked with the stick centred (graded); a step that latches
-  POST FAIL restarts the HMI (Restart HMI tile, a clean reset); a C2 step that latches a stick
-  FAULT runs an injected calibration with the board's own calibrated values (C2 §9).
+  POST FAIL, or a C2 step that latches a stick FAULT, restarts the HMI (Restart HMI tile, a
+  clean reset). **The bench never runs a calibration that writes flash** (the owner's
+  standing rule): C2-13, whose way out is a completed run, is NOT_RUN.
 - Their graders are tested without a board on hand-written traces built from the specs
   (`hazard_selftest.py`, BENCH-015..046 in `run_bench.py selftest`).
 

@@ -71,6 +71,7 @@ CLEANUP: dict[str, Callable[[hazard_rig.Rig], None]] = {
     **scenario_c2.CLEANUP,
 }
 SELFTEST_AFTER = scenario_c2.SELFTEST_AFTER
+NOT_RUNNABLE = scenario_c2.NOT_RUNNABLE
 
 
 def canonical(name: str) -> str | None:
@@ -110,6 +111,9 @@ def run_step(name: str, ip: str, out: pathlib.Path, tree: pathlib.Path,
     st = hazard_rig.HazardStep(name, out)
     st.record("title", title)
     st.record("groups", sorted(groups))
+    if name in NOT_RUNNABLE:
+        st.not_run = f"bench: {NOT_RUNNABLE[name]}"
+        return st.result()
     if name in NEEDS_SERIAL and not port:
         st.not_run = "bench: the step reads the serial log; no board port (B0, or --port)"
         return st.result()

@@ -60,9 +60,6 @@ MENU_KEY = (360, 1198)                 # scripts/hmi_ui.py MENU_KEY
 PROFILE_Y = 195 + 675 + 162 // 2       # scenario_hazards: DriveScreen's profile buttons
 PROFILE_NORMAL = (257 + 207 // 2, PROFILE_Y)
 PROFILE_LOW = (484 + 207 // 2, PROFILE_Y)
-# JoystickScreen: ui_CalibrateButton 360x162 at (330, 572) in ui_JoystickContent, which
-# starts at y 195 (body) + 52 (padding) + 47 (title) + 34 (row gap).
-CALIBRATE_BUTTON = (330 + 360 // 2, 195 + 52 + 47 + 34 + 572 + 162 // 2)
 # SkunkWorksScreen: actions_spec.h's five tiles (Restart HMI is the fifth), 320x240, two to
 # a row, 20 px apart, rows centred (ui_SkunkWorksScreen.c, ui_comp_slottile.c).
 RESTART_TILE_INDEX = 4
@@ -86,9 +83,17 @@ class HazardStep(scenario_hazards.Step):
         super().__init__(name, out)
         self.not_verified = []
         self.not_run: str | None = None
+        # A criterion the step could only observe indirectly (B5''-18b's fallback): the step
+        # is never PASS on it; with every graded check passed it is NOT_RUN, "partial: ...".
+        self.partial: str | None = None
 
     def result(self, characterisation: bool = False) -> dict:
         out = super().result(characterisation)
+        if self.partial is not None:
+            out["partial"] = self.partial
+            if out["verdict"] == "PASS":
+                out["verdict"] = "NOT_RUN"
+                out["reason"] = f"partial: {self.partial}"
         if self.not_run is not None:
             out["verdict"] = "NOT_RUN"
             out["reason"] = self.not_run
@@ -203,16 +208,20 @@ class Injector:
 
 
 class SerialWatch:
-    """The board's serial log, captured without a reset on a thread (board.capture)."""
+    """The board's serial log, captured without a reset on a thread (board.capture).
+    `lines` keeps each line's arrival time on the runner's clock (time.monotonic()), the
+    clock the sim's log and the STATE polls use."""
 
     def __init__(self, port: str, seconds: float):
         import board
         self.text = ""
+        self.lines: list[tuple[float, str]] = []
         self._stop = threading.Event()
 
         def run() -> None:
             cap = board.capture(port, seconds, reset=False,
                                 on_line=lambda c, line: self._stop.is_set())
+            self.lines = [(round(cap.started + t, 4), line) for t, line in cap.lines]
             self.text = cap.text()
 
         self._thread = threading.Thread(target=run, daemon=True)

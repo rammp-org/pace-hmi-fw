@@ -32,7 +32,7 @@ graded clean-up, Locked. "Forward" = the vertical pot at its calibrated min (y =
 | B5''-14 | a | from the Seat screen: DriveScreen within 3.0 s |
 | B5''-15 | ongone keep, a | after Restart HMI: DriveScreen within 30 s; no non-zero XYTwist until 60 s; no ENABLE |
 
-Not scriptable (STATE has no field for it), recorded as not verified: the banners.
+No C1 step grades a banner (STATE's `banner` is graded in C3 and C2 steps).
 Retired by later fixes (hazard_steps.py plans them out): B5''-15 by C3's B5''-18b (C3 F5),
 B5''-12 with C2 (C2 E9: the stick monitor is the only writer of stick health).
 """

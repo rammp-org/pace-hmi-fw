@@ -10,19 +10,24 @@ the stick centred; one that leaves POST FAIL latched restarts the HMI (a clean r
 | Step | Sim | Pass if |
 | --- | --- | --- |
 | B5''-16 | IDLE | 5 boots: 19 POST PASS lines, POST RESULT PASS 19/19 <= 3000 ms; post PASS, indicator NONE, reset_reason SW; first DriveCommand a DISABLE, the only one in 10 s |
-| B5''-17 | IDLE | y +25 %, POST RERUN: PENDING on joy.y_cal_off/y_noise, WAITING "Centre the joystick", never FAIL; hold refused (no DriveCommand); centred: PASS within 2.5 s, indicator NONE; hold: 1 ENABLE |
+| B5''-17 | IDLE | y +25 %, POST RERUN: PENDING on joy.y_cal_off/y_noise, WAITING "Centre the joystick", never FAIL; hold refused (banner REFUSED_POST, no DriveCommand); centred: PASS within 2.5 s, indicator NONE; hold: 1 ENABLE |
 | B5''-17b | IDLE | button held, POST RERUN: joy.button_idle, "Release the joystick button"; PASS within 2.5 s of release |
 | B5''-18 | ENABLED, s | Drive, forward, POST RERUN: Drive stays; zero from RERUN + 0.2 s to PASS at >= 25 Hz; notice names the check; after PASS and 0.5 s centred: y > 0 within 0.3 s |
 | B5''-18b | ongone keep, a, s | Restart HMI: first DriveCommand a DISABLE, exactly 1 in the link's first 2 s; no ENABLE; DriveScreen within 3 s of the link; zero until centred 0.5 s; serial POST RESULT PASS |
 | B5''-18c | ongone keep, a | Restart HMI: 1 DISABLE; the sim goes IDLE; Locked for 10 s |
-| B5''-19 | IDLE | y +25 %, POST RERUN, Seat: no SeatCommand for 2 s; centred, PASS: exactly 1 SeatCommand |
+| B5''-19 | IDLE | y +25 %, POST RERUN, Seat: no SeatCommand for 2 s, banner REFUSED_POST; centred, PASS: exactly 1 SeatCommand |
 | B5''-20 | IDLE | CAL UNSAVED, POST RERUN: FAIL joy.cal_saved, FAILED "The joystick must be calibrated first", FAIL 10 s; hold refused; Restart HMI clears it |
 | B5''-21 | IDLE | CRASH: serial POST sys.clean_reset FAIL 0, POST RESULT FAIL; reset_reason PANIC, FAILED "Restarted after a fault: PANIC"; hold refused; Restart HMI: PASS, SW |
 | B5''-22 | IDLE | fail_mask 7, POST RERUN: FAIL 3.0..3.7 s after, adc.valid, "timed out" |
 | B5''-22b | IDLE | fail_mask 1 for one refresh in the first window: FAIL adc.valid (below 990), latched |
 
-Not scriptable, recorded as not verified: the REFUSED_POST banner (STATE has no banner) and
-the About screen's "Last reset" text (a screenshot is saved where the stick is not injected).
+Banners: STATE's `banner` (owner, 2026-10-08), polled like everything else. Not scriptable,
+recorded as not verified: the About screen's "Last reset" text.
+
+B5''-18b's "DriveScreen within 3 s of the HMI's link" is timed from the serial log (owner,
+2026-10-08): the arrival time of the firmware's screen-change line (SCREEN_LOG_RE) against
+the sim's hmi_back, both on the runner's clock. With no such line the first STATE poll is
+used and the step is never PASS on it: "partial: remote UI up after the window".
 """
 
 from __future__ import annotations
@@ -41,6 +46,9 @@ POST_RESULT_RE = re.compile(r"POST RESULT (PASS|FAIL) (\d+)/(\d+) (\d+)")
 SERIAL_S = 120.0
 BOOTS = 5
 BUMP = 0.25  # C3 B5''-17: y = centre + 25 % of (max - centre)
+# The screen-change line the firmware logs when a screen loads (the owning lane adds it):
+# "screen -> DriveScreen".
+SCREEN_LOG_RE = re.compile(r"screen -> (\w+)")
 
 
 def bumped(cal: hg.Cal) -> tuple[int, int, int]:
@@ -105,12 +113,20 @@ def grade_b17(st: HazardStep, tr: hg.Trace, p: dict) -> None:
     st.check("never FAIL", fail is None, "" if fail is None else f"at {fail[0] - rr:.2f} s")
     cmds = hg.drive_commands(tr.events, h1, c)
     st.check("1st hold: no DriveCommand", not cmds, str([x["request"] for x in cmds]))
+    check_banner(st, tr, "1st hold", "REFUSED_POST", h1, c)
     found = hg.first_state(tr.states, _post("PASS"), c)
     if check_within(st, "after centring: post PASS", found, c, 2.5) is not None:
         st.check("indicator NONE", found[1].get("indicator") == "NONE",
                  str(found[1].get("indicator")))
     en = hg.drive_commands(tr.events, h2, h2 + 3.5, "ENABLE")
     st.check("2nd hold: 1 ENABLE", len(en) == 1, f"{len(en)}")
+
+
+def check_banner(st: HazardStep, tr: hg.Trace, what: str, banner: str, t0: float,
+                 t1: float) -> None:
+    seen = hg.first_state(tr.states, hg.field_is("banner", banner), t0, t1)
+    st.check(f"{what}: banner {banner}", seen is not None,
+             "never" if seen is None else f"at +{seen[0] - t0:.2f} s")
 
 
 def grade_b17b(st: HazardStep, tr: hg.Trace, p: dict) -> None:
@@ -168,7 +184,19 @@ def grade_b18b(st: HazardStep, tr: hg.Trace, p: dict) -> None:
              len(first2) == 1 and first2[0]["request"] == "DISABLE",
              str([x["request"] for x in first2]))
     st.check("no ENABLE", not hg.drive_commands(tr.events, r, float("inf"), "ENABLE"), "")
-    check_within(st, "DriveScreen after the HMI's link", _drive_after(tr, b), link, 3.0)
+    screen_line = next((t for t, line in p.get("serial_lines", [])
+                        if t >= r and (m := SCREEN_LOG_RE.search(line)) and m.group(1) == DRIVE),
+                       None)
+    if screen_line is not None:
+        dt = screen_line - link
+        st.check("DriveScreen within 3.0 s of the HMI's link (serial screen-change line)",
+                 dt <= 3.0, f"after {dt:.2f} s")
+    else:
+        d = _drive_after(tr, b)
+        seen = "never" if d is None else f"first poll at link + {d[0] - link:.2f} s"
+        st.record("drive_after_link_fallback", seen)
+        st.partial = ("remote UI up after the window: no screen-change line in the serial "
+                      f"log, DriveScreen from the first STATE poll only ({seen})")
     check_no_nonzero(st, "no non-zero XYTwist until the script centres 0.5 s", tr, r, c + 0.5)
     st.check("serial POST RESULT PASS present", "POST RESULT PASS" in p.get("serial_text", ""),
              "" if p.get("serial_text") else "no serial capture")
@@ -191,6 +219,7 @@ def grade_b19(st: HazardStep, tr: hg.Trace, p: dict) -> None:
     first = hg.seat_commands(tr.events, s1, min(s1 + 2.0, c))
     st.check("1st press: no SeatCommand for 2 s", not first and s1 + 2.0 <= c,
              f"{len(first)} SeatCommand(s); centred {c - s1:.1f} s after the press")
+    check_banner(st, tr, "1st press", "REFUSED_POST", s1, c)
     second = hg.seat_commands(tr.events, s2, s2 + 2.0)
     st.check("2nd press: exactly 1 SeatCommand", len(second) == 1, f"{len(second)}")
 
@@ -299,6 +328,7 @@ def s_b16(rig: Rig) -> dict:
 
 def s_b17(rig: Rig) -> dict:
     rig.begin()
+    rig.need("banner")
     rig.inject(*bumped(rig.cal))
     rig.mark("rerun")
     rig.bench_verb(rig.hmi.post_rerun, "POST RERUN")
@@ -313,7 +343,6 @@ def s_b17(rig: Rig) -> dict:
     rig.mark("hold-2")
     rig.hold_button()
     rig.watch(3.0)
-    rig.st.not_verified.append("the REFUSED_POST banner on the 1st hold (STATE has no banner)")
     return {}
 
 
@@ -364,7 +393,8 @@ def s_b18b(rig: Rig) -> dict:
     rig.mark("forward")
     rig.forward()
     rig.watch(1.0)
-    return {"serial_text": watch.stop()}
+    text = watch.stop()
+    return {"serial_text": text, "serial_lines": watch.lines}
 
 
 def s_b18c(rig: Rig) -> dict:
@@ -392,6 +422,7 @@ def seat_press(rig: Rig) -> None:
 
 def s_b19(rig: Rig) -> dict:
     rig.begin()
+    rig.need("banner")
     rig.inject(*bumped(rig.cal))
     rig.mark("rerun")
     rig.bench_verb(rig.hmi.post_rerun, "POST RERUN")
@@ -408,7 +439,6 @@ def s_b19(rig: Rig) -> dict:
     rig.hmi.command("KEY ENTER")  # the same row, now with POST passed
     rig.watch(2.1)
     rig.home()
-    rig.st.not_verified.append("the REFUSED_POST banner on the 1st press (STATE has no banner)")
     return {}
 
 

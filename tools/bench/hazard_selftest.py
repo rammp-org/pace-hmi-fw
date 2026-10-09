@@ -77,6 +77,7 @@ class TB:
         while (t := round(t0 + k * every, 4)) < t1 - 1e-6:
             k += 1
             state = {"screen": "LockedScreen", "phase": "LOCKED", "notice": "NONE",
+                     "banner": "NONE",
                      "menu_open": False, "calibrating": False, "post": "PASS",
                      "post_check": None, "indicator": "NONE", "indicator_text": "",
                      "reset_reason": "SW", "stick": None}
@@ -369,11 +370,12 @@ def t_b16() -> None:
 
 
 def t_b17() -> None:
-    def b(tb: TB, enables: int = 1, fail_at: float | None = None) -> TB:
+    def b(tb: TB, enables: int = 1, fail_at: float | None = None, banner: bool = True) -> TB:
         tb.mark("rerun", 100.0).mark("hold-1", 103.0).mark("centred", 104.6)
         tb.mark("hold-2", 106.2)
         tb.polls(100.1, 104.6, post="PENDING", post_check="joy.y_cal_off",
-                 indicator="WAITING", indicator_text="Centre the joystick")
+                 indicator="WAITING", indicator_text="Centre the joystick",
+                 banner=lambda t: "REFUSED_POST" if banner and 103.6 <= t < 104.4 else "NONE")
         tb.polls(104.6, 105.8, post="PENDING", post_check="joy.y_cal_off", indicator="WAITING")
         tb.polls(105.8, 110.0)
         for k in range(enables):
@@ -384,6 +386,7 @@ def t_b17() -> None:
     passes("B5''-17", c3.grade_b17, b(TB()).build())
     fails("FAIL", c3.grade_b17, b(TB(), fail_at=102.0).build(), "never FAIL")
     fails("two ENABLEs", c3.grade_b17, b(TB(), enables=2).build(), "1 ENABLE")
+    fails("no banner", c3.grade_b17, b(TB(), banner=False).build(), "banner REFUSED_POST")
 
     def bb(tb: TB, pass_at: float = 204.5) -> TB:
         return (tb.mark("rerun", 200.0).mark("release", 203.0)
@@ -415,12 +418,19 @@ def t_b18() -> None:
                 .dc(425.5, "DISABLE").mark("centred", 432.0)
                 .polls(426.5, drive).polls(drive, 434.0, screen="DriveScreen")
                 .stream(425.0, 432.5).stream(432.5, 434.0, 1.0))
-    p = {"serial_text": "x\nPOST RESULT PASS 19/19 1200\n"}
+    p = {"serial_text": "x\nPOST RESULT PASS 19/19 1200\n",
+         "serial_lines": [(410.0, "[ui/I][2.1]: screen -> BootScreen"),
+                          (426.7, "[ui/I][21.9]: screen -> DriveScreen")]}
     passes("B5''-18b", c3.grade_b18b, b18b(TB()).build(), p)
+    fails("B5''-18b serial: Drive late", c3.grade_b18b, b18b(TB()).build(), "serial screen-change",
+          {**p, "serial_lines": [(428.4, "[ui/I][23.6]: screen -> DriveScreen")]})
+    st = graded(c3.grade_b18b, b18b(TB()).build(), {**p, "serial_lines": []})
+    r = st.result()
+    expect("no screen-change line: never PASS on the poll alone, partial",
+           (r["verdict"], r["reason"].startswith("partial: remote UI up after the window")),
+           ("NOT_RUN", True))
     fails("B5''-18b ENABLE", c3.grade_b18b, with_(b18b, lambda tb: tb.dc(426.0, "ENABLE")),
           "no ENABLE", p)
-    fails("B5''-18b Drive late", c3.grade_b18b, b18b(TB(), drive=428.5).build(),
-          "within 3.0 s", p)
     fails("B5''-18b no POST line", c3.grade_b18b, b18b(TB()).build(), "POST RESULT PASS", {})
 
     def b18c(tb: TB) -> TB:
@@ -433,12 +443,16 @@ def t_b18() -> None:
 
 
 def t_b19_b20() -> None:
-    def b19(tb: TB) -> TB:
+    def b19(tb: TB, banner: bool = True) -> TB:
         return (tb.mark("seat-1", 600.0).mark("centred", 602.2).mark("seat-2", 604.0)
+                .polls(600.0, 602.2, screen="SeatScreen", post="PENDING",
+                       banner="REFUSED_POST" if banner else "NONE")
                 .ev(604.3, "seat_command", axis=0))
     passes("B5''-19", c3.grade_b19, b19(TB()).build())
     fails("B5''-19 early seat", c3.grade_b19,
           with_(b19, lambda tb: tb.ev(600.5, "seat_command", axis=0)), "no SeatCommand")
+    fails("B5''-19 no banner", c3.grade_b19, b19(TB(), banner=False).build(),
+          "banner REFUSED_POST")
 
     def b20(tb: TB, pending_at: float | None = None) -> TB:
         tb.mark("rerun", 700.0).mark("hold", 703.2).mark("back", 730.0)
@@ -641,15 +655,18 @@ def t_c2_reads() -> None:
 
 
 def t_c2_8_9_10() -> None:
-    def e(tb: TB, before: bool = False) -> TB:
+    def e(tb: TB, before: bool = False, banner: bool = True) -> TB:
         tb.mark("enter", 4790.0).mark("change", 4800.0).dc(4800.3, "DISABLE")
-        tb.polls(4799.0, 4801.0, screen="DriveScreen").polls(4801.0, 4802.1)
+        flag = (lambda t: "STICK_FAULT" if banner and t >= 4800.4 else "NONE")
+        tb.polls(4799.0, 4801.0, screen="DriveScreen", banner=flag)
+        tb.polls(4801.0, 4802.1, banner=flag)
         tb.stream(4799.0, 4800.15, 1.0).stream(4800.15, 4802.1)
         if before:
             tb.dc(4799.0, "DISABLE")
         return tb
     passes("C2-8", c2.grade_c2_8, e(TB()).build())
     fails("C2-8 earlier DISABLE", c2.grade_c2_8, e(TB(), before=True).build(), "none before")
+    fails("C2-8 no banner", c2.grade_c2_8, e(TB(), banner=False).build(), "banner STICK_FAULT")
     passes("C2-9", c2.grade_c2_9, tr_b6(TB(), t1=4900.3, label="change", output="zero").build())
     fails("C2-9 motion", c2.grade_c2_9,
           with_(lambda tb: tr_b6(tb, t1=4900.3, label="change", output="zero"),
@@ -689,16 +706,16 @@ def t_c2_11_12() -> None:
 
 
 def t_c2_13_14() -> None:
-    def c(tb: TB, healed: bool = False) -> TB:
-        tb.mark("run", 5300.0).polls(5300.0, 5302.0, stick=stick("FAULT"))
-        tb.polls(5302.0, 5316.0, calibrating=True, stick=stick("CALIBRATING"))
-        tb.polls(5316.0, 5316.3, stick=stick("RECOVERING")).polls(5316.3, 5317.0, stick=stick())
-        tb.mark("run-done", 5317.0).mark("forward", 5320.0)
-        tb.stream(5319.0, 5320.2).stream(5320.2, 5321.0, 1.0)
-        tb.mark("bad-run-done", 5340.0)
-        return tb.polls(5340.1, 5340.2, stick=stick("OK" if healed else "FAULT"))
-    passes("C2-13", c2.grade_c2_13, c(TB()).build())
-    fails("C2-13 REJECT", c2.grade_c2_13, c(TB(), healed=True).build(), "3200 mV")
+    with tempfile.TemporaryDirectory() as tmp:
+        r = hazard_steps.run_step("C2-13", "0.0.0.0", pathlib.Path(tmp), common.REPO, ["c2"])
+    expect("C2-13 is NOT_RUN before the board is touched, and says why",
+           (r["verdict"], "rewriting the stored calibration" in r["reason"]), ("NOT_RUN", True))
+    sources = [pathlib.Path(m.__file__).read_text(encoding="utf-8")
+               for m in (c1, c2, c3, c4, hazard_rig, hazard_steps)]
+    expect("no step presses Calibrate or injects a calibration run (no flash write)",
+           any(k in src for src in sources for k in ("CalibrateButton", "CALIBRATE_BUTTON",
+                                                     "inject_calibration_run")), False)
+    expect("the C2 clean-up reboots", c2.CLEANUP["C2-3"].__name__, "reboot_cleanup")
 
     def d(tb: TB, ok_at: float = 5401.0, age: int = 131) -> TB:
         return (tb.mark("back", 5400.0).polls(5400.2, ok_at, stick=stick("INIT"))
@@ -983,7 +1000,8 @@ CASES = [
     ("BENCH-042 C2-5..7 graders: failed read, stale X/Y, NaN", t_c2_reads),
     ("BENCH-043 C2-8..10 graders: fault while driving, no auto-resume", t_c2_8_9_10),
     ("BENCH-044 C2-11, 12 graders: keys silent, the indicator persists", t_c2_11_12),
-    ("BENCH-045 C2-13, 14 graders: the way out by touch, boot", t_c2_13_14),
+    ("BENCH-045 C2-13 is NOT_RUN (no calibration that writes flash); the C2 clean-up reboots; "
+     "C2-14 grader: boot", t_c2_13_14),
     ("BENCH-046 C2-15, 16 graders: the soak's self test, ContinuousAdc starvation", t_c2_15_16),
 ]
 

@@ -3,9 +3,11 @@
 (stick-injection build, ci/sdkconfig.stick_inject) after the sole-sim proof.
 
 Start of every step (C2 §9): Locked, sim `ok`, POST passed (stick injected at rest), STATE
-stick OK. End: Locked with the stick OK (graded); a latched FAULT is cleared by an injected
-calibration with the board's own calibrated values (as C2-13), so the saved record stays
-what it was. t = the time the step's first changed STICK message was sent (its mark).
+stick OK. End: Locked with the stick OK (graded). A latched FAULT is cleared by a reboot
+(the Restart HMI tile; the latch is RAM only), never by a calibration: the owner's standing
+rule forbids rewriting the stored calibration on the bench, even with the same values
+(coordinator, 2026-10-08; C2 §9 said "an injected calibration"). t = the time the step's
+first changed STICK message was sent (its mark).
 "Forward" = the vertical read at the calibrated min; "centre" = the calibrated centres.
 
 | Step | Script | Pass if |
@@ -20,18 +22,18 @@ what it was. t = the time the step's first changed STICK message was sent (its m
 | C2-5 | forward; vertical read fails (0x02) 2 s | >= 25 Hz; all 0 after t + 200 ms; FAULT MISSING vertical by t + 500 ms |
 | C2-6 | forward; X/Y frozen (0x40) 2 s | a y > 0 in [t, t + 250 ms]; all 0 after t + 550 ms; FAULT STALE by t + 800 ms |
 | C2-7 | forward; vertical NaN (0x10) 2 s | as C2-5, NAN vertical |
-| C2-8 | sim normal; forward; rail | 1 DISABLE in [t, t + 600 ms], none before; Locked by t + 1.5 s; no ENABLE; 0 after t + 200 ms |
+| C2-8 | sim normal; forward; rail | 1 DISABLE in [t, t + 600 ms], none before; Locked by t + 1.5 s; banner STICK_FAULT; no ENABLE; 0 after t + 200 ms |
 | C2-9 | sim s; as C2-8; 7 s | Drive throughout; every XYTwist after t + 200 ms 0; B5''-6's DISABLE timing |
 | C2-10 | after C2-3: centre 5 s, forward 2 s, sim a, centre 0.5 s, forward 2 s | no non-zero XYTwist; FAULT throughout; notice STICK_FAULT |
 | C2-11 | OK then FAULT; Settings; down, up, right, left 0.5 s each | FAULT: focus and screen unchanged, joy_key 0; OK (control): the focus moves |
 | C2-12 | FAULT; Home, Settings, Joystick, Drive 15 s each | the fault indicator on every screen; FAULT after 60 s |
-| C2-13 | FAULT; Calibrate by touch; inject the run | calibrating, then RECOVERING, OK; y > 0 within 0.3 s; a run with an end at 3200 mV: still FAULT |
+| C2-13 | FAULT; Calibrate by touch; inject the run | NOT_RUN: a completed run saves the record (REQ-CAL-06), which the bench may not do; CAL UNSAVED cannot stand in (it moves no generation counter) |
 | C2-14 | Restart HMI; centre from the start | stick OK within 1.5 s of the first STATE; never FAULT; xy_age_max_ms <= 200 |
 | C2-15 | 30 min on Drive, centred; then the self test | joy.bad_samples 0, joy.xy_age_max <= 200, joy.health OK; time.adc_avg 34.5..35.5; time.adc_max <= 40; mem.stk_adc >= 2048 |
 | C2-16 | STALL CADC 1000 | FAULT STALE; output 0 by 340 ms after the stall start (+ transport) |
 
-Not scriptable, not verified: the STICK_FAULT banner (C2-8; STATE has no banner) and the
-indicator in each SHOT (C2-12: the SHOTs are saved, STATE grades it).
+Banners: STATE's `banner` (owner, 2026-10-08). Not graded: the indicator in a SHOT (C2-12:
+STATE grades it).
 """
 
 from __future__ import annotations
@@ -39,16 +41,20 @@ from __future__ import annotations
 import time
 
 import hazard_grade as hg
-from hazard_rig import CALIBRATE_BUTTON, HazardStep, NotRun, Rig
+from hazard_rig import HazardStep, NotRun, Rig
 from scenario_c1 import (DRIVE, LOCKED, check_no_nonzero, check_resume, check_within,
                          driving_forward, grade_ignored_stop, to_drive_by_mcb, watch_disables)
 
 HIGH_RAIL_MV = 3150      # C2 §4
 CAL_OVERSHOOT_MV = 100
 SOAK_S = 30 * 60.0       # C2-15
-CAL_STEP_S = 1.6         # each end: 30 periods steady (1 s) plus margin (joystick_cal kHoldTicks)
-CAL_REST_S = 3.0         # settle 45 + hold 30 periods
-CAL_RELEASE_S = 2.0
+# Steps the bench may not run, and why (checked before the board is touched).
+NOT_RUNNABLE = {
+    "C2-13": "the way out is a completed calibration run, which saves the record "
+             "(REQ-CAL-06); the owner's standing rule forbids rewriting the stored calibration "
+             "on the bench, and CAL UNSAVED does not stand in for a run (it hands over no "
+             "validated record, so the monitor's generation counter does not move)",
+}
 
 
 def _state(name: str):
@@ -190,6 +196,9 @@ def grade_c2_8(st: HazardStep, tr: hg.Trace, p: dict) -> None:
     st.check("exactly one DISABLE in [t, t + 600 ms], none before", len(dis) == 1 and not before,
              f"{len(dis)} in the window, {len(before)} before")
     check_within(st, "Locked", hg.first_state(tr.states, hg.screen_is(LOCKED), t), t, 1.5)
+    seen = hg.first_state(tr.states, hg.field_is("banner", "STICK_FAULT"), t, t + 2.0)
+    st.check("banner STICK_FAULT", seen is not None,
+             "never" if seen is None else f"at +{seen[0] - t:.2f} s")
     st.check("no ENABLE", not hg.drive_commands(tr.events, t, float("inf"), "ENABLE"), "")
     check_exact_zero_after(st, tr, t + 0.2, t + 2.0, "no non-zero XYTwist after t + 200 ms")
 
@@ -234,23 +243,6 @@ def grade_c2_12(st: HazardStep, tr: hg.Trace, p: dict) -> None:
     st.check("still FAULT after 60 s", last is not None and last[0] - t >= 60.0
              and _stick(last[1], "state") == "FAULT",
              "" if last is None else f"at +{last[0] - t:.0f} s: {_stick(last[1], 'state')}")
-
-
-def grade_c2_13(st: HazardStep, tr: hg.Trace, p: dict) -> None:
-    run, done = tr.mark("run"), tr.mark("run-done")
-    cal = hg.first_state(tr.states, hg.field_is("calibrating", True), run, done)
-    st.check("calibrating 1", cal is not None, "")
-    end = hg.first_state(tr.states, hg.field_is("calibrating", False), cal[0] if cal else run)
-    st.check("then the run completes", end is not None, "")
-    rec = hg.first_state(tr.states, _state("RECOVERING"), run)
-    ok = rec is not None and hg.first_state(tr.states, _state("OK"), rec[0]) is not None
-    st.check("STATE RECOVERING then OK", ok, "")
-    check_resume(st, tr, tr.mark("forward"))
-    bad_end = tr.mark("bad-run-done")
-    s = hg.first_state(tr.states, lambda s: True, bad_end)
-    st.check("a run with one end at 3200 mV: REJECT, still FAULT",
-             s is not None and _stick(s[1], "state") == "FAULT"
-             and s[1].get("calibrating") is False, str(s and _stick(s[1], "state")))
 
 
 def grade_c2_14(st: HazardStep, tr: hg.Trace, p: dict) -> None:
@@ -321,49 +313,19 @@ def begin_c2(rig: Rig) -> None:
         raise NotRun("firmware", "the stick monitor is not OK at the start (or not in STATE)")
 
 
-def inject_calibration_run(rig: Rig, ends: dict[str, int] | None = None) -> None:
-    """Joystick screen, hold Calibrate by touch 2 s, then the run's inputs (joystick_cal
-    kDirections order: left, right, forward, back, clockwise, counter-clockwise) at the
-    board's own calibrated values, so the saved record is what it was. `ends` overrides an
-    end ("h_max": 3200 for C2-13's rejected run)."""
-    c = rig.cal
-    ends = ends or {}
-    rig.go("Joystick")
-    if rig.watch(3.0, until=hg.screen_is("JoystickScreen")) is None:
-        raise NotRun("bench", "could not open the Joystick screen")
-    rig.hmi.command(f"PRESS {CALIBRATE_BUTTON[0]} {CALIBRATE_BUTTON[1]}")
-    time.sleep(2.0)  # the calibrate hold, by touch
-    rig.hmi.command("RELEASE")
-    if rig.watch(2.0, until=hg.field_is("calibrating", True)) is None:
-        raise NotRun("bench", "the calibration run did not start")
-    rig.centre()
-    time.sleep(CAL_REST_S)
-    h, v, tw = c.centre()
-    for key, (hh, vv, tt) in (("h_min", (c.h[0], v, tw)), ("h_max", (c.h[2], v, tw)),
-                              ("v_min", (h, c.v[0], tw)), ("v_max", (h, c.v[2], tw)),
-                              ("tw_max", (h, v, c.twist[2])), ("tw_min", (h, v, c.twist[0]))):
-        if key in ends:
-            hh, vv, tt = {"h_min": (ends[key], v, tw), "h_max": (ends[key], v, tw),
-                          "v_min": (h, ends[key], tw), "v_max": (h, ends[key], tw),
-                          "tw_max": (h, v, ends[key]), "tw_min": (h, v, ends[key])}[key]
-        rig.inject(hh, vv, tt)
-        time.sleep(CAL_STEP_S)
-    rig.centre()
-    time.sleep(CAL_RELEASE_S)
-    rig.watch(5.0, until=hg.field_is("calibrating", False))
-
-
-def cal_cleanup(rig: Rig) -> None:
-    """A latched FAULT is cleared by an injected calibration (C2 §9's clean-up)."""
+def reboot_cleanup(rig: Rig) -> None:
+    """A latched FAULT is RAM only: Restart HMI clears it. Never a calibration run."""
     if _stick(rig.state(), "state") != "FAULT":
         return
-    rig.sim_cmd("ok")
-    rig.watch(3.0, until=hg.screen_is(LOCKED))
-    inject_calibration_run(rig)
+    rig.inj.pause()
+    rig.restart_hmi()
+    rig.wait_back()
+    rig.read_cal()
+    rig.centre()
+    rig.watch(15.0, until=lambda s: s.get("post") == "PASS")
     s = rig.watch(3.0, until=_state("OK"))
-    rig.st.check("clean-up: stick OK after the injected calibration", s is not None,
+    rig.st.check("clean-up: stick OK after the reboot", s is not None,
                  str(_stick(rig.state(), "state")))
-    rig.home()
 
 
 def _mv(rig: Rig, mv: int, residual: bool) -> dict:
@@ -480,10 +442,10 @@ def s_c2_7(rig: Rig) -> dict:
 
 def s_c2_8(rig: Rig) -> dict:
     begin_c2(rig)
+    rig.need("banner")
     _rail(rig)
     rig.watch(2.0)
     rig.centre()
-    rig.st.not_verified.append("the STICK_FAULT banner (STATE has no banner)")
     return {}
 
 
@@ -576,32 +538,11 @@ def s_c2_12(rig: Rig) -> dict:
 
 
 def s_c2_13(rig: Rig) -> dict:
-    begin_c2(rig)
-    h, v, tw = rig.cal.centre()
-    rig.inject(3300, v, tw)
-    rig.watch(1.0, until=_state("FAULT"))
-    rig.centre()
-    rig.mark("run")
-    inject_calibration_run(rig)
-    rig.watch(2.0, until=_state("OK"))
-    rig.mark("run-done")
-    rig.home()
-    to_drive_by_mcb(rig)
-    rig.centre()
-    time.sleep(0.5)
-    rig.mark("forward")
-    rig.forward()
-    rig.watch(1.0)
-    rig.centre()
-    rig.sim_cmd("ok")
-    rig.watch(3.0, until=hg.screen_is(LOCKED))
-    rig.inject(3300, v, tw)
-    rig.watch(1.0, until=_state("FAULT"))
-    rig.centre()
-    inject_calibration_run(rig, {"h_max": 3200})
-    rig.mark("bad-run-done")
-    rig.watch(1.0)
-    return {}
+    raise NotRun("bench", NOT_RUNNABLE["C2-13"])
+
+
+def no_grade(st: HazardStep, tr: hg.Trace, p: dict) -> None:
+    """For a step the bench may not run (NOT_RUNNABLE)."""
 
 
 def s_c2_14(rig: Rig) -> dict:
@@ -655,10 +596,10 @@ STEPS = {
     "C2-10": (s_c2_10, grade_c2_10, "release: no auto-resume"),
     "C2-11": (s_c2_11, grade_c2_11, "stick keys silent in FAULT"),
     "C2-12": (s_c2_12, grade_c2_12, "fault indicator persists"),
-    "C2-13": (s_c2_13, grade_c2_13, "way out by touch (injected calibration)"),
+    "C2-13": (s_c2_13, no_grade, "way out by touch (NOT_RUN: would rewrite the calibration)"),
     "C2-14": (s_c2_14, grade_c2_14, "boot"),
     "C2-15": (s_c2_15, grade_c2_15, "30 min soak, then the self test"),
     "C2-16": (s_c2_16, grade_c2_16, "ContinuousAdc starvation (STALL CADC)"),
 }
-CLEANUP = {name: cal_cleanup for name in STEPS}
+CLEANUP = {name: reboot_cleanup for name in STEPS if name not in NOT_RUNNABLE}
 SELFTEST_AFTER = {"C2-15"}
