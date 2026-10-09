@@ -98,7 +98,7 @@ def fake_bench(fake: FakeBoard, backup_made: bool = False):
         patch(run_bench.Run, "hotspot", lambda self, action: (0, "STATE On"))
         patch(run_bench.Run, "rtps_sweep", lambda self: [fake.ip])
         patch(run_bench.boot_check, "analyse",
-              lambda text, baseline: {"verdict": "PASS", "problems": [], "ip": fake.ip})
+              lambda text, baseline, **k: {"verdict": "PASS", "problems": [], "ip": fake.ip})
         patch(run_bench.ui_client, "ping", fake.ping)
         patch(run_bench.compare_selftest, "run_selftest",
               lambda ip, out, tree: (fake.app_step("B3", ip)["verdict"], {}))
@@ -337,8 +337,10 @@ CASES = [
 
 
 def main() -> int:
+    import hazard_selftest  # BENCH-015..: the hazard fixes' bench steps
     import ui_client  # its Unity-format case runner
-    return ui_client.run_cases("tools/bench/run_bench_selftest.py", CASES)
+    return ui_client.run_cases("tools/bench/run_bench_selftest.py",
+                               CASES + hazard_selftest.CASES)
 
 
 if __name__ == "__main__":
