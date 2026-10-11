@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <numeric>
 #include <vector>
 
 #include "test_case.hpp"
@@ -624,11 +625,11 @@ TEST_CASE("DRV-116 a tick runs its sub-steps in TICK_SEQUENCE order on two Envs:
   TEST_ASSERT_EQUAL(Phase::EXITING, faulted.phase());
   TEST_ASSERT_TRUE(contains(steps[step_of(Input::TICK_STICK_FAULT)], Action::SHOW_STICK_FAULT));
   TEST_ASSERT_TRUE(contains(steps[step_of(Input::TICK_STICK_FAULT)], Action::ARM_STOP_TIMER));
-  std::size_t disables = 0;
-  for (const Actions &a : steps) {
-    disables += static_cast<std::size_t>(std::ranges::count(a, Action::SEND_DISABLE));
-  }
-  TEST_ASSERT_EQUAL_size_t(1, disables);
+  const auto disables = std::accumulate(steps.begin(), steps.end(), std::ptrdiff_t{0},
+                                        [](std::ptrdiff_t n, const Actions &a) {
+                                          return n + std::ranges::count(a, Action::SEND_DISABLE);
+                                        });
+  TEST_ASSERT_EQUAL_INT(1, static_cast<int>(disables));
   // The next tick, still in FAULT: EXITING has no stick-fault row; the stop's own re-send runs.
   steps = tick(faulted, fault_due);
   TEST_ASSERT_EQUAL(Phase::EXITING, faulted.phase());

@@ -559,11 +559,9 @@ TEST_CASE("DSO-024 rows 55-56 carry row 21's actions then SHOW_STICK_FAULT; TICK
     TEST_ASSERT_TRUE(n + 1 == ds::kMaxActions || t.actions[n + 1] == Action::NONE);
   }
   // No other row reads TICK_STICK_FAULT (EXITING, EXIT_REFUSED, ASKING, LOCKED: nothing).
-  std::size_t stick_rows = 0;
-  for (const auto &t : ds::TRANSITIONS) {
-    stick_rows += t.input == Input::TICK_STICK_FAULT ? 1U : 0U;
-  }
-  TEST_ASSERT_EQUAL_size_t(2, stick_rows);
+  const auto stick_rows = std::ranges::count_if(
+      ds::TRANSITIONS, [](const ds::Transition &t) { return t.input == Input::TICK_STICK_FAULT; });
+  TEST_ASSERT_EQUAL_INT(2, static_cast<int>(stick_rows));
   // TICK_STICK_FAULT right after TICK_STOP_RESEND.
   TEST_ASSERT_EQUAL_size_t(tick_index(Input::TICK_STOP_RESEND) + 1,
                            tick_index(Input::TICK_STICK_FAULT));
