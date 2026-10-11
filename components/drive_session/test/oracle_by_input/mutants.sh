@@ -11,7 +11,8 @@
 # fingerprint and its check are untouched.
 #
 # Usage: mutants.sh <repo> <build dir> <unity dir>. Exit 0 = the unmutated build passes both
-# oracles and every mutant is rejected by both.
+# oracles and every mutant is rejected by both. MUTANT_JOBS=<n> (default 1) runs n mutants at a
+# time (each builds and runs its two apps one after the other); the report keeps the list's order.
 
 set -u
 REPO=$1
@@ -80,6 +81,7 @@ run_app() {
 }
 
 mkdir -p "$OUT"
+JOBS=${MUTANT_JOBS:-1}
 fail=0
 base_old=$(run_app "$OLD" "$INC" "$SRC" "$OUT/unmutated-old")
 base_new=$(run_app "$NEW" "$INC" "$SRC" "$OUT/unmutated-new")
@@ -88,7 +90,10 @@ if [ "$base_old" != PASS ] || [ "$base_new" != PASS ]; then
   fail=1
 fi
 
-for m in "${MUTANTS[@]}"; do
+# One mutant: writes its report line to $OUT/<name>.result (FAIL in it marks a failure).
+mutate_one() {
+  local m=$1
+  local name rest kind expr dir target orig changed old new old_fail new_fail verdict
   name=${m%%|*}
   rest=${m#*|}
   kind=${rest%%|*}
@@ -104,9 +109,8 @@ for m in "${MUTANTS[@]}"; do
     sed -i 's/^static_assert(table_fingerprint() == TABLE_FINGERPRINT,/static_assert(true || table_fingerprint() == TABLE_FINGERPRINT,/' \
       "$dir/include/drive_session_fingerprint.hpp"
     if cmp -s "$INC/drive_session_fingerprint.hpp" "$dir/include/drive_session_fingerprint.hpp"; then
-      echo "MUTANT $name: the fingerprint check could not be switched off (FAIL)"
-      fail=1
-      continue
+      echo "MUTANT $name: the fingerprint check could not be switched off (FAIL)" > "$OUT/$name.result"
+      return
     fi
   else
     target=$dir/drive_session.cpp
@@ -114,9 +118,8 @@ for m in "${MUTANTS[@]}"; do
   fi
   sed -i "$expr" "$target"
   if cmp -s "$orig" "$target"; then
-    echo "MUTANT $name: the mutation did not apply (FAIL)"
-    fail=1
-    continue
+    echo "MUTANT $name: the mutation did not apply (FAIL)" > "$OUT/$name.result"
+    return
   fi
   changed=$(diff "$orig" "$target" | grep -c '^>')
   old=$(run_app "$OLD" "$dir/include" "$dir/drive_session.cpp" "$dir/old")
@@ -126,9 +129,29 @@ for m in "${MUTANTS[@]}"; do
   verdict=ok
   if [ "$changed" -ne 1 ] || [ "$old" != REJECTED ] || [ "$new" != REJECTED ]; then
     verdict=FAIL
+  fi
+  echo "MUTANT $name ($kind, $changed line): full product $old ($old_fail cases), by input $new ($new_fail cases) -> $verdict" > "$OUT/$name.result"
+}
+
+for m in "${MUTANTS[@]}"; do
+  rm -f "$OUT/${m%%|*}.result"
+  while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do
+    wait -n
+  done
+  mutate_one "$m" &
+done
+wait
+for m in "${MUTANTS[@]}"; do
+  result=$OUT/${m%%|*}.result
+  if [ -f "$result" ]; then
+    cat "$result"
+    if grep -q 'FAIL' "$result"; then
+      fail=1
+    fi
+  else
+    echo "MUTANT ${m%%|*}: no result (FAIL)"
     fail=1
   fi
-  echo "MUTANT $name ($kind, $changed line): full product $old ($old_fail cases), by input $new ($new_fail cases) -> $verdict"
 done
 echo "MUTANTS: ${#MUTANTS[@]} mutants -> $([ $fail -eq 0 ] && echo PASS || echo FAIL)"
 exit $fail
