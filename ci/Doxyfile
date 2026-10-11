@@ -33,6 +33,9 @@ WARN_FORMAT            = "$file:$line: warning: $text"
 WARN_LOGFILE           = results/doxygen/warnings.log
 OUTPUT_DIRECTORY       = results/doxygen
 GENERATE_HTML          = YES
+# No graphs: they are not used, and Ubuntu's doxygen turns HAVE_DOT on by default, which with
+# no graphviz on the runner gives one "Problems running dot" warning per graph (540).
+HAVE_DOT               = NO
 GENERATE_LATEX         = NO
 GENERATE_XML           = NO
 GENERATE_RTF           = NO
