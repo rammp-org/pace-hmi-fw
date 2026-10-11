@@ -717,6 +717,25 @@ def t_c2_mv_and_rail() -> None:
                 .polls(4101.2, 4104.2, stick=fault))
     passes("C2-3", c2.grade_c2_3, rail(TB()).build())
     fails("C2-3 axis", c2.grade_c2_3, rail(TB(), "V").build(), "HIGH H")
+
+    def stopping(tb: TB, notice: str = "STOPPING", phase: str = "EXITING") -> TB:
+        # C2b: the FAULT stops as an exit hold does; the stop's notice ranks first (C1 §2.7)
+        fault = stick("FAULT", fault_reason="HIGH", fault_axis="H")
+        return (tb.mark("change", 4100.0).mark("centred", 4101.0)
+                .stream(4099.0, 4100.15, 1.0).stream(4100.15, 4104.2)
+                .polls(4099.5, 4100.35, screen="DriveScreen", phase="DRIVING", stick=stick())
+                .polls(4100.35, 4100.45, screen="DriveScreen", phase="DRIVING",
+                       notice="STICK_FAULT", stick=fault)
+                .polls(4100.45, 4101.2, screen="DriveScreen", phase=phase, notice=notice,
+                       stick=fault)
+                .polls(4101.2, 4104.2, stick=fault))
+    passes("C2-3 stopping (C2b)", c2.grade_c2_3, stopping(TB()).build())
+    passes("C2-3 MCB did not stop", c2.grade_c2_3,
+           stopping(TB(), "MCB_DID_NOT_STOP", "EXIT_REFUSED").build())
+    fails("C2-3 stop notice while still driving", c2.grade_c2_3,
+          stopping(TB(), "STOPPING", "DRIVING").build(), "the stop's notice while stopping")
+    fails("C2-3 no notice while stopping", c2.grade_c2_3,
+          stopping(TB(), "NONE", "EXITING").build(), "the stop's notice while stopping")
     fails("C2-3 motion", c2.grade_c2_3,
           with_(rail, lambda tb: tb.tr.samples.append((4102.0, 0.0, 0.0, 0.2, 0))),
           "exactly 0")
@@ -793,12 +812,25 @@ def t_c2_8_9_10() -> None:
           with_(lambda tb: tr_b6(tb, t1=4900.3, label="change", output="zero"),
                 lambda tb: tb.tr.samples.append((4903.0, 0, 1.0, 0, 0))), "G3 over G4")
 
-    def ten(tb: TB, notice: str = "STICK_FAULT") -> TB:
-        return (tb.mark("release", 5000.0).mark("end", 5013.0).stream(4999.0, 5013.0)
-                .polls(5000.0, 5009.0, stick=stick("FAULT"))
-                .polls(5009.0, 5013.0, screen="DriveScreen", notice=notice, stick=stick("FAULT")))
+    def ten(tb: TB, disable_at: float | None = 5007.6, locked_at: float = 5008.2,
+            enable: bool = False) -> TB:
+        # C2b: the re-enable at 5007 is followed into Drive and stopped on the same tick
+        tb.mark("release", 5000.0).mark("reenable", 5007.0).mark("end", 5013.0)
+        tb.stream(4999.0, 5013.0).polls(5000.0, 5007.3, stick=stick("FAULT"))
+        tb.polls(5007.3, locked_at, screen="DriveScreen", phase="EXITING", notice="STOPPING",
+                 stick=stick("FAULT"))
+        tb.polls(locked_at, 5013.0, stick=stick("FAULT"))
+        if disable_at is not None:
+            tb.dc(disable_at, "DISABLE")
+        if enable:
+            tb.dc(5007.5, "ENABLE")
+        return tb
     passes("C2-10", c2.grade_c2_10, ten(TB()).build())
-    fails("C2-10 notice", c2.grade_c2_10, ten(TB(), "NONE").build(), "STICK_FAULT")
+    fails("C2-10 no DISABLE", c2.grade_c2_10, ten(TB(), disable_at=None).build(), "a DISABLE")
+    fails("C2-10 late DISABLE", c2.grade_c2_10, ten(TB(), disable_at=5008.1).build(),
+          "a DISABLE")
+    fails("C2-10 not Locked", c2.grade_c2_10, ten(TB(), locked_at=5013.0).build(), "Locked within")
+    fails("C2-10 ENABLE", c2.grade_c2_10, ten(TB(), enable=True).build(), "no ENABLE")
 
 
 def t_c2_11_12() -> None:

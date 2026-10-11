@@ -111,9 +111,23 @@ def grade_c2_3(st: HazardStep, tr: hg.Trace, p: dict) -> None:
     st.check("still FAULT after centring", ok, f"{n} polls; first other {bad}")
     if f is not None:
         drive = [s for tt, s in hg.states_in(tr.states, f, c + 3.0) if s.get("screen") == DRIVE]
-        st.check("notice STICK_FAULT (on Drive)", bool(drive)
-                 and all(s.get("notice") == "STICK_FAULT" for s in drive),
-                 f"{len(drive)} Drive polls; {[s.get('notice') for s in drive[:2]]}")
+        st.check("notice STICK_FAULT on Drive, or the stop's notice while stopping (C1 §2.7)",
+                 bool(drive) and all(fault_notice_ok(s) for s in drive),
+                 f"{len(drive)} Drive polls; "
+                 f"{[(s.get('phase'), s.get('notice')) for s in drive if not fault_notice_ok(s)][:2]}")
+
+
+# C1 §2.7: the Drive notice ranks the user's stop first. With C2b a stick FAULT while driving
+# stops as an exit hold does (rows 55-56): while the phase is EXITING or EXIT_REFUSED the notice
+# is the stop's (STOPPING, then MCB_DID_NOT_STOP), otherwise the hold reason's STICK_FAULT.
+STOP_PHASES = ("EXITING", "EXIT_REFUSED")
+STOP_NOTICES = ("STOPPING", "MCB_DID_NOT_STOP")
+
+
+def fault_notice_ok(s: dict) -> bool:
+    if s.get("phase") in STOP_PHASES:
+        return s.get("notice") in STOP_NOTICES
+    return s.get("notice") == "STICK_FAULT"
 
 
 def grade_c2_3b(st: HazardStep, tr: hg.Trace, p: dict) -> None:
@@ -208,6 +222,14 @@ def grade_c2_9(st: HazardStep, tr: hg.Trace, p: dict) -> None:
     grade_ignored_stop(st, tr, "change", "zero")
 
 
+# C2-10's re-entry (C2 §5.1, C2b rows 55-56): the MCB re-enables, the HMI follows into Drive
+# (M1) and stops on the same tick with a DISABLE; the MCB (sim normal) obeys and the HMI relocks.
+# The DISABLE within one MibStatus period (0.5 s) + one tick (0.25 s) + transport; Locked within
+# 1.5 s of it (as C2-8).
+REENTRY_DISABLE_WITHIN_S = 1.0
+REENTRY_LOCKED_WITHIN_S = 1.5
+
+
 def grade_c2_10(st: HazardStep, tr: hg.Trace, p: dict) -> None:
     c0, e = tr.mark("release"), tr.mark("end")
     check_no_nonzero_strict = hg.nonzero_in(tr.samples, c0, e)
@@ -215,9 +237,19 @@ def grade_c2_10(st: HazardStep, tr: hg.Trace, p: dict) -> None:
              f"{len(check_no_nonzero_strict)} non-zero")
     ok, n, bad = hg.all_states(tr.states, _state("FAULT"), c0, e)
     st.check("STATE FAULT throughout", ok, f"{n} polls; first other {bad}")
-    drive = [s for t, s in hg.states_in(tr.states, c0, e) if s.get("screen") == DRIVE]
-    st.check("Drive notice STICK_FAULT", bool(drive)
-             and all(s.get("notice") == "STICK_FAULT" for s in drive), f"{len(drive)} Drive polls")
+    r = tr.mark("reenable")
+    dis = hg.drive_commands(tr.events, r, r + REENTRY_DISABLE_WITHIN_S, "DISABLE")
+    st.check(f"re-entry: a DISABLE within {REENTRY_DISABLE_WITHIN_S} s of the re-enable "
+             f"(rows 55-56)", bool(dis), f"{len(hg.drive_commands(tr.events, r, e, 'DISABLE'))}"
+             f" DISABLE(s) by the end")
+    enables = hg.drive_commands(tr.events, c0, e, "ENABLE")
+    st.check("no ENABLE", not enables, f"{len(enables)}")
+    if dis:
+        d = dis[0]["mono"]
+        locked = hg.first_state(tr.states, hg.screen_is(LOCKED), d)
+        st.check(f"Locked within {REENTRY_LOCKED_WITHIN_S} s of the DISABLE",
+                 locked is not None and locked[0] - d <= REENTRY_LOCKED_WITHIN_S,
+                 "never" if locked is None else f"after {locked[0] - d:.2f} s")
 
 
 def grade_c2_11(st: HazardStep, tr: hg.Trace, p: dict) -> None:
@@ -509,8 +541,9 @@ def s_c2_10(rig: Rig) -> dict:
     rig.watch(5.0)
     rig.forward()
     rig.watch(2.0)
-    rig.sim_cmd("a")  # re-enable
-    rig.watch(3.0, until=hg.screen_is(DRIVE))
+    rig.mark("reenable")
+    rig.sim_cmd("a")  # re-enable: the HMI follows into Drive and stops on the same tick (C2b)
+    rig.watch(3.0, until=hg.screen_is(LOCKED))
     rig.centre()
     rig.watch(0.5)
     rig.forward()
