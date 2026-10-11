@@ -2,7 +2,7 @@
 
 /// @file rates_constants.hpp
 /// @brief The rates and depths the topology's CHANNELS table names (CS-OWN-12).
-/// @details DRAFT for review, like topology.hpp. Dependency-free: no includes but <cstdint>.
+/// @details DRAFT for review, like topology.hpp. Dependency-free: no includes but `<cstdint>`.
 ///          Each value says where it comes from:
 ///          - measured: read on the bench (board 2) or in a boot log;
 ///          - doc: today's code or a document states it (file:line);

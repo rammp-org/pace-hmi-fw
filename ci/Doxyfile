@@ -1,5 +1,7 @@
 # Doxygen configuration for the CS-DOC-01 check (tools/l0/doxygen_gate.py).
-# First-party public headers only; nothing is generated except the warning log.
+# First-party public headers only. HTML is generated into results/doxygen/html and not used:
+# doxygen 1.9.8 reads @param and @return while writing HTML, and with no HTML output it reports
+# every documented parameter list and return value as undocumented (checked on a 10-line header).
 # WARN_AS_ERROR stays NO: the gate ratchets the warning count instead (see the script).
 PROJECT_NAME           = "pace-hmi-fw"
 INPUT                  = components main
@@ -30,7 +32,7 @@ WARN_AS_ERROR          = NO
 WARN_FORMAT            = "$file:$line: warning: $text"
 WARN_LOGFILE           = results/doxygen/warnings.log
 OUTPUT_DIRECTORY       = results/doxygen
-GENERATE_HTML          = NO
+GENERATE_HTML          = YES
 GENERATE_LATEX         = NO
 GENERATE_XML           = NO
 GENERATE_RTF           = NO
