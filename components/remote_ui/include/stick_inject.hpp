@@ -13,7 +13,7 @@
 ///          constexpr, so a release build compiles none of this (CS-LAY-09, CS-TYP-05) and app_main
 ///          is unchanged (the L0 ratchet holds main.cpp's lines and statics).
 ///
-///          In a bench inject build it is StickInjectBench, a StickPipeline whose sample() swaps
+///          In a bench inject build it is StickInjectBench, a StickPipeline whose inject() swaps
 ///          the ADC task's raw sample for the injected one (StickInjector::sample); the island
 ///          runs the real code on it: the monitor (C2), calibration, mapping, keys, the permit,
 ///          XYTwist.
@@ -61,7 +61,7 @@ using StickInjectActiveReader = hmi::fw::Reader<StickInjectActive>;
 /// @param active The injection-active flag's read end.
 void remote_ui_attach_stick_inject(StickInjectWriter writer, StickInjectActiveReader active);
 
-/// @brief The ADC task's stick with the bench injection in front of its raw sample (sample()).
+/// @brief The ADC task's stick with the bench injection in front of its raw sample (inject()).
 ///        See the file comment.
 class StickInjectBench : public hmi::stick::StickPipeline {
 public:
@@ -77,13 +77,14 @@ public:
   StickInjectBench &operator=(StickInjectBench &&) = delete;
   ~StickInjectBench() = default;
 
-  /// @brief The raw sample this cycle uses (ADC task only, once per cycle, before the cycle):
-  ///        the injected one while an injection holds (until 300 ms after the last STICK; its
-  ///        fail_mask as REQ-STK-26), else @p real. The island hands it to its Io and the
-  ///        pipeline. Drains the mailbox (its one reader), never blocking.
-  /// @param real This cycle's raw sample from the ADC.
-  /// @return The sample for the Io and the pipeline.
-  [[nodiscard]] hmi::stick::RawSample sample(const hmi::stick::RawSample &real) noexcept {
+  /// @brief The raw sample this cycle uses (ADC task only, once per cycle, before the cycle),
+  ///        in place: the injected one while an injection holds (until 300 ms after the last
+  ///        STICK; its fail_mask as REQ-STK-26), else the ADC's unchanged. The island hands it
+  ///        to its Io and the pipeline. Drains the mailbox (its one reader), never blocking.
+  ///        Out of line (noinline): its message and sample copies stay out of the ADC task's
+  ///        own frame (hazard-c2-spec.md §10.3).
+  /// @param sample This cycle's raw sample from the ADC; the injected one on return.
+  [[gnu::noinline]] void inject(hmi::stick::RawSample &sample) noexcept {
     const auto now = std::chrono::steady_clock::now();
     hmi::stick::StickInjectMsg msg{};
     switch (mailbox_.read(msg)) {
@@ -94,10 +95,10 @@ public:
       break;
     case hmi::fw::ReadStatus::WRONG_TASK:
       // Not the ADC task (the read end reported it): touch nothing it owns; the real stick.
-      return real;
+      return;
     }
     active_.write(injector_.active(now));
-    return injector_.sample(real, now);
+    sample = injector_.sample(sample, now);
   }
 
 private:

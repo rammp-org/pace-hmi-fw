@@ -58,6 +58,10 @@ struct Cycle {
 ///         (cycle.hpp): the motion guard, the stick, note_cycle, the watchdog reset.
 template <typename Stick, typename Io, Cycle kCycle, typename Ports> class StickIsland {
 public:
+  // C2's P6 (twist all reads good) counts the island's oneshot reads (hazard-c2-spec.md §4).
+  static_assert(kCycle.twist_oversample == hmi::stick::TWIST_OVERSAMPLE,
+                "the monitor's TWIST_OVERSAMPLE is the island's twist_oversample");
+
   /// @brief The motion guard's channels (hazard fix C4, §3.1); every one outlives the task.
   struct Guard {
     const GuardSources *sources; ///< the UI heartbeat, the MibStatus state and stamp
@@ -92,24 +96,19 @@ public:
                  // snapshot (mean, max, sequence; see the AXIS WIRING note at the
                  // calibrations: CH1 is horizontal, CH0 vertical), then the twist pot on ADC2
                  // (GPIO52), sampled oneshot (mean, max, reads).
-                 const auto xy = adc_.get_windows(xy_channels_);
-                 hmi::stick::RawSample sample{.horizontal = window_of(xy[1]), // ADC1_CH1
-                                              .vertical = window_of(xy[0]),   // ADC1_CH0
-                                              .twist_mean_mv = std::nullopt,
-                                              .twist_max_mv = 0.0f,
-                                              .twist_reads = 0};
-                 read_twist(*twist_adc_, sample);
+                 read_windows(sample_);
+                 read_twist(*twist_adc_, sample_);
 
                  // raw mV -> calibrated stick -> the keypad key, the bars and XYTwist:
-                 // hmi::stick::StickPipeline (components/stick), fed through Io. Only a
-                 // cycle with all three reads does anything; otherwise nothing is published.
-                 // The Io is handed the reads the pipeline gets (after the bench injection)
-                 // first, valid or not. ControlCycle runs, every cycle, valid or not: the
-                 // motion guard (its verdict to the Io: the permit's condition 2), this
-                 // cycle, note_cycle on the ADC's reads, the watchdog reset (hazard fix C4).
+                 // hmi::stick::StickPipeline (components/stick), fed through Io; a cycle with a
+                 // read missing is the pipeline's to handle (H9). The Io is handed the sample
+                 // the stick gets (after the bench injection) first, valid or not.
+                 // ControlCycle runs, every cycle, valid or not: the motion guard (its verdict
+                 // to the Io: the permit's condition 2), this cycle, note_cycle on the ADC's
+                 // reads, the watchdog reset (hazard fix C4).
                  Io stick_io{*twist_lowpass_, *io_state_};
-                 Step step{this, &sample};
-                 static_cast<void>(control_.run(step, stick_io, means_of(sample)));
+                 Step step{this, &sample_};
+                 static_cast<void>(control_.run(step, stick_io, means_of(sample_)));
                  Ports::after_cycle();
 
                  // NOTE: sleeping in this way allows the sleep to exit early when the
@@ -165,12 +164,20 @@ private:
   // The stick as ControlCycle sees it: one cycle_on on this cycle's raw sample.
   struct Step {
     StickIsland *island;
-    const hmi::stick::RawSample *sample;
-    [[gnu::always_inline]] bool cycle(Io &stick_io, const hmi::stick::RawReadsMv &) {
-      return island->cycle_on(stick_io, *sample);
+    hmi::stick::RawSample *sample;
+    [[gnu::always_inline]] bool cycle(Io &stick_io, const hmi::stick::RawReadsMv &means) {
+      return island->cycle_on(stick_io, *sample, means);
     }
   };
 
+  // Both X/Y windows into @p out, from one snapshot (see the AXIS WIRING note at the
+  // calibrations: CH1 is horizontal, CH0 vertical). Out of line (noinline): the snapshot's
+  // arrays stay out of the task's own frame (hazard-c2-spec.md §10.3).
+  [[gnu::noinline]] void read_windows(hmi::stick::RawSample &out) const {
+    const auto xy = adc_.get_windows(xy_channels_);
+    out.horizontal = window_of(xy[1]); // ADC1_CH1
+    out.vertical = window_of(xy[0]);   // ADC1_CH0
+  }
   // A window as the raw sample carries it; a missing read carries no max and no sequence.
   [[gnu::always_inline]] static hmi::stick::XyWindowMv
   window_of(const std::optional<hmi::adc::AdcWindowReading> &w) {
@@ -186,20 +193,23 @@ private:
             .twist_mv = s.twist_mean_mv};
   }
 
-  // One cycle of the stick on the ADC's raw sample @p raw, through @p stick_io: the sample the
-  // stick gets is the Stick's own (the bench injection's) when it has `sample`, else @p raw
-  // itself. The Io is handed it (note_sample: the monitor's input, the one `calibrating` of the
-  // cycle) and its means (note_reads) before the pipeline runs on the means.
-  [[gnu::always_inline]] bool cycle_on(Io &stick_io, const hmi::stick::RawSample &raw) {
-    if constexpr (requires { stick_->sample(raw); }) {
-      return cycle_with(stick_io, stick_->sample(raw));
+  // One cycle of the stick on the ADC's raw sample @p sample (whose means are @p means), through
+  // @p stick_io. The Stick's own injection (bench builds: inject()) replaces the sample in place
+  // when it has one. The Io is handed the sample (note_sample: the monitor's input, the one
+  // `calibrating` of the cycle) and its means (note_reads) before the pipeline runs on them.
+  [[gnu::always_inline]] bool cycle_on(Io &stick_io, hmi::stick::RawSample &sample,
+                                       const hmi::stick::RawReadsMv &means) {
+    if constexpr (requires { stick_->inject(sample); }) {
+      stick_->inject(sample);
+      const hmi::stick::RawReadsMv injected = means_of(sample);
+      return cycle_with(stick_io, sample, injected);
     } else {
-      return cycle_with(stick_io, raw);
+      return cycle_with(stick_io, sample, means);
     }
   }
-  [[gnu::always_inline]] bool cycle_with(Io &stick_io, const hmi::stick::RawSample &sample) {
+  [[gnu::always_inline]] bool cycle_with(Io &stick_io, const hmi::stick::RawSample &sample,
+                                         const hmi::stick::RawReadsMv &reads) {
     stick_io.note_sample(sample);
-    const hmi::stick::RawReadsMv reads = means_of(sample);
     stick_io.note_reads(reads);
     return stick_->cycle(stick_io, reads);
   }
@@ -233,12 +243,15 @@ private:
     }
     out.twist_reads = reads;
     out.twist_max_mv = max;
-    if (reads > 0) {
-      out.twist_mean_mv = sum / static_cast<float>(reads);
-    }
+    out.twist_mean_mv =
+        reads > 0 ? std::optional<float>{sum / static_cast<float>(reads)} : std::nullopt;
   }
 
   std::array<espp::AdcConfig, 2> xy_channels_; ///< vertical (CH0), horizontal (CH1)
+  // This cycle's raw sample (C2 §2.1): every field written each cycle by read_windows and
+  // read_twist, then (bench builds) the injection. A member, not a local, so the Read ADC
+  // task's own frame holds none of it (hazard-c2-spec.md §10.3). Read ADC only.
+  hmi::stick::RawSample sample_{};
   espp::SimpleLowpassFilter::Config twist_lowpass_config_;
   WindowedContinuousAdc adc_;
   std::optional<espp::OneshotAdc> twist_adc_;
