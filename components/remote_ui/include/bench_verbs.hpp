@@ -61,8 +61,8 @@ enum class Verb : std::uint8_t {
 
 /// @brief PERMIT POST's values: C1 §3.2's PostGate, in its order.
 enum class PostGateName : std::uint8_t { NOT_RUN, PENDING, PASS, FAIL };
-/// @brief What STALL stalls: the UI task (the LVGL lock held), the ADC task (a sleep in its
-///        cycle) or espp's ContinuousAdc task (suspended).
+/// @brief What STALL stalls: the UI task (a spin before its heartbeat), the ADC task (a spin
+///        after its cycle) or espp's ContinuousAdc task (suspended by the ADC task, C2 O14).
 enum class StallTarget : std::uint8_t { UI, ADC, CADC };
 
 /// @brief The longest STALL accepted, ms. C4 asks for 3000 (a watchdog trip at 2 s); C2 for 1000.

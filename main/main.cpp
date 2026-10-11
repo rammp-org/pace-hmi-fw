@@ -219,6 +219,13 @@ struct StickPorts {
   static void watchdog_reset() { task_watchdog_reset(); }
   static void after_cycle();
 };
+// Bench inject builds add STALL CADC's request (C2 O14): the island suspends espp's
+// ContinuousAdc task for its time. A release build's Ports has none, so the island compiles no
+// suspend.
+struct BenchStickPorts : StickPorts {
+  static uint32_t cadc_stall_ms();
+};
+using StickPortsSlot = std::conditional_t<BENCH_STICK_INJECT, BenchStickPorts, StickPorts>;
 
 // The ADC task's side of StickPipeline::cycle. Runs on the ADC task only; every
 // member is what the stick block of adc_task_fn did inline before.
@@ -899,16 +906,21 @@ static hmi::bench_verbs::StickBlock bench_stick_block() {
   return b;
 }
 
-// C4's verb: STALL UI|ADC <ms> (REQ-RUI-07). The task stalls itself at its next cycle; the reply
-// comes at once. STALL CADC is C2's (O14): refused here.
+uint32_t BenchStickPorts::cadc_stall_ms() {
+  return ui_app.bench_stall().take(hmi::control::StallTask::CADC);
+}
+
+// The STALL verb: UI|ADC <ms> (C4 REQ-RUI-07), the task stalls itself at its next cycle;
+// CADC <ms> (C2 O14, REQ-RUI-08), Read ADC suspends espp's ContinuousAdc task at its next
+// cycle. The reply comes at once.
 static void add_motion_guard_hooks(hmi::bench_verbs::Hooks &h) {
   h.stall = [](hmi::bench_verbs::StallTarget target, uint32_t ms) {
     using hmi::bench_verbs::StallTarget;
-    if (target == StallTarget::CADC) {
-      return false;
-    }
-    ui_app.bench_stall().request(
-        target == StallTarget::UI ? hmi::control::StallTask::UI : hmi::control::StallTask::ADC, ms);
+    using hmi::control::StallTask;
+    ui_app.bench_stall().request(target == StallTarget::UI    ? StallTask::UI
+                                 : target == StallTarget::ADC ? StallTask::ADC
+                                                              : StallTask::CADC,
+                                 ms);
     return true;
   };
 }
@@ -1292,7 +1304,7 @@ extern "C" void app_main(void) {
   };
   // The motion guard's link flags (C4-b): rtps_comms' atomics, alive as long as the firmware.
   const RtpsLinkFlags link_flags = rtps_comms_link_flags();
-  hmi::control::StickIsland<StickSlot, AdcStickIo, kStickCycle, StickPorts> stick_island({
+  hmi::control::StickIsland<StickSlot, AdcStickIo, kStickCycle, StickPortsSlot> stick_island({
       .task =
           {
               .name = "Read ADC",

@@ -110,6 +110,9 @@ public:
                  Step step{this, &sample_};
                  static_cast<void>(control_.run(step, stick_io, means_of(sample_)));
                  Ports::after_cycle();
+                 if constexpr (requires { Ports::cadc_stall_ms(); }) {
+                   step_cadc_stall(Ports::cadc_stall_ms(), Ports::now_ms()); // bench builds
+                 }
 
                  // NOTE: sleeping in this way allows the sleep to exit early when the
                  // task is being stopped / destroyed
@@ -246,6 +249,28 @@ private:
     out.twist_mean_mv =
         reads > 0 ? std::optional<float>{sum / static_cast<float>(reads)} : std::nullopt;
   }
+
+  // Bench builds (C2 O14, STALL CADC): espp's ContinuousAdc task suspended by Read ADC from a
+  // request until its time is up, so X/Y go stale as a starved producer's do (C2-16). Read ADC
+  // only. A request while one is running is dropped.
+  struct CadcStall {
+    TaskHandle_t task = nullptr; ///< suspended, while not null
+    std::uint32_t until_ms = 0;
+  };
+  void step_cadc_stall(std::uint32_t request_ms, std::uint32_t now_ms) noexcept {
+    if (request_ms != 0 && cadc_stall_.task == nullptr) {
+      if (TaskHandle_t task = adc_.task_handle(); task != nullptr) {
+        vTaskSuspend(task);
+        cadc_stall_ = {.task = task, .until_ms = now_ms + request_ms};
+      }
+    }
+    if (cadc_stall_.task != nullptr &&
+        static_cast<std::int32_t>(now_ms - cadc_stall_.until_ms) >= 0) {
+      vTaskResume(cadc_stall_.task);
+      cadc_stall_.task = nullptr;
+    }
+  }
+  CadcStall cadc_stall_{};
 
   std::array<espp::AdcConfig, 2> xy_channels_; ///< vertical (CH0), horizontal (CH1)
   // This cycle's raw sample (C2 §2.1): every field written each cycle by read_windows and

@@ -49,6 +49,10 @@ public:
     }
     return out;
   }
+
+  /// The reader task's handle once it has run (nullptr before): bench builds suspend it for
+  /// C2's STALL CADC (O14).
+  [[nodiscard]] TaskHandle_t task_handle() const noexcept { return task_handle_.load(); }
 };
 
 } // namespace hmi::control

@@ -13,8 +13,9 @@
 
 namespace hmi::control {
 
-/// What STALL stalls (C4 §8): the UI task, or the stick task.
-enum class StallTask : std::uint8_t { UI, ADC };
+/// What STALL stalls: the UI task, the stick task (C4 §8), or espp's ContinuousAdc task, which
+/// Read ADC suspends for the time (C2 O14, C2-16).
+enum class StallTask : std::uint8_t { UI, ADC, CADC };
 
 /// One pending stall per task, in ms; 0 = none. Any task requests; the stalled task takes it.
 class BenchStall {
@@ -32,7 +33,7 @@ private:
   static constexpr std::size_t index(StallTask task) noexcept {
     return static_cast<std::size_t>(task);
   }
-  std::array<std::atomic<std::uint32_t>, 2> ms_{};
+  std::array<std::atomic<std::uint32_t>, 3> ms_{};
   static_assert(std::atomic<std::uint32_t>::is_always_lock_free, "CS-OWN-03");
 };
 
