@@ -232,6 +232,9 @@ struct AdcStickIo {
     hmi::stick::PostGate post_seen = hmi::stick::PostGate::NOT_RUN; // the gate, last cycle
     // C4's motion guard: this cycle's verdict (ControlCycle hands it over before the pipeline)
     hmi::control::GuardReason guard = hmi::control::GuardReason::WDT_MISSING;
+    // joystick_cal_running(), sampled once per cycle (note_sample) for every reader of it in
+    // that cycle (hazard fix C2, REQ-CTL-15)
+    bool calibrating = false;
   };
 
   espp::SimpleLowpassFilter &twist_lowpass;
@@ -240,6 +243,12 @@ struct AdcStickIo {
   // The motion guard's verdict for this cycle (hazard-c4-spec.md §2.1): the output permit's
   // condition 2. Every cycle, valid or not, before the pipeline.
   void set_motion_verdict(hmi::control::GuardReason verdict) { state.guard = verdict; }
+
+  // Every cycle, valid or not, first: the raw sample (after the bench injection), and the one
+  // `calibrating` of the cycle (hazard fix C2, REQ-CTL-15).
+  void note_sample(const hmi::stick::RawSample & /*sample*/) {
+    state.calibrating = joystick_cal_running();
+  }
 
   // Every cycle, valid or not, before the pipeline: the reads it gets (after the bench
   // injection). An invalid cycle restarts the permit's neutral wait (REQ-STK-12).
@@ -273,7 +282,7 @@ struct AdcStickIo {
   }
   // While a calibration run owns the stick nothing downstream may act on it:
   // the user is being told to push it to every end in turn.
-  bool calibrating() { return joystick_cal_running(); }
+  bool calibrating() { return state.calibrating; }
   bool swap() { return applied_settings.stick_swap(); }
   bool invert_x() { return applied_settings.stick_invert_x(); }
   bool invert_y() { return applied_settings.stick_invert_y(); }
@@ -595,7 +604,7 @@ inline hmi::stick::Permit AdcStickIo::output_permit(const hmi::stick::Position &
   const hmi::stick::PermitInputs in{
       .gate_open = ::stick_drives.load(),
       .motion_guard_ok = state.guard == hmi::control::GuardReason::OK,
-      .calibrating = joystick_cal_running(),
+      .calibrating = state.calibrating,
       .calibration_measured = joystick_cal_measured(),
       .post = hooks.post_gate.read(),
       .health = hooks.stick_health.read(),

@@ -4,6 +4,7 @@
 // in main's unit, so the ADC path's calls stay in one translation unit (app-main-shrink
 // §6, inlining and timing).
 
+#include <array>
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
@@ -12,9 +13,11 @@
 
 #include "continuous_adc.hpp"
 #include "control/cycle.hpp"
+#include "control/windowed_adc.hpp"
 #include "logger.hpp"
 #include "oneshot_adc.hpp"
 #include "simple_lowpass_filter.hpp"
+#include "stick/stick_monitor.hpp"
 #include "stick/stick_pipeline.hpp"
 #include "task.hpp"
 
@@ -79,18 +82,23 @@ public:
   /// no task of its own.
   /// @param config See Config.
   explicit StickIsland(const Config &config)
-      : channels_(config.adc.channels)
+      : xy_channels_{config.adc.channels.at(0), config.adc.channels.at(1)}
       , twist_lowpass_config_(config.twist_lowpass)
       , adc_(config.adc)
       , control_(watchdog_, PortClock{}, *config.guard.sources, config.guard.flags,
                  *config.guard.telemetry)
       , task_({.callback = [this](std::mutex &m, std::condition_variable &cv) -> bool {
-                 // see the AXIS WIRING note at the calibrations: CH1 is horizontal, CH0 is
-                 // vertical
-                 auto vert_mv = adc_.get_mv(channels_[0]);  // ADC1_CH0 (GPIO16)
-                 auto horiz_mv = adc_.get_mv(channels_[1]); // ADC1_CH1 (GPIO17)
-                 // twist pot on ADC2 (GPIO52), sampled oneshot and averaged
-                 const std::optional<float> twist_mv = read_twist_mv(*twist_adc_);
+                 // The raw sample (hazard fix C2, §2.1, REQ-CTL-15): both X/Y windows in one
+                 // snapshot (mean, max, sequence; see the AXIS WIRING note at the
+                 // calibrations: CH1 is horizontal, CH0 vertical), then the twist pot on ADC2
+                 // (GPIO52), sampled oneshot (mean, max, reads).
+                 const auto xy = adc_.get_windows(xy_channels_);
+                 hmi::stick::RawSample sample{.horizontal = window_of(xy[1]), // ADC1_CH1
+                                              .vertical = window_of(xy[0]),   // ADC1_CH0
+                                              .twist_mean_mv = std::nullopt,
+                                              .twist_max_mv = 0.0f,
+                                              .twist_reads = 0};
+                 read_twist(*twist_adc_, sample);
 
                  // raw mV -> calibrated stick -> the keypad key, the bars and XYTwist:
                  // hmi::stick::StickPipeline (components/stick), fed through Io. Only a
@@ -100,11 +108,8 @@ public:
                  // motion guard (its verdict to the Io: the permit's condition 2), this
                  // cycle, note_cycle on the ADC's reads, the watchdog reset (hazard fix C4).
                  Io stick_io{*twist_lowpass_, *io_state_};
-                 Step step{this};
-                 static_cast<void>(control_.run(step, stick_io,
-                                                hmi::stick::RawReadsMv{.horizontal_mv = horiz_mv,
-                                                                       .vertical_mv = vert_mv,
-                                                                       .twist_mv = twist_mv}));
+                 Step step{this, &sample};
+                 static_cast<void>(control_.run(step, stick_io, means_of(sample)));
                  Ports::after_cycle();
 
                  // NOTE: sleeping in this way allows the sleep to exit early when the
@@ -157,31 +162,51 @@ private:
   struct PortClock {
     std::uint32_t operator()() const { return Ports::now_ms(); }
   };
-  // The stick as ControlCycle sees it: one cycle_on.
+  // The stick as ControlCycle sees it: one cycle_on on this cycle's raw sample.
   struct Step {
     StickIsland *island;
-    [[gnu::always_inline]] bool cycle(Io &stick_io, const hmi::stick::RawReadsMv &raw) {
-      return island->cycle_on(stick_io, raw);
+    const hmi::stick::RawSample *sample;
+    [[gnu::always_inline]] bool cycle(Io &stick_io, const hmi::stick::RawReadsMv &) {
+      return island->cycle_on(stick_io, *sample);
     }
   };
 
-  // One cycle of the stick on the ADC's reads @p raw, through @p stick_io: the reads the
-  // pipeline gets are the Stick's own (the bench injection's) when it has `reads`, else @p raw
-  // itself (no copy). The Io is handed them before the cycle.
-  [[gnu::always_inline]] bool cycle_on(Io &stick_io, const hmi::stick::RawReadsMv &raw) {
-    if constexpr (requires { stick_->reads(raw); }) {
-      return cycle_with(stick_io, stick_->reads(raw));
+  // A window as the raw sample carries it; a missing read carries no max and no sequence.
+  [[gnu::always_inline]] static hmi::stick::XyWindowMv
+  window_of(const std::optional<hmi::adc::AdcWindowReading> &w) {
+    if (!w) {
+      return {.mean_mv = std::nullopt, .max_mv = 0.0f, .sequence = 0};
+    }
+    return {.mean_mv = w->mean_mv, .max_mv = w->max_mv, .sequence = w->sequence};
+  }
+  // The three means: what the pipeline and note_cycle get.
+  [[gnu::always_inline]] static hmi::stick::RawReadsMv means_of(const hmi::stick::RawSample &s) {
+    return {.horizontal_mv = s.horizontal.mean_mv,
+            .vertical_mv = s.vertical.mean_mv,
+            .twist_mv = s.twist_mean_mv};
+  }
+
+  // One cycle of the stick on the ADC's raw sample @p raw, through @p stick_io: the sample the
+  // stick gets is the Stick's own (the bench injection's) when it has `sample`, else @p raw
+  // itself. The Io is handed it (note_sample: the monitor's input, the one `calibrating` of the
+  // cycle) and its means (note_reads) before the pipeline runs on the means.
+  [[gnu::always_inline]] bool cycle_on(Io &stick_io, const hmi::stick::RawSample &raw) {
+    if constexpr (requires { stick_->sample(raw); }) {
+      return cycle_with(stick_io, stick_->sample(raw));
     } else {
       return cycle_with(stick_io, raw);
     }
   }
-  [[gnu::always_inline]] bool cycle_with(Io &stick_io, const hmi::stick::RawReadsMv &reads) {
+  [[gnu::always_inline]] bool cycle_with(Io &stick_io, const hmi::stick::RawSample &sample) {
+    stick_io.note_sample(sample);
+    const hmi::stick::RawReadsMv reads = means_of(sample);
     stick_io.note_reads(reads);
     return stick_->cycle(stick_io, reads);
   }
 
   // The twist pot's reading for the Read ADC task: kCycle.twist_oversample oneshot reads
-  // on ADC2, averaged; nullopt if none succeeded.
+  // on ADC2, into @p out: their mean (nullopt if none succeeded), their largest, and how many
+  // succeeded (hazard fix C2, §2.1).
   //
   // Out of line on purpose (noinline). OneshotAdc::read_mv brings espp Logger's
   // error paths with it, and once GCC also inlined Logger::get_time there (an fmt
@@ -193,25 +218,29 @@ private:
   // channel and the count are kCycle's constants, as they were the arguments' (GCC
   // cloned the free function for them; with them as runtime values the frame was 16 B
   // larger).
-  [[gnu::noinline]] static std::optional<float> read_twist_mv(espp::OneshotAdc &twist_adc) {
-    std::optional<float> twist_mv;
+  [[gnu::noinline]] static void read_twist(espp::OneshotAdc &twist_adc,
+                                           hmi::stick::RawSample &out) {
     float sum = 0.0f;
-    int reads = 0;
+    float max = 0.0f;
+    std::uint8_t reads = 0;
     for (int i = 0; i < kCycle.twist_oversample; ++i) {
       if (auto mv = twist_adc.read_mv(kCycle.twist_channel)) {
-        sum += static_cast<float>(*mv);
+        const float v = static_cast<float>(*mv);
+        sum += v;
+        max = reads == 0 || v > max ? v : max;
         ++reads;
       }
     }
+    out.twist_reads = reads;
+    out.twist_max_mv = max;
     if (reads > 0) {
-      twist_mv = sum / static_cast<float>(reads);
+      out.twist_mean_mv = sum / static_cast<float>(reads);
     }
-    return twist_mv;
   }
 
-  std::vector<espp::AdcConfig> channels_;
+  std::array<espp::AdcConfig, 2> xy_channels_; ///< vertical (CH0), horizontal (CH1)
   espp::SimpleLowpassFilter::Config twist_lowpass_config_;
-  espp::ContinuousAdc adc_;
+  WindowedContinuousAdc adc_;
   std::optional<espp::OneshotAdc> twist_adc_;
   std::optional<Stick> stick_;
   typename Io::State *io_state_ = nullptr;

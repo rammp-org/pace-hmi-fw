@@ -36,6 +36,7 @@
 #include "fw_core/mailbox.hpp"
 #include "sdkconfig.h"
 #include "stick/bench_inject.hpp"
+#include "stick/stick_monitor.hpp"
 #include "stick/stick_pipeline.hpp"
 
 /// @brief CONFIG_HMI_BENCH_STICK_INJECT as a constexpr (CS-TYP-05; the hidden _AS_INT is always
@@ -95,6 +96,21 @@ public:
     }
     active_.write(injector_.active(now));
     return injector_.apply(real, now);
+  }
+
+  /// @brief The raw sample this cycle uses (the island's, hazard fix C2): reads() on its three
+  ///        means; the windows' maxima and sequences pass as read.
+  /// @param real This cycle's raw sample.
+  /// @return The sample for the Io and the pipeline.
+  [[nodiscard]] hmi::stick::RawSample sample(const hmi::stick::RawSample &real) noexcept {
+    const hmi::stick::RawReadsMv got = reads({.horizontal_mv = real.horizontal.mean_mv,
+                                              .vertical_mv = real.vertical.mean_mv,
+                                              .twist_mv = real.twist_mean_mv});
+    hmi::stick::RawSample out = real;
+    out.horizontal.mean_mv = got.horizontal_mv;
+    out.vertical.mean_mv = got.vertical_mv;
+    out.twist_mean_mv = got.twist_mv;
+    return out;
   }
 
 private:
