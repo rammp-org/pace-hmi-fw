@@ -78,6 +78,10 @@ output 0" (M1).
 
 ### C2 = H3 + H9 (stick table), after D2
 
+Status (2026-10-11): implemented on `dev_ai_hazard_c2` per [hazard-c2-spec.md](hazard-c2-spec.md)
+(commits 4-8, 10; C2b's drive-table rows are lane D's). The rules below are the v2 outline the
+spec replaced.
+
 | Rule |
 | --- |
 | A state machine OK / SUSPECT(n) / FAULT / RECOVERING with its own table, oracle and 100 % branches |

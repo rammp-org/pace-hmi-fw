@@ -920,13 +920,13 @@ The hazard IDs come from [plans/refactor.md §1](plans/refactor.md). Locations a
 | --- | --- | --- |
 | H1 | An ENABLED the HMI never asked for unlocks it; the stick drives about 1.3 s later | table rows 1–2 (`drive_session_table.hpp` `TRANSITIONS`, from line 252) → `DriveUi::unlock_advance_cb` → `NavView::arrive` → gate |
 | H2 | No boot POST; nothing gates motion on it or the reset reason; no DISABLE at boot | `components/post` not wired; `main.cpp:604-908` |
-| H3 | An out-of-calibration raw value is clamped to ±1: an open or shorted pot reads as full deflection | espp range mapper via `StickPipeline::map`; `joystick_cal`'s `plausible()` has no upper bound |
+| H3 | An out-of-calibration raw value is clamped to ±1: an open or shorted pot reads as full deflection (C2, `dev_ai_hazard_c2`: the stick monitor holds a read above its limit at 0; the 0 mV low rail stays a residual) | espp range mapper via `StickPipeline::map`; `joystick_cal`'s `plausible()` had no upper bound (C2: `check()`) |
 | H4 | The gate is written only by the UI task; the ADC task checks no link age, MIB state or UI liveness | `DriveUi::update_stick_gate` (`drive_ui.cpp:124`); `stick_pipeline.hpp:210` |
 | H5 | A relock on an unrequested stop or link loss sends no DISABLE; the request stays ENABLE and a profile tap re-sends it | rows 3–9 and 29–34; `DriveAdapter::perform_request` |
 | H6 | DriveCommand and SeatCommand are one-shot, best effort, result ignored; a refused exit is not re-sent | `DrivePort::publish` (`drive_port.hpp:103`); `UiApp::seat_request`; row 14; `rtps_comms.cpp:149` |
 | H7 | Any RTPS peer can start a self test; its overlay blocks the exit hold and the keys while `XYTwist` keeps flowing | `rtps_comms.cpp:160` (`on_command`); `HoldEngine::poll_all`; `UiApp::keypad_read` |
 | H8 | A NaN or huge seat value is UB in `seat_raw`; an unknown value steps from the axis minimum | `hmi_rtps_spec.hpp:90-95`; `UiApp::seat_step` |
-| H9 | A failed ADC read publishes nothing instead of neutral | `stick_pipeline.hpp:187` |
+| H9 | A failed ADC read publishes nothing instead of neutral (C2, `dev_ai_hazard_c2`: neutral) | `stick_pipeline.hpp:187` |
 | H10 | No neutral-stick check before ENABLE or the gate; seat presses not gated on `seat_ready` | row 18; `SeatView` (`seat_view.cpp:58, 70`) |
 | H11 | No task watchdog on the app tasks; the ADC task is below the UI (5 vs 20), with a boot-dependent core and a 4 KB stack | `main.cpp:826-836`; [§4.1](#41-the-tasks) |
 | H12 | A reset or panic is never shown (only the self test reads `esp_reset_reason`); the battery and range on the TopBar are placeholders | `main/selftest.cpp:414`; the export's TopBar |

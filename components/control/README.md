@@ -10,9 +10,9 @@ function-local statics, are members.
 
 | File | What |
 | --- | --- |
-| `include/control/stick_island.hpp` | `StickIsland<Stick, Io, kCycle>`: brings the continuous ADC (X/Y) and the twist's oneshot ADC up, builds the stick on its calibration (`start`), and every `kCycle.period_ms` reads the three pots and runs one `Stick::cycle` on them, then `Io::note_cycle`. `Cycle`: the period and the twist read, a template argument so they stay compile-time constants. Its private `read_twist_mv`, the twist's oversampled oneshot read, is out of line on purpose (its comment says why) |
+| `include/control/stick_island.hpp` | `StickIsland<Stick, Io, kCycle, Ports>`: brings the continuous ADC (X/Y) and the twist's oneshot ADC up, builds the stick on its calibration (`start`), and every `kCycle.period_ms` gathers the cycle's raw sample (hazard fix C2: both X/Y windows in one snapshot, `read_windows`; the twist's reads, `read_twist`; both out of line so the task's frame stays small), hands it to the Io (`note_sample`: C2's monitor) and runs one `Stick::cycle` on its means through `ControlCycle`. `Cycle`: the period and the twist read, a template argument so they stay compile-time constants. Bench inject builds: the injection replaces the sample in place, and `Ports::cadc_stall_ms` (STALL CADC) suspends the ContinuousAdc task |
 | `include/control/motion_guard.hpp` | Hazard fix C4 ([hazard-c4-spec.md](../../docs/plans/hazard-c4-spec.md)): `MotionGuard`, the ADC task's own check of the UI heartbeat, the link, the MibStatus age and the MCB state; its constants (`UI_HEARTBEAT_MAX_AGE_MS` 200, `MIB_STATUS_MAX_AGE_MS` 2000), the `GuardReason` verdict, the stale latch (`StampWatch`), the shared 32-bit stamps and atomics (`StampCell`, `GuardSources`, `GuardTelemetry`) and the ordered load (`load_guard_inputs`). Pure C++, time as a parameter |
-| `include/control/windowed_adc.hpp` | `WindowedContinuousAdc`: espp's `ContinuousAdc` (vendored, `components/espp_adc`) plus `get_windows(configs)`, each channel's newest window (mean, max, sequence) from one publish, read lock-free from `components/adc_window` (hazard fix C2, REQ-CTL-16). Not used by the firmware yet |
+| `include/control/windowed_adc.hpp` | `WindowedContinuousAdc`: espp's `ContinuousAdc` (vendored, `components/espp_adc`) plus `get_windows(configs)`, each channel's newest window (mean, max, sequence) from one publish, read lock-free from `components/adc_window` (hazard fix C2, REQ-CTL-16); `task_handle()` for the bench's STALL CADC |
 | `include/control/cycle.hpp` | `ControlCycle<Watchdog, Clock>`: one ADC cycle after the reads, in C4's order: (first cycle) subscribe to the task watchdog, evaluate the guard once, hand the verdict to the Io, one `Stick::cycle`, `Io::note_cycle`, reset the watchdog. No espp or IDF type, so the host tests drive it |
 
 **Status (2026-10-09).** The motion guard runs on the stick task: `StickIsland` runs one
@@ -35,8 +35,11 @@ The pipeline's own requirements are `components/stick`'s. The rows below are haz
 host app `test/` (`tests/manifest.d/control.yaml`, L1-CTL). Cases CTL-012, 013, 015, 016, 020
 and 021 (test_guard_permit.cpp) run the guard through ControlCycle, the real StickPipeline and
 C1's real OutputPermit, as main's AdcStickIo wires them; B-steps are bench checks
-(hazard-c4-spec.md §8). REQ-CTL-15 and 16 are hazard fix C2's
-(hazard-c2-spec.md §7.2); CTL-022 and 023 come with C2's island commit.
+(hazard-c4-spec.md §8). REQ-CTL-15 and 16 are hazard fix C2's (hazard-c2-spec.md §7.2).
+CTL-022 and 023 are not written: they need the island on the host, and it is not host-built
+(espp's ADC drivers). What they would check is covered by the stick's wired cases STK-084,
+092..098 (main's per-cycle order: monitor, then pipeline, on one `calibrating`) and on the
+bench by C2-3 (a rail on the horizontal channel reads HIGH horizontal).
 
 | ID | Requirement | Tests |
 | --- | --- | --- |
