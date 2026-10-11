@@ -1,6 +1,7 @@
 #include "rtps_comms.hpp"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -548,6 +549,31 @@ bool initialize_wifi() {
 ///////////////////////////////////////////////////////////////////////////////
 // RTPS
 
+// PROPOSAL (docs/plans/hazard-c4-rtps-priority.md; the owner decides, task configs are
+// ask-first): espp RTPS sends every publish, XYTwist included, from its worker pool, two
+// tasks at priority 5, each pinned to the core of its first FPU use. On core 1 a stuck
+// lv_task (priority 20) starves them, and XYTwist stops for the whole UI stall (C4 B5i:
+// hazard-c4-spec.md wants it to keep flowing, neutral). Raised to lv_task's 20 they share
+// core 1 with a stuck UI task instead; they stay below Read ADC (21) on core 0. espp names the
+// pool's workers "rtps_worker_<n>" (worker_count 2, EsppTransport.cpp); a worker not found is
+// logged and left as it is.
+constexpr UBaseType_t kRtpsWorkerPriority = 20;
+constexpr std::array<const char *, 2> kRtpsWorkers{"rtps_worker_0", "rtps_worker_1"};
+
+void raise_rtps_workers() {
+  for (const char *name : kRtpsWorkers) {
+    TaskHandle_t task = xTaskGetHandle(name);
+    if (task == nullptr) {
+      logger.warn("{} not found: its priority is left as espp set it", name);
+      continue;
+    }
+    const UBaseType_t was = uxTaskPriorityGet(task);
+    vTaskPrioritySet(task, kRtpsWorkerPriority);
+    logger.info("{}: priority {} -> {} (sends XYTwist; shares core time with a stuck UI task)",
+                name, was, kRtpsWorkerPriority);
+  }
+}
+
 // On the current lease.
 bool start_participant() {
   // the W5500's per-frame SPI bounce buffer comes from this pool, unchecked
@@ -565,6 +591,7 @@ bool start_participant() {
     participant.reset();
     return false;
   }
+  raise_rtps_workers(); // the participant's transport made its worker pool
 
   // 5 writers + 4 readers, plus SPDP's pair: the budget set in sdkconfig.defaults
   bool ok = false;
