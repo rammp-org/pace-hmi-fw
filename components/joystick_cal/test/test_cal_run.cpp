@@ -192,7 +192,7 @@ TEST_CASE("CAL-306 HAZARD a NaN sample counts as held at any end; the run then e
   }
   TEST_ASSERT_TRUE(ticks(run, kRest, 30) == Action::REJECT);
   TEST_ASSERT_TRUE(run.phase() == Phase::RESULT);
-  TEST_ASSERT_FALSE(hmi::cal::plausible(run.record()));
+  TEST_ASSERT_FALSE(hmi::cal::valid(run.record()));
 }
 
 TEST_CASE("CAL-307 START while the result is up begins a fresh run with an empty record",

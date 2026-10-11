@@ -1,5 +1,6 @@
 // The joystick calibration record: see cal_record.hpp. Moved from main/joystick_cal.cpp
-// (describe, plausible, next_word, read_file, write_file) without a change in behaviour.
+// (describe, plausible, next_word, read_file, write_file) without a change in behaviour;
+// plausible() became check()/valid() with hazard fix C2 (REQ-CAL-09).
 
 #include "cal_record.hpp"
 
@@ -55,20 +56,35 @@ std::string describe(const Record &record) {
   return out + " mV";
 }
 
-bool plausible(const Record &record) {
-  return std::all_of(record.begin(), record.end(), [](const AxisCal &a) {
-    return a.center_mv - a.min_mv >= kFullTravelMv && a.max_mv - a.center_mv >= kFullTravelMv;
-  });
+namespace {
+// One axis, in RecordFault's order.
+RecordFault axis_fault(const AxisCal &a) {
+  if (!std::isfinite(a.min_mv) || !std::isfinite(a.center_mv) || !std::isfinite(a.max_mv)) {
+    return RecordFault::NOT_FINITE;
+  }
+  if (a.min_mv < 0.0f) {
+    return RecordFault::BELOW_ZERO;
+  }
+  if (!(a.center_mv - a.min_mv >= kFullTravelMv && a.max_mv - a.center_mv >= kFullTravelMv)) {
+    return RecordFault::TRAVEL;
+  }
+  if (!(a.max_mv + hmi::stick::CAL_OVERSHOOT_MV <= hmi::stick::HIGH_RAIL_MV)) {
+    return RecordFault::ABOVE_LIMIT;
+  }
+  return RecordFault::NONE;
+}
+} // namespace
+
+RecordCheck check(const Record &record) {
+  for (std::size_t i = 0; i < kAxisCount; ++i) {
+    if (const RecordFault f = axis_fault(record[i]); f != RecordFault::NONE) {
+      return {.fault = f, .axis = i};
+    }
+  }
+  return {};
 }
 
-bool valid(const Record &record) {
-  return std::all_of(record.begin(), record.end(), [](const AxisCal &a) {
-    return std::isfinite(a.min_mv) && std::isfinite(a.center_mv) && std::isfinite(a.max_mv) &&
-           a.min_mv >= 0.0f && a.center_mv - a.min_mv >= kFullTravelMv &&
-           a.max_mv - a.center_mv >= kFullTravelMv &&
-           a.max_mv + hmi::stick::CAL_OVERSHOOT_MV <= hmi::stick::HIGH_RAIL_MV;
-  });
-}
+bool valid(const Record &record) { return check(record).fault == RecordFault::NONE; }
 
 std::string encode(const Record &record) {
   std::string text = fmt::format("# joystick calibration, raw ADC mV: min center max\n"

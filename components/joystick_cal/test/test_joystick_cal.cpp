@@ -63,12 +63,6 @@ bool same(const JoystickCal &a, const JoystickCal &b) {
   return true;
 }
 
-bool travel_at_least_1000(const JoystickCal &c) {
-  return std::all_of(c.begin(), c.end(), [](const JoystickAxisCal &a) {
-    return a.center_mv - a.min_mv >= 1000.0f && a.max_mv - a.center_mv >= 1000.0f;
-  });
-}
-
 bool starts_with(const std::string &s, std::string_view prefix) { return s.rfind(prefix, 0) == 0; }
 
 bool contains(const std::string &haystack, std::string_view needle) {
@@ -427,7 +421,7 @@ TEST_CASE("CAL-010 numbers that are not floats are rejected: words, nan, inf, ov
 }
 
 TEST_CASE("CAL-011 the travel limit is 1000 mV each way from rest, on every axis, inclusive",
-          "[cal][plausible]") {
+          "[cal][valid]") {
   start_clean();
   // exactly 1000 each way: accepted
   TEST_ASSERT_TRUE(accepted(golden_with("500 1500 2500", "500 1500 2500", "500 1500 2500")));
@@ -451,23 +445,12 @@ TEST_CASE("CAL-011 the travel limit is 1000 mV each way from rest, on every axis
   }
 }
 
-TEST_CASE("CAL-012 a reversed or collapsed axis is rejected", "[cal][plausible][hostile]") {
+TEST_CASE("CAL-012 a reversed or collapsed axis is rejected", "[cal][valid][hostile]") {
   start_clean();
   StdoutCapture quiet;
   TEST_ASSERT_FALSE(accepted(golden_with("2971 1507 11", "6 1510 2962", "10 1477 2960")));
   TEST_ASSERT_FALSE(accepted(golden_with("1507 1507 1507", "6 1510 2962", "10 1477 2960")));
   TEST_ASSERT_FALSE(accepted(golden_with("0 0 0", "0 0 0", "0 0 0")));
-}
-
-TEST_CASE("CAL-013 HAZARD (H3) a record far outside the ADC's range is accepted: no upper bound",
-          "[cal][plausible][hazard]") {
-  start_clean();
-  // The ADC reads about 0..3300 mV; nothing checks a saved record against that.
-  TEST_ASSERT_TRUE(accepted(golden_with("11 1507 9999", "6 1510 2962", "10 1477 2960")));
-  TEST_ASSERT_TRUE(accepted(golden_with("-5000 1507 2971", "6 1510 2962", "10 1477 2960")));
-  TEST_ASSERT_TRUE(accepted(golden_with("-1e30 0 1e30", "-1e30 0 1e30", "-1e30 0 1e30")));
-  TEST_ASSERT_TRUE(accepted(golden_with("100000 101000 102000", "6 1510 2962", "10 1477 2960")));
-  TEST_ASSERT_EQUAL_FLOAT(101000.0f, joystick_cal_current()[JOY_HORIZONTAL].center_mv);
 }
 
 TEST_CASE("CAL-014 anything after the twist line is ignored", "[cal][codec]") {
@@ -477,7 +460,7 @@ TEST_CASE("CAL-014 anything after the twist line is ignored", "[cal][codec]") {
   TEST_ASSERT_TRUE(same(joystick_cal_current(), kBoard2));
 }
 
-TEST_CASE("CAL-015 seeded random bytes load as the defaults or a plausible record, never crash",
+TEST_CASE("CAL-015 seeded random bytes load as the defaults or a valid record, never crash",
           "[cal][codec][hostile]") {
   start_clean();
   std::mt19937 rng(20261006u);
@@ -488,11 +471,11 @@ TEST_CASE("CAL-015 seeded random bytes load as the defaults or a plausible recor
     std::string text(static_cast<std::size_t>(len_dist(rng)), '\0');
     std::generate(text.begin(), text.end(), [&] { return static_cast<char>(byte_dist(rng)); });
     const JoystickCal cal = load_text(text);
-    TEST_ASSERT_TRUE(joystick_cal_saved() ? travel_at_least_1000(cal) : same(cal, kDefaults));
+    TEST_ASSERT_TRUE(joystick_cal_saved() ? hmi::cal::valid(cal) : same(cal, kDefaults));
   }
 }
 
-TEST_CASE("CAL-016 seeded byte changes in the golden file load as the defaults or a plausible "
+TEST_CASE("CAL-016 seeded byte changes in the golden file load as the defaults or a valid "
           "record",
           "[cal][codec][hostile]") {
   start_clean();
@@ -508,7 +491,7 @@ TEST_CASE("CAL-016 seeded byte changes in the golden file load as the defaults o
       text[pos_dist(rng)] = static_cast<char>(byte_dist(rng));
     }
     const JoystickCal cal = load_text(text);
-    TEST_ASSERT_TRUE(joystick_cal_saved() ? travel_at_least_1000(cal) : same(cal, kDefaults));
+    TEST_ASSERT_TRUE(joystick_cal_saved() ? hmi::cal::valid(cal) : same(cal, kDefaults));
     kept += joystick_cal_saved() ? 1 : 0;
   }
   TEST_ASSERT_TRUE(kept > 0); // changes inside the comment line still load
@@ -943,4 +926,124 @@ TEST_CASE("CAL-401 joystick_cal_measured: true after a valid load and after a co
   TEST_ASSERT_TRUE(joystick_cal_measured());
   TEST_ASSERT_FALSE(joystick_cal_saved());
   (void)joystick_cal_take_new();
+}
+
+// ============================================================================================
+// Hazard fix C2: validation at load and at the end of a run, the generation (REQ-CAL-09, 10)
+// ============================================================================================
+
+namespace {
+size_t count_of(const std::string &haystack, std::string_view needle) {
+  size_t n = 0;
+  for (size_t at = haystack.find(needle); at != std::string::npos;
+       at = haystack.find(needle, at + needle.size())) {
+    ++n;
+  }
+  return n;
+}
+} // namespace
+
+TEST_CASE("CAL-411 a saved file with horizontal max 3100: the defaults, not measured, one log "
+          "line naming the axis",
+          "[cal][valid][REQ-CAL-09]") {
+  start_clean();
+  std::string log;
+  const JoystickCal cal =
+      load_text(golden_with("11 1507 3100", "6 1510 2962", "10 1477 2960"), &log);
+  TEST_ASSERT_TRUE(same(cal, kDefaults));
+  TEST_ASSERT_FALSE(joystick_cal_saved());
+  TEST_ASSERT_FALSE(joystick_cal_measured());
+  TEST_ASSERT_EQUAL_UINT(1, count_of(log, "[joy_cal/W]"));
+  TEST_ASSERT_TRUE_MESSAGE(contains(log, "]: " + storage_path(kFileName) +
+                                             " ignored, horizontal max above 3050 mV: "
+                                             "horizontal 11/1507/3100, "),
+                           log.c_str());
+  // 3050 itself is the limit, inclusive (CAL-410): used.
+  TEST_ASSERT_TRUE(accepted(golden_with("11 1507 3050", "6 1510 2962", "10 1477 2960")));
+  // The other faults name their axis too: min below 0 on twist.
+  (void)load_text(golden_with("11 1507 2971", "6 1510 2962", "-1 1477 2960"), &log);
+  TEST_ASSERT_FALSE(joystick_cal_saved());
+  TEST_ASSERT_TRUE_MESSAGE(contains(log, " ignored, twist min below 0 mV: "), log.c_str());
+}
+
+TEST_CASE("CAL-412 a run whose right end holds at 3200 mV: REJECT, nothing handed over, the "
+          "generation unchanged",
+          "[cal][run][valid][REQ-CAL-09][REQ-CAL-10]") {
+  start_clean();
+  const JoystickCal before = joystick_cal_current();
+  const uint32_t generation = joystick_cal_generation();
+  const int writes = fake_storage::write_calls();
+  joystick_cal_toggle();
+  do_rest();
+  (void)hold(11.0f, 1510.0f, 1477.0f, kHoldTicks);   // left
+  (void)hold(3200.0f, 1510.0f, 1477.0f, kHoldTicks); // right, above the limit
+  for (std::size_t d = 2; d < kEnds.size(); ++d) {
+    (void)hold(kEnds[d][0], kEnds[d][1], kEnds[d][2], kHoldTicks);
+  }
+  StdoutCapture cap;
+  do_release();
+  const std::string log = cap.stop();
+  TEST_ASSERT_FALSE(joystick_cal_running());
+  TEST_ASSERT_EQUAL_STRING("Calibration failed: an end reads too high.\nNothing changed.",
+                           shown().c_str());
+  TEST_ASSERT_TRUE_MESSAGE(contains(log, "]: calibration rejected: horizontal 11/1507/3200"),
+                           log.c_str());
+  TEST_ASSERT_FALSE(joystick_cal_take_new().has_value());
+  TEST_ASSERT_EQUAL_UINT32(generation, joystick_cal_generation());
+  TEST_ASSERT_TRUE(same(joystick_cal_current(), before));
+  TEST_ASSERT_EQUAL_INT(writes, fake_storage::write_calls());
+}
+
+TEST_CASE("CAL-413 two completed runs, one rejected, one cancelled: the generation + 2, each "
+          "+1 before the run stops running",
+          "[cal][run][REQ-CAL-10]") {
+  start_clean();
+  const uint32_t generation = joystick_cal_generation();
+  StdoutCapture quiet;
+  // completed (saved)
+  joystick_cal_toggle();
+  do_rest();
+  do_directions();
+  do_release();
+  TEST_ASSERT_EQUAL_UINT32(generation + 1, joystick_cal_generation());
+  (void)joystick_cal_take_new();
+  for (int i = 0; i < kResultTicks; ++i) {
+    (void)tick(1507.0f, 1510.0f, 1477.0f);
+  }
+  // rejected: the right end above the limit (every end is taken >= 1000 mV out, so the limit
+  // is what a run can fail on)
+  joystick_cal_toggle();
+  do_rest();
+  (void)hold(11.0f, 1510.0f, 1477.0f, kHoldTicks);
+  (void)hold(3200.0f, 1510.0f, 1477.0f, kHoldTicks);
+  for (std::size_t d = 2; d < kEnds.size(); ++d) {
+    (void)hold(kEnds[d][0], kEnds[d][1], kEnds[d][2], kHoldTicks);
+  }
+  do_release();
+  TEST_ASSERT_FALSE(joystick_cal_running());
+  TEST_ASSERT_FALSE(joystick_cal_take_new().has_value());
+  TEST_ASSERT_EQUAL_UINT32(generation + 1, joystick_cal_generation());
+  for (int i = 0; i < kResultTicks; ++i) {
+    (void)tick(1507.0f, 1510.0f, 1477.0f);
+  }
+  // cancelled
+  joystick_cal_toggle();
+  do_rest();
+  joystick_cal_toggle();
+  TEST_ASSERT_FALSE(joystick_cal_running());
+  TEST_ASSERT_EQUAL_UINT32(generation + 1, joystick_cal_generation());
+  for (int i = 0; i < kResultTicks; ++i) {
+    (void)tick(1507.0f, 1510.0f, 1477.0f);
+  }
+  // completed (not saved: a hand-over all the same)
+  fake_storage::set_write_fails(true);
+  joystick_cal_toggle();
+  do_rest();
+  do_directions();
+  do_release();
+  fake_storage::set_write_fails(false);
+  TEST_ASSERT_FALSE(joystick_cal_running());
+  TEST_ASSERT_EQUAL_UINT32(generation + 2, joystick_cal_generation());
+  TEST_ASSERT_TRUE(joystick_cal_take_new().has_value());
+  (void)quiet.stop();
 }

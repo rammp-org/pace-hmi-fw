@@ -11,6 +11,7 @@
 #include "cal_record.hpp"
 #include "cal_run.hpp"
 #include "logger.hpp"
+#include "stick/stick_monitor.hpp"
 #include "storage.hpp"
 
 namespace {
@@ -19,9 +20,10 @@ espp::Logger logger({.tag = "joy_cal", .level = espp::Logger::Verbosity::INFO});
 
 // The record, its file and its check: components/joystick_cal (cal_record.hpp).
 using hmi::cal::describe;
+using hmi::cal::kAxisNames;
 using hmi::cal::kFileName;
 using hmi::cal::kFullTravelMv;
-using hmi::cal::plausible;
+using hmi::cal::RecordFault;
 
 // The run itself - its steps, timing and limits - is the model in
 // components/joystick_cal (cal_run.hpp); this file is its view.
@@ -38,7 +40,16 @@ JoystickCal current{}; // in use
 enum class InUse : uint8_t { DEFAULTS, MEASURED, SAVED };
 std::atomic<InUse> in_use{InUse::DEFAULTS};
 std::optional<JoystickCal> pending; // a finished run, for the ADC task to apply
-std::atomic<bool> running{false};
+// What other tasks read of the run without the lock: whether one is going, and how many
+// validated records runs have handed to the ADC task (REQ-CAL-10). The generation is bumped
+// with `pending`, under the lock and before `running` falls, so the ADC cycle that sees the run
+// end sees the new count.
+struct RunShared {
+  std::atomic<bool> running{false};
+  std::atomic<uint32_t> generation{0};
+};
+static_assert(std::atomic<uint32_t>::is_always_lock_free);
+RunShared shared;
 std::atomic<float> latest_mv[3];
 
 std::optional<JoystickCal> read_file(const std::string &path) {
@@ -92,7 +103,7 @@ void show_prompt() {
 }
 
 void finish(const char *message) {
-  running = false;
+  shared.running = false;
   lv_subject_set_int(&prompting_subject, 0);
   lv_subject_set_int(&running_subject, 0);
   lv_subject_copy_string(&text_subject, message);
@@ -106,6 +117,7 @@ void complete() {
     current = cal;
     in_use = saved ? InUse::SAVED : InUse::MEASURED;
     pending = cal;
+    shared.generation.fetch_add(1);
   }
   logger.info("calibrated{}: {}", saved ? "" : " (NOT saved)", describe(cal));
   finish(saved ? "Calibration saved"
@@ -118,7 +130,7 @@ void act(Action action, const char *why) {
   case Action::NONE:
     return;
   case Action::BEGIN:
-    running = true;
+    shared.running = true;
     lv_subject_set_int(&running_subject, 1);
     show_prompt();
     lv_timer_resume(timer);
@@ -131,9 +143,13 @@ void act(Action action, const char *why) {
   case Action::COMPLETE:
     complete();
     return;
-  case Action::REJECT: // every end was taken past kFullTravelMv, so not expected
+  case Action::REJECT: // the record failed hmi::cal::check() (REQ-CAL-09)
     logger.error("calibration rejected: {}", describe(run.record()));
-    finish("Calibration failed: travel too short.\nNothing changed.");
+    // An end above the limit (a pot shorted toward the rail reads past 3050 mV) cannot be
+    // calibrated away (hazard-c2-spec.md §6); any other failure keeps the old text.
+    finish(hmi::cal::check(run.record()).fault == RecordFault::ABOVE_LIMIT
+               ? "Calibration failed: an end reads too high.\nNothing changed."
+               : "Calibration failed: travel too short.\nNothing changed.");
     return;
   case Action::TIME_OUT:
     logger.warn("calibration timed out at step {}", run.from_step());
@@ -161,13 +177,13 @@ void tick_cb(lv_timer_t *) {
 }
 
 void cancel(const char *why) {
-  if (running) {
+  if (shared.running) {
     act(run.handle(Input::CANCEL), why);
   }
 }
 
 void button_cb(lv_event_t *) {
-  if (running) {
+  if (shared.running) {
     cancel("button");
   } else {
     start();
@@ -189,13 +205,37 @@ void button_label_observer(lv_observer_t *observer, lv_subject_t *subject) {
                     lv_subject_get_int(subject) ? "CANCEL" : button_text.c_str());
 }
 
+// The one line a saved record that fails check() logs (REQ-CAL-09): the axis and the reason.
+// Short travel keeps the line the firmware has always logged.
+void warn_ignored(const std::string &path, const hmi::cal::RecordCheck &found,
+                  const JoystickCal &saved) {
+  const std::string_view axis = kAxisNames[found.axis];
+  switch (found.fault) {
+  case RecordFault::TRAVEL:
+    logger.warn("{} ignored, travel under {:.0f} mV: {}", path, kFullTravelMv, describe(saved));
+    return;
+  case RecordFault::ABOVE_LIMIT:
+    logger.warn("{} ignored, {} max above {:.0f} mV: {}", path, axis,
+                hmi::stick::HIGH_RAIL_MV - hmi::stick::CAL_OVERSHOOT_MV, describe(saved));
+    return;
+  case RecordFault::BELOW_ZERO:
+    logger.warn("{} ignored, {} min below 0 mV: {}", path, axis, describe(saved));
+    return;
+  case RecordFault::NOT_FINITE:
+  case RecordFault::NONE: // not called for a valid record
+    logger.warn("{} ignored, {} not a finite number: {}", path, axis, describe(saved));
+    return;
+  }
+}
+
 } // namespace
 
 JoystickCal joystick_cal_load(const JoystickCal &defaults) {
   const std::string path = storage_path(kFileName);
   const auto saved = read_file(path);
   std::lock_guard<std::mutex> lock(cal_mutex);
-  if (saved && plausible(*saved)) {
+  const hmi::cal::RecordCheck found = saved ? hmi::cal::check(*saved) : hmi::cal::RecordCheck{};
+  if (saved && found.fault == RecordFault::NONE) {
     current = *saved;
     in_use = InUse::SAVED;
     logger.info("loaded {}: {}", path, describe(current));
@@ -203,7 +243,7 @@ JoystickCal joystick_cal_load(const JoystickCal &defaults) {
     current = defaults;
     in_use = InUse::DEFAULTS;
     if (saved) {
-      logger.warn("{} ignored, travel under {:.0f} mV: {}", path, kFullTravelMv, describe(*saved));
+      warn_ignored(path, found, *saved);
     } else {
       logger.warn("no joystick calibration saved; using defaults until CALIBRATE is run");
     }
@@ -253,7 +293,7 @@ void joystick_cal_toggle() {
   if (ui.screen == nullptr) {
     return; // no UI bound: nothing to prompt with
   }
-  if (running) {
+  if (shared.running) {
     cancel("menu");
   } else {
     start();
@@ -266,9 +306,11 @@ void joystick_cal_note_raw(float horizontal_mv, float vertical_mv, float twist_m
   latest_mv[JOY_TWIST].store(twist_mv, std::memory_order_relaxed);
 }
 
-bool joystick_cal_running() { return running.load(); }
+bool joystick_cal_running() { return shared.running.load(); }
 
 std::optional<JoystickCal> joystick_cal_take_new() {
   std::lock_guard<std::mutex> lock(cal_mutex);
   return std::exchange(pending, std::nullopt);
 }
+
+uint32_t joystick_cal_generation() { return shared.generation.load(); }

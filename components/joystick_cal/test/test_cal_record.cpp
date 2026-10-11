@@ -1,4 +1,4 @@
-// L1 tests of components/joystick_cal's record: encode, decode, describe and plausible,
+// L1 tests of components/joystick_cal's record: encode, decode, describe and valid,
 // called directly (cal_record.hpp). The same behaviour seen through main is pinned by the
 // characterisation cases in test_joystick_cal.cpp; these hold the component to it on its own.
 
@@ -102,33 +102,24 @@ TEST_CASE("CAL-105 the error messages are the words the firmware has always logg
                            message(static_cast<DecodeError>(99)).c_str());
 }
 
-TEST_CASE("CAL-106 plausible needs 1000 mV each way on every axis, inclusive; NaN fails",
-          "[cal][record][plausible]") {
+TEST_CASE("CAL-106 valid needs 1000 mV each way on every axis, inclusive; NaN fails",
+          "[cal][record][valid]") {
   const AxisCal exact{500.0f, 1500.0f, 2500.0f};
-  TEST_ASSERT_TRUE(hmi::cal::plausible({exact, exact, exact}));
+  TEST_ASSERT_TRUE(hmi::cal::valid({exact, exact, exact}));
   // 0.1 mV too close. (One float step is not enough: 1500 - nextafter(500) rounds to 1000.)
   const float below = 500.1f;
   const float above = 2499.9f;
   for (std::size_t axis = 0; axis < hmi::cal::kAxisCount; ++axis) {
     Record r{exact, exact, exact};
     r[axis].min_mv = below;
-    TEST_ASSERT_FALSE(hmi::cal::plausible(r));
+    TEST_ASSERT_FALSE(hmi::cal::valid(r));
     r = {exact, exact, exact};
     r[axis].max_mv = above;
-    TEST_ASSERT_FALSE(hmi::cal::plausible(r));
+    TEST_ASSERT_FALSE(hmi::cal::valid(r));
     r = {exact, exact, exact};
     r[axis].center_mv = std::numeric_limits<float>::quiet_NaN();
-    TEST_ASSERT_FALSE(hmi::cal::plausible(r));
+    TEST_ASSERT_FALSE(hmi::cal::valid(r));
   }
-}
-
-TEST_CASE("CAL-107 HAZARD (H3) plausible has no upper bound: even infinite travel passes",
-          "[cal][record][plausible][hazard]") {
-  constexpr float kInf = std::numeric_limits<float>::infinity();
-  const AxisCal huge{-1e30f, 0.0f, 1e30f};
-  const AxisCal infinite{-kInf, 0.0f, kInf};
-  TEST_ASSERT_TRUE(hmi::cal::plausible({huge, huge, huge}));
-  TEST_ASSERT_TRUE(hmi::cal::plausible({infinite, infinite, infinite}));
 }
 
 TEST_CASE("CAL-108 encode then decode keeps a record to 0.1 mV and is stable after one pass",

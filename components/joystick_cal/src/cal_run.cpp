@@ -167,7 +167,7 @@ Guard CalibrationRun::tick_guard() const {
   }
   case Phase::RELEASE:
     if (window_.full()) {
-      return plausible(record_) ? Guard::RELEASED : Guard::RELEASED_BAD;
+      return valid(record_) ? Guard::RELEASED : Guard::RELEASED_BAD;
     }
     break;
   }

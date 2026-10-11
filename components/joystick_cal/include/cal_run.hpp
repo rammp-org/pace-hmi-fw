@@ -91,8 +91,8 @@ enum class Guard : std::uint8_t {
   WAITING,      ///< the step is neither taken nor timed out; the result is still up
   TAKEN,        ///< rest, or an end that is not the last, held steady for kHoldTicks
   LAST_TAKEN,   ///< the last end held steady for kHoldTicks
-  RELEASED,     ///< let go for kHoldTicks, and the record is plausible()
-  RELEASED_BAD, ///< let go for kHoldTicks, but the record is not plausible()
+  RELEASED,     ///< let go for kHoldTicks, and the record is valid() (REQ-CAL-09)
+  RELEASED_BAD, ///< let go for kHoldTicks, but the record is not valid()
   TIMED_OUT,    ///< more than kStepTimeoutTicks in this step
   RESULT_OVER,  ///< the result has been up for kResultTicks
 };

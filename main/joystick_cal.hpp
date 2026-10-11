@@ -24,6 +24,7 @@
  */
 
 #include <array>
+#include <cstdint>
 #include <functional>
 #include <optional>
 
@@ -42,8 +43,9 @@ enum JoystickAxis { JOY_HORIZONTAL = 0, JOY_VERTICAL = 1, JOY_TWIST = 2 };
 using JoystickCal = hmi::cal::Record;
 
 /// Mount the file system and load the saved calibration, falling back to
-/// `defaults` when there is none or it is implausible. Returns what is now in
-/// use. Call once from app_main, before the ADC task starts.
+/// `defaults` when there is none or it fails hmi::cal::check() (REQ-CAL-09: one log line
+/// with the axis and the reason). Returns what is now in use. Call once from app_main, before
+/// the ADC task starts.
 JoystickCal joystick_cal_load(const JoystickCal &defaults);
 
 /// Whether the calibration in use is the one saved in flash, rather than the
@@ -97,3 +99,7 @@ bool joystick_cal_running();
 
 /// A calibration the ADC task should switch to, once per finished run.
 std::optional<JoystickCal> joystick_cal_take_new();
+/// How many validated records a run has handed to the ADC task since boot (hazard fix C2,
+/// REQ-CAL-10): +1 at each hand-over, before the run stops running, and at no other time. The
+/// stick monitor leaves a FAULT only through a run during which it moved. Lock-free. Any task.
+uint32_t joystick_cal_generation();

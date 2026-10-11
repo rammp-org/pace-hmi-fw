@@ -18,13 +18,15 @@
  * of its line, where a word is expected (before `version` and before each axis name). Numbers
  * are read with `std::istream >> float`. Anything after the twist line is ignored.
  *
- * Safety (CS-SAF-01): the record sets the stick's travel. Its behaviour as it is today is
- * pinned by components/joystick_cal/test (CAL-xxx), hazards included: plausible() has no upper
- * bound (plan H3), and a word in the file has no length limit.
+ * Safety (CS-SAF-01): the record sets the stick's travel. Its behaviour is pinned by
+ * components/joystick_cal/test (CAL-xxx). check() is the one test a record passes before the
+ * stick uses it, at boot and at the end of a run (hazard fix C2, REQ-CAL-09: it gained the upper
+ * bound and finiteness plausible() lacked, plan H3). A word in the file has no length limit.
  */
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <istream>
 #include <string>
 #include <string_view>
@@ -74,16 +76,30 @@ enum class DecodeError {
 /// rounded to whole mV. The boot log line the bench checks is built from this.
 [[nodiscard]] std::string describe(const Record &record);
 
-/// Whether every axis has at least kFullTravelMv each way from rest. No upper bound: see the
-/// file comment.
-[[nodiscard]] bool plausible(const Record &record);
+/// What check() found wrong with a record, in the order it looks (per axis, Record order).
+enum class RecordFault : std::uint8_t {
+  NONE,        ///< valid
+  NOT_FINITE,  ///< a NaN or an infinity among the axis's three numbers
+  BELOW_ZERO,  ///< min below 0 mV (the ADC cannot read it)
+  TRAVEL,      ///< less than kFullTravelMv from rest to an end (or an end on the wrong side)
+  ABOVE_LIMIT, ///< max + CAL_OVERSHOOT_MV above HIGH_RAIL_MV (max above 3050 mV)
+};
 
-/// Hazard fix C2 (docs/plans/hazard-c2-spec.md §6, REQ-CAL-09): whether a record may be used.
-/// Valid exactly when all nine numbers are finite and, per axis, min >= 0,
+/// check()'s answer: the first fault and the axis it is on (index into Record; 0 when NONE).
+struct RecordCheck {
+  RecordFault fault = RecordFault::NONE;
+  std::size_t axis = 0;
+};
+
+/// Hazard fix C2 (docs/plans/hazard-c2-spec.md §6, REQ-CAL-09): the first reason a record may
+/// not be used, axis by axis in Record order and, on one axis, in RecordFault's order. A record
+/// passes exactly when all nine numbers are finite and, per axis, min >= 0,
 /// center - min >= kFullTravelMv, max - center >= kFullTravelMv and
 /// max + CAL_OVERSHOOT_MV <= HIGH_RAIL_MV (that is, max <= 3050 mV; stick/stick_monitor.hpp).
-/// Not used by the firmware yet: C2's behaviour commit replaces plausible() with it at load and
-/// at the end of a run.
+[[nodiscard]] RecordCheck check(const Record &record);
+
+/// Whether a record may be used: check() found nothing. Boot uses only a valid saved record,
+/// and a run hands over only a valid one (REQ-CAL-09).
 [[nodiscard]] bool valid(const Record &record);
 
 /// The file's text for `record`, numbers to 0.1 mV.
@@ -91,7 +107,7 @@ enum class DecodeError {
 
 /// Reads one record from `in`. On success fills `out`, sets `error` to NONE and returns true;
 /// otherwise leaves `out` as it was, sets `error` to the reason and returns false. Does not
-/// check plausible().
+/// check() the record.
 [[nodiscard]] bool decode(std::istream &in, Record &out, DecodeError &error);
 
 } // namespace hmi::cal
