@@ -62,7 +62,8 @@ constexpr std::array SCREENS{Screen::BOOT, Screen::LOCKED, Screen::DRIVE, Screen
                              Screen::OTHER};
 constexpr std::array RESENDS{ds::Resend::NOT_DUE, ds::Resend::FAST, ds::Resend::SLOW};
 constexpr unsigned HIDDEN_COMBOS = 1U << static_cast<unsigned>(std::popcount(ds::kHiddenGuards));
-constexpr std::size_t ENV_COUNT = 2 * MIBS.size() * SCREENS.size() * 2 * 8 * 4 * RESENDS.size() * 2;
+constexpr std::size_t ENV_COUNT =
+    2 * MIBS.size() * SCREENS.size() * 2 * 8 * 4 * RESENDS.size() * 2 * 2;
 
 // Every distinct Env, by index (0 .. ENV_COUNT-1).
 Env env_at(std::size_t i) {
@@ -88,7 +89,8 @@ Env env_at(std::size_t i) {
              .calibrating = (stop & 1U) != 0,
              .stop_fault_elapsed = (stop & 2U) != 0,
              .resend = RESENDS[i % RESENDS.size()],
-             .post_ok = (i / RESENDS.size()) % 2 != 0};
+             .post_ok = (i / RESENDS.size()) % 2 != 0,
+             .stick_fault = (i / RESENDS.size() / 2) % 2 != 0};
 }
 
 // Spread an index over the hidden guard bits, in bit order.
@@ -241,9 +243,9 @@ TEST_CASE("DRV-012 the oracle drove every input and every row of the table; the 
           "inputs give the table's row or change nothing",
           "[drive][safety][oracle]") {
   // DRV-001..011 have the AS-IS inputs; the inputs the hazard fixes appended (C1:
-  // TICK_STOP_FAULT_DUE, TICK_STOP_RESEND; C3: TICK_BOOT_STOP) are driven here, with their
-  // verdict. An input not driven yet (a shuffled order) is driven now: totals only for the
-  // AS-IS ones, whose verdicts are their own cases'.
+  // TICK_STOP_FAULT_DUE, TICK_STOP_RESEND; C3: TICK_BOOT_STOP; C2b: TICK_STICK_FAULT) are
+  // driven here, with their verdict. An input not driven yet (a shuffled order) is driven now:
+  // totals only for the AS-IS ones, whose verdicts are their own cases'.
   unsigned long mismatches = 0;
   for (std::size_t i = 0; i < ds::kInputCount; ++i) {
     if (g_input_done[i]) {

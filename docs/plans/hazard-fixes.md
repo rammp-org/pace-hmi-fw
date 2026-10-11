@@ -80,7 +80,9 @@ output 0" (M1).
 
 Status (2026-10-11): implemented on `dev_ai_hazard_c2` per [hazard-c2-spec.md](hazard-c2-spec.md)
 (commits 4-8, 10; C2b's drive-table rows are lane D's). The rules below are the v2 outline the
-spec replaced.
+spec replaced. C2b (2026-10-11, `dev_ai_hazard_c2b`): rows 55-57 as §10 renumbered them, plus
+D9b's rows 58-59 (the push and the DRIVE row refused with the stick in FAULT); 59 rows,
+`TICK_STICK_FAULT` after `TICK_STOP_RESEND`.
 
 | Rule |
 | --- |

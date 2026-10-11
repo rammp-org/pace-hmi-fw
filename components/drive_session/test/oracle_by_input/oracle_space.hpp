@@ -58,7 +58,7 @@ inline constexpr std::array SCREENS{ds::Screen::BOOT, ds::Screen::LOCKED, ds::Sc
 
 // ---- Dimensions -----------------------------------------------------------------------------
 
-inline constexpr std::size_t kEnvDims = 10;
+inline constexpr std::size_t kEnvDims = 11;
 inline constexpr std::size_t kHiddenDims = std::popcount(ds::kHiddenGuards);
 inline constexpr std::size_t kDims = kEnvDims + kHiddenDims;
 // More than 32 dimensions does not fit DimSet: a compile error, not a silent cut.
@@ -107,6 +107,8 @@ constexpr std::array<Dim, kDims> make_dims() noexcept {
   d[8] = Dim{3, ds::mask({ds::Guard::RESEND_FAST_DUE, ds::Guard::RESEND_SLOW_DUE}), 2};
   // C3: the POST gate PASS at the sample.
   d[9] = Dim{2, ds::bit(ds::Guard::POST_OK), 1};
+  // C2b: stick health FAULT at the sample.
+  d[10] = Dim{2, ds::bit(ds::Guard::STICK_FAULT), 1};
   for (std::size_t k = 0; k < kHiddenDims; ++k) {
     d[kEnvDims + k] = Dim{2, hidden_bit(k), 1};
   }
@@ -147,7 +149,8 @@ inline Point point_of(const Values &v) noexcept {
                     .calibrating = v[6] != 0,
                     .stop_fault_elapsed = v[7] != 0,
                     .resend = RESENDS[v[8]],
-                    .post_ok = v[9] != 0};
+                    .post_ok = v[9] != 0,
+                    .stick_fault = v[10] != 0};
   ds::GuardMask hidden = 0;
   for (std::size_t k = 0; k < kHiddenDims; ++k) {
     hidden |= v[kEnvDims + k] != 0 ? hidden_bit(k) : 0;

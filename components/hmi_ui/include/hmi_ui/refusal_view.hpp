@@ -44,6 +44,7 @@ struct RefusalTexts {
   const char *link_lost_title, *mcb_fault_title; ///< a drive cut short
   const char *refused_post_title;      ///< C3: a drive asked for before the start-up check passed
   const char *refused_post_seat_title; ///< C3: a seat press before the start-up check passed
+  const char *stick_fault_title;       ///< C2b: the drive table stopped for a stick FAULT
 };
 
 /// One instance for every refusal banner. `refused` records only THAT a request was refused;
@@ -69,6 +70,10 @@ public:
     /// (UiApp::post_reason): REFUSED_POST's body.
     Fn<bool()> post_passed;
     Fn<const char *()> post_reason;
+    /// C2b: stick health is FAULT, and the fault in words ("Joystick fault: <axis> <what>",
+    /// UiApp::stick_fault_words): REFUSED_STICK's and STICK_FAULT's body.
+    Fn<bool()> stick_fault;
+    Fn<const char *()> stick_fault_words;
     uint32_t grace_ms; ///< a press shorter than this is a tap, not a push (kBarGraceMs)
   };
 
@@ -111,6 +116,10 @@ public:
   ///        footer.
   /// UI task, lvgl_mutex held.
   void fill_post_refused(lv_obj_t *panel, const char *title);
+  /// @brief Fills a banner with the stick's latched fault (C2b, REFUSED_STICK and STICK_FAULT):
+  ///        `title`, the fault in words (stick_fault_words) as the body, no footer.
+  /// UI task, lvgl_mutex held.
+  void fill_stick_fault(lv_obj_t *panel, const char *title);
   /// @brief Binds `cb` on `panel` (object-bound, with `user_data`) to every subject the cause
   ///        depends on: link, MIB state, error text and footer. Also for other views' banners
   ///        that word the same cause.

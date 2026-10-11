@@ -54,6 +54,8 @@ public:
     Fn<hmi::stick::HoldReason()> hold_reason;
     /// The POST gate (the permit hooks', acquire): the drive table's POST_OK (C3).
     Fn<hmi::stick::PostGate()> post_gate;
+    /// C2b: stick health is FAULT, as the ADC task last stored it (the permit hooks', acquire).
+    Fn<bool()> stick_fault;
     /// The Drive screen's notice slot (hmi_ui); empty: the notice is not shown.
     Fn<void(hmi::drive_adapter::DriveNotice)> show_notice;
     /// The drive session's input (main's one DriveAdapter); true when its row acted.
@@ -111,6 +113,7 @@ public:
   [[nodiscard]] bool calibrating() const { return config_.calibrating(); }
   [[nodiscard]] hmi::stick::HoldReason hold_reason() const { return config_.hold_reason(); }
   [[nodiscard]] hmi::stick::PostGate post_gate() const { return config_.post_gate(); }
+  [[nodiscard]] bool stick_fault() const { return config_.stick_fault(); }
   void show_drive_notice(hmi::drive_adapter::DriveNotice notice) const {
     if (config_.show_notice) {
       config_.show_notice(notice);

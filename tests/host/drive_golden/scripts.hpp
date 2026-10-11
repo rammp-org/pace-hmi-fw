@@ -54,6 +54,8 @@ enum class Op : std::uint8_t {
   PUBLISH_DELAY, // arg: us: the next DriveCommand publish blocks this long (the clock moves)
   // C3 (hazard-c3-spec.md §6.2)
   POST, // arg: hmi::stick::PostGate's value: the POST gate
+  // C2b (hazard-c2-spec.md §8.5)
+  STICK_FAULT, // arg: 0/1: stick health leaves or enters FAULT
 };
 
 struct Step {
@@ -98,5 +100,6 @@ Step hold(std::uint8_t reason);
 Step live_link(bool up);
 Step publish_delay(std::int64_t us);
 Step post(std::uint8_t gate);
+Step stick_fault(bool fault);
 
 } // namespace golden

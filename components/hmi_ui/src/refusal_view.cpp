@@ -83,6 +83,14 @@ void hmi::ui::RefusalView::fill_post_refused(lv_obj_t *panel, const char *title)
   lv_label_set_text(ui_comp_get_child(panel, UI_COMP_ERRORBANNER_BANNERBOX_BANNERFOOTER), "");
 }
 
+// C2b: the stick's latched fault. The body names it.
+void hmi::ui::RefusalView::fill_stick_fault(lv_obj_t *panel, const char *title) {
+  lv_label_set_text(ui_comp_get_child(panel, UI_COMP_ERRORBANNER_BANNERTITLE), title);
+  lv_label_set_text(ui_comp_get_child(panel, UI_COMP_ERRORBANNER_BANNERBOX_BANNERMESSAGE),
+                    config_.stick_fault_words());
+  lv_label_set_text(ui_comp_get_child(panel, UI_COMP_ERRORBANNER_BANNERBOX_BANNERFOOTER), "");
+}
+
 // Binds `cb` on `panel` to every subject the cause depends on, so the subject
 // argument each observer gets is ignored: whichever fired, the answer depends
 // on all of them.
@@ -145,6 +153,15 @@ void hmi::ui::RefusalView::refused_panel_observer(lv_observer_t *observer, lv_su
     shown(true);
     return;
   }
+  // C2b: asked to drive with the stick in FAULT (for its window or until the fault clears), or
+  // the stop the fault made, still in its window after the relock.
+  if (refused == REFUSED_STICK || refused == REFUSED_STICK_FAULT) {
+    view->fill_stick_fault(panel, refused == REFUSED_STICK
+                                      ? view->config_.texts->refused_post_title
+                                      : view->config_.texts->stick_fault_title);
+    shown(true);
+    return;
+  }
   if (view->config_.mcb_ready()) {
     shown(false);
     return;
@@ -201,6 +218,13 @@ void hmi::ui::RefusalView::lost_panel_observer(lv_observer_t *observer, lv_subje
       lv_screen_active() == ui_DriveScreen) {
     const BannerText &t = view->config_.texts->exit_refused;
     view->fill_mib_reason(panel, t.title, t.body, t.footer);
+    view->show(panel, true);
+    return;
+  }
+  // C2b: the drive table stopped for a stick FAULT (rows 55-56): the screen says why.
+  if (lv_subject_get_int(view->config_.refused) == REFUSED_STICK_FAULT &&
+      lv_screen_active() == ui_DriveScreen) {
+    view->fill_stick_fault(panel, view->config_.texts->stick_fault_title);
     view->show(panel, true);
     return;
   }
@@ -278,7 +302,8 @@ void hmi::ui::RefusalView::poll() {
              ((refused == REFUSED_SEAT || refused == REFUSED_DRIVE_LOST ||
                refused == REFUSED_DRIVE_MENU) &&
               config_.mcb_ready()) ||
-             (refused == REFUSED_POST && config_.post_passed())) {
+             (refused == REFUSED_POST && config_.post_passed()) ||
+             (refused == REFUSED_STICK && !config_.stick_fault())) {
     // A refused drive is tied to the push on the Locked screen, so it goes
     // with it. A refused seat comes from the menu -- no push to hold it up --
     // so it stays its window (the dwell timer) unless the cause clears.

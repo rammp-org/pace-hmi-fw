@@ -7,9 +7,10 @@
 // the code, the code wins and the disagreement is listed in TABLE.md. The hazard fix C1
 // (docs/plans/hazard-c1-spec.md, approved by the owner 2026-10-08) changes rows 1-9, 21, 22,
 // 25, 26, 31 and 32 and appends rows 42-49; the hazard fix C3 (hazard-c3-spec.md, approved the
-// same day) changes rows 1, 2, 18, 31 and 32 and appends rows 50-54; each of those rows cites
-// its spec. Any further change to a row is a behaviour change and needs the owner's approval
-// (CS-SAF-05).
+// same day) changes rows 1, 2, 18, 31 and 32 and appends rows 50-54; the hazard fix C2b
+// (hazard-c2-spec.md §5.3, hazard-fixes.md §10 items 13-15, owner D8 = a, D9 = b) changes row 18
+// and appends rows 55-59; each of those rows cites its spec. Any further change to a row is a
+// behaviour change and needs the owner's approval (CS-SAF-05).
 //
 // This file is the spec, the test oracle (TS-UNIT-08) and the source of the D4
 // diagram in TABLE.md (CS-SAF-02, CS-TYP-03). The agent that writes the
@@ -122,11 +123,13 @@ static_assert(kStopResendSlow > kStopResend && kStopFaultAfter > kStopResendSlow
 // first: a relock ends the stop before any re-send. BOOT_STOP right after FOLLOW (C3 §2.5): the
 // first CONNECTED tick sends the boot DISABLE and does not enter Drive. EXIT_DUE before the
 // stop steps: the phase they read is final. STOP_FAULT_DUE before STOP_RESEND: on the fault
-// tick the rate switches to 1 Hz at once.
+// tick the rate switches to 1 Hz at once. STICK_FAULT after STOP_RESEND (C2b, hazard-c2-spec.md
+// §5.3): the second Env predates rows 55-56's DISABLE, so a re-send step after them would send a
+// second DISABLE on the fault tick; a relock in FOLLOW still wins.
 inline constexpr std::array TICK_SEQUENCE{
     Input::TICK_FOLLOW,         Input::TICK_BOOT_STOP,   Input::TICK_EXIT_DUE,
-    Input::TICK_STOP_FAULT_DUE, Input::TICK_STOP_RESEND, Input::TICK_WARN_DUE,
-    Input::TICK_GIVEUP_DUE,
+    Input::TICK_STOP_FAULT_DUE, Input::TICK_STOP_RESEND, Input::TICK_STICK_FAULT,
+    Input::TICK_WARN_DUE,       Input::TICK_GIVEUP_DUE,
 };
 
 // What each action does to the HIDDEN variables. Phase changes are the row's
@@ -231,6 +234,8 @@ inline constexpr std::array INPUT_PRECONDITIONS{
     InputPrecondition{Input::TICK_STOP_RESEND, kAllPhases, kAlways},
     // The boot DISABLE's tick sub-step (C3): every phase, always.
     InputPrecondition{Input::TICK_BOOT_STOP, kAllPhases, kAlways},
+    // The stick fault's tick sub-step (C2b): every phase, always.
+    InputPrecondition{Input::TICK_STICK_FAULT, kAllPhases, kAlways},
 };
 
 // ---------------------------------------------------------------------------
@@ -286,6 +291,10 @@ inline constexpr Actions kExitAskMenu = acts({Action::SEND_DISABLE, Action::SET_
 inline constexpr Actions kFirstExitAskHold =
     acts({Action::SEND_DISABLE, Action::SET_EXIT_REQUESTED, Action::CLEAR_THEN_MENU,
           Action::ARM_EXIT_DEADLINE, Action::ARM_STOP_TIMER});
+// Rows 55-56 (C2b): the stick in FAULT stops as the exit hold does (row 21), then names it.
+inline constexpr Actions kFirstExitAskStickFault =
+    acts({Action::SEND_DISABLE, Action::SET_EXIT_REQUESTED, Action::CLEAR_THEN_MENU,
+          Action::ARM_EXIT_DEADLINE, Action::ARM_STOP_TIMER, Action::SHOW_STICK_FAULT});
 inline constexpr Actions kFirstExitAskMenu =
     acts({Action::SEND_DISABLE, Action::SET_EXIT_REQUESTED, Action::SET_THEN_MENU,
           Action::ARM_EXIT_DEADLINE, Action::ARM_STOP_TIMER});
@@ -374,11 +383,13 @@ inline constexpr std::array TRANSITIONS{
                acts({Action::CLEAR_GIVEUP, Action::SEND_DISABLE}),
                "frag_drive.inc:116-121 (orig 1639-1644)"},
 
-    // ===== UNLOCK_HOLD_DONE: activate_drive; no ENABLE before POST pass (C3, H2: row 52)
-    Transition{Phase::LOCKED, Input::UNLOCK_HOLD_DONE, when({Guard::MCB_READY, Guard::POST_OK}),
-               Phase::ASKING,
+    // ===== UNLOCK_HOLD_DONE: activate_drive; no ENABLE before POST pass (C3, H2: row 52) nor
+    // with the stick in FAULT (C2b: row 57)
+    Transition{Phase::LOCKED, Input::UNLOCK_HOLD_DONE,
+               when({Guard::MCB_READY, Guard::POST_OK}, {Guard::STICK_FAULT}), Phase::ASKING,
                acts({Action::RING_WAIT, Action::SEND_ENABLE, Action::ARM_WARN, Action::ARM_GIVEUP}),
-               "frag_drive.inc:154-155,134-137 (orig 1677-1678,1657-1660); hazard-c3-spec.md 4.2"},
+               "frag_drive.inc:154-155,134-137 (orig 1677-1678,1657-1660); hazard-c3-spec.md 4.2; "
+               "hazard-c2-spec.md 5.3"},
     Transition{Phase::LOCKED, Input::UNLOCK_HOLD_DONE, when({}, {Guard::MCB_READY}), Phase::LOCKED,
                acts({Action::RING_REST, Action::SHOW_REFUSED_DRIVE, Action::REFUSAL_FEEDBACK}),
                "frag_drive.inc:148-152 (orig 1671-1675)"},
@@ -511,8 +522,35 @@ inline constexpr std::array TRANSITIONS{
     Transition{Phase::LOCKED, Input::MENU_ROW_DRIVE, when({Guard::MCB_READY}, {Guard::POST_OK}),
                Phase::LOCKED, acts({Action::REFUSAL_FEEDBACK, Action::SHOW_REFUSED_POST}),
                "hazard-c3-spec.md 4.3 row 54"},
+
+    // ===== Hazard fix C2b, appended (docs/plans/hazard-c2-spec.md §5.3; hazard-fixes.md §10)
+    // TICK_STICK_FAULT: the stick in FAULT while unlocked stops as the exit hold does (D8 = a).
+    // The stick output is already 0 (the permit); the DISABLE keeps the MCB from staying ENABLED
+    // behind a broken stick. EXITING and EXIT_REFUSED are already stopping; ASKING waits for
+    // the MCB (rows 1-2, then 55).
+    Transition{Phase::UNLOCKING, Input::TICK_STICK_FAULT, when({Guard::STICK_FAULT}),
+               Phase::EXITING, kFirstExitAskStickFault, "hazard-c2-spec.md 5.3 row 55"},
+    Transition{Phase::DRIVING, Input::TICK_STICK_FAULT, when({Guard::STICK_FAULT}), Phase::EXITING,
+               kFirstExitAskStickFault, "hazard-c2-spec.md 5.3 row 56"},
+    // Refusals with the stick in FAULT, the MCB ready and POST passed (D9 = b): the unlock hold
+    // (row 57, D9a), the push on the Locked screen and the menu's DRIVE row (rows 58-59, D9b,
+    // the pattern of C3's rows 53-54). MCB not ready, then POST, then the stick, in the
+    // permit's order: their twins are rows 19/38/40 and 52/53/54.
+    Transition{Phase::LOCKED, Input::UNLOCK_HOLD_DONE,
+               when({Guard::MCB_READY, Guard::POST_OK, Guard::STICK_FAULT}), Phase::LOCKED,
+               acts({Action::RING_REST, Action::SHOW_REFUSED_STICK, Action::REFUSAL_FEEDBACK}),
+               "hazard-c2-spec.md 5.3 row 57"},
+    Transition{Phase::LOCKED, Input::ENTRY_PUSH,
+               when({Guard::ON_LOCKED_SCREEN, Guard::MCB_READY, Guard::POST_OK, Guard::STICK_FAULT},
+                    {Guard::MENU_OPEN}),
+               Phase::LOCKED, acts({Action::SHOW_REFUSED_STICK, Action::REFUSAL_FEEDBACK}),
+               "hazard-decisions.md D9b, row 58 (as hazard-c3-spec.md 4.3 row 53)"},
+    Transition{Phase::LOCKED, Input::MENU_ROW_DRIVE,
+               when({Guard::MCB_READY, Guard::POST_OK, Guard::STICK_FAULT}), Phase::LOCKED,
+               acts({Action::REFUSAL_FEEDBACK, Action::SHOW_REFUSED_STICK}),
+               "hazard-decisions.md D9b, row 59 (as hazard-c3-spec.md 4.3 row 54)"},
 };
-inline constexpr std::size_t kTransitionCount = 54;
+inline constexpr std::size_t kTransitionCount = 59;
 
 // What the Drive screen says about the user's stop (hazard-c1-spec.md §2.6): MCB_DID_NOT_STOP
 // in an exit phase with the stop fault, STOPPING in an exit phase without it, NONE otherwise.
@@ -872,12 +910,28 @@ constexpr bool boot_stop_and_post_refusal_where_allowed() noexcept {
   });
 }
 
+// ---- The hazard fix C2b's own rules (hazard-c2-spec.md §5.3) ------------------------------
+
+// The stick-fault banners only with +STICK_FAULT: SHOW_STICK_FAULT only in rows 55-56,
+// SHOW_REFUSED_STICK only in rows 57-59.
+constexpr bool stick_fault_banners_where_allowed() noexcept {
+  return std::ranges::all_of(TRANSITIONS, [](const Transition &t) {
+    const std::size_t row = index_of_row(t) + 1;
+    const bool fault = (t.guard.need_true & bit(Guard::STICK_FAULT)) != 0;
+    const bool stop_ok =
+        !has(t.actions, Action::SHOW_STICK_FAULT) || (fault && (row == 55 || row == 56));
+    const bool refusal_ok =
+        !has(t.actions, Action::SHOW_REFUSED_STICK) || (fault && row >= 57 && row <= 59);
+    return stop_ok && refusal_ok;
+  });
+}
+
 } // namespace detail
 
 static_assert(static_cast<std::size_t>(Phase::EXIT_REFUSED) + 1 == kPhaseCount);
-static_assert(static_cast<std::size_t>(Input::TICK_BOOT_STOP) + 1 == kInputCount);
-static_assert(static_cast<std::size_t>(Guard::BOOT_STOP_DONE) + 1 == kGuardCount);
-static_assert(static_cast<std::size_t>(Action::SHOW_REFUSED_POST) + 1 == kActionCount);
+static_assert(static_cast<std::size_t>(Input::TICK_STICK_FAULT) + 1 == kInputCount);
+static_assert(static_cast<std::size_t>(Guard::STICK_FAULT) + 1 == kGuardCount);
+static_assert(static_cast<std::size_t>(Action::SHOW_REFUSED_STICK) + 1 == kActionCount);
 static_assert(kGuardCount <= 32, "GuardMask is 32 bits");
 static_assert(TRANSITIONS.size() == kTransitionCount, "update kTransitionCount and TABLE.md");
 static_assert(detail::tables_indexed(), "PHASE_INVARIANTS / INPUT_PRECONDITIONS indexed by enum");
@@ -905,6 +959,8 @@ static_assert(detail::entry_waits_for_boot_stop(),
               "C3: rows 1-2 must read +BOOT_STOP_DONE and must not read POST_OK");
 static_assert(detail::boot_stop_and_post_refusal_where_allowed(),
               "C3: MARK_BOOT_STOP outside rows 50-51, or SHOW_REFUSED_POST without !POST_OK");
+static_assert(detail::stick_fault_banners_where_allowed(),
+              "C2b: a stick-fault banner outside rows 55-59 or without +STICK_FAULT");
 static_assert(stop_notice(Phase::EXITING, 0) == StopNotice::STOPPING);
 static_assert(stop_notice(Phase::EXIT_REFUSED, bit(Guard::STOP_FAULT)) ==
               StopNotice::MCB_DID_NOT_STOP);

@@ -99,6 +99,15 @@ constexpr Actions UNLOCK_REFUSED_POST{Action::RING_REST, Action::SHOW_REFUSED_PO
                                       Action::REFUSAL_FEEDBACK};
 constexpr Actions ENTRY_REFUSED_POST{Action::SHOW_REFUSED_POST, Action::REFUSAL_FEEDBACK};
 constexpr Actions MENU_ROW_REFUSED_POST{Action::REFUSAL_FEEDBACK, Action::SHOW_REFUSED_POST};
+// C2b (rows 55-59): the stick in FAULT stops as the exit hold does, then names it; and the
+// refusals with the stick in FAULT.
+constexpr Actions FIRST_ASK_EXIT_STICK_FAULT{Action::SEND_DISABLE,    Action::SET_EXIT_REQUESTED,
+                                             Action::CLEAR_THEN_MENU, Action::ARM_EXIT_DEADLINE,
+                                             Action::ARM_STOP_TIMER,  Action::SHOW_STICK_FAULT};
+constexpr Actions UNLOCK_REFUSED_STICK{Action::RING_REST, Action::SHOW_REFUSED_STICK,
+                                       Action::REFUSAL_FEEDBACK};
+constexpr Actions ENTRY_REFUSED_STICK{Action::SHOW_REFUSED_STICK, Action::REFUSAL_FEEDBACK};
+constexpr Actions MENU_ROW_REFUSED_STICK{Action::REFUSAL_FEEDBACK, Action::SHOW_REFUSED_STICK};
 constexpr Actions NOTHING{};
 
 // What an action does to the hidden variables. Only these actions touch them; every other
@@ -203,8 +212,9 @@ DriveSession::Outcome DriveSession::locked_follow(GuardMask g) const noexcept {
   return stay();
 }
 
-// LOCKED's asks to drive: the unlock hold (rows 18, 19, 52), the push (rows 38, 53) and the
-// menu's DRIVE row (rows 40, 54). Refused without the MCB ready, or (C3) before POST pass.
+// LOCKED's asks to drive: the unlock hold (rows 18, 19, 52, 57), the push (rows 38, 53, 58) and
+// the menu's DRIVE row (rows 40, 54, 59). Refused without the MCB ready, or (C3) before POST
+// pass, or (C2b) with the stick in FAULT, in that order.
 DriveSession::Outcome DriveSession::locked_drive_ask(Input in, GuardMask g) const noexcept {
   if (in == Input::ENTRY_PUSH && (!on(g, Guard::ON_LOCKED_SCREEN) || on(g, Guard::MENU_OPEN))) {
     return stay();
@@ -217,14 +227,35 @@ DriveSession::Outcome DriveSession::locked_drive_ask(Input in, GuardMask g) cons
                                                      : MENU_ROW_REFUSED); // row 40
   }
   if (on(g, Guard::POST_OK)) {
-    return in == Input::UNLOCK_HOLD_DONE ? go(Phase::ASKING, ASK_ENABLE) // row 18
-                                         : stay();
+    return locked_ask_post_ok(in, g); // rows 18, 57-59
   }
   if (in == Input::UNLOCK_HOLD_DONE) {
     return go(Phase::LOCKED, UNLOCK_REFUSED_POST); // row 52 (C3, H2)
   }
   return go(Phase::LOCKED, in == Input::ENTRY_PUSH ? ENTRY_REFUSED_POST      // row 53 (C3)
                                                    : MENU_ROW_REFUSED_POST); // row 54 (C3)
+}
+
+// LOCKED's asks with the MCB ready and POST passed: the unlock hold asks for ENABLE (row 18)
+// unless the stick is in FAULT (C2b, D9 = b: rows 57-59 refuse the hold, the push, the row).
+DriveSession::Outcome DriveSession::locked_ask_post_ok(Input in, GuardMask g) const noexcept {
+  if (!on(g, Guard::STICK_FAULT)) {
+    return in == Input::UNLOCK_HOLD_DONE ? go(Phase::ASKING, ASK_ENABLE) // row 18
+                                         : stay();
+  }
+  if (in == Input::UNLOCK_HOLD_DONE) {
+    return go(Phase::LOCKED, UNLOCK_REFUSED_STICK); // row 57
+  }
+  return go(Phase::LOCKED, in == Input::ENTRY_PUSH ? ENTRY_REFUSED_STICK      // row 58
+                                                   : MENU_ROW_REFUSED_STICK); // row 59
+}
+
+// UNLOCKING's and DRIVING's stick fault (rows 55-56): stop as the exit hold does.
+DriveSession::Outcome DriveSession::stick_fault_stop(GuardMask g) const noexcept {
+  if (on(g, Guard::STICK_FAULT)) {
+    return go(Phase::EXITING, FIRST_ASK_EXIT_STICK_FAULT);
+  }
+  return stay();
 }
 
 DriveSession::Outcome DriveSession::on_locked(Input in, GuardMask g) const noexcept {
@@ -255,6 +286,7 @@ DriveSession::Outcome DriveSession::on_locked(Input in, GuardMask g) const noexc
   case Input::UNLOCK_TIMER:
   case Input::TICK_STOP_FAULT_DUE:
   case Input::TICK_STOP_RESEND:
+  case Input::TICK_STICK_FAULT:
     return stay();
   default:
     break; // corrupted input: safe state
@@ -315,6 +347,7 @@ DriveSession::Outcome DriveSession::on_asking(Input in, GuardMask g) const noexc
   case Input::UNLOCK_TIMER:
   case Input::TICK_STOP_FAULT_DUE:
   case Input::TICK_STOP_RESEND:
+  case Input::TICK_STICK_FAULT: // the MCB decides; if it grants, rows 1-2 then 55
     return stay();
   default:
     break; // corrupted input: safe state
@@ -344,6 +377,8 @@ DriveSession::Outcome DriveSession::on_unlocking(Input in, GuardMask g) const no
       return go(Phase::DRIVING, ADVANCE); // row 35
     }
     return stay();
+  case Input::TICK_STICK_FAULT:
+    return stick_fault_stop(g); // row 55 (C2b)
   case Input::TICK_EXIT_DUE:
   case Input::TICK_WARN_DUE:
   case Input::TICK_GIVEUP_DUE:
@@ -377,6 +412,8 @@ DriveSession::Outcome DriveSession::on_driving(Input in, GuardMask g) const noex
       return go(Phase::DRIVING, ENABLE_PROFILE); // row 32
     }
     return stay(); // never re-send a stale request (H5), no ENABLE before POST pass (H2)
+  case Input::TICK_STICK_FAULT:
+    return stick_fault_stop(g); // row 56 (C2b)
   case Input::TICK_EXIT_DUE:
   case Input::TICK_WARN_DUE:
   case Input::TICK_GIVEUP_DUE:
@@ -423,6 +460,7 @@ DriveSession::Outcome DriveSession::on_exiting(Input in, GuardMask g) const noex
     return stop_resend(g);    // rows 46-47
   case Input::MENU_KEY_DRIVE: // row 27: deadline armed, the key does nothing
   case Input::TICK_BOOT_STOP:
+  case Input::TICK_STICK_FAULT: // already stopping
   case Input::TICK_WARN_DUE:
   case Input::TICK_GIVEUP_DUE:
   case Input::UNLOCK_HOLD_DONE:
@@ -459,6 +497,7 @@ DriveSession::Outcome DriveSession::on_exit_refused(Input in, GuardMask g) const
     return stop_resend(g);   // rows 48-49
   case Input::TICK_EXIT_DUE: // no timeout here: the stop re-sends until the MCB stops (G4)
   case Input::TICK_BOOT_STOP:
+  case Input::TICK_STICK_FAULT: // already stopping
   case Input::TICK_WARN_DUE:
   case Input::TICK_GIVEUP_DUE:
   case Input::UNLOCK_HOLD_DONE:

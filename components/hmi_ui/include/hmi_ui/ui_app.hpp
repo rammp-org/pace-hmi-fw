@@ -208,6 +208,12 @@ private:
   /// Why POST has not passed, in words: hmi_ui's post_reason_text over the gate (the Drive
   /// notice and the REFUSED_POST banner). Null when it has passed.
   const char *post_reason();
+  /// C2b: stick health is FAULT, as C2's monitor last stored it (acquire): the drive table's
+  /// STICK_FAULT and REFUSED_STICK's clearing.
+  bool stick_fault() const;
+  /// C2b: the latched fault in words, "Joystick fault: <axis> <what>" (the Joystick screen's,
+  /// REQ-UI-26, without its tail): the STICK_FAULT and REFUSED_STICK banners' body.
+  const char *stick_fault_words();
   void profile_clicked();
   bool entry_push();
   void hold_confirm();
@@ -286,6 +292,7 @@ private:
   bool stick_state_seen_ = false;
   uint8_t stick_state_ = 0;
   PostText stick_words_{};
+  PostText stick_fault_words_{}; ///< the banners' words, as stick_fault_words last wrote them
   /// Raw value per seat axis, in the table's units, as the MCB last reported it.
   lv_subject_t seat_axis_value_[rammp::kSeatAxisCount]{};
   uint8_t seat_axis_count_ = 0; ///< actuators in the table
@@ -378,6 +385,8 @@ private:
       .entry_push = hmi::ui::bind<&UiApp::entry_push>(this),
       .post_passed = hmi::ui::bind<&UiApp::post_passed>(this),
       .post_reason = hmi::ui::bind<&UiApp::post_reason>(this),
+      .stick_fault = hmi::ui::bind<&UiApp::stick_fault>(this),
+      .stick_fault_words = hmi::ui::bind<&UiApp::stick_fault_words>(this),
       .grace_ms = HOLD_GRACE_MS,
   }};
   // Locked means "not driving", and the Locked screen is where that changes.
@@ -409,6 +418,7 @@ private:
       .calibrating = config_.screens->calibrating,
       .hold_reason = hmi::ui::bind<&UiApp::hold_reason>(this),
       .post_gate = hmi::ui::bind<&UiApp::post_gate>(this),
+      .stick_fault = hmi::ui::bind<&UiApp::stick_fault>(this),
       .show_notice = hmi::ui::bind<&DriveNoticeView::show>(&drive_notice_view_),
       .input = config_.drive->input,
       .stick_drives = &stick_drives,

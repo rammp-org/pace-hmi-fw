@@ -45,6 +45,12 @@ MUTANTS=(
   'T16-effect-fault-sets-nothing|table|s/ActionEffect{Action::RAISE_STOP_FAULT, bit(Guard::STOP_FAULT), 0},/ActionEffect{Action::RAISE_STOP_FAULT, 0, 0},/'
   # The hazard fix C3's rows (hazard-c3-spec.md §4).
   'T17-row50-without-link|table|0,/when({Guard::LINK_CONNECTED}, {Guard::BOOT_STOP_DONE}), Phase::LOCKED,/s//when({}, {Guard::BOOT_STOP_DONE}), Phase::LOCKED,/'
+  # The hazard fix C2b's rows (hazard-c2-spec.md §5.3; D9b's rows 58-59).
+  'T18-row55-without-fault|table|s/Transition{Phase::UNLOCKING, Input::TICK_STICK_FAULT, when({Guard::STICK_FAULT}),/Transition{Phase::UNLOCKING, Input::TICK_STICK_FAULT, kAlways,/'
+  'T19-row56-no-banner|table|s/kFirstExitAskStickFault, "hazard-c2-spec.md 5.3 row 56"},/kFirstExitAskHold, "hazard-c2-spec.md 5.3 row 56"},/'
+  'T20-row57-no-feedback|table|s/acts({Action::RING_REST, Action::SHOW_REFUSED_STICK, Action::REFUSAL_FEEDBACK}),/acts({Action::RING_REST, Action::SHOW_REFUSED_STICK}),/'
+  'T21-row58-menu-ignored|table|s/^                    {Guard::MENU_OPEN}),$/                    {}),/'
+  'T22-row59-no-feedback|table|s/acts({Action::REFUSAL_FEEDBACK, Action::SHOW_REFUSED_STICK}),/acts({Action::SHOW_REFUSED_STICK}),/'
   # Code that reads a guard bit the table does not read for that input: the by-input oracle
   # only samples those (oracle_space.hpp), so these test the sample.
   'C01-unlock-reads-menu|code|0,/^  if (on(g, Guard::DRIVING_OK)) {/s//  if (on(g, Guard::DRIVING_OK) \&\& !on(g, Guard::MENU_OPEN)) {/'
@@ -58,6 +64,9 @@ MUTANTS=(
   'C08-effect-cancel-keeps-timer|code|s/    {Action::CANCEL_UNLOCK_TIMER, clears(Guard::UNLOCK_TIMER_ARMED)},/    {Action::CANCEL_UNLOCK_TIMER, NO_EFFECT},/'
   'C10-row51-sends-disable|code|s|BOOT_STOP_MOOT); // row 51|BOOT_STOP); // row 51|'
   'C09-resend-fast-after-fault|code|s/      on(g, Guard::STOP_FAULT) ? on(g, Guard::RESEND_SLOW_DUE) :/      on(g, Guard::STOP_FAULT) ? on(g, Guard::RESEND_FAST_DUE) :/'
+  # C2b's code (rows 55-59).
+  'C11-stick-stop-reads-menu|code|s/^  if (on(g, Guard::STICK_FAULT)) {$/  if (on(g, Guard::STICK_FAULT) || on(g, Guard::MENU_OPEN)) {/'
+  'C12-row57-asks|code|s|    return go(Phase::LOCKED, UNLOCK_REFUSED_STICK); // row 57|    return go(Phase::ASKING, ASK_ENABLE); // row 57|'
 )
 
 # run_app <app dir> <include dir> <source> <build dir>: prints PASS, REJECTED, CRASHED or

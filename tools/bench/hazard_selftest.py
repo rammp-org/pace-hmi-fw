@@ -905,7 +905,8 @@ def t_c2_cleanup_and_setup() -> None:
 
 def t_silence_and_c2b() -> None:
     """silence_after counts a gap that starts at the last sample before the mark (the sim's
-    ~15.6 ms clock); C2-8/C2-9 are NOT_RUN on a tree without C2b's rows."""
+    ~15.6 ms clock); C2-8/C2-9 are NOT_RUN on a tree without C2b's rows, and run on this one
+    (lane D's C2b: rows 55-59, TICK_STICK_FAULT)."""
     samples = [(10.0 + 0.035 * i, 0, 1.0, 0, 0) for i in range(20)]  # to 10.665
     samples += [(13.7 + 0.035 * i, 0, 0.0, 0, 0) for i in range(10)]
     mark = 10.678  # 13 ms after the last sample before the silence
@@ -926,7 +927,7 @@ def t_silence_and_c2b() -> None:
         table.write_text("enum class Input { TICK_FOLLOW, TICK_STICK_FAULT };\n",
                          encoding="utf-8")
         expect("C2b rows", c2.c2b_in(tree), True)
-    expect("this tree (C2 without lane D's C2b)", c2.c2b_in(common.REPO), False)
+    expect("this tree (C2 with lane D's C2b): C2-8/C2-9 run", c2.c2b_in(common.REPO), True)
 
 
 def t_restart_fallback() -> None:
@@ -1613,7 +1614,7 @@ CASES = [
      "check, recording each reboot; C2's drive set-ups wait for hold reason NONE",
      t_c2_cleanup_and_setup),
     ("BENCH-044c a silence starting a sim clock tick before the mark is the stall's; C2-8/9 "
-     "NOT_RUN without C2b's rows", t_silence_and_c2b),
+     "NOT_RUN without C2b's rows, run with them (this tree)", t_silence_and_c2b),
     ("BENCH-044d restart falls back to the port when Skunk Works does not open",
      t_restart_fallback),
     ("BENCH-039b B5i, B5j graders, watchdog phase 1 (report only): the report, no reset, "

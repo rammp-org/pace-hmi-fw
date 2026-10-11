@@ -25,6 +25,11 @@ enum Refused : int32_t {
   /// C3: driving asked for (the unlock hold, a push on the Locked screen, the menu's DRIVE row)
   /// before the start-up check passed. Stays its window, or until the check passes.
   REFUSED_POST = 8,
+  /// C2b: the drive table stopped because the stick is in FAULT (rows 55-56). Stays its window.
+  REFUSED_STICK_FAULT = 9,
+  /// C2b: driving asked for (the unlock hold, a push on the Locked screen, the menu's DRIVE row)
+  /// with the stick in FAULT (rows 57-59). Stays its window, or until the fault clears.
+  REFUSED_STICK = 10,
 };
 
 /// @brief A `refused` value's name, for logs and the bench's STATE line ("NONE" for
@@ -49,6 +54,10 @@ enum Refused : int32_t {
     return "REFUSED_DRIVE_MENU";
   case REFUSED_POST:
     return "REFUSED_POST";
+  case REFUSED_STICK_FAULT:
+    return "STICK_FAULT";
+  case REFUSED_STICK:
+    return "REFUSED_STICK";
   default:
     return "?";
   }

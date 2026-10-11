@@ -5,7 +5,7 @@
   level: L1
   path: components/drive_adapter/test
   requirements: [REQ-DAD-02, REQ-DAD-03, REQ-DAD-04, REQ-DAD-05, REQ-DAD-08, REQ-DAD-09,
-                 REQ-DAD-10]
+                 REQ-DAD-10, REQ-DAD-11]
   resources: [host]
   timeout_s: 120
   expected_s: 15

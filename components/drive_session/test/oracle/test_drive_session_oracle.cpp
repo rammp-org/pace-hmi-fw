@@ -50,7 +50,8 @@ constexpr std::array SCREENS{Screen::BOOT, Screen::LOCKED, Screen::DRIVE, Screen
                              Screen::OTHER};
 constexpr std::array RESENDS{ds::Resend::NOT_DUE, ds::Resend::FAST, ds::Resend::SLOW};
 constexpr unsigned HIDDEN_COMBOS = 1U << static_cast<unsigned>(std::popcount(ds::kHiddenGuards));
-constexpr std::size_t ENV_COUNT = 2 * MIBS.size() * SCREENS.size() * 2 * 8 * 4 * RESENDS.size() * 2;
+constexpr std::size_t ENV_COUNT =
+    2 * MIBS.size() * SCREENS.size() * 2 * 8 * 4 * RESENDS.size() * 2 * 2;
 
 // Every distinct Env, by index (0 .. ENV_COUNT-1).
 Env env_at(std::size_t i) {
@@ -76,7 +77,8 @@ Env env_at(std::size_t i) {
              .calibrating = (stop & 1U) != 0,
              .stop_fault_elapsed = (stop & 2U) != 0,
              .resend = RESENDS[i % RESENDS.size()],
-             .post_ok = (i / RESENDS.size()) % 2 != 0};
+             .post_ok = (i / RESENDS.size()) % 2 != 0,
+             .stick_fault = (i / RESENDS.size() / 2) % 2 != 0};
 }
 
 // One Env for each distinct env guard mask, in env_at order (the first Env with that mask).
@@ -142,7 +144,8 @@ Env make_env(bool link, MibState mib, Screen screen) {
              .calibrating = false,
              .stop_fault_elapsed = false,
              .resend = ds::Resend::NOT_DUE,
-             .post_ok = true};
+             .post_ok = true,
+             .stick_fault = false};
 }
 
 // The actions of each sub-step of one tick, in TICK_SEQUENCE order.
@@ -499,8 +502,9 @@ TEST_CASE("DRV-026 every relock from an unlocked phase sends DISABLE and leaves 
 }
 
 TEST_CASE("DRV-027 over every state, ENABLE is sent only by rows 18, 31 and 32, and by 31-32 "
-          "only with the MCB ENABLED on a CONNECTED link and POST passed",
-          "[drive][safety][REQ-DRV-37]") {
+          "only with the MCB ENABLED on a CONNECTED link and POST passed; by row 18 only with "
+          "POST passed and the stick not in FAULT",
+          "[drive][safety][REQ-DRV-37][REQ-DRV-44]") {
   unsigned long enables = 0;
   unsigned long bad = 0;
   for (std::size_t pi = 0; pi < ds::kPhaseCount; ++pi) {
@@ -522,7 +526,7 @@ TEST_CASE("DRV-027 over every state, ENABLE is sent only by rows 18, 31 and 32, 
           }
           ++enables;
           const bool hold = p == Phase::LOCKED && in == Input::UNLOCK_HOLD_DONE && // row 18
-                            env.post_ok;
+                            env.post_ok && !env.stick_fault;
           const bool tap = (p == Phase::UNLOCKING || p == Phase::DRIVING) && // rows 31-32
                            in == Input::PROFILE_CLICK && env.link_connected &&
                            env.mib == MibState::ENABLED && env.post_ok;
@@ -561,8 +565,9 @@ TEST_CASE("DRV-028 the exit hold while locked sends one DISABLE (row 42); while 
 
 TEST_CASE("DRV-116 a tick runs its sub-steps in TICK_SEQUENCE order on two Envs: the first "
           "CONNECTED tick sends the boot DISABLE and does not enter; a re-send due between the "
-          "samples is sent the same tick; a relock on the first means no re-send",
-          "[drive][safety][REQ-DRV-36]") {
+          "samples is sent the same tick; a relock on the first means no re-send; a stick FAULT "
+          "tick sends exactly one DISABLE",
+          "[drive][safety][REQ-DRV-45]") {
   using ds::Resend;
   // The warn deadline passing between the two samples: NOT_GRANTED in the same tick (as before).
   const Env at_start = make_env(true, MibState::IDLE, Screen::LOCKED);
@@ -607,11 +612,34 @@ TEST_CASE("DRV-116 a tick runs its sub-steps in TICK_SEQUENCE order on two Envs:
   TEST_ASSERT_FALSE(any_contains(steps, Action::SET_UNLOCKED));
   (void)tick(fresh, mib_enabled);
   TEST_ASSERT_EQUAL(Phase::UNLOCKING, fresh.phase());
+  // C2b (hazard-c2-spec.md §5.3, §8.5): DRIVING, the stick in FAULT on both samples, the last
+  // DISABLE long ago (a re-send would be due on the second Env): rows 55-56 stop as the exit
+  // hold does, and the tick sends exactly one DISABLE.
+  DriveSession faulted = driving();
+  Env fault_env = make_env(true, MibState::ENABLED, Screen::DRIVE);
+  fault_env.stick_fault = true;
+  Env fault_due = fault_env;
+  fault_due.resend = Resend::SLOW;
+  steps = tick(faulted, fault_env, fault_due);
+  TEST_ASSERT_EQUAL(Phase::EXITING, faulted.phase());
+  TEST_ASSERT_TRUE(contains(steps[step_of(Input::TICK_STICK_FAULT)], Action::SHOW_STICK_FAULT));
+  TEST_ASSERT_TRUE(contains(steps[step_of(Input::TICK_STICK_FAULT)], Action::ARM_STOP_TIMER));
+  std::size_t disables = 0;
+  for (const Actions &a : steps) {
+    disables += static_cast<std::size_t>(std::ranges::count(a, Action::SEND_DISABLE));
+  }
+  TEST_ASSERT_EQUAL_size_t(1, disables);
+  // The next tick, still in FAULT: EXITING has no stick-fault row; the stop's own re-send runs.
+  steps = tick(faulted, fault_due);
+  TEST_ASSERT_EQUAL(Phase::EXITING, faulted.phase());
+  TEST_ASSERT_TRUE(steps[step_of(Input::TICK_STICK_FAULT)] == Actions{});
+  TEST_ASSERT_TRUE(contains(steps[step_of(Input::TICK_STOP_RESEND)], Action::SEND_DISABLE));
   // The order itself (DSO-018 pins the data).
   TEST_ASSERT_EQUAL(0, step_of(Input::TICK_FOLLOW));
   TEST_ASSERT_EQUAL(1, step_of(Input::TICK_BOOT_STOP));
   TEST_ASSERT_TRUE(step_of(Input::TICK_EXIT_DUE) < step_of(Input::TICK_STOP_FAULT_DUE));
   TEST_ASSERT_TRUE(step_of(Input::TICK_STOP_FAULT_DUE) < step_of(Input::TICK_STOP_RESEND));
+  TEST_ASSERT_EQUAL(step_of(Input::TICK_STOP_RESEND) + 1, step_of(Input::TICK_STICK_FAULT));
 }
 
 // ---- The hazard fix C3 (docs/plans/hazard-c3-spec.md §6.1) ----------------------------------
@@ -691,7 +719,7 @@ TEST_CASE("DRV-031 over every state inside the phase invariants with POST_OK fal
 
 TEST_CASE("DRV-032 the POST refusals (rows 52, 53, 54) and their !RDY twins (19, 38, 40) fire "
           "exactly where their guards say, never both",
-          "[drive][safety][REQ-DRV-40][REQ-DRV-41][REQ-DRV-42]") {
+          "[drive][safety][REQ-DRV-40][REQ-DRV-41][REQ-DRV-44]") {
   unsigned long bad = 0;
   unsigned long fired = 0;
   for (const Input in : {Input::UNLOCK_HOLD_DONE, Input::ENTRY_PUSH, Input::MENU_ROW_DRIVE}) {

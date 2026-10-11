@@ -117,8 +117,8 @@ TEST_CASE("GLD-114 a corrupted input during a stop gives the safe state and repo
   expect_golden("GLD-114");
 }
 
-TEST_CASE("GLD-115 the scenarios and the seeded walks take every row of the drive table (C1 and "
-          "C3)",
+TEST_CASE("GLD-115 the scenarios and the seeded walks take every row of the drive table (C1, C3 "
+          "and C2b)",
           "[drive_golden]") {
   golden::run_all(golden::main_unit_target());
   const auto &hits = golden::row_hits();
@@ -200,4 +200,31 @@ TEST_CASE("GLD-125 DrivePort's sample reads the POST gate live: PENDING not pass
   const bool pass = golden::port_sample_post_ok();
   TEST_ASSERT_FALSE(pending);
   TEST_ASSERT_TRUE(pass);
+}
+
+// ---- C2b (docs/plans/hazard-c2-spec.md §5.3, §8.5; hazard-decisions.md D8, D9) ----------------
+
+TEST_CASE("GLD-126 the stick in FAULT while driving stops as an exit hold; the MCB obeys: relock",
+          "[drive_golden][REQ-DRV-43]") {
+  expect_golden("GLD-126");
+}
+
+TEST_CASE("GLD-127 the stick in FAULT while driving, the MCB ignores the stop: as GLD-105",
+          "[drive_golden][REQ-DRV-43]") {
+  expect_golden("GLD-127");
+}
+
+TEST_CASE("GLD-128 the stick in FAULT, locked: the unlock hold is refused with REFUSED_STICK",
+          "[drive_golden][REQ-DRV-44]") {
+  expect_golden("GLD-128");
+}
+
+TEST_CASE("GLD-129 the stick in FAULT, locked: the push and the DRIVE row are refused (D9b)",
+          "[drive_golden][REQ-DRV-46]") {
+  expect_golden("GLD-129");
+}
+
+TEST_CASE("GLD-130 the stick in FAULT, the MCB enables on its own: entry, then the stop",
+          "[drive_golden][REQ-DRV-43]") {
+  expect_golden("GLD-130");
 }

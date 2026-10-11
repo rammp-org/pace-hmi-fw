@@ -118,8 +118,10 @@ enum class Input : std::uint8_t {
   TICK_STOP_RESEND,    // is a DISABLE re-send due (G4: every 250 ms, then 1 Hz)
   // --- hazard fix C3 (docs/plans/hazard-c3-spec.md §4.1): the boot DISABLE
   TICK_BOOT_STOP, // is the boot DISABLE due (the first tick with the link CONNECTED)
+  // --- hazard fix C2b (docs/plans/hazard-c2-spec.md §5.3): the stick fault's stop
+  TICK_STICK_FAULT, // is the stick in FAULT while unlocked (rows 55-56: stop as the exit hold)
 };
-inline constexpr std::size_t kInputCount = 14;
+inline constexpr std::size_t kInputCount = 15;
 
 // ---------------------------------------------------------------------------
 // Guard
@@ -153,8 +155,10 @@ enum class Guard : std::uint8_t {
   // --- hazard fix C3 (hazard-c3-spec.md §4.1), appended: env, then hidden ------------------
   POST_OK,        // env: the POST gate is PASS at the sample
   BOOT_STOP_DONE, // hidden: the boot DISABLE was sent (or the user's ENABLE made it moot)
+  // --- hazard fix C2b (hazard-c2-spec.md §5.3), appended: env ------------------------------
+  STICK_FAULT, // env: the stick-health atomic reads FAULT at the sample (not SUSPECT, CHECK...)
 };
-inline constexpr std::size_t kGuardCount = 23;
+inline constexpr std::size_t kGuardCount = 24;
 
 using GuardMask = std::uint32_t;
 constexpr GuardMask bit(Guard g) noexcept { return GuardMask{1} << static_cast<unsigned>(g); }
@@ -163,11 +167,12 @@ constexpr GuardMask mask(std::initializer_list<Guard> gs) noexcept {
                          [](GuardMask m, Guard g) { return m | bit(g); });
 }
 
-inline constexpr GuardMask kEnvGuards = mask(
-    {Guard::LINK_CONNECTED, Guard::DRIVING_OK, Guard::MCB_READY, Guard::ON_LOCKED_SCREEN,
-     Guard::ON_DRIVE_SCREEN, Guard::ON_SEAT_SCREEN, Guard::MENU_OPEN, Guard::EXIT_ELAPSED,
-     Guard::WARN_ELAPSED, Guard::GIVEUP_ELAPSED, Guard::CALIBRATING, Guard::ON_BOOT_SCREEN,
-     Guard::STOP_FAULT_ELAPSED, Guard::RESEND_FAST_DUE, Guard::RESEND_SLOW_DUE, Guard::POST_OK});
+inline constexpr GuardMask kEnvGuards =
+    mask({Guard::LINK_CONNECTED, Guard::DRIVING_OK, Guard::MCB_READY, Guard::ON_LOCKED_SCREEN,
+          Guard::ON_DRIVE_SCREEN, Guard::ON_SEAT_SCREEN, Guard::MENU_OPEN, Guard::EXIT_ELAPSED,
+          Guard::WARN_ELAPSED, Guard::GIVEUP_ELAPSED, Guard::CALIBRATING, Guard::ON_BOOT_SCREEN,
+          Guard::STOP_FAULT_ELAPSED, Guard::RESEND_FAST_DUE, Guard::RESEND_SLOW_DUE, Guard::POST_OK,
+          Guard::STICK_FAULT});
 inline constexpr GuardMask kHiddenGuards =
     mask({Guard::WARN_ARMED, Guard::GIVEUP_ARMED, Guard::THEN_MENU, Guard::REQUEST_ENABLE,
           Guard::UNLOCK_TIMER_ARMED, Guard::STOP_FAULT, Guard::BOOT_STOP_DONE});
@@ -212,6 +217,7 @@ struct Env {
   bool stop_fault_elapsed; // C1: the stop timer is armed and kStopFaultAfter has passed
   Resend resend;           // C1: which DISABLE re-send is due
   bool post_ok;            // C3: the POST gate is PASS (read live at the sample)
+  bool stick_fault;        // C2b: stick health is FAULT (read live at the sample)
 };
 constexpr GuardMask env_guards(const Env &e) noexcept {
   GuardMask m = 0;
@@ -262,6 +268,9 @@ constexpr GuardMask env_guards(const Env &e) noexcept {
   }
   if (e.post_ok) {
     m |= bit(Guard::POST_OK);
+  }
+  if (e.stick_fault) {
+    m |= bit(Guard::STICK_FAULT);
   }
   return m;
 }
@@ -330,8 +339,11 @@ enum class Action : std::uint8_t {
   // --- hazard fix C3 (hazard-c3-spec.md §4.1), appended: the boot DISABLE and POST ---------
   MARK_BOOT_STOP,    // BOOT_STOP_DONE := true
   SHOW_REFUSED_POST, // banner REFUSED_POST, 3000 ms; the view fills the check's text
+  // --- hazard fix C2b (hazard-c2-spec.md §5.3), appended: the stick fault -----------------
+  SHOW_STICK_FAULT,   // banner STICK_FAULT, 3000 ms: the stop was the stick's fault (rows 55-56)
+  SHOW_REFUSED_STICK, // banner REFUSED_STICK, 3000 ms: refused with the stick in FAULT (57-59)
 };
-inline constexpr std::size_t kActionCount = 41;
+inline constexpr std::size_t kActionCount = 43;
 // 12: the relock rows use 11 (C1 adds SEND_DISABLE and, from the exit phases,
 // CLEAR_STOP_FAULT), and DriveSession::SAFE_STATE_ACTIONS 12. The padding is NONE and is not in
 // the fingerprint.

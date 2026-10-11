@@ -105,6 +105,10 @@ inline const char *banner_name(std::int32_t which) {
     return "REFUSED_DRIVE_MENU";
   case 8:
     return "REFUSED_POST";
+  case 9:
+    return "STICK_FAULT";
+  case 10:
+    return "REFUSED_STICK";
   default:
     return "?";
   }
@@ -385,6 +389,10 @@ inline hmi::stick::PostGate post_gate() {
   golden::raw(std::format("post_gate -> {}", hmi::stick::to_string(g)));
   return g;
 }
+inline bool stick_fault() {
+  golden::raw(std::format("stick_fault -> {}", int{golden::world().stick_fault}));
+  return golden::world().stick_fault;
+}
 inline hmi::stick::HoldReason hold_reason() {
   const auto r = static_cast<hmi::stick::HoldReason>(golden::world().hold);
   golden::raw(std::format("hold_reason -> {}", hmi::stick::to_string(r)));
@@ -456,6 +464,7 @@ struct MainUnitUi {
   bool calibrating() const { return shim::calibrating(); }
   hmi::stick::HoldReason hold_reason() const { return shim::hold_reason(); }
   hmi::stick::PostGate post_gate() const { return shim::post_gate(); }
+  bool stick_fault() const { return shim::stick_fault(); }
   void show_drive_notice(hmi::drive_adapter::DriveNotice notice) const {
     shim::show_drive_notice(notice);
   }

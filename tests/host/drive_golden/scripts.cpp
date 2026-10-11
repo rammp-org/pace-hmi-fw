@@ -56,6 +56,7 @@ Step hold(std::uint8_t reason) { return {Op::HOLD, reason}; }
 Step live_link(bool up) { return {Op::LIVE_LINK, up ? 1 : 0}; }
 Step publish_delay(std::int64_t us) { return {Op::PUBLISH_DELAY, us}; }
 Step post(std::uint8_t gate) { return {Op::POST, gate}; }
+Step stick_fault(bool fault) { return {Op::STICK_FAULT, fault ? 1 : 0}; }
 
 namespace {
 
@@ -157,6 +158,19 @@ void add_c1_scenarios(std::vector<Scenario> &s) {
                seq({kReady,
                     {tick(), post(1), unlock_hold(), input(Input::ENTRY_PUSH),
                      input(Input::MENU_ROW_DRIVE), post(2), unlock_hold()}})});
+  // C2b's rows: the stick fault's stop (55, 56) and the refusals with the stick in FAULT (57-59).
+  s.push_back({"C2b: the stick in FAULT while unlocking, then while driving: the stop (rows 55, "
+               "56), the MCB obeys (row 7)",
+               seq({kReady,
+                    {tick(), mib(Mib::ENABLED), tick(), stick_fault(true), tick(), mib(Mib::IDLE),
+                     tick(), stick_fault(false), mib(Mib::ENABLED), tick(), timer_fires(),
+                     frame_step(), stick_fault(true), tick(), mib(Mib::IDLE), tick()}})});
+  s.push_back({"C2b: with the stick in FAULT, the unlock hold, the push and the DRIVE row are "
+               "refused (rows 57, 58, 59), then the hold asks (row 18)",
+               seq({kReady,
+                    {tick(), screen(ScreenId::LOCKED), stick_fault(true), unlock_hold(),
+                     input(Input::ENTRY_PUSH), input(Input::MENU_ROW_DRIVE), stick_fault(false),
+                     unlock_hold()}})});
   s.push_back({"C1: a profile tap after the MCB stopped, before the tick (rows 32 held, 5, 29)",
                seq({kDriving,
                     {profile(Profile::HIGH), mib(Mib::IDLE), profile(Profile::LOW), tick(),
@@ -300,11 +314,15 @@ constexpr std::array<ScreenId, 5> kScreens{ScreenId::BOOT, ScreenId::LOCKED, Scr
 
 Step random_step(Rng &r) {
   using enum Input;
-  const std::int64_t k = r.pick(106);
+  const std::int64_t k = r.pick(108);
   if (k >= 100) {
-    // C1's step kinds: a calibration starting or stopping, a slow publish; C3's: the POST gate.
+    // C1's step kinds: a calibration starting or stopping, a slow publish; C3's: the POST gate;
+    // C2b's: the stick entering or leaving FAULT.
     if (k < 102) {
       return calibrating(r.pick(2) != 0);
+    }
+    if (k >= 106) {
+      return stick_fault(r.pick(2) != 0);
     }
     return k < 103 ? publish_delay(r.pick(2) * 150 * kMs)
                    : post(static_cast<std::uint8_t>(r.pick(4)));
@@ -417,6 +435,10 @@ void play_c1(const Step &step) {
     w.post_gate = static_cast<std::uint8_t>(step.arg);
     both(std::format("> post {}", step.arg));
     break;
+  case Op::STICK_FAULT:
+    w.stick_fault = step.arg != 0;
+    both(std::format("> stick fault {}", step.arg));
+    break;
   default:
     break;
   }
@@ -498,6 +520,7 @@ void play(const Step &step, const Target &t) {
   case Op::LIVE_LINK:
   case Op::PUBLISH_DELAY:
   case Op::POST:
+  case Op::STICK_FAULT:
     play_c1(step);
     break;
   }

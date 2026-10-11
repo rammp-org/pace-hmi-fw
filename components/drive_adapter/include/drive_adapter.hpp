@@ -40,6 +40,7 @@ struct DriveSample {
   bool calibrating;                  ///< joystick_cal_running() (C1, G5)
   hmi::stick::HoldReason hold;       ///< the stick's hold reason, as the ADC task last stored it
   bool post_ok;                      ///< the POST gate is PASS, read live (acquire) (C3)
+  bool stick_fault;                  ///< stick health is FAULT, read live (acquire) (C2b)
 };
 
 /// @brief The banners the session raises (Action::SHOW_*), in Action order.
@@ -51,7 +52,9 @@ enum class DriveBanner : std::uint8_t {
   EXIT_REFUSED,
   DRIVE_LOST,
   REFUSED_DRIVE_MENU,
-  REFUSED_POST, ///< C3: not ready to drive, the start-up check has not passed
+  REFUSED_POST,  ///< C3: not ready to drive, the start-up check has not passed
+  STICK_FAULT,   ///< C2b: the stop was the stick's fault (rows 55-56)
+  REFUSED_STICK, ///< C2b: not ready to drive, the stick is in FAULT (rows 57-59)
 };
 
 /// @brief The port: what the adapter needs from the UI and the link (README, "The port").
@@ -237,6 +240,7 @@ private:
         .stop_fault_elapsed = stop_first_us_ != 0 && now - stop_first_us_ >= kStopFaultAfterUs,
         .resend = resend_due(now),
         .post_ok = s.post_ok,
+        .stick_fault = s.stick_fault,
     };
   }
 
@@ -458,6 +462,12 @@ private:
       return true;
     case Action::SHOW_REFUSED_POST:
       view_.show_banner(DriveBanner::REFUSED_POST);
+      return true;
+    case Action::SHOW_STICK_FAULT:
+      view_.show_banner(DriveBanner::STICK_FAULT);
+      return true;
+    case Action::SHOW_REFUSED_STICK:
+      view_.show_banner(DriveBanner::REFUSED_STICK);
       return true;
     case Action::REFUSAL_FEEDBACK:
       view_.refusal_feedback();

@@ -26,8 +26,9 @@ the drive table review (CS-SAF-05, two approvals; D1: the owner is the only appr
 `input(in)`: read the clock (`now_us`), sample the port (`sample`), build the session's `Env`
 (each deadline against that `now`), `step`, then perform each action in order. `tick()`: the
 same for TICK_FOLLOW (`TICK_SEQUENCE[0]`); then one more clock read and sample shared by the
-other sub-steps of `TICK_SEQUENCE`, in its order (TICK_EXIT_DUE, TICK_STOP_FAULT_DUE,
-TICK_STOP_RESEND, TICK_WARN_DUE, TICK_GIVEUP_DUE: two Envs per tick, DRV-116).
+other sub-steps of `TICK_SEQUENCE`, in its order (TICK_BOOT_STOP, TICK_EXIT_DUE,
+TICK_STOP_FAULT_DUE, TICK_STOP_RESEND, TICK_STICK_FAULT, TICK_WARN_DUE, TICK_GIVEUP_DUE: two
+Envs per tick, DRV-116).
 `exit_hold_done()` is a plain input in every phase (C1: rows 42-43 replace TABLE.md U3). After
 every input and tick the Drive notice (`drive_notice`: MCB did not stop > Stopping > the stick's
 hold reason in its order > none) is handed to the port once per change; so is it after
@@ -49,7 +50,7 @@ does is dropped and logged, see REQ-DAD-03).
 
 | Method | Action(s) | DrivePort (drive_ui) does |
 | --- | --- | --- |
-| `sample()` | every input | the link live (`rtps_comms_link_state`, REQ-UI-18), `mib_state_subject`, `lv_screen_active()`, `nav_menu_open`, `joystick_cal_running()`, the stick's hold reason, the POST gate (PASS: `post_ok`, C3), in that order |
+| `sample()` | every input | the link live (`rtps_comms_link_state`, REQ-UI-18), `mib_state_subject`, `lv_screen_active()`, `nav_menu_open`, `joystick_cal_running()`, the stick's hold reason, the POST gate (PASS: `post_ok`, C3), stick health (FAULT: `stick_fault`, C2b), in that order |
 | `now_us()` | every input; SEND_ENABLE; ARM_EXIT_DEADLINE | `esp_timer_get_time()` |
 | `publish(enable)` | SEND_ENABLE, SEND_DISABLE, PUBLISH_DRIVE | `rtps_comms_publish_drive(request, drive_profile_published)`; returns its result, which the adapter does not use yet (H6) |
 | `ring_wait()`, `ring_rest()` | RING_WAIT, RING_REST | `lock_visual_wait()`, `lock_visual_rest()` |
@@ -59,7 +60,7 @@ does is dropped and logged, see REQ-DAD-03).
 | `gate_update()` | GATE_UPDATE | `DriveUi::update_stick_gate()` |
 | `menu_on_arrival(open)` | OPEN/CLEAR_MENU_ON_ARRIVAL | `nav_menu_on_arrival = open` |
 | `go_locked_screen()`, `go_drive_screen()`, `nav_home()` | GO_LOCKED_SCREEN, GO_DRIVE_SCREEN, NAV_HOME | `locked_screen_go()`, fade to Drive over kUnlockDissolveMs, `nav_home()` |
-| `show_banner(banner)` | SHOW_* (C3: SHOW_REFUSED_POST, REFUSED_POST) | `DrivePort::show_refused(kRefused*, dwell)` |
+| `show_banner(banner)` | SHOW_* (C3: SHOW_REFUSED_POST, REFUSED_POST; C2b: SHOW_STICK_FAULT, STICK_FAULT, and SHOW_REFUSED_STICK, REFUSED_STICK) | `DrivePort::show_refused(kRefused*, dwell)` |
 | `refusal_feedback()` | REFUSAL_FEEDBACK | `refusal_feedback()` |
 | `show_notice(notice)` | after every input, tick and `refresh_notice`, on a change | the Drive screen's notice slot (hmi_ui's DriveNoticeView) |
 
@@ -77,6 +78,7 @@ does is dropped and logged, see REQ-DAD-03).
 | REQ-DAD-08 | The stop timer starts at the first stop of an exit and is not reset by a repeated stop; the last-DISABLE time is every DISABLE published; the Env's stop and re-send guards follow hazard-c1-spec.md §2.1 exactly at their boundaries | DAD-007, DAD-008, DAD-011 |
 | REQ-DAD-09 | Every DriveCommand publish result is checked; a failure is counted and logged at most once a second, and the re-send schedule does not change | DAD-009 |
 | REQ-DAD-10 | After every input and tick, the Drive notice (MCB did not stop > Stopping > the hold reason in its order > none) is handed to the port once per change | DAD-010, DAD-012 |
+| REQ-DAD-11 | (C2b) The Env's STICK_FAULT is stick health FAULT, read live at the sample (`DriveSample::stick_fault`); SHOW_STICK_FAULT and SHOW_REFUSED_STICK reach the port as the STICK_FAULT and REFUSED_STICK banners | DAD-013, GLD-126, GLD-128 |
 
 ## Tasks
 

@@ -476,6 +476,20 @@ const char *stick_axis_words(hmi::stick::StickAxis axis) {
 }
 } // namespace
 
+bool UiApp::stick_fault() const {
+  return permit_hooks_.stick_health.read() == hmi::stick::StickHealth::FAULT;
+}
+
+// The latched fault, as the monitor's telemetry names it, in the Joystick screen's words.
+const char *UiApp::stick_fault_words() {
+  constexpr auto relaxed = std::memory_order_relaxed;
+  const auto kind = static_cast<hmi::stick::SampleFault>(stick_telemetry_.fault_kind.load(relaxed));
+  const auto axis = static_cast<hmi::stick::StickAxis>(stick_telemetry_.fault_axis.load(relaxed));
+  std::snprintf(stick_fault_words_.text.data(), stick_fault_words_.text.size(), "%s%s%s",
+                rammp::kHmiStickFaultLead, stick_axis_words(axis), stick_why(kind));
+  return stick_fault_words_.text.data();
+}
+
 // C2's stick monitor as the UI task sees it (REQ-UI-26, REQ-UI-27): each change of its state is
 // logged once, with the reasons and the counters (the ADC task logs nothing); in FAULT the
 // Joystick screen names the reason in words.

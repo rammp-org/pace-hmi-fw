@@ -105,6 +105,8 @@ private:
   [[nodiscard]] Outcome locked_follow(GuardMask g) const noexcept;
   [[nodiscard]] Outcome asking_follow(GuardMask g) const noexcept;
   [[nodiscard]] Outcome locked_drive_ask(Input in, GuardMask g) const noexcept;
+  [[nodiscard]] Outcome locked_ask_post_ok(Input in, GuardMask g) const noexcept;
+  [[nodiscard]] Outcome stick_fault_stop(GuardMask g) const noexcept;
   [[nodiscard]] Outcome stop_resend(GuardMask g) const noexcept;
   void perform(const Outcome &o, Actions &out) noexcept;
 

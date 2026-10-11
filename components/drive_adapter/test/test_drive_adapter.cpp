@@ -1,5 +1,5 @@
 // L1 host app for components/drive_adapter: the adapter's own contract (DAD-001..005,
-// DAD-007..012). Its behaviour at the port is pinned by the drive goldens
+// DAD-007..013). Its behaviour at the port is pinned by the drive goldens
 // (tests/host/drive_golden, GLD-101..116). DAD-006 (TABLE.md U3) is removed: the exit hold while
 // locked is now the table's rows 42-43 (hazard-c1-spec.md E8).
 
@@ -73,7 +73,8 @@ struct Port {
                          .menu_open = false,
                          .calibrating = false,
                          .hold = HoldReason::NONE,
-                         .post_ok = true};
+                         .post_ok = true,
+                         .stick_fault = false};
   DriveBanner last_banner = DriveBanner::REFUSED_DRIVE;
   std::size_t banners = 0;
   std::array<DriveNotice, 64> notices{};
@@ -476,4 +477,45 @@ TEST_CASE("DAD-012 between two ticks the Drive notice follows the stick's hold r
   // The stop ended at the relock: the hold reason given reads again.
   TEST_ASSERT_TRUE(adapter.notice_for(HoldReason::CENTRE_FIRST) == DriveNotice::CENTRE_FIRST);
   g_adapter = nullptr;
+}
+
+TEST_CASE("DAD-013 stick health FAULT in the sample is the Env's STICK_FAULT; a FAULT tick while "
+          "driving publishes one DISABLE, arms the stop timer, raises STICK_FAULT, then Stopping",
+          "[drive_adapter][REQ-DAD-11]") {
+  // hazard-c2-spec.md §5.3 (REQ-DAD-11): the Env's STICK_FAULT is stick health FAULT at the
+  // sample; rows 55-56 stop as the exit hold does (D8 = a).
+  fresh_port();
+  Adapter adapter{{.view = FakeView{}}};
+  g_port.sample.stick_fault = true;
+  ds::Env e = DriveAdapterTestPeer::env(adapter, g_port.now);
+  TEST_ASSERT_TRUE(e.stick_fault);
+  TEST_ASSERT_TRUE((ds::env_guards(e) & ds::bit(ds::Guard::STICK_FAULT)) != 0);
+  g_port.sample.stick_fault = false;
+  e = DriveAdapterTestPeer::env(adapter, g_port.now);
+  TEST_ASSERT_FALSE(e.stick_fault);
+  TEST_ASSERT_TRUE((ds::env_guards(e) & ds::bit(ds::Guard::STICK_FAULT)) == 0);
+  // Through the tick, DRIVING, the last DISABLE long ago (the boot's).
+  drive(adapter);
+  g_port.now += 2'000'000;
+  g_port.count = 0;
+  g_port.banners = 0;
+  g_port.sample.stick_fault = true;
+  adapter.tick();
+  TEST_ASSERT_EQUAL_UINT(1, g_port.count_of(Call::PUBLISH_DISABLE));
+  TEST_ASSERT_EQUAL_UINT(0, g_port.count_of(Call::PUBLISH_ENABLE));
+  TEST_ASSERT_EQUAL_UINT(1, g_port.banners);
+  TEST_ASSERT_TRUE(g_port.last_banner == DriveBanner::STICK_FAULT);
+  TEST_ASSERT_TRUE(adapter.published_phase() == ds::Phase::EXITING);
+  TEST_ASSERT_TRUE(adapter.notice() == DriveNotice::STOPPING);
+  TEST_ASSERT_EQUAL_INT64(g_port.now, DriveAdapterTestPeer::stop_first_us(adapter));
+  // Locked with the MCB ready and POST passed: the unlock hold is refused (row 57).
+  fresh_port();
+  Adapter locked{{.view = FakeView{}}};
+  boot(locked);
+  g_port.sample.stick_fault = true;
+  locked.unlock_hold_done();
+  TEST_ASSERT_EQUAL_UINT(0, g_port.publishes());
+  TEST_ASSERT_TRUE(g_port.last_banner == DriveBanner::REFUSED_STICK);
+  TEST_ASSERT_EQUAL_UINT(1, g_port.count_of(Call::REFUSAL_FEEDBACK));
+  TEST_ASSERT_TRUE(locked.locked());
 }

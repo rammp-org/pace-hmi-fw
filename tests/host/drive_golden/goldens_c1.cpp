@@ -1,7 +1,8 @@
-// The hazard fixes' hand-written goldens: C1's GLD-101..114 (docs/plans/hazard-c1-spec.md §5.2)
-// and C3's GLD-117..124 (hazard-c3-spec.md §6.2). Since C3, C1's run after the "booted"
-// preamble (C3 F1: the POST gate PASS, link up, MIB IDLE, one tick, not compared); their
-// expected lines are unchanged.
+// The hazard fixes' hand-written goldens: C1's GLD-101..114 (docs/plans/hazard-c1-spec.md §5.2),
+// C3's GLD-117..124 (hazard-c3-spec.md §6.2) and C2b's GLD-126..130 (hazard-c2-spec.md §8.5;
+// GLD-129 and GLD-130 for the owner's D9b and §5.1's re-entry, hazard-decisions.md). Since C3, C1's
+// run after the "booted" preamble (C3 F1: the POST gate PASS, link up, MIB IDLE, one tick, not
+// compared); their expected lines are unchanged.
 //
 // Each golden is a list of steps played against the firmware's drive code (drive_ui's
 // DrivePort over the recording shims, and the one DriveAdapter, main_unit.cpp). A checked
@@ -364,6 +365,50 @@ std::vector<Golden> c3_goldens() {
                     .run({link(true), mib(Mib::IDLE), screen(ScreenId::LOCKED)})
                     .check(unlock_hold(), {"ring_wait", "P(E)"})
                     .check(tick(), kNothing)
+                    .done());
+
+  // --- C2b (hazard-c2-spec.md §5.3, §8.5): the stick in FAULT -----------------------------------
+  // Row 55/56's actions are row 21's (P(D)) then SHOW_STICK_FAULT (B:STICK_FAULT); the Drive
+  // notice follows the tick's actions (C1 §2.7), so N:STOPPING comes last.
+  const Tokens kStickStop{"P(D)", "B:STICK_FAULT", "N:STOPPING"};
+  out.push_back(Builder("GLD-126 the stick in FAULT while driving: the stop as an exit hold, the "
+                        "MCB obeys: relock as GLD-107, no banner")
+                    .driving()
+                    .check(stick_fault(true), kNothing)
+                    .check(tick(), kStickStop)
+                    .at_check(100, mib(Mib::IDLE), kNothing)
+                    .tick_at(250, with(relock("menu(0)", "P(D)"), {"N:NONE"}))
+                    .done());
+
+  {
+    Builder b("GLD-127 the stick in FAULT while driving, the MCB stays ENABLED: as GLD-105, "
+              "never a relock");
+    b.driving().check(stick_fault(true), kNothing).check(tick(), kStickStop);
+    stop_ignored_ticks(b, 250, 7000, 750);
+    out.push_back(b.done());
+  }
+
+  out.push_back(Builder("GLD-128 the stick in FAULT, locked: the unlock hold is refused, no "
+                        "DriveCommand")
+                    .start()
+                    .run({mib(Mib::IDLE), screen(ScreenId::LOCKED), stick_fault(true)})
+                    .check(unlock_hold(), {"ring_rest", "B:REFUSED_STICK"})
+                    .done());
+
+  out.push_back(Builder("GLD-129 the stick in FAULT, locked: the push and the DRIVE row are "
+                        "refused, no DriveCommand (D9b)")
+                    .start()
+                    .run({mib(Mib::IDLE), screen(ScreenId::LOCKED), stick_fault(true)})
+                    .check(input(Input::ENTRY_PUSH), {"B:REFUSED_STICK"})
+                    .check(input(Input::MENU_ROW_DRIVE), {"B:REFUSED_STICK"})
+                    .done());
+
+  out.push_back(Builder("GLD-130 the stick in FAULT, the MCB enables on its own: the entry (M1), "
+                        "then the stick fault's stop on the same tick")
+                    .start()
+                    .run({mib(Mib::IDLE), screen(ScreenId::LOCKED), stick_fault(true)})
+                    .check(mib(Mib::ENABLED), kNothing)
+                    .check(tick(), with(kEntry, {"P(D)", "B:STICK_FAULT", "N:STOPPING"}))
                     .done());
   return out;
 }

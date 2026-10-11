@@ -39,7 +39,7 @@ template <typename F> void for_each_env(F &&f) {
     for (MibState mib : kMib) {
       for (Screen s : kScreens) {
         for (bool menu : {false, true}) {
-          for (unsigned t = 0; t < 64; ++t) {
+          for (unsigned t = 0; t < 128; ++t) {
             for (ds::Resend r : kResend) {
               const Env e{.link_connected = link,
                           .mib = mib,
@@ -51,7 +51,8 @@ template <typename F> void for_each_env(F &&f) {
                           .calibrating = (t & 8u) != 0,
                           .stop_fault_elapsed = (t & 16u) != 0,
                           .resend = r,
-                          .post_ok = (t & 32u) != 0};
+                          .post_ok = (t & 32u) != 0,
+                          .stick_fault = (t & 64u) != 0};
               f(ds::env_guards(e));
             }
           }
@@ -111,18 +112,19 @@ template <typename F> void for_each_valid(F &&f) {
 // The cases register through tests/host/test_case.hpp and run from tests/host/test_main.cpp
 // (host L1 contract, TS-UNIT-02), which also defines setUp/tearDown.
 TEST_CASE("DSO-001 the tables have their declared sizes", "[drive_session_table]") {
-  TEST_ASSERT_EQUAL_size_t(54, ds::TRANSITIONS.size());
-  TEST_ASSERT_EQUAL_size_t(14, ds::kInputCount);
-  TEST_ASSERT_EQUAL_size_t(23, ds::kGuardCount);
-  TEST_ASSERT_EQUAL_INT(16, std::popcount(ds::kEnvGuards));
+  // hazard-c2-spec.md §5.3 counts, plus D9b's two rows (hazard-decisions.md D9 = b).
+  TEST_ASSERT_EQUAL_size_t(59, ds::TRANSITIONS.size());
+  TEST_ASSERT_EQUAL_size_t(15, ds::kInputCount);
+  TEST_ASSERT_EQUAL_size_t(24, ds::kGuardCount);
+  TEST_ASSERT_EQUAL_INT(17, std::popcount(ds::kEnvGuards));
   TEST_ASSERT_EQUAL_INT(7, std::popcount(ds::kHiddenGuards));
-  TEST_ASSERT_EQUAL_size_t(41, ds::kActionCount);
+  TEST_ASSERT_EQUAL_size_t(43, ds::kActionCount);
   TEST_ASSERT_EQUAL_size_t(12, ds::kMaxActions);
   TEST_ASSERT_EQUAL_size_t(ds::kTransitionCount, ds::TRANSITIONS.size());
   TEST_ASSERT_EQUAL_size_t(11, ds::HOLD_TRANSITIONS.size());
   TEST_ASSERT_EQUAL_size_t(ds::kPhaseCount, ds::PHASE_INVARIANTS.size());
   TEST_ASSERT_EQUAL_size_t(ds::kInputCount, ds::INPUT_PRECONDITIONS.size());
-  TEST_ASSERT_EQUAL_size_t(7, ds::TICK_SEQUENCE.size());
+  TEST_ASSERT_EQUAL_size_t(8, ds::TICK_SEQUENCE.size());
   TEST_ASSERT_EQUAL_size_t(0, ds::KNOWN_GAPS.size());
   TEST_ASSERT_EQUAL_size_t(5, ds::GATE_TRIGGERS.size());
 }
@@ -254,8 +256,11 @@ TEST_CASE("DSO-010 every row cites its code, or the hazard spec that added it",
   // a row a hazard fix added (42 on) has no code of e2047a4 to cite and cites its spec.
   for (std::size_t i = 0; i < ds::TRANSITIONS.size(); ++i) {
     const auto &t = ds::TRANSITIONS[i];
+    // C2b's D9b rows (58-59) are the owner's decision, not in a spec: they cite it.
     const bool spec = t.code.find("hazard-c1-spec.md") != std::string_view::npos ||
-                      t.code.find("hazard-c3-spec.md") != std::string_view::npos;
+                      t.code.find("hazard-c3-spec.md") != std::string_view::npos ||
+                      t.code.find("hazard-c2-spec.md") != std::string_view::npos ||
+                      t.code.find("hazard-decisions.md D9b") != std::string_view::npos;
     if (i < 41) {
       TEST_ASSERT_TRUE(t.code.find("frag_") != std::string_view::npos);
       TEST_ASSERT_TRUE(t.code.find("orig ") != std::string_view::npos);
@@ -435,16 +440,16 @@ TEST_CASE("DSO-017 rows 1-2 read !CALIBRATING !ON_BOOT_SCREEN; ARM_STOP_TIMER on
                        t.to == Phase::EXITING);
     }
   }
-  TEST_ASSERT_EQUAL_size_t(4, arms); // rows 21, 22, 25, 26
+  TEST_ASSERT_EQUAL_size_t(6, arms); // rows 21, 22, 25, 26; C2b's 55, 56
 }
 
 TEST_CASE("DSO-018 TICK_SEQUENCE is exactly follow, boot stop, exit due, stop fault due, stop "
-          "re-send, warn due, give-up due",
-          "[drive_session_table][REQ-DRV-36]") {
+          "re-send, stick fault, warn due, give-up due",
+          "[drive_session_table][REQ-DRV-45]") {
   constexpr std::array kWant{Input::TICK_FOLLOW,      Input::TICK_BOOT_STOP,
                              Input::TICK_EXIT_DUE,    Input::TICK_STOP_FAULT_DUE,
-                             Input::TICK_STOP_RESEND, Input::TICK_WARN_DUE,
-                             Input::TICK_GIVEUP_DUE};
+                             Input::TICK_STOP_RESEND, Input::TICK_STICK_FAULT,
+                             Input::TICK_WARN_DUE,    Input::TICK_GIVEUP_DUE};
   TEST_ASSERT_EQUAL_size_t(kWant.size(), ds::TICK_SEQUENCE.size());
   for (std::size_t i = 0; i < kWant.size(); ++i) {
     TEST_ASSERT_TRUE(ds::TICK_SEQUENCE[i] == kWant[i]);
@@ -516,4 +521,93 @@ TEST_CASE("DSO-023 UNLOCK_APPLIES needs POST_OK; SHOW_REFUSED_POST only with !PO
     }
   }
   TEST_ASSERT_EQUAL_size_t(3, refusals); // rows 52-54
+}
+
+// ---- The hazard fix C2b (docs/plans/hazard-c2-spec.md §5.3, §8.5; hazard-decisions.md D9) -------
+
+namespace {
+// The guards a row reads, as (need_true, need_false).
+bool guard_is(const ds::Transition &t, std::initializer_list<ds::Guard> yes,
+              std::initializer_list<ds::Guard> no) {
+  return t.guard.need_true == ds::mask(yes) && t.guard.need_false == ds::mask(no);
+}
+} // namespace
+
+TEST_CASE("DSO-024 rows 55-56 carry row 21's actions then SHOW_STICK_FAULT; TICK_STICK_FAULT "
+          "follows TICK_STOP_RESEND; row 18 reads !STICK_FAULT; rows 57-59 are exclusive with "
+          "their !RDY and !POST_OK twins",
+          "[drive_session_table][REQ-DRV-43][REQ-DRV-44][REQ-DRV-46]") {
+  using ds::Action;
+  using ds::Guard;
+  using ds::Phase;
+  // Rows 55-56: UNLOCKING / DRIVING, TICK_STICK_FAULT, +STICK_FAULT -> EXITING, row 21's actions
+  // (the exit hold from UNLOCKING) and then SHOW_STICK_FAULT.
+  const ds::Transition &r21 = ds::TRANSITIONS[20];
+  TEST_ASSERT_TRUE(r21.from == Phase::UNLOCKING && r21.input == Input::EXIT_HOLD_DONE);
+  for (std::size_t i : {std::size_t{54}, std::size_t{55}}) {
+    const ds::Transition &t = ds::TRANSITIONS[i];
+    TEST_ASSERT_TRUE(t.from == (i == 54 ? Phase::UNLOCKING : Phase::DRIVING));
+    TEST_ASSERT_TRUE(t.input == Input::TICK_STICK_FAULT);
+    TEST_ASSERT_TRUE(guard_is(t, {Guard::STICK_FAULT}, {}));
+    TEST_ASSERT_TRUE(t.to == Phase::EXITING);
+    std::size_t n = 0;
+    while (n < r21.actions.size() && r21.actions[n] != Action::NONE) {
+      TEST_ASSERT_TRUE(t.actions[n] == r21.actions[n]);
+      ++n;
+    }
+    TEST_ASSERT_TRUE(t.actions[n] == Action::SHOW_STICK_FAULT);
+    TEST_ASSERT_TRUE(n + 1 == ds::kMaxActions || t.actions[n + 1] == Action::NONE);
+  }
+  // No other row reads TICK_STICK_FAULT (EXITING, EXIT_REFUSED, ASKING, LOCKED: nothing).
+  std::size_t stick_rows = 0;
+  for (const auto &t : ds::TRANSITIONS) {
+    stick_rows += t.input == Input::TICK_STICK_FAULT ? 1U : 0U;
+  }
+  TEST_ASSERT_EQUAL_size_t(2, stick_rows);
+  // TICK_STICK_FAULT right after TICK_STOP_RESEND.
+  TEST_ASSERT_EQUAL_size_t(tick_index(Input::TICK_STOP_RESEND) + 1,
+                           tick_index(Input::TICK_STICK_FAULT));
+  // Row 18: +RDY +POST_OK !STICK_FAULT.
+  TEST_ASSERT_TRUE(
+      guard_is(ds::TRANSITIONS[17], {Guard::MCB_READY, Guard::POST_OK}, {Guard::STICK_FAULT}));
+  // Row 57 (D9a): LOCKED, UNLOCK_HOLD_DONE, +RDY +POST_OK +STICK_FAULT: RING_REST,
+  // SHOW_REFUSED_STICK, REFUSAL_FEEDBACK. Rows 58-59 (D9b): as rows 53-54 with the stick named.
+  const ds::Transition &r57 = ds::TRANSITIONS[56];
+  TEST_ASSERT_TRUE(r57.from == Phase::LOCKED && r57.input == Input::UNLOCK_HOLD_DONE &&
+                   r57.to == Phase::LOCKED);
+  TEST_ASSERT_TRUE(guard_is(r57, {Guard::MCB_READY, Guard::POST_OK, Guard::STICK_FAULT}, {}));
+  TEST_ASSERT_TRUE(r57.actions == ds::acts({Action::RING_REST, Action::SHOW_REFUSED_STICK,
+                                            Action::REFUSAL_FEEDBACK}));
+  const ds::Transition &r58 = ds::TRANSITIONS[57];
+  TEST_ASSERT_TRUE(r58.from == Phase::LOCKED && r58.input == Input::ENTRY_PUSH &&
+                   r58.to == Phase::LOCKED);
+  TEST_ASSERT_TRUE(
+      guard_is(r58, {Guard::ON_LOCKED_SCREEN, Guard::MCB_READY, Guard::POST_OK, Guard::STICK_FAULT},
+               {Guard::MENU_OPEN}));
+  TEST_ASSERT_TRUE(r58.actions == ds::acts({Action::SHOW_REFUSED_STICK, Action::REFUSAL_FEEDBACK}));
+  const ds::Transition &r59 = ds::TRANSITIONS[58];
+  TEST_ASSERT_TRUE(r59.from == Phase::LOCKED && r59.input == Input::MENU_ROW_DRIVE &&
+                   r59.to == Phase::LOCKED);
+  TEST_ASSERT_TRUE(guard_is(r59, {Guard::MCB_READY, Guard::POST_OK, Guard::STICK_FAULT}, {}));
+  TEST_ASSERT_TRUE(r59.actions == ds::acts({Action::REFUSAL_FEEDBACK, Action::SHOW_REFUSED_STICK}));
+  // Each refusal is exclusive with its !RDY twin (rows 19, 38, 40), its !POST_OK twin (52, 53,
+  // 54) and row 18.
+  for (const auto &[stick, ready, post] :
+       {std::array<std::size_t, 3>{57, 19, 52}, std::array<std::size_t, 3>{58, 38, 53},
+        std::array<std::size_t, 3>{59, 40, 54}}) {
+    const ds::GuardExpr g = ds::TRANSITIONS[stick - 1].guard;
+    TEST_ASSERT_TRUE(ds::exclusive(g, ds::TRANSITIONS[ready - 1].guard));
+    TEST_ASSERT_TRUE(ds::exclusive(g, ds::TRANSITIONS[post - 1].guard));
+  }
+  TEST_ASSERT_TRUE(ds::exclusive(r57.guard, ds::TRANSITIONS[17].guard));
+  // The stick-fault banners only in rows 55-59.
+  for (const auto &t : ds::TRANSITIONS) {
+    const std::size_t row = row_number(t);
+    if (row_has(t, Action::SHOW_STICK_FAULT)) {
+      TEST_ASSERT_TRUE(row == 55 || row == 56);
+    }
+    if (row_has(t, Action::SHOW_REFUSED_STICK)) {
+      TEST_ASSERT_TRUE(row >= 57 && row <= 59);
+    }
+  }
 }

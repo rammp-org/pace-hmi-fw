@@ -242,6 +242,9 @@ static_assert(sizeof(kHmiNoticeNotCalibrated) <= kErrorTextLen &&
 // C2 REQ-UI-26: the Joystick screen names a latched stick fault's reason in words (proposed
 // words, owner F1 to confirm): "<axis> <what>" between these two.
 inline constexpr char kHmiStickFaultLead[] = "Joystick fault: ";
+// C2b (hazard-c2-spec.md §5.1): the banner when the drive table stops for a stick FAULT (its
+// body: kHmiStickFaultLead and the reason, as the Joystick screen words it).
+inline constexpr char kHmiStickFaultTitle[] = "Joystick fault";
 inline constexpr char kHmiStickFaultTail[] = ".\nHold CALIBRATE to recalibrate.";
 inline constexpr char kHmiStickAxisHorizontal[] = "horizontal ";
 inline constexpr char kHmiStickAxisVertical[] = "vertical ";
