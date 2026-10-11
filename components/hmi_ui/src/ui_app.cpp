@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <numeric>
 
 #include "esp_timer.h"
 #include "ui.h"
@@ -494,10 +495,9 @@ void UiApp::stick_monitor_changed() {
   const auto last_axis = static_cast<StickAxis>(t.last_axis.load(relaxed));
   const auto fault_kind = static_cast<SampleFault>(t.fault_kind.load(relaxed));
   const auto fault_axis = static_cast<StickAxis>(t.fault_axis.load(relaxed));
-  uint32_t bad = 0;
-  for (const auto &n : t.implausible) {
-    bad += n.load(relaxed);
-  }
+  const uint32_t bad =
+      std::accumulate(t.implausible.begin(), t.implausible.end(), uint32_t{0},
+                      [](uint32_t sum, const auto &n) { return sum + n.load(relaxed); });
   if (stick_log_ != nullptr) {
     stick_log_->info("stick monitor {}: last {} {}, fault {} {}; suspect onsets {}, faults {}, "
                      "implausible samples {}, X/Y age max {} ms",

@@ -11,6 +11,7 @@
 #include <cmath>
 #include <ctime>
 #include <limits>
+#include <numeric>
 #include <optional>
 #include <string>
 #include <vector>
@@ -1173,10 +1174,9 @@ extern "C" void app_main(void) {
   selftest_board.stick_monitor = [] {
     constexpr auto relaxed = std::memory_order_relaxed;
     const hmi::stick::MonitorTelemetry &t = ui_app.stick_telemetry();
-    uint32_t bad = 0;
-    for (const auto &n : t.implausible) {
-      bad += n.load(relaxed);
-    }
+    const uint32_t bad =
+        std::accumulate(t.implausible.begin(), t.implausible.end(), uint32_t{0},
+                        [](uint32_t sum, const auto &n) { return sum + n.load(relaxed); });
     return std::array<int32_t, 3>{static_cast<int32_t>(ui_app.permit_hooks().stick_health.read()),
                                   static_cast<int32_t>(bad),
                                   static_cast<int32_t>(t.xy_age_max_ms.load(relaxed))};
