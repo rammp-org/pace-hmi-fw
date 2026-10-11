@@ -929,6 +929,44 @@ def t_silence_and_c2b() -> None:
     expect("this tree (C2 without lane D's C2b)", c2.c2b_in(common.REPO), False)
 
 
+def t_restart_fallback() -> None:
+    """restart_hmi resets through the port when Skunk Works does not open (c2cadc C2-11), and
+    without a port it stays NOT_RUN as before."""
+    class Fake:
+        tree = common.REPO
+        restart_watch = None
+
+        def __init__(self, port, st):
+            self.port, self.st, self.by_port = port, st, 0
+
+        def state(self):
+            return {"screen": "LockedScreen"}
+
+        def go(self, row):
+            pass
+
+        def watch(self, seconds, until=None):
+            return None  # the screen never shows
+
+        def _restart_by_port(self, serial_s):
+            self.by_port += 1
+            return 1.0
+
+    with quiet(), tempfile.TemporaryDirectory() as tmp:
+        st = hazard_rig.HazardStep("x", pathlib.Path(tmp))
+        fake = Fake("COM9", st)
+        hazard_rig.Rig.restart_hmi(fake)
+        expect("Skunk Works did not open: reset by the port, recorded",
+               (fake.by_port, "restart_fallback" in st.records), (1, True))
+        fake = Fake(None, st)
+        try:
+            hazard_rig.Rig.restart_hmi(fake)
+        except hazard_rig.NotRun as e:
+            expect("no port: NOT_RUN as before", "could not open Skunk Works" in e.reason, True)
+        else:
+            raise AssertionError("no port: went on")
+
+
 def t_c2_15_16() -> None:
     rows = {"joy.bad_samples": {"value": 0, "unit": "", "result": "PASS"},
             "joy.xy_age_max": {"value": 140, "unit": "ms", "result": "PASS"},
@@ -1576,6 +1614,8 @@ CASES = [
      t_c2_cleanup_and_setup),
     ("BENCH-044c a silence starting a sim clock tick before the mark is the stall's; C2-8/9 "
      "NOT_RUN without C2b's rows", t_silence_and_c2b),
+    ("BENCH-044d restart falls back to the port when Skunk Works does not open",
+     t_restart_fallback),
     ("BENCH-039b B5i, B5j graders, watchdog phase 1 (report only): the report, no reset, "
      "the stream resumes; the 300 ms stall ends 300 ms after its mark", t_b5i_b5j_phase1),
     ("BENCH-039c the watchdog phase comes from the tree's sdkconfig.defaults", t_watchdog_phase),
