@@ -23,9 +23,8 @@
 ///
 ///          The motion guard (C4) has no channel here: it runs on the ADC task itself, so its
 ///          verdict reaches the permit as an input of the cycle (OutputPermit's
-///          `motion_guard_ok`). Until C4 lands main passes "OK" (decision D2: the hook passes
-///          until C4). Stick health stays NOT_MONITORED, which passes, until C2 (D2); only C2's
-///          monitor writes OK, CHECK or FAULT.
+///          `motion_guard_ok`). Stick health is NOT_MONITORED until the monitor's first cycle
+///          (it holds, C2 REQ-STK-27); from then only C2's monitor writes OK, CHECK or FAULT.
 ///
 ///          No ESP-IDF, no LVGL, no allocation. Every enum is one byte, so each channel is a
 ///          lock-free std::atomic (static_assert in fw::AtomicValue).
@@ -40,7 +39,7 @@ namespace hmi::stick {
 struct PermitHooks {
   /// The POST gate: NOT_RUN until the POST runner's first tick.
   hmi::fw::AtomicValue<PostGate> post_gate{{.initial = PostGate::NOT_RUN}};
-  /// Stick health: NOT_MONITORED until C2's monitor writes it.
+  /// Stick health: NOT_MONITORED (holds) until C2's monitor writes it, every ADC cycle.
   hmi::fw::AtomicValue<StickHealth> stick_health{{.initial = StickHealth::NOT_MONITORED}};
   /// The permit's hold reason as of the ADC task's last valid cycle; GATE_SHUT before the
   /// first (the gate is shut at boot).

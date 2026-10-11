@@ -9,7 +9,7 @@
 // STK-040..049  bench stick injection (stick/bench_inject.hpp, REQ-STK-26): the STICK verb's
 //               parser, the expiry, fail_mask, and injected reads through the real pipeline;
 //               STK-103, 104: C2's mask bits 3-7 and the injected raw sample
-// STK-060..067  the output permit (hazard-c1-spec.md §3, REQ-STK-10..14): literal 0, the
+// STK-060..066  the output permit (hazard-c1-spec.md §3, REQ-STK-10..13): literal 0, the
 //               neutral latch, the hold reason order, the hooks. STK-016 and STK-035 (they
 //               pinned the gate's multiply) are retired by C1 E9.
 
@@ -144,9 +144,12 @@ struct FakeIo {
     return twist_mv; // the filter stays in main; the vector's twist is its output
   }
   void note_raw_mv(float, float, float) { trace.add('N'); }
-  bool calibrating() {
+  // The keys are silent while calibrating (the golden rows' rule) or when a case says the C2
+  // monitor is outside OK and RECOVERING (`silent`).
+  bool silent = false;
+  bool keys_silent() {
     trace.add('C');
-    return in->calibrating;
+    return in->calibrating || silent;
   }
   bool swap() {
     trace.add('w');
@@ -212,6 +215,12 @@ struct FakeIo {
                                                  : hmi::stick::HoldReason::NONE};
     }
     return last_permit;
+  }
+  // An invalid cycle's button bit (REQ-STK-17): POST passed unless a case says not.
+  bool post_passed = true;
+  bool button_passes() {
+    trace.add('p');
+    return post_passed;
   }
   bool button_pressed() {
     trace.add('b');
@@ -293,17 +302,55 @@ StickVector after_c1(StickVector want) {
 
 } // namespace
 
+namespace {
+
+bool invalid_row(const StickVector &v) { return !(v.horiz_ok && v.vert_ok && v.twist_ok); }
+
+/// A golden row as the pipeline must give it after C2 (hazard-c2-spec.md §8.6 E1, REQ-STK-17),
+/// on top of after_c1, replayed with stick health OK. An invalid row is published: +0.0 x3, the
+/// button bit as read (POST passed), the key released (0; a remote key would win), no bars. The
+/// key trigger being released there, a stick held through it re-engages on the next valid row
+/// with a flick (REQ-STK-03's flick on a new key; as after a calibration run, row 1867): rows
+/// 1876 and 1878, which E1 missed. golden_stick.inc is not edited.
+StickVector after_c2(StickVector want, const StickVector *previous, std::size_t &re_flicks) {
+  if (invalid_row(want)) {
+    want.published = true;
+    want.cmd_x = bits(0.0f);
+    want.cmd_y = bits(0.0f);
+    want.cmd_twist = bits(0.0f);
+    want.buttons = want.button ? 1U : 0U;
+    want.bars_set = false;
+    want.joy_key = want.remote_key;
+    want.joy_flick = 0; // no remote key in the frozen rows (checked below)
+    TEST_ASSERT_EQUAL_UINT32(0U, want.remote_key);
+  } else if (previous != nullptr && !want.reset && invalid_row(*previous) && want.remote_key == 0 &&
+             want.joy_key != 0) {
+    want.joy_flick = want.joy_key;
+    ++re_flicks;
+  }
+  return want;
+}
+
+} // namespace
+
 TEST_CASE("STK-002 StickPipeline reproduces every frozen golden row bit-exactly, a literal +0.0 "
-          "where the row is gated",
-          "[stick][golden][safety][REQ-STK-10]") {
+          "where the row is gated, neutral on an invalid row",
+          "[stick][golden][safety][REQ-STK-10][REQ-STK-17]") {
   PipelineRunner runner;
   std::size_t failures = 0;
+  std::size_t re_flicks = 0;
+  std::size_t invalid = 0;
   for (std::size_t i = 0; i < GOLDEN.size(); ++i) {
-    if (!same(i, after_c1(GOLDEN[i]), runner.cycle(GOLDEN[i]))) {
+    const StickVector want =
+        after_c2(after_c1(GOLDEN[i]), i > 0 ? &GOLDEN[i - 1] : nullptr, re_flicks);
+    invalid += invalid_row(GOLDEN[i]) ? 1U : 0U;
+    if (!same(i, want, runner.cycle(GOLDEN[i]))) {
       ++failures;
     }
   }
   TEST_ASSERT_EQUAL_size_t(0, failures);
+  TEST_ASSERT_EQUAL_size_t(8, invalid);   // rows 1869-1875, 1877 (E1)
+  TEST_ASSERT_EQUAL_size_t(2, re_flicks); // rows 1876, 1878
 }
 
 TEST_CASE("STK-003 a valid cycle calls its Io in today's order", "[stick][order][safety]") {
@@ -323,6 +370,65 @@ TEST_CASE("STK-003 a valid cycle calls its Io in today's order", "[stick][order]
   TEST_ASSERT_EQUAL_STRING("TSNCwxyskrKkBdgbP", runner.io.trace.c_str());
 }
 
+TEST_CASE("STK-095 each invalid pattern: published, +0.0 x3, the button as read, key 0 (a remote "
+          "key wins), and nothing else called: no bars, no calibration take, no lowpass, no "
+          "note_raw",
+          "[stick][order][safety][REQ-STK-17]") {
+  PipelineRunner runner;
+  for (int m = 0; m < 7; ++m) { // every combination with at least one read missing
+    for (const bool button : {false, true}) {
+      StickVector v = GOLDEN[stick_test::ROW_OPEN_HORIZ];
+      v.reset = m == 0 && !button;
+      v.horiz_ok = (m & 1) != 0;
+      v.vert_ok = (m & 2) != 0;
+      v.twist_ok = (m & 4) != 0;
+      v.button = button;
+      v.new_cal = stick_test::CAL_BOARD2; // pending: an invalid cycle must not take it
+      const StickOutputs out = runner.cycle(v);
+      TEST_ASSERT_TRUE(out.published);
+      TEST_ASSERT_EQUAL_HEX32(0x00000000U, out.cmd_x);
+      TEST_ASSERT_EQUAL_HEX32(0x00000000U, out.cmd_y);
+      TEST_ASSERT_EQUAL_HEX32(0x00000000U, out.cmd_twist);
+      TEST_ASSERT_EQUAL_UINT32(button ? 1U : 0U, out.buttons);
+      TEST_ASSERT_FALSE(out.bars_set);
+      TEST_ASSERT_EQUAL_UINT32(0U, out.joy_key);
+      TEST_ASSERT_TRUE(runner.io.pending_cal.has_value());
+      // joy_key, remote_key, set_joy_key, joy_key, button_passes, button_pressed, publish
+      TEST_ASSERT_EQUAL_STRING("krKkpbP", runner.io.trace.c_str());
+    }
+  }
+  // A remote key wins (and is latched as a flick when new), as on a valid cycle.
+  StickVector v = GOLDEN[stick_test::ROW_OPEN_HORIZ];
+  v.reset = false; // keep the runner's Io (and its post_passed below)
+  v.vert_ok = false;
+  v.remote_key = stick_test::KEY_UP;
+  StickOutputs out = runner.cycle(v);
+  TEST_ASSERT_EQUAL_UINT32(stick_test::KEY_UP, out.joy_key);
+  TEST_ASSERT_EQUAL_UINT32(stick_test::KEY_UP, out.joy_flick);
+  TEST_ASSERT_EQUAL_STRING("krrKkFpbP", runner.io.trace.c_str());
+  // Before POST passes the button goes released (REQ-STK-15), as on a valid cycle.
+  v.remote_key = 0;
+  v.button = true;
+  runner.io.post_passed = false;
+  out = runner.cycle(v);
+  TEST_ASSERT_EQUAL_UINT32(0U, out.buttons);
+  // The key trigger is released: a stick held right re-engages with a flick when reads return.
+  StickVector right = GOLDEN[stick_test::ROW_OPEN_HORIZ];
+  right.horiz_mv = 3300.0f;
+  right.power_on_cal = stick_test::CAL_IDEAL;
+  right.reset = true;
+  TEST_ASSERT_EQUAL_UINT32(stick_test::KEY_RIGHT, runner.cycle(right).joy_key);
+  right.reset = false;
+  TEST_ASSERT_TRUE(runner.pipeline->key_engaged_state());
+  right.twist_ok = false;
+  TEST_ASSERT_EQUAL_UINT32(0U, runner.cycle(right).joy_key);
+  TEST_ASSERT_FALSE(runner.pipeline->key_engaged_state());
+  right.twist_ok = true;
+  const StickOutputs back = runner.cycle(right);
+  TEST_ASSERT_EQUAL_UINT32(stick_test::KEY_RIGHT, back.joy_key);
+  TEST_ASSERT_EQUAL_UINT32(stick_test::KEY_RIGHT, back.joy_flick);
+}
+
 TEST_CASE("STK-004 while calibrating the pipeline still asks the output permit, which holds",
           "[stick][order]") {
   // Before C1 the gate's stick_drives was not read while calibrating ("...Bdb P"); the permit
@@ -335,23 +441,9 @@ TEST_CASE("STK-004 while calibrating the pipeline still asks the output permit, 
   TEST_ASSERT_TRUE(runner.io.last_permit.reason == hmi::stick::HoldReason::CALIBRATING);
 }
 
-TEST_CASE("STK-005 an invalid cycle calls nothing on its Io", "[stick][order][safety]") {
-  PipelineRunner runner;
-  for (int m = 0; m < 7; ++m) { // every combination with at least one read missing
-    StickVector v = GOLDEN[stick_test::ROW_OPEN_HORIZ];
-    v.reset = m == 0;
-    v.horiz_ok = (m & 1) != 0;
-    v.vert_ok = (m & 2) != 0;
-    v.twist_ok = (m & 4) != 0;
-    const StickOutputs out = runner.cycle(v);
-    TEST_ASSERT_FALSE(out.published);
-    TEST_ASSERT_EQUAL_STRING("", runner.io.trace.c_str());
-  }
-}
+// ---------------------------------------------------------------- residual hazards pinned (D2)
 
-// ---------------------------------------------------------------- hazards pinned (today)
-
-TEST_CASE("STK-010 today an open-circuit horizontal pot (0 mV) commands full left",
+TEST_CASE("STK-010 RESIDUAL (D2) an open-circuit horizontal pot (0 mV) commands full left",
           "[stick][hazard][safety]") {
   const StickVector &r = GOLDEN[stick_test::ROW_OPEN_HORIZ];
   TEST_ASSERT_TRUE(r.published);
@@ -359,7 +451,7 @@ TEST_CASE("STK-010 today an open-circuit horizontal pot (0 mV) commands full lef
   TEST_ASSERT_EQUAL_HEX32(bits(0.0f), r.cmd_y);
 }
 
-TEST_CASE("STK-011 today an open-circuit vertical pot (0 mV) commands full forward",
+TEST_CASE("STK-011 RESIDUAL (D2) an open-circuit vertical pot (0 mV) commands full forward",
           "[stick][hazard][safety]") {
   const StickVector &r = GOLDEN[stick_test::ROW_OPEN_VERT];
   TEST_ASSERT_TRUE(r.published);
@@ -367,35 +459,29 @@ TEST_CASE("STK-011 today an open-circuit vertical pot (0 mV) commands full forwa
   TEST_ASSERT_EQUAL_HEX32(bits(1.0f), r.cmd_y);
 }
 
-TEST_CASE("STK-012 today an open-circuit twist pot (0 mV) commands full counter-clockwise",
+TEST_CASE("STK-012 RESIDUAL (D2) an open-circuit twist pot (0 mV) commands full "
+          "counter-clockwise",
           "[stick][hazard][safety]") {
   const StickVector &r = GOLDEN[stick_test::ROW_OPEN_TWIST];
   TEST_ASSERT_TRUE(r.published);
   TEST_ASSERT_EQUAL_HEX32(bits(-1.0f), r.cmd_twist);
 }
 
-TEST_CASE("STK-013 today a pot shorted to 3300 mV commands full right, reverse or clockwise",
+TEST_CASE("STK-013 the mapping clamps a pot shorted to 3300 mV to full right, reverse or "
+          "clockwise; the C2 monitor withholds it (STK-098)",
           "[stick][hazard][safety]") {
   TEST_ASSERT_EQUAL_HEX32(bits(1.0f), GOLDEN[stick_test::ROW_SHORT_HORIZ].cmd_x);
   TEST_ASSERT_EQUAL_HEX32(bits(-1.0f), GOLDEN[stick_test::ROW_SHORT_VERT].cmd_y);
   TEST_ASSERT_EQUAL_HEX32(bits(1.0f), GOLDEN[stick_test::ROW_SHORT_TWIST].cmd_twist);
 }
 
-TEST_CASE("STK-014 today all three pots open command full left-forward and full twist",
+TEST_CASE("STK-014 RESIDUAL (D2) all three pots open command full left-forward and full twist",
           "[stick][hazard][safety]") {
   const StickVector &r = GOLDEN[stick_test::ROW_OPEN_ALL];
   TEST_ASSERT_TRUE(r.published);
   TEST_ASSERT_EQUAL_HEX32(0xbf3504f3U, r.cmd_x); // -0.70710677: normalised onto the unit circle
   TEST_ASSERT_EQUAL_HEX32(0x3f3504f3U, r.cmd_y);
   TEST_ASSERT_EQUAL_HEX32(bits(-1.0f), r.cmd_twist);
-}
-
-TEST_CASE("STK-015 today an invalid ADC cycle publishes nothing and keeps the last key (H9)",
-          "[stick][hazard][safety]") {
-  const StickVector &r = GOLDEN[stick_test::ROW_INVALID_HORIZ_MISSING];
-  TEST_ASSERT_FALSE(r.published);
-  TEST_ASSERT_FALSE(r.bars_set);
-  TEST_ASSERT_EQUAL_UINT32(stick_test::KEY_RIGHT, r.joy_key);
 }
 
 TEST_CASE("STK-017 the stick button reaches the MCB with the gate closed",
@@ -709,7 +795,7 @@ TEST_CASE("STK-048 a clock that reads earlier than the message ends the injectio
 }
 
 TEST_CASE("STK-049 injected reads go through the real pipeline: forward passes an open gate, "
-          "a closed gate sends 0, a failed read publishes nothing",
+          "a closed gate sends 0, a failed read publishes neutral",
           "[stick][inject][safety]") {
   StickInjector inject;
   // Full forward: the vertical pot reads LOWER moving up (0 mV on the ideal calibration).
@@ -722,8 +808,9 @@ TEST_CASE("STK-049 injected reads go through the real pipeline: forward passes a
   TEST_ASSERT_EQUAL_FLOAT(0.0f, std::bit_cast<float>(drive.io.out.cmd_y));
   drive.v.drives = true;
   inject.note(inject_msg(1650.0f, 0.0f, 1650.0f, 0x02), T0); // the vertical read fails
-  TEST_ASSERT_FALSE(drive.cycle(inject.apply(REAL_MV, T0))); // H9 as today: nothing sent
-  TEST_ASSERT_FALSE(drive.io.out.published);
+  TEST_ASSERT_TRUE(drive.cycle(inject.apply(REAL_MV, T0)));  // H9 fixed (C2 E6): neutral
+  TEST_ASSERT_TRUE(drive.io.out.published);
+  TEST_ASSERT_EQUAL_HEX32(bits(0.0f), drive.io.out.cmd_y);
 }
 
 namespace {
@@ -933,7 +1020,7 @@ constexpr PermitInputs ALL_MET{.gate_open = true,
                                .calibrating = false,
                                .calibration_measured = true,
                                .post = PostGate::PASS,
-                               .health = StickHealth::NOT_MONITORED};
+                               .health = StickHealth::OK};
 constexpr Position CENTRED{.x = 0.0f, .y = 0.0f, .twist = 0.0f};
 constexpr Position FORWARD{.x = 0.0f, .y = 1.0f, .twist = 0.0f};
 constexpr std::uint32_t CYCLE_MS = 33; // the ADC cycle's wait (C1 §3.1)
@@ -978,16 +1065,6 @@ std::uint32_t first_allowed(OutputPermit &p, std::uint32_t t0, int cycles) {
     }
   }
   return 0;
-}
-
-/// Whether the permit allows output within two seconds of centred 33 ms cycles on `in`.
-bool first_allowed_with(OutputPermit &p, const PermitInputs &in) {
-  for (std::uint32_t t = 0; t < 2000; t += CYCLE_MS) {
-    if (p.cycle(in, CENTRED, T_START + t).output) {
-      return true;
-    }
-  }
-  return false;
 }
 
 } // namespace
@@ -1135,7 +1212,7 @@ TEST_CASE("STK-066 the hold reason is the first failing condition, over every co
           want = HoldReason::POST_NOT_PASSED;
         } else if (health == StickHealth::FAULT) {
           want = HoldReason::STICK_FAULT;
-        } else if (health == StickHealth::CHECK) {
+        } else if (health != StickHealth::OK) { // CHECK, and NOT_MONITORED (C2 REQ-STK-27)
           want = HoldReason::STICK_CHECK;
         }
         OutputPermit p;
@@ -1151,49 +1228,6 @@ TEST_CASE("STK-066 the hold reason is the first failing condition, over every co
   OutputPermit p; // all met and latched: NONE
   TEST_ASSERT_EQUAL_UINT32(T_START + 330, first_allowed(p, T_START, 20));
   TEST_ASSERT_TRUE(p.cycle(ALL_MET, FORWARD, T_START + 363).reason == HoldReason::NONE);
-}
-
-TEST_CASE("STK-067 POST gate NOT_RUN, PENDING and FAIL hold, PASS allows; stick health FAULT "
-          "and CHECK hold, NOT_MONITORED and OK allow; the motion guard allows only OK",
-          "[stick][permit][safety][REQ-STK-14]") {
-  struct Gate {
-    PostGate post;
-    bool allows;
-  };
-  const std::array<Gate, 6> gates{{{PostGate::NOT_RUN, false},
-                                   {PostGate::PENDING, false},
-                                   {PostGate::PASS, true},
-                                   {PostGate::FAIL, false},
-                                   {static_cast<PostGate>(4), false},
-                                   {static_cast<PostGate>(255), false}}};
-  for (const Gate &g : gates) {
-    PermitInputs in = ALL_MET;
-    in.post = g.post;
-    OutputPermit p;
-    TEST_ASSERT_EQUAL(g.allows, first_allowed_with(p, in));
-  }
-  struct Health {
-    StickHealth health;
-    bool allows;
-    HoldReason reason;
-  };
-  const std::array<Health, 5> healths{
-      {{StickHealth::NOT_MONITORED, true, HoldReason::NONE},
-       {StickHealth::OK, true, HoldReason::NONE},
-       {StickHealth::CHECK, false, HoldReason::STICK_CHECK},
-       {StickHealth::FAULT, false, HoldReason::STICK_FAULT},
-       {static_cast<StickHealth>(9), false, HoldReason::STICK_CHECK}}};
-  for (const Health &h : healths) {
-    PermitInputs in = ALL_MET;
-    in.health = h.health;
-    OutputPermit p;
-    TEST_ASSERT_EQUAL(h.allows, first_allowed_with(p, in));
-    TEST_ASSERT_TRUE(p.cycle(in, CENTRED, T_START + 2000).reason == h.reason);
-  }
-  PermitInputs guard = ALL_MET;
-  guard.motion_guard_ok = false; // until C4 main passes OK (decision D2)
-  OutputPermit p;
-  TEST_ASSERT_FALSE(first_allowed_with(p, guard));
 }
 
 TEST_CASE("STK-068 the stick button bit is sent released while the POST gate is PENDING, and "

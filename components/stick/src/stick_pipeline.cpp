@@ -70,10 +70,10 @@ KeyThresholds key_thresholds(int sensitivity) {
 }
 
 // main.cpp:1537-1548
-bool key_engaged(bool engaged, bool calibrating, float x, float y, KeyThresholds thresholds) {
+bool key_engaged(bool engaged, bool silent, float x, float y, KeyThresholds thresholds) {
   const float mag = std::max(std::abs(x), std::abs(y));
-  if (calibrating) {
-    return false; // "hold LEFT" must not page the menus or exit
+  if (silent) {
+    return false; // calibrating, "hold LEFT" must not page the menus or exit; or a stick fault
   }
   if (mag > thresholds.engage) {
     return true;

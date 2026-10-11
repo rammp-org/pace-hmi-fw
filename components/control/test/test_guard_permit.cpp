@@ -56,7 +56,7 @@ struct PermitIo {
   std::optional<hmi::stick::CalibrationMv> take_new_calibration() { return std::nullopt; }
   float smooth_twist_mv(float twist_mv) { return twist_mv; }
   void note_raw_mv(float, float, float) {}
-  bool calibrating() { return false; }
+  bool keys_silent() { return false; }
   bool swap() { return false; }
   bool invert_x() { return false; }
   bool invert_y() { return false; }
@@ -78,6 +78,7 @@ struct PermitIo {
     reason = p.reason;
     return p;
   }
+  bool button_passes() { return true; }
   bool button_pressed() { return false; }
   bool publish(const hmi::stick::Command &c, bool) {
     last = c;

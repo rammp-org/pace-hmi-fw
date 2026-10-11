@@ -24,10 +24,10 @@ enum class PostGate : std::uint8_t {
 };
 
 /// @brief The stick's health as C2's plausibility monitor sees it (hazard-c1-spec.md §3.2).
-/// @details NOT_MONITORED and OK let the stick drive; CHECK and FAULT hold it (REQ-STK-14).
-///          NOT_MONITORED is the value until C2 lands (no detector, decision D2).
+/// @details Only OK lets the stick drive; CHECK, FAULT and NOT_MONITORED hold it (C2,
+///          REQ-STK-27). NOT_MONITORED is the channel's value before the monitor's first cycle.
 enum class StickHealth : std::uint8_t {
-  NOT_MONITORED = 0, ///< no monitor fitted (before C2): passes
+  NOT_MONITORED = 0, ///< the monitor has not run yet (boot): holds
   OK = 1,            ///< the monitor sees a plausible stick
   CHECK = 2,         ///< the monitor is starting, or a sample was implausible: holds
   FAULT = 3,         ///< a latched stick fault: holds until a recalibration or a reboot
@@ -108,17 +108,18 @@ enum class HoldReason : std::uint8_t {
   return "?";
 }
 
-/// @brief Whether the POST gate lets the stick drive: PASS only (REQ-STK-14). Any other byte,
+/// @brief Whether the POST gate lets the stick drive: PASS only (REQ-STK-11). Any other byte,
 ///        a value outside the enum included, holds it.
 /// @param gate the gate as loaded
 /// @return true for PASS
 [[nodiscard]] constexpr bool post_passed(PostGate gate) noexcept { return gate == PostGate::PASS; }
 
-/// @brief Whether stick health lets the stick drive: NOT_MONITORED and OK (REQ-STK-14).
+/// @brief Whether stick health lets the stick drive: OK only (C2, REQ-STK-27). CHECK,
+///        NOT_MONITORED and any other byte hold it with STICK_CHECK; FAULT with STICK_FAULT.
 /// @param health the health as loaded
-/// @return true for NOT_MONITORED and OK
+/// @return true for OK
 [[nodiscard]] constexpr bool health_allows(StickHealth health) noexcept {
-  return health == StickHealth::NOT_MONITORED || health == StickHealth::OK;
+  return health == StickHealth::OK;
 }
 
 /// @brief One cycle's verdict of the output permit (stick/output_permit.hpp), as the stick

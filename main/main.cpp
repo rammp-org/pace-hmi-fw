@@ -172,6 +172,7 @@ static void refusal_feedback();
 // stick injection in front of it.
 #include "control/stick_island.hpp"
 #include "post/rest_window.hpp"
+#include "stick/monitor_cycle.hpp"
 #include "stick/output_permit.hpp"
 #include "stick_inject.hpp"
 
@@ -235,6 +236,9 @@ struct AdcStickIo {
     // joystick_cal_running(), sampled once per cycle (note_sample) for every reader of it in
     // that cycle (hazard fix C2, REQ-CTL-15)
     bool calibrating = false;
+    // C2's stick monitor (hazard-c2-spec.md §3): stepped once per cycle in note_sample, on the
+    // limits of the calibration in use (set at start and by take_new_calibration)
+    hmi::stick::MonitorCycle monitor{};
   };
 
   espp::SimpleLowpassFilter &twist_lowpass;
@@ -244,11 +248,10 @@ struct AdcStickIo {
   // condition 2. Every cycle, valid or not, before the pipeline.
   void set_motion_verdict(hmi::control::GuardReason verdict) { state.guard = verdict; }
 
-  // Every cycle, valid or not, first: the raw sample (after the bench injection), and the one
-  // `calibrating` of the cycle (hazard fix C2, REQ-CTL-15).
-  void note_sample(const hmi::stick::RawSample & /*sample*/) {
-    state.calibrating = joystick_cal_running();
-  }
+  // Every cycle, valid or not, first: the raw sample (after the bench injection), the one
+  // `calibrating` of the cycle, and C2's monitor stepped on them (REQ-CTL-15): its stick health
+  // to the permit's channel, its telemetry to the UiApp. Defined after the UiApp.
+  [[gnu::noinline]] void note_sample(const hmi::stick::RawSample &sample);
 
   // Every cycle, valid or not, before the pipeline: the reads it gets (after the bench
   // injection). An invalid cycle restarts the permit's neutral wait (REQ-STK-12).
@@ -272,7 +275,9 @@ struct AdcStickIo {
   // samples, on the task that owns the stick.
   std::optional<hmi::stick::CalibrationMv> take_new_calibration() {
     if (auto cal = joystick_cal_take_new()) {
-      return stick_cal_mv(*cal);
+      const hmi::stick::CalibrationMv mv = stick_cal_mv(*cal);
+      state.monitor.use_calibration(mv); // the monitor's limits follow the calibration in use
+      return mv;
     }
     return std::nullopt;
   }
@@ -280,9 +285,10 @@ struct AdcStickIo {
   void note_raw_mv(float horizontal_mv, float vertical_mv, float twist_mv) {
     joystick_cal_note_raw(horizontal_mv, vertical_mv, twist_mv);
   }
-  // While a calibration run owns the stick nothing downstream may act on it:
-  // the user is being told to push it to every end in turn.
-  bool calibrating() { return state.calibrating; }
+  // The stick's keys are silent while a calibration run owns the stick (the user is being
+  // told to push it to every end in turn), and while C2's monitor is outside OK and
+  // RECOVERING (hazard-c2-spec.md §3.1, REQ-STK-20).
+  bool keys_silent() { return state.calibrating || !state.monitor.keys_live(); }
   bool swap() { return applied_settings.stick_swap(); }
   bool invert_x() { return applied_settings.stick_invert_x(); }
   bool invert_y() { return applied_settings.stick_invert_y(); }
@@ -313,11 +319,14 @@ struct AdcStickIo {
   // 2 C4's motion guard (hazard-c4-spec.md §2): the UI heartbeat, the link, the MibStatus age
   //   and the MCB state, judged by the ADC task itself this cycle (set_motion_verdict).
   // 3 no calibration run (the user is pushing it to every end in turn); 4 a measured
-  //   calibration (G5); 5 POST passed (G3, C3); 6, 7 stick health (C2; NOT_MONITORED passes
-  //   until then, D2); 8 the stick centred for kNeutralHold since the last hold (G1).
+  //   calibration (G5); 5 POST passed (G3, C3); 6, 7 stick health OK (C2's monitor, stepped
+  //   this cycle in note_sample); 8 the stick centred for kNeutralHold since the last hold (G1).
   // The first failing one goes to the Drive notice (hold_reason). Lock-free reads only.
   // Defined after the UiApp, which owns the permit's channels.
   hmi::stick::Permit output_permit(const hmi::stick::Position &mounted);
+  // An invalid cycle's button bit (H9 fixed, REQ-STK-17): released until POST passes
+  // (REQ-STK-15), as the permit gives it on a valid cycle. Defined after the UiApp.
+  inline bool button_passes();
   bool button_pressed() { return joy_button_pressed.load(); }
   // The MCB gets the same calibrated -1..+1 values the bars show (+Y forward,
   // deadzones applied), scaled by Settings "Speed sensitivity" (0 when held), so
@@ -597,6 +606,21 @@ static_assert(hmi::drive_adapter::DrivePort<hmi::ui::DrivePort<hmi::ui::DriveUi>
 static hmi::drive_adapter::DriveAdapter<hmi::ui::DrivePort<hmi::ui::DriveUi>> drive_adapter{
     {.view = drive_port}};
 
+// AdcStickIo's monitor step (its comment above, hazard-c2-spec.md §3.2, §3.7): ADC task, every
+// cycle, before the pipeline. The stick health goes to the permit's channel (release), so the
+// permit reads this cycle's value; the telemetry to the UiApp (relaxed, diagnostics).
+[[gnu::noinline]] void AdcStickIo::note_sample(const hmi::stick::RawSample &sample) {
+  state.calibrating = joystick_cal_running();
+  const hmi::stick::StickHealth health =
+      state.monitor.step(state.calibrating, sample, joystick_cal_generation(), adc_clock_ms(),
+                         ui_app.stick_telemetry());
+  ui_app.permit_hooks().stick_health.write(health);
+}
+
+inline bool AdcStickIo::button_passes() {
+  return hmi::stick::post_passed(ui_app.permit_hooks().post_gate.read());
+}
+
 // AdcStickIo's output permit (its comment above): ADC task, lock-free reads of the UiApp's
 // permit channels only.
 inline hmi::stick::Permit AdcStickIo::output_permit(const hmi::stick::Position &mounted) {
@@ -842,6 +866,38 @@ void StickPorts::after_cycle() {
   }
 }
 
+// STATE's stick block (C2 REQ-RUI-08): the monitor's telemetry as the bench reads it. Remote-UI
+// task, lock-free reads only.
+static hmi::bench_verbs::StickBlock bench_stick_block() {
+  using hmi::stick::MonitorState;
+  using hmi::stick::SampleFault;
+  using hmi::stick::StickAxis;
+  constexpr auto relaxed = std::memory_order_relaxed;
+  const hmi::stick::MonitorTelemetry &t = ui_app.stick_telemetry();
+  hmi::bench_verbs::StickBlock b;
+  b.state = hmi::stick::to_string(static_cast<MonitorState>(t.state.load(relaxed)));
+  b.health = hmi::stick::to_string(ui_app.permit_hooks().stick_health.read());
+  b.reason = hmi::stick::to_string(static_cast<SampleFault>(t.last_kind.load(relaxed)));
+  b.reason_axis = hmi::stick::to_string(static_cast<StickAxis>(t.last_axis.load(relaxed)));
+  b.fault_reason = hmi::stick::to_string(static_cast<SampleFault>(t.fault_kind.load(relaxed)));
+  b.fault_axis = hmi::stick::to_string(static_cast<StickAxis>(t.fault_axis.load(relaxed)));
+  b.suspect_onsets = t.suspect_onsets.load(relaxed);
+  b.faults = t.faults.load(relaxed);
+  // bad: kImplausibleKinds' order, P1..P6, is SampleFault's MISSING..TWIST_PARTIAL
+  static_assert(static_cast<std::size_t>(SampleFault::MISSING) == 1 &&
+                static_cast<std::size_t>(SampleFault::TWIST_PARTIAL) ==
+                    hmi::bench_verbs::kImplausibleKinds.size());
+  for (std::size_t k = 0; k < b.bad.size(); ++k) {
+    b.bad.at(k) = t.implausible.at(k + 1).load(relaxed);
+  }
+  b.xy_age_max_ms = t.xy_age_max_ms.load(relaxed);
+  for (std::size_t i = 0; i < b.max_mv.size(); ++i) {
+    b.max_mv.at(i) = t.max_mv.at(i).load(relaxed);
+  }
+  b.joy_key = static_cast<std::int32_t>(::joy_key.load());
+  return b;
+}
+
 // C4's verb: STALL UI|ADC <ms> (REQ-RUI-07). The task stalls itself at its next cycle; the reply
 // comes at once. STALL CADC is C2's (O14): refused here.
 static void add_motion_guard_hooks(hmi::bench_verbs::Hooks &h) {
@@ -858,7 +914,6 @@ static void add_motion_guard_hooks(hmi::bench_verbs::Hooks &h) {
 
 static hmi::bench_verbs::Hooks bench_verb_hooks() {
   using hmi::bench_verbs::PostGateName;
-  using hmi::bench_verbs::StickHealthName;
   hmi::bench_verbs::Hooks h;
   add_drive_hooks(h);
   add_motion_guard_hooks(h);
@@ -879,6 +934,7 @@ static hmi::bench_verbs::Hooks bench_verb_hooks() {
   };
   h.indicator = [] { return std::string(post_indicator_name(ui_app.post().shown().kind)); };
   h.indicator_text = [] { return std::string(ui_app.post().text_now().text.data()); };
+  h.stick = bench_stick_block; // C2 REQ-RUI-08: the monitor's telemetry
   h.reset_reason = [] {
     return std::string(
         hmi::post::reset_reason_id(static_cast<hmi::post::ResetReason>(esp_reset_reason())));
@@ -887,15 +943,6 @@ static hmi::bench_verbs::Hooks bench_verb_hooks() {
   // writer. PostGateName is PostGate's order (static_asserted below).
   h.permit_post = [](PostGateName gate) {
     ui_app.post().request_gate(static_cast<hmi::stick::PostGate>(gate));
-    return true;
-  };
-  // PERMIT STICK: C1 §3.2's other writer of stick health, bench builds only (gone with C2).
-  h.permit_stick = [](StickHealthName health) {
-    using hmi::stick::StickHealth;
-    const StickHealth value = health == StickHealthName::OK      ? StickHealth::OK
-                              : health == StickHealthName::FAULT ? StickHealth::FAULT
-                                                                 : StickHealth::NOT_MONITORED;
-    ui_app.permit_hooks().stick_health.write(value);
     return true;
   };
   // CAL UNSAVED: RAM only, until reboot: joystick_cal_measured() and the POST's "saved" fact
@@ -1267,6 +1314,7 @@ extern "C" void app_main(void) {
   // the bench stick injection in front of its reads (stick_inject.hpp).
   // Without the task the stick sends nothing, which is the safe direction: no XYTwist, no
   // motion. The boot goes on so the failure is seen: this line, and stick_task_running().
+  adc_state.monitor.use_calibration(stick_cal_mv(joystick_cal)); // before the task starts
   if (!stick_island.start(stick_pipeline_config(joystick_cal), adc_state)) {
     logger.error("Failed to start the Read ADC task: no stick output (XYTwist) until reset!");
   }

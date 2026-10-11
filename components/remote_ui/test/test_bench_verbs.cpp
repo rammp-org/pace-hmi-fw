@@ -72,7 +72,7 @@ bv::Hooks all_hooks() {
 } // namespace
 
 TEST_CASE("RUI-001 every bench verb of the specs parses to its request",
-          "[remote_ui][REQ-RUI-05][REQ-RUI-06][REQ-RUI-07]") {
+          "[remote_ui][REQ-RUI-08][REQ-RUI-06][REQ-RUI-07]") {
   TEST_ASSERT_TRUE(request_of("STATE").verb == bv::Verb::STATE);
   struct PostCase {
     const char *line;
@@ -85,18 +85,6 @@ TEST_CASE("RUI-001 every bench verb of the specs parses to its request",
     const bv::Request r = request_of(c.line);
     TEST_ASSERT_TRUE_MESSAGE(r.verb == bv::Verb::PERMIT_POST, c.line);
     TEST_ASSERT_TRUE_MESSAGE(r.post == c.want, c.line);
-  }
-  struct StickCase {
-    const char *line;
-    bv::StickHealthName want;
-  };
-  for (const StickCase c :
-       {StickCase{"PERMIT STICK not_monitored", bv::StickHealthName::NOT_MONITORED},
-        StickCase{"PERMIT STICK ok", bv::StickHealthName::OK},
-        StickCase{"PERMIT STICK fault", bv::StickHealthName::FAULT}}) {
-    const bv::Request r = request_of(c.line);
-    TEST_ASSERT_TRUE_MESSAGE(r.verb == bv::Verb::PERMIT_STICK, c.line);
-    TEST_ASSERT_TRUE_MESSAGE(r.stick == c.want, c.line);
   }
   TEST_ASSERT_TRUE(request_of("CAL UNSAVED").verb == bv::Verb::CAL_UNSAVED);
   TEST_ASSERT_TRUE(request_of("POST RERUN").verb == bv::Verb::POST_RERUN);
@@ -121,7 +109,7 @@ TEST_CASE("RUI-001 every bench verb of the specs parses to its request",
 }
 
 TEST_CASE("RUI-002 a bench verb with a wrong, missing or extra argument gets its usage",
-          "[remote_ui][REQ-RUI-05][REQ-RUI-06][REQ-RUI-07]") {
+          "[remote_ui][REQ-RUI-08][REQ-RUI-06][REQ-RUI-07]") {
   for (const char *line : {"STATE now",
                            "PERMIT",
                            "PERMIT POST",
@@ -130,6 +118,8 @@ TEST_CASE("RUI-002 a bench verb with a wrong, missing or extra argument gets its
                            "PERMIT POST pass now",
                            "PERMIT STICK check",
                            "PERMIT STICK OK",
+                           "PERMIT STICK fault", // gone with C2 (REQ-RUI-08)
+                           "PERMIT STICK not_monitored",
                            "PERMIT GATE pass",
                            "CAL",
                            "CAL SAVED",
@@ -155,7 +145,7 @@ TEST_CASE("RUI-002 a bench verb with a wrong, missing or extra argument gets its
 }
 
 TEST_CASE("RUI-003 a line that is not a bench verb is left to the remote UI's own verbs",
-          "[remote_ui][REQ-RUI-05]") {
+          "[remote_ui][REQ-RUI-08]") {
   for (const char *line :
        {"", "   ", "PING", "SCREEN", "STICK 1507 1510 1477 0 1", "TAP 1 2", "BTN 1", "TASKS",
         "SHOT", "STATEX", "state", "Permit POST pass", "CRASHED", "STALLS UI 300"}) {
@@ -166,7 +156,7 @@ TEST_CASE("RUI-003 a line that is not a bench verb is left to the remote UI's ow
 }
 
 TEST_CASE("RUI-004 STATE with no hook wired reports the screen and null for everything else",
-          "[remote_ui][REQ-RUI-05]") {
+          "[remote_ui][REQ-RUI-08]") {
   const std::string got =
       bv::answer(request_of("STATE"), bv::Hooks{}, std::optional<std::string>{"LockedScreen"});
   TEST_ASSERT_EQUAL_STRING(
@@ -179,7 +169,7 @@ TEST_CASE("RUI-004 STATE with no hook wired reports the screen and null for ever
 }
 
 TEST_CASE("RUI-005 STATE with every hook wired is one JSON line in the documented key order",
-          "[remote_ui][REQ-RUI-05][REQ-RUI-06]") {
+          "[remote_ui][REQ-RUI-08][REQ-RUI-06]") {
   const std::string got =
       bv::answer(request_of("STATE"), all_hooks(), std::optional<std::string>{"DriveScreen"});
   TEST_ASSERT_EQUAL_STRING(
@@ -215,10 +205,9 @@ TEST_CASE("RUI-006 STATE escapes quotes, backslashes and control characters in i
 }
 
 TEST_CASE("RUI-007 a verb whose hook is not wired says so; a wired hook gets the parsed value",
-          "[remote_ui][REQ-RUI-05][REQ-RUI-06][REQ-RUI-07]") {
+          "[remote_ui][REQ-RUI-08][REQ-RUI-06][REQ-RUI-07]") {
   const bv::Hooks none;
-  for (const char *line :
-       {"PERMIT POST pass", "PERMIT STICK fault", "CAL UNSAVED", "POST RERUN", "STALL UI 300"}) {
+  for (const char *line : {"PERMIT POST pass", "CAL UNSAVED", "POST RERUN", "STALL UI 300"}) {
     const std::string got = bv::answer(request_of(line), none, std::nullopt);
     TEST_ASSERT_TRUE_MESSAGE(got.starts_with("ERR "), got.c_str());
     TEST_ASSERT_TRUE_MESSAGE(got.find(" not wired in this firmware (") != std::string::npos,
@@ -230,10 +219,6 @@ TEST_CASE("RUI-007 a verb whose hook is not wired says so; a wired hook gets the
   h.permit_post = [&seen](bv::PostGateName v) {
     seen.push_back("post" + std::to_string(static_cast<int>(v)));
     return true;
-  };
-  h.permit_stick = [&seen](bv::StickHealthName v) {
-    seen.push_back("stick" + std::to_string(static_cast<int>(v)));
-    return false;
   };
   h.cal_unsaved = [&seen] {
     seen.emplace_back("cal");
@@ -248,14 +233,11 @@ TEST_CASE("RUI-007 a verb whose hook is not wired says so; a wired hook gets the
     return true;
   };
   TEST_ASSERT_EQUAL_STRING("OK", bv::answer(request_of("PERMIT POST pending"), h, {}).c_str());
-  TEST_ASSERT_EQUAL_STRING("ERR PERMIT STICK refused",
-                           bv::answer(request_of("PERMIT STICK fault"), h, {}).c_str());
   TEST_ASSERT_EQUAL_STRING("OK", bv::answer(request_of("CAL UNSAVED"), h, {}).c_str());
   TEST_ASSERT_EQUAL_STRING("OK", bv::answer(request_of("POST RERUN"), h, {}).c_str());
   TEST_ASSERT_EQUAL_STRING("OK", bv::answer(request_of("STALL CADC 1000"), h, {}).c_str());
   TEST_ASSERT_EQUAL_STRING("OK", bv::answer(request_of("STALL ADC 3000"), h, {}).c_str());
-  const std::vector<std::string> want{"post1", "stick2",      "cal",
-                                      "rerun", "stall2:1000", "stall1:3000"};
+  const std::vector<std::string> want{"post1", "cal", "rerun", "stall2:1000", "stall1:3000"};
   TEST_ASSERT_EQUAL_size_t(want.size(), seen.size());
   for (std::size_t i = 0; i < want.size(); ++i) {
     TEST_ASSERT_EQUAL_STRING(want[i].c_str(), seen[i].c_str());

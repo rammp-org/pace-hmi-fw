@@ -210,7 +210,7 @@ class Hmi:
         return parse_state(self.command("STATE"))
 
     def permit(self, what: str, value: str) -> str:
-        """PERMIT POST not_run|pending|pass|fail, or PERMIT STICK not_monitored|ok|fault."""
+        """PERMIT POST not_run|pending|pass|fail (C1's PERMIT STICK went with C2)."""
         return self._bench(f"PERMIT {what.upper()} {value.lower()}")
 
     def cal_unsaved(self) -> str:

@@ -7,12 +7,13 @@
 ///          only when all of these hold, in this order; otherwise it is a literal
 ///          (+0.0, +0.0, +0.0):
 ///          1. the gate (`stick_drives`) is open;
-///          2. the motion guard's verdict is OK (C4; OK until C4, decision D2);
+///          2. the motion guard's verdict is OK (C4);
 ///          3. no calibration is running;
 ///          4. a measured calibration is in use (G5);
 ///          5. the POST gate is PASS (G3, C3);
 ///          6. stick health is not FAULT (G3, C2);
-///          7. stick health is not CHECK (C2);
+///          7. stick health is OK (C2: CHECK, NOT_MONITORED or any other byte holds,
+///             REQ-STK-27);
 ///          8. the neutral latch is set (G1).
 ///          The first failing condition is the hold reason (HoldReason, the same order).
 ///

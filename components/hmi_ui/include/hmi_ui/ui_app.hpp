@@ -19,6 +19,7 @@
 #include "messages/mib_message.hpp"
 #include "settings.hpp"
 #include "settings_spec.hpp"
+#include "stick/monitor_cycle.hpp"
 #include "stick/permit_hooks.hpp"
 
 #include "drive_ui/drive_ui.hpp"
@@ -152,6 +153,11 @@ public:
   [[nodiscard]] constexpr hmi::control::GuardTelemetry &guard_telemetry() noexcept {
     return guard_telemetry_;
   }
+  /// C2's stick monitor telemetry (stick/monitor_cycle.hpp, REQ-STK-24): written by the ADC task
+  /// only; the UI's indicator and log, the self test and the bench read it. Any task.
+  [[nodiscard]] constexpr hmi::stick::MonitorTelemetry &stick_telemetry() noexcept {
+    return stick_telemetry_;
+  }
   /// The bench verb STALL's requests (bench builds only take them, C4 REQ-RUI-07).
   [[nodiscard]] constexpr hmi::control::BenchStall &bench_stall() noexcept { return bench_stall_; }
   /// The refusal banner up (`refused`, a Refused value) as of its last change. Any task (an
@@ -251,6 +257,8 @@ private:
   hmi::control::GuardSources guard_sources_{};
   hmi::control::GuardTelemetry guard_telemetry_{};
   hmi::control::BenchStall bench_stall_{};
+  // C2's stick monitor telemetry (hazard-c2-spec.md §3, REQ-STK-24): constant initialised too.
+  hmi::stick::MonitorTelemetry stick_telemetry_{};
   // The quick POST (hazard-c3-spec.md §2.3): the POST gate's only writer.
   PostStage post_stage_{{
       .port = config_.post,

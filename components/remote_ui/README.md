@@ -19,9 +19,10 @@ the casts of its step-(a) commit.
 | REQ-RUI-02 | In a bench build it serves one client at a time on TCP 3333; input goes into the same latches the stick and the GPIO48 button use, so a script exercises the real handling. When a client goes, a held touch, key or button is released. | bench B0-B5 (the runner drives the board through it) |
 | REQ-RUI-03 | `TASKS` answers one JSON line with every task's name, priority, core, stack size and high-water mark, copied under the kernel lock (`tools/guards/README.md`, G10). | bench (task_dump.py) |
 | REQ-RUI-04 | Stick injection (`CONFIG_HMI_BENCH_STICK_INJECT`, needs the remote UI: a static_assert stops a build without it) reaches the stick only through `StickInjectMailbox`, whose write end `remote_ui_attach_stick_inject` hands over before the server starts. | bench B5 (simulated MCB) |
-| REQ-RUI-05 | The bench verbs `STATE`, `PERMIT` and `CAL UNSAVED` exist only with `CONFIG_HMI_BENCH_STICK_INJECT`; a release ELF has none of their symbols (hazard-c1-spec.md §6). | RUI-001..008; the release ELF symbol check (`bench_?verb`, build.yml) and its match in the bench_inject ELF (l0.yml) |
+| REQ-RUI-05 | RETIRED 2026-10-11, superseded by REQ-RUI-08. The bench verbs `STATE`, `PERMIT` and `CAL UNSAVED` exist only with `CONFIG_HMI_BENCH_STICK_INJECT`; a release ELF has none of their symbols (hazard-c1-spec.md §6). | – |
 | REQ-RUI-06 | Bench builds only: `STATE` adds `post`, `post_check`, `indicator`, `reset_reason`; `POST RERUN` restarts the runner from NOT_RUN (facts re-gathered, gate back to PENDING); `CRASH` aborts (a PANIC reset); `PERMIT POST` is applied by the runner; `CAL UNSAVED` also makes the POST fact `saved` false. A release ELF has none of their symbols (hazard-c3-spec.md). | RUI-001, RUI-002, RUI-005..008; the release ELF symbol check |
-| REQ-RUI-07 | The bench verbs `STALL UI <ms>` and `STALL ADC <ms>` exist only with `CONFIG_HMI_BENCH_STICK_INJECT` (as REQ-RUI-05); a release ELF has none of their symbols (hazard-c4-spec.md, O6 = yes). | RUI-001, RUI-002, RUI-007; the release ELF symbol check |
+| REQ-RUI-07 | The bench verbs `STALL UI <ms>` and `STALL ADC <ms>` exist only with `CONFIG_HMI_BENCH_STICK_INJECT` (as REQ-RUI-08); a release ELF has none of their symbols (hazard-c4-spec.md, O6 = yes). | RUI-001, RUI-002, RUI-007; the release ELF symbol check |
+| REQ-RUI-08 | Bench builds only (`CONFIG_HMI_BENCH_STICK_INJECT`): `STATE`, `PERMIT POST` and `CAL UNSAVED` as REQ-RUI-05 said; `STATE` adds the stick state, reason, fault reason, counters and `xy_age_max_ms` (the `stick` block); `PERMIT STICK` is gone (the monitor is the only writer of stick health); `STALL CADC <ms>` (O14 = yes); a release ELF has none of these symbols (hazard-c2-spec.md §7.2). | RUI-001..008; the release ELF symbol check (`bench_?verb`, build.yml) and its match in the bench_inject ELF (l0.yml) |
 
 ## Interface
 
@@ -33,8 +34,9 @@ the casts of its step-(a) commit.
 
 ## The hazard bench verbs (bench_verbs.hpp)
 
-hazard-decisions.md H1: `STATE`, `PERMIT POST|STICK`, `CAL UNSAVED` (C1), `POST RERUN`, `CRASH`
-(C3), `STALL UI|ADC|CADC <ms>` (C4 O6, C2 O14). Answered only in a
+hazard-decisions.md H1: `STATE`, `PERMIT POST`, `CAL UNSAVED` (C1), `POST RERUN`, `CRASH`
+(C3), `STALL UI|ADC|CADC <ms>` (C4 O6, C2 O14); C1's `PERMIT STICK` went with C2 (REQ-RUI-08:
+the stick monitor is the only writer of stick health). Answered only in a
 `CONFIG_HMI_BENCH_STICK_INJECT` build; any other bench build answers `ERR`, a release build has
 no remote UI. The remote UI parses the line and answers it; every value `STATE` reports and
 every change a verb asks for goes through a hook in `hmi::bench_verbs::Hooks`, which app_main
@@ -43,9 +45,8 @@ before `remote_ui_start`). An empty hook gives `null` in `STATE` and `ERR <verb>
 this firmware (...)` for a verb: the hooks belong to the code that owns each value (the drive
 session and its adapter, the stick's output permit, the POST runner, the stick monitor, the
 ADC and UI tasks), and land with it. `CRASH` is the remote UI's own: it replies, then aborts.
-`STALL` blocks the server for its time (the PC sees the reply when the stall ends). The PC end
-is `scripts/hmi_ui.py` (`state`, `permit`, ...) and the scenario scripts in `tools/bench`.
-When C2 lands, `PERMIT STICK` goes (REQ-RUI-08 retires REQ-RUI-05).
+`STALL` answers at once; the stalled task stalls itself at its next cycle. The PC end is
+`scripts/hmi_ui.py` (`state`, `permit`, ...) and the scenario scripts in `tools/bench`.
 `STATE`'s `banner` (the refusal banner up, by name, or NONE) is the owner's addition of
 2026-10-08, so the bench grades the banners the specs name (REFUSED_POST, STICK_FAULT).
 

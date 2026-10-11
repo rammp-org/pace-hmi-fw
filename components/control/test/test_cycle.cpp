@@ -88,7 +88,7 @@ struct FakeIo {
   std::optional<hmi::stick::CalibrationMv> take_new_calibration() { return std::nullopt; }
   float smooth_twist_mv(float twist_mv) { return twist_mv; }
   void note_raw_mv(float, float, float) {}
-  bool calibrating() const { return is_calibrating; }
+  bool keys_silent() const { return is_calibrating; }
   bool swap() { return false; }
   bool invert_x() { return false; }
   bool invert_y() { return false; }
@@ -105,6 +105,7 @@ struct FakeIo {
   hmi::stick::Permit output_permit(const hmi::stick::Position &) const {
     return {.output = true, .button = true, .reason = hmi::stick::HoldReason::NONE};
   }
+  bool button_passes() const { return true; }
   bool button_pressed() { return false; }
   bool publish(const hmi::stick::Command &c, bool) {
     trace->add('P');
@@ -169,7 +170,7 @@ TEST_CASE("CTL-014 a UI stall during invalid-read cycles and during a calibratio
   for (int i = 0; i < 10; ++i) {
     w.now_ms += 35;
     w.sources.note_mib_status(kEnabled, w.now_ms);
-    TEST_ASSERT_FALSE(cycle.run(stick, io, kInvalid));
+    TEST_ASSERT_TRUE(cycle.run(stick, io, kInvalid)); // neutral (H9 fixed, C2 REQ-STK-17)
   }
   TEST_ASSERT_EQUAL_UINT8(static_cast<std::uint8_t>(GuardReason::UI_STALE),
                           static_cast<std::uint8_t>(io.verdict));
@@ -226,7 +227,7 @@ TEST_CASE("CTL-018 1000 cycles of guard + pipeline + gate under the armed alloca
     hits = scope.count();
   }
   TEST_ASSERT_EQUAL_UINT(0, hits);
-  TEST_ASSERT_EQUAL_UINT(1000 - 143, published); // every valid cycle publishes
+  TEST_ASSERT_EQUAL_UINT(1000, published); // every cycle publishes (invalid ones neutral, C2 H9)
   TEST_ASSERT_TRUE(cycle.guard().trips(GuardReason::UI_STALE) > 0);
 }
 
@@ -246,7 +247,7 @@ TEST_CASE("CTL-019 per-cycle sequence with a fake watchdog: subscribe once, rese
     TEST_ASSERT_EQUAL_STRING("SVPNR", trace.text.data()); // first cycle subscribes first
     TEST_ASSERT_TRUE(cycle.adc_wdt_ok());
     TEST_ASSERT_TRUE(io.noted_valid && io.noted_published);
-    // Each read missing in turn: no publish, noted invalid, still reset.
+    // Each read missing in turn: a neutral publish (C2 H9), noted invalid, still reset.
     const std::array<RawReadsMv, 3> invalid{RawReadsMv{std::nullopt, 6.0f, 1477.0f}, kInvalid,
                                             RawReadsMv{1507.0f, 6.0f, std::nullopt}};
     for (const RawReadsMv &raw : invalid) {
@@ -254,9 +255,10 @@ TEST_CASE("CTL-019 per-cycle sequence with a fake watchdog: subscribe once, rese
       io.noted_valid = true;
       w.now_ms += 35;
       w.all_alive();
-      TEST_ASSERT_FALSE(cycle.run(stick, io, raw));
-      TEST_ASSERT_EQUAL_STRING("VNR", trace.text.data());
-      TEST_ASSERT_FALSE(io.noted_valid || io.noted_published);
+      TEST_ASSERT_TRUE(cycle.run(stick, io, raw));
+      TEST_ASSERT_EQUAL_STRING("VPNR", trace.text.data());
+      TEST_ASSERT_FALSE(io.noted_valid);
+      TEST_ASSERT_TRUE(io.noted_published);
     }
     trace.clear();
     w.now_ms += 35;

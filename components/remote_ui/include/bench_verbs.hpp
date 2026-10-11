@@ -3,7 +3,7 @@
 /// @file bench_verbs.hpp
 /// @brief The hazard fixes' bench verbs: STATE, PERMIT, CAL UNSAVED, POST RERUN, CRASH and
 ///        STALL. Their parser, the STATE line, and the hooks the firmware fills.
-/// @details BENCH ONLY (hazard-decisions.md H1; REQ-RUI-05, REQ-RUI-06, REQ-RUI-07). The remote
+/// @details BENCH ONLY (hazard-decisions.md H1; REQ-RUI-08, REQ-RUI-06, REQ-RUI-07). The remote
 ///          UI (remote_ui.cpp) answers these verbs only in a CONFIG_HMI_BENCH_STICK_INJECT build;
 ///          any other build answers ERR, and a release build compiles no remote UI at all, so
 ///          a release ELF has none of this (the `bench_?verb` symbol check in build.yml).
@@ -51,19 +51,16 @@ namespace hmi::bench_verbs {
 
 /// @brief What a bench verb line asks for.
 enum class Verb : std::uint8_t {
-  STATE,        ///< `STATE`: one JSON line (C1 §6, C3, C2)
-  PERMIT_POST,  ///< `PERMIT POST not_run|pending|pass|fail` (C1 §3.2; C3: applied by the runner)
-  PERMIT_STICK, ///< `PERMIT STICK not_monitored|ok|fault` (C1 §3.2; removed by C2, REQ-RUI-08)
-  CAL_UNSAVED,  ///< `CAL UNSAVED`: RAM only, joystick_cal_measured() false until reboot (C1 §6)
-  POST_RERUN,   ///< `POST RERUN`: the POST runner restarts from NOT_RUN (C3 REQ-RUI-06)
-  CRASH,        ///< `CRASH`: abort, a PANIC reset (C3 REQ-RUI-06)
-  STALL,        ///< `STALL UI|ADC|CADC <ms>` (C4 REQ-RUI-07, C2 O14)
+  STATE,       ///< `STATE`: one JSON line (C1 §6, C3, C2)
+  PERMIT_POST, ///< `PERMIT POST not_run|pending|pass|fail` (C1 §3.2; C3: applied by the runner)
+  CAL_UNSAVED, ///< `CAL UNSAVED`: RAM only, joystick_cal_measured() false until reboot (C1 §6)
+  POST_RERUN,  ///< `POST RERUN`: the POST runner restarts from NOT_RUN (C3 REQ-RUI-06)
+  CRASH,       ///< `CRASH`: abort, a PANIC reset (C3 REQ-RUI-06)
+  STALL,       ///< `STALL UI|ADC|CADC <ms>` (C4 REQ-RUI-07, C2 O14)
 };
 
 /// @brief PERMIT POST's values: C1 §3.2's PostGate, in its order.
 enum class PostGateName : std::uint8_t { NOT_RUN, PENDING, PASS, FAIL };
-/// @brief PERMIT STICK's values (C1 §6). CHECK is written only by C2's monitor.
-enum class StickHealthName : std::uint8_t { NOT_MONITORED, OK, FAULT };
 /// @brief What STALL stalls: the UI task (the LVGL lock held), the ADC task (a sleep in its
 ///        cycle) or espp's ContinuousAdc task (suspended).
 enum class StallTarget : std::uint8_t { UI, ADC, CADC };
@@ -74,10 +71,9 @@ inline constexpr std::uint32_t kStallMaxMs = 10000;
 /// @brief One parsed bench verb.
 struct Request {
   Verb verb = Verb::STATE;
-  PostGateName post = PostGateName::NOT_RUN;              ///< PERMIT_POST only
-  StickHealthName stick = StickHealthName::NOT_MONITORED; ///< PERMIT_STICK only
-  StallTarget stall = StallTarget::UI;                    ///< STALL only
-  std::uint32_t stall_ms = 0;                             ///< STALL only, 1..kStallMaxMs
+  PostGateName post = PostGateName::NOT_RUN; ///< PERMIT_POST only
+  StallTarget stall = StallTarget::UI;       ///< STALL only
+  std::uint32_t stall_ms = 0;                ///< STALL only, 1..kStallMaxMs
 };
 
 /// @brief What parse() made of a line.
@@ -154,7 +150,6 @@ struct Hooks {
   std::function<StickBlock()> stick;                      ///< C2: the monitor's atomics
   // verbs; each returns false when the firmware refused the request
   std::function<bool(PostGateName)> permit_post;         ///< C1 §3.2 / C3 §2.4 (via the runner)
-  std::function<bool(StickHealthName)> permit_stick;     ///< C1 §3.2 (gone with C2)
   std::function<bool()> cal_unsaved;                     ///< C1 §6
   std::function<bool()> post_rerun;                      ///< C3 REQ-RUI-06
   std::function<bool(StallTarget, std::uint32_t)> stall; ///< C4 REQ-RUI-07, C2 O14; posts
@@ -163,8 +158,7 @@ struct Hooks {
 namespace detail {
 
 inline constexpr std::string_view kStateUsage = "usage: STATE";
-inline constexpr std::string_view kPermitUsage =
-    "usage: PERMIT POST not_run|pending|pass|fail | PERMIT STICK not_monitored|ok|fault";
+inline constexpr std::string_view kPermitUsage = "usage: PERMIT POST not_run|pending|pass|fail";
 inline constexpr std::string_view kCalUsage = "usage: CAL UNSAVED";
 inline constexpr std::string_view kPostUsage = "usage: POST RERUN";
 inline constexpr std::string_view kCrashUsage = "usage: CRASH";
@@ -234,19 +228,6 @@ template <std::size_t N> [[nodiscard]] constexpr Words<N> split(std::string_view
   return std::nullopt;
 }
 
-[[nodiscard]] constexpr std::optional<StickHealthName> stick_name(std::string_view text) {
-  if (text == "not_monitored") {
-    return StickHealthName::NOT_MONITORED;
-  }
-  if (text == "ok") {
-    return StickHealthName::OK;
-  }
-  if (text == "fault") {
-    return StickHealthName::FAULT;
-  }
-  return std::nullopt;
-}
-
 [[nodiscard]] constexpr std::optional<StallTarget> stall_target(std::string_view text) {
   if (text == "UI") {
     return StallTarget::UI;
@@ -275,10 +256,6 @@ template <std::size_t N> [[nodiscard]] constexpr Words<N> split(std::string_view
   if (w.word[1] == "POST") {
     const auto value = post_name(w.word[2]);
     return value ? ok(Request{.verb = Verb::PERMIT_POST, .post = *value}) : usage(kPermitUsage);
-  }
-  if (w.word[1] == "STICK") {
-    const auto value = stick_name(w.word[2]);
-    return value ? ok(Request{.verb = Verb::PERMIT_STICK, .stick = *value}) : usage(kPermitUsage);
   }
   return usage(kPermitUsage);
 }
@@ -519,10 +496,6 @@ template <typename T, typename Fn> [[nodiscard]] std::optional<T> call(const Fn 
     return detail::verdict(hooks.permit_post ? std::optional<bool>{hooks.permit_post(request.post)}
                                              : std::nullopt,
                            "PERMIT POST", "C1 3.2 POST gate hook");
-  case Verb::PERMIT_STICK:
-    return detail::verdict(
-        hooks.permit_stick ? std::optional<bool>{hooks.permit_stick(request.stick)} : std::nullopt,
-        "PERMIT STICK", "C1 3.2 stick health hook");
   case Verb::CAL_UNSAVED:
     return detail::verdict(detail::call<bool>(hooks.cal_unsaved), "CAL UNSAVED",
                            "C1 6 joystick_cal_measured");

@@ -7,12 +7,15 @@
 //
 // Extracted from main.cpp's adc_task_fn (dev_refactor 7ea7592, lines 1481-1601) and
 // main/frag_stick_config.inc. It reproduces that code's golden vectors bit-exactly
-// (components/stick/test), including what is unsafe today (refactor.md §1):
-//   - H3: a pot outside its calibration is clamped to full deflection (open circuit = full);
-//   - H9: an invalid ADC cycle publishes nothing (no neutral).
-// except where hazard fix C1 changed it (hazard-c1-spec.md §3, approved 2026-10-08): the gate
-// is no longer a multiply. The Io's output permit (stick/output_permit.hpp) decides, and a held
-// stick sends a literal (+0.0, +0.0, +0.0) (REQ-STK-10); the replays expect +0.0 there (E9).
+// (components/stick/test), including what is unsafe (refactor.md §1): H3, a pot outside its
+// calibration is clamped to full deflection (open circuit = full; the C2 monitor withholds what
+// it can see, the 0 mV low rail stays a residual, D2), except where the hazard fixes changed it:
+//   - C1 (hazard-c1-spec.md §3): the gate is no longer a multiply. The Io's output permit
+//     (stick/output_permit.hpp) decides, and a held stick sends a literal (+0.0, +0.0, +0.0)
+//     (REQ-STK-10); the replays expect +0.0 there (E9);
+//   - C2 (hazard-c2-spec.md §3.7): H9 is fixed, an invalid ADC cycle publishes neutral
+//     (REQ-STK-17), and the keys are silent while the monitor says so (keys_silent(),
+//     REQ-STK-20); the replays expect that on the invalid rows (E1).
 //
 // No LVGL, no ESP-IDF, no allocation after construction. The mapping engine is
 // components/joystick (espp::Joystick), as today.
@@ -105,9 +108,10 @@ twist_config(const AxisCalMv &cal, float center_deadband_mv, float range_deadban
 /// 0.01; release is half the engage.
 [[nodiscard]] KeyThresholds key_thresholds(int sensitivity);
 
-/// The key's Schmitt trigger: released while calibrating, engaged past `engage`, released
-/// below `release`, and between the two it keeps `engaged`. The larger axis counts.
-[[nodiscard]] bool key_engaged(bool engaged, bool calibrating, float x, float y,
+/// The key's Schmitt trigger: released while the keys are silent (a calibration run, or the C2
+/// monitor outside OK and RECOVERING), engaged past `engage`, released below `release`, and
+/// between the two it keeps `engaged`. The larger axis counts.
+[[nodiscard]] bool key_engaged(bool engaged, bool silent, float x, float y,
                                KeyThresholds thresholds);
 
 /// The key the stick holds: 0 when not engaged, else the larger axis's direction (a tie goes
@@ -128,7 +132,7 @@ twist_config(const AxisCalMv &cal, float center_deadband_mv, float range_deadban
 ///   std::optional<CalibrationMv> take_new_calibration();    // joystick_cal_take_new
 ///   float smooth_twist_mv(float twist_mv);                   // twist_lowpass
 ///   void note_raw_mv(float horizontal_mv, float vertical_mv, float twist_mv);
-///   bool calibrating();                                      // joystick_cal_running
+///   bool keys_silent();   // a calibration run, or the monitor outside OK and RECOVERING
 ///   bool swap(); bool invert_x(); bool invert_y();           // Settings, mount
 ///   int sensitivity();                                       // Settings
 ///   std::uint32_t joy_key(); std::uint32_t remote_key();
@@ -140,6 +144,10 @@ twist_config(const AxisCalMv &cal, float center_deadband_mv, float range_deadban
 ///   bool publish(const Command &command, bool button_pressed);  // XYTwist
 /// output_permit is asked on every valid cycle, where stick_drives() was asked before C1: it
 /// sees every condition (the gate, a calibration, ...) and times the neutral latch.
+/// An invalid cycle (H9, REQ-STK-17) calls only, in this order:
+///   joy_key, remote_key (twice when set), set_joy_key, joy_key, [set_joy_flick],
+///   bool button_passes();   // the button bit may pass: POST passed (REQ-STK-15)
+///   button_pressed, publish(HELD_COMMAND, ...).
 class StickPipeline {
 public:
   struct Config {
@@ -161,7 +169,8 @@ public:
   [[nodiscard]] Position map(float horizontal_mv, float vertical_mv, float twist_mv);
 
   /// One ADC cycle. Returns whether XYTwist was published. An invalid cycle (any read
-  /// missing) calls nothing on `io` and publishes nothing (H9).
+  /// missing) publishes neutral with the button bit, the stick's key released (a remote key
+  /// still sets it), and calls nothing else on `io` (H9 fixed, REQ-STK-17).
   /// always_inline (also update_keys): the ADC task has ~1.5 kB of stack free and the guard
   /// is "no less than before" (refactor.md §3.2); inlined, the cycle costs the task's frame
   /// what the inline code did (RISC-V GCC 15.2 -O2 estimate: +16 B), outlined about +64 B.
@@ -173,7 +182,14 @@ public:
 
 private:
   template <typename Io>
-  [[gnu::always_inline]] inline void update_keys(Io &io, const Position &mounted, bool calibrating);
+  [[gnu::always_inline]] inline void update_keys(Io &io, const Position &mounted, bool silent);
+  // Sets joy_key to the remote key if one is set, else to @p own, and latches a new key as a
+  // flick: the keys' last step, valid cycles and invalid ones alike.
+  template <typename Io>
+  [[gnu::always_inline]] static inline void set_key(Io &io, std::uint32_t own);
+  // An invalid cycle (H9 fixed, REQ-STK-17).
+  // Out of line (noinline): a rare path, kept out of the ADC task's own frame (C2 §10.3).
+  template <typename Io> [[gnu::noinline]] bool publish_neutral(Io &io);
 
   Config config_;
   espp::Joystick joystick_;
@@ -195,7 +211,7 @@ inline constexpr float TWIST_RANGE_DEADBAND_MV = 40.0f;
 
 template <typename Io> inline bool StickPipeline::cycle(Io &io, const RawReadsMv &raw) {
   if (!(raw.vertical_mv && raw.horizontal_mv && raw.twist_mv)) {
-    return false;
+    return publish_neutral(io);
   }
   const float horizontal_mv = *raw.horizontal_mv;
   const float vertical_mv = *raw.vertical_mv;
@@ -206,14 +222,15 @@ template <typename Io> inline bool StickPipeline::cycle(Io &io, const RawReadsMv
   }
   const float twist_smoothed_mv = io.smooth_twist_mv(twist_mv);
   io.note_raw_mv(horizontal_mv, vertical_mv, twist_smoothed_mv);
-  // While a calibration run owns the stick nothing downstream may act on it.
-  const bool calibrating = io.calibrating();
+  // While a calibration run owns the stick, or the C2 monitor is outside OK and RECOVERING, the
+  // stick's keys are silent (the key trigger released).
+  const bool silent = io.keys_silent();
   const Position mapped = map(horizontal_mv, vertical_mv, twist_smoothed_mv);
   const bool swap = io.swap();
   const bool invert_x = io.invert_x();
   const bool invert_y = io.invert_y();
   const Position mounted = mount(mapped, swap, invert_x, invert_y);
-  update_keys(io, mounted, calibrating);
+  update_keys(io, mounted, silent);
   io.show(mounted);
   // The output permit (C1 §3): a held stick sends a literal 0, never 0 * the stick; the button
   // bit is sent released until POST passes (REQ-STK-15).
@@ -225,19 +242,31 @@ template <typename Io> inline bool StickPipeline::cycle(Io &io, const RawReadsMv
 }
 
 template <typename Io>
-inline void StickPipeline::update_keys(Io &io, const Position &mounted, bool calibrating) {
+inline void StickPipeline::update_keys(Io &io, const Position &mounted, bool silent) {
   const KeyThresholds thresholds = key_thresholds(io.sensitivity());
-  key_engaged_ = key_engaged(key_engaged_, calibrating, mounted.x, mounted.y, thresholds);
+  key_engaged_ = key_engaged(key_engaged_, silent, mounted.x, mounted.y, thresholds);
+  set_key(io, key_direction(key_engaged_, mounted.x, mounted.y, config_.keys));
+}
+
+template <typename Io> inline void StickPipeline::set_key(Io &io, std::uint32_t own) {
   const std::uint32_t was = io.joy_key();
   if (io.remote_key() != 0) {
     io.set_joy_key(io.remote_key());
   } else {
-    io.set_joy_key(key_direction(key_engaged_, mounted.x, mounted.y, config_.keys));
+    io.set_joy_key(own);
   }
   // A fresh engage (or a re-aim) is latched for the keypad (joy_flick).
   if (const std::uint32_t now = io.joy_key(); now != 0 && now != was) {
     io.set_joy_flick(now);
   }
+}
+
+template <typename Io> bool StickPipeline::publish_neutral(Io &io) {
+  key_engaged_ = false; // the key trigger released: the stick's key is 0
+  set_key(io, 0U);
+  const bool passes = io.button_passes();
+  const bool button = io.button_pressed();
+  return io.publish(HELD_COMMAND, passes && button);
 }
 
 } // namespace hmi::stick

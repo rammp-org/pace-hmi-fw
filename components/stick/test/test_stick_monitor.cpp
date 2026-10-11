@@ -3,21 +3,26 @@
 // STK-070..072  the oracle: the code (decide, transition) against the table, row by row, and
 //               the table's invariants
 // STK-073..081  classification of one sample (§2.2, P1..P6)
-// STK-082..099  the state machine over time, on 35 ms fake cycles (the monitor's part of them;
-//               what the pipeline and C1's permit do with it comes with C2's wiring commit)
+// STK-082..099  the state machine over time, on 35 ms fake cycles; STK-084, 092..098 through
+//               the wiring as the ADC task runs it (MonitorCycle, the pipeline, C1's permit)
 // STK-100       no allocation over 10,000 cycles of monitor + pipeline
-// STK-102       health per state
+// STK-101       the hold reason with the monitor writing stick health
+// STK-102       health per state, and through the permit: only OK allows
 //
 // Expected values come from the spec, never from the code under test. Fake time only.
 
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <utility>
 
 #include "alloc_guard.hpp"
+#include "stick/monitor_cycle.hpp"
+#include "stick/output_permit.hpp"
 #include "stick/stick_monitor.hpp"
 #include "stick/stick_pipeline.hpp"
 #include "test_case.hpp"
@@ -758,7 +763,7 @@ TEST_CASE("STK-100 10,000 cycles of monitor + pipeline under the armed allocatio
     std::optional<CalibrationMv> take_new_calibration() { return std::nullopt; }
     float smooth_twist_mv(float mv) { return mv; }
     void note_raw_mv(float, float, float) {}
-    bool calibrating() { return false; }
+    bool keys_silent() { return false; }
     bool swap() { return false; }
     bool invert_x() { return false; }
     bool invert_y() { return false; }
@@ -773,6 +778,7 @@ TEST_CASE("STK-100 10,000 cycles of monitor + pipeline under the armed allocatio
     Permit output_permit(const Position &) const {
       return {.output = true, .button = true, .reason = HoldReason::NONE}; // allowed
     }
+    bool button_passes() { return true; }
     bool button_pressed() { return false; }
     bool publish(const Command &, bool) { return true; }
   };
@@ -797,12 +803,12 @@ TEST_CASE("STK-100 10,000 cycles of monitor + pipeline under the armed allocatio
     hits = scope.count();
   }
   TEST_ASSERT_EQUAL_UINT(0, hits);
-  TEST_ASSERT_EQUAL_UINT(10'000 - 104, published); // 104 failed reads (i % 97 == 0)
+  TEST_ASSERT_EQUAL_UINT(10'000, published); // a failed read publishes neutral (H9 fixed)
 }
 
 TEST_CASE("STK-102 health per state: OK only in OK, FAULT in FAULT, CHECK otherwise; keys live "
-          "only in OK and RECOVERING",
-          "[stick][monitor]") {
+          "only in OK and RECOVERING; through the permit only OK allows (NOT_MONITORED withholds)",
+          "[stick][monitor][permit][REQ-STK-27]") {
   const std::array<MonitorHealth, kMonitorStateCount> health{
       MonitorHealth::CHECK, MonitorHealth::OK,    MonitorHealth::CHECK,
       MonitorHealth::CHECK, MonitorHealth::FAULT, MonitorHealth::CHECK};
@@ -815,9 +821,426 @@ TEST_CASE("STK-102 health per state: OK only in OK, FAULT in FAULT, CHECK otherw
     Peer::set_state(m, static_cast<std::uint8_t>(s));
     TEST_ASSERT_TRUE(m.health() == health[s]);
   }
+  // Through C1's permit (replaces C1's STK-067, E9): only OK allows; CHECK, FAULT and
+  // NOT_MONITORED withhold (REQ-STK-27). The rest of STK-067 kept: the POST gate allows only
+  // PASS, the motion guard only OK.
+  const PermitInputs met{.gate_open = true,
+                         .motion_guard_ok = true,
+                         .calibrating = false,
+                         .calibration_measured = true,
+                         .post = PostGate::PASS,
+                         .health = StickHealth::OK};
+  const auto allowed_within_2s = [](const PermitInputs &in) {
+    OutputPermit p;
+    for (std::uint32_t t = 0; t < 2000; t += 33) {
+      if (p.cycle(in, Position{0.0f, 0.0f, 0.0f}, 1000 + t).output) {
+        return true;
+      }
+    }
+    return false;
+  };
+  struct HealthCase {
+    StickHealth health;
+    bool allows;
+    HoldReason reason;
+  };
+  for (const HealthCase &h :
+       {HealthCase{StickHealth::OK, true, HoldReason::NONE},
+        HealthCase{StickHealth::CHECK, false, HoldReason::STICK_CHECK},
+        HealthCase{StickHealth::FAULT, false, HoldReason::STICK_FAULT},
+        HealthCase{StickHealth::NOT_MONITORED, false, HoldReason::STICK_CHECK},
+        HealthCase{static_cast<StickHealth>(9), false, HoldReason::STICK_CHECK}}) {
+    PermitInputs in = met;
+    in.health = h.health;
+    TEST_ASSERT_EQUAL(h.allows, allowed_within_2s(in));
+    OutputPermit p;
+    TEST_ASSERT_TRUE(p.cycle(in, Position{0.0f, 0.0f, 0.0f}, 1000).reason ==
+                     (h.allows ? HoldReason::CENTRE_FIRST : h.reason));
+  }
+  for (std::size_t s = 0; s < kMonitorStateCount; ++s) { // the monitor's health per state
+    PermitInputs in = met;
+    in.health = stick_health(health_of(static_cast<MonitorState>(s)));
+    TEST_ASSERT_EQUAL(s == static_cast<std::size_t>(MonitorState::OK), allowed_within_2s(in));
+  }
+  for (const auto &[post, allows] :
+       {std::pair{PostGate::NOT_RUN, false}, std::pair{PostGate::PENDING, false},
+        std::pair{PostGate::PASS, true}, std::pair{PostGate::FAIL, false},
+        std::pair{static_cast<PostGate>(4), false}, std::pair{static_cast<PostGate>(255), false}}) {
+    PermitInputs in = met;
+    in.post = post;
+    TEST_ASSERT_EQUAL(allows, allowed_within_2s(in));
+  }
+  PermitInputs guard = met;
+  guard.motion_guard_ok = false;
+  TEST_ASSERT_FALSE(allowed_within_2s(guard));
   // §3.2's input choice.
   TEST_ASSERT_TRUE(select_input(true, MonitorState::OK) == MonitorInput::CAL_START);
   TEST_ASSERT_TRUE(select_input(true, MonitorState::CALIBRATING) == MonitorInput::SAMPLE);
   TEST_ASSERT_TRUE(select_input(false, MonitorState::CALIBRATING) == MonitorInput::CAL_END);
   TEST_ASSERT_TRUE(select_input(false, MonitorState::FAULT) == MonitorInput::SAMPLE);
+}
+
+// ---------------------------------------------------------------------------------------------
+// The wiring (§3.7, REQ-STK-17, 20, 23, 27): main's AdcStickIo reduced to what the stick path
+// does each cycle, on the real MonitorCycle, StickPipeline and OutputPermit
+// ---------------------------------------------------------------------------------------------
+
+namespace {
+
+constexpr CalibrationMv kBoard2Cal{
+    {11.0f, 1507.0f, 2971.0f}, {6.0f, 1510.0f, 2962.0f}, {10.0f, 1477.0f, 2960.0f}};
+constexpr KeyCodes kKeys{.up = 1, .down = 2, .right = 3, .left = 4};
+
+/// One ADC cycle's raw sample on board 2: the three values as means and maxima, fresh X/Y
+/// windows (`seq`), twist 8 of 8.
+RawSample at(float h, float v, float tw, std::uint32_t seq) {
+  return RawSample{.horizontal = {h, h, seq},
+                   .vertical = {v, v, seq},
+                   .twist_mean_mv = tw,
+                   .twist_max_mv = tw,
+                   .twist_reads = 8};
+}
+
+/// What main's ADC task does, in its order (note_sample, note_reads, the pipeline), with fakes
+/// only for the world around it: POST passed, the gate open, a measured calibration, the guard
+/// OK unless a case changes them. 35 ms cycles on a fake clock.
+struct Wired {
+  MonitorCycle monitor;
+  MonitorTelemetry telemetry;
+  OutputPermit permit;
+  StickPipeline pipeline{pipeline_config(kBoard2Cal, kKeys)};
+  std::uint32_t now_ms = 5000;
+  std::uint32_t seq = 0;
+  std::uint32_t generation = 0;
+  bool calibrating = false;
+  bool gate_open = true;
+  PostGate post = PostGate::PASS;
+  bool button = false;
+  std::uint32_t remote = 0;
+  // the last cycle's outputs
+  StickHealth health = StickHealth::NOT_MONITORED;
+  bool published = false;
+  Command command{};
+  bool button_bit = false;
+  std::uint32_t key = 0;
+  std::uint32_t flick = 0;
+  HoldReason reason = HoldReason::GATE_SHUT;
+
+  Wired() { monitor.use_calibration(kBoard2Cal); }
+
+  struct Io {
+    Wired *w;
+    std::optional<CalibrationMv> take_new_calibration() { return std::nullopt; }
+    float smooth_twist_mv(float mv) { return mv; }
+    void note_raw_mv(float, float, float) {}
+    bool keys_silent() { return w->calibrating || !w->monitor.keys_live(); }
+    bool swap() { return false; }
+    bool invert_x() { return false; }
+    bool invert_y() { return false; }
+    int sensitivity() { return 9; }
+    std::uint32_t joy_key() const { return w->key; }
+    std::uint32_t remote_key() const { return w->remote; }
+    void set_joy_key(std::uint32_t k) { w->key = k; }
+    void set_joy_flick(std::uint32_t k) { w->flick = k; }
+    void show(const Position &) {}
+    int drive_speed() { return 10; }
+    Permit output_permit(const Position &mounted) {
+      const PermitInputs in{.gate_open = w->gate_open,
+                            .motion_guard_ok = true,
+                            .calibrating = w->calibrating,
+                            .calibration_measured = true,
+                            .post = w->post,
+                            .health = w->health};
+      const Permit p = w->permit.cycle(in, mounted, w->now_ms);
+      w->reason = p.reason;
+      return p;
+    }
+    bool button_passes() const { return post_passed(w->post); }
+    bool button_pressed() const { return w->button; }
+    bool publish(const Command &c, bool b) {
+      w->command = c;
+      w->button_bit = b;
+      return true;
+    }
+  };
+
+  /// One cycle on @p s; the clock moves 35 ms after it.
+  void cycle(const RawSample &s) {
+    health = monitor.step(calibrating, s, generation, now_ms, telemetry);
+    const RawReadsMv reads{s.horizontal.mean_mv, s.vertical.mean_mv, s.twist_mean_mv};
+    if (!(reads.horizontal_mv && reads.vertical_mv && reads.twist_mv)) {
+      permit.invalid_cycle();
+    }
+    flick = 0;
+    command = {};
+    Io io{this};
+    published = pipeline.cycle(io, reads);
+    now_ms += 35;
+  }
+  void centred(int n = 1) {
+    for (int i = 0; i < n; ++i) {
+      cycle(at(1507.0f, 1510.0f, 1477.0f, ++seq));
+    }
+  }
+  void forward(int n = 1) { // vertical at its calibrated min: full forward
+    for (int i = 0; i < n; ++i) {
+      cycle(at(1507.0f, 6.0f, 1477.0f, ++seq));
+    }
+  }
+  void right(int n = 1) {
+    for (int i = 0; i < n; ++i) {
+      cycle(at(2971.0f, 1510.0f, 1477.0f, ++seq));
+    }
+  }
+  /// From power-on: OK, then centred until the permit's latch is set (300 ms neutral).
+  void to_driving() {
+    centred(3);
+    expect_state(MonitorState::OK, monitor.monitor().state());
+    centred(10);
+    TEST_ASSERT_TRUE(permit.latched());
+  }
+  [[nodiscard]] bool command_is_zero() const {
+    return std::bit_cast<std::uint32_t>(command.x) == 0U &&
+           std::bit_cast<std::uint32_t>(command.y) == 0U &&
+           std::bit_cast<std::uint32_t>(command.twist) == 0U;
+  }
+  [[nodiscard]] MonitorState state() const { return monitor.monitor().state(); }
+};
+
+} // namespace
+
+TEST_CASE("STK-084 OK, driving forward with the permit open; one implausible sample: that "
+          "cycle +0.0 x3; SUSPECT, RECOVERING, OK after 3 good; then 0 until 300 ms neutral, "
+          "then the stick's value",
+          "[stick][monitor][wired][safety][REQ-STK-23]") {
+  Wired w;
+  w.to_driving();
+  w.forward();
+  TEST_ASSERT_EQUAL_FLOAT(1.0f, w.command.y);
+  // One implausible sample on a valid cycle: the twist's max above its limit (3060 mV).
+  RawSample spike = at(1507.0f, 6.0f, 1477.0f, ++w.seq);
+  spike.twist_max_mv = 3200.0f;
+  w.cycle(spike);
+  TEST_ASSERT_TRUE(w.published && w.command_is_zero());
+  expect_state(MonitorState::SUSPECT, w.state());
+  TEST_ASSERT_TRUE(w.reason == HoldReason::STICK_CHECK);
+  // Forward held: SUSPECT -> RECOVERING (1st good), RECOVERING (2nd), OK (3rd), all held at 0.
+  w.forward();
+  expect_state(MonitorState::RECOVERING, w.state());
+  TEST_ASSERT_TRUE(w.command_is_zero());
+  w.forward();
+  expect_state(MonitorState::RECOVERING, w.state());
+  TEST_ASSERT_TRUE(w.command_is_zero());
+  w.forward();
+  expect_state(MonitorState::OK, w.state());
+  TEST_ASSERT_TRUE(w.command_is_zero()); // OK, but C1's latch was cleared: centre first
+  TEST_ASSERT_TRUE(w.reason == HoldReason::CENTRE_FIRST);
+  w.forward(20); // still forward: never resumes by itself
+  TEST_ASSERT_TRUE(w.command_is_zero());
+  // Centred: held for the cycles under 300 ms, allowed from the first at 300 ms or later.
+  const std::uint32_t t0 = w.now_ms;
+  while (w.now_ms - t0 < 300) {
+    w.centred();
+    TEST_ASSERT_FALSE(w.permit.latched());
+  }
+  w.centred();
+  TEST_ASSERT_TRUE(w.permit.latched());
+  w.forward();
+  TEST_ASSERT_EQUAL_FLOAT(1.0f, w.command.y);
+}
+
+TEST_CASE("STK-092 keys: full right held in INIT, SUSPECT, FAULT and CALIBRATING gives joy_key 0, "
+          "no flick; a remote key still sets joy_key",
+          "[stick][monitor][wired][REQ-STK-20]") {
+  Wired w; // INIT: before any window (the sequences still 0)
+  w.cycle(at(2971.0f, 1510.0f, 1477.0f, 0));
+  expect_state(MonitorState::INIT, w.state());
+  TEST_ASSERT_EQUAL_UINT32(0, w.key);
+  TEST_ASSERT_EQUAL_UINT32(0, w.flick);
+  w.remote = kKeys.up;
+  w.cycle(at(2971.0f, 1510.0f, 1477.0f, 0));
+  TEST_ASSERT_EQUAL_UINT32(kKeys.up, w.key);
+  w.remote = 0;
+  // SUSPECT: OK first, then a NaN twist with the stick full right.
+  w.right(3);
+  expect_state(MonitorState::OK, w.state());
+  TEST_ASSERT_EQUAL_UINT32(kKeys.right, w.key);
+  RawSample nan = at(2971.0f, 1510.0f, 1477.0f, ++w.seq);
+  nan.twist_mean_mv = std::numeric_limits<float>::quiet_NaN();
+  w.cycle(nan);
+  expect_state(MonitorState::SUSPECT, w.state());
+  TEST_ASSERT_EQUAL_UINT32(0, w.key);
+  TEST_ASSERT_EQUAL_UINT32(0, w.flick);
+  // FAULT: two more.
+  w.cycle(nan);
+  w.cycle(nan);
+  expect_state(MonitorState::FAULT, w.state());
+  w.right(5);
+  TEST_ASSERT_EQUAL_UINT32(0, w.key);
+  TEST_ASSERT_EQUAL_UINT32(0, w.flick);
+  w.remote = kKeys.left;
+  w.right();
+  TEST_ASSERT_EQUAL_UINT32(kKeys.left, w.key);
+  w.remote = 0;
+  // CALIBRATING.
+  w.calibrating = true;
+  w.right(3);
+  expect_state(MonitorState::CALIBRATING, w.state());
+  TEST_ASSERT_EQUAL_UINT32(0, w.key);
+  TEST_ASSERT_EQUAL_UINT32(0, w.flick);
+}
+
+TEST_CASE("STK-093 keys: full right held through SUSPECT -> RECOVERING: 0 in SUSPECT; in "
+          "RECOVERING the key re-engages with one flick",
+          "[stick][monitor][wired][REQ-STK-20]") {
+  Wired w;
+  w.right(3);
+  expect_state(MonitorState::OK, w.state());
+  w.right();
+  TEST_ASSERT_EQUAL_UINT32(kKeys.right, w.key);
+  TEST_ASSERT_EQUAL_UINT32(0, w.flick); // held: no new flick
+  RawSample high = at(2971.0f, 1510.0f, 1477.0f, ++w.seq);
+  high.horizontal.max_mv = 3100.0f; // above board 2's horizontal limit, 3071
+  w.cycle(high);
+  expect_state(MonitorState::SUSPECT, w.state());
+  TEST_ASSERT_EQUAL_UINT32(0, w.key);
+  w.right();
+  expect_state(MonitorState::RECOVERING, w.state());
+  TEST_ASSERT_EQUAL_UINT32(kKeys.right, w.key);
+  TEST_ASSERT_EQUAL_UINT32(kKeys.right, w.flick); // one flick
+  w.right();
+  TEST_ASSERT_EQUAL_UINT32(kKeys.right, w.key);
+  TEST_ASSERT_EQUAL_UINT32(0, w.flick); // and only one
+}
+
+TEST_CASE("STK-094 the button pressed in each monitor state and on an invalid cycle: the XYTwist "
+          "button bit is set every time",
+          "[stick][monitor][wired][REQ-STK-20]") {
+  Wired w;
+  w.button = true;
+  w.cycle(at(1507.0f, 1510.0f, 1477.0f, 0)); // INIT
+  expect_state(MonitorState::INIT, w.state());
+  TEST_ASSERT_TRUE(w.button_bit);
+  w.centred(3); // RECOVERING, RECOVERING, OK
+  expect_state(MonitorState::OK, w.state());
+  TEST_ASSERT_TRUE(w.button_bit);
+  RawSample failed = at(1507.0f, 1510.0f, 1477.0f, ++w.seq);
+  failed.vertical.mean_mv = std::nullopt; // an invalid cycle: SUSPECT
+  w.cycle(failed);
+  expect_state(MonitorState::SUSPECT, w.state());
+  TEST_ASSERT_TRUE(w.published && w.button_bit);
+  w.centred();
+  expect_state(MonitorState::RECOVERING, w.state());
+  TEST_ASSERT_TRUE(w.button_bit);
+  w.cycle(failed);
+  w.cycle(failed); // the 3rd bad of the window: FAULT
+  expect_state(MonitorState::FAULT, w.state());
+  TEST_ASSERT_TRUE(w.button_bit);
+  w.centred();
+  TEST_ASSERT_TRUE(w.button_bit);
+  w.calibrating = true;
+  w.centred();
+  expect_state(MonitorState::CALIBRATING, w.state());
+  TEST_ASSERT_TRUE(w.button_bit);
+  w.post = PostGate::PENDING; // before POST pass the bit is released (C3's REQ-STK-15)
+  w.centred();
+  TEST_ASSERT_FALSE(w.button_bit);
+}
+
+TEST_CASE("STK-096 6 mV drives full: OK, vertical 6 mV, the permit open after 300 ms neutral: y = "
+          "+1.0 x the speed scale; state OK",
+          "[stick][monitor][wired][safety]") {
+  Wired w;
+  w.to_driving();
+  for (int i = 0; i < 30; ++i) {
+    w.cycle(at(1507.0f, 6.0f, 1477.0f, ++w.seq));
+    expect_state(MonitorState::OK, w.state());
+    TEST_ASSERT_EQUAL_HEX32(std::bit_cast<std::uint32_t>(1.0f),
+                            std::bit_cast<std::uint32_t>(w.command.y)); // drive speed 10: x 1.0
+  }
+}
+
+TEST_CASE("STK-097 RESIDUAL (D2): each axis at 0 mV with the permit open: state OK; full left, "
+          "full forward, full counter-clockwise",
+          "[stick][monitor][wired][safety][residual]") {
+  struct Axis {
+    float h, v, tw;
+    float Command::*field;
+    float want;
+  };
+  const std::array<Axis, 3> axes{{{0.0f, 1510.0f, 1477.0f, &Command::x, -1.0f},
+                                  {1507.0f, 0.0f, 1477.0f, &Command::y, 1.0f},
+                                  {1507.0f, 1510.0f, 0.0f, &Command::twist, -1.0f}}};
+  for (const Axis &a : axes) {
+    Wired w;
+    w.to_driving();
+    for (int i = 0; i < 10; ++i) {
+      w.cycle(at(a.h, a.v, a.tw, ++w.seq));
+      expect_state(MonitorState::OK, w.state());
+    }
+    TEST_ASSERT_EQUAL_FLOAT(a.want, w.command.*a.field);
+  }
+}
+
+TEST_CASE("STK-098 rail while driving: forward held, then horizontal 3300 mV for 1 s, then "
+          "centred: deflected before; +0.0 from the first rail cycle; FAULT on the 3rd; 0 after "
+          "centring (latched)",
+          "[stick][monitor][wired][safety]") {
+  Wired w;
+  w.to_driving();
+  w.forward(5);
+  TEST_ASSERT_EQUAL_FLOAT(1.0f, w.command.y);
+  for (int i = 1; i * 35 <= 1000; ++i) {
+    w.cycle(at(3300.0f, 6.0f, 1477.0f, ++w.seq));
+    TEST_ASSERT_TRUE(w.published && w.command_is_zero());
+    expect_state(i < 3 ? MonitorState::SUSPECT : MonitorState::FAULT, w.state());
+  }
+  expect_reason({SampleFault::HIGH, StickAxis::HORIZONTAL}, w.monitor.monitor().fault_reason());
+  w.centred(100);
+  expect_state(MonitorState::FAULT, w.state());
+  TEST_ASSERT_TRUE(w.command_is_zero());
+  w.forward(5);
+  TEST_ASSERT_TRUE(w.command_is_zero());
+  TEST_ASSERT_TRUE(w.reason == HoldReason::STICK_FAULT);
+}
+
+TEST_CASE("STK-101 the hold reason with the monitor writing stick health: each monitor state "
+          "with each other permit condition, first in REQ-STK-13's order",
+          "[stick][monitor][wired][REQ-STK-13][REQ-STK-27]") {
+  for (std::size_t s = 0; s < kMonitorStateCount; ++s) {
+    const auto state = static_cast<MonitorState>(s);
+    StickMonitor m;
+    Peer::set_state(m, static_cast<std::uint8_t>(s));
+    const StickHealth health = stick_health(m.health());
+    const bool calibrating = state == MonitorState::CALIBRATING; // §3.2: they go together
+    for (int failing = 0; failing <= 5; ++failing) {             // 0: none of conditions 1-5 fails
+      PermitInputs in{.gate_open = failing != 1,
+                      .motion_guard_ok = failing != 2,
+                      .calibrating = calibrating || failing == 3,
+                      .calibration_measured = failing != 4,
+                      .post = failing == 5 ? PostGate::PENDING : PostGate::PASS,
+                      .health = health};
+      HoldReason want = HoldReason::CENTRE_FIRST; // a fresh permit, stick forward
+      if (failing == 1) {
+        want = HoldReason::GATE_SHUT;
+      } else if (failing == 2) {
+        want = HoldReason::MOTION_GUARD;
+      } else if (in.calibrating) {
+        want = HoldReason::CALIBRATING; // CALIBRATING's hold is C1's, before the stick reasons
+      } else if (failing == 4) {
+        want = HoldReason::NOT_CALIBRATED;
+      } else if (failing == 5) {
+        want = HoldReason::POST_NOT_PASSED;
+      } else if (state == MonitorState::FAULT) {
+        want = HoldReason::STICK_FAULT;
+      } else if (state != MonitorState::OK) { // INIT, SUSPECT, RECOVERING
+        want = HoldReason::STICK_CHECK;
+      }
+      OutputPermit p;
+      const Permit got = p.cycle(in, Position{0.0f, 1.0f, 0.0f}, 1000);
+      TEST_ASSERT_EQUAL_UINT8(static_cast<std::uint8_t>(want),
+                              static_cast<std::uint8_t>(got.reason));
+      TEST_ASSERT_FALSE(got.output);
+    }
+  }
 }

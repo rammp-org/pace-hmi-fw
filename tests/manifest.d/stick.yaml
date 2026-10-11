@@ -10,9 +10,9 @@
   title: stick pipeline golden vectors, hazards pinned as-is (open/short pot, invalid cycle), the output permit
   level: L1
   path: components/stick/test
-  requirements: [REQ-STK-01, REQ-STK-02, REQ-STK-03, REQ-STK-05, REQ-STK-06, REQ-STK-08,
-                 REQ-STK-09, REQ-STK-10, REQ-STK-11, REQ-STK-12, REQ-STK-13, REQ-STK-14,
-                 REQ-STK-15, REQ-STK-16, REQ-STK-18, REQ-STK-19, REQ-STK-21, REQ-STK-22,
+  requirements: [REQ-STK-01, REQ-STK-02, REQ-STK-03, REQ-STK-06, REQ-STK-08, REQ-STK-09,
+                 REQ-STK-10, REQ-STK-11, REQ-STK-12, REQ-STK-13, REQ-STK-15, REQ-STK-16,
+                 REQ-STK-17, REQ-STK-18, REQ-STK-19, REQ-STK-20, REQ-STK-21, REQ-STK-22,
                  REQ-STK-23, REQ-STK-24, REQ-STK-25, REQ-STK-26, REQ-STK-27]
   resources: [host]
   timeout_s: 300
