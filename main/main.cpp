@@ -1324,6 +1324,10 @@ extern "C" void app_main(void) {
                   {{.unit = ADC_UNIT_1, .channel = ADC_CHANNEL_0, .attenuation = ADC_ATTEN_DB_12},
                    {.unit = ADC_UNIT_1, .channel = ADC_CHANNEL_1, .attenuation = ADC_ATTEN_DB_12}},
               .convert_mode = ADC_CONV_SINGLE_UNIT_1,
+              // PROPOSAL (docs/plans/hazard-c2-cadc-priority.md; the owner's E5): the X/Y
+              // producer at lv_task's priority, so a busy UI task on its core cannot starve it
+              // into C2's STALE fault. espp's default is 5.
+              .task_priority = 20,
               .window_size_bytes = 1024,
               .log_level = espp::Logger::Verbosity::WARN},
       .twist_lowpass = {.time_constant = 0.08f},
