@@ -68,6 +68,9 @@ BANDS = {
     "joy.twist_rest": "abs:30", "joy.x_noise": "limits", "joy.y_noise": "limits",
     "joy.twist_noise": "limits", "joy.cal_saved": "exact", "joy.x_cal_off": "limits",
     "joy.y_cal_off": "limits", "joy.twist_cal_off": "limits", "joy.button_idle": "exact",
+    # bench rows (Need::BENCH): only an image with the allocation guard reports them, so a
+    # baseline taken without it has none and such a run differs in its check IDs
+    "mem.alloc_adc": "exact", "mem.alloc_lvgl": "any", "mem.alloc_rtps": "any",
     "pc.report_complete": "exact", "pc.spec_match": "exact", "pc.adc_rx_hz": "limits",
 }
 

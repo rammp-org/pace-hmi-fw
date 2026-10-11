@@ -52,6 +52,31 @@ menu "RAMMP HMI"
         default 1 if HMI_BENCH_STICK_INJECT
         default 0
 
+    config HMI_BENCH_ALLOC_GUARD
+        bool "Bench: count heap allocations per safety task after start-up (TS-DET-08)"
+        depends on HMI_REMOTE_UI
+        select HEAP_USE_HOOKS
+        default n
+        help
+            The on-chip allocation guard (components/alloc_guard). ESP-IDF's
+            heap hook (HEAP_USE_HOOKS, selected here) counts, from the moment
+            app_main parks, every heap allocation made by the tasks the self
+            test names: Read ADC, lv_task and rtps_pub. The self test reports
+            them as mem.alloc_adc (must be 0), mem.alloc_lvgl and
+            mem.alloc_rtps (counted, not limited); builds without this option
+            leave those rows out of the run.
+
+            The hook runs after every allocation of every task, in IRAM: a
+            few loads and compares, nothing else. Bench only (CS-LAY-09):
+            never in sdkconfig.defaults, which ships (L0 checks it);
+            ci/sdkconfig.allocguard turns it on for the alloc_guard variant.
+
+    # Hidden: CONFIG_HMI_BENCH_ALLOC_GUARD as 0/1 (see HMI_BENCH_DA7280_TEST_AS_INT).
+    config HMI_BENCH_ALLOC_GUARD_AS_INT
+        int
+        default 1 if HMI_BENCH_ALLOC_GUARD
+        default 0
+
     # Hidden: 1 when the bootloader may skip validating the app image (any
     # BOOTLOADER_SKIP_VALIDATE_* option). The quick POST's img.ok takes "verified" from
     # the bootloader's own validation and static_asserts this is 0 (hazard-c3-spec.md

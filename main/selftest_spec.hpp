@@ -29,6 +29,11 @@
  *                   Everything that needs the MCB itself (McbStatus arriving, its
  *                   timing, a subscriber for the joystick stream) is REQUIRED, so
  *                   an unplugged cable or a silent MCB fails wherever it is run.
+ *   Need::BENCH     reported only by a build that has what measures it (the
+ *                   on-chip allocation guard, CONFIG_HMI_BENCH_ALLOC_GUARD); any
+ *                   other build leaves the row out of the run altogether, so its
+ *                   report is exactly the rows before it. Reported but not
+ *                   measurable: SKIP. These rows come last (asserted below).
  *
  * The limits come from measurements on the bench unit, with margin for
  * unit-to-unit spread. A check that fails on a healthy unit means the limit
@@ -63,6 +68,7 @@ enum class Need : uint8_t {
   REQUIRED, ///< FAIL
   OPTIONAL, ///< SKIP
   REMOTE,   ///< FAIL on a run requested over RTPS, SKIP on a local one
+  BENCH,    ///< reported only by a build that measures it; SKIP when it cannot
 };
 
 // How a run is paced. Every check below is measured inside one of these.
@@ -130,6 +136,13 @@ inline constexpr int kRenderFrames = 30;
  *
  * net.wifi_rssi  Only on WiFi (SKIP on Ethernet). Below about -75 dBm 2.4 GHz
  *            starts losing frames, which shows up as rtps.mcb_loss and rtt.
+ *
+ * mem.alloc_*  Bench builds with the allocation guard only (TS-DET-08; Need::BENCH):
+ *            heap allocations the task in kAllocRows made since app_main parked,
+ *            the detail giving the first one's size. Read ADC is a safety task
+ *            and allocates nothing after start-up (CS-SAF-04): 0..0. lv_task
+ *            (LVGL's own allocations are allowed, CS-MEM-02) and rtps_pub are
+ *            counted, not limited, until the islands rework says what they may do.
  */
 
 /// One check, in kChecks' order: the position is the report's check index.
@@ -190,6 +203,9 @@ enum class Id : uint8_t {
   JOY_Y_CAL,
   JOY_TWIST_CAL,
   JOY_BUTTON,
+  MEM_ALLOC_ADC,
+  MEM_ALLOC_LVGL,
+  MEM_ALLOC_RTPS,
   COUNT, ///< not a check: how many there are (asserted equal to kChecks.size())
 };
 
@@ -284,6 +300,10 @@ inline constexpr std::array kChecks{
     Check{Id::JOY_Y_CAL,       "joy.y_cal_off",     "mV",   0,     40,     Need::OPTIONAL, "Y rest vs its calibrated centre"},
     Check{Id::JOY_TWIST_CAL,   "joy.twist_cal_off", "mV",   0,     50,     Need::OPTIONAL, "Twist rest vs saved centre"},
     Check{Id::JOY_BUTTON,      "joy.button_idle",   "",     1,     1,      Need::REQUIRED, "Stick button not stuck pressed"},
+    // bench only, last (Need::BENCH): heap allocations after start-up, per task (kAllocRows)
+    Check{Id::MEM_ALLOC_ADC,   "mem.alloc_adc",     "",     0,     0,      Need::BENCH,    "Read ADC allocated nothing after boot"},
+    Check{Id::MEM_ALLOC_LVGL,  "mem.alloc_lvgl",    "",     0,     kAnyHi, Need::BENCH,    "lv_task allocations after boot"},
+    Check{Id::MEM_ALLOC_RTPS,  "mem.alloc_rtps",    "",     0,     kAnyHi, Need::BENCH,    "rtps_pub allocations after boot"},
 };
 // clang-format on
 
@@ -317,8 +337,8 @@ static_assert(ids_match_rows(), "Id and kChecks disagree: same checks, same orde
 /// @return true when every row is well formed
 consteval bool rows_well_formed() {
   return std::all_of(kChecks.begin(), kChecks.end(), [](const Check &c) {
-    const bool need_ok =
-        c.need == Need::REQUIRED || c.need == Need::OPTIONAL || c.need == Need::REMOTE;
+    const bool need_ok = c.need == Need::REQUIRED || c.need == Need::OPTIONAL ||
+                         c.need == Need::REMOTE || c.need == Need::BENCH;
     return c.lo <= c.hi && !c.name.empty() && !c.why.empty() && need_ok;
   });
 }
@@ -338,6 +358,69 @@ consteval bool names_unique() {
   return true;
 }
 static_assert(names_unique(), "two selftest_spec.hpp rows share a name");
+
+/// @brief How many rows a build reports: all of them with the allocation guard, else every row
+///        before the first Need::BENCH one.
+/// @param alloc_guard the build has the allocation guard (CONFIG_HMI_BENCH_ALLOC_GUARD)
+/// @return the number of rows in the run's report, from row 0 (a uint8_t, as the report has it)
+[[nodiscard]] constexpr uint8_t reported_rows(bool alloc_guard) {
+  const auto *end = alloc_guard ? kChecks.end()
+                                : std::find_if(kChecks.begin(), kChecks.end(), [](const Check &c) {
+                                    return c.need == Need::BENCH;
+                                  });
+  return static_cast<uint8_t>(end - kChecks.begin());
+}
+
+/// @brief The Need::BENCH rows are the table's last ones, so a build without them reports a
+///        prefix of the table and every index stays what it is.
+/// @return true when no other row follows a Need::BENCH one
+consteval bool bench_rows_last() {
+  return std::all_of(kChecks.begin() + reported_rows(false), kChecks.end(),
+                     [](const Check &c) { return c.need == Need::BENCH; });
+}
+static_assert(bench_rows_last(), "a selftest_spec.hpp row follows a Need::BENCH row");
+
+/// @brief A mem.alloc_* row and the task whose allocations it counts.
+struct AllocRow {
+  Id id;                 ///< the row
+  std::string_view task; ///< the FreeRTOS task name (at most 15 characters)
+};
+
+/// @brief The tasks the allocation guard watches, in its slot order: slot i is kAllocRows[i].
+inline constexpr std::array kAllocRows{
+    AllocRow{Id::MEM_ALLOC_ADC, "Read ADC"},
+    AllocRow{Id::MEM_ALLOC_LVGL, "lv_task"},
+    AllocRow{Id::MEM_ALLOC_RTPS, "rtps_pub"},
+};
+
+/// @brief The task names of kAllocRows, in its order (what the guard's start() takes).
+inline constexpr std::array<std::string_view, kAllocRows.size()> kAllocTasks = [] {
+  std::array<std::string_view, kAllocRows.size()> tasks{};
+  for (std::size_t i = 0; i < kAllocRows.size(); ++i) {
+    tasks[i] = kAllocRows[i].task;
+  }
+  return tasks;
+}();
+
+/// @brief Every kAllocRows row is a Need::BENCH row, each one once, and each task name fits
+///        FreeRTOS's (15 characters and the NUL).
+/// @return true when kAllocRows is consistent with kChecks
+consteval bool alloc_rows_ok() {
+  for (std::size_t i = 0; i < kAllocRows.size(); ++i) {
+    const AllocRow &row = kAllocRows[i];
+    if (check(row.id).need != Need::BENCH || row.task.empty() || row.task.size() > 15) {
+      return false;
+    }
+    for (std::size_t j = i + 1; j < kAllocRows.size(); ++j) {
+      if (kAllocRows[j].id == row.id) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+static_assert(alloc_rows_ok(),
+              "kAllocRows names a row that is not Need::BENCH, twice, or a bad task");
 
 } // namespace selftest_spec
 

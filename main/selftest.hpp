@@ -15,12 +15,17 @@
  */
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
+
+#include "alloc_guard/config.hpp"
 
 /// Board-specific probes the runner calls. main.cpp fills these in; one left
 /// empty makes its check unmeasurable, which selftest_spec.hpp turns into a FAIL
@@ -53,6 +58,11 @@ struct SelfTestPlatform {
   /// twist) in the saved calibration; nullopt while the compiled-in defaults
   /// are in use because nothing is saved.
   std::function<std::optional<std::array<float, 3>>()> joystick_cal_centers_mv;
+  /// Bench builds with the allocation guard (CONFIG_HMI_BENCH_ALLOC_GUARD) only, empty in any
+  /// other: the heap allocations since start-up of the task in guard slot `slot`
+  /// (selftest_spec.hpp kAllocRows[slot]), and the detail for its row; no count, and why, when
+  /// no such task has been watched.
+  std::function<std::pair<std::optional<int32_t>, std::string>(std::size_t slot)> allocs_after_boot;
 };
 
 enum class SelfTestTrigger {

@@ -4,6 +4,7 @@
 // scripts/rammp_rtps.py (used by rtps_selftest.py) makes of the header. Then the table's
 // invariants, and the behaviour each row carries (in_limits, required, is_yes_no).
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -48,6 +49,8 @@ const char *need_name(Need need) {
     return "optional";
   case Need::REMOTE:
     return "remote";
+  case Need::BENCH:
+    return "bench";
   }
   return "?";
 }
@@ -55,17 +58,18 @@ const char *need_name(Need need) {
 // Id's enumerator names, in declaration order, so a row's `Id::X` can be compared with
 // the golden "X". Kept by hand like Id itself; SST-001 fails if the two drift.
 constexpr std::string_view kIdNames[] = {
-    "SYS_RESET",     "SYS_CPU",        "SYS_UPTIME",      "LOG_CAPTURE",     "NET_LINK",
-    "NET_IP",        "NET_WIFI_RSSI",  "RTPS_LINK",       "RTPS_MCB_PERIOD", "RTPS_MCB_GAP",
-    "RTPS_MCB_LOSS", "RTPS_ADC_HZ",    "RTPS_RTT_P50",    "RTPS_RTT_P99",    "RTPS_PING_LOSS",
-    "MEM_INT_FREE",  "MEM_INT_MIN",    "MEM_INT_BLOCK",   "MEM_DMA_FREE",    "MEM_DMA_MIN",
-    "MEM_DMA_BLOCK", "MEM_PSRAM_FREE", "MEM_HEAP_OK",     "MEM_STK_LVGL",    "MEM_STK_ADC",
-    "MEM_STK_RTPS",  "I2C_MISSING",    "I2C_COUNT",       "IMU_ACCEL",       "RTC_TICK",
-    "PWR_VBAT",      "HAP_DRV_ID",     "HAP_DRV_FAULT",   "HAP_DRV_PLAY",    "HAP_DA7280",
-    "DISP_DIRECT",   "DISP_BACKLIGHT", "TIME_RENDER_AVG", "TIME_RENDER_MAX", "TIME_UI_STALL",
-    "TIME_ADC_AVG",  "TIME_ADC_MAX",   "JOY_VALID",       "JOY_X",           "JOY_Y",
-    "JOY_TWIST",     "JOY_X_NOISE",    "JOY_Y_NOISE",     "JOY_TWIST_NOISE", "JOY_CAL",
-    "JOY_X_CAL",     "JOY_Y_CAL",      "JOY_TWIST_CAL",   "JOY_BUTTON",
+    "SYS_RESET",      "SYS_CPU",        "SYS_UPTIME",      "LOG_CAPTURE",     "NET_LINK",
+    "NET_IP",         "NET_WIFI_RSSI",  "RTPS_LINK",       "RTPS_MCB_PERIOD", "RTPS_MCB_GAP",
+    "RTPS_MCB_LOSS",  "RTPS_ADC_HZ",    "RTPS_RTT_P50",    "RTPS_RTT_P99",    "RTPS_PING_LOSS",
+    "MEM_INT_FREE",   "MEM_INT_MIN",    "MEM_INT_BLOCK",   "MEM_DMA_FREE",    "MEM_DMA_MIN",
+    "MEM_DMA_BLOCK",  "MEM_PSRAM_FREE", "MEM_HEAP_OK",     "MEM_STK_LVGL",    "MEM_STK_ADC",
+    "MEM_STK_RTPS",   "I2C_MISSING",    "I2C_COUNT",       "IMU_ACCEL",       "RTC_TICK",
+    "PWR_VBAT",       "HAP_DRV_ID",     "HAP_DRV_FAULT",   "HAP_DRV_PLAY",    "HAP_DA7280",
+    "DISP_DIRECT",    "DISP_BACKLIGHT", "TIME_RENDER_AVG", "TIME_RENDER_MAX", "TIME_UI_STALL",
+    "TIME_ADC_AVG",   "TIME_ADC_MAX",   "JOY_VALID",       "JOY_X",           "JOY_Y",
+    "JOY_TWIST",      "JOY_X_NOISE",    "JOY_Y_NOISE",     "JOY_TWIST_NOISE", "JOY_CAL",
+    "JOY_X_CAL",      "JOY_Y_CAL",      "JOY_TWIST_CAL",   "JOY_BUTTON",      "MEM_ALLOC_ADC",
+    "MEM_ALLOC_LVGL", "MEM_ALLOC_RTPS",
 };
 static_assert(std::size(kIdNames) == kChecks.size());
 
@@ -170,7 +174,8 @@ TEST_CASE("SST-005 an unmeasurable check fails when required, and a remote one o
     char at[96];
     where(at, i, kGolden[i].name);
     const std::string_view need(kGolden[i].need);
-    TEST_ASSERT_EQUAL_MESSAGE(need != "optional", c.required(true), at);
+    // optional and bench rows SKIP when they cannot be measured, wherever the run came from
+    TEST_ASSERT_EQUAL_MESSAGE(need == "required" || need == "remote", c.required(true), at);
     TEST_ASSERT_EQUAL_MESSAGE(need == "required", c.required(false), at);
   }
 }
@@ -186,4 +191,45 @@ TEST_CASE("SST-006 a yes/no check is the one with limits 1..1 and no unit", "[se
   TEST_ASSERT_TRUE(selftest_spec::check(Id::SYS_RESET).is_yes_no());
   TEST_ASSERT_FALSE(selftest_spec::check(Id::I2C_MISSING).is_yes_no()); // 0..0: a count
   TEST_ASSERT_FALSE(selftest_spec::check(Id::JOY_VALID).is_yes_no());   // 99..100 %
+}
+
+TEST_CASE("SST-007 the bench rows come last: a build without the allocation guard reports the "
+          "rows before them, one with it every row",
+          "[selftest_spec]") {
+  std::size_t first_bench = std::size(kGolden);
+  for (std::size_t i = 0; i < std::size(kGolden); ++i) {
+    if (std::string_view(kGolden[i].need) == "bench") {
+      first_bench = std::min(first_bench, i);
+    } else {
+      char at[96];
+      where(at, i, kGolden[i].name);
+      TEST_ASSERT_TRUE_MESSAGE(i < first_bench, at); // no other row after a bench row
+    }
+  }
+  TEST_ASSERT_EQUAL_UINT32(54U, first_bench); // the 54 rows of the B3 baseline
+  TEST_ASSERT_EQUAL_UINT32(first_bench, selftest_spec::reported_rows(false));
+  TEST_ASSERT_EQUAL_UINT32(kChecks.size(), selftest_spec::reported_rows(true));
+}
+
+TEST_CASE("SST-008 each mem.alloc_* row watches its task: Read ADC 0..0, lv_task and rtps_pub "
+          "counted with no upper limit",
+          "[selftest_spec]") {
+  TEST_ASSERT_EQUAL_UINT32(3U, selftest_spec::kAllocRows.size());
+  const struct {
+    Id id;
+    const char *task;
+    int32_t hi;
+  } want[] = {{Id::MEM_ALLOC_ADC, "Read ADC", 0},
+              {Id::MEM_ALLOC_LVGL, "lv_task", kAnyHi},
+              {Id::MEM_ALLOC_RTPS, "rtps_pub", kAnyHi}};
+  for (std::size_t i = 0; i < std::size(want); ++i) {
+    const selftest_spec::AllocRow &row = selftest_spec::kAllocRows[i];
+    TEST_ASSERT_TRUE(row.id == want[i].id);
+    TEST_ASSERT_TRUE(row.task == want[i].task);
+    TEST_ASSERT_TRUE(selftest_spec::kAllocTasks[i] == want[i].task);
+    const Check &c = selftest_spec::check(row.id);
+    TEST_ASSERT_TRUE(c.need == Need::BENCH);
+    TEST_ASSERT_EQUAL_INT32(0, c.lo);
+    TEST_ASSERT_EQUAL_INT32(want[i].hi, c.hi);
+  }
 }

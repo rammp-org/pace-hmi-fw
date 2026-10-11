@@ -95,14 +95,18 @@ def for_link(name: str, value: str) -> str:
 
 
 def selftest_count(tree: pathlib.Path) -> int | None:
-    """How many checks the tree's main/selftest_spec.hpp declares (kChecks), parsed the way
-    rtps_selftest.py parses it; None when the tree has no such file."""
+    """How many checks a bench build of the tree reports, from its main/selftest_spec.hpp
+    (kChecks) parsed the way rtps_selftest.py parses it: every row but the bench rows
+    (Need::BENCH), which only a build with the allocation guard reports
+    (CONFIG_HMI_BENCH_ALLOC_GUARD, ci/sdkconfig.allocguard): such an image's marker reads that
+    many more. None when the tree has no such file."""
     path = tree / "main" / "selftest_spec.hpp"
     if not path.exists():
         return None
     sys.path.insert(0, str(common.REPO / "scripts"))
     import rammp_rtps  # the parser only; the file is the tree's
-    return len(rammp_rtps.parse_selftest_spec(path.read_text(encoding="utf-8")))
+    rows = rammp_rtps.parse_selftest_spec(path.read_text(encoding="utf-8"))
+    return sum(1 for row in rows if row.need != "bench")
 
 
 def idle_checks_off(tree: pathlib.Path) -> bool:
