@@ -39,6 +39,7 @@ B5''-12 with C2 (C2 E9: the stick monitor is the only writer of stick health).
 
 from __future__ import annotations
 
+import datetime
 import time
 
 import hazard_grade as hg
@@ -80,9 +81,11 @@ def wait_neutral_latch(rig: Rig) -> None:
 def driving_forward(rig: Rig, label: str = "enter") -> None:
     """Drive (sim `a`), centred until the neutral latch is set, then forward with XYTwist y > 0
     seen (set-up)."""
+    start = datetime.datetime.now()
     to_drive_by_mcb(rig, label)
     rig.centre()
     wait_neutral_latch(rig)  # C1 G1, after the gate opens
+    rig.setup_span(start)  # set-up, ungraded: a lapse in it does not void the step
     rig.forward()
     ok = rig.wait_y(lambda y: y > 0, 1.5)
     if not rig.st.check("set-up: driving forward (XYTwist y > 0)", ok, ""):

@@ -24,6 +24,7 @@ start mark (plus the command's one-way time), not when the reply comes.
 
 from __future__ import annotations
 
+import datetime
 import pathlib
 import re
 import statistics
@@ -48,9 +49,11 @@ def watchdog_panics(tree: pathlib.Path) -> bool:
 
 def drive_y_half(rig: Rig, label: str) -> None:
     """Neutral, sim a, Drive, then full forward until XYTwist y > 0.5, held 1 s (set-up)."""
+    start = datetime.datetime.now()
     to_drive_by_mcb(rig, label)
     rig.centre()
     wait_neutral_latch(rig)  # the gate open and the 300 ms neutral latch set (C1)
+    rig.setup_span(start)  # set-up, ungraded: a lapse in it does not void the step
     rig.forward()
     ok = rig.wait_y(lambda y: y > 0.5, 2.0)
     if not rig.st.check(f"set-up {label}: XYTwist y > 0.5", ok, ""):

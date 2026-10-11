@@ -21,6 +21,10 @@ How the remote UI is shared. The board serves one client, so the stick refresh (
 sent under one lock, and TAP is done as PRESS, 150 ms, RELEASE so no single command blocks
 the refresh for long. A refresh more than INJECT_LAPSE_S after the previous one is recorded;
 a step whose injection lapsed in a graded window is not graded (NOT_RUN, a bench problem).
+A graded window is all of the step except a drive set-up that succeeded (Rig.setup_span:
+driving_forward, drive_y_half, from their start to hold reason NONE), which no grader reads
+unless the step says so (hazard_steps.SETUP_GRADED); see graded_lapses. A set-up that fails,
+a lapse among its causes or not, is NOT_RUN as before.
 
 Verdicts. A step is PASS or FAIL on its graded checks. It is NOT_RUN when the firmware lacks
 what it needs (no STATE, a STATE field that is null, a verb "not wired", no stick injection)
@@ -246,6 +250,21 @@ class Injector:
         self._thread.join(timeout=2.0)
 
 
+def graded_lapses(lapses: list[tuple[str, float]],
+                  setups: list[tuple[datetime.datetime, datetime.datetime]]
+                  ) -> list[tuple[str, float]]:
+    """The lapses (stick_lapses) in a graded window: all but those whose whole gap lies inside
+    a set-up span that succeeded. A gap that reaches past the span's end counts: the step's
+    graded part may have started without the injection."""
+    out = []
+    for sent, gap in lapses:
+        b = datetime.datetime.fromisoformat(sent)
+        a = b - datetime.timedelta(seconds=gap)
+        if not any(s0 <= a and b <= s1 for s0, s1 in setups):
+            out.append((sent, gap))
+    return out
+
+
 def stick_lapses(rows: list[dict], pauses: list[datetime.datetime],
                  limit: float = INJECT_LAPSE_S) -> list[tuple[str, float]]:
     """Gaps over `limit` between consecutive STICK sends in the remote-UI log (rows with
@@ -354,6 +373,8 @@ class Rig:
         self.sim: peers.SimChild | None = None
         self.hmi = None
         self.inj: Injector | None = None
+        # drive set-ups that succeeded, wall clock as the remote-UI log (graded_lapses)
+        self.setup_spans: list[tuple[datetime.datetime, datetime.datetime]] = []
         self._io = threading.RLock()  # re-entered by the inline refresh before a command
         self._hmi_ui = None
         self._t0 = time.monotonic()
@@ -483,6 +504,11 @@ class Rig:
         if self.sim.reply(f"ongone {policy}", rf"on HMI gone: {policy}") is None:
             raise NotRun("bench", f"the sim did not take 'ongone {policy}'")
         self.trace.sent.append((round(time.monotonic(), 3), f"sim ongone {policy}"))
+
+    def setup_span(self, start: datetime.datetime) -> None:
+        """A drive set-up that succeeded, from `start` (datetime.now() at its start) to now:
+        no grader reads it unless its step is in hazard_steps.SETUP_GRADED (graded_lapses)."""
+        self.setup_spans.append((start, datetime.datetime.now()))
 
     def mark(self, label: str) -> float:
         """A mark in the sim's log just before an action; returns the runner's send time

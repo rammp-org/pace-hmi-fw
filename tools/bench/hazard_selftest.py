@@ -1290,6 +1290,80 @@ def t_stick_lapses() -> None:
     expect("0.28 s exactly is not", hazard_rig.stick_lapses([row(0), row(280)], []), [])
 
 
+def t_lapses_in_graded_windows() -> None:
+    """Only a lapse in a graded window voids a step (hazard_rig's docstring): one wholly in a
+    drive set-up that succeeded is recorded, not counted. c4c-514468b B5''-4: a 0.355 s STATE
+    reply at the Drive screen's load held the STICK refresh in the set-up."""
+    import datetime as dt
+    t0 = dt.datetime(2026, 10, 11, 4, 33, 44)
+
+    def at(s: float) -> dt.datetime:
+        return t0 + dt.timedelta(seconds=s)
+
+    def lapse(end: float, gap: float) -> tuple[str, float]:
+        return (at(end).isoformat(timespec="milliseconds"), gap)
+    setup = [(at(0.0), at(2.5))]
+    inside, past_end, after = lapse(2.145, 0.365), lapse(2.6, 0.3), lapse(5.0, 0.4)
+    expect("a lapse wholly in the set-up is not graded",
+           hazard_rig.graded_lapses([inside], setup), [])
+    expect("a gap reaching past the set-up's end is graded",
+           hazard_rig.graded_lapses([past_end], setup), [past_end])
+    expect("a lapse after the set-up is graded",
+           hazard_rig.graded_lapses([inside, after], setup), [after])
+    expect("no set-up span: every lapse is graded",
+           hazard_rig.graded_lapses([inside], []), [inside])
+
+    class FakeRig:
+        def __init__(self, st, script_lapses, spans, fail_setup):
+            self.st, self.inj = st, type("Inj", (), {"lapses": script_lapses})()
+            self.setup_spans, self.fail_setup = spans, fail_setup
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def collect(self):
+            return hg.Trace()
+
+        def end(self):
+            pass
+
+    def run(name: str, lapses: list, spans: list, fail_setup: bool = False) -> dict:
+        group = hazard_steps.STEP_GROUP[name]
+        steps = hazard_steps.MODULES[group].STEPS
+        saved_rig, saved_step = hazard_rig.Rig, steps[name]
+
+        def script(rig):
+            if rig.fail_setup:
+                raise hazard_rig.NotRun("bench", "the stick did not drive in the set-up")
+            return {}
+
+        def grade(st, tr, p):
+            st.check("graded", True, "")
+        hazard_rig.Rig = lambda ip, tree, out, st, *a, **k: FakeRig(st, lapses, spans,
+                                                                    fail_setup)
+        steps[name] = (script, grade, saved_step[2])
+        try:
+            with quiet(), tempfile.TemporaryDirectory() as tmp:
+                return hazard_steps.run_step(name, "0.0.0.0", pathlib.Path(tmp), common.REPO,
+                                             [group])
+        finally:
+            hazard_rig.Rig, steps[name] = saved_rig, saved_step
+    r = run("B5g", [inside], setup)
+    expect("B5g: a set-up lapse only: graded, the lapse recorded",
+           (r["verdict"], r["records"].get("injection_lapses_in_setup")), ("PASS", [inside]))
+    r = run("B5g", [inside, after], setup)
+    expect("B5g: a lapse in a graded window: NOT_RUN",
+           (r["verdict"], "graded window" in r.get("reason", "")), ("NOT_RUN", True))
+    r = run("B5g", [inside], setup, fail_setup=True)
+    expect("B5g: a set-up that failed (a lapse or not): NOT_RUN",
+           (r["verdict"], "set-up" in r.get("reason", "")), ("NOT_RUN", True))
+    r = run("C2-8", [inside], setup)
+    expect("C2-8 grades its set-up: a set-up lapse voids it", r["verdict"], "NOT_RUN")
+
+
 def t_restart_tile_and_refresh() -> None:
     names = hazard_rig.skunk_actions(common.REPO)
     expect("the tree's Skunk Works tiles", names[-1], "RESTART_HMI")
@@ -1447,6 +1521,9 @@ CASES = [
      "first (a wrong one is NOT_RUN); KEY ENTER is always released", t_seat_targets_and_key_enter),
     ("BENCH-051 injection lapses come from the STICK send times in the remote-UI log, not "
      "the injector's own clock; a pause is not a lapse", t_stick_lapses),
+    ("BENCH-051b only a lapse in a graded window voids a step: a lapse wholly in a drive set-up "
+     "that succeeded is recorded; a failed set-up and a graded-window lapse stay NOT_RUN",
+     t_lapses_in_graded_windows),
 ]
 
 
