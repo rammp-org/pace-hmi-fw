@@ -903,6 +903,32 @@ def t_c2_cleanup_and_setup() -> None:
            inspect.getsource(c2.drive_centred), True)
 
 
+def t_silence_and_c2b() -> None:
+    """silence_after counts a gap that starts at the last sample before the mark (the sim's
+    ~15.6 ms clock); C2-8/C2-9 are NOT_RUN on a tree without C2b's rows."""
+    samples = [(10.0 + 0.035 * i, 0, 1.0, 0, 0) for i in range(20)]  # to 10.665
+    samples += [(13.7 + 0.035 * i, 0, 0.0, 0, 0) for i in range(10)]
+    mark = 10.678  # 13 ms after the last sample before the silence
+    last = hg.silence_after(samples, mark, 1.0)
+    expect("a silence that starts a tick before the mark", round(last[0], 3), 10.665)
+    expect("no gap: the last sample", hg.silence_after(samples[:20], 10.1, 1.0)[0],
+           samples[19][0])
+    expect("a gap after t still found", round(hg.silence_after(samples, 10.2, 1.0)[0], 3),
+           10.665)
+    expect("a gap that ended well before t is not the stall's",
+           round(hg.silence_after(samples, 13.75, 1.0)[0], 3), round(samples[-1][0], 3))
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = pathlib.Path(tmp)
+        (tree / "components" / "drive_session" / "include").mkdir(parents=True)
+        table = tree / "components" / "drive_session" / "include" / "table.hpp"
+        table.write_text("enum class Input { TICK_FOLLOW };\n", encoding="utf-8")
+        expect("no C2b rows", c2.c2b_in(tree), False)
+        table.write_text("enum class Input { TICK_FOLLOW, TICK_STICK_FAULT };\n",
+                         encoding="utf-8")
+        expect("C2b rows", c2.c2b_in(tree), True)
+    expect("this tree (C2 without lane D's C2b)", c2.c2b_in(common.REPO), False)
+
+
 def t_c2_15_16() -> None:
     rows = {"joy.bad_samples": {"value": 0, "unit": "", "result": "PASS"},
             "joy.xy_age_max": {"value": 140, "unit": "ms", "result": "PASS"},
@@ -1548,6 +1574,8 @@ CASES = [
     ("BENCH-044b C2's clean-up reboots once more when the reboot's POST fails on a latched "
      "check, recording each reboot; C2's drive set-ups wait for hold reason NONE",
      t_c2_cleanup_and_setup),
+    ("BENCH-044c a silence starting a sim clock tick before the mark is the stall's; C2-8/9 "
+     "NOT_RUN without C2b's rows", t_silence_and_c2b),
     ("BENCH-039b B5i, B5j graders, watchdog phase 1 (report only): the report, no reset, "
      "the stream resumes; the 300 ms stall ends 300 ms after its mark", t_b5i_b5j_phase1),
     ("BENCH-039c the watchdog phase comes from the tree's sdkconfig.defaults", t_watchdog_phase),

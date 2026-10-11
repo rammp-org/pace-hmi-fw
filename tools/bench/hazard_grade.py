@@ -88,9 +88,19 @@ def last_before(samples: Iterable[Sample], t: float) -> Sample | None:
     return out
 
 
+# The sim's arrival stamps tick at Windows' default timer resolution (~15.6 ms); a sample
+# stamped up to this long before a mark may have arrived after it.
+SIM_CLOCK_TICK_S = 0.032
+
+
 def silence_after(samples: list[Sample], t: float, gap_s: float) -> Sample | None:
-    """The last sample before the first gap of at least gap_s that starts after t."""
-    ordered = sorted(s for s in samples if s[0] >= t)
+    """The last sample before the first gap of at least gap_s that ends after t. The gap may
+    start at a sample up to SIM_CLOCK_TICK_S before t: the sim stamps arrivals on a ~15.6 ms
+    clock, so a task that stops at t can show its last sample a tick before the mark (c2cadc
+    B5j: -13 ms, which the old rule, gaps starting at or after t, missed: it graded the next
+    silence instead)."""
+    before = [s for s in samples if t - SIM_CLOCK_TICK_S <= s[0] < t]
+    ordered = ([max(before)] if before else []) + sorted(s for s in samples if s[0] >= t)
     for a, b in zip(ordered, ordered[1:]):
         if b[0] - a[0] >= gap_s:
             return a

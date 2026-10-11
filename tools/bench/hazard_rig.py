@@ -663,7 +663,12 @@ class Rig:
             raise NotRun("bench", f"no {RESTART_ACTION} in the tree's actions_spec.h")
         self.go("Skunk Works")
         if self.watch(3.0, until=hg.screen_is("SkunkWorksScreen")) is None:
-            raise NotRun("bench", "could not open Skunk Works")
+            # The menu taps did not take (c2cadc C2-11's clean-up, a latched FAULT left for the
+            # next step): reset through the port instead, when there is one.
+            if not self.port:
+                raise NotRun("bench", "could not open Skunk Works")
+            self.st.record("restart_fallback", "Skunk Works did not open: reset by the port")
+            return self._restart_by_port(serial_s)
         f0 = self.focus()
         # The keypad group may hold more than the tiles (it did on 9e0fb77: 6 for 5 tiles);
         # the first tile is what places the grid.

@@ -463,7 +463,23 @@ def s_c2_7(rig: Rig) -> dict:
     return _standing_mask(rig, 0x10)
 
 
+def c2b_in(tree) -> bool:
+    """Whether the tree's drive table has C2b's stick-fault rows (lane D, hazard-c2-spec.md
+    §5.3: TICK_STICK_FAULT). C2-8 and C2-9 grade them."""
+    import pathlib
+    root = pathlib.Path(tree) / "components" / "drive_session"
+    return any("TICK_STICK_FAULT" in p.read_text(encoding="utf-8", errors="replace")
+               for p in root.rglob("*.hpp"))
+
+
+def need_c2b(rig: Rig) -> None:
+    if not c2b_in(rig.tree):
+        raise NotRun("firmware", "C2-8/C2-9 grade C2b's drive-table rows 55-56 (lane D), "
+                                 "which this tree does not have (no TICK_STICK_FAULT)")
+
+
 def s_c2_8(rig: Rig) -> dict:
+    need_c2b(rig)
     begin_c2(rig)
     rig.need("banner")
     _rail(rig)
@@ -473,6 +489,7 @@ def s_c2_8(rig: Rig) -> dict:
 
 
 def s_c2_9(rig: Rig) -> dict:
+    need_c2b(rig)
     begin_c2(rig)
     rig.sim_toggle("s", True)
     _rail(rig)
