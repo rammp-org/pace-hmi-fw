@@ -846,6 +846,63 @@ def t_c2_13_14() -> None:
     fails("C2-14 age", c2.grade_c2_14, d(TB(), age=240).build(), "xy_age_max_ms")
 
 
+def t_c2_cleanup_and_setup() -> None:
+    """C2's clean-up reboots again when the first reboot's POST fails on a latched check
+    (c2-2b2b219: i2c.missing after C2-8's port reset), and records each reboot; C2's drive
+    set-up waits for hold reason NONE."""
+    class FakeRig:
+        def __init__(self, posts, st):
+            self.posts, self.st, self.restarts, self.paused = list(posts), st, 0, 0
+            self.stick = "FAULT"
+            self.inj = type("Inj", (), {"pause": lambda _: None})()
+
+        def state(self):
+            post = self.posts[min(self.restarts, len(self.posts)) - 1] if self.restarts else "PASS"
+            return {"stick": {"state": self.stick}, "post": post, "post_check":
+                    "i2c.missing" if post == "FAIL" else None, "reset_reason": "SW"}
+
+        def restart_hmi(self):
+            self.restarts += 1
+            self.stick = "OK"
+
+        def wait_back(self):
+            pass
+
+        def read_cal(self):
+            pass
+
+        def centre(self):
+            pass
+
+        def watch(self, seconds, until=None):
+            s = self.state()
+            return s if until is None or until(s) else None
+
+    for posts, restarts, ok in ((["PASS"], 1, True), (["FAIL", "PASS"], 2, True),
+                                (["FAIL", "FAIL"], 2, False)):
+        with quiet(), tempfile.TemporaryDirectory() as tmp:
+            st = hazard_rig.HazardStep("x", pathlib.Path(tmp))
+            rig = FakeRig(posts, st)
+            c2.reboot_cleanup(rig)
+            post_check = next(c for c in st.checks if "POST PASS" in c["check"])
+            expect(f"POSTs {posts}: reboots, clean-up POST check", (rig.restarts, post_check["ok"]),
+                   (restarts, ok))
+            expect(f"POSTs {posts}: each reboot recorded", len(st.records["cleanup_reboots"]),
+                   restarts)
+    # No FAULT: no reboot at all.
+    with quiet(), tempfile.TemporaryDirectory() as tmp:
+        rig = FakeRig(["PASS"], hazard_rig.HazardStep("x", pathlib.Path(tmp)))
+        rig.stick = "OK"
+        c2.reboot_cleanup(rig)
+        expect("stick OK: no reboot", rig.restarts, 0)
+    import inspect
+    for name in ("_mv", "s_c2_3b", "s_c2_4c"):
+        expect(f"{name} sets up through drive_centred", "drive_centred(rig)" in
+               inspect.getsource(getattr(c2, name)), True)
+    expect("drive_centred waits for the neutral latch", "wait_neutral_latch(rig)" in
+           inspect.getsource(c2.drive_centred), True)
+
+
 def t_c2_15_16() -> None:
     rows = {"joy.bad_samples": {"value": 0, "unit": "", "result": "PASS"},
             "joy.xy_age_max": {"value": 140, "unit": "ms", "result": "PASS"},
@@ -1488,6 +1545,9 @@ CASES = [
     ("BENCH-037 B5f, B5g graders: XYTwist 0 after IDLE and after stale MibStatus", t_b5f_b5g),
     ("BENCH-038 B5h grader: G4 holds", t_b5h),
     ("BENCH-039 B5i, B5j graders: the stalls and the watchdog", t_b5i_b5j),
+    ("BENCH-044b C2's clean-up reboots once more when the reboot's POST fails on a latched "
+     "check, recording each reboot; C2's drive set-ups wait for hold reason NONE",
+     t_c2_cleanup_and_setup),
     ("BENCH-039b B5i, B5j graders, watchdog phase 1 (report only): the report, no reset, "
      "the stream resumes; the 300 ms stall ends 300 ms after its mark", t_b5i_b5j_phase1),
     ("BENCH-039c the watchdog phase comes from the tree's sdkconfig.defaults", t_watchdog_phase),

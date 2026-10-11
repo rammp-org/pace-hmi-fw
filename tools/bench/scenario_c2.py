@@ -43,7 +43,8 @@ import time
 import hazard_grade as hg
 from hazard_rig import HazardStep, NotRun, Rig
 from scenario_c1 import (DRIVE, LOCKED, check_no_nonzero, check_resume, check_within,
-                         driving_forward, grade_ignored_stop, to_drive_by_mcb, watch_disables)
+                         driving_forward, grade_ignored_stop, to_drive_by_mcb, wait_neutral_latch,
+                         watch_disables)
 
 HIGH_RAIL_MV = 3150      # C2 §4
 CAL_OVERSHOOT_MV = 100
@@ -313,25 +314,49 @@ def begin_c2(rig: Rig) -> None:
         raise NotRun("firmware", "the stick monitor is not OK at the start (or not in STATE)")
 
 
+# The reboots a clean-up may take to leave the board as the next step needs it (POST PASS,
+# stick OK): the first clears the latched FAULT; a second only when that boot's POST failed
+# on a latched check (c2-2b2b219: a port reset from DriveScreen came back with i2c.missing).
+CLEANUP_REBOOTS = 2
+
+
 def reboot_cleanup(rig: Rig) -> None:
-    """A latched FAULT is RAM only: Restart HMI clears it. Never a calibration run."""
+    """A latched FAULT is RAM only: Restart HMI clears it. Never a calibration run. A reboot
+    whose POST fails (a latched check, RAM only too) is retried once, so the next step does not
+    inherit it; each reboot's POST is recorded."""
     if _stick(rig.state(), "state") != "FAULT":
         return
-    rig.inj.pause()
-    rig.restart_hmi()
-    rig.wait_back()
-    rig.read_cal()
-    rig.centre()
-    rig.watch(15.0, until=lambda s: s.get("post") == "PASS")
+    posts = []
+    for _ in range(CLEANUP_REBOOTS):
+        rig.inj.pause()
+        rig.restart_hmi()
+        rig.wait_back()
+        rig.read_cal()
+        rig.centre()
+        s = rig.watch(15.0, until=lambda s: s.get("post") in ("PASS", "FAIL"))
+        post = rig.state() if s is None else s
+        posts.append([post.get("post"), post.get("post_check"), post.get("reset_reason")])
+        if post.get("post") == "PASS":
+            break
+    rig.st.record("cleanup_reboots", posts)
+    rig.st.check("clean-up: POST PASS after the reboot", posts[-1][0] == "PASS", str(posts))
     s = rig.watch(3.0, until=_state("OK"))
     rig.st.check("clean-up: stick OK after the reboot", s is not None,
                  str(_stick(rig.state(), "state")))
 
 
+def drive_centred(rig: Rig) -> None:
+    """Set-up: sim a, Drive, centred until the stick may drive (hold reason NONE: the gate
+    open and C1's 300 ms neutral latch set), not a fixed 0.5 s that can end before the gate
+    opens (c2-2b2b219 C2-2: off-centre 0.12 s after the gate opened, CENTRE_FIRST for good)."""
+    to_drive_by_mcb(rig)
+    rig.centre()
+    wait_neutral_latch(rig)
+
+
 def _mv(rig: Rig, mv: int, residual: bool) -> dict:
     begin_c2(rig)
-    to_drive_by_mcb(rig)
-    rig.watch(0.5)  # centred
+    drive_centred(rig)
     rig.mark("change")
     rig.inject(*rig.cal.vertical_at(mv))
     rig.watch(2.1)
@@ -365,8 +390,7 @@ def s_c2_3(rig: Rig) -> dict:
 
 def s_c2_3b(rig: Rig) -> dict:
     begin_c2(rig)
-    to_drive_by_mcb(rig)
-    rig.watch(0.5)
+    drive_centred(rig)
     lim = limit_mv(rig.cal.v[2])
     rig.mark("change")
     rig.inject(*rig.cal.vertical_at(lim - 20))
@@ -407,8 +431,7 @@ def s_c2_4b(rig: Rig) -> dict:
 
 def s_c2_4c(rig: Rig) -> dict:
     begin_c2(rig)
-    to_drive_by_mcb(rig)
-    rig.watch(0.5)
+    drive_centred(rig)
     rig.mark("change")
     for _ in range(10):
         rig.inject(*rig.cal.centre(), mask=0x81, once=True)
