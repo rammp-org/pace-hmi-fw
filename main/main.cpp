@@ -471,6 +471,7 @@ static constexpr hmi::ui::MainScreens kMainScreens{
     .calibration_init = calibration_screen_init,
     .calibration_toggle = joystick_cal_toggle,
     .calibrating = joystick_cal_running,
+    .calibration_note = joystick_cal_set_note,
 };
 
 // The quick POST's facts from ESP-IDF (hazard-c3-spec.md §2.2, REQ-POST-19), for the POST
@@ -932,8 +933,17 @@ static hmi::bench_verbs::Hooks bench_verb_hooks() {
     }
     return std::string(hmi::post::check(*shown.check).name);
   };
-  h.indicator = [] { return std::string(post_indicator_name(ui_app.post().shown().kind)); };
-  h.indicator_text = [] { return std::string(ui_app.post().text_now().text.data()); };
+  // The persistent indicator: the POST's, or below every POST state C2's stick FAULT
+  // (REQ-UI-26), as the TopBar shows it.
+  h.indicator = [] {
+    return std::string(ui_app.stick_fault_indicated()
+                           ? "STICK_FAULT"
+                           : post_indicator_name(ui_app.post().shown().kind));
+  };
+  h.indicator_text = [] {
+    return std::string(ui_app.stick_fault_indicated() ? rammp::kHmiNoticeStickFault
+                                                      : ui_app.post().text_now().text.data());
+  };
   h.stick = bench_stick_block; // C2 REQ-RUI-08: the monitor's telemetry
   h.reset_reason = [] {
     return std::string(
@@ -1148,6 +1158,17 @@ extern "C" void app_main(void) {
         watched ? 1 : 0, static_cast<int32_t>(t.ui_age_max_ms.load(std::memory_order_relaxed)),
         static_cast<int32_t>(t.ui_stalls_drive.load(std::memory_order_relaxed))};
   };
+  selftest_board.stick_monitor = [] {
+    constexpr auto relaxed = std::memory_order_relaxed;
+    const hmi::stick::MonitorTelemetry &t = ui_app.stick_telemetry();
+    uint32_t bad = 0;
+    for (const auto &n : t.implausible) {
+      bad += n.load(relaxed);
+    }
+    return std::array<int32_t, 3>{static_cast<int32_t>(ui_app.permit_hooks().stick_health.read()),
+                                  static_cast<int32_t>(bad),
+                                  static_cast<int32_t>(t.xy_age_max_ms.load(relaxed))};
+  };
   selftest_init(selftest_board);
 
   ui_app.build_on_demand_parts();
@@ -1170,6 +1191,9 @@ extern "C" void app_main(void) {
   AdcStickIo::State adc_state{
       .permit = {}, .rest = {}, .windows = hmi::fw::writer(rest_windows), .window = {}};
   espp::Logger post_logger({.tag = "post", .level = espp::Logger::Verbosity::INFO});
+  // C2's stick monitor: each change of its state, logged by the UI task (REQ-UI-27).
+  espp::Logger stick_logger({.tag = "stick", .level = espp::Logger::Verbosity::INFO});
+  ui_app.attach_stick_log(stick_logger);
   {
     hmi::post::I2cSet i2c_found;
     for (const uint8_t address : found_addresses) {

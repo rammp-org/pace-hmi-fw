@@ -86,6 +86,9 @@ struct MainScreens {
   void (*calibration_init)();   ///< the Joystick screen's calibration view
   void (*calibration_toggle)(); ///< starts a calibration run, or cancels one
   bool (*calibrating)();        ///< a calibration run owns the stick (joystick_cal_running)
+  /// The Joystick screen's words while the stick monitor holds a FAULT (C2 REQ-UI-26), or null
+  /// to show the screen's own text again (joystick_cal_set_note).
+  void (*calibration_note)(const char *note);
 };
 
 } // namespace hmi::ui

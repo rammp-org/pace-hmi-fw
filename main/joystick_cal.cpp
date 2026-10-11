@@ -83,7 +83,14 @@ lv_timer_t *timer = nullptr;
 lv_subject_t text_subject;
 char text_buf[160];
 char text_prev_buf[160];
-std::string idle_text;
+// The instructions' text while no run is going: the export's own, or, while the stick monitor
+// holds a FAULT, its reason in words (C2 REQ-UI-26, joystick_cal_set_note).
+struct IdleText {
+  std::string screen; // the export's
+  std::string note;   // empty: none
+  [[nodiscard]] const std::string &shown() const { return note.empty() ? screen : note; }
+};
+IdleText idle_text;
 // 1 while a prompt is up: the label blinks on ui.blink.
 lv_subject_t prompting_subject;
 // 1 while a run is going: the button reads CANCEL.
@@ -160,7 +167,7 @@ void act(Action action, const char *why) {
     finish("Calibration cancelled.\nNothing changed.");
     return;
   case Action::SHOW_IDLE:
-    lv_subject_copy_string(&text_subject, idle_text.c_str());
+    lv_subject_copy_string(&text_subject, idle_text.shown().c_str());
     lv_timer_pause(timer);
     return;
   case Action::PAUSE:
@@ -268,10 +275,10 @@ void joystick_cal_init_ui(const JoystickCalUi &config) {
     return;
   }
   ui = config;
-  idle_text = lv_label_get_text(ui.instructions);
+  idle_text.screen = lv_label_get_text(ui.instructions);
   button_text = ui.button_label != nullptr ? lv_label_get_text(ui.button_label) : "CALIBRATE";
   lv_subject_init_string(&text_subject, text_buf, text_prev_buf, sizeof(text_buf),
-                         idle_text.c_str());
+                         idle_text.shown().c_str());
   lv_subject_init_int(&prompting_subject, 0);
   lv_subject_init_int(&running_subject, 0);
   lv_label_bind_text(ui.instructions, &text_subject, nullptr);
@@ -314,3 +321,10 @@ std::optional<JoystickCal> joystick_cal_take_new() {
 }
 
 uint32_t joystick_cal_generation() { return shared.generation.load(); }
+
+void joystick_cal_set_note(const char *note) {
+  idle_text.note = note != nullptr ? note : "";
+  if (ui.screen != nullptr && run.phase() == hmi::cal::Phase::IDLE) {
+    lv_subject_copy_string(&text_subject, idle_text.shown().c_str());
+  }
+}

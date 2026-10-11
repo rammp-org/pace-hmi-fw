@@ -293,6 +293,7 @@ public:
 
     check_log();
     check_control();
+    check_stick_monitor();
     // last, so the low-water mark and the stacks cover everything above
     check_memory();
 
@@ -791,6 +792,19 @@ private:
     record(Id::CTL_WDT, guard[0]);
     record(Id::CTL_UI_AGE_MAX, guard[1]);
     record(Id::CTL_UI_STALLS_DRIVE, guard[2]);
+  }
+
+  // The stick monitor since boot (hazard-c2-spec.md §8.6 E10, C2-15).
+  void check_stick_monitor() {
+    const std::array<Id, 3> ids{Id::JOY_HEALTH, Id::JOY_BAD_SAMPLES, Id::JOY_XY_AGE_MAX};
+    if (!platform.stick_monitor) {
+      std::ranges::for_each(ids, [this](Id id) { unmeasurable(id, "no stick monitor"); });
+      return;
+    }
+    const std::array<int32_t, 3> monitor = platform.stick_monitor();
+    for (std::size_t i = 0; i < ids.size(); ++i) {
+      record(ids.at(i), monitor.at(i));
+    }
   }
 
   void check_stack(Id id, const char *task_name) {

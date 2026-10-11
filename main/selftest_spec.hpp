@@ -193,6 +193,9 @@ enum class Id : uint8_t {
   CTL_WDT,
   CTL_UI_AGE_MAX,
   CTL_UI_STALLS_DRIVE,
+  JOY_HEALTH,
+  JOY_BAD_SAMPLES,
+  JOY_XY_AGE_MAX,
   COUNT, ///< not a check: how many there are (asserted equal to kChecks.size())
 };
 
@@ -291,6 +294,10 @@ inline constexpr std::array kChecks{
     Check{Id::CTL_WDT,         "ctl.wdt",           "",     1,     1,      Need::REQUIRED, "Stick and UI tasks on the task watchdog"},
     Check{Id::CTL_UI_AGE_MAX,  "ctl.ui_age_max",    "ms",   0,     1000,   Need::REQUIRED, "Longest UI heartbeat age the stick saw"},
     Check{Id::CTL_UI_STALLS_DRIVE, "ctl.ui_stalls_drive", "", 0,   0,      Need::REQUIRED, "UI stalls that paused the stick in Drive"},
+    // the stick monitor (hazard-c2-spec.md §8.6 E10, C2-15): health 1 is StickHealth::OK
+    Check{Id::JOY_HEALTH,      "joy.health",        "",     1,     1,      Need::REQUIRED, "Stick monitor reads the stick as OK"},
+    Check{Id::JOY_BAD_SAMPLES, "joy.bad_samples",   "",     0,     0,      Need::REQUIRED, "Implausible stick samples since boot"},
+    Check{Id::JOY_XY_AGE_MAX,  "joy.xy_age_max",    "ms",   0,     200,    Need::REQUIRED, "Longest X/Y window age the stick saw"},
 };
 // clang-format on
 

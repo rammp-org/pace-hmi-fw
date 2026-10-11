@@ -169,6 +169,12 @@ public:
   [[nodiscard]] bool menu_open_any_task() const { return drive_ui_.menu_open_any_task(); }
   /// The quick POST on the UI task: its runner, the rest windows, the indicator's state.
   [[nodiscard]] constexpr PostStage &post() noexcept { return post_stage_; }
+  /// Whether the persistent indicator shows C2's stick FAULT: the POST's shows nothing and
+  /// stick health is FAULT (REQ-UI-26, below every POST state). Any task.
+  [[nodiscard]] bool stick_fault_indicated() const;
+  /// @brief The stick monitor's log (C2 REQ-UI-27): each change of its state, once, from the
+  ///        UI task. app_main, before lv_task starts; @p log must outlive the firmware.
+  void attach_stick_log(espp::Logger &log) noexcept { stick_log_ = &log; }
 
   /// @brief The joystick's LVGL keypad read: moves the cursor through each screen's focus
   ///        group. It drains the latch the ADC task fills, so one flick of the stick = one
@@ -246,6 +252,7 @@ private:
   void strip_overdraw_logged();
   void theme_switched(uint8_t theme);
   void post_indicator();
+  void stick_monitor_changed();
 
   // Members in dependency order: a view's Config may read only what is declared above it.
   Config config_;
@@ -273,6 +280,12 @@ private:
   lv_subject_t refused_{};              ///< int: Refused; refusal panels up unless REFUSED_NONE
   std::atomic<int32_t> refused_pub_{0}; ///< `refused`, for other tasks (refused_any_task)
   PostText post_reason_words_{};        ///< the indicator's words, as post_reason last read them
+  // C2: the stick monitor's state as the UI task last saw it (REQ-UI-27), its log, and the
+  // Joystick screen's words for a FAULT (REQ-UI-26).
+  espp::Logger *stick_log_ = nullptr;
+  bool stick_state_seen_ = false;
+  uint8_t stick_state_ = 0;
+  PostText stick_words_{};
   /// Raw value per seat axis, in the table's units, as the MCB last reported it.
   lv_subject_t seat_axis_value_[rammp::kSeatAxisCount]{};
   uint8_t seat_axis_count_ = 0; ///< actuators in the table

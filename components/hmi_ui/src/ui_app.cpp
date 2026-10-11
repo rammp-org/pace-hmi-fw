@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 
 #include "esp_timer.h"
 #include "ui.h"
@@ -428,10 +429,107 @@ void UiApp::theme_switched(uint8_t theme) {
   settings_set_theme(theme);
 }
 
+bool UiApp::stick_fault_indicated() const {
+  return post_stage_.shown().kind == hmi::post::IndicatorKind::NONE &&
+         permit_hooks_.stick_health.read() == hmi::stick::StickHealth::FAULT;
+}
+
+namespace {
+// The Joystick screen's words for a latched stick fault (REQ-UI-26): the axis and what it does.
+const char *stick_why(hmi::stick::SampleFault kind) {
+  using hmi::stick::SampleFault;
+  switch (kind) {
+  case SampleFault::MISSING:
+    return rammp::kHmiStickWhyMissing;
+  case SampleFault::NAN_VALUE:
+    return rammp::kHmiStickWhyNan;
+  case SampleFault::NEGATIVE:
+    return rammp::kHmiStickWhyNegative;
+  case SampleFault::HIGH:
+    return rammp::kHmiStickWhyHigh;
+  case SampleFault::STALE:
+    return rammp::kHmiStickWhyStale;
+  case SampleFault::TWIST_PARTIAL:
+    return rammp::kHmiStickWhyTwistPartial;
+  case SampleFault::NO_SAMPLES:
+    return rammp::kHmiStickWhyNoSamples;
+  case SampleFault::INTERNAL:
+  case SampleFault::NONE:
+    break;
+  }
+  return rammp::kHmiStickWhyInternal;
+}
+const char *stick_axis_words(hmi::stick::StickAxis axis) {
+  using hmi::stick::StickAxis;
+  switch (axis) {
+  case StickAxis::HORIZONTAL:
+    return rammp::kHmiStickAxisHorizontal;
+  case StickAxis::VERTICAL:
+    return rammp::kHmiStickAxisVertical;
+  case StickAxis::TWIST:
+    return rammp::kHmiStickAxisTwist;
+  case StickAxis::NONE:
+    break;
+  }
+  return "";
+}
+} // namespace
+
+// C2's stick monitor as the UI task sees it (REQ-UI-26, REQ-UI-27): each change of its state is
+// logged once, with the reasons and the counters (the ADC task logs nothing); in FAULT the
+// Joystick screen names the reason in words.
+void UiApp::stick_monitor_changed() {
+  using hmi::stick::MonitorState;
+  using hmi::stick::SampleFault;
+  using hmi::stick::StickAxis;
+  constexpr auto relaxed = std::memory_order_relaxed;
+  const hmi::stick::MonitorTelemetry &t = stick_telemetry_;
+  const uint8_t state = t.state.load(relaxed);
+  if (stick_state_seen_ && state == stick_state_) {
+    return;
+  }
+  stick_state_seen_ = true;
+  stick_state_ = state;
+  const auto last_kind = static_cast<SampleFault>(t.last_kind.load(relaxed));
+  const auto last_axis = static_cast<StickAxis>(t.last_axis.load(relaxed));
+  const auto fault_kind = static_cast<SampleFault>(t.fault_kind.load(relaxed));
+  const auto fault_axis = static_cast<StickAxis>(t.fault_axis.load(relaxed));
+  uint32_t bad = 0;
+  for (const auto &n : t.implausible) {
+    bad += n.load(relaxed);
+  }
+  if (stick_log_ != nullptr) {
+    stick_log_->info("stick monitor {}: last {} {}, fault {} {}; suspect onsets {}, faults {}, "
+                     "implausible samples {}, X/Y age max {} ms",
+                     hmi::stick::to_string(static_cast<MonitorState>(state)),
+                     hmi::stick::to_string(last_kind), hmi::stick::to_string(last_axis),
+                     hmi::stick::to_string(fault_kind), hmi::stick::to_string(fault_axis),
+                     t.suspect_onsets.load(relaxed), t.faults.load(relaxed), bad,
+                     t.xy_age_max_ms.load(relaxed));
+  }
+  if (config_.screens->calibration_note == nullptr) {
+    return;
+  }
+  if (static_cast<MonitorState>(state) != MonitorState::FAULT) {
+    config_.screens->calibration_note(nullptr);
+    return;
+  }
+  std::snprintf(stick_words_.text.data(), stick_words_.text.size(), "%s%s%s%s",
+                rammp::kHmiStickFaultLead, stick_axis_words(fault_axis), stick_why(fault_kind),
+                rammp::kHmiStickFaultTail);
+  config_.screens->calibration_note(stick_words_.text.data());
+}
+
 // The POST's persistent indicator on every TopBar (hazard-c3-spec.md §2.8, REQ-UI-19): the
-// indicator's state after this tick's runner and drive tick, in its words and colour.
+// indicator's state after this tick's runner and drive tick, in its words and colour. Below
+// every POST state, C2's latched stick fault (REQ-UI-26).
 void UiApp::post_indicator() {
   using hmi::post::IndicatorKind;
+  stick_monitor_changed();
+  if (stick_fault_indicated()) {
+    topbar_view_.set_post(TopBarView::PostColour::RED, rammp::kHmiNoticeStickFault);
+    return;
+  }
   const PostStage::Shown shown = post_stage_.shown();
   TopBarView::PostColour colour = TopBarView::PostColour::RED;
   switch (shown.kind) {

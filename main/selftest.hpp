@@ -57,6 +57,9 @@ struct SelfTestPlatform {
   /// task watchdog (1/0), the longest UI heartbeat age it saw (ms), and its UI stalls while
   /// the stick was driving.
   std::function<std::array<int32_t, 3>()> motion_guard;
+  /// The stick monitor (hazard fix C2): its stick health (StickHealth: 1 is OK), the
+  /// implausible samples it has counted since boot, and the longest X/Y window age (ms).
+  std::function<std::array<int32_t, 3>()> stick_monitor;
 };
 
 enum class SelfTestTrigger {

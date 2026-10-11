@@ -229,13 +229,31 @@ inline constexpr char kHmiNoticePostNotRun[] = "Start-up check not run";        
 inline constexpr char kHmiNoticePostRunning[] = "Start-up check running"; // C3
 inline constexpr char kHmiNoticePostFailed[] = "Start-up check failed";   // C3
 // C3 §4.5: the refusal of a drive asked for before POST passed (its body: the check's words).
-inline constexpr char kHmiRefusedPostTitle[] = "Not ready to drive";            // C3
-inline constexpr char kHmiRefusedPostSeatTitle[] = "Seat not ready";            // C3, a seat press
-inline constexpr char kHmiNoticeStickFault[] = "Joystick fault";                // C1, until C2
-inline constexpr char kHmiNoticeStickCheck[] = "Checking the joystick";         // C2
-inline constexpr char kHmiNoticeCentreFirst[] = "Centre the joystick to drive"; // C1
-static_assert(sizeof(kHmiNoticeNotCalibrated) <= kErrorTextLen,
+inline constexpr char kHmiRefusedPostTitle[] = "Not ready to drive"; // C3
+inline constexpr char kHmiRefusedPostSeatTitle[] = "Seat not ready"; // C3, a seat press
+// C2 (hazard-c2-spec.md §0, O11, F1): the Drive notice for a latched stick fault, and C3's
+// persistent indicator for it below every POST state (REQ-UI-26).
+inline constexpr char kHmiNoticeStickFault[] = "Joystick fault: recalibrate to clear"; // C2
+inline constexpr char kHmiNoticeStickCheck[] = "Checking the joystick";                // C2
+inline constexpr char kHmiNoticeCentreFirst[] = "Centre the joystick to drive";        // C1
+static_assert(sizeof(kHmiNoticeNotCalibrated) <= kErrorTextLen &&
+                  sizeof(kHmiNoticeStickFault) <= kErrorTextLen,
               "a Drive notice outgrows the width its slot is drawn for");
+// C2 REQ-UI-26: the Joystick screen names a latched stick fault's reason in words (proposed
+// words, owner F1 to confirm): "<axis> <what>" between these two.
+inline constexpr char kHmiStickFaultLead[] = "Joystick fault: ";
+inline constexpr char kHmiStickFaultTail[] = ".\nHold CALIBRATE to recalibrate.";
+inline constexpr char kHmiStickAxisHorizontal[] = "horizontal ";
+inline constexpr char kHmiStickAxisVertical[] = "vertical ";
+inline constexpr char kHmiStickAxisTwist[] = "twist ";
+inline constexpr char kHmiStickWhyMissing[] = "read failed";
+inline constexpr char kHmiStickWhyNan[] = "reading is not a number";
+inline constexpr char kHmiStickWhyNegative[] = "reads below 0 mV";
+inline constexpr char kHmiStickWhyHigh[] = "reads too high";
+inline constexpr char kHmiStickWhyStale[] = "reading stopped updating";
+inline constexpr char kHmiStickWhyTwistPartial[] = "twist reads failing";
+inline constexpr char kHmiStickWhyNoSamples[] = "no readings at start";
+inline constexpr char kHmiStickWhyInternal[] = "internal error";
 static_assert(sizeof(kHmiDriveNotGrantedFooter) <= kErrorFooterLen &&
                   sizeof(kHmiDriveStoppedFooter) <= kErrorFooterLen &&
                   sizeof(kHmiExitRefusedFooter) <= kErrorFooterLen,

@@ -74,6 +74,7 @@ constexpr std::string_view kIdNames[] = {
     "JOY_TWIST_NOISE", "JOY_CAL",         "JOY_X_CAL",
     "JOY_Y_CAL",       "JOY_TWIST_CAL",   "JOY_BUTTON",
     "CTL_WDT",         "CTL_UI_AGE_MAX",  "CTL_UI_STALLS_DRIVE",
+    "JOY_HEALTH",      "JOY_BAD_SAMPLES", "JOY_XY_AGE_MAX",
 };
 static_assert(std::size(kIdNames) == kChecks.size());
 

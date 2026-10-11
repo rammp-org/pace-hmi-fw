@@ -86,6 +86,7 @@ REPORT_ONLY_WHY = "report-only: owner P3, board 2 has no battery (PoE); see proj
 # baseline carries it.
 DECLARED_NEW = (
     "ctl.wdt", "ctl.ui_age_max", "ctl.ui_stalls_drive",  # hazard-c4-spec.md §8 B3, §9.2
+    "joy.health", "joy.bad_samples", "joy.xy_age_max",  # hazard-c2-spec.md §8.6 E10
 )
 
 
@@ -308,6 +309,21 @@ def t_declared_new_checks() -> None:
     late["results"].append(late["results"].pop(
         next(i for i, r in enumerate(late["results"]) if r["name"] == "ctl.wdt")))
     _expect("a declared check after the pc.* rows", compare(late, base)["verdict"], "FAIL")
+    c2 = _with_declared(base)  # C2's three joy.* after C4's three, pc.report_complete + 6
+    rows = c2["results"]
+    first_pc = next(i for i, r in enumerate(rows) if r["name"].startswith("pc."))
+    rows[first_pc:first_pc] = [
+        {"name": "joy.health", "result": "PASS", "value": 1, "lo": 1, "hi": 1},
+        {"name": "joy.bad_samples", "result": "PASS", "value": 0, "lo": 0, "hi": 0},
+        {"name": "joy.xy_age_max", "result": "PASS", "value": 140, "lo": 0, "hi": 200}]
+    next(r for r in rows if r["name"] == "pc.report_complete")["value"] += 3
+    _expect("C2's joy.* after C4's ctl.*, pc.report_complete 60",
+            (compare(c2, base)["verdict"], compare(c2, base)["problems"]), ("PASS", []))
+    swapped = copy.deepcopy(c2)
+    names = [r["name"] for r in swapped["results"]]
+    i, j = names.index("joy.health"), names.index("joy.xy_age_max")
+    swapped["results"][i], swapped["results"][j] = swapped["results"][j], swapped["results"][i]
+    _expect("C2's checks out of their order", compare(swapped, base)["verdict"], "FAIL")
     other = copy.deepcopy(base)
     other["results"].append({"name": "x.new", "result": "PASS", "value": 1})
     _expect("an undeclared extra check", compare(other, base)["verdict"], "FAIL")

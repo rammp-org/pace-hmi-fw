@@ -1047,3 +1047,32 @@ TEST_CASE("CAL-413 two completed runs, one rejected, one cancelled: the generati
   TEST_ASSERT_TRUE(joystick_cal_take_new().has_value());
   (void)quiet.stop();
 }
+
+TEST_CASE("CAL-414 the Joystick screen's note (C2 REQ-UI-26): shown in place of the screen's own "
+          "text while no run is going, kept off the prompts and the result, cleared by null",
+          "[cal][view]") {
+  start_clean();
+  TEST_ASSERT_EQUAL_STRING(kIdleText, shown().c_str());
+  joystick_cal_set_note("Joystick fault: horizontal reads too high.");
+  TEST_ASSERT_EQUAL_STRING("Joystick fault: horizontal reads too high.", shown().c_str());
+  joystick_cal_set_note(nullptr);
+  TEST_ASSERT_EQUAL_STRING(kIdleText, shown().c_str());
+  // During a run the prompts stay; the note comes back once the result has been up.
+  StdoutCapture quiet;
+  joystick_cal_toggle();
+  const std::string prompt = shown();
+  joystick_cal_set_note("Joystick fault: twist read failed.");
+  TEST_ASSERT_EQUAL_STRING(prompt.c_str(), shown().c_str());
+  do_rest();
+  do_directions();
+  do_release();
+  TEST_ASSERT_TRUE(starts_with(shown(), "Calibration saved"));
+  for (int i = 0; i < kResultTicks + 1; ++i) {
+    (void)tick(1507.0f, 1510.0f, 1477.0f);
+  }
+  TEST_ASSERT_EQUAL_STRING("Joystick fault: twist read failed.", shown().c_str());
+  joystick_cal_set_note(nullptr);
+  TEST_ASSERT_EQUAL_STRING(kIdleText, shown().c_str());
+  (void)joystick_cal_take_new();
+  (void)quiet.stop();
+}

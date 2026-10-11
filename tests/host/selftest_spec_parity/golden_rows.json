@@ -55,5 +55,8 @@
 {"order": 53, "id": "JOY_BUTTON", "name": "joy.button_idle", "unit": "", "lo": 1, "hi": 1, "need": "required", "why": "Stick button not stuck pressed"},
 {"order": 54, "id": "CTL_WDT", "name": "ctl.wdt", "unit": "", "lo": 1, "hi": 1, "need": "required", "why": "Stick and UI tasks on the task watchdog"},
 {"order": 55, "id": "CTL_UI_AGE_MAX", "name": "ctl.ui_age_max", "unit": "ms", "lo": 0, "hi": 1000, "need": "required", "why": "Longest UI heartbeat age the stick saw"},
-{"order": 56, "id": "CTL_UI_STALLS_DRIVE", "name": "ctl.ui_stalls_drive", "unit": "", "lo": 0, "hi": 0, "need": "required", "why": "UI stalls that paused the stick in Drive"}
+{"order": 56, "id": "CTL_UI_STALLS_DRIVE", "name": "ctl.ui_stalls_drive", "unit": "", "lo": 0, "hi": 0, "need": "required", "why": "UI stalls that paused the stick in Drive"},
+{"order": 57, "id": "JOY_HEALTH", "name": "joy.health", "unit": "", "lo": 1, "hi": 1, "need": "required", "why": "Stick monitor reads the stick as OK"},
+{"order": 58, "id": "JOY_BAD_SAMPLES", "name": "joy.bad_samples", "unit": "", "lo": 0, "hi": 0, "need": "required", "why": "Implausible stick samples since boot"},
+{"order": 59, "id": "JOY_XY_AGE_MAX", "name": "joy.xy_age_max", "unit": "ms", "lo": 0, "hi": 200, "need": "required", "why": "Longest X/Y window age the stick saw"}
 ]

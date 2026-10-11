@@ -108,6 +108,9 @@ dwells), `drive_ui/shared_subjects.hpp` (`SharedSubjects`) and `drive_ui/hold_ra
 | REQ-UI-22 | `DrivePort::sample` reads the POST gate live (acquire); `post_ok` is true only for PASS | GLD-125 |
 | REQ-UI-23 | Each UI poll tick runs the POST runner, then the drive adapter's tick, then the indicator (`UiPoll::poll`) | review; no host test (ui_poll.cpp needs LVGL) |
 | REQ-UI-24 | The UI task stores the heartbeat after every completed cycle, subscribes to the task watchdog at its first cycle and resets it after every cycle (hazard fix C4, `UiIsland`; hazard-c4-spec.md §4.3) | B3 (`ctl.ui_age_max`), B5i |
+| REQ-UI-25 | Only if O7 = yes: when `ui_stalls_drive` goes up, the Drive screen shows "Display stalled: stick paused" for 3 s (hazard-c4-spec.md; O7 = yes, F2). | not implemented yet: C4 commit 8 (owner decision pending on who builds it); bench B5i |
+| REQ-UI-26 | While stick health is FAULT, C3's persistent fault indicator shows C2's FAULT text ("Joystick fault: recalibrate to clear") on every screen but Boot, below every POST state (`UiApp::stick_fault_indicated`), and the Joystick screen names the reason in words (`joystick_cal_set_note`) (hazard-c2-spec.md §7.2) | CAL-414; bench C2-12 |
+| REQ-UI-27 | The UI task logs each change of the stick monitor's state once, with the reasons and the counters (`UiApp::stick_monitor_changed`, tag `stick`); the ADC task logs nothing (hazard-c2-spec.md §7.2) | review; no host test (ui_app.cpp needs LVGL); bench C2-3 serial log |
 
 ## Tasks and dependencies
 

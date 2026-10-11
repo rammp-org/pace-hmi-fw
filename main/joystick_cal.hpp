@@ -103,3 +103,7 @@ std::optional<JoystickCal> joystick_cal_take_new();
 /// REQ-CAL-10): +1 at each hand-over, before the run stops running, and at no other time. The
 /// stick monitor leaves a FAULT only through a run during which it moved. Lock-free. Any task.
 uint32_t joystick_cal_generation();
+/// The Joystick screen's words while no run is going (C2 REQ-UI-26): @p note, the stick fault's
+/// reason, in place of the screen's own text; null gives the screen's own text back. Shown at
+/// once when idle, else when the run's result has been up. LVGL task.
+void joystick_cal_set_note(const char *note);
