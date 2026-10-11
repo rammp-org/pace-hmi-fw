@@ -15,29 +15,45 @@ added for B5f as the spec asks). "Stall start" is the mark the runner writes jus
 sends STALL; the command's one-way time (half the median PING round trip, measured before)
 is allowed on top. While a STALL is in flight the remote-UI connection is busy, so the
 injection is not refreshed: it lapses 300 ms after the last refresh (the real stick, at rest,
-reads then). B5i/B5j need the panic on (C4 phase 2) and the serial port.
+reads then). B5i/B5j need the serial port. They grade the watchdog phase the tree builds
+(hazard-c4-spec.md §4.2): phase 1 (CONFIG_ESP_TASK_WDT_PANIC off, report only) wants the
+report naming the stalled task and no reset; phase 2 (panic on) wants the reset. The STALL hook
+answers at once and the task stalls itself at its next cycle, so a stall ends `ms` after its
+start mark (plus the command's one-way time), not when the reply comes.
 """
 
 from __future__ import annotations
 
+import datetime
+import pathlib
 import re
 import statistics
 import time
 
 import hazard_grade as hg
 from hazard_rig import HazardStep, NotRun, Rig, SerialWatch
-from scenario_c1 import LOCKED, check_no_nonzero, to_drive_by_mcb
+from scenario_c1 import LOCKED, check_no_nonzero, to_drive_by_mcb, wait_neutral_latch
 
 B5F_REPEATS = 10
 B5G_REPEATS = 3
 WDT_TRIP_RE = re.compile(r"task_wdt: Task watchdog got triggered")
+PANIC_ON_RE = re.compile(r"^CONFIG_ESP_TASK_WDT_PANIC=y\s*$", re.M)
+
+
+def watchdog_panics(tree: pathlib.Path) -> bool:
+    """Phase 2 of the task watchdog (a trip panics and resets): the tree's sdkconfig.defaults
+    sets CONFIG_ESP_TASK_WDT_PANIC=y. Phase 1 (off) only reports (hazard-c4-spec.md §4.2)."""
+    path = pathlib.Path(tree) / "sdkconfig.defaults"
+    return path.exists() and PANIC_ON_RE.search(path.read_text(encoding="utf-8")) is not None
 
 
 def drive_y_half(rig: Rig, label: str) -> None:
     """Neutral, sim a, Drive, then full forward until XYTwist y > 0.5, held 1 s (set-up)."""
+    start = datetime.datetime.now()
     to_drive_by_mcb(rig, label)
     rig.centre()
-    time.sleep(0.5)  # neutral 300 ms first (C1 latch)
+    wait_neutral_latch(rig)  # the gate open and the 300 ms neutral latch set (C1)
+    rig.setup_span(start)  # set-up, ungraded: a lapse in it does not void the step
     rig.forward()
     ok = rig.wait_y(lambda y: y > 0.5, 2.0)
     if not rig.st.check(f"set-up {label}: XYTwist y > 0.5", ok, ""):
@@ -130,8 +146,9 @@ def panic_names(text: str, task: str) -> bool:
 
 
 def grade_b5i(st: HazardStep, tr: hg.Trace, p: dict) -> None:
-    s, e, f = tr.mark("stall-300"), tr.mark("stalled-300"), tr.mark("forward")
+    s, f = tr.mark("stall-300"), tr.mark("forward")
     allow = p.get("one_way_s", 0.0)
+    e = s + 0.300 + allow  # the stall's end: the task stalls itself for 300 ms
     z = hg.first_sample(tr.samples, hg.is_exact_zero, s)
     st.check("300: XYTwist 0 by stall start + 240 ms",
              z is not None and z[0] - s <= 0.240 + allow,
@@ -144,6 +161,15 @@ def grade_b5i(st: HazardStep, tr: hg.Trace, p: dict) -> None:
              "never" if back is None else f"after {back[0] - f:.2f} s")
     s3 = tr.mark("stall-3000")
     text = p.get("serial_text", "")
+    if not p.get("panic", True):
+        grade_stall_report(st, tr, p, "3000", s3, "lv_task")
+        z3 = hg.first_sample(tr.samples, hg.is_exact_zero, s3)
+        check_no_nonzero(st, "3000: XYTwist 0 from stall start + 240 ms to the stall's end", tr,
+                         s3 + 0.240 + allow, s3 + 3.0)
+        st.check("3000: XYTwist 0 by stall start + 240 ms",
+                 z3 is not None and z3[0] - s3 <= 0.240 + allow,
+                 "never" if z3 is None else f"first zero at +{z3[0] - s3:.3f} s")
+        return
     st.check("3000: reset, the panic names lv_task", panic_names(text, "lv_task"), "")
     st.check("3000: reset reason TASK_WDT", p.get("reset_reason") == "TASK_WDT",
              str(p.get("reset_reason")))
@@ -155,9 +181,35 @@ def grade_b5i(st: HazardStep, tr: hg.Trace, p: dict) -> None:
                      last[0] - 1.5, last[0] + 1e-6)
 
 
+def grade_stall_report(st: HazardStep, tr: hg.Trace, p: dict, tag: str, s: float,
+                       task: str) -> None:
+    """Phase 1 (report only): the watchdog reports the stalled task, and nothing resets."""
+    text = p.get("serial_text", "")
+    st.check(f"{tag}: phase 1: the task watchdog reports {task}", panic_names(text, task), "")
+    st.check(f"{tag}: phase 1: no reset (reset reason unchanged)",
+             p.get("reset_reason") == p.get("reset_reason_before"),
+             f"{p.get('reset_reason_before')} -> {p.get('reset_reason')}")
+    after = [x for x in tr.samples if x[0] >= s + 3.5]
+    st.check(f"{tag}: phase 1: XYTwist flows after the stall", len(after) > 0,
+             f"{len(after)} samples after the stall")
+
+
 def grade_b5j(st: HazardStep, tr: hg.Trace, p: dict) -> None:
     s = tr.mark("stall")
     text = p.get("serial_text", "")
+    if not p.get("panic", True):
+        grade_stall_report(st, tr, p, "3000", s, "Read ADC")
+        last = hg.silence_after(tr.samples, s, 1.0)
+        st.check("XYTwist silence from the stall", last is not None and last[0] - s <= 0.1
+                 + p.get("one_way_s", 0.0),
+                 "no sample" if last is None else f"last sample at +{last[0] - s:.3f} s")
+        back = None if last is None else hg.first_sample(tr.samples, lambda x: True,
+                                                          last[0] + 1e-6)
+        st.check("XYTwist back after the 3 s stall", back is not None and last is not None
+                 and 2.5 <= back[0] - last[0] <= 4.0,
+                 "never" if back is None or last is None else
+                 f"{back[0] - last[0]:.2f} s of silence")
+        return
     st.check("reset; the panic names Read ADC", panic_names(text, "Read ADC"), "")
     last = hg.silence_after(tr.samples, s, 1.0)
     st.check("XYTwist silence from the stall", last is not None and last[0] - s <= 0.1
@@ -238,19 +290,26 @@ def s_b5i(rig: Rig) -> dict:
     one_way = one_way_s(rig)
     rig.mark("stall-300")
     _stall(rig, "UI", 300)
-    rig.mark("stalled-300")
+    rig.watch(0.4)  # the stall runs on the board; the hook answered at once
     rig.centre()
     rig.watch(0.6)
     rig.mark("forward")
     rig.forward()
     rig.watch(1.2)
+    panic = watchdog_panics(rig.tree)
+    before = rig.state().get("reset_reason")
     watch = SerialWatch(rig.port, 120.0)
     rig.mark("stall-3000")
-    _stall_reset(rig, "UI", 3000)
-    rig.inj.pause()
-    rig.wait_back()
+    if panic:
+        _stall_reset(rig, "UI", 3000)
+        rig.inj.pause()
+        rig.wait_back()
+    else:
+        _stall(rig, "UI", 3000)
+        rig.watch(4.0)  # phase 1: the watchdog reports at 2 s; nothing resets
     reason = rig.state().get("reset_reason")
-    return {"one_way_s": one_way, "serial_text": watch.stop(), "reset_reason": reason}
+    return {"one_way_s": one_way, "serial_text": watch.stop(), "reset_reason": reason,
+            "reset_reason_before": before, "panic": panic}
 
 
 def s_b5j(rig: Rig) -> dict:
@@ -259,12 +318,20 @@ def s_b5j(rig: Rig) -> dict:
     rig.begin()
     drive_y_half(rig, "enter")
     one_way = one_way_s(rig)
+    panic = watchdog_panics(rig.tree)
+    before = rig.state().get("reset_reason")
     watch = SerialWatch(rig.port, 120.0)
     rig.mark("stall")
-    _stall_reset(rig, "ADC", 3000)
-    rig.inj.pause()
-    rig.wait_back()
-    return {"one_way_s": one_way, "serial_text": watch.stop()}
+    if panic:
+        _stall_reset(rig, "ADC", 3000)
+        rig.inj.pause()
+        rig.wait_back()
+    else:
+        _stall(rig, "ADC", 3000)
+        rig.watch(4.5)  # phase 1: silence while the stick task stalls, then XYTwist again
+    reason = rig.state().get("reset_reason")
+    return {"one_way_s": one_way, "serial_text": watch.stop(), "reset_reason": reason,
+            "reset_reason_before": before, "panic": panic}
 
 
 STEPS = {

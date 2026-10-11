@@ -603,6 +603,91 @@ def t_b5i_b5j() -> None:
     fails("B5j panic", c4.grade_b5j, j(TB()).build(), "Read ADC", {**q, "serial_text": WDT_LV})
 
 
+def t_b5i_b5j_phase1() -> None:
+    """Phase 1 (panic off): the watchdog reports the task, nothing resets, the stream resumes.
+    The 300 ms stall ends 300 ms after its start mark: the hook answers at once."""
+    def i(tb: TB, moving: float | None = None) -> TB:
+        tb.mark("stall-300", 3100.0).mark("forward", 3101.0)
+        tb.stream(3099.0, 3100.19, 1.0).stream(3100.19, 3101.2).stream(3101.2, 3102.0, 1.0)
+        tb.mark("stall-3000", 3110.0).stream(3109.0, 3110.2, 1.0).stream(3110.2, 3113.2)
+        tb.stream(3113.2, 3114.5, 1.0)
+        if moving is not None:
+            tb.tr.samples.append((moving, 0, 0.6, 0, 0))
+            tb.tr.samples.sort()
+        return tb
+    p = {"one_way_s": 0.01, "serial_text": WDT_LV, "reset_reason": "POWERON",
+         "reset_reason_before": "POWERON", "panic": False}
+    passes("B5i phase 1", c4.grade_b5i, i(TB()).build(), p)
+    fails("B5i 300 motion before the stall's end", c4.grade_b5i, i(TB(), moving=3100.28).build(),
+          "300: zero from then to the stall's end", p)
+    fails("B5i phase 1 motion in the 3 s stall", c4.grade_b5i, i(TB(), moving=3112.0).build(),
+          "3000: XYTwist 0 from stall start + 240 ms", p)
+    fails("B5i phase 1 reset", c4.grade_b5i, i(TB()).build(), "no reset",
+          {**p, "reset_reason": "TASK_WDT"})
+    fails("B5i phase 1 report", c4.grade_b5i, i(TB()).build(), "reports lv_task",
+          {**p, "serial_text": WDT_ADC})
+
+    def j(tb: TB, back: float = 3203.05) -> TB:
+        return tb.mark("stall", 3200.0).stream(3199.0, 3200.05, 1.0).stream(back, back + 1.5)
+    q = {"one_way_s": 0.01, "serial_text": WDT_ADC, "reset_reason": "POWERON",
+         "reset_reason_before": "POWERON", "panic": False}
+    passes("B5j phase 1", c4.grade_b5j, j(TB()).build(), q)
+    fails("B5j phase 1 short silence", c4.grade_b5j, j(TB(), back=3201.6).build(),
+          "back after the 3 s stall", q)
+    fails("B5j phase 1 report", c4.grade_b5j, j(TB()).build(), "reports Read ADC",
+          {**q, "serial_text": WDT_LV})
+    fails("B5j phase 1 reset", c4.grade_b5j, j(TB()).build(), "no reset",
+          {**q, "reset_reason": "TASK_WDT"})
+
+
+def t_wait_neutral_latch() -> None:
+    """The drive set-up waits for hold reason NONE (gate open, latch set), not a fixed time: the
+    C4 bench run 2026-10-11 went forward 0.56 s after DriveScreen, before the gate opened."""
+    class FakeRig:
+        def __init__(self, holds: list[str], st: hazard_rig.HazardStep):
+            self.holds, self.st, self.polls = holds, st, 0
+
+        def state(self) -> dict:
+            self.polls += 1
+            return {"hold_reason": self.holds[min(self.polls - 1, len(self.holds) - 1)]}
+
+        def watch(self, seconds: float, until: Callable[[dict], bool]) -> dict | None:
+            for _ in range(int(seconds / 0.05)):
+                s = self.state()
+                if until(s):
+                    return s
+            return None
+
+    with quiet(), tempfile.TemporaryDirectory() as tmp:
+        st = hazard_rig.HazardStep("x", pathlib.Path(tmp))
+        rig = FakeRig(["GATE_SHUT"] * 5 + ["CENTRE_FIRST"] * 6 + ["NONE"], st)
+        c1.wait_neutral_latch(rig)
+        expect("returns once hold reason NONE, the set-up check passed",
+               (rig.polls >= 12, st.checks[-1]["ok"]), (True, True))
+        rig = FakeRig(["CENTRE_FIRST"], st)
+        try:
+            c1.wait_neutral_latch(rig)
+        except hazard_rig.NotRun as e:
+            expect("never NONE: a set-up fault, not a FAIL", e.kind, "bench")
+        else:
+            raise AssertionError("never NONE: went on")
+
+
+def t_watchdog_phase() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        tree = pathlib.Path(d)
+        expect("no sdkconfig.defaults: phase 1", c4.watchdog_panics(tree), False)
+        (tree / "sdkconfig.defaults").write_text(
+            "CONFIG_ESP_TASK_WDT_TIMEOUT_S=2\n# CONFIG_ESP_TASK_WDT_PANIC is not set\n",
+            encoding="utf-8")
+        expect("panic not set: phase 1", c4.watchdog_panics(tree), False)
+        (tree / "sdkconfig.defaults").write_text("CONFIG_ESP_TASK_WDT_PANIC=y\n",
+                                                 encoding="utf-8")
+        expect("panic on: phase 2", c4.watchdog_panics(tree), True)
+    expect("this tree builds phase 1 (hazard-c4-spec.md §4.2)",
+           c4.watchdog_panics(pathlib.Path(__file__).resolve().parents[2]), False)
+
+
 # ---------------------------------------------------------------- C2
 
 
@@ -1205,6 +1290,80 @@ def t_stick_lapses() -> None:
     expect("0.28 s exactly is not", hazard_rig.stick_lapses([row(0), row(280)], []), [])
 
 
+def t_lapses_in_graded_windows() -> None:
+    """Only a lapse in a graded window voids a step (hazard_rig's docstring): one wholly in a
+    drive set-up that succeeded is recorded, not counted. c4c-514468b B5''-4: a 0.355 s STATE
+    reply at the Drive screen's load held the STICK refresh in the set-up."""
+    import datetime as dt
+    t0 = dt.datetime(2026, 10, 11, 4, 33, 44)
+
+    def at(s: float) -> dt.datetime:
+        return t0 + dt.timedelta(seconds=s)
+
+    def lapse(end: float, gap: float) -> tuple[str, float]:
+        return (at(end).isoformat(timespec="milliseconds"), gap)
+    setup = [(at(0.0), at(2.5))]
+    inside, past_end, after = lapse(2.145, 0.365), lapse(2.6, 0.3), lapse(5.0, 0.4)
+    expect("a lapse wholly in the set-up is not graded",
+           hazard_rig.graded_lapses([inside], setup), [])
+    expect("a gap reaching past the set-up's end is graded",
+           hazard_rig.graded_lapses([past_end], setup), [past_end])
+    expect("a lapse after the set-up is graded",
+           hazard_rig.graded_lapses([inside, after], setup), [after])
+    expect("no set-up span: every lapse is graded",
+           hazard_rig.graded_lapses([inside], []), [inside])
+
+    class FakeRig:
+        def __init__(self, st, script_lapses, spans, fail_setup):
+            self.st, self.inj = st, type("Inj", (), {"lapses": script_lapses})()
+            self.setup_spans, self.fail_setup = spans, fail_setup
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def collect(self):
+            return hg.Trace()
+
+        def end(self):
+            pass
+
+    def run(name: str, lapses: list, spans: list, fail_setup: bool = False) -> dict:
+        group = hazard_steps.STEP_GROUP[name]
+        steps = hazard_steps.MODULES[group].STEPS
+        saved_rig, saved_step = hazard_rig.Rig, steps[name]
+
+        def script(rig):
+            if rig.fail_setup:
+                raise hazard_rig.NotRun("bench", "the stick did not drive in the set-up")
+            return {}
+
+        def grade(st, tr, p):
+            st.check("graded", True, "")
+        hazard_rig.Rig = lambda ip, tree, out, st, *a, **k: FakeRig(st, lapses, spans,
+                                                                    fail_setup)
+        steps[name] = (script, grade, saved_step[2])
+        try:
+            with quiet(), tempfile.TemporaryDirectory() as tmp:
+                return hazard_steps.run_step(name, "0.0.0.0", pathlib.Path(tmp), common.REPO,
+                                             [group])
+        finally:
+            hazard_rig.Rig, steps[name] = saved_rig, saved_step
+    r = run("B5g", [inside], setup)
+    expect("B5g: a set-up lapse only: graded, the lapse recorded",
+           (r["verdict"], r["records"].get("injection_lapses_in_setup")), ("PASS", [inside]))
+    r = run("B5g", [inside, after], setup)
+    expect("B5g: a lapse in a graded window: NOT_RUN",
+           (r["verdict"], "graded window" in r.get("reason", "")), ("NOT_RUN", True))
+    r = run("B5g", [inside], setup, fail_setup=True)
+    expect("B5g: a set-up that failed (a lapse or not): NOT_RUN",
+           (r["verdict"], "set-up" in r.get("reason", "")), ("NOT_RUN", True))
+    r = run("C2-8", [inside], setup)
+    expect("C2-8 grades its set-up: a set-up lapse voids it", r["verdict"], "NOT_RUN")
+
+
 def t_restart_tile_and_refresh() -> None:
     names = hazard_rig.skunk_actions(common.REPO)
     expect("the tree's Skunk Works tiles", names[-1], "RESTART_HMI")
@@ -1329,6 +1488,11 @@ CASES = [
     ("BENCH-037 B5f, B5g graders: XYTwist 0 after IDLE and after stale MibStatus", t_b5f_b5g),
     ("BENCH-038 B5h grader: G4 holds", t_b5h),
     ("BENCH-039 B5i, B5j graders: the stalls and the watchdog", t_b5i_b5j),
+    ("BENCH-039b B5i, B5j graders, watchdog phase 1 (report only): the report, no reset, "
+     "the stream resumes; the 300 ms stall ends 300 ms after its mark", t_b5i_b5j_phase1),
+    ("BENCH-039c the watchdog phase comes from the tree's sdkconfig.defaults", t_watchdog_phase),
+    ("BENCH-039d the drive set-up waits for hold reason NONE, then NOT_RUN after 2 s",
+     t_wait_neutral_latch),
     ("BENCH-040 C2-1..3b graders: 6 mV, 0 mV, the rail, the limit edge", t_c2_mv_and_rail),
     ("BENCH-041 C2-4a..c graders: one, alternating and sparse bad cycles", t_c2_bad_cycles),
     ("BENCH-042 C2-5..7 graders: failed read, stale X/Y, NaN", t_c2_reads),
@@ -1357,6 +1521,9 @@ CASES = [
      "first (a wrong one is NOT_RUN); KEY ENTER is always released", t_seat_targets_and_key_enter),
     ("BENCH-051 injection lapses come from the STICK send times in the remote-UI log, not "
      "the injector's own clock; a pause is not a lapse", t_stick_lapses),
+    ("BENCH-051b only a lapse in a graded window voids a step: a lapse wholly in a drive set-up "
+     "that succeeded is recorded; a failed set-up and a graded-window lapse stay NOT_RUN",
+     t_lapses_in_graded_windows),
 ]
 
 

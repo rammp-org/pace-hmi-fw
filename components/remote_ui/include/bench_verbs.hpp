@@ -19,7 +19,8 @@
 ///          Threads: every hook runs on the remote UI's server task, never under lvgl_mutex.
 ///          A hook reads atomics or posts a request to the owning task (C3 §2.4: PERMIT POST is
 ///          applied by the POST runner); it never touches LVGL and never blocks for long. STALL
-///          is the exception by design: its hook blocks for the requested time (C4 B5i/B5j).
+///          too: its hook posts the request and answers at once; the stalled task spins for
+///          the requested time at its next cycle (C4 B5i/B5j).
 ///
 ///          The STATE line: "OK " and one JSON object, keys in this order, each `null` when
 ///          its hook is empty (names are the specs' enumerators):
@@ -156,7 +157,7 @@ struct Hooks {
   std::function<bool(StickHealthName)> permit_stick;     ///< C1 §3.2 (gone with C2)
   std::function<bool()> cal_unsaved;                     ///< C1 §6
   std::function<bool()> post_rerun;                      ///< C3 REQ-RUI-06
-  std::function<bool(StallTarget, std::uint32_t)> stall; ///< C4 REQ-RUI-07, C2 O14; blocks
+  std::function<bool(StallTarget, std::uint32_t)> stall; ///< C4 REQ-RUI-07, C2 O14; posts
 };
 
 namespace detail {

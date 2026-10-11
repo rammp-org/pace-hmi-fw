@@ -54,6 +54,9 @@ RETIRED_BY = {"B5''-15": ("c3", "C3 F5: replaced by B5''-18b"),
 NEEDS_SERIAL = scenario_c1.NEEDS_SERIAL | scenario_c3.NEEDS_SERIAL | scenario_c4.NEEDS_SERIAL
 # Steps whose injection is expected to lapse: a STALL blocks the remote-UI connection.
 ALLOW_LAPSE = {"B5i", "B5j", "C2-16"}
+# Steps whose graders read inside the drive set-up (C2-8: no DISABLE from the "enter" mark,
+# set in driving_forward): every lapse of theirs counts, set-up or not.
+SETUP_GRADED = {"C2-8"}
 
 
 def _restart_after(rig: hazard_rig.Rig) -> None:
@@ -124,10 +127,7 @@ def run_step(name: str, ip: str, out: pathlib.Path, tree: pathlib.Path,
             try:
                 p = script(rig)
                 tr = rig.collect()
-                if rig.inj.lapses and name not in ALLOW_LAPSE:
-                    raise hazard_rig.NotRun("bench", f"the stick injection lapsed "
-                                            f"{rig.inj.lapses[:3]} (refresh gap over "
-                                            f"{hazard_rig.INJECT_LAPSE_S} s)")
+                _check_lapses(rig, name)
                 if name in SELFTEST_AFTER:
                     deferred = (tr, p)
                 else:
@@ -146,6 +146,22 @@ def run_step(name: str, ip: str, out: pathlib.Path, tree: pathlib.Path,
         # (a serial port refused on 2026-10-09 made run_bench skip every later step)
         st.not_run = f"bench: {type(e).__name__}: {e}"
     return st.result()
+
+
+def _check_lapses(rig: hazard_rig.Rig, name: str) -> None:
+    """NOT_RUN when the injection lapsed in a graded window (hazard_rig's docstring); a lapse
+    wholly inside a drive set-up that succeeded is recorded and does not void the step."""
+    if rig.inj is None or name in ALLOW_LAPSE:
+        return
+    spans = [] if name in SETUP_GRADED else rig.setup_spans
+    graded = hazard_rig.graded_lapses(rig.inj.lapses, spans)
+    in_setup = [x for x in rig.inj.lapses if x not in graded]
+    if in_setup:
+        rig.st.record("injection_lapses_in_setup", in_setup)
+    if graded:
+        raise hazard_rig.NotRun("bench", f"the stick injection lapsed in a graded window "
+                                f"{graded[:3]} (refresh gap over "
+                                f"{hazard_rig.INJECT_LAPSE_S} s)")
 
 
 def _clean_up(rig: hazard_rig.Rig, name: str) -> None:

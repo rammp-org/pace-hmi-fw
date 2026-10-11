@@ -39,6 +39,7 @@ B5''-12 with C2 (C2 E9: the stick monitor is the only writer of stick health).
 
 from __future__ import annotations
 
+import datetime
 import time
 
 import hazard_grade as hg
@@ -62,11 +63,29 @@ def to_drive_by_mcb(rig: Rig, label: str = "enter", within: float = 4.0) -> floa
     return time.monotonic()
 
 
+# Set-up: how long the stick may take to be allowed after DriveScreen shows. The gate opens when
+# the screen has loaded (after its fade), then the stick must read neutral 300 ms (C1 G1): on
+# board 2 (C4 image, 2026-10-11) 0.50-0.73 s from DriveScreen to hold reason NONE, 8 entries.
+NEUTRAL_LATCH_WITHIN_S = 2.0
+
+
+def wait_neutral_latch(rig: Rig) -> None:
+    """Set-up: centred until STATE says the stick may drive (hold reason NONE: the gate open
+    and the 300 ms neutral latch set), not a fixed wait that can end before the gate opens."""
+    s = rig.watch(NEUTRAL_LATCH_WITHIN_S, until=lambda s: s.get("hold_reason") == "NONE")
+    if not rig.st.check("set-up: centred until hold reason NONE (gate open, neutral latch)",
+                        s is not None, f"hold_reason {rig.state().get('hold_reason')}"):
+        raise NotRun("bench", "the stick was not allowed to drive in the step's set-up")
+
+
 def driving_forward(rig: Rig, label: str = "enter") -> None:
-    """Drive (sim `a`), centred 0.5 s, then forward with XYTwist y > 0 seen (set-up)."""
+    """Drive (sim `a`), centred until the neutral latch is set, then forward with XYTwist y > 0
+    seen (set-up)."""
+    start = datetime.datetime.now()
     to_drive_by_mcb(rig, label)
     rig.centre()
-    time.sleep(0.5)  # C1 G1: centred longer than the 300 ms neutral hold
+    wait_neutral_latch(rig)  # C1 G1, after the gate opens
+    rig.setup_span(start)  # set-up, ungraded: a lapse in it does not void the step
     rig.forward()
     ok = rig.wait_y(lambda y: y > 0, 1.5)
     if not rig.st.check("set-up: driving forward (XYTwist y > 0)", ok, ""):

@@ -1150,13 +1150,14 @@ extern "C" void app_main(void) {
       // The motion guard's UI heartbeat (hazard-c4-spec.md §3.1), on the ADC side's clock.
       .heartbeat =
           [] {
-            ui_app.guard_sources().note_ui_cycle(adc_clock_ms());
-            // Bench builds: STALL UI. This cycle completed; the next comes after the stall, and
-            // the watchdog reset waits for it too.
+            // Bench builds: STALL UI, before this cycle's stamp: the cycle in progress runs
+            // `ms` longer, so the heartbeat's age counts from the last stamp before the request
+            // (B5i: XYTwist 0 by request + 240 ms), and the watchdog reset waits for it too.
             if constexpr (BENCH_STICK_INJECT) {
               hmi::control::spin_for_ms(ui_app.bench_stall().take(hmi::control::StallTask::UI),
                                         adc_clock_ms);
             }
+            ui_app.guard_sources().note_ui_cycle(adc_clock_ms());
           },
       // The task watchdog (C4 §4.3): the UI task subscribes at its first cycle; the result is
       // the motion guard's ui_wdt_ok.
