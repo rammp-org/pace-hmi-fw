@@ -1,7 +1,7 @@
 # L1 host app for components/stick (cases STK-001.. in components/stick/test/test_stick.cpp).
 # Golden vectors of the ADC task's stick math (refactor.md §3.2), replayed bit-exactly through
-# a verbatim copy of today's code and through the extracted pipeline. STK-040..049: the bench
-# stick injection's parser, expiry and fail_mask (REQ-STK-07). STK-037: pipeline_config
+# a verbatim copy of today's code and through the extracted pipeline. STK-040..049, 103, 104: the
+# bench stick injection's parser, expiry and fail_mask (REQ-STK-26, C2's mask bits 3-7). STK-037: pipeline_config
 # (REQ-STK-08). STK-050..052: the stick button's edges (REQ-STK-09). STK-060..067: the output
 # permit (hazard-c1-spec.md §3, REQ-STK-10..14); STK-068: the button bit before POST pass
 # (REQ-STK-15).
@@ -10,9 +10,10 @@
   title: stick pipeline golden vectors, hazards pinned as-is (open/short pot, invalid cycle), the output permit
   level: L1
   path: components/stick/test
-  requirements: [REQ-STK-01, REQ-STK-02, REQ-STK-03, REQ-STK-05, REQ-STK-06, REQ-STK-07,
-                 REQ-STK-08, REQ-STK-09, REQ-STK-10, REQ-STK-11, REQ-STK-12, REQ-STK-13,
-                 REQ-STK-14, REQ-STK-15]
+  requirements: [REQ-STK-01, REQ-STK-02, REQ-STK-03, REQ-STK-05, REQ-STK-06, REQ-STK-08,
+                 REQ-STK-09, REQ-STK-10, REQ-STK-11, REQ-STK-12, REQ-STK-13, REQ-STK-14,
+                 REQ-STK-15, REQ-STK-16, REQ-STK-18, REQ-STK-19, REQ-STK-21, REQ-STK-22,
+                 REQ-STK-23, REQ-STK-24, REQ-STK-25, REQ-STK-26, REQ-STK-27]
   resources: [host]
   timeout_s: 300
   expected_s: 60

@@ -378,7 +378,7 @@ bool handle_stick(int sock, std::string_view args) {
     const std::optional<hmi::stick::StickInjectMsg> msg = hmi::stick::parse_stick_inject(args);
     if (!msg) {
       return send_line(sock, "ERR usage: STICK <h_mv> <v_mv> <twist_mv> <fail_mask> <seq> "
-                             "(mV 0..3300, fail_mask 0..7)");
+                             "(mV 0..3300, fail_mask 0..255)");
     }
     if (!cfg.stick_inject) {
       return send_line(sock, "ERR stick injection not attached");

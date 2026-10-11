@@ -13,7 +13,12 @@
 ///            reads (calibration, mapping, keys, gate, XYTwist) is the real code;
 ///          - an injection holds only while it is refreshed: INJECT_EXPIRY after the last
 ///            message, the real reads come back;
-///          - fail_mask makes a read fail (no value), as a failed ADC read does (H9).
+///          - fail_mask makes a read fail (no value), as a failed ADC read does (H9); with C2
+///            (REQ-STK-26) it also makes a value NaN, freezes the X/Y window sequences, or
+///            limits those faults to the first cycle that takes the message;
+///          - the C2 monitor judges a whole raw sample (StickInjector::sample): an injected one
+///            is fresh each cycle (both X/Y sequences advance), its twist has all
+///            TWIST_OVERSAMPLE reads good, and each maximum equals its value.
 ///          Pure: no ESP-IDF, no LVGL, no allocation; the clock is passed in (CS-HAL-03).
 
 #include <array>
@@ -21,23 +26,31 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string_view>
 #include <system_error>
 
+#include "stick/stick_monitor.hpp"
 #include "stick/stick_pipeline.hpp"
 
 namespace hmi::stick {
 
-/// @brief StickInjectMsg::fail_mask bits: which read fails.
+/// @brief StickInjectMsg::fail_mask bits (REQ-STK-26): bits 0-2 a read fails, 3-5 a value is
+///        NaN, 6 the X/Y sequences freeze, 7 bits 0-6 apply to the first cycle only.
 enum class InjectFail : std::uint8_t {
-  HORIZONTAL = 1U << 0U, ///< ADC1_CH1, RawReadsMv::horizontal_mv
-  VERTICAL = 1U << 1U,   ///< ADC1_CH0, RawReadsMv::vertical_mv
-  TWIST = 1U << 2U,      ///< ADC2_CH3, RawReadsMv::twist_mv
+  HORIZONTAL = 1U << 0U,     ///< ADC1_CH1, RawReadsMv::horizontal_mv: the read fails
+  VERTICAL = 1U << 1U,       ///< ADC1_CH0, RawReadsMv::vertical_mv: the read fails
+  TWIST = 1U << 2U,          ///< ADC2_CH3, RawReadsMv::twist_mv: the read fails
+  NAN_HORIZONTAL = 1U << 3U, ///< the horizontal value (mean and max) is NaN
+  NAN_VERTICAL = 1U << 4U,   ///< the vertical value is NaN
+  NAN_TWIST = 1U << 5U,      ///< the twist value is NaN
+  FREEZE_XY = 1U << 6U,      ///< the X/Y window sequences do not advance (stale X/Y)
+  ONE_CYCLE = 1U << 7U,      ///< bits 0-6 apply to the first cycle that takes the message only
 };
 
-/// @brief Every fail_mask bit.
-inline constexpr std::uint8_t INJECT_FAIL_ALL = 0x07U;
+/// @brief The largest fail_mask (REQ-STK-26: every bit, 0..255).
+inline constexpr std::uint32_t INJECT_MASK_MAX = 0xFFU;
 
 /// @brief The largest injected read, in mV: the ADC's full scale as the firmware assumes it
 ///        (the uncalibrated ideal axis is 0..3300 mV).
@@ -62,7 +75,7 @@ struct StickInjectMsg {
 /// @brief Parses the STICK verb's arguments: `<h_mv> <v_mv> <twist_mv> <fail_mask> <seq>`.
 /// @details Outside input (TCP), so validated, never asserted (CS-ERR-04): exactly five
 ///          unsigned decimal integers separated by spaces; each mV 0..INJECT_MAX_MV, fail_mask
-///          0..INJECT_FAIL_ALL, seq 0..2^32-1. Anything else (a sign, a fraction, a sixth
+///          0..INJECT_MASK_MAX, seq 0..2^32-1. Anything else (a sign, a fraction, a sixth
 ///          field, trailing text, an overflow) is rejected. Bounded by the text's length.
 /// @param args The text after the verb.
 /// @return The message, or nothing when the text is not exactly that.
@@ -90,7 +103,7 @@ struct StickInjectMsg {
   }
   const auto [h_mv, v_mv, twist_mv, mask, seq] = values;
   if (count != FIELDS || h_mv > INJECT_MAX_MV || v_mv > INJECT_MAX_MV || twist_mv > INJECT_MAX_MV ||
-      mask > INJECT_FAIL_ALL) {
+      mask > INJECT_MASK_MAX) {
     return std::nullopt;
   }
   return StickInjectMsg{.horizontal_mv = static_cast<float>(h_mv),
@@ -113,6 +126,7 @@ public:
   void note(const StickInjectMsg &msg, TimePoint now) noexcept {
     last_ = msg;
     noted_at_ = now;
+    untaken_ = true;
   }
 
   /// @brief Ends the injection now: the real reads come back.
@@ -135,22 +149,71 @@ public:
   /// @param real The ADC's reads this cycle.
   /// @param now The ADC task's time.
   /// @return The reads to pass to StickPipeline::cycle.
+  ///        Bits 0-5 act on the reads; bits 6-7 concern the raw sample (sample()).
   [[nodiscard]] RawReadsMv apply(const RawReadsMv &real, TimePoint now) const noexcept {
     if (!active(now)) {
       return real;
     }
-    const auto read = [mask = last_->fail_mask](InjectFail bit, float mv) {
-      return (mask & static_cast<std::uint8_t>(bit)) != 0U ? std::nullopt
-                                                           : std::optional<float>{mv};
-    };
-    return {.horizontal_mv = read(InjectFail::HORIZONTAL, last_->horizontal_mv),
-            .vertical_mv = read(InjectFail::VERTICAL, last_->vertical_mv),
-            .twist_mv = read(InjectFail::TWIST, last_->twist_mv)};
+    const std::uint8_t mask = last_->fail_mask;
+    return {.horizontal_mv = value(mask, Axis::HORIZONTAL, last_->horizontal_mv),
+            .vertical_mv = value(mask, Axis::VERTICAL, last_->vertical_mv),
+            .twist_mv = value(mask, Axis::TWIST, last_->twist_mv)};
+  }
+
+  /// @brief The raw sample the stick monitor gets at @p now (REQ-STK-26), once per cycle: while
+  ///        an injection holds, the injected values (fail_mask bits 0-5 as in apply()), each
+  ///        maximum equal to its value, the twist's TWIST_OVERSAMPLE reads all good (none when
+  ///        its read fails), and both X/Y sequences advanced by one unless bit 6 freezes them.
+  ///        With bit 7, bits 0-6 apply only to the first call after the message was noted.
+  ///        Else @p real unchanged.
+  /// @param real This cycle's raw sample from the ADC.
+  /// @param now The ADC task's time.
+  /// @return The sample for the monitor and, as its means, the pipeline.
+  [[nodiscard]] RawSample sample(const RawSample &real, TimePoint now) noexcept {
+    if (!active(now)) {
+      return real;
+    }
+    const bool first = untaken_;
+    untaken_ = false;
+    const bool one_cycle = has(last_->fail_mask, InjectFail::ONE_CYCLE);
+    const std::uint8_t mask = one_cycle && !first ? std::uint8_t{0} : last_->fail_mask;
+    if (!has(mask, InjectFail::FREEZE_XY)) {
+      ++sequence_;
+    }
+    const std::optional<float> twist = value(mask, Axis::TWIST, last_->twist_mv);
+    return {.horizontal = window(value(mask, Axis::HORIZONTAL, last_->horizontal_mv)),
+            .vertical = window(value(mask, Axis::VERTICAL, last_->vertical_mv)),
+            .twist_mean_mv = twist,
+            .twist_max_mv = twist.value_or(0.0f),
+            .twist_reads = twist ? TWIST_OVERSAMPLE : std::uint8_t{0}};
   }
 
 private:
+  enum class Axis : std::uint8_t { HORIZONTAL, VERTICAL, TWIST };
+  [[nodiscard]] static constexpr bool has(std::uint8_t mask, InjectFail bit) {
+    return (mask & static_cast<std::uint8_t>(bit)) != 0U;
+  }
+  // One injected value: none when its read fails, NaN when its NaN bit is set, else @p mv.
+  [[nodiscard]] static std::optional<float> value(std::uint8_t mask, Axis axis, float mv) {
+    static constexpr std::array<InjectFail, 3> FAILS{InjectFail::HORIZONTAL, InjectFail::VERTICAL,
+                                                     InjectFail::TWIST};
+    static constexpr std::array<InjectFail, 3> NANS{
+        InjectFail::NAN_HORIZONTAL, InjectFail::NAN_VERTICAL, InjectFail::NAN_TWIST};
+    const auto i = static_cast<std::size_t>(axis);
+    if (has(mask, FAILS.at(i))) {
+      return std::nullopt;
+    }
+    return has(mask, NANS.at(i)) ? std::numeric_limits<float>::quiet_NaN() : mv;
+  }
+  // An injected X/Y window: its value as mean and max, the injection's sequence.
+  [[nodiscard]] XyWindowMv window(std::optional<float> mv) const {
+    return {.mean_mv = mv, .max_mv = mv.value_or(0.0f), .sequence = sequence_};
+  }
+
   std::optional<StickInjectMsg> last_;
   TimePoint noted_at_{};
+  bool untaken_ = false;       ///< the last message has not been through sample() yet
+  std::uint32_t sequence_ = 0; ///< the injected X/Y windows' sequence (both channels)
 };
 
 } // namespace hmi::stick

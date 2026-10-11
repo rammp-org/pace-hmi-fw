@@ -6,8 +6,9 @@
 //               state what the code does TODAY, including what is unsafe (refactor.md §1 H3,
 //               H9): a characterisation, not a specification. Fixing them is parked (§3.3).
 // STK-030..039  the extracted pure stages, one behaviour each
-// STK-040..     bench stick injection (stick/bench_inject.hpp, REQ-STK-07): the STICK verb's
-//               parser, the expiry, fail_mask, and injected reads through the real pipeline
+// STK-040..049  bench stick injection (stick/bench_inject.hpp, REQ-STK-26): the STICK verb's
+//               parser, the expiry, fail_mask, and injected reads through the real pipeline;
+//               STK-103, 104: C2's mask bits 3-7 and the injected raw sample
 // STK-060..067  the output permit (hazard-c1-spec.md §3, REQ-STK-10..14): literal 0, the
 //               neutral latch, the hold reason order, the hooks. STK-016 and STK-035 (they
 //               pinned the gate's multiply) are retired by C1 E9.
@@ -21,8 +22,10 @@
 #include <limits>
 #include <optional>
 #include <random>
+#include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 
 #include "golden_stick.inc"
 #include "legacy_adc_cycle.hpp"
@@ -587,7 +590,7 @@ TEST_CASE("STK-041 hostile STICK arguments are rejected (TS-UNIT-07)", "[stick][
       "3301 1650 1650 0 1",                 // horizontal just above the maximum
       "1650 3301 1650 0 1",                 // vertical just above
       "1650 1650 3301 0 1",                 // twist just above
-      "1650 1650 1650 8 1",                 // fail_mask just above 7
+      "1650 1650 1650 256 1",               // fail_mask just above 255 (REQ-STK-26)
       "1650 1650 1650 0 4294967296",        // seq just above 2^32-1
       "99999999999999999999 1650 1650 0 1", // far above: overflows uint32
       "-1 1650 1650 0 1",                   // a sign
@@ -623,7 +626,7 @@ TEST_CASE("STK-041 hostile STICK arguments are rejected (TS-UNIT-07)", "[stick][
     }
     if (const auto m = parse_stick_inject({buf.data(), len})) {
       TEST_ASSERT_TRUE(m->horizontal_mv <= 3300.0f && m->vertical_mv <= 3300.0f &&
-                       m->twist_mv <= 3300.0f && m->fail_mask <= 7);
+                       m->twist_mv <= 3300.0f); // fail_mask: every uint8 value is valid
     }
   }
 }
@@ -670,17 +673,22 @@ TEST_CASE("STK-045 a refresh holds the injection 300 ms from the refresh", "[sti
   TEST_ASSERT_FALSE(inject.active(T0 + milliseconds{550}));
 }
 
-TEST_CASE("STK-046 fail_mask makes exactly the masked reads fail", "[stick][inject]") {
-  for (unsigned mask = 0; mask <= hmi::stick::INJECT_FAIL_ALL; ++mask) {
+TEST_CASE("STK-046 fail_mask bits 0-2 make exactly the masked reads fail, bits 3-5 make the "
+          "unfailed ones NaN",
+          "[stick][inject]") {
+  for (unsigned mask = 0; mask <= 0xFFU; ++mask) {
     StickInjector inject;
     inject.note(inject_msg(10.0f, 20.0f, 30.0f, static_cast<std::uint8_t>(mask)), T0);
     const RawReadsMv got = inject.apply(REAL_MV, T0);
     TEST_ASSERT_EQUAL((mask & 1U) == 0U, got.horizontal_mv.has_value());
     TEST_ASSERT_EQUAL((mask & 2U) == 0U, got.vertical_mv.has_value());
     TEST_ASSERT_EQUAL((mask & 4U) == 0U, got.twist_mv.has_value());
-    TEST_ASSERT_TRUE(got.horizontal_mv.value_or(10.0f) == 10.0f &&
-                     got.vertical_mv.value_or(20.0f) == 20.0f &&
-                     got.twist_mv.value_or(30.0f) == 30.0f);
+    const auto is = [](std::optional<float> v, bool nan, float mv) {
+      return !v || (nan ? std::isnan(*v) : *v == mv);
+    };
+    TEST_ASSERT_TRUE(is(got.horizontal_mv, (mask & 8U) != 0U, 10.0f));
+    TEST_ASSERT_TRUE(is(got.vertical_mv, (mask & 16U) != 0U, 20.0f));
+    TEST_ASSERT_TRUE(is(got.twist_mv, (mask & 32U) != 0U, 30.0f));
   }
 }
 
@@ -716,6 +724,146 @@ TEST_CASE("STK-049 injected reads go through the real pipeline: forward passes a
   inject.note(inject_msg(1650.0f, 0.0f, 1650.0f, 0x02), T0); // the vertical read fails
   TEST_ASSERT_FALSE(drive.cycle(inject.apply(REAL_MV, T0))); // H9 as today: nothing sent
   TEST_ASSERT_FALSE(drive.io.out.published);
+}
+
+namespace {
+using hmi::stick::classify;
+using hmi::stick::HighLimitsMv;
+using hmi::stick::RawSample;
+using hmi::stick::SampleFault;
+using hmi::stick::StickAxis;
+using hmi::stick::StickMonitor;
+
+// A real raw sample at rest (board 2), its own X/Y sequences 500, 600.
+constexpr RawSample REAL_SAMPLE{.horizontal = {1507.0f, 1510.0f, 500},
+                                .vertical = {1510.0f, 1513.0f, 600},
+                                .twist_mean_mv = 1477.0f,
+                                .twist_max_mv = 1490.0f,
+                                .twist_reads = 8};
+constexpr HighLimitsMv LIMITS_IDEAL{3150.0f, 3150.0f, 3150.0f};
+
+bool fault_is(const RawSample &s, SampleFault kind, StickAxis axis) {
+  const auto r = classify(s, LIMITS_IDEAL, false, false);
+  return r.kind == kind && r.axis == axis;
+}
+} // namespace
+
+TEST_CASE("STK-103 injection mask bits 3-5 make a value NaN (mean and max), 6 freezes the X/Y "
+          "sequences while set, 7 limits the faults to the first cycle that takes the message",
+          "[stick][inject][REQ-STK-26]") {
+  // Without a fault bit: fresh each cycle, both sequences + 1, twist 8 of 8, max = value.
+  StickInjector inject;
+  inject.note(inject_msg(1000.0f, 2000.0f, 3000.0f, 0), T0);
+  const RawSample a = inject.sample(REAL_SAMPLE, T0);
+  const RawSample b = inject.sample(REAL_SAMPLE, T0 + milliseconds{35});
+  TEST_ASSERT_EQUAL_FLOAT(1000.0f, *a.horizontal.mean_mv);
+  TEST_ASSERT_EQUAL_FLOAT(1000.0f, a.horizontal.max_mv);
+  TEST_ASSERT_EQUAL_FLOAT(2000.0f, *a.vertical.mean_mv);
+  TEST_ASSERT_EQUAL_FLOAT(2000.0f, a.vertical.max_mv);
+  TEST_ASSERT_EQUAL_FLOAT(3000.0f, *a.twist_mean_mv);
+  TEST_ASSERT_EQUAL_FLOAT(3000.0f, a.twist_max_mv);
+  TEST_ASSERT_EQUAL_UINT8(8, a.twist_reads);
+  TEST_ASSERT_EQUAL_UINT32(a.horizontal.sequence + 1U, b.horizontal.sequence);
+  TEST_ASSERT_EQUAL_UINT32(a.vertical.sequence + 1U, b.vertical.sequence);
+  TEST_ASSERT_TRUE(fault_is(a, SampleFault::NONE, StickAxis::NONE));
+  // Bits 3, 4, 5: NaN in mean and max, reason NAN on that axis.
+  const std::array<std::pair<std::uint8_t, StickAxis>, 3> nans{
+      {{0x08U, StickAxis::HORIZONTAL}, {0x10U, StickAxis::VERTICAL}, {0x20U, StickAxis::TWIST}}};
+  for (const auto &[bit, axis] : nans) {
+    StickInjector one;
+    one.note(inject_msg(1000.0f, 2000.0f, 3000.0f, bit), T0);
+    const RawSample n = one.sample(REAL_SAMPLE, T0);
+    TEST_ASSERT_TRUE(fault_is(n, SampleFault::NAN_VALUE, axis));
+    const float mean = axis == StickAxis::HORIZONTAL ? *n.horizontal.mean_mv
+                       : axis == StickAxis::VERTICAL ? *n.vertical.mean_mv
+                                                     : *n.twist_mean_mv;
+    const float max = axis == StickAxis::HORIZONTAL ? n.horizontal.max_mv
+                      : axis == StickAxis::VERTICAL ? n.vertical.max_mv
+                                                    : n.twist_max_mv;
+    TEST_ASSERT_TRUE(std::isnan(mean) && std::isnan(max));
+  }
+  // A failed twist read: no mean, no reads.
+  StickInjector failed;
+  failed.note(inject_msg(1000.0f, 2000.0f, 3000.0f, 0x04U), T0);
+  const RawSample f = failed.sample(REAL_SAMPLE, T0);
+  TEST_ASSERT_FALSE(f.twist_mean_mv.has_value());
+  TEST_ASSERT_EQUAL_UINT8(0, f.twist_reads);
+  // Bit 6: the sequences stay while it is set (the monitor sees STALE at 300 ms), and move
+  // again once a message without it comes.
+  StickInjector frozen;
+  frozen.note(inject_msg(1650.0f, 1650.0f, 1650.0f, 0x40U), T0);
+  StickMonitor m;
+  const RawSample first = frozen.sample(REAL_SAMPLE, T0);
+  for (std::uint32_t t = 0; t <= 300; t += 35) {
+    const RawSample s = frozen.sample(REAL_SAMPLE, T0 + milliseconds{t});
+    TEST_ASSERT_EQUAL_UINT32(first.horizontal.sequence, s.horizontal.sequence);
+    TEST_ASSERT_EQUAL_UINT32(first.vertical.sequence, s.vertical.sequence);
+  }
+  frozen.note(inject_msg(1650.0f, 1650.0f, 1650.0f, 0), T0 + milliseconds{320});
+  TEST_ASSERT_EQUAL_UINT32(first.horizontal.sequence + 1U,
+                           frozen.sample(REAL_SAMPLE, T0 + milliseconds{320}).horizontal.sequence);
+  // Through the monitor: frozen X/Y windows read STALE once XY_STALE_MS (300 ms) has passed.
+  StickInjector stale;
+  stale.note(inject_msg(1650.0f, 1650.0f, 1650.0f, 0), T0);
+  std::uint32_t now = 0;
+  m.step(hmi::stick::MonitorInput::SAMPLE, stale.sample(REAL_SAMPLE, T0), LIMITS_IDEAL, 0, now);
+  stale.note(inject_msg(1650.0f, 1650.0f, 1650.0f, 0x40U), T0);
+  for (now = 35; now < 300; now += 35) {
+    m.step(hmi::stick::MonitorInput::SAMPLE, stale.sample(REAL_SAMPLE, T0), LIMITS_IDEAL, 0, now);
+    TEST_ASSERT_TRUE(m.last_reason().kind == SampleFault::NONE);
+  }
+  m.step(hmi::stick::MonitorInput::SAMPLE, stale.sample(REAL_SAMPLE, T0), LIMITS_IDEAL, 0, 300);
+  TEST_ASSERT_TRUE(m.last_reason().kind == SampleFault::STALE);
+  // Bit 7: the faults of bits 0-6 on the first cycle that takes the message only; the second
+  // cycle on the same message is plausible; a new message with bit 7 faults once again.
+  StickInjector once;
+  once.note(inject_msg(1650.0f, 1650.0f, 1650.0f, 0x81U), T0); // horizontal fails, one cycle
+  TEST_ASSERT_TRUE(
+      fault_is(once.sample(REAL_SAMPLE, T0), SampleFault::MISSING, StickAxis::HORIZONTAL));
+  TEST_ASSERT_TRUE(fault_is(once.sample(REAL_SAMPLE, T0 + milliseconds{35}), SampleFault::NONE,
+                            StickAxis::NONE));
+  once.note(inject_msg(1650.0f, 1650.0f, 1650.0f, 0x90U), T0 + milliseconds{70}); // NaN V
+  TEST_ASSERT_TRUE(fault_is(once.sample(REAL_SAMPLE, T0 + milliseconds{70}), SampleFault::NAN_VALUE,
+                            StickAxis::VERTICAL));
+  TEST_ASSERT_TRUE(fault_is(once.sample(REAL_SAMPLE, T0 + milliseconds{105}), SampleFault::NONE,
+                            StickAxis::NONE));
+  // No injection, or an expired one: the real sample unchanged.
+  StickInjector none;
+  const RawSample r = none.sample(REAL_SAMPLE, T0);
+  TEST_ASSERT_EQUAL_UINT32(500, r.horizontal.sequence);
+  TEST_ASSERT_EQUAL_FLOAT(1513.0f, r.vertical.max_mv);
+  inject.note(inject_msg(1000.0f, 2000.0f, 3000.0f, 0), T0);
+  TEST_ASSERT_EQUAL_UINT32(600, inject.sample(REAL_SAMPLE, T0 + INJECT_EXPIRY).vertical.sequence);
+}
+
+TEST_CASE("STK-104 hostile STICK arguments with C2's mask range: 255 accepted, 256 rejected, "
+          "plus TS-UNIT-07's set",
+          "[stick][inject][REQ-STK-26]") {
+  const auto all = parse_stick_inject("3300 0 1650 255 4294967295");
+  TEST_ASSERT_TRUE(all.has_value());
+  TEST_ASSERT_EQUAL_UINT8(255, all->fail_mask);
+  constexpr std::array<std::string_view, 9> BAD{
+      "1650 1650 1650 256 1",        // the mask just above 255
+      "1650 1650 1650 65535 1",      // far above
+      "1650 1650 1650 4294967296 1", // overflows uint32
+      "1650 1650 1650 -1 1",         // a sign
+      "1650 1650 1650 0x81 1",       // hex
+      "1650 1650 1650 1e2 1",        // an exponent
+      "1650 1650 1650 129.0 1",      // a fraction
+      "1650 1650 1650  1",           // the mask missing
+      "1650 1650 1650 129 1 0",      // a sixth field
+  };
+  for (const std::string_view text : BAD) {
+    if (parse_stick_inject(text).has_value()) {
+      std::printf("accepted: \"%.*s\"\n", static_cast<int>(text.size()), text.data());
+      TEST_FAIL();
+    }
+  }
+  for (unsigned mask = 0; mask <= 255; ++mask) {
+    const std::string line = "1650 1650 1650 " + std::to_string(mask) + " 9";
+    const auto m = parse_stick_inject(line);
+    TEST_ASSERT_TRUE(m.has_value() && m->fail_mask == mask);
+  }
 }
 
 TEST_CASE("STK-037 the HMI's pipeline config carries the dead zones main always passed",

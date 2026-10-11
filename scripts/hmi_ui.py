@@ -365,8 +365,8 @@ def cmd_walk(hmi: Hmi, out: pathlib.Path, half: bool) -> int:
 
 
 # What components/remote_ui/include/stick_inject.hpp and components/stick/include/stick/bench_inject.hpp
-# accept: an injection holds this long after the last STICK, mV 0..3300, mask 0..7 today.
-# hazard-c2-spec.md REQ-STK-26 widens the mask to 0..255 (3-5 NaN, 6 X/Y frozen, 7 one cycle);
+# accept: an injection holds this long after the last STICK, mV 0..3300, mask 0..255
+# (hazard-c2-spec.md REQ-STK-26: 0-2 a read fails, 3-5 NaN, 6 X/Y frozen, 7 one cycle);
 # a board before C2 answers a mask above 7 with ERR, which stick() raises.
 STICK_EXPIRY_MS = 300
 STICK_MAX_MV = 3300

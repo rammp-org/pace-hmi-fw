@@ -5,16 +5,18 @@
 ///        remote UI in front of its raw reads.
 /// @details BENCH ONLY: CONFIG_HMI_BENCH_STICK_INJECT (depends on CONFIG_HMI_REMOTE_UI, off by
 ///          default, never in sdkconfig.defaults; hazard-fixes.md §3 B1). The logic (parse,
-///          expiry, fail_mask) is hmi::stick's bench_inject.hpp, host-tested (STK-040..049).
+///          expiry, fail_mask) is hmi::stick's bench_inject.hpp, host-tested (STK-040..049,
+///          STK-103, STK-104).
 ///
 ///          the stick that main's `StickIsland<StickSlot, ...>` owns is hmi::stick::StickPipeline
 ///          itself in every other build: the type is chosen by `std::conditional_t` on the
 ///          constexpr, so a release build compiles none of this (CS-LAY-09, CS-TYP-05) and app_main
 ///          is unchanged (the L0 ratchet holds main.cpp's lines and statics).
 ///
-///          In a bench inject build it is StickInjectBench, a StickPipeline whose reads() swaps
-///          the ADC task's RawReadsMv for the injected ones (StickInjector::apply); the island
-///          runs the real pipeline on them: calibration, mapping, keys, gate, XYTwist.
+///          In a bench inject build it is StickInjectBench, a StickPipeline whose sample() swaps
+///          the ADC task's raw sample for the injected one (StickInjector::sample); the island
+///          runs the real code on it: the monitor (C2), calibration, mapping, keys, the permit,
+///          XYTwist.
 ///
 ///          Who touches what (CS-OWN; one writer and one reader per channel):
 ///
@@ -59,8 +61,8 @@ using StickInjectActiveReader = hmi::fw::Reader<StickInjectActive>;
 /// @param active The injection-active flag's read end.
 void remote_ui_attach_stick_inject(StickInjectWriter writer, StickInjectActiveReader active);
 
-/// @brief The ADC task's stick with the bench injection in front of its reads (reads()). See
-///        the file comment.
+/// @brief The ADC task's stick with the bench injection in front of its raw sample (sample()).
+///        See the file comment.
 class StickInjectBench : public hmi::stick::StickPipeline {
 public:
   /// @brief The stick pipeline on @p config, and the channel ends handed to the remote UI.
@@ -75,13 +77,13 @@ public:
   StickInjectBench &operator=(StickInjectBench &&) = delete;
   ~StickInjectBench() = default;
 
-  /// @brief The reads this cycle uses (ADC task only, once per cycle, before the cycle): the
-  ///        injected ones while an injection holds (until 300 ms after the last STICK), else
-  ///        @p real. The island passes them to StickPipeline::cycle and to its Io.
-  ///        Drains the mailbox (its one reader), never blocking.
-  /// @param real This cycle's ADC reads.
-  /// @return The reads for the pipeline.
-  [[nodiscard]] hmi::stick::RawReadsMv reads(const hmi::stick::RawReadsMv &real) noexcept {
+  /// @brief The raw sample this cycle uses (ADC task only, once per cycle, before the cycle):
+  ///        the injected one while an injection holds (until 300 ms after the last STICK; its
+  ///        fail_mask as REQ-STK-26), else @p real. The island hands it to its Io and the
+  ///        pipeline. Drains the mailbox (its one reader), never blocking.
+  /// @param real This cycle's raw sample from the ADC.
+  /// @return The sample for the Io and the pipeline.
+  [[nodiscard]] hmi::stick::RawSample sample(const hmi::stick::RawSample &real) noexcept {
     const auto now = std::chrono::steady_clock::now();
     hmi::stick::StickInjectMsg msg{};
     switch (mailbox_.read(msg)) {
@@ -95,22 +97,7 @@ public:
       return real;
     }
     active_.write(injector_.active(now));
-    return injector_.apply(real, now);
-  }
-
-  /// @brief The raw sample this cycle uses (the island's, hazard fix C2): reads() on its three
-  ///        means; the windows' maxima and sequences pass as read.
-  /// @param real This cycle's raw sample.
-  /// @return The sample for the Io and the pipeline.
-  [[nodiscard]] hmi::stick::RawSample sample(const hmi::stick::RawSample &real) noexcept {
-    const hmi::stick::RawReadsMv got = reads({.horizontal_mv = real.horizontal.mean_mv,
-                                              .vertical_mv = real.vertical.mean_mv,
-                                              .twist_mv = real.twist_mean_mv});
-    hmi::stick::RawSample out = real;
-    out.horizontal.mean_mv = got.horizontal_mv;
-    out.vertical.mean_mv = got.vertical_mv;
-    out.twist_mean_mv = got.twist_mv;
-    return out;
+    return injector_.sample(real, now);
   }
 
 private:
