@@ -46,7 +46,7 @@ MUTANTS=(
   # The hazard fix C3's rows (hazard-c3-spec.md §4).
   'T17-row50-without-link|table|0,/when({Guard::LINK_CONNECTED}, {Guard::BOOT_STOP_DONE}), Phase::LOCKED,/s//when({}, {Guard::BOOT_STOP_DONE}), Phase::LOCKED,/'
   # The hazard fix C2b's rows (hazard-c2-spec.md §5.3; D9b's rows 58-59).
-  'T18-row55-without-fault|table|s/Transition{Phase::UNLOCKING, Input::TICK_STICK_FAULT, when({Guard::STICK_FAULT}),/Transition{Phase::UNLOCKING, Input::TICK_STICK_FAULT, kAlways,/'
+  'T18-row55-also-needs-link|table|s/Transition{Phase::UNLOCKING, Input::TICK_STICK_FAULT, when({Guard::STICK_FAULT}),/Transition{Phase::UNLOCKING, Input::TICK_STICK_FAULT, when({Guard::STICK_FAULT, Guard::LINK_CONNECTED}),/'
   'T19-row56-no-banner|table|s/kFirstExitAskStickFault, "hazard-c2-spec.md 5.3 row 56"},/kFirstExitAskHold, "hazard-c2-spec.md 5.3 row 56"},/'
   'T20-row57-no-feedback|table|s/acts({Action::RING_REST, Action::SHOW_REFUSED_STICK, Action::REFUSAL_FEEDBACK}),/acts({Action::RING_REST, Action::SHOW_REFUSED_STICK}),/'
   'T21-row58-menu-ignored|table|s/^                    {Guard::MENU_OPEN}),$/                    {}),/'
