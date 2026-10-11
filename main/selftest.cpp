@@ -4,8 +4,6 @@
 #include <array>
 #include <atomic>
 #include <cmath>
-#include <cstring>
-#include <iterator>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -356,6 +354,15 @@ private:
     publish_result(index_of(id));
   }
 
+  // A check measured when `value` holds one (no detail), else unmeasurable for `why_not`.
+  void record_or(Id id, std::optional<int32_t> value, std::string why_not) {
+    if (value) {
+      record(id, *value);
+    } else {
+      unmeasurable(id, std::move(why_not));
+    }
+  }
+
   void unmeasurable(Id id, std::string reason) {
     const Check &s = selftest_spec::check(id);
     Outcome &o = out_[index_of(id)];
@@ -463,12 +470,8 @@ private:
       }
     }
 
-    const auto accel = platform.imu_accel_mg ? platform.imu_accel_mg() : std::nullopt;
-    if (accel) {
-      record(Id::IMU_ACCEL, *accel);
-    } else {
-      unmeasurable(Id::IMU_ACCEL, "no accelerometer reading");
-    }
+    record_or(Id::IMU_ACCEL, platform.imu_accel_mg ? platform.imu_accel_mg() : std::nullopt,
+              "no accelerometer reading");
 
     const auto vbat = platform.battery_mv ? platform.battery_mv() : std::nullopt;
     if (!vbat) {
@@ -494,11 +497,8 @@ private:
       unmeasurable(Id::HAP_DRV_ID, "DRV2605 did not answer");
       unmeasurable(Id::HAP_DRV_FAULT, "DRV2605 did not answer");
     }
-    if (platform.da7280_found) {
-      record(Id::HAP_DA7280, 1);
-    } else {
-      unmeasurable(Id::HAP_DA7280, "not fitted (no ACK at 0x4a at boot)");
-    }
+    record_or(Id::HAP_DA7280, platform.da7280_found ? std::optional<int32_t>(1) : std::nullopt,
+              "not fitted (no ACK at 0x4a at boot)");
   }
 
   void check_haptic_play() {
@@ -535,18 +535,11 @@ private:
     const bool lease = rank >= static_cast<int>(RtpsLinkState::NO_PEER);
     record(Id::NET_LINK, link ? 1 : 0, link ? std::string() : detail);
     record(Id::NET_IP, lease ? 1 : 0, lease ? std::string() : detail);
-    if (state == RtpsLinkState::CONNECTED) {
-      record(Id::RTPS_LINK, 1);
-    } else {
-      unmeasurable(Id::RTPS_LINK, detail);
-    }
+    record_or(Id::RTPS_LINK,
+              state == RtpsLinkState::CONNECTED ? std::optional<int32_t>(1) : std::nullopt, detail);
     const NetLink net = rtps_comms_net_link();
-    if (const auto rssi = rtps_comms_wifi_rssi()) {
-      record(Id::NET_WIFI_RSSI, *rssi);
-    } else {
-      unmeasurable(Id::NET_WIFI_RSSI,
-                   net == NetLink::WIFI ? detail : std::string("on Ethernet, not WiFi"));
-    }
+    record_or(Id::NET_WIFI_RSSI, rtps_comms_wifi_rssi(),
+              net == NetLink::WIFI ? detail : std::string("on Ethernet, not WiFi"));
   }
 
   // Joystick, ADC cadence, McbStatus, pings, RTC and UI stalls, all measured
@@ -609,11 +602,10 @@ private:
       pings = std::move(ping_log); // closes the window: later pongs are ignored
     }
 
-    if (platform.lvgl_mutex) {
-      record(Id::TIME_UI_STALL, static_cast<int32_t>(stall_max_us));
-    } else {
-      unmeasurable(Id::TIME_UI_STALL, "no LVGL lock");
-    }
+    record_or(Id::TIME_UI_STALL,
+              platform.lvgl_mutex ? std::optional(static_cast<int32_t>(stall_max_us))
+                                  : std::nullopt,
+              "no LVGL lock");
 
     if (rtc_start && rtc_end) {
       record(Id::RTC_TICK, static_cast<int32_t>(*rtc_end - *rtc_start),
