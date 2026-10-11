@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <vector>
 
 #include "test_case.hpp"
 
@@ -76,6 +77,27 @@ Env env_at(std::size_t i) {
              .stop_fault_elapsed = (stop & 2U) != 0,
              .resend = RESENDS[i % RESENDS.size()],
              .post_ok = (i / RESENDS.size()) % 2 != 0};
+}
+
+// One Env for each distinct env guard mask, in env_at order (the first Env with that mask).
+// DriveSession::step decides on env_guards(env) | hidden only, so these Envs make every decision
+// the ENV_COUNT Envs make; the whole-state sweeps (DRV-026, DRV-027, DRV-031) run over them.
+// With the link down every MIB state gives the same mask: 5 of the 8 (link, MIB) pairs remain.
+const std::vector<Env> &distinct_envs() {
+  static const std::vector<Env> envs = [] {
+    std::vector<Env> out;
+    std::vector<GuardMask> seen;
+    for (std::size_t ei = 0; ei < ENV_COUNT; ++ei) {
+      const Env env = env_at(ei);
+      const GuardMask m = ds::env_guards(env);
+      if (std::ranges::find(seen, m) == seen.end()) {
+        seen.push_back(m);
+        out.push_back(env);
+      }
+    }
+    return out;
+  }();
+  return envs;
 }
 
 // Spread an index over the hidden guard bits, in bit order.
@@ -458,11 +480,11 @@ TEST_CASE("DRV-026 every relock from an unlocked phase sends DISABLE and leaves 
       if (!ds::hidden_valid(p, hidden)) {
         continue;
       }
-      for (std::size_t ei = 0; ei < ENV_COUNT; ++ei) {
+      for (const Env &env : distinct_envs()) {
         DriveSession s;
         DriveSessionTestPeer::set(s, p, hidden);
         Actions out{};
-        TEST_ASSERT_TRUE(s.step(Input::TICK_FOLLOW, env_at(ei), out));
+        TEST_ASSERT_TRUE(s.step(Input::TICK_FOLLOW, env, out));
         if (s.phase() != Phase::LOCKED) {
           continue;
         }
@@ -490,8 +512,7 @@ TEST_CASE("DRV-027 over every state, ENABLE is sent only by rows 18, 31 and 32, 
       }
       for (std::size_t ii = 0; ii < ds::kInputCount; ++ii) {
         const auto in = static_cast<Input>(ii);
-        for (std::size_t ei = 0; ei < ENV_COUNT; ++ei) {
-          const Env env = env_at(ei);
+        for (const Env &env : distinct_envs()) {
           DriveSession s;
           DriveSessionTestPeer::set(s, p, hidden);
           Actions out{};
@@ -650,8 +671,7 @@ TEST_CASE("DRV-031 over every state inside the phase invariants with POST_OK fal
         continue;
       }
       for (std::size_t ii = 0; ii < ds::kInputCount; ++ii) {
-        for (std::size_t ei = 0; ei < ENV_COUNT; ++ei) {
-          const Env env = env_at(ei);
+        for (const Env &env : distinct_envs()) {
           if (env.post_ok) {
             continue;
           }
