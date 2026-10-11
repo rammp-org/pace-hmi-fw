@@ -34,7 +34,7 @@ stick until a recalibration or a reboot (REQ-STK-22).
 
 ## 4. Bench results of this branch
 
-Image `C:\dev_ai_hazard_c2_cadcprio_bench`, v3.0.0-alpha-649-g7a10576 (bench + stick inject +
+Image `C:\b\dev_ai_hazard_c2_cadcprio_bench`, v3.0.0-alpha-649-g7a10576 (bench + stick inject +
 wifi.local). Full run with all hazard groups (`c2cadc-7a10576-20261011-091102`, tools at f03d07a):
 51 PASS, 1 RECORD, 5 FAIL, 7 NOT_RUN (C2-13 by design).
 
