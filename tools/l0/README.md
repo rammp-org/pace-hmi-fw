@@ -63,3 +63,12 @@ the top of `ratchet.py`.
 
 `python tools/l0/include_boundary.py check` fails when a file includes another component's
 private `src/` files (CS-LAY-03); `selftest` runs its cases. Both run in the `L0` workflow.
+
+## Coverage and Doxygen gates
+
+`coverage_gate.py` (TS-COV-02, CS-SAF-05) reads `results/<run>/summary.json` from
+`tests/run.py run --all --coverage` and fails if a file's L1 line or branch coverage falls
+below `coverage_baseline.json`; the gap to the spec thresholds is reported, not failed.
+`update` raises the baseline. `doxygen_gate.py` (CS-DOC-01) runs `doxygen ci/Doxyfile` and
+fails if the warning count of any file rises above `doxygen_baseline.json`; `update` lowers
+it. Both have a `selftest`. Reduce the debt, run `update`, commit the new baseline.

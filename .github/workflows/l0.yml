@@ -34,6 +34,14 @@ jobs:
     - name: Ratchet check (legacy counts may only fall; new files start clean)
       run: python3 tools/l0/ratchet.py check
 
+    # Coverage and Doxygen gates (compliance-gaps.md gaps 5 and 7): the gate logic here; the
+    # real checks run after the L1 tests (host-l1) and in the doxygen job below.
+    - name: Coverage and Doxygen gate self tests
+      run: |
+        python3 -m pip install --quiet pyyaml
+        python3 tools/l0/coverage_gate.py selftest
+        python3 tools/l0/doxygen_gate.py selftest
+
     # No file includes another component's private src/ (CS-LAY-03; compliance-gaps.md gap 8).
     - name: Include boundary (no #include of another component's src/)
       run: |
@@ -114,7 +122,10 @@ jobs:
         ! grep -Eq '^CONFIG_HMI_BENCH_STICK_INJECT(_AS_INT)?=(y|[1-9])' sdkconfig.defaults
 
   host-l1:
-    # L1 host tests (tests/run.py). They need the espp headers, which the component
+    # L1 host tests (tests/run.py --coverage: `make coverage` runs the same cases as `make test`
+    # with gcov on). Then the coverage ratchet (tools/l0/coverage_gate.py, TS-COV-02): no file
+    # below its baseline in tools/l0/coverage_baseline.json; the gap to the spec thresholds is
+    # reported in the job summary. They need the espp headers, which the component
     # manager fetches during a reconfigure; the IDF image also has g++ and Unity.
     runs-on: ubuntu-latest
     steps:
@@ -133,6 +144,29 @@ jobs:
           idf.py reconfigure
           && pip install --quiet pyyaml
           && UNITY_DIR=$IDF_PATH/components/unity/unity/src python3 tests/run.py run --all --seed 1
+          --coverage
+          && python3 tools/l0/coverage_gate.py check
+
+  doxygen:
+    # CS-DOC-01: Doxygen over the first-party headers (ci/Doxyfile). The warning count is a
+    # ratchet against tools/l0/doxygen_baseline.json until the legacy headers are documented.
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v7
+
+    - name: Install doxygen
+      run: sudo apt-get install -y --no-install-recommends doxygen
+
+    - name: Doxygen warnings (may only fall)
+      run: python3 tools/l0/doxygen_gate.py check
+
+    - name: Upload the warning log
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: doxygen-warnings
+        path: results/doxygen/warnings.log
 
   bench-build:
     # The bench variants, one job each: bench (the remote UI debug channel on,
