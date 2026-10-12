@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import ipaddress
+import queue
 import select
 import socket
 import struct
@@ -901,9 +902,8 @@ class RtpsHostHarness:
                 if sent >= self.SEDP_ANNOUNCE_REPEATS:
                     continue
                 self.peer_sedp_counts[target] = sent + 1
-                for message in self._sedp_announcements():
-                    self._send_metatraffic(message, target)
-                    time.sleep(self.SEDP_SEND_GAP_S)
+                self._send_sedp_round(lambda m, t=target: self._send_metatraffic(m, t),
+                                      self._sedp_announcements())
 
     def send_spdp_announce_now(self) -> None:
         payload = self.build_spdp_announce_message()
@@ -940,6 +940,42 @@ class RtpsHostHarness:
     # Gap between the announcements in a round. Sent back to back, a round is
     # a burst the HMI's W5500 does not always take whole.
     SEDP_SEND_GAP_S = 0.005
+    # Send each SEDP round from a thread of its own instead of the loop that receives and
+    # decodes samples. In the loop, a round's gaps held every sample behind them: the first
+    # ~5 discovery rounds blocked it ~0.19-0.22 s three times a step, and a caller that stamps
+    # samples as the loop decodes them (rtps_mcb_sim) saw them late, in a burst
+    # (cand3-1485932). Off by default: probe and scan participants keep their sends in line.
+    SEDP_OFF_LOOP = False
+
+    def _send_sedp_round(self, send, messages: Iterable[bytes]) -> None:
+        """One SEDP round through `send`, SEDP_SEND_GAP_S apart: in line, or queued for the
+        SEDP thread (SEDP_OFF_LOOP), which returns at once."""
+        messages = list(messages)
+        if not self.SEDP_OFF_LOOP:
+            for message in messages:
+                send(message)
+                time.sleep(self.SEDP_SEND_GAP_S)
+            return
+        q = getattr(self, "_sedp_queue", None)
+        if q is None:
+            q = self._sedp_queue = queue.Queue()
+            threading.Thread(target=self._sedp_sender, args=(q,), name="sedp-sender",
+                             daemon=True).start()
+        q.put((send, messages))
+
+    def _sedp_sender(self, q: "queue.Queue") -> None:
+        stop = getattr(self, "_stop_event", None)
+        while stop is None or not stop.is_set():
+            try:
+                send, messages = q.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            for message in messages:
+                try:
+                    send(message)
+                except OSError:
+                    break  # the socket closed under us (stop)
+                time.sleep(self.SEDP_SEND_GAP_S)
 
     def send_sedp_announcements_to(self, participant: ParticipantProxy) -> None:
         target = (participant.address, participant.ports.metatraffic_unicast)
@@ -949,9 +985,8 @@ class RtpsHostHarness:
         if sent >= self.SEDP_ANNOUNCE_REPEATS:
             return
         self.sedp_announce_counts[participant.participant_guid] = sent + 1
-        for message in self._sedp_announcements():
-            self.metatraffic_unicast_sock.sendto(message, target)
-            time.sleep(self.SEDP_SEND_GAP_S)
+        self._send_sedp_round(lambda m, t=target: self.metatraffic_unicast_sock.sendto(m, t),
+                              self._sedp_announcements())
 
     def send_discovery_now(self) -> None:
         self.send_spdp_announce_now()
@@ -1453,6 +1488,40 @@ def parse_rtps_data_messages(packet: bytes) -> List[tuple[bytes, bytes, bytes, b
         serialized_payload = payload[20:]
         messages.append((guid_prefix, writer_id, serialized_payload, reader_id))
     return messages
+
+
+def sedp_off_loop_case() -> None:
+    """SIM-015: with SEDP_OFF_LOOP the caller (the receive loop) is back at once, and the SEDP
+    thread still sends the round in order, SEDP_SEND_GAP_S apart. No network: a fake send."""
+    class Harness(RtpsHostHarness):
+        SEDP_OFF_LOOP = True
+
+        def __init__(self) -> None:  # no sockets
+            self._stop_event = threading.Event()
+    h = Harness()
+    sent: List[Tuple[float, bytes]] = []
+    messages = [b"a", b"b", b"c", b"d"]
+    try:
+        t0 = time.perf_counter()
+        h._send_sedp_round(lambda m: sent.append((time.perf_counter(), m)), messages)
+        back = time.perf_counter() - t0
+        deadline = time.perf_counter() + 2.0
+        while len(sent) < len(messages) and time.perf_counter() < deadline:
+            time.sleep(0.01)
+    finally:
+        h._stop_event.set()
+    if back > 0.004:
+        raise AssertionError(f"the caller waited {back * 1000:.1f} ms for the round")
+    if [m for _, m in sent] != messages:
+        raise AssertionError(f"sent {[m for _, m in sent]}, want {messages}")
+    gaps = [b - a for (a, _), (b, _) in zip(sent, sent[1:])]
+    if min(gaps) < RtpsHostHarness.SEDP_SEND_GAP_S * 0.8:
+        raise AssertionError(f"gaps {gaps}: under SEDP_SEND_GAP_S")
+    inline = RtpsHostHarness.__new__(RtpsHostHarness)
+    t0 = time.perf_counter()
+    inline._send_sedp_round(lambda m: None, messages)
+    if time.perf_counter() - t0 < RtpsHostHarness.SEDP_SEND_GAP_S * len(messages) * 0.8:
+        raise AssertionError("the default (in line) round no longer spaces its sends")
 
 
 def run_self_test() -> int:

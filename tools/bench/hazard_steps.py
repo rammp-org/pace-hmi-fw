@@ -57,6 +57,9 @@ NEEDS_SERIAL = (scenario_c1.NEEDS_SERIAL | scenario_c3.NEEDS_SERIAL | scenario_c
                 | scenario_seat.NEEDS_SERIAL)
 # Steps whose injection is expected to lapse: a STALL blocks the remote-UI connection.
 ALLOW_LAPSE = {"B5i", "B5j", "C2-16"}
+# Steps a link stall does not void: the stalls and the silence are theirs (B5i, B5j, C2-16),
+# or the grade reads only the board's own counters and self test (C2-15's 30 min soak).
+LINK_STALL_EXEMPT = ALLOW_LAPSE | {"C2-15"}
 # Steps whose graders read inside the drive set-up (C2-8: no DISABLE from the "enter" mark,
 # set in driving_forward): every lapse of theirs counts, set-up or not.
 SETUP_GRADED = {"C2-8"}
@@ -136,6 +139,7 @@ def run_step(name: str, ip: str, out: pathlib.Path, tree: pathlib.Path,
                     deferred = (tr, p)
                 else:
                     grade(st, tr, p)
+                _check_link_stalls(rig, name)
             finally:
                 _clean_up(rig, name)
         if deferred is not None:
@@ -166,6 +170,15 @@ def _check_lapses(rig: hazard_rig.Rig, name: str) -> None:
         raise hazard_rig.NotRun("bench", f"the stick injection lapsed in a graded window "
                                 f"{graded[:3]} (refresh gap over "
                                 f"{hazard_rig.INJECT_LAPSE_S} s)")
+
+
+def _check_link_stalls(rig: hazard_rig.Rig, name: str) -> None:
+    """After grading (its checks stay in the result): a step whose graded window holds a proven
+    link stall (hazard_rig.link_stalls) is NOT_RUN, never PASS, and is retried like a lapse."""
+    if name in LINK_STALL_EXEMPT or not rig.link_stalls:
+        return
+    rig.st.not_run = (f"bench network stall: {len(rig.link_stalls)} XYTwist gap(s) under a "
+                      f"delayed remote-UI reply {rig.link_stalls[:2]}")
 
 
 def _clean_up(rig: hazard_rig.Rig, name: str) -> None:

@@ -102,7 +102,8 @@ sim's seat modes `seatval`, `seatdrop`, `seatslow`, the HMI's `SEATFAIL` and STA
   clean reset). **The bench never runs a calibration that writes flash** (the owner's
   standing rule): C2-13, whose way out is a completed run, is NOT_RUN.
 - Their graders are tested without a board on hand-written traces built from the specs
-  (`hazard_selftest.py`, BENCH-015..090 in `run_bench.py selftest`; the seat's BENCH-073..090).
+  (`hazard_selftest.py` and `run_bench_selftest.py` in `run_bench.py selftest`; the seat's
+  BENCH-100..117).
 
 ## Rules the code enforces
 - Never erases. `common.esptool()` refuses any erase option. The only write is

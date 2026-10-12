@@ -83,6 +83,11 @@ RESTART_ACTION = "RESTART_HMI"
 # A command never makes the stick wait: a refresh goes first once the last is this old (a
 # WiFi stall of 0.27 + 0.20 s on two commands in a row lapsed it on 2026-10-09 at 50 ms).
 PRE_REFRESH_S = 0.02
+# A one-cycle message (fail_mask bit 7) acts on the first ADC cycle after the board notes it;
+# a refresh noted before that cycle replaces it unseen (2026-10-11: C2-4b/c lost 1-2 of their
+# bad cycles to a pre-command refresh 6-28 ms after a STICK answered slowly). Nothing replaces
+# it for two ADC cycles (35 ms each) after its send returns; the injection lasts 300 ms.
+ONCE_HOLD_S = 0.080
 
 
 def skunk_actions(tree: pathlib.Path) -> list[str]:
@@ -186,6 +191,7 @@ class Injector:
         self._once: tuple[int, int, int, int] | None = None
         self._seq = itertools.count(1)  # thread-safe enough: next() is atomic in CPython
         self._last: float | None = None
+        self._hold_until = 0.0  # time.monotonic(): no refresh before (a one-cycle message)
         # (sent, gap) over INJECT_LAPSE_S between STICK sends, from the remote-UI log
         # (stick_lapses, at collect); pauses (wall clock) end a run of refreshes on purpose.
         self.lapses: list[tuple[str, float]] = []
@@ -200,7 +206,8 @@ class Injector:
     def due(self, age: float) -> tuple[int, int, int, int] | None:
         """The standing target when its last refresh is at least `age` s old, else None."""
         target, last = self._target, self._last
-        if target is None or last is None or time.monotonic() - last < age:
+        now = time.monotonic()
+        if target is None or last is None or now - last < age or now < self._hold_until:
             return None
         return target
 
@@ -225,9 +232,11 @@ class Injector:
                 if self._target is None:
                     raise NotRun("bench", "a one-cycle message needs a standing target")
                 t = self._push(msg)
+                self._hold_until = time.monotonic() + ONCE_HOLD_S
             else:
                 self._target = msg
                 t = self._push(msg)
+                self._hold_until = 0.0
             self._wake.set()
             return t
 
@@ -245,7 +254,8 @@ class Injector:
             with self._lock:
                 if self._target is None or self._stop.is_set():
                     continue
-                if self._last is not None and time.monotonic() - self._last < INJECT_PERIOD_S * 0.8:
+                now = time.monotonic()
+                if (self._last is not None and now - self._last < INJECT_PERIOD_S * 0.8)                         or now < self._hold_until:
                     continue
                 try:
                     self._push(self._target)
@@ -288,6 +298,51 @@ def stick_lapses(rows: list[dict], pauses: list[datetime.datetime],
         gap = (b - a).total_seconds()
         if gap > limit and not any(a <= p <= b for p in pauses):
             out.append((b.isoformat(timespec="milliseconds"), round(gap, 3)))
+    return out
+
+
+# A proven link stall (orchestrator, 2026-10-11, measurement fix): an XYTwist gap at the sim
+# over LINK_STALL_GAP_S that an unrelated remote-UI reply, delayed over LINK_STALL_REPLY_S,
+# overlaps. Both channels stalled at once: the network, not the firmware (B5''-6 on
+# cand3-1485932: a 0.453 s DISABLE gap behind a 0.219 s XYTwist gap). Gaps over
+# LINK_STALL_GAP_MAX_S are the board stopping (a reboot, a stall), not the link.
+LINK_STALL_GAP_S = 0.15
+LINK_STALL_REPLY_S = 0.15
+LINK_STALL_GAP_MAX_S = 1.0
+
+
+def link_stalls(samples: list, events: list[dict], rows: list[dict],
+                setups: list[tuple[datetime.datetime, datetime.datetime]]) -> list[list]:
+    """[gap end (wall, ISO ms), gap s, command, its reply s] for each proven link stall outside
+    a set-up span that succeeded. A STALL command's own slow reply is related, not proof."""
+    ref = next((e for e in events if "mono" in e and "t" in e), None)
+    if ref is None:
+        return []
+    off = datetime.datetime.fromisoformat(ref["t"]).timestamp() - ref["mono"]
+    slow = []
+    for r in rows:
+        cmd = str(r.get("cmd", ""))
+        if "error" in r or not r.get("sent") or cmd.startswith("STALL"):
+            continue
+        dur = r.get("dur_s") or 0.0
+        if dur > LINK_STALL_REPLY_S:
+            a = datetime.datetime.fromisoformat(r["sent"]).timestamp()
+            slow.append((a, a + dur, cmd, dur))
+    out = []
+    times = sorted(s[0] for s in samples)
+    for a, b in zip(times, times[1:]):
+        gap = b - a
+        if not LINK_STALL_GAP_S < gap <= LINK_STALL_GAP_MAX_S:
+            continue
+        wa, wb = a + off, b + off
+        hit = next((x for x in slow if x[0] < wb and x[1] > wa), None)
+        if hit is None:
+            continue
+        da, db = (datetime.datetime.fromtimestamp(w) for w in (wa, wb))
+        if any(s0 <= da and db <= s1 for s0, s1 in setups):
+            continue
+        out.append([db.isoformat(timespec="milliseconds"), round(gap, 3), hit[2][:40],
+                    round(hit[3], 3)])
     return out
 
 
@@ -396,6 +451,7 @@ class Rig:
         self.inj: Injector | None = None
         # drive set-ups that succeeded, wall clock as the remote-UI log (graded_lapses)
         self.setup_spans: list[tuple[datetime.datetime, datetime.datetime]] = []
+        self.link_stalls: list[list] = []  # proven link stalls in graded windows (collect)
         self._io = threading.RLock()  # re-entered by the inline refresh before a command
         self._hmi_ui = None
         self._t0 = time.monotonic()
@@ -404,6 +460,9 @@ class Rig:
 
     def __enter__(self) -> "Rig":
         self.out.mkdir(parents=True, exist_ok=True)
+        clock_ok, clock = common.clock_check()
+        if not clock_ok:
+            raise NotRun("bench", f"clock: {clock}")
         if self.proof is None:
             ok, detail = sole_sim_proof(self.ip, self._sweep)
             if not ok:
@@ -909,6 +968,8 @@ class Rig:
                     if line.strip()] if log.exists() else []
             self.inj.lapses = stick_lapses(rows, self.inj.pauses)
             self.st.record("injection_lapses", self.inj.lapses)
+            self.link_stalls = link_stalls(self.trace.samples, events, rows, self.setup_spans)
+            self.st.record("link_stalls", self.link_stalls)
         (self.out / "states.jsonl").write_text(
             "".join(json.dumps([t, s]) + "\n" for t, s in self.trace.states), encoding="utf-8")
         return self.trace

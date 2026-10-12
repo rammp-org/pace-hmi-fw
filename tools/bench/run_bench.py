@@ -169,6 +169,7 @@ class Run:
         def check(name: str, ok: bool, detail: str) -> None:
             checks.append({"name": name, "ok": ok, "detail": detail})
 
+        check("clock", *common.clock_check())
         try:
             self.port = board.find_port()
             check("port", True, f"{self.port} = {common.BOARD_MAC}")

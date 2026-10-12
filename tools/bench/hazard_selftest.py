@@ -441,13 +441,14 @@ def t_b17() -> None:
 
 
 def t_b18() -> None:
-    def b(tb: TB, dt: float = DT, resume: float = 308.25, leak: float | None = None) -> TB:
+    def b(tb: TB, dt: float = DT, resume: float = 308.25, leak: float | None = None,
+          left: float = 300.1, zero: float = 300.13) -> TB:
         tb.mark("rerun", 300.0).mark("centred", 305.0).mark("forward", 308.1)
-        tb.polls(299.0, 300.1, screen="DriveScreen")
-        tb.polls(300.1, 306.2, screen="DriveScreen", post="PENDING", notice="POST_NOT_PASSED",
+        tb.polls(299.0, left, screen="DriveScreen")
+        tb.polls(left, 306.2, screen="DriveScreen", post="PENDING", notice="POST_NOT_PASSED",
                  post_check=lambda t: "joy.y_cal_off" if t < 305.0 else "joy.y_noise")
         tb.polls(306.2, 310.2, screen="DriveScreen", notice="CENTRE_FIRST")
-        tb.stream(299.0, 300.2, 1.0).stream(300.2, resume, dt=dt).stream(resume, 310.2, 1.0)
+        tb.stream(299.0, zero, 1.0).stream(zero, resume, dt=dt).stream(resume, 310.2, 1.0)
         if leak:
             tb.tr.samples.append((leak, 0, 1.0, 0, 0))
         return tb
@@ -455,6 +456,11 @@ def t_b18() -> None:
     fails("motion before PASS", c3.grade_b18, b(TB(), leak=302.0).build(), "until PASS is zero")
     fails("slow stream", c3.grade_b18, b(TB(), dt=0.05).build(), ">= 25 Hz")
     fails("slow resume", c3.grade_b18, b(TB(), resume=308.5).build(), "within 0.3 s")
+    # The gate shuts on the runner's next 250 ms tick: graded from the first poll off PASS.
+    passes("B5''-18 gate shut 0.3 s after RERUN, zero within 35 ms of the poll", c3.grade_b18,
+           b(TB(), left=300.3, zero=300.33).build())
+    fails("B5''-18 motion 100 ms after the poll off PASS", c3.grade_b18,
+          b(TB(), left=300.3, zero=300.4).build(), "first poll off PASS + 35 ms")
 
     def b18b(tb: TB, drive: float = 426.8) -> TB:
         return (tb.mark("restart", 400.0).ev(425.0, "hmi_back").mark("back", 426.5)
@@ -1537,6 +1543,7 @@ def t_lapses_in_graded_windows() -> None:
         def __init__(self, st, script_lapses, spans, fail_setup):
             self.st, self.inj = st, type("Inj", (), {"lapses": script_lapses})()
             self.setup_spans, self.fail_setup = spans, fail_setup
+            self.link_stalls: list = []
 
         def __enter__(self):
             return self
@@ -2071,6 +2078,108 @@ def t_c2_11_restores_brightness() -> None:
                                                           r.log.count("+")), ("bench", 1, 0))
 
 
+def t_link_stalls() -> None:
+    """A proven link stall (an XYTwist gap over 0.15 s under an unrelated remote-UI reply
+    delayed over 0.15 s) in a graded window voids the step: NOT_RUN, never PASS."""
+    import datetime as dt
+    t0 = dt.datetime(2026, 10, 11, 21, 47, 0)
+    events = [{"t": t0.isoformat(), "mono": 1000.0, "ev": "mark", "label": "step-start"}]
+
+    def samples(gap_at: float, gap: float) -> list:
+        out, t = [], 1000.0
+        while t < 1010.0:
+            out.append((round(t, 3), 0.0, 0.0, 0.0, 0))
+            t += gap if abs(t - gap_at) < 0.017 else 0.035
+        return out
+
+    def row(at: float, dur: float, cmd: str = "STATE") -> dict:
+        return {"cmd": cmd, "sent": (t0 + dt.timedelta(seconds=at)).isoformat(
+            timespec="milliseconds"), "dur_s": dur}
+    s = samples(1005.005, 0.22)
+    gap_start = next(a for a, b in zip([x[0] for x in s], [x[0] for x in s][1:]) if b - a > 0.2)
+    at = gap_start - 1000.0 + 0.02
+    stalls = hazard_rig.link_stalls(s, events, [row(at, 0.2)], [])
+    expect("a gap under a delayed reply: one stall", (len(stalls), stalls[0][1], stalls[0][2]),
+           (1, 0.22, "STATE"))
+    expect("a STALL command's own slow reply is not proof",
+           hazard_rig.link_stalls(s, events, [row(at, 0.2, "STALL UI 300")], []), [])
+    expect("a gap with every reply fast", hazard_rig.link_stalls(s, events, [row(at, 0.05)], []),
+           [])
+    expect("a slow reply with no gap", hazard_rig.link_stalls(
+        samples(0.0, 0.035), events, [row(at, 0.3)], []), [])
+    expect("a gap over 1 s is the board stopping, not the link", hazard_rig.link_stalls(
+        samples(1005.005, 1.5), events, [row(at, 1.6)], []), [])
+    span = (t0 + dt.timedelta(seconds=4), t0 + dt.timedelta(seconds=6))
+    expect("a gap wholly in a set-up span that succeeded", hazard_rig.link_stalls(
+        s, events, [row(at, 0.2)], [span]), [])
+
+    class FakeRig:
+        def __init__(self, stalls):
+            self.link_stalls = stalls
+            self.st = hazard_rig.HazardStep("x", pathlib.Path(tempfile.gettempdir()))
+            self.st.check("graded", True, "")
+    r = FakeRig(stalls)
+    hazard_steps._check_link_stalls(r, "B5''-6")
+    res = r.st.result()
+    expect("proven: NOT_RUN 'bench network stall', the checks kept",
+           (res["verdict"], res["reason"].startswith("bench network stall"), len(res["checks"])),
+           ("NOT_RUN", True, 1))
+    r = FakeRig([])
+    hazard_steps._check_link_stalls(r, "B5''-6")
+    expect("not proven: the verdict stands", r.st.result()["verdict"], "PASS")
+    r = FakeRig(stalls)
+    hazard_steps._check_link_stalls(r, "B5i")
+    expect("a step whose silence is its own: exempt", r.st.result()["verdict"], "PASS")
+
+
+def t_once_hold_and_clock() -> None:
+    """A one-cycle message stands two ADC cycles: no refresh, inline or periodic, replaces it
+    before the board's next cycle has taken it (C2-4b/c, cand3-1485932). The bench refuses a
+    15.6 ms clock; the one-way delay uses perf_counter."""
+    sent: list[tuple] = []
+    inj = hazard_rig.Injector(lambda h, v, tw, mask, seq: sent.append((time.monotonic(), mask)))
+    try:
+        inj.set(1507, 1510, 1477)
+        time.sleep(0.15)
+        t = inj.set(1507, 1510, 1477, mask=0x81, once=True)
+        held = inj.due(hazard_rig.PRE_REFRESH_S)
+        time.sleep(0.03)
+        held_later = inj.due(hazard_rig.PRE_REFRESH_S)
+        time.sleep(hazard_rig.ONCE_HOLD_S)
+        after = inj.due(0.0)  # the periodic refresh may have gone meanwhile
+        time.sleep(0.15)
+    finally:
+        inj.stop()
+    expect("no pre-command refresh inside the hold (at once, 30 ms on)", (held, held_later),
+           (None, None))
+    expect("the standing target again after the hold", after, (1507, 1510, 1477, 0))
+    nxt = [r for r in sent if r[0] > t and r[1] == 0]
+    expect("the next refresh no sooner than the hold", bool(nxt) and nxt[0][0] - t
+           >= hazard_rig.ONCE_HOLD_S - 0.005, True)
+    expect("two ADC cycles at least", hazard_rig.ONCE_HOLD_S >= 2 * 0.035, True)
+
+    saved = common.clock_resolution
+    try:
+        common.clock_resolution = lambda exe=None: 0.015625
+        ok, detail = common.clock_check()
+        expect("a 15.6 ms clock is refused, and says what to run", (ok, "Python 3.13" in detail),
+               (False, True))
+        common.clock_resolution = lambda exe=None: 1e-07
+        expect("a QPC clock passes", common.clock_check()[0], True)
+    finally:
+        common.clock_resolution = saved
+
+    class Hmi:
+        def command(self, text: str) -> str:
+            time.sleep(0.004)
+            return "OK"
+
+    class FakeRig:
+        hmi = Hmi()
+    w = c4.one_way_s(FakeRig())
+    expect("one-way from 4 ms round trips (not 0)", 0.0015 <= w <= 0.02, True)
+
+
 CASES = [
     ("BENCH-015 the hazard steps: only behind --hazard or --steps; retired as the fixes land; "
      "B5pp names", t_plan),
@@ -2144,46 +2253,52 @@ CASES = [
      "first (a wrong one is NOT_RUN); KEY ENTER is always released", t_seat_targets_and_key_enter),
     ("BENCH-070 C2-11's clean-up sets the approved brightness back by touch ('-' to the "
      "floor, '+' up to it); a tap off the Brightness row is NOT_RUN", t_c2_11_restores_brightness),
+    ("BENCH-073 a proven link stall (XYTwist gap > 0.15 s under an unrelated remote-UI reply "
+     "> 0.15 s) in a graded window: NOT_RUN 'bench network stall', never PASS; else the "
+     "verdict stands", t_link_stalls),
+    ("BENCH-072 a one-cycle STICK stands 80 ms (no refresh replaces it unseen); a 15.6 ms "
+     "monotonic clock is refused; the one-way delay is never 0 on a slow clock",
+     t_once_hold_and_clock),
     ("BENCH-051 injection lapses come from the STICK send times in the remote-UI log, not "
      "the injector's own clock; a pause is not a lapse", t_stick_lapses),
     ("BENCH-051b only a lapse in a graded window voids a step: a lapse wholly in a drive set-up "
      "that succeeded is recorded; a failed set-up and a graded-window lapse stay NOT_RUN",
      t_lapses_in_graded_windows),
-    ("BENCH-073 B5s-1 grader: one press, one step: reported + 5.0 mm within 0.5 s, shown within 1.0 s",
+    ("BENCH-100 B5s-1 grader: one press, one step: reported + 5.0 mm within 0.5 s, shown within 1.0 s",
      t_seat_b1),
-    ("BENCH-074 B5s-2 grader: NaN: unknown, both presses refused POSITION_UNKNOWN, known again, then one",
+    ("BENCH-101 B5s-2 grader: NaN: unknown, both presses refused POSITION_UNKNOWN, known again, then one",
      t_seat_b2),
-    ("BENCH-075 B5s-3 grader: inf, -inf, 1e30, -1e30, each as B5s-2",
+    ("BENCH-102 B5s-3 grader: inf, -inf, 1e30, -1e30, each as B5s-2",
      t_seat_b3),
-    ("BENCH-076 B5s-4 grader: the tolerance band: 255.0 known, '+' AT_LIMIT without a banner, '-' to 250.0; 255.1 unknown",
+    ("BENCH-103 B5s-4 grader: the tolerance band: 255.0 known, '+' AT_LIMIT without a banner, '-' to 250.0; 255.1 unknown",
      t_seat_b4),
-    ("BENCH-077 B5s-5 grader: link loss: unknown 1.5..2.9 s after p, nothing sent, known within 1.0 s of r",
+    ("BENCH-104 B5s-5 grader: link loss: unknown 1.5..2.9 s after p, nothing sent, known within 1.0 s of r",
      t_seat_b5),
-    ("BENCH-078 B5s-6 grader: link loss mid-move: one command, Locked with the seat banner, the move goes on",
+    ("BENCH-105 B5s-6 grader: link loss mid-move: one command, Locked with the seat banner, the move goes on",
      t_seat_b6),
-    ("BENCH-079 B5s-7 grader: HMI reset mid-move: nothing sent at the reboot, unknown until MibStatus, then one",
+    ("BENCH-106 B5s-7 grader: HMI reset mid-move: nothing sent at the reboot, unknown until MibStatus, then one",
      t_seat_b7),
-    ("BENCH-080 B5s-8 grader: MCB not IDLE: refused MCB_NOT_IDLE, the greyed tile never reaches the gate",
+    ("BENCH-107 B5s-8 grader: MCB not IDLE: refused MCB_NOT_IDLE, the greyed tile never reaches the gate",
      t_seat_b8),
-    ("BENCH-081 B5s-9 grader: POST not passed on the Seat screen, the Actuators page and Skunk Works",
+    ("BENCH-108 B5s-9 grader: POST not passed on the Seat screen, the Actuators page and Skunk Works",
      t_seat_b9),
-    ("BENCH-082 B5s-10 grader: stick FAULT: refused REFUSED_STICK, one after the reboot",
+    ("BENCH-109 B5s-10 grader: stick FAULT: refused REFUSED_STICK, one after the reboot",
      t_seat_b10),
-    ("BENCH-083 B5s-11 grader: a stuck key: one step",
+    ("BENCH-110 B5s-11 grader: a stuck key: one step",
      t_seat_b11),
-    ("BENCH-084 B5s-12 grader: a stuck touch: nothing while held, at most one at the release",
+    ("BENCH-111 B5s-12 grader: a stuck touch: nothing while held, at most one at the release",
      t_seat_b12),
-    ("BENCH-085 B5s-13 grader: a failed publish: counted, banner, logged, never re-sent",
+    ("BENCH-112 B5s-13 grader: a failed publish: counted, banner, logged, never re-sent",
      t_seat_b13),
-    ("BENCH-086 B5s-14 grader: a lost command: one dropped, nothing re-sent, the value unchanged",
+    ("BENCH-113 B5s-14 grader: a lost command: one dropped, nothing re-sent, the value unchanged",
      t_seat_b14),
-    ("BENCH-087 B5s-15 grader: rapid presses: every target within one step of the reported value",
+    ("BENCH-114 B5s-15 grader: rapid presses: every target within one step of the reported value",
      t_seat_b15),
-    ("BENCH-088 B5s-16 grader: the menu's Seat Functions row: refused with the reason's banner, menu stays",
+    ("BENCH-115 B5s-16 grader: the menu's Seat Functions row: refused with the reason's banner, menu stays",
      t_seat_b16),
-    ("BENCH-089 B5s-17 grader: the MCB moves the seat: shown within 1.0 s, nothing sent",
+    ("BENCH-116 B5s-17 grader: the MCB moves the seat: shown within 1.0 s, nothing sent",
      t_seat_b17),
-    ("BENCH-090 the seat tooling: seat modes carried over a reboot, the seat group's "
+    ("BENCH-117 the seat tooling: seat modes carried over a reboot, the seat group's "
      "steps and names, the Actuators '+' offset", t_seat_tooling),
 ]
 

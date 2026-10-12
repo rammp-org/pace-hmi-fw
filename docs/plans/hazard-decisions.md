@@ -106,6 +106,27 @@ plus this sheet's E5.
 - **C2-8:** "exactly one DISABLE while the MCB reads ENABLED, at most one more at the relock" is
   accepted as C2-8's pass rule.
 
+## Measurement fixes (orchestrator, 2026-10-11, for owner review)
+
+From L1's analysis of the candidate bench on 1485932 (`cand3-1485932-20261011-213852`). Each is
+"orchestrator, 2026-10-11, measurement fix, for owner review": the bench measures closer to the
+firmware; no pass band moves and no safety property changes.
+
+- **Sim stamps (SIM-015):** the sim stamps XYTwist and DriveCommand as its single receive loop
+  decodes them, and its SEDP rounds slept in that loop (~0.19-0.22 s, three times a step in the
+  first ~5 discovery rounds), so samples arrived in a burst, stamped late. The sim's SEDP rounds
+  now go from a thread of their own (`rtps_host.SEDP_OFF_LOOP`). Orchestrator, 2026-10-11,
+  measurement fix, for owner review.
+- **B5''-18 from the gate:** the POST runner takes RERUN on its next 250 ms PostStage tick
+  (hazard-c3-spec.md), so "XYTwist zero" is graded from the first STATE poll showing the gate
+  off PASS plus one ADC cycle and its publish (35 ms), not from RERUN + 0.2 s. Still: no non-zero
+  XYTwist after the gate is shut. Orchestrator, 2026-10-11, measurement fix, for owner review.
+- **Link-stall rule (BENCH-073):** a graded window holding a proven link stall (an XYTwist gap
+  over 0.15 s that an unrelated remote-UI reply delayed over 0.15 s overlaps) makes the step
+  NOT_RUN "bench network stall", never PASS, retried like an injection lapse (B5''-6's 0.453 s
+  DISABLE gap). Exempt: B5i, B5j, C2-16, C2-15. Orchestrator, 2026-10-11, measurement fix, for
+  owner review.
+
 ## 2. How to answer
 
 Answer by ID: "rec" takes the recommendation. Rec = the spec agents' recommendation. "Blocks"
