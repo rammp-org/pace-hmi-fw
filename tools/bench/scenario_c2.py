@@ -25,7 +25,7 @@ first changed STICK message was sent (its mark).
 | C2-8 | sim normal; forward; rail | 1 DISABLE in [t, t + 600 ms], none before; Locked by t + 1.5 s; banner STICK_FAULT; no ENABLE; 0 after t + 200 ms |
 | C2-9 | sim s; as C2-8; 7 s | Drive throughout; every XYTwist after t + 200 ms 0; B5''-6's DISABLE timing |
 | C2-10 | after C2-3: centre 5 s, forward 2 s, sim a, centre 0.5 s, forward 2 s | no non-zero XYTwist; FAULT throughout; notice STICK_FAULT |
-| C2-11 | OK then FAULT; Settings; down, up, right, left 0.5 s each | FAULT: focus and screen unchanged, joy_key 0; OK (control): the focus moves. Clean-up: brightness back to the approved value by touch (the sweep steps it) |
+| C2-11 | OK then FAULT; Settings list (menu's second level); down, up, right, left 0.5 s each | FAULT: focus, screen and open menu unchanged, joy_key 0; OK (control): the focus moves. Clean-up: brightness back to the approved value by touch (the sweep steps it) |
 | C2-12 | FAULT; Home, Settings, Joystick, Drive 15 s each | the fault indicator on every screen; FAULT after 60 s |
 | C2-13 | FAULT; Calibrate by touch; inject the run | NOT_RUN: a completed run saves the record (REQ-CAL-06), which the bench may not do; CAL UNSAVED cannot stand in (it moves no generation counter) |
 | C2-14 | Restart HMI; centre from the start | stick OK within 1.5 s of the first STATE; never FAULT; xy_age_max_ms <= 250 (until M8) |
@@ -268,9 +268,9 @@ def grade_c2_11(st: HazardStep, tr: hg.Trace, p: dict) -> None:
     st.check("FAULT: focus unchanged", not p["fault_moved"], f"{p['fault_focus']}")
     a, e = tr.mark("keys-fault"), tr.mark("keys-fault-end")
     ok, n, bad = hg.all_states(tr.states, lambda s: s.get("screen") == p["screen"]
-                               and _stick(s, "joy_key") == 0 and _stick(s, "state") == "FAULT",
+                               and s.get("menu_open") is True and _stick(s, "joy_key") == 0 and _stick(s, "state") == "FAULT",
                                a, e)
-    st.check("FAULT: screen unchanged and joy_key 0 throughout", ok,
+    st.check("FAULT: screen and open menu unchanged, joy_key 0 throughout", ok,
              f"{n} polls; first other {bad}")
 
 
@@ -589,9 +589,14 @@ def _settings_list(rig: Rig, tag: str) -> dict:
         rig.burger()
         rig.watch(1.0, until=lambda s: not s.get("menu_open"))
     rig.go("Settings")
-    s = rig.watch(3.0, until=hg.screen_is("SettingsScreen"))
-    if not rig.st.check(f"set-up ({tag}): the Settings list on screen", s is not None,
-                        f"screen {rig.state().get('screen')}"):
+    # The Settings list is the burger menu's second level over the current screen (STATE:
+    # menu_open, the screen under it); its group is the back row, the sections and the key.
+    s = rig.watch(3.0, until=lambda s: s.get("menu_open") is True)
+    f = rig.focus() if s is not None else None
+    want = len(rig._hmi_ui.SETTINGS_ROWS) + 2
+    if not rig.st.check(f"set-up ({tag}): the Settings list on screen (menu open, FOCUS group "
+                        f"of {want})", s is not None and f is not None and f[4] == want,
+                        f"menu_open {(s or {}).get('menu_open')}, FOCUS {f}"):
         raise NotRun("bench", f"C2-11 set-up ({tag}): the Settings list did not show")
     return s
 

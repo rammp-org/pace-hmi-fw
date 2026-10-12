@@ -867,12 +867,15 @@ def t_c2_8_9_10() -> None:
 
 
 def t_c2_11_12() -> None:
-    def k(tb: TB, key: int = 0) -> TB:
+    # The Settings list is the burger menu's second level, open over the screen (LockedScreen).
+    def k(tb: TB, key: int = 0, menu: bool = True) -> TB:
         return (tb.mark("keys-fault", 5100.0).mark("keys-fault-end", 5104.0)
-                .polls(5100.0, 5104.0, screen="SettingsScreen", stick=stick("FAULT", joy_key=key)))
+                .polls(5100.0, 5104.0, screen="LockedScreen", menu_open=menu,
+                       stick=stick("FAULT", joy_key=key)))
     p = {"control_moved": True, "control_focus": [1, 2], "fault_moved": False,
-         "fault_focus": [1, 1], "screen": "SettingsScreen"}
+         "fault_focus": [1, 1], "screen": "LockedScreen"}
     passes("C2-11", c2.grade_c2_11, k(TB()).build(), p)
+    fails("C2-11 the menu shut", c2.grade_c2_11, k(TB(), menu=False).build(), "open menu", p)
     fails("C2-11 key", c2.grade_c2_11, k(TB(), 18).build(), "joy_key 0", p)
     fails("C2-11 no control", c2.grade_c2_11, k(TB()).build(), "control",
           {**p, "control_moved": False})
@@ -1723,8 +1726,9 @@ def t_c2_11_restores_brightness() -> None:
 
 
 def t_c2_11_settings_setup() -> None:
-    """C2-11 reaches the Settings list from a closed menu, or is NOT_RUN: never graded on
-    another screen (cand4-retry1: LockedScreen with the menu open)."""
+    """C2-11 reaches the Settings list (the menu's second level: open, a FOCUS group of the
+    back row, five sections and the key) from a closed menu, or is NOT_RUN: never graded on
+    another menu or screen (cand4-retry1)."""
     class FakeRig:
         def __init__(self, menu_open: bool, shows: bool) -> None:
             self.log: list = []
@@ -1741,18 +1745,24 @@ def t_c2_11_settings_setup() -> None:
             self.log.append("burger")
             self.menu_open = False
 
+        _hmi_ui = type("HmiUi", (), {"SETTINGS_ROWS": ["a", "b", "c", "d", "e"]})
+
         def watch(self, seconds, until=None):
-            s = {"screen": "SettingsScreen" if self.shows else "LockedScreen",
-                 "menu_open": self.menu_open}
+            s = {"screen": "LockedScreen", "menu_open": self.menu_open}
             return s if until is None or until(s) else None
 
         def go(self, row: str) -> None:
             self.log.append(f"go:{row}")
+            self.menu_open = True
+
+        def focus(self):
+            return (0, 310, 720, 115, 7 if self.shows else 9)  # the top level: 8 rows + key
     r = FakeRig(menu_open=True, shows=True)
     with quiet():
         s = c2._settings_list(r, "FAULT")
-    expect("an open menu is shut first, then Settings", (r.log, s["screen"]),
-           (["home", "burger", "go:Settings"], "SettingsScreen"))
+    expect("an open menu is shut first, then Settings: the screen under the menu",
+           (r.log, s["screen"], s["menu_open"]), (["home", "burger", "go:Settings"],
+                                                  "LockedScreen", True))
     r = FakeRig(menu_open=False, shows=False)
     try:
         with quiet():
