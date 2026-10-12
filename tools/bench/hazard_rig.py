@@ -747,6 +747,12 @@ class Rig:
             raise NotRun("bench", f"the board did not come back: {detail}")
         self._connect()
         if self.sim is None:
+            # One STATE poll before the new sim publishes: what the rebooted HMI shows before
+            # its first MibStatus (the seat's values, B5s-7). Recorded like any poll.
+            try:
+                self.state()
+            except (NotRun, ui_client.RemoteUiError, self._hmi_ui.BenchVerbError):
+                pass  # a firmware without STATE: the steps that need it say so themselves
             self._relaunch_sim()
         return time.monotonic()
 

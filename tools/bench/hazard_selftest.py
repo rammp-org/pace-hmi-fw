@@ -1822,9 +1822,12 @@ def tr_s6(tb: TB, moves: bool = True) -> TB:
 
 def tr_s7(tb: TB, resend: bool = False) -> TB:
     seat_pubs(tb, 95.0, 101.0)
+    tb.ev(101.2, "close")  # the rig retires the sim at the restart, starts a new one later
+    tb.ev(130.5, "open")
     seat_pubs(tb, 131.0, 148.0)
     seat_polls(tb, 99.0, 101.0)
-    seat_polls(tb, 130.2, 148.0, seat=lambda t: [None] * 4 if t < 131.1 else list(RAW_MID))
+    seat_polls(tb, 130.2, 130.3, seat=[None] * 4)  # Rig.wait_back's poll before the new sim
+    seat_polls(tb, 131.2, 148.0)
     sc(tb, 100.2, 0.0)
     if resend:
         sc(tb, 131.5, 0.0)

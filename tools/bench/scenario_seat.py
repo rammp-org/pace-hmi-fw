@@ -36,6 +36,8 @@ Elevation is axis 2 (RAMMP_SEAT_AXIS_TABLE), the Seat screen's second-row first 
 
 from __future__ import annotations
 
+import contextlib
+import datetime
 import math
 import re
 import time
@@ -203,6 +205,20 @@ def seat_cleanup(rig: Rig) -> None:
     scenario_c2.reboot_cleanup(rig)
 
 
+# ---------------------------------------------------------------- navigation
+
+
+@contextlib.contextmanager
+def navigating(rig: Rig):
+    """A navigation that succeeded is a set-up span (hazard_rig.Rig.setup_span): no grader reads
+    it, so an injection lapse inside it (a screen built on demand holds the remote UI ~0.7 s:
+    Settings, Skunk Works, on 2026-10-11) does not void the step. The seat steps grade no
+    motion; the stick only has to stay centred, which the board's own stick at rest also is."""
+    start = datetime.datetime.now()
+    yield
+    rig.setup_span(start)
+
+
 # ---------------------------------------------------------------- the Seat screen
 
 
@@ -219,6 +235,11 @@ def centre_of(f: tuple) -> tuple[int, int]:
 
 
 def seat_map(rig: Rig) -> dict:
+    with navigating(rig):
+        return _seat_map(rig)
+
+
+def _seat_map(rig: Rig) -> dict:
     """With the stick centred: the Seat screen's Elevation button and its adjustment page's
     "-", "+" and three presets, placed by FOCUS (the keypad walks them; nothing is pressed
     but the Elevation button, which opens the page). The page stays open."""
@@ -255,6 +276,11 @@ def seat_map(rig: Rig) -> dict:
 
 
 def open_elevation_by_touch(rig: Rig, m: dict) -> None:
+    with navigating(rig):
+        _open_elevation_by_touch(rig, m)
+
+
+def _open_elevation_by_touch(rig: Rig, m: dict) -> None:
     """The Seat screen by the menu, then Elevation by touch (no stick key: a FAULT silences
     them)."""
     rig.go("Seat Functions")
@@ -282,6 +308,11 @@ def press(rig: Rig, at: tuple[int, int], label: str) -> float:
 
 
 def open_actuators(rig: Rig) -> tuple[int, int]:
+    with navigating(rig):
+        return _open_actuators(rig)
+
+
+def _open_actuators(rig: Rig) -> tuple[int, int]:
     """Bench, PIN 1234 by the stick's keys (as B4b), the actuators page, cursor on Elevation;
     returns where Elevation's "+" is (from the row FOCUS places)."""
     rig.go("Bench")
@@ -320,6 +351,11 @@ def key_right(rig: Rig, label: str) -> float:
 
 
 def skunk_seat_up(rig: Rig) -> tuple[int, int]:
+    with navigating(rig):
+        return _skunk_seat_up(rig)
+
+
+def _skunk_seat_up(rig: Rig) -> tuple[int, int]:
     actions = skunk_actions(rig.tree)
     if SEAT_UP_ACTION not in actions:
         raise NotRun("bench", f"no {SEAT_UP_ACTION} in the tree's actions_spec.h")
@@ -553,8 +589,9 @@ def s_b7(rig: Rig) -> dict:
     rig.watch(max(0.0, t + 1.0 - time.monotonic()))
     watch = _serial(rig, 120.0)  # through the reboot: its POST RESULT line
     rig.mark("restart")
-    rig.restart_hmi()
-    rig.wait_back()
+    with navigating(rig):
+        rig.restart_hmi()
+        rig.wait_back()
     rig.mark("back")
     rig.read_cal()
     rig.centre()
@@ -568,13 +605,21 @@ def s_b7(rig: Rig) -> dict:
 
 
 def grade_b7(st, tr: hg.Trace, p: dict) -> None:
-    rs, back, plus = tr.mark("restart"), tr.mark("back"), tr.mark("plus")
+    rs, plus = tr.mark("restart"), tr.mark("plus")
     check_none(st, tr, "restart .. '+'", rs, plus)
-    first_pub = next((e["mono"] for e in hg.publishes(tr.events, back)), None)
-    early = [s.get("seat") for t, s in tr.states if back <= t < (first_pub or back)]
+    # The rebooted HMI's first MibStatus is the new sim's: the rig retires the old sim at the
+    # restart ("close") and starts a new one once the HMI answers again ("open"; both log to one
+    # file), polling STATE once in between (Rig.wait_back). Every poll after the old sim closed
+    # and before the new sim's first publish shows every axis unknown, and there is one.
+    closed = hg.first_event(tr.events, lambda e: e.get("ev") == "close", rs)
+    opened = hg.first_event(tr.events, lambda e: e.get("ev") == "open", rs)
+    first_pub = next((e["mono"] for e in hg.publishes(tr.events, opened["mono"])), None)         if opened else None
+    early = [s.get("seat") for t, s in tr.states
+             if closed and first_pub and closed["mono"] < t < first_pub]
     st.check("seat values null until the first MibStatus after the reboot",
-             all(isinstance(v, list) and all(x is None for x in v) for v in early),
-             f"{len(early)} poll(s) before it")
+             bool(early) and all(isinstance(v, list) and all(x is None for x in v)
+                                 for v in early),
+             f"{len(early)} poll(s) before it: {early[:2]}")
     text = p.get("serial_text")
     if text is None:
         st.not_verified.append("serial POST RESULT PASS (no serial port given)")
@@ -656,10 +701,12 @@ def s_b9(rig: Rig) -> dict:
     seat_begin(rig)
     m = seat_map(rig)
     _post_cycle(rig, m["minus"], "seat", seat_screen=True)
-    rig.home()
+    with navigating(rig):
+        rig.home()
     plus = open_actuators(rig)
     _post_cycle(rig, plus, "act")
-    rig.home()
+    with navigating(rig):
+        rig.home()
     tile = skunk_seat_up(rig)
     _post_cycle(rig, tile, "skunk")
     return {}
@@ -678,18 +725,20 @@ def grade_b9(st, tr: hg.Trace, p: dict) -> None:
 
 
 def s_b10(rig: Rig) -> dict:
+    """The stick FAULT comes with the Seat screen's Elevation page already open: with a FAULT
+    the menu's Seat Functions row is refused (REQ-UI-32, Q10, B5s-16), so the screen cannot be
+    reached by the menu after it; the press is by touch (the keys are silent)."""
     seat_begin(rig)
     m = seat_map(rig)
-    rig.home()
     rig.mark("fault")
     stick_fault(rig)
-    open_elevation_by_touch(rig, m)
     press(rig, m["plus"], "plus-1")
     rig.watch(2.0)
     rig.mark("restart")
     rig.inj.pause()
-    rig.restart_hmi()
-    rig.wait_back()
+    with navigating(rig):
+        rig.restart_hmi()
+        rig.wait_back()
     rig.read_cal()
     rig.centre()
     rig.watch(15.0, until=hg.field_is("post", "PASS"))
@@ -848,6 +897,13 @@ def grade_b15(st, tr: hg.Trace, p: dict) -> None:
 # ---------------------------------------------------------------- B5s-16, 17
 
 
+def close_menu(rig: Rig) -> None:
+    """The burger key again when the menu is still open (a refused row leaves it up)."""
+    if rig.state().get("menu_open"):
+        rig.burger()
+        rig.watch(2.0, until=lambda s: s.get("menu_open") is False)
+
+
 def s_b16(rig: Rig) -> dict:
     seat_begin(rig)
     rig.mark("e")
@@ -856,7 +912,7 @@ def s_b16(rig: Rig) -> dict:
     rig.mark("row-e")
     rig.go("Seat Functions")
     rig.watch(2.0)
-    rig.home()
+    close_menu(rig)
     rig.sim_cmd("ok")
     rig.watch(1.5)
     rig.mark("fault")
@@ -864,6 +920,7 @@ def s_b16(rig: Rig) -> dict:
     rig.mark("row-fault")
     rig.go("Seat Functions")
     rig.watch(2.0)
+    close_menu(rig)
     return {}
 
 
