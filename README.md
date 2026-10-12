@@ -19,7 +19,7 @@ Firmware for the RAMMP wheelchair HMI: an M5Stack Tab5 (ESP32-P4) on the [RAMMP 
 
 ## Screens
 
-The UI follows RAMMP UI spec V2. Every screen has the same frame: the status bar, the **DRIVE / STATE** band, the screen's own content, and the **burger key** at the bottom, which opens the menu. [docs/ui-architecture.md](docs/ui-architecture.md) explains how it all works: where the screens come from, how the menu is built, how touch and the joystick move around, and how the chair's state reaches the screen. [docs/how-the-firmware-works.md](docs/how-the-firmware-works.md) walks through the code itself: boot, tasks, the joystick-to-motion path, the drive state machine and where each part of the old `main.cpp` went.
+The UI follows RAMMP UI spec V2. Every screen has the same frame: the status bar, the **DRIVE / STATE** band, the screen's own content, and the **burger key** at the bottom, which opens the menu. [docs/ui-architecture.md](docs/ui-architecture.md) explains how it all works: where the screens come from, how the menu is built, how touch and the joystick move around, and how the chair's state reaches the screen. [docs/how-the-firmware-works.md](docs/how-the-firmware-works.md) walks through the code itself: boot, tasks, the joystick-to-motion path, the drive state machine and where each part of the old `main.cpp` went. To understand the whole firmware from one page, start with [docs/fw-overview.md](docs/fw-overview.md): every task and every channel between them in one diagram.
 
 - **Driving**: on the Locked screen, **hold the joystick button** until the ring closes. The MIB decides: the Drive screen opens only once it says the chair is driving. Hold the button again on the Drive screen to stop. While driving, the burger key asks the MIB to stop first, and the menu opens once it has.
 - **Moving around**: touch, or the joystick. Push to move the highlight, press the button to select. Down past the last item reaches the burger key.
@@ -201,6 +201,8 @@ One row in `messages/joystick_message.hpp` (rammp-rtps); the HMI screens and the
 - A seat axis also takes the next free button on the seat screen, in table order; past the fourth there is no button for it yet, and it appears only on the DEBUG ACTUATORS page.
 
 ## Testing
+
+Every test and gate (CI's L0 checks, the host L1 apps, the build variants, the drive table's oracles and mutants, the bench steps and their verdicts) is one diagram in [docs/testing-overview.md](docs/testing-overview.md). The tools below are the ones you run by hand.
 
 | command | what it does |
 | --- | --- |

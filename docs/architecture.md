@@ -1,29 +1,37 @@
 # Architecture: pace-hmi-fw
 
-Generated sections are rewritten by `tools/gen_diagrams` and checked by its `check` mode, meant
-for L0 in CI (CS-ARC-02; not yet a step in `.github/workflows/l0.yml`).
+Generated sections are rewritten by `tools/gen_diagrams` and checked by its `check` mode in L0
+(CS-ARC-02; the "Diagrams" step of `.github/workflows/l0.yml`).
 Do not edit between the markers. Regenerate with `python tools/gen_diagrams/gen_diagrams.py write`;
 see [tools/gen_diagrams/README.md](../tools/gen_diagrams/README.md).
 
 ## Today vs target
 
-For a file-by-file walk through the code as it is today (boot, tasks, the motion path, the drive
-state machine, where each part of the old `main.cpp` went), read [how-the-firmware-works.md](how-the-firmware-works.md).
+The firmware as it runs today, every task and every channel between them, is one diagram in
+[fw-overview.md](fw-overview.md); all of its testing is one diagram in
+[testing-overview.md](testing-overview.md). For a file-by-file walk through the code (boot,
+tasks, the motion path, the drive state machine, where each part of the old `main.cpp` went),
+read [how-the-firmware-works.md](how-the-firmware-works.md).
 
 - **Today:** `main` wires and the work lives in `components/*` (no `frag_*.inc` fragments any
   more). `main.cpp` builds the UI, stick and housekeeping islands from their `Config`s and
   fills the UI's ports; the network link and RTPS, the self test and the calibration stay in
-  `main/` as approved deviations. Tasks share state through atomics, LVGL subjects and a global
-  recursive `lvgl_mutex`. `fw_core` channels exist only in the bench stick injection, and
-  `topology` and `post` are built and tested but not wired. The layout, task by task, is in
-  [how-the-firmware-works.md](how-the-firmware-works.md).
+  `main/` as approved deviations. Tasks share state through atomics, `fw_core` channels (the
+  output permit's `AtomicValue`s, the POST rest-window `Mailbox`, the bench stick injection's
+  `Mailbox`), LVGL subjects and a global recursive `lvgl_mutex`. The quick POST (`post`) is
+  wired; `topology` is built and tested but not wired, so **D2 below is the target, not
+  today's tasks**: today's are in [fw-overview.md](fw-overview.md).
 - **Target:** the islands, adapters and channels of
   [docs/plans/refactor.md §2.1–2.3](plans/refactor.md#2-target-design), wired by
   `components/topology/include/topology.hpp`. D2 below is generated from that file; D3 grows as
   components move out of `main`. The target sketches of D2 and D3 are in
   [§2.5](plans/refactor.md#25-diagrams).
-- D4 (state machines inside a component) does not exist yet: the drive session, link and seat
-  tables are drafts in [§2.4](plans/refactor.md#24-safety-state-machines-transition-tables).
+- D4 (state machines inside a component): the drive session's is drawn by hand in
+  [components/drive_session/TABLE.md §5](../components/drive_session/TABLE.md#5-d4-state-diagram-drawn-by-hand-from-2),
+  the stick monitor's in [components/stick/README.md](../components/stick/README.md), the
+  POST's overall state in [components/post/README.md](../components/post/README.md). The link
+  and seat tables are still drafts in
+  [§2.4](plans/refactor.md#24-safety-state-machines-transition-tables).
 
 ## Legend (CS-ARC-03)
 

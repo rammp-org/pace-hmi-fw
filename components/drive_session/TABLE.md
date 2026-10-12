@@ -190,7 +190,7 @@ stick's hold reason, on the Drive screen's notice slot.
 
 | Input | Source | code |
 | --- | --- | --- |
-| TICK_* | `rtps_poll_cb` → `drive_wait_poll`, every 250 ms (`kRtpsPollMs`); TICK_STOP_FAULT_DUE and TICK_STOP_RESEND are C1's sub-steps | frag_rtps_poll.inc:45 (orig 682); timer main.cpp:676 (orig 5298) |
+| TICK_* | `rtps_poll_cb` → `drive_wait_poll`, every 250 ms (`kRtpsPollMs`); TICK_STOP_FAULT_DUE and TICK_STOP_RESEND are C1's sub-steps, TICK_BOOT_STOP C3's, TICK_STICK_FAULT C2b's | frag_rtps_poll.inc:45 (orig 682); timer main.cpp:676 (orig 5298) |
 | UNLOCK_HOLD_DONE | `unlock_gesture` completed → `activate_drive` | frag_lock.inc:99 (orig 1164) |
 | EXIT_HOLD_DONE | `drive_exit_gesture` completed → `drive_exit_ask(false)` | frag_drive.inc:198 (orig 1721) |
 | MENU_KEY_DRIVE | `nav_key_cb` with its menu shut, on the Drive screen, unlocked | frag_nav.inc:491 (orig 3719) |
@@ -314,7 +314,8 @@ Self-loops left out of the diagram:
 - rows 29–34 (PROFILE_CLICK: the request as it stands; ENABLE with the profile while unlocked
   and DOK);
 - rows 38–41 (refusal banners);
-- row 42 (exit hold while LOCKED: one DISABLE).
+- row 42 (exit hold while LOCKED: one DISABLE);
+- row 51 (TICK_BOOT_STOP while ASKING: the boot stop marked done, no DISABLE).
 
 ## 6. CS-SAF-02: a way out of every phase
 

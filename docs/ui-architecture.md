@@ -5,7 +5,11 @@ the screens come from, how the burger menu is built and wired, how touch and the
 move around it, and how the chair's state reaches the screen. It is written for someone who
 knows the spec and wants to know where each part of it lives in the code.
 
-Everything below lives in `main/main.cpp` unless a file is named.
+The behaviour lives in `components/hmi_ui` (`UiApp`, `NavView` and the views) and
+`components/drive_ui`, wired by `main/main.cpp`; the names below are those classes' members
+unless a file is named. How it all runs (tasks, locks, the drive session) is in
+[how-the-firmware-works.md](how-the-firmware-works.md) and, on one page,
+[fw-overview.md](fw-overview.md).
 
 ## 1. From the spec to pixels
 
@@ -19,7 +23,7 @@ flowchart LR
   build -->|writes| spj["pace-hmi-ui.spj<br/>SquareLine project"]
   spj -->|SquareLine CLI export| cfiles["ui_c_files/<br/>generated C"]
   cfiles -->|import_ui.ps1| ui["components/ui/<br/>(this repo, never edited)"]
-  ui -->|ui_* widgets, bound by name| fw["main/main.cpp<br/>behaviour"]
+  ui -->|ui_* widgets, bound by name| fw["components/hmi_ui, drive_ui<br/>behaviour, wired by main.cpp"]
 ```
 
 - **`tools/build_ui.py`** is the design. Every screen, component, size, font and colour is a
@@ -28,17 +32,17 @@ flowchart LR
   and, with `--export-to ../ui_c_files`, exports the C.
 - **`import_ui.ps1`** (this repo) mirrors that export into `components/ui/`, converts the
   images the software renderer cannot draw, and runs **`scripts/ui_contract.py`**, which
-  checks that every widget `main.cpp` reaches for still exists with the parent and text it
+  checks that every widget the firmware reaches for still exists with the parent and text it
   expects. A menu row that moved, or a widget that was renamed, fails the import instead of
   silently binding to the wrong thing.
 - **`components/ui/`** is generated. Editing it by hand is lost on the next import.
-- **`main.cpp`** gives the widgets their behaviour. It finds them by name: a screen widget
+- **`hmi_ui`** (with `drive_ui`) gives the widgets their behaviour. It finds them by name: a screen widget
   is a global `ui_<Name>` (`ui_SeatBackButton`), a widget inside a component is reached with
   `ui_comp_get_child(instance, UI_COMP_<COMPONENT>_<CHILD>)`.
 
 The design is decoupled from the code in one direction only: `build_ui.py` can move, resize
 and restyle anything freely, but renaming or removing a widget the firmware binds to needs
-a matching change in `main.cpp` and in `ui_contract.py`.
+a matching change in the firmware and in `ui_contract.py`.
 
 ## 2. What is on the panel
 
@@ -71,7 +75,7 @@ ErrorBanner, MenuKey and MenuOverlay, are the *chrome*.
 | SettingsScreen | - | menu: Settings > Display & sound, Settings > Joystick & driving; after the PIN, DEBUG ACTUATORS |
 
 SettingsScreen, SkunkWorksScreen and DiagnosticsScreen are built when first opened and
-destroyed on the way out ("Screens built on demand" in `main.cpp`): their rows are
+destroyed on the way out (`OnDemandScreens`, `hmi_ui/on_demand_screens.*`): their rows are
 generated at runtime, and keeping them all resident ran internal RAM out.
 
 ## 3. The burger menu
@@ -86,19 +90,19 @@ LVGL screens are separate object trees, so a widget cannot appear on two of them
 screen therefore has its own instance of all the chrome, `MenuOverlay1` ... `MenuOverlay13`,
 each with its own rows. The firmware treats them as one menu:
 
-- **`kChrome`** (in `app_main`) lists every screen's TopBar, DriveBand, MenuKey and
-  MenuOverlay.
-- **`nav_attach_chrome`** wires one screen's set: the key's click and key events, and for
+- **`kChrome`** (`for_each_resident_chrome`, `hmi_ui/src/resident_chrome.cpp`) lists every
+  resident screen's TopBar, DriveBand, MenuKey and MenuOverlay.
+- **`NavView::attach_chrome`** wires one screen's set: the key's click and key events, and for
   each row the click, the stick's arrows, the cursor and pressed looks, and,
   on Drive and Seat Functions, the observers that grey the row while the MCB could not act
   on it.
-- **`nav_chrome[]`** remembers which key and overlay belong to which screen, so "the menu of
-  the screen that is up" is one lookup (`nav_chrome_of`).
+- **`NavView`'s chrome table** remembers which key and overlay belong to which screen, so
+  "the menu of the screen that is up" is one lookup (`NavView::chrome_of`).
 
 ### Rows are positions, destinations are names
 
 The menu's order is the order of `rows` in `build_menuoverlay`. The firmware mirrors it in
-one enum:
+one enum (`hmi_ui/nav_view.hpp`):
 
 ```cpp
 enum NavDest {
@@ -109,7 +113,7 @@ enum NavDest {
 };
 ```
 
-A row's index is its `NavDest`: `nav_row_cb` receives the index and `nav_go` switches on it.
+A row's index is its `NavDest`: `NavView::row_cb` receives the index and `NavView::go` switches on it.
 `scripts/ui_contract.py` checks that `RowLabel<n>` still reads what the enum expects, so a
 reordered export cannot open the wrong screen.
 
@@ -120,27 +124,27 @@ Settings is not a screen but a second level of the same menu. The overlay holds 
 (`SubRow2`...). `NavDest` lists the top rows first, up to `NAV_TOP_COUNT`, then the sections;
 `kNavRowIds` maps both kinds to their child ids.
 
-- Picking Settings calls `nav_menu_enter_settings`: the panel shows, and `nav_menu_level`
-  refills `menu_group` with its rows (back row first) and the key, the cursor on the first
+- Picking Settings shows the panel, and `NavView::menu_level`
+  refills the menu group with its rows (back row first) and the key, the cursor on the first
   section. No row press to wait out: nothing underneath changes.
-- "< Settings", or the stick to the LEFT on any section, is `nav_menu_leave_settings`: back
+- "< Settings" (`NavView::sub_back_cb`), or the stick to the LEFT on any section, goes back
   to the top rows with the cursor on Settings. LEFT at the top closes the menu, as before.
-- The menu always opens at the top (`nav_open_menu`), and the overlay goes back to its top
-  level once hidden (`nav_menu_hide_cb`).
-- A section is picked like any row, and `nav_drop_menu` replays the press on the destination's
+- The menu always opens at the top (`NavView::open_menu`), and the overlay goes back to its top
+  level once hidden (`NavView::menu_hide_cb`).
+- A section is picked like any row, and `NavView::drop_menu` replays the press on the destination's
   overlay with its SubMenu shown.
 
 **To add, remove or reorder a row**, change all of these together:
 
 1. `rows` (or `subrows`, for Settings' level) in `build_menuoverlay` (pace-hmi-gui), then
    export and import.
-2. `NavDest` and `kNavRowIds` in `main.cpp` (a new row also needs its `UI_COMP_MENUOVERLAY_*`).
-3. The `case` in `nav_go`, and its line in `nav_go`'s `dest_screens` table.
+2. `NavDest` and `kNavRowIds` in `hmi_ui/nav_view.hpp` (a new row also needs its `UI_COMP_MENUOVERLAY_*`).
+3. The `case` in `NavView::go`, and its line in that function's `dest_screens` table.
 4. `cui_RowLabel<n>` / `cui_SubRowLabel<n>` in `scripts/ui_contract.py`, and `MENU_ROWS` /
    `SETTINGS_ROWS` in `scripts/hmi_ui.py`.
 
 A new Settings section that is a page of rows is a `SETTINGS_PAGES` row in `settings_spec.hpp` plus its
-rows' page; `nav_go` opens it with `setting_page_open(SETTINGS_PAGE_<NAME>)`.
+rows' page; `NavView::go` opens it with `setting_page_open(SETTINGS_PAGE_<NAME>)`.
 
 ### What happens on a pick
 
@@ -149,23 +153,25 @@ sequenceDiagram
   participant U as User
   participant K as MenuKey
   participant M as MenuOverlay
-  participant N as nav_go
+  participant N as NavView::go
   participant S as next screen
   U->>K: tap, or stick button with the key focused
-  K->>M: nav_open_menu: show, fill menu_group, focus row 1
+  K->>M: NavView::open_menu: show, fill the menu group, focus row 1
   U->>M: tap a row, or stick button on it
-  M->>M: row goes negative for 300 ms (kRowPressMs)
-  M->>N: nav_press_done_cb
+  M->>M: NavView::row_picked: refusal check, row goes negative for 300 ms (ROW_PRESS_MS)
+  M->>N: NavView::press_done_cb
   N->>S: _ui_screen_change
-  S->>S: SCREEN_LOADED -> nav_arrive -> nav_enter_screen
-  S->>S: nav_drop_menu replays the press and hides its overlay
+  S->>S: SCREEN_LOADED -> NavView::arrive -> UiApp::enter_screen, stick gate update
+  S->>S: NavView::drop_menu replays the press and hides its overlay
 ```
 
-- A greyed row (Drive or Seat Functions while the MCB cannot act) refuses on the spot: the
-  menu stays open, the refusal sounds, and the reason waits on the banner underneath.
-- While **driving**, the key does not open the menu. It asks the MIB to stop
-  (`drive_exit_ask(true)`), and the menu opens over the Locked screen once driving has
-  actually stopped. If the MIB keeps driving, the Drive screen stays and says EXIT REFUSED.
+- A greyed row (Drive or Seat Functions while the MCB cannot act; Drive also before POST
+  passes or with a stick fault, table rows 40, 54, 59) refuses on the spot: the menu stays
+  open, the refusal sounds, and the reason waits on the banner underneath.
+- While **driving**, the key does not open the menu. It asks the MIB to stop (the drive
+  session's MENU_KEY_DRIVE, rows 25-26: DISABLE, re-sent every 250 ms), and the menu opens over
+  the Locked screen once driving has actually stopped. If the MIB keeps driving, the Drive
+  screen stays and says EXIT REFUSED, then "MCB did not stop" after 5 s.
 
 ## 4. Moving around: touch, stick and button
 
@@ -180,21 +186,21 @@ There are three inputs, and all of them end up as LVGL events on widgets.
 ### Focus groups
 
 The stick moves a *cursor*: LVGL's focus within a **group**. Each screen has its own group
-of the widgets the stick may visit, and `nav_use_group` hands the stick that group, always
+of the widgets the stick may visit, and `NavView::use_group` hands the stick that group, always
 with the screen's burger key appended last, so "down past the bottom" reaches the key.
 
 | group | screen |
 | --- | --- |
-| `menu_group` | the open menu: the rows of the level that is up, then the key (wraps) |
-| `seat_group`, `seat_adjust_group` | Seat: the function buttons; the adjustment page |
-| `rd_group` | BenchGate: the PIN pad |
-| `setting_group`, `actions_group`, `diag_group` | Settings, Skunk Works, Diagnostics |
+| `NavView`'s menu group | the open menu: the rows of the level that is up, then the key (wraps) |
+| `SeatView`'s buttons and adjust groups | Seat: the function buttons; the adjustment page |
+| `BenchPinView`'s group | BenchGate: the PIN pad |
+| `SettingsView`'s, `ActionsView`'s, `DiagnosticsView`'s groups | Settings, Skunk Works, Diagnostics |
 | `LogView::group()` (`components/hmi_ui/src/log_view.cpp`, through `log_view_group()`) | Log |
 | `InternetView`'s main, networks and password groups (`components/hmi_ui/src/internet_view.cpp`) | Internet: the main page, the network list, the keyboard |
 | `UpdateView`'s list, pick and run groups (`components/hmi_ui/src/update_view.cpp`) | Firmware update: the releases, one release, the install |
-| `joystick_group` | everything else: Locked, Drive, Joystick |
+| `NavView`'s fallback group | everything else: Locked, Drive, Joystick |
 
-`nav_arrive` runs whenever a screen comes up (SCREEN_LOADED, or by hand when a row picks
+`NavView::arrive` runs whenever a screen comes up (SCREEN_LOADED, or by hand when a row picks
 the screen already showing): it closes the menu, picks the screen's group and puts the
 cursor on the first item. A backstop timer re-enters the screen if the stick is ever left
 with nothing focused, and logs `nav: the stick had nothing focused` when it does.
@@ -204,7 +210,7 @@ with nothing focused, and logs `nav: the stick had nothing focused` when it does
 LVGL's own focus order is a flat list, which does not match a 2-D screen. Two patterns
 cover every screen:
 
-- **Grids** (`ButtonGrid`, `grid_key_cb`): the seat pages, the PIN pad and the Skunk Works
+- **Grids** (`ButtonGrid`, over `hmi_models::grid_step`): the seat pages, the PIN pad and the Skunk Works
   tiles. Each keeps a row/column cursor and moves it the way the buttons are laid out.
 - **Lists** (Settings, Diagnostics, Log): UP/DOWN walks the rows; the list scrolls to keep
   the focused row in view (scroll-on-focus, which is why each list is sized to its window
@@ -215,18 +221,19 @@ cover every screen:
 The spec's rule is that selection is the *negative* of the resting look, never a colour.
 `negative()` in `build_ui.py` gives a widget inverted colours for PRESSED and CHECKED (and
 FOCUSED on menu rows). LVGL does not pass a state to a widget's children, so the firmware
-mirrors it down to the label (`nav_mirror_states`). Buttons show the cursor as a ring
-around them (`nav_focus_ring`).
+mirrors it down to the label (`NavView::mirror_states`). Buttons show the cursor as a ring
+around them (`NavView::focus_ring`).
 
 ### Holds
 
-Three things need a hold rather than a press, driven by `HoldGesture` and `hold_poll`:
+Three things need a hold rather than a press, driven by `HoldGesture` and `HoldEngine` on
+`UiApp`'s 33 ms hold poll (`UiApp::hold_poll_cb`):
 
 | gesture | input | screen | does |
 | --- | --- | --- | --- |
-| `unlock_gesture` | stick button | Locked | asks the MIB to drive (the ring fills, then spins) |
-| `drive_exit_gesture` | stick button | Drive | asks the MIB to stop |
-| `calibrate_gesture` | stick button, or a finger on CALIBRATE | Joystick | starts or cancels calibration |
+| `unlock_gesture_` | stick button | Locked | asks the MIB to drive (the ring fills, then spins); only while the MCB is ready and POST has passed |
+| `drive_exit_gesture_` | stick button | Drive | asks the MIB to stop |
+| `calibrate_gesture_` | stick button, or a finger on CALIBRATE | Joystick | starts or cancels calibration |
 
 A hold has a 500 ms grace before it starts filling, so a tap (which selects) never ticks
 it, and an input must be let go before it can start another hold ("let go first"), so the
@@ -243,25 +250,31 @@ flowchart LR
   rtps --> subj["subjects:<br/>mib_state, rtps_link, drive_profile,<br/>seat_axis_value, error_text, ..."]
   subj --> obs["observers"]
   obs --> w["labels, bands, banners,<br/>greyed rows, mode buttons"]
-  w -- "taps, holds" --> ask["drive_ask, seat_request,<br/>drive_publish"]
+  w -- "taps, holds" --> ask["drive session (DriveAdapter, DrivePort::publish),<br/>UiApp::seat_request"]
   ask -- "DriveCommand, SeatCommand" --> mib
+  mib -- "MibStatus state + stamp, before any lock" --> adc["Read ADC: motion guard,<br/>output permit"]
+  adc -- "XYTwist, or 0 when held" --> mib
 ```
 
 - **Nothing on screen claims what the chair has not confirmed.** A drive mode button lights
   when `MibStatus.activeProfile` says so, not when it is tapped; a seat number moves when
   the next status says the seat moved.
-- **`drive_screen_follow_state`** keeps the screens honest: the Drive screen is up exactly
-  while the MIB says ENABLED. Driving stopping by itself brings back Locked with the reason.
-- **Banners**: every warning goes through `banner_show`, which also plays the refusal
+- **The drive session's TICK_FOLLOW** (rows 1-9 of
+  [TABLE.md](../components/drive_session/TABLE.md)) keeps the screens honest: the Drive screen
+  is up exactly while the MIB says ENABLED on a fresh link. Driving stopping by itself brings
+  back Locked with the reason, and one DISABLE. While the stick is held (POST, calibration,
+  stick health, centre first), the Drive screen's notice says why.
+- **Banners**: every warning goes through `RefusalView::show`, which also plays the refusal
   sound when one appears on the screen in front.
 
 ## 6. Settings, sounds and the rest
 
 - **Settings** rows come from `components/settings/include/settings_spec.hpp`, one line each; the firmware builds
   a `SettingRow` per line and saves every value to `/storage/settings.txt`. Adding a
-  setting is a table line, its names in `kSettingParamNames`, its subject in
-  `kSettingParamValue`, and a `case` in `setting_store_observer` if it needs applying.
-- **Skunk Works** tiles come from `main/actions_spec.h`, one line each.
+  setting is a table line, its names in `kSettingParamNames` (`hmi_ui/src/settings_view.cpp`),
+  its subject in `SettingSubjects`, and its handling in `UiApp::store_setting` (or
+  `AppliedSettings::apply`) if it needs applying.
+- **Skunk Works** tiles come from `components/hmi_ui/include/hmi_ui/actions_spec.h`, one line each.
 - **About** is `hmi_ui`'s `AboutView` (main's side: `main/about_ui.cpp`), fed by `components/ota/src/fw_info.cpp`: a low-priority thread hashes
   the running image at boot (~0.5 s for 4 MB) and looks that hash up in
   `/storage/fwinfo.txt`, which only `scripts/fw_verify.py` on the PC writes, and only for a
