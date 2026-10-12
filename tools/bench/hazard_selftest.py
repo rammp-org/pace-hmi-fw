@@ -1722,6 +1722,46 @@ def t_c2_11_restores_brightness() -> None:
                                                           r.log.count("+")), ("bench", 1, 0))
 
 
+def t_c2_11_settings_setup() -> None:
+    """C2-11 reaches the Settings list from a closed menu, or is NOT_RUN: never graded on
+    another screen (cand4-retry1: LockedScreen with the menu open)."""
+    class FakeRig:
+        def __init__(self, menu_open: bool, shows: bool) -> None:
+            self.log: list = []
+            self.menu_open, self.shows = menu_open, shows
+            self.st = hazard_rig.HazardStep("x", pathlib.Path(tempfile.gettempdir()))
+
+        def home(self) -> None:
+            self.log.append("home")
+
+        def state(self) -> dict:
+            return {"menu_open": self.menu_open, "screen": "LockedScreen"}
+
+        def burger(self) -> None:
+            self.log.append("burger")
+            self.menu_open = False
+
+        def watch(self, seconds, until=None):
+            s = {"screen": "SettingsScreen" if self.shows else "LockedScreen",
+                 "menu_open": self.menu_open}
+            return s if until is None or until(s) else None
+
+        def go(self, row: str) -> None:
+            self.log.append(f"go:{row}")
+    r = FakeRig(menu_open=True, shows=True)
+    with quiet():
+        s = c2._settings_list(r, "FAULT")
+    expect("an open menu is shut first, then Settings", (r.log, s["screen"]),
+           (["home", "burger", "go:Settings"], "SettingsScreen"))
+    r = FakeRig(menu_open=False, shows=False)
+    try:
+        with quiet():
+            c2._settings_list(r, "FAULT")
+        raise AssertionError("graded on another screen")
+    except hazard_rig.NotRun as e:
+        expect("no Settings list: NOT_RUN bench", (e.kind, r.log), ("bench", ["home", "go:Settings"]))
+
+
 def t_link_stalls() -> None:
     """A proven link stall (an XYTwist gap over 0.15 s under an unrelated remote-UI reply
     delayed over 0.15 s) in a graded window voids the step: NOT_RUN, never PASS."""
@@ -1897,6 +1937,8 @@ CASES = [
      "first (a wrong one is NOT_RUN); KEY ENTER is always released", t_seat_targets_and_key_enter),
     ("BENCH-070 C2-11's clean-up sets the approved brightness back by touch ('-' to the "
      "floor, '+' up to it); a tap off the Brightness row is NOT_RUN", t_c2_11_restores_brightness),
+    ("BENCH-075 C2-11 reaches the Settings list from a closed menu, or is NOT_RUN",
+     t_c2_11_settings_setup),
     ("BENCH-073 a proven link stall (XYTwist gap > 0.15 s under an unrelated remote-UI reply "
      "> 0.15 s) in a graded window: NOT_RUN 'bench network stall', never PASS; else the "
      "verdict stands", t_link_stalls),

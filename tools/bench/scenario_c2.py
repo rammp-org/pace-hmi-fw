@@ -580,10 +580,25 @@ def _keys(rig: Rig) -> list:
     return seen
 
 
+def _settings_list(rig: Rig, tag: str) -> dict:
+    """Set-up: the Settings list on screen from a closed menu (the sweep before can leave the
+    menu open, and the burger key then toggles it shut: cand4-retry1 graded LockedScreen with
+    the menu open as C2-11's FAULT screen). NOT_RUN when it does not show."""
+    rig.home()
+    if rig.state().get("menu_open"):
+        rig.burger()
+        rig.watch(1.0, until=lambda s: not s.get("menu_open"))
+    rig.go("Settings")
+    s = rig.watch(3.0, until=hg.screen_is("SettingsScreen"))
+    if not rig.st.check(f"set-up ({tag}): the Settings list on screen", s is not None,
+                        f"screen {rig.state().get('screen')}"):
+        raise NotRun("bench", f"C2-11 set-up ({tag}): the Settings list did not show")
+    return s
+
+
 def s_c2_11(rig: Rig) -> dict:
     begin_c2(rig)
-    rig.go("Settings")
-    rig.watch(3.0, until=hg.screen_is("SettingsScreen"))
+    _settings_list(rig, "control")
     control = _keys(rig)
     rig.home()
     rig.mark("fault")
@@ -591,14 +606,13 @@ def s_c2_11(rig: Rig) -> dict:
     rig.inject(3300, v, tw)
     rig.watch(1.0, until=_state("FAULT"))
     rig.centre()
-    rig.go("Settings")
-    s = rig.watch(3.0, until=hg.screen_is("SettingsScreen"))
+    s = _settings_list(rig, "FAULT")
     rig.mark("keys-fault")
     fault = _keys(rig)
     rig.mark("keys-fault-end")
     return {"control_focus": control, "control_moved": len({f for f in control if f}) > 1,
             "fault_focus": fault, "fault_moved": len({f for f in fault if f}) > 1,
-            "screen": (s or {}).get("screen", "SettingsScreen")}
+            "screen": s.get("screen")}
 
 
 def s_c2_12(rig: Rig) -> dict:
