@@ -512,7 +512,9 @@ class Rig:
 
     def mark(self, label: str) -> float:
         """A mark in the sim's log just before an action; returns the runner's send time
-        (the grader uses the sim's stamp of it, from the log)."""
+        (the grader uses the sim's stamp of it, from the log). The sim lowercases what it
+        reads, so a label goes lowercase here and hg.Trace.mark looks it up lowercase."""
+        label = label.lower()
         t = time.monotonic()
         if not self.sim.event_mark(label):
             raise NotRun("bench", f"the sim did not log mark {label!r}")

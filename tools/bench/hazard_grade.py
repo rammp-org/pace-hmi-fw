@@ -33,6 +33,8 @@ class Trace:
 
     def mark(self, label: str) -> float:
         if label not in self.marks:
+            label = label.lower()  # the sim logs marks lowercase (Rig.mark)
+        if label not in self.marks:
             raise KeyError(f"no mark {label!r} in the trace (marks: {sorted(self.marks)})")
         return self.marks[label]
 

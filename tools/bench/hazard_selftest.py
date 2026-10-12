@@ -1000,6 +1000,27 @@ def t_restart_fallback() -> None:
             raise AssertionError("no port: went on")
 
 
+def t_mark_case() -> None:
+    """The sim lowercases its stdin, so marks are lowercase on both ends (candidate run C2-12:
+    'on-Home' was never found and the step was NOT_RUN)."""
+    sent = []
+
+    class Sim:
+        def event_mark(self, label):
+            sent.append(label)
+            return label == label.lower()
+
+    class Fake:
+        sim = Sim()
+        trace = hg.Trace()
+
+    hazard_rig.Rig.mark(Fake(), "on-Home")
+    expect("Rig.mark sends lowercase", sent, ["on-home"])
+    tr = hg.Trace()
+    tr.marks["on-home"] = 12.5
+    expect("Trace.mark finds a mixed-case name", tr.mark("on-Home"), 12.5)
+
+
 def t_c2_15_16() -> None:
     rows = {"joy.bad_samples": {"value": 0, "unit": "", "result": "PASS"},
             "joy.xy_age_max": {"value": 140, "unit": "ms", "result": "PASS"},
@@ -1649,6 +1670,7 @@ CASES = [
      "NOT_RUN without C2b's rows, run with them (this tree)", t_silence_and_c2b),
     ("BENCH-044d restart falls back to the port when Skunk Works does not open",
      t_restart_fallback),
+    ("BENCH-044e marks are lowercase on both ends (the sim lowercases its stdin)", t_mark_case),
     ("BENCH-039b B5i, B5j graders, watchdog phase 1 (report only): the report, no reset, "
      "the stream resumes; the 300 ms stall ends 300 ms after its mark", t_b5i_b5j_phase1),
     ("BENCH-039c the watchdog phase comes from the tree's sdkconfig.defaults", t_watchdog_phase),
