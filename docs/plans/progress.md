@@ -1,36 +1,58 @@
 # Refactor progress (living report)
 
-Updated by the orchestrator after each merge into `dev_refactor`. Last update: 2026-10-08 13:00,
-`dev_refactor` at 63359b1. Nothing has gone to `dev` or `main`; no PR was opened.
+Last update: 2026-10-12 (end of the weekend run), `dev_refactor` at 82880cc. Nothing went to
+`dev` or `main`; no PR.
 
 ## Where it stands
 
-**Refactor plan: about 90% done. fw-standards rules fully met: about 52% (strict count,
-docs/plans/compliance-gaps.md; the earlier 65% was plan progress, not a rule count).**
+**Structural refactor: done (~97%).** fw-standards rules fully met: ~58% (strict count).
+Hazard fixes: C1+C3 merged; C4, C2, C2b and the seat path implemented and benched on branches,
+waiting for ONE owner decision (below) before they merge.
 
 | Area | State |
 | --- | --- |
-| Fragments | **none left** (26 → 0): drive cluster in hmi_ui (DrivePort, DriveUi, StickButton, PerfOverlay), shared state in hmi_ui/app_state, views and wiring in hmi_ui's UiApp |
-| `main.cpp` | 3,983 → **637** code lines (CS-FIL-01 ≤1,000 met); 1,052 physical lines; mutable globals 143 → 6 |
-| `app_main` | 1,007 → **230** lines (≤300 met) |
-| `main/` | main.cpp, rtps_comms, selftest (+ selftest_platform), log_capture, the *_ui and log_view adapters, joystick_cal adapter: CS-LAY-01 deviation rows (P6); main implements hmi_ui's ports (LinkPort, DriveInputs, CuesPort, SelfTestPort, BoardPort, MainScreens) |
-| Components | storage, settings, ota, remote_ui, control, housekeeping, hmi_rtps_spec added |
-| Bench | every merge benched first on board 2: all graded steps PASS, B5e RECORD, G10 task dump PASS |
-| POST limits (P3) | proposal: docs/plans/post-limits-proposal.md (keep 12, WINDOW_MIN_SAMPLES 25 → 30) |
-| Compliance tooling | pre-commit on all files in CI, include-boundary check, host allocation guard, requirement coverage 97 → 108 of 137 |
-| Hazard fixes C1-C4, seat | ~5%: owner review pending |
-| Docs | how-the-firmware-works.md not refreshed for tonight's moves (an agent's read was denied); D3 regenerated |
+| Fragments | none (26 → 0) |
+| `main.cpp` | 900 physical / 536 code lines (CS-FIL-01 met); `app_main` 165 |
+| Components | board (bring-up on the Tab5 BSP), drive_ui (safety), control, housekeeping, hmi_rtps_spec, adc_window, alloc_guard, espp_adc (vendored) … see docs |
+| On `dev_refactor` | C1 + C3 hazard fixes; coverage ratchet; Doxygen ratchet; on-chip allocation guard (bench builds); settings post-check; all benched |
+| Branch `dev_ai_hazard_candidate` (e65c051) | C4 + C2 + C2b + approved RTPS-worker / ContinuousAdc priority 20 + T1 (boot DISABLE after match, vendored espp_rtps) + all owner decisions of 2026-10-11. Bench cand4: 59 PASS; remaining FAILs: `joy.xy_age_max` 210 > 200 at boot (B3, C2-15), see decision below |
+| Branch `dev_ai_hazard_seat` (440665b) | Seat path on top of the candidate: B5s-1..17 + B5''-19 PASS. Merges after the candidate |
+| Branch `dev_ai_docs_final` (1fb0ba1) | `docs/fw-overview.md` (whole-FW diagram: tasks, components, 26 channels, walk-throughs), `docs/testing-overview.md` (all testing in one diagram), refreshed how-the-firmware-works and other diagrams. Merges after the candidate |
 
-## Owner decisions waiting (2026-10-08)
+## Decision needed to finish (one)
 
-1. Hazards C1-C4 and the seat path.
-2. Leaner main.cpp: board bring-up out of app_main into a component, and/or rtps_comms and selftest out of main (P6 says they stay).
-3. hmi_ui is now safety-relevant (DrivePort sends DriveCommand): its README/.clang-tidy say it commands nothing (120-line limit). 60-line limit or a split.
-4. drive_session_table.hpp code citations point at deleted fragments; they feed the fingerprint (a table change).
-5. Proposed deviation rows in docs/project-profile.md ("Proposed, awaiting owner approval"); the approved CS-LAY-01 row still says the wire spec is in main.
-6. From the audit: topology wiring, CODEOWNERS and branch protection, selftest rework vs deviation, SquareLine export location, clang-tidy backlog, release flow.
-7. Two actions denied for an agent and not worked around: `idf.py reconfigure` for D3, reading how-the-firmware-works.md.
-8. Bench network: the board is on the hotspot (WiFi). BENCH_NET lan/routed modes exist for Ethernet; on Ethernet G10 reports w5500_tsk (not in the WiFi-captured table).
+`joy.xy_age_max` self-test limit: the boot transient varies 112–245 ms run to run (the same
+firmware read 114 and 210); the self test's limit is 200 ms while your T16 set C2-14's band to
+250 ms until measurement M8. Options: (a) 250 ms for the self-test row too, until M8; (b) start
+the maximum after warm-up (first OK sample). L1 showed the T1 code is not the cause. With either,
+the candidate, the seat branch and the docs merge after one confirming bench run.
+
+## For owner review (taken under the standing rules, recorded in hazard-decisions.md)
+
+- Measurement fixes: sim stamps samples on a receive thread; B5''-18 graded from the gate leaving
+  PASS (+35 ms); a proven link stall makes a step NOT_RUN and retried, never PASS; clock check
+  (the IDF Python 3.11 timer has 15.6 ms steps); B5''-18c graded like your C2-8 decision.
+- T1 needed a per-topic match signal espp-rtps does not have: espp-rtps vendored (like espp_adc)
+  with a small `matched_readers(topic)` accessor, offered upstream.
+- A permission-system block was not worked around: an A/B diagnostic build for the boot X/Y age.
+
+## Findings for you
+
+- Two I2C boot flakes on board 2 this weekend (one missing device; once 11 devices timed out);
+  POST caught both and the next boot was clean. Check the internal I2C bus.
+- Read ADC allocates after start-up (940 by the end of a bench run, first 20 B, not the 24 B of
+  espp's topic string): source not yet pinned (T12 accepted for now; a heap trace would show it).
+- The remote UI (priority 5) starves on core 1 while a Settings page loads (~1 s): bench-only
+  path, makes C2-11 NOT_RUN.
+- MCB team questions (hazard-fixes.md §9 and seat S1-S9) and measurements M1-M8 are still open.
+
+## Later list
+
+- Oracle reduction (today 354 M steps, ~40 min): D (parallel, nightly), then A (split the drive
+  session by concern, ~615 k steps) with a one-time equivalence proof.
+- Remaining compliance (~4-6 days + decisions): topology wiring, CODEOWNERS/branch protection,
+  clang-tidy backlog, selftest rework, coverage up to the spec thresholds (12 of 16 below),
+  Doxygen warnings (878).
 
 ## Decisions taken on your delegation (review these)
 
