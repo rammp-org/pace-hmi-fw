@@ -731,6 +731,64 @@ RULE_PLACEMENTS: dict[str, re.Pattern[str]] = {
 }
 
 
+# C-ABI hook state (owner decision T13, 2026-10-11; CS-CMP-03, CS-NAM-02). A C callback that
+# takes no context argument (an ESP-IDF hook) can reach its state only by name, so that state
+# may be a mutable namespace-scope object when all of these hold, checked on every run:
+#   - the file is listed here with the Kconfig option that builds it, the callback, and how many
+#     such objects it may hold (each entry is reviewed: the objects are the callback's state
+#     and nothing else);
+#   - the file defines the callback with C linkage (`extern "C" ... <callback>(...) {`);
+#   - bench-only: its component's CMakeLists.txt compiles the file only inside
+#     `if(<option>) ... else()/endif()`, and sdkconfig.defaults (release) does not set the option.
+# Anything else, or more objects than listed, is the usual `mutable_globals` violation.
+C_HOOK_STATE: dict[str, tuple[str, str, int]] = {
+    # path: (Kconfig option, C callback, mutable globals allowed)
+    "components/alloc_guard/src/alloc_guard.cpp":
+        ("CONFIG_HMI_BENCH_ALLOC_GUARD", "esp_heap_trace_alloc_hook", 1),
+}
+
+
+def _bench_only_source(root: pathlib.Path, path: str, option: str) -> str | None:
+    """Why `path` is not compiled only under `if(<option>)` in its component, or None."""
+    parts = path.split("/")
+    if len(parts) < 3 or parts[0] != "components":
+        return "not in a component"
+    cmake = root / "components" / parts[1] / "CMakeLists.txt"
+    if not cmake.is_file():
+        return "its component has no CMakeLists.txt"
+    text = re.sub(r"(?m)#.*$", "", read_text(cmake))
+    rel = "/".join(parts[2:])
+    block = re.search(r"\bif\s*\(\s*" + re.escape(option) + r"\s*\)(.*?)\b(?:else|endif)\s*\(",
+                      text, re.S)
+    if block is None or rel not in block.group(1):
+        return f"CMakeLists.txt does not compile {rel} inside if({option})"
+    if text.count(rel) != block.group(1).count(rel):
+        return f"CMakeLists.txt names {rel} outside if({option})"
+    defaults = root / "sdkconfig.defaults"
+    if defaults.is_file() and re.search(r"(?m)^" + re.escape(option) + r"=y\s*$",
+                                        read_text(defaults)):
+        return f"sdkconfig.defaults (release) sets {option}"
+    return None
+
+
+def c_hook_allowance(root: pathlib.Path,
+                     table: dict[str, tuple[str, str, int]] | None = None) -> dict[str, int | str]:
+    """Each C_HOOK_STATE file present: the mutable globals it may hold, or why it may hold none."""
+    out: dict[str, int | str] = {}
+    for path, (option, callback, allowed) in (C_HOOK_STATE if table is None else table).items():
+        src = root / path
+        if not src.is_file():
+            continue
+        code = strip_code(read_text(src))  # literals stripped: extern "C" reads extern ""
+        if not re.search(r'\bextern\s*""[^;{}]*\b' + re.escape(callback) + r"\s*\([^;{}]*\)\s*\{",
+                         code):
+            out[path] = f'defines no extern "C" {callback}'
+            continue
+        why = _bench_only_source(root, path, option)
+        out[path] = allowed if why is None else why
+    return out
+
+
 # A component whose own .clang-tidy sets readability-function-size.LineThreshold to 60 (or
 # less) is safety code for CS-FIL-01 ("Safety-relevant components: function 60, set in their
 # own .clang-tidy"): there fn_over_60 is a hard limit, not a SHOULD. Both YAML forms of
@@ -772,17 +830,21 @@ Grants = dict[str, dict[str, "collections.Counter[str]"]]  # dest -> metric -> m
 def violations(base: dict[str, dict[str, int]], current: dict[str, dict[str, int]],
                strict: frozenset[str] = frozenset(), grants: Grants | None = None,
                keys: LineKeys | None = None,
-               upstream: dict[str, dict[str, int] | None] | None = None) -> list[str]:
+               upstream: dict[str, dict[str, int] | None] | None = None,
+               hooks: dict[str, int | str] | None = None) -> list[str]:
     """FAIL lines. `strict`: components where fn_over_60 is a hard limit (strict_components).
 
     `grants` (from transfers) and `keys` (line_keys of each path that holds grants): on a
     path outside the baseline, a forbidden metric's violations must each match a grant 1:1.
     `upstream` (upstream_allowance): a vendored file with our hook lines may hold no more of
     any metric than its pristine copy, `lines` aside.
+    `hooks` (c_hook_allowance): a C_HOOK_STATE file may hold that many mutable globals or, with a
+    reason in place of a count, none.
     """
     bad: list[str] = []
     grants = grants or {}
     upstream = upstream or {}
+    hooks = hooks or {}
     for path in sorted(current):
         if path in upstream:
             bad += _upstream_violations(path, current[path], upstream[path])
@@ -806,6 +868,13 @@ def violations(base: dict[str, dict[str, int]], current: dict[str, dict[str, int
                 # elsewhere SHOULD only; fn_over_120 is the hard limit
             elif name in RULE_PLACEMENTS and RULE_PLACEMENTS[name].match(path):
                 pass  # the rule puts it here
+            elif name == "mutable_globals" and path in hooks and n > 0:
+                allowed = hooks[path]
+                if isinstance(allowed, str):
+                    bad.append(f"mutable_globals {path}: {n} > 0 (C_HOOK_STATE entry not met: {allowed})")
+                elif n > allowed:
+                    bad.append(f"mutable_globals {path}: {n} > {allowed} (C_HOOK_STATE: the callback's "
+                               "state only)")
             elif n > 0 and name in grants.get(path, {}):
                 have = (keys or {}).get(path, {}).get(name, [])
                 unmatched = collections.Counter(k for k, _ in have) - grants[path][name]
@@ -1160,7 +1229,7 @@ def cmd_check(root: pathlib.Path, baseline: pathlib.Path, git: Git | None = None
     current = {path: measure(path, text) for path, text in units.items()}
     keys = _grant_keys(transfers, units)
     bad = violations(base, current, strict_components(root), merged_grants(transfers), keys,
-                     upstream_allowance(root))
+                     upstream_allowance(root), c_hook_allowance(root))
     if transfers:
         bad += transfer_problems(root, baseline, base, transfers, units, git or Git(root))
     for line in bad:
@@ -1188,7 +1257,7 @@ def cmd_update(root: pathlib.Path, baseline: pathlib.Path, init: bool, git: Git 
         base, transfers = load_doc(baseline)
         keys = _grant_keys(transfers, units)
         bad = violations(base, current, strict_components(root), merged_grants(transfers), keys,
-                         upstream_allowance(root))
+                         upstream_allowance(root), c_hook_allowance(root))
         if transfers:
             bad += transfer_problems(root, baseline, base, transfers, units, git or Git(root))
         if bad:
@@ -1694,6 +1763,40 @@ def _selftest_transfer(expect: Expect) -> None:
         expect("an unknown base", transfer("components/four/src/four.cpp", "0" * 40)[0], 1)
 
 
+def _selftest_c_hook_state(expect: Expect) -> None:
+    """C-ABI hook state (T13): allowed only in a listed bench-only file that defines the callback;
+    the same pattern built unconditionally, on in release, unlisted, or one global more fails."""
+    path = "components/hk/src/hook.cpp"
+    table = {path: ("CONFIG_HMI_BENCH_HK", "the_hook", 1)}
+    hook = ('namespace {\nconstinit Counter counter;\n}\n'
+            'extern "C" void the_hook(void *p, size_t n) {\n  counter.note(n);\n}\n')
+    gated = ('if(CONFIG_HMI_BENCH_HK)\n  set(srcs "src/hook.cpp")\nelse()\n  set(srcs "")\nendif()\n'
+             'idf_component_register(SRCS ${srcs} INCLUDE_DIRS "include")\n')
+    always = 'idf_component_register(SRCS "src/hook.cpp" INCLUDE_DIRS "include")\n'
+
+    def run(cmake: str, code: str, defaults: str = "CONFIG_X=y\n") -> list[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "components/hk/src").mkdir(parents=True)
+            (root / "components/hk/CMakeLists.txt").write_text(cmake, encoding="utf-8")
+            (root / path).write_text(code, encoding="utf-8")
+            (root / "sdkconfig.defaults").write_text(defaults, encoding="utf-8")
+            return violations({}, {path: measure(path, code)}, hooks=c_hook_allowance(root, table))
+
+    expect("c_hook: one global, bench-only, callback defined: allowed", run(gated, hook), [])
+    expect("c_hook: the same file compiled unconditionally fails",
+           [v.split(" (")[0] for v in run(always, hook)], [f"mutable_globals {path}: 1 > 0"])
+    expect("c_hook: the option on in release (sdkconfig.defaults) fails",
+           len(run(gated, hook, "CONFIG_HMI_BENCH_HK=y\n")), 1)
+    expect("c_hook: a file with no extern \"C\" callback fails",
+           len(run(gated, hook.replace('extern "C" ', ""))), 1)
+    expect("c_hook: a second global beyond the entry fails",
+           len(run(gated, hook.replace("Counter counter;", "Counter counter;\nint other;"))), 1)
+    other = "components/hk/src/other.cpp"
+    expect("c_hook: an unlisted file with the same pattern fails",
+           len(violations({}, {other: measure(other, hook)}, hooks={path: 1})), 1)
+
+
 def selftest() -> int:
     failures: list[str] = []
 
@@ -1846,6 +1949,7 @@ def selftest() -> int:
     _selftest_task_idiom(expect)
     _selftest_ui_paths(expect)
     _selftest_vendored(expect)
+    _selftest_c_hook_state(expect)
     _selftest_transfer(expect)
 
     for f in failures:
