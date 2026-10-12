@@ -13,6 +13,8 @@ EXCLUDE                = components/ui \
                          components/espp_adc/upstream \
                          components/espp_adc/include/adc_types.hpp \
                          components/espp_adc/include/oneshot_adc.hpp \
+                         components/espp_rtps/include \
+                         components/espp_rtps/upstream \
                          main/boot_logo.h \
                          managed_components \
                          external

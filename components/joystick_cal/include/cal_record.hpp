@@ -87,8 +87,8 @@ enum class RecordFault : std::uint8_t {
 
 /// check()'s answer: the first fault and the axis it is on (index into Record; 0 when NONE).
 struct RecordCheck {
-  RecordFault fault = RecordFault::NONE;
-  std::size_t axis = 0;
+  RecordFault fault = RecordFault::NONE; ///< the first fault found, NONE when the record passes
+  std::size_t axis = 0;                  ///< the axis it is on (index into Record)
 };
 
 /// Hazard fix C2 (docs/plans/hazard-c2-spec.md §6, REQ-CAL-09): the first reason a record may
@@ -96,10 +96,14 @@ struct RecordCheck {
 /// passes exactly when all nine numbers are finite and, per axis, min >= 0,
 /// center - min >= kFullTravelMv, max - center >= kFullTravelMv and
 /// max + CAL_OVERSHOOT_MV <= HIGH_RAIL_MV (that is, max <= 3050 mV; stick/stick_monitor.hpp).
+/// @param record the record to judge
+/// @return the first fault and its axis, or NONE
 [[nodiscard]] RecordCheck check(const Record &record);
 
 /// Whether a record may be used: check() found nothing. Boot uses only a valid saved record,
 /// and a run hands over only a valid one (REQ-CAL-09).
+/// @param record the record to judge
+/// @return true when check() finds nothing
 [[nodiscard]] bool valid(const Record &record);
 
 /// The file's text for `record`, numbers to 0.1 mV.

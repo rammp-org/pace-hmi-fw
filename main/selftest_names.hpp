@@ -7,4 +7,6 @@
 #include "esp_system.h"
 
 /// The reset reason as the self test's sys.clean_reset detail names it ("TASK WDT").
+/// @param reason esp_reset_reason()'s value
+/// @return its name, a string literal
 const char *reset_reason_name(esp_reset_reason_t reason);
