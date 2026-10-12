@@ -146,10 +146,15 @@ template <class T> bool subscribe(const rammp::Topic<T> &topic, void (*on_msg)(c
   return sub.is_valid();
 }
 
+// `f()` under endpoints_mutex, so no publisher or the participant is dropped under it.
+template <class F> bool under_endpoints(F &&f) {
+  std::lock_guard<std::mutex> lock(endpoints_mutex);
+  return f();
+}
+
 // Quiet until the endpoints exist and a peer has matched: no one to send to yet.
 template <class T> bool publish(const Publisher<T> &pub, const T &msg) {
-  std::lock_guard<std::mutex> lock(endpoints_mutex);
-  return endpoints_ready && peer_matched && pub->publish(msg);
+  return under_endpoints([&] { return endpoints_ready && peer_matched && pub->publish(msg); });
 }
 
 std::string ip_string(uint32_t addr) {
