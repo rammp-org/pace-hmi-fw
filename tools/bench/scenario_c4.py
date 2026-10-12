@@ -7,7 +7,7 @@ build (ci/sdkconfig.stick_inject); no step grades XYTwist while a SHOT runs.
 | B5f | neutral, sim a, Drive, full forward (y > 0.5 for 1 s), sim i | every XYTwist received > 120 ms after the first IDLE MibStatus publish is 0, in 10 of 10 repeats |
 | B5g | as B5f, then sim p | every XYTwist after the last publish + 2120 ms is 0; XYTwist still at >= 25 Hz in [+2.12 s, +4 s]; 3 of 3 repeats |
 | B5h | sim ign 50, Drive, forward, exit hold | the sim stays ENABLED and XYTwist y > 0.5 for 5 s after the hold |
-| B5i | STALL UI 300, then STALL UI 3000 | 300: XYTwist 0 by stall start + 240 ms, back after; 3000: reset, the panic names lv_task, reset reason TASK_WDT, the last 1.5 s of XYTwist before the silence all 0 |
+| B5i | STALL UI 300, then STALL UI 3000 | 300: XYTwist 0 published by stall start + 240 ms (board time; the network reported), back after; 3000: reset, the panic names lv_task, reset reason TASK_WDT, the last 1.5 s of XYTwist before the silence all 0 |
 | B5j | STALL ADC 3000 | reset; the panic names Read ADC; the sim logs XYTwist silence from the stall and its ongone at 1 s |
 
 The MibStatus publish times come from the sim's `mib_publish` records (scripts/mcb_sim_logic.py,
@@ -145,14 +145,37 @@ def panic_names(text: str, task: str) -> bool:
     return False
 
 
+# B5i's 240 ms is measured at the board's publish (owner, 2026-10-11); the network's share is
+# reported, not graded. Neither the serial log nor XYTwist carries the board's time, so the
+# board's side is estimated from the sim's (PC) clock with the measured one-way delay w (the
+# median remote-UI round trip / 2, one_way_s, taken just before the stalls): the stall starts on
+# the board at mark + w (the STALL command's way in) and a sample published at P reaches the sim
+# at P + w, so P - start = (arrival - mark) - 2 w. What the network adds beyond its median stays
+# in the figure (a late zero is graded late, never early).
+STALL_ZERO_WITHIN_S = 0.240
+
+
+def board_after(arrival: float, mark: float, one_way: float) -> float:
+    """The board's publish time of a sample after its stall started (see above)."""
+    return arrival - mark - 2.0 * one_way
+
+
+def check_zero_by(st: HazardStep, tag: str, z, s: float, one_way: float) -> None:
+    board = None if z is None else board_after(z[0], s, one_way)
+    st.check(f"{tag}: XYTwist 0 published by stall start + {STALL_ZERO_WITHIN_S * 1000:.0f} ms "
+             f"(board time)", board is not None and board <= STALL_ZERO_WITHIN_S,
+             "never" if z is None else
+             f"board +{board:.3f} s; at the sim +{z[0] - s:.3f} s, one-way {one_way:.3f} s")
+    if board is not None:  # the network's share is reported, not graded
+        st.record(f"b5i_{tag}_network_s", round(z[0] - s - board, 3))
+
+
 def grade_b5i(st: HazardStep, tr: hg.Trace, p: dict) -> None:
     s, f = tr.mark("stall-300"), tr.mark("forward")
     allow = p.get("one_way_s", 0.0)
-    e = s + 0.300 + allow  # the stall's end: the task stalls itself for 300 ms
+    e = s + 0.300 + 2.0 * allow  # the stall's end, at the sim: the task stalls itself 300 ms
     z = hg.first_sample(tr.samples, hg.is_exact_zero, s)
-    st.check("300: XYTwist 0 by stall start + 240 ms",
-             z is not None and z[0] - s <= 0.240 + allow,
-             "never" if z is None else f"first zero at +{z[0] - s:.3f} s (allowance {allow:.3f})")
+    check_zero_by(st, "300", z, s, allow)
     if z is not None:
         check_no_nonzero(st, "300: zero from then to the stall's end", tr, z[0], e)
     back = hg.first_sample(tr.samples, hg.y_positive, f)
@@ -165,10 +188,8 @@ def grade_b5i(st: HazardStep, tr: hg.Trace, p: dict) -> None:
         grade_stall_report(st, tr, p, "3000", s3, "lv_task")
         z3 = hg.first_sample(tr.samples, hg.is_exact_zero, s3)
         check_no_nonzero(st, "3000: XYTwist 0 from stall start + 240 ms to the stall's end", tr,
-                         s3 + 0.240 + allow, s3 + 3.0)
-        st.check("3000: XYTwist 0 by stall start + 240 ms",
-                 z3 is not None and z3[0] - s3 <= 0.240 + allow,
-                 "never" if z3 is None else f"first zero at +{z3[0] - s3:.3f} s")
+                         s3 + STALL_ZERO_WITHIN_S + 2.0 * allow, s3 + 3.0)
+        check_zero_by(st, "3000", z3, s3, allow)
         return
     st.check("3000: reset, the panic names lv_task", panic_names(text, "lv_task"), "")
     st.check("3000: reset reason TASK_WDT", p.get("reset_reason") == "TASK_WDT",
