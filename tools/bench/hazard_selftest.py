@@ -434,13 +434,14 @@ def t_b17() -> None:
 
 
 def t_b18() -> None:
-    def b(tb: TB, dt: float = DT, resume: float = 308.25, leak: float | None = None) -> TB:
+    def b(tb: TB, dt: float = DT, resume: float = 308.25, leak: float | None = None,
+          left: float = 300.1, zero: float = 300.13) -> TB:
         tb.mark("rerun", 300.0).mark("centred", 305.0).mark("forward", 308.1)
-        tb.polls(299.0, 300.1, screen="DriveScreen")
-        tb.polls(300.1, 306.2, screen="DriveScreen", post="PENDING", notice="POST_NOT_PASSED",
+        tb.polls(299.0, left, screen="DriveScreen")
+        tb.polls(left, 306.2, screen="DriveScreen", post="PENDING", notice="POST_NOT_PASSED",
                  post_check=lambda t: "joy.y_cal_off" if t < 305.0 else "joy.y_noise")
         tb.polls(306.2, 310.2, screen="DriveScreen", notice="CENTRE_FIRST")
-        tb.stream(299.0, 300.2, 1.0).stream(300.2, resume, dt=dt).stream(resume, 310.2, 1.0)
+        tb.stream(299.0, zero, 1.0).stream(zero, resume, dt=dt).stream(resume, 310.2, 1.0)
         if leak:
             tb.tr.samples.append((leak, 0, 1.0, 0, 0))
         return tb
@@ -448,6 +449,11 @@ def t_b18() -> None:
     fails("motion before PASS", c3.grade_b18, b(TB(), leak=302.0).build(), "until PASS is zero")
     fails("slow stream", c3.grade_b18, b(TB(), dt=0.05).build(), ">= 25 Hz")
     fails("slow resume", c3.grade_b18, b(TB(), resume=308.5).build(), "within 0.3 s")
+    # The gate shuts on the runner's next 250 ms tick: graded from the first poll off PASS.
+    passes("B5''-18 gate shut 0.3 s after RERUN, zero within 35 ms of the poll", c3.grade_b18,
+           b(TB(), left=300.3, zero=300.33).build())
+    fails("B5''-18 motion 100 ms after the poll off PASS", c3.grade_b18,
+          b(TB(), left=300.3, zero=300.4).build(), "first poll off PASS + 35 ms")
 
     def b18b(tb: TB, drive: float = 426.8) -> TB:
         return (tb.mark("restart", 400.0).ev(425.0, "hmi_back").mark("back", 426.5)

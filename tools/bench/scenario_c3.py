@@ -12,7 +12,7 @@ the stick centred; one that leaves POST FAIL latched restarts the HMI (a clean r
 | B5''-16 | IDLE | 5 boots: 19 POST PASS lines, POST RESULT PASS 19/19 <= 3000 ms; post PASS, indicator NONE, reset_reason SW; first DriveCommand a DISABLE, the only one in 10 s |
 | B5''-17 | IDLE | y +25 %, POST RERUN: PENDING on joy.y_cal_off/y_noise, WAITING "Centre the joystick", never FAIL; hold refused (banner REFUSED_POST, no DriveCommand); centred: PASS within 2.5 s, indicator NONE; hold: 1 ENABLE |
 | B5''-17b | IDLE | button held, POST RERUN: joy.button_idle, "Release the joystick button"; PASS within 2.5 s of release |
-| B5''-18 | ENABLED, s | Drive, forward, POST RERUN: Drive stays; zero from RERUN + 0.2 s to PASS at >= 25 Hz; notice names the check; after PASS and 0.5 s centred: y > 0 within 0.3 s |
+| B5''-18 | ENABLED, s | Drive, forward, POST RERUN: Drive stays; zero from the first poll off PASS + 35 ms to PASS at >= 25 Hz; notice names the check; after PASS and 0.5 s centred: y > 0 within 0.3 s |
 | B5''-18b | ongone keep, a, s | Restart HMI: first DriveCommand a DISABLE, exactly 1 in the link's first 2 s; no ENABLE; DriveScreen within 3 s of the link; zero until centred 0.5 s; serial POST RESULT PASS |
 | B5''-18c | ongone keep, a | Restart HMI: 1 DISABLE; the sim goes IDLE; Locked for 10 s |
 | B5''-19 | IDLE | y +25 %, POST RERUN, Seat: no SeatCommand for 2 s, banner REFUSED_POST; centred, PASS: exactly 1 SeatCommand |
@@ -140,6 +140,11 @@ def grade_b17b(st: HazardStep, tr: hg.Trace, p: dict) -> None:
                  rel, 2.5)
 
 
+# One ADC cycle and its publish: from the poll that shows the gate shut to the first XYTwist
+# the gate zeroes (B5''-18).
+GATE_TO_ZERO_S = 0.035
+
+
 def grade_b18(st: HazardStep, tr: hg.Trace, p: dict) -> None:
     rr, c, f = tr.mark("rerun"), tr.mark("centred"), tr.mark("forward")
     ok, n, bad = hg.all_states(tr.states, hg.screen_is(DRIVE), rr, f + 2.0)
@@ -151,9 +156,15 @@ def grade_b18(st: HazardStep, tr: hg.Trace, p: dict) -> None:
                     ps is not None, "the gate never left PASS" if left is None else ""):
         return
     t_pass = ps[0]
-    check_no_nonzero(st, "every XYTwist from RERUN + 0.2 s until PASS is zero", tr, rr + 0.2,
-                     t_pass)
-    hz = hg.rate_hz(tr.samples, rr + 0.2, t_pass)
+    # From the gate, not from the request (orchestrator, 2026-10-11, measurement fix): the
+    # runner takes RERUN on its next PostStage tick (every 250 ms, hazard-c3-spec.md), so the
+    # gate can shut up to 0.25 s after it. The first STATE poll off PASS, plus one ADC cycle
+    # and its publish; no non-zero XYTwist after the gate is shut, as before.
+    z0 = left[0] + GATE_TO_ZERO_S
+    st.record("b18_gate_left_after_rerun_s", round(left[0] - rr, 3))
+    check_no_nonzero(st, "every XYTwist from the first poll off PASS + 35 ms until PASS is "
+                     "zero", tr, z0, t_pass)
+    hz = hg.rate_hz(tr.samples, z0, t_pass)
     st.check("... at >= 25 Hz", hz >= 25.0, f"{hz:.1f} Hz")
     pending = [s for t, s in hg.states_in(tr.states, rr + 0.5, t_pass) if s.get("post") != "PASS"]
     st.check("notice names the check (POST_NOT_PASSED, post_check set)",
