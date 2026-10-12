@@ -222,7 +222,8 @@ TEST_CASE("SST-007 the bench rows come last: a build without the allocation guar
           "rows before them, one with it every row",
           "[selftest_spec]") {
   const std::size_t first_bench = first_bench_row(kGolden);
-  TEST_ASSERT_EQUAL_UINT32(54U, first_bench); // the 54 rows of the B3 baseline
+  // the 54 rows of the B3 baseline, then C4's three ctl.* and C2's three joy.* (declared new)
+  TEST_ASSERT_EQUAL_UINT32(60U, first_bench);
   TEST_ASSERT_EQUAL_UINT32(first_bench, selftest_spec::reported_rows(false));
   TEST_ASSERT_EQUAL_UINT32(kChecks.size(), selftest_spec::reported_rows(true));
 }
