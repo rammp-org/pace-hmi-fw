@@ -53,7 +53,7 @@
 {"order": 51, "id": "JOY_Y_CAL", "name": "joy.y_cal_off", "unit": "mV", "lo": 0, "hi": 40, "need": "optional", "why": "Y rest vs its calibrated centre"},
 {"order": 52, "id": "JOY_TWIST_CAL", "name": "joy.twist_cal_off", "unit": "mV", "lo": 0, "hi": 50, "need": "optional", "why": "Twist rest vs saved centre"},
 {"order": 53, "id": "JOY_BUTTON", "name": "joy.button_idle", "unit": "", "lo": 1, "hi": 1, "need": "required", "why": "Stick button not stuck pressed"},
-{"order": 54, "id": "MEM_ALLOC_ADC", "name": "mem.alloc_adc", "unit": "", "lo": 0, "hi": 0, "need": "bench", "why": "Read ADC allocated nothing after boot"},
+{"order": 54, "id": "MEM_ALLOC_ADC", "name": "mem.alloc_adc", "unit": "", "lo": 0, "hi": 2147483647, "need": "bench", "why": "Read ADC allocations after boot (T12: report-only)"},
 {"order": 55, "id": "MEM_ALLOC_LVGL", "name": "mem.alloc_lvgl", "unit": "", "lo": 0, "hi": 2147483647, "need": "bench", "why": "lv_task allocations after boot"},
 {"order": 56, "id": "MEM_ALLOC_RTPS", "name": "mem.alloc_rtps", "unit": "", "lo": 0, "hi": 2147483647, "need": "bench", "why": "rtps_pub allocations after boot"}
 ]

@@ -62,8 +62,9 @@ menu "RAMMP HMI"
             heap hook (HEAP_USE_HOOKS, selected here) counts, from the moment
             app_main parks, every heap allocation made by the tasks the self
             test names: Read ADC, lv_task and rtps_pub. The self test reports
-            them as mem.alloc_adc (must be 0), mem.alloc_lvgl and
-            mem.alloc_rtps (counted, not limited); builds without this option
+            them as mem.alloc_adc (to be 0; report-only until espp's publish
+            stops allocating, owner T12), mem.alloc_lvgl and mem.alloc_rtps
+            (counted, not limited); builds without this option
             leave those rows out of the run.
 
             The hook runs after every allocation of every task, in IRAM: a

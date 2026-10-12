@@ -211,15 +211,15 @@ TEST_CASE("SST-007 the bench rows come last: a build without the allocation guar
   TEST_ASSERT_EQUAL_UINT32(kChecks.size(), selftest_spec::reported_rows(true));
 }
 
-TEST_CASE("SST-008 each mem.alloc_* row watches its task: Read ADC 0..0, lv_task and rtps_pub "
-          "counted with no upper limit",
+TEST_CASE("SST-008 each mem.alloc_* row watches its task: Read ADC, lv_task and rtps_pub, all "
+          "counted with no upper limit (Read ADC report-only, owner T12)",
           "[selftest_spec]") {
   TEST_ASSERT_EQUAL_UINT32(3U, selftest_spec::kAllocRows.size());
   const struct {
     Id id;
     const char *task;
     int32_t hi;
-  } want[] = {{Id::MEM_ALLOC_ADC, "Read ADC", 0},
+  } want[] = {{Id::MEM_ALLOC_ADC, "Read ADC", kAnyHi}, // 0 again once espp stops allocating
               {Id::MEM_ALLOC_LVGL, "lv_task", kAnyHi},
               {Id::MEM_ALLOC_RTPS, "rtps_pub", kAnyHi}};
   for (std::size_t i = 0; i < std::size(want); ++i) {

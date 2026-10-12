@@ -23,9 +23,10 @@ using hmi::alloc_guard::AllocCounter;
 using hmi::alloc_guard::MAX_TASKS;
 
 // The guard's counts, written by the heap hook below.
-// spec-deviation(CS-CMP-03): the one mutable object at namespace scope in this component. The
-// hook ESP-IDF calls (esp_heap_trace_alloc_hook) takes no context argument, so what it writes
-// can only be reached through a name; TS-DET-08 prescribes that hook on the chip. Constant-
+// The one mutable object at namespace scope in this component, allowed as C-ABI hook state
+// (owner decision T13; tools/l0/ratchet.py C_HOOK_STATE, CS-CMP-03). The hook ESP-IDF calls
+// (esp_heap_trace_alloc_hook) takes no context argument, so what it writes can only be reached
+// through a name; TS-DET-08 prescribes that hook on the chip. Constant-
 // initialised (no constructor runs: G4) and in internal RAM (DRAM_ATTR), which the hook can
 // reach with the flash cache off. Bench builds only (CONFIG_HMI_BENCH_ALLOC_GUARD).
 DRAM_ATTR constinit AllocCounter<MAX_TASKS> counter;

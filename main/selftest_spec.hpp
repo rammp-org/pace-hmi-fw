@@ -140,9 +140,15 @@ inline constexpr int kRenderFrames = 30;
  * mem.alloc_*  Bench builds with the allocation guard only (TS-DET-08; Need::BENCH):
  *            heap allocations the task in kAllocRows made since app_main parked,
  *            the detail giving the first one's size. Read ADC is a safety task
- *            and allocates nothing after start-up (CS-SAF-04): 0..0. lv_task
- *            (LVGL's own allocations are allowed, CS-MEM-02) and rtps_pub are
- *            counted, not limited, until the islands rework says what they may do.
+ *            and must allocate nothing after start-up (CS-SAF-04), but today it
+ *            does: espp's RtpsParticipant::publish builds a std::string of the
+ *            topic for every XYTwist ("rammp/joystick/xy_twist", 24 B, ~30 per s
+ *            while a peer is matched). Until that is fixed mem.alloc_adc is
+ *            report-only, 0..kAnyHi, with the count shown (owner T12,
+ *            2026-10-11; deviation in docs/project-profile.md); it returns to
+ *            0..0 with the fix. lv_task (LVGL's own allocations are allowed,
+ *            CS-MEM-02) and rtps_pub are counted, not limited, until the
+ *            islands rework says what they may do.
  */
 
 /// One check, in kChecks' order: the position is the report's check index.
@@ -301,7 +307,7 @@ inline constexpr std::array kChecks{
     Check{Id::JOY_TWIST_CAL,   "joy.twist_cal_off", "mV",   0,     50,     Need::OPTIONAL, "Twist rest vs saved centre"},
     Check{Id::JOY_BUTTON,      "joy.button_idle",   "",     1,     1,      Need::REQUIRED, "Stick button not stuck pressed"},
     // bench only, last (Need::BENCH): heap allocations after start-up, per task (kAllocRows)
-    Check{Id::MEM_ALLOC_ADC,   "mem.alloc_adc",     "",     0,     0,      Need::BENCH,    "Read ADC allocated nothing after boot"},
+    Check{Id::MEM_ALLOC_ADC,   "mem.alloc_adc",     "",     0,     kAnyHi, Need::BENCH,    "Read ADC allocations after boot (T12: report-only)"},
     Check{Id::MEM_ALLOC_LVGL,  "mem.alloc_lvgl",    "",     0,     kAnyHi, Need::BENCH,    "lv_task allocations after boot"},
     Check{Id::MEM_ALLOC_RTPS,  "mem.alloc_rtps",    "",     0,     kAnyHi, Need::BENCH,    "rtps_pub allocations after boot"},
 };

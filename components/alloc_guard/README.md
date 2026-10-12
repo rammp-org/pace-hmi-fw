@@ -37,7 +37,7 @@ is unchanged (same rows, same indices, `ready: 54 checks`).
 
 | Row | Task | Limit |
 | --- | --- | --- |
-| `mem.alloc_adc` | `Read ADC` | 0..0: a safety task allocates nothing after start-up |
+| `mem.alloc_adc` | `Read ADC` | to be 0..0 (a safety task allocates nothing after start-up); report-only today, see below |
 | `mem.alloc_lvgl` | `lv_task` | counted, no limit (LVGL's own allocations are allowed, CS-MEM-02) |
 | `mem.alloc_rtps` | `rtps_pub` | counted, no limit |
 
@@ -45,6 +45,16 @@ The detail of a non-zero row gives the first allocation's size. Read them with
 `python scripts/rtps_selftest.py` against an image built with the guard. Against the plain
 bench baseline (`tests/characterisation/baseline-e2047a4`) such an image differs by exactly
 these three rows: B2's `ready: 57 checks` and B3's check list.
+
+**`mem.alloc_adc` is not 0 today, and is report-only until it is** (owner decision T12,
+2026-10-11; deviation row in `docs/project-profile.md`). The `Read ADC` task publishes XYTwist
+itself, and espp's `RtpsParticipant::publish` (managed component `espp/rtps`) looks the writer up
+with `writers_.find(std::string(topic))`: "rammp/joystick/xy_twist" is longer than the string's
+inline buffer, so every publish allocates 24 B, about 30 times a second while a peer is matched.
+Expected on the bench: the count grows with uptime, the detail reads `first 24 B`. The row's
+limit is 0..kAnyHi so the self test does not fail on it, and the count stays in the report.
+When espp looks the topic up without a temporary string (a transparent comparator), set the
+limit back to 0..0 and drop the deviation row.
 
 TS-DET-08 also asks for the task and a backtrace of an offending allocation. The hook cannot
 take a backtrace (RISC-V without frame pointers, and nothing that is not IRAM-safe), so the row
@@ -74,6 +84,7 @@ to find the call once a count is not zero.
 - No task of its own. The hook runs on whichever task allocates; `start` on app_main, `count`
   on the self test's task.
 - Dependencies: private `freertos`, `heap`, `esp_hw_support` (guard builds only).
-- spec-deviation(CS-CMP-03): `src/alloc_guard.cpp` holds one mutable object at namespace
-  scope, the counter. ESP-IDF's hook takes no context argument, so it can reach its state only
-  by name. Constant-initialised, internal RAM, bench builds only.
+- `src/alloc_guard.cpp` holds one mutable object at namespace scope, the counter: ESP-IDF's
+  hook takes no context argument, so it can reach its state only by name. Allowed as C-ABI hook
+  state by the ratchet's `C_HOOK_STATE` rule (owner decision T13; tools/l0/README.md), which
+  checks that the file stays bench-only. Constant-initialised, internal RAM.
