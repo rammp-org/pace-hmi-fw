@@ -161,6 +161,18 @@ def find(lines: list[str], regex: str) -> list[tuple[int, str]]:
     return out
 
 
+def expected_settings() -> dict[str, int]:
+    """The approved settings line (boot-expected.json's override, else the baseline's) as
+    {key: value}, e.g. {"brightness": 80, "theme": 0, ...}."""
+    value = OVERRIDES.get("settings_loaded", {}).get("value")
+    if value is None:
+        base = (common.BASELINE_DIR / "boot-board2.log").read_text(
+            encoding="utf-8", errors="replace").splitlines()
+        hits = find(base, dict((n, r) for n, r, _ in MARKERS)["settings_loaded"])
+        value = hits[0][1] if hits else ""
+    return {k: int(v) for k, v in re.findall(r"(\w+) (-?\d+)", value)}
+
+
 def wdt_signature(lines: list[str]) -> tuple[int, list[str]]:
     trips = sum(1 for line in lines if WDT_TRIP.search(line))
     tasks = []
