@@ -139,7 +139,9 @@ def judge(run_id: int, got: dict, rows: dict[str, SpecRow]) -> tuple[int, dict]:
     if finished is None:
         pc[-1] = pc[-1]._replace(result=spec.SELFTEST_RESULT_FAIL, detail="run never finished")
     board_names = {r.name for r in device}
-    spec_names = set(rows)
+    # A bench row (Need::BENCH, the allocation guard's mem.alloc_*) is reported only by a build
+    # that has the guard: absent is not a mismatch, present is graded like any other row.
+    spec_names = {name for name, row in rows.items() if row.need != "bench" or name in board_names}
     only_board = sorted(board_names - spec_names)
     only_spec = sorted(spec_names - board_names) if not missing else []
     mismatch = ", ".join([f"board only: {n}" for n in only_board] +

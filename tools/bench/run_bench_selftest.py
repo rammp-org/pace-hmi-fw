@@ -326,6 +326,60 @@ def t_boot_check_on_ethernet() -> None:
     finally:
         common.LINK = saved
 
+def t_boot_check_variant_rows() -> None:
+    import boot_check
+    baseline = (common.BASELINE_DIR / "boot-board2.log").read_text(encoding="utf-8",
+                                                                    errors="replace")
+    settings_re = boot_check.MARKERS[0][1]
+    (_, base_settings), = boot_check.find(baseline.splitlines(), settings_re)[:1]
+    wanted = boot_check.OVERRIDES.get("settings_loaded", {}).get("value", base_settings)
+    plain = boot_check.selftest_count(common.REPO)
+    # As BENCH-014: a boot of this tree, its own self-test count, no task_wdt line once C4 turns
+    # the idle-task checks off.
+    log = baseline.replace(base_settings, wanted).replace("ready: 54 checks",
+                                                          f"ready: {plain} checks")
+    if boot_check.idle_checks_off(common.REPO):
+        log = "\n".join(ln for ln in log.splitlines() if "task_wdt" not in ln)
+    guard = common.variant_checks(None, common.REPO, {"CONFIG_HMI_BENCH_ALLOC_GUARD": "1"})
+    expect("the guard's rows come from the tree's Need::BENCH rows", sorted(guard),
+           ["mem.alloc_adc", "mem.alloc_lvgl", "mem.alloc_rtps"])
+    expect("report-only per T12", [n for n, v in guard.items() if v["report_only"]],
+           ["mem.alloc_adc"])
+    expect("option off or absent: no rows",
+           (common.variant_checks(None, common.REPO, {"CONFIG_HMI_BENCH_ALLOC_GUARD": "0"}),
+            common.variant_checks(None, common.REPO, {})), ({}, {}))
+    guard_log = log.replace(f"ready: {plain} checks", f"ready: {plain + 3} checks")
+    saved = common.LINK
+    try:
+        common.LINK = "WiFi"
+        expect("plain image, no variant: PASS", boot_check.analyse(log, baseline)["problems"], [])
+        report = boot_check.analyse(guard_log, baseline, variant=guard)
+        expect("guard image, guard variant: PASS with a finding",
+               (report["problems"], any("+3 rows" in f for f in report["findings"])), ([], True))
+        expect("guard image read as plain: selftest_ready fails", [
+            p.split(":")[0] for p in boot_check.analyse(guard_log, baseline)["problems"]],
+            ["selftest_ready"])
+        expect("plain image with the variant claimed: selftest_ready fails", [
+            p.split(":")[0] for p in boot_check.analyse(log, baseline, variant=guard)["problems"]],
+            ["selftest_ready"])
+    finally:
+        common.LINK = saved
+    # additive: a tree count the hazard fixes declare (57 with C4) plus the guard's rows
+    text, problems, findings = boot_check.expected_selftest_ready(
+        f"ready: {plain} checks (selftest_spec.h)", 57, guard)
+    expect("C4's 57 plus the guard: 60 expected, no problem",
+           (text, problems, len(findings)), ("ready: 60 checks (selftest_spec.h)", [], 2))
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = pathlib.Path(tmp) / "config"
+        cfg.mkdir()
+        (cfg / "sdkconfig.h").write_text("#define CONFIG_HMI_REMOTE_UI 1\n"
+                                         "#define CONFIG_HMI_BENCH_ALLOC_GUARD 1\n",
+                                         encoding="utf-8")
+        expect("read from the build dir's sdkconfig.h",
+               sorted(common.variant_checks(pathlib.Path(tmp), common.REPO)),
+               ["mem.alloc_adc", "mem.alloc_lvgl", "mem.alloc_rtps"])
+
+
 SETTINGS = ("loaded: brightness 80, theme 0, menu_slide 0, flip 0, stick_sensitivity 9, "
             "drive_speed 10, stick_invert_x 0, stick_invert_y 0, stick_swap 0, sounds 1, network 1")
 
@@ -374,6 +428,9 @@ CASES = [
      "anything else refused", t_net_spec),
     ("BENCH-014 on Ethernet B2 expects 'Network: Ethernet' and network 0, nothing else",
      t_boot_check_on_ethernet),
+    ("BENCH-072 B2 with a build variant: the alloc guard's config adds the tree's Need::BENCH "
+     "rows to the self-test count, on top of the tree's (and C4's) count; read from the build "
+     "dir's sdkconfig.h", t_boot_check_variant_rows),
     ("BENCH-071 SETTINGS: a run whose steps change a saved setting ends INVALID (rig fault) "
      "after a closing reset; unchanged is PASS; no step after B2, no reset", t_settings_guard),
 ]

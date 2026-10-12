@@ -177,3 +177,58 @@ def stray_peers(exclude_pids: set[int] | None = None, exclude_trees: set[int] | 
                                   "rtps_drive_game", "rtps_host.py")):
             hits.append(f"{pid}: {cmd.strip()[:160]}")
     return hits
+
+
+# --- build variants that add self-test rows -------------------------------------------------
+# Some build options add rows to the self test that the B2/B3 baseline (a plain bench build)
+# does not have. The bench reads the option from the image's own build config
+# (<build dir>/config/sdkconfig.h), never from a fixed count, so the variant's rows go on top of
+# whatever the tree's main/selftest_spec.hpp declares (C4's ctl.*, C2's joy.*, ...).
+#   option -> need: the tree's selftest_spec rows with this `need` are the variant's rows;
+#             why: what the variant is; report_only: row -> why it is shown and never graded.
+VARIANT_ROWS: dict[str, dict] = {
+    "CONFIG_HMI_BENCH_ALLOC_GUARD": {
+        "need": "bench",
+        "why": "on-chip allocation guard, TS-DET-08 (ci/sdkconfig.allocguard)",
+        "report_only": {
+            "mem.alloc_adc": "report-only: owner T12 (2026-10-11), Read ADC allocates in espp's "
+                             "publish until that is fixed",
+        },
+    },
+}
+
+
+def build_config(build_dir: pathlib.Path | str | None) -> dict[str, str]:
+    """The build's `#define CONFIG_<X> <value>` lines (config/sdkconfig.h); {} without one."""
+    if build_dir is None:
+        return {}
+    path = pathlib.Path(build_dir) / "config" / "sdkconfig.h"
+    if not path.is_file():
+        return {}
+    out: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        parts = line.split(None, 2)
+        if len(parts) == 3 and parts[0] == "#define" and parts[1].startswith("CONFIG_"):
+            out[parts[1]] = parts[2].strip()
+    return out
+
+
+def variant_checks(build_dir: pathlib.Path | str | None, tree: pathlib.Path,
+                   config: dict[str, str] | None = None) -> dict[str, dict]:
+    """Every self-test row the build's variant options add: name -> {"why", "report_only"}
+    (report_only: the reason it is never graded, or None). Rows from the tree's
+    main/selftest_spec.hpp; `config` stands in for the build's sdkconfig.h (selftests)."""
+    config = build_config(build_dir) if config is None else config
+    enabled = [(opt, v) for opt, v in VARIANT_ROWS.items() if config.get(opt) == "1"]
+    spec = pathlib.Path(tree) / "main" / "selftest_spec.hpp"
+    if not enabled or not spec.is_file():
+        return {}
+    sys.path.insert(0, str(REPO / "scripts"))
+    import rammp_rtps  # the parser only; the file is the tree's
+    rows = rammp_rtps.parse_selftest_spec(spec.read_text(encoding="utf-8"))
+    out: dict[str, dict] = {}
+    for _opt, v in enabled:
+        for row in rows:
+            if row.need == v["need"]:
+                out[row.name] = {"why": v["why"], "report_only": v["report_only"].get(row.name)}
+    return out

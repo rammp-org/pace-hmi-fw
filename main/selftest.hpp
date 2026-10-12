@@ -15,12 +15,17 @@
  */
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
+
+#include "alloc_guard/config.hpp"
 
 /// Board-specific probes the runner calls. main.cpp fills these in; one left
 /// empty makes its check unmeasurable, which selftest_spec.hpp turns into a FAIL
@@ -60,6 +65,11 @@ struct SelfTestPlatform {
   /// The stick monitor (hazard fix C2): its stick health (StickHealth: 1 is OK), the
   /// implausible samples it has counted since boot, and the longest X/Y window age (ms).
   std::function<std::array<int32_t, 3>()> stick_monitor;
+  /// Bench builds with the allocation guard (CONFIG_HMI_BENCH_ALLOC_GUARD) only, empty in any
+  /// other: the heap allocations since start-up of the task in guard slot `slot`
+  /// (selftest_spec.hpp kAllocRows[slot]), and the detail for its row; no count, and why, when
+  /// no such task has been watched.
+  std::function<std::pair<std::optional<int32_t>, std::string>(std::size_t slot)> allocs_after_boot;
 };
 
 enum class SelfTestTrigger {

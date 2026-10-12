@@ -43,9 +43,9 @@ using selftest_spec::kRenderFrames;
 using selftest_spec::kSettleMs;
 using selftest_spec::kWindowMs;
 
-// the number of checks; the report carries it, and each check's index, as a uint8_t
-// (selftest_spec.hpp asserts it fits)
-constexpr uint8_t kCount = static_cast<uint8_t>(kChecks.size());
+// the number of checks this build reports (the bench-only rows need the allocation guard);
+// the report carries it, and each check's index, as a uint8_t (selftest_spec.hpp asserts it fits)
+constexpr uint8_t kCount = selftest_spec::reported_rows(hmi::alloc_guard::ENABLED);
 
 /// "182 KB", "yes", "0.7%": how a value reads on screen and in the log.
 std::string format_value(const Check &s, int32_t value) {
@@ -770,6 +770,16 @@ private:
     check_stack(Id::MEM_STK_LVGL, "lv_task");
     check_stack(Id::MEM_STK_ADC, "Read ADC");
     check_stack(Id::MEM_STK_RTPS, "rtps_pub");
+    // mem.alloc_*: only a build with the allocation guard has them (Need::BENCH, kCount)
+    for (std::size_t i = 0; kCount == kChecks.size() && i < selftest_spec::kAllocRows.size(); ++i) {
+      const Id id = selftest_spec::kAllocRows[i].id;
+      auto [allocations, detail] = platform.allocs_after_boot(i);
+      if (allocations) {
+        record(id, *allocations, std::move(detail));
+      } else {
+        unmeasurable(id, std::move(detail));
+      }
+    }
   }
 
   // The motion guard's observability since boot (hazard-c4-spec.md §8 B3).

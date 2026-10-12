@@ -120,6 +120,8 @@ jobs:
         ! grep -Eq '^CONFIG_HMI_BENCH_DA7280_TEST(_AS_INT)?=(y|[1-9])' sdkconfig.defaults
         ! grep -Eq '^CONFIG_HMI_DEBUG_FPS(_STRESS)?(_AS_INT)?=(y|[1-9])' sdkconfig.defaults
         ! grep -Eq '^CONFIG_HMI_BENCH_STICK_INJECT(_AS_INT)?=(y|[1-9])' sdkconfig.defaults
+        ! grep -Eq '^CONFIG_HMI_BENCH_ALLOC_GUARD(_AS_INT)?=(y|[1-9])' sdkconfig.defaults
+        ! grep -Eq '^CONFIG_HEAP_USE_HOOKS=y' sdkconfig.defaults
 
   host-l1:
     # L1 host tests (tests/run.py --coverage: `make coverage` runs the same cases as `make test`
@@ -170,12 +172,15 @@ jobs:
 
   bench-build:
     # The bench variants, one job each: bench (the remote UI debug channel on,
-    # ci/sdkconfig.bench) and bench_inject (bench plus stick injection,
-    # ci/sdkconfig.stick_inject). Each has its own build dir and sdkconfig, so an overlay is
-    # not shadowed by another config. Then guards G4 and G2 on its objects, inside the IDF
-    # image (they need its readelf/objdump/nm). bench_inject's ELF must have symbols matching
-    # each pattern build.yml keeps out of the release ELF (stick injection, the hazard bench
-    # verbs): proof that each pattern matches the real code, so its absence there means something.
+    # ci/sdkconfig.bench), bench_inject (bench plus stick injection,
+    # ci/sdkconfig.stick_inject) and alloc_guard (bench plus the on-chip allocation guard,
+    # ci/sdkconfig.allocguard, TS-DET-08). Each has its own build dir and sdkconfig, so an
+    # overlay is not shadowed by another config. Then guards G4 and G2 on its objects, inside
+    # the IDF image (they need its readelf/objdump/nm); alloc_guard is held to the bench G4
+    # baseline: the guard adds no static initialiser. bench_inject's ELF must have symbols
+    # matching each pattern build.yml keeps out of the release ELF (stick injection, the hazard
+    # bench verbs), and alloc_guard's the heap hook: proof that each pattern matches the real
+    # code, so its absence there means something.
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -184,9 +189,18 @@ jobs:
           - variant: bench
             defaults: "sdkconfig.defaults;ci/sdkconfig.bench"
             inject: "0"
+            alloc_guard: "0"
+            g4: bench
           - variant: bench_inject
             defaults: "sdkconfig.defaults;ci/sdkconfig.bench;ci/sdkconfig.stick_inject"
             inject: "1"
+            alloc_guard: "0"
+            g4: bench_inject
+          - variant: alloc_guard
+            defaults: "sdkconfig.defaults;ci/sdkconfig.bench;ci/sdkconfig.allocguard"
+            inject: "0"
+            alloc_guard: "1"
+            g4: bench
     steps:
     - name: Checkout repo
       uses: actions/checkout@v7
@@ -205,11 +219,19 @@ jobs:
           && grep -q "^#define CONFIG_HMI_REMOTE_UI 1" build_${{ matrix.variant }}/config/sdkconfig.h
           && grep -qx "#define CONFIG_HMI_BENCH_STICK_INJECT_AS_INT ${{ matrix.inject }}"
           build_${{ matrix.variant }}/config/sdkconfig.h
+          && grep -qx "#define CONFIG_HMI_BENCH_ALLOC_GUARD_AS_INT ${{ matrix.alloc_guard }}"
+          build_${{ matrix.variant }}/config/sdkconfig.h
           && python3 tools/guards/init_order.py check --build build_${{ matrix.variant }}
-          --variant ${{ matrix.variant }}
+          --variant ${{ matrix.g4 }}
           && python3 tools/guards/exports.py check --build build_${{ matrix.variant }}
           && if [ "${{ matrix.inject }}" = 1 ]; then
           riscv32-esp-elf-nm -C build_${{ matrix.variant }}/rammp-hmi-p4.elf
           > build_${{ matrix.variant }}/inject_nm.txt
           && grep -Eiq "stick_?inject" build_${{ matrix.variant }}/inject_nm.txt
           && grep -Eiq "bench_?verb" build_${{ matrix.variant }}/inject_nm.txt; fi
+          && if [ "${{ matrix.alloc_guard }}" = 1 ]; then
+          grep -q "^#define CONFIG_HEAP_USE_HOOKS 1" build_${{ matrix.variant }}/config/sdkconfig.h
+          && riscv32-esp-elf-nm -C build_${{ matrix.variant }}/rammp-hmi-p4.elf
+          > build_${{ matrix.variant }}/guard_nm.txt
+          && grep -Eq " [TW] esp_heap_trace_alloc_hook$" build_${{ matrix.variant }}/guard_nm.txt
+          && grep -q "alloc_guard" build_${{ matrix.variant }}/guard_nm.txt; fi

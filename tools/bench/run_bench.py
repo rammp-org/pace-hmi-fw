@@ -130,6 +130,10 @@ class Run:
         self.groups: list[str] = list(getattr(a, "hazard_groups", []) or [])
         self.summary["hazard_groups"] = self.groups
         self.sole_sim: tuple[bool, str] | None = None
+        # Self-test rows the image's build options add (its config/sdkconfig.h): B2's count and
+        # B3's declared new checks (common.VARIANT_ROWS).
+        self.variant: dict[str, dict] = common.variant_checks(a.build_dir, a.tree)
+        self.summary["variant_checks"] = sorted(self.variant)
 
     def record(self, step: str, verdict: str, **detail: object) -> str:
         self.summary["steps"][step] = {"verdict": verdict, **detail}
@@ -268,7 +272,9 @@ class Run:
         (self.dir / f"boot-{tag}.log").write_text(text, encoding="utf-8")
         baseline = (common.BASELINE_DIR / "boot-board2.log").read_text(encoding="utf-8",
                                                                         errors="replace")
-        report = boot_check.analyse(text, baseline, tree=self.a.tree, groups=self.groups)
+        # the variant only when the image has one: a plain image is graded exactly as before
+        extra = {"variant": self.variant} if self.variant else {}
+        report = boot_check.analyse(text, baseline, tree=self.a.tree, groups=self.groups, **extra)
         report["joined_wifi"] = state["joined"] is not None
         return report, notes
 
@@ -355,8 +361,9 @@ class Run:
     # --- B3..B5 --------------------------------------------------------------
 
     def b3(self) -> str:
+        extra = (self.variant,) if self.variant else ()  # as boot(): plain images as before
         verdict, report = compare_selftest.run_selftest(self.ip, self.dir / "selftest.json",
-                                                        self.a.tree)
+                                                        self.a.tree, *extra)
         report.pop("verdict", None)
         return self.record("B3", verdict, **report)
 
