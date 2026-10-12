@@ -187,6 +187,7 @@ flowchart LR
   c_post["post"]:::safety
   c_rammp_rtps_messages["rammp_rtps_messages (submodule)"]:::safety
   c_remote_ui["remote_ui"]
+  c_seat["seat"]:::safety
   c_settings["settings"]
   c_stick["stick"]:::safety
   c_storage["storage"]
@@ -230,6 +231,7 @@ flowchart LR
   c_hmi_ui -.-> c_ota_parse
   c_hmi_ui -.-> c_post
   c_hmi_ui -.-> c_rammp_rtps_messages
+  c_hmi_ui -.-> c_seat
   c_hmi_ui -.-> c_settings
   c_hmi_ui -.-> c_stick
   c_hmi_ui -.-> c_ui
@@ -283,6 +285,9 @@ flowchart LR
   c_remote_ui -.-> c_ui
   c_remote_ui -.-> g_ESP_IDF
   c_remote_ui -.-> g_LVGL
+  c_seat -.-> c_hmi_format
+  c_seat -.-> c_hmi_rtps_spec
+  c_seat -.-> c_stick
   c_settings -.-> c_storage
   c_settings -.-> g_espp
   c_stick -.-> c_fw_core

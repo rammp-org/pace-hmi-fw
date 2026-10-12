@@ -13,7 +13,10 @@ here as pure functions and small classes, so it can be tested on inline inputs:
   (`ongone keep`: stays ENABLED across an HMI reset; `ongone idle`: drops to IDLE);
 - XyTwistLog: the per-second XYTwist summary plus every non-zero sample;
 - EventLog: the timestamped JSONL log (rtps_mcb_sim.py --event-log PATH);
-- mib_publish_event(): the log record of every MibStatus publish (hazard-c4-spec.md B5f);
+- mib_publish_event(): the log record of every MibStatus publish (hazard-c4-spec.md B5f),
+  with the seat values it carried (hazard-seat-spec.md §6);
+- SeatModes, seat_wire(), seat_step_toward(): the seat fault modes (`seatval`, `seatdrop`,
+  `seatslow`; hazard-seat-spec.md §6) and what they do to the seat on the wire;
 - parse_mode_command(): the stdin commands above, parsed.
 
     python scripts/mcb_sim_logic.py selftest      # cases SIM-001.., Unity's output format
@@ -262,13 +265,124 @@ class XyTwistLog:
 # ---------------------------------------------------------------- MibStatus publishes
 
 
-def mib_publish_event(state: int, seq: int, targets: int) -> dict:
+def mib_publish_event(state: int, seq: int, targets: int, seat: tuple | None = None) -> dict:
     """The event-log record of one MibStatus put on the wire (C4 B5f/B5g: the bench grades
     XYTwist against the time of the first IDLE publish and of the last publish before a
     pause, so every publish is logged, not only state changes). `targets` 0 means nobody
-    subscribed yet: the sample went nowhere, and the record says so."""
-    return {"ev": "mib_publish", "state": state_name(state), "seq": seq & 0xFF,
-            "targets": targets}
+    subscribed yet: the sample went nowhere, and the record says so. `seat`, when given, is
+    the seat values the sample carried, in whole units and MIB::seatState's field order (the
+    seat bench B5s grades against them; a NaN or an infinity is logged as such)."""
+    record = {"ev": "mib_publish", "state": state_name(state), "seq": seq & 0xFF,
+              "targets": targets}
+    if seat is not None:
+        record["seat"] = [float(v) for v in seat]
+    return record
+
+
+# ---------------------------------------------------------------- the seat
+
+
+#: What the sim did with a SeatCommand that `seatdrop` dropped: as if lost on the wire.
+SEAT_DROPPED = "DROPPED"
+
+
+class SeatModes:
+    """The seat fault modes (hazard-seat-spec.md §6): per axis a value published instead of
+    the model's (`seatval`), how many SeatCommands to drop (`seatdrop`), and whether the model
+    moves one axis step per MibStatus period toward its target (`seatslow`)."""
+
+    def __init__(self, axes: int):
+        self.override: list[float | None] = [None] * axes
+        self.drop = 0
+        self.slow = False
+
+    def take_drop(self) -> bool:
+        """One SeatCommand arrived: True when it is to be dropped (counts one down)."""
+        if self.drop > 0:
+            self.drop -= 1
+            return True
+        return False
+
+    def describe(self) -> str:
+        shown = ", ".join(f"{i}={v!r}" for i, v in enumerate(self.override) if v is not None)
+        return (f"seatval {shown or 'off'}, seatdrop {self.drop}, "
+                f"seatslow {'on' if self.slow else 'off'}")
+
+    def commands(self) -> list[str]:
+        """The stdin commands that give a fresh sim these modes (nothing for the defaults)."""
+        out = [f"seatval {i} {format_seat_value(v)}" for i, v in enumerate(self.override)
+               if v is not None]
+        if self.drop:
+            out.append(f"seatdrop {self.drop}")
+        if self.slow:
+            out.append("seatslow on")
+        return out
+
+
+def format_seat_value(value: float) -> str:
+    """A `seatval` value as the command takes it back: nan, inf, -inf or the number."""
+    if math.isnan(value):
+        return "nan"
+    if math.isinf(value):
+        return "inf" if value > 0 else "-inf"
+    return repr(float(value))
+
+
+def seat_wire(model_units: tuple, override: list) -> tuple:
+    """The seat on the wire: per axis the `seatval` override when set, else the model's."""
+    return tuple(o if o is not None else v for v, o in zip(model_units, override))
+
+
+def seat_step_toward(value: int, target: int, step: int) -> int:
+    """`seatslow`: one axis step from `value` toward `target`, never past it (raw units)."""
+    if value < target:
+        return min(value + step, target)
+    if value > target:
+        return max(value - step, target)
+    return value
+
+
+def seat_apply(values: list[int], targets: list[int], modes: SeatModes, axis: int,
+               target_units: float) -> str:
+    """One SeatCommand on the seat model, in place (raw units per axis). Returns SEAT_DROPPED
+    when `seatdrop` takes it (nothing changes), "moving" when `seatslow` is on and the axis has
+    somewhere to go (only its target is set: seat_tick moves it), else "applied" (the value is
+    the clamped target at once). The axis must be one of the table's."""
+    if modes.take_drop():
+        return SEAT_DROPPED
+    a = spec.SEAT_AXES[axis]
+    raw = round(target_units * 10 ** a.decimals)
+    targets[axis] = max(a.min_value, min(a.max_value, raw))
+    if modes.slow and values[axis] != targets[axis]:
+        return "moving"
+    values[axis] = targets[axis]
+    return "applied"
+
+
+def seat_tick(values: list[int], targets: list[int]) -> list[dict]:
+    """`seatslow`, once per MibStatus period: every axis away from its target moves one step
+    toward it. One `seat_move` record per axis that moved (whole units)."""
+    out = []
+    for i, a in enumerate(spec.SEAT_AXES):
+        if values[i] == targets[i]:
+            continue
+        values[i] = seat_step_toward(values[i], targets[i], a.step)
+        out.append({"ev": "seat_move", "axis": i, "value": values[i] / 10 ** a.decimals,
+                    "target": targets[i] / 10 ** a.decimals})
+    return out
+
+
+def parse_seat_value(text: str) -> float | None:
+    """`seatval`'s value: `off` (None), nan, inf, -inf or a number. ValueError otherwise."""
+    if text == "off":
+        return None
+    if text in ("nan", "inf", "-inf", "+inf"):
+        return float(text)
+    try:
+        value = float(text)
+    except ValueError:
+        raise ValueError(f"'seatval' takes nan, inf, -inf, off or a number, got {text!r}")             from None
+    return value
 
 
 # ---------------------------------------------------------------- event log
@@ -344,9 +458,16 @@ MODE_HELP = """  ign <n>         ignore the next n DISABLEs: received and answer
                   state: stays ENABLED across an HMI reset (default)
   ongone idle     when the HMI goes away, ENABLED drops to IDLE
   mark <label>    write a mark into the --event-log (prints MARK <label>)
-  modes           show the fault modes"""
+  modes           show the fault modes
+  seatval <axis> <v>   publish v for that seat axis (0..3) instead of the model's:
+                  nan, inf, -inf or a number in whole units; 'seatval <axis> off' ends it
+  seatdrop <n>    drop the next n SeatCommands: logged, not applied, no reply
+  seatslow on|off move the seat one axis step per MibStatus period toward its target
+                  instead of at once (off: the rest of the move at once)"""
 
-MODE_COMMANDS = ("ign", "drop", "ongone", "mark", "modes")
+MODE_COMMANDS = ("ign", "drop", "ongone", "mark", "modes", "seatval", "seatdrop", "seatslow")
+#: Seat axes `seatval` accepts: RAMMP_SEAT_AXIS_TABLE's rows.
+SEAT_AXIS_COUNT = len(spec.SEAT_AXES)
 
 
 def is_mode_command(text: str) -> bool:
@@ -355,7 +476,8 @@ def is_mode_command(text: str) -> bool:
 
 
 def parse_mode_command(text: str) -> tuple[str, object]:
-    """('ign'|'drop', n) | ('ongone', policy) | ('mark', label) | ('modes', None).
+    """('ign'|'drop', n) | ('ongone', policy) | ('mark', label) | ('modes', None) |
+    ('seatval', (axis, value or None)) | ('seatdrop', n) | ('seatslow', bool).
 
     Raises ValueError with a one-line reason for a bad argument, or for text that
     is not a mode command (check is_mode_command first).
@@ -364,7 +486,15 @@ def parse_mode_command(text: str) -> tuple[str, object]:
     if not words or words[0] not in MODE_COMMANDS:
         raise ValueError(f"not a mode command: {text!r}")
     head, args = words[0], words[1:]
-    if head in ("ign", "drop"):
+    if head == "seatval":
+        if len(args) != 2 or not args[0].isdigit() or int(args[0]) >= SEAT_AXIS_COUNT:
+            raise ValueError(f"'seatval' takes an axis 0..{SEAT_AXIS_COUNT - 1} and a value")
+        return head, (int(args[0]), parse_seat_value(args[1]))
+    if head == "seatslow":
+        if len(args) != 1 or args[0] not in ("on", "off"):
+            raise ValueError("'seatslow' takes on or off")
+        return head, args[0] == "on"
+    if head in ("ign", "drop", "seatdrop"):
         if len(args) > 1:
             raise ValueError(f"'{head}' takes one count")
         if not args:
@@ -606,6 +736,81 @@ def t_mib_publish_event() -> None:
            [("mib_publish", 5.0, "ERROR", 9)])
 
 
+def t_seatval() -> None:
+    mid = tuple((a.min_value + a.max_value) / 2 / 10 ** a.decimals for a in spec.SEAT_AXES)
+    modes = SeatModes(len(spec.SEAT_AXES))
+    for word, check in (("nan", math.isnan), ("inf", lambda v: v == math.inf),
+                        ("-inf", lambda v: v == -math.inf),
+                        ("1e30", lambda v: abs(v - 1e30) / 1e30 < 1e-6),
+                        ("255.1", lambda v: abs(v - 255.1) < 1e-4)):
+        name, (axis, value) = parse_mode_command(f"seatval 2 {word}")
+        expect(f"seatval 2 {word} parses", (name, axis), ("seatval", 2))
+        modes.override[axis] = value
+        fields = spec.unpack_mib_status(spec.pack_mib_status(IDLE, seat=seat_wire(mid, modes.override)))
+        seat = fields[2:6]
+        expect(f"{word}: axis 2 carries the override", check(seat[2]), True)
+        expect(f"{word}: the other axes the model's",
+               [round(v, 3) for i, v in enumerate(seat) if i != 2],
+               [round(v, 3) for i, v in enumerate(mid) if i != 2])
+    _, (axis, value) = parse_mode_command("seatval 2 off")
+    modes.override[axis] = value
+    fields = spec.unpack_mib_status(spec.pack_mib_status(IDLE, seat=seat_wire(mid, modes.override)))
+    expect("off: the model's value again", [round(v, 3) for v in fields[2:6]],
+           [round(v, 3) for v in mid])
+    record = mib_publish_event(IDLE, 1, 1, seat_wire(mid, [None, None, math.nan, None]))
+    expect("the publish record carries the seat", math.isnan(record["seat"][2]), True)
+    for bad in ("seatval", "seatval 2", f"seatval {SEAT_AXIS_COUNT} 1", "seatval x 1",
+                "seatval 2 lots", "seatval 2 1 2", "seatslow", "seatslow maybe", "seatdrop -1"):
+        try:
+            parse_mode_command(bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"{bad!r} was accepted")
+
+
+def t_seatdrop() -> None:
+    values = [(a.min_value + a.max_value) // 2 for a in spec.SEAT_AXES]
+    targets = list(values)
+    modes = SeatModes(len(values))
+    name, n = parse_mode_command("seatdrop 2")
+    expect("seatdrop 2 parses", (name, n), ("seatdrop", 2))
+    modes.drop = n
+    start = list(values)
+    got = [seat_apply(values, targets, modes, 2, 100.0) for _ in range(2)]
+    expect("the first two dropped, the model unchanged", (got, values), ([SEAT_DROPPED] * 2, start))
+    expect("the third applied", (seat_apply(values, targets, modes, 2, 100.0), values[2]),
+           ("applied", 1000))
+    expect("the modes line names it, and a fresh sim gets it back",
+           (modes.describe(), SeatModes(4).commands()),
+           ("seatval off, seatdrop 0, seatslow off", []))
+
+
+def t_seatslow() -> None:
+    values = [(a.min_value + a.max_value) // 2 for a in spec.SEAT_AXES]
+    targets = list(values)
+    modes = SeatModes(len(values))
+    _, on = parse_mode_command("seatslow on")
+    modes.slow = on
+    el = spec.SEAT_AXES[2]
+    start = values[2]
+    goal = start + 10 * el.step
+    expect("a command only sets the target", (seat_apply(values, targets, modes, 2,
+                                                          goal / 10 ** el.decimals), values[2]),
+           ("moving", start))
+    moves = []
+    for _ in range(12):  # one MibStatus period each
+        moves.append(seat_tick(values, targets))
+    expect("one step per period for 10 periods, then nothing",
+           [len(m) for m in moves], [1] * 10 + [0, 0])
+    expect("each a seat_move one step on", [m[0]["value"] for m in moves[:10]],
+           [(start + k * el.step) / 10 ** el.decimals for k in range(1, 11)])
+    expect("stopped at the target", values[2], goal)
+    modes.override[2] = math.nan
+    modes.drop = 1
+    expect("carried to a fresh sim", modes.commands(),
+           ["seatval 2 nan", "seatdrop 1", "seatslow on"])
+
+
 CASES = [
     ("SIM-001 ENABLE gives ENABLED and DISABLE gives IDLE from IDLE or ENABLED",
      t_plain_requests),
@@ -628,6 +833,12 @@ CASES = [
     ("SIM-013 the mode commands parse and reject bad arguments", t_parse_mode_command),
     ("SIM-014 every MibStatus publish is an event-log record with its state and seq",
      t_mib_publish_event),
+    ("SIM-015 seatval puts its value on the wire for that axis only, off gives the model's back",
+     t_seatval),
+    ("SIM-016 seatdrop N drops the next N SeatCommands, model unchanged, then applies",
+     t_seatdrop),
+    ("SIM-017 seatslow moves one axis step per MibStatus period, logs seat_move, stops at the "
+     "target", t_seatslow),
 ]
 
 

@@ -17,6 +17,7 @@
 #include "control/motion_guard.hpp"
 #include "messages/joystick_message.hpp"
 #include "messages/mib_message.hpp"
+#include "seat/seat_gate.hpp"
 #include "settings.hpp"
 #include "settings_spec.hpp"
 #include "stick/monitor_cycle.hpp"
@@ -176,6 +177,23 @@ public:
   ///        UI task. app_main, before lv_task starts; @p log must outlive the firmware.
   void attach_stick_log(espp::Logger &log) noexcept { stick_log_ = &log; }
 
+  /// The seat path as the bench's STATE reports it (hazard-seat-spec.md REQ-RUI-09).
+  struct SeatTelemetry {
+    std::array<int32_t, rammp::kSeatAxisCount> values{}; ///< raw, or VALUE_UNKNOWN
+    uint32_t sent = 0;             ///< SeatCommands published (the publish returned true)
+    uint32_t refused = 0;          ///< presses refused before a publish
+    uint32_t publish_failures = 0; ///< publishes that returned false
+    bool pressed = false;          ///< a seat press has happened since boot
+    hmi::seat::SeatReason reason = hmi::seat::SeatReason::ALLOW; ///< the last press' outcome
+  };
+  /// The seat values and counters as last stored. Any task (atomics).
+  [[nodiscard]] SeatTelemetry seat_telemetry() const;
+  /// SEATFAIL <n> (REQ-RUI-09): how many seat publishes main's bench wrapper still fails.
+  /// Bench builds write and take it; a release build never reads it. Any task.
+  [[nodiscard]] constexpr std::atomic<uint32_t> &bench_seat_fails() noexcept {
+    return bench_seat_fails_;
+  }
+
   /// @brief The joystick's LVGL keypad read: moves the cursor through each screen's focus
   ///        group. It drains the latch the ADC task fills, so one flick of the stick = one
   ///        PRESSED cycle = one LV_EVENT_KEY.
@@ -232,6 +250,8 @@ private:
   void seat_apply_state(const MIB::seatState &seat);
   void seat_request(rammp::SeatAxis axis, int32_t target);
   void seat_step(size_t row, int direction);
+  void seat_store(size_t row, int32_t raw);        ///< the subject and its mirror, on a change
+  void seat_outcome(hmi::seat::SeatReason reason); ///< counts a press' outcome (REQ-RUI-09)
   void bench_accepted();
   static void style_pin_key(lv_obj_t *key);
   void store_setting(int param, int32_t value);
@@ -296,6 +316,16 @@ private:
   /// Raw value per seat axis, in the table's units, as the MCB last reported it.
   lv_subject_t seat_axis_value_[rammp::kSeatAxisCount]{};
   uint8_t seat_axis_count_ = 0; ///< actuators in the table
+  // The seat path for the bench (REQ-RUI-09): the values as stored in the subjects (release),
+  // the counters, the last press' outcome (kSeatNoPress before the first). Written where the
+  // subjects and the presses are (UI task, or the RTPS task under lvgl_mutex); read by any task.
+  static constexpr uint8_t kSeatNoPress = 0xFF;
+  std::array<std::atomic<int32_t>, rammp::kSeatAxisCount> seat_value_pub_{};
+  std::atomic<uint32_t> seat_sent_{0};
+  std::atomic<uint32_t> seat_refused_{0};
+  std::atomic<uint32_t> seat_publish_failures_{0};
+  std::atomic<uint8_t> seat_reason_{kSeatNoPress};
+  std::atomic<uint32_t> bench_seat_fails_{0}; ///< SEATFAIL's count (bench builds)
 
   SharedSubjects shared_{
       .locked = &locked_,

@@ -1,9 +1,10 @@
 #pragma once
 
 /// @file bench_verbs.hpp
-/// @brief The hazard fixes' bench verbs: STATE, PERMIT, CAL UNSAVED, POST RERUN, CRASH and
-///        STALL. Their parser, the STATE line, and the hooks the firmware fills.
-/// @details BENCH ONLY (hazard-decisions.md H1; REQ-RUI-08, REQ-RUI-06, REQ-RUI-07). The remote
+/// @brief The hazard fixes' bench verbs: STATE, PERMIT, CAL UNSAVED, POST RERUN, CRASH, STALL
+///        and SEATFAIL. Their parser, the STATE line, and the hooks the firmware fills.
+/// @details BENCH ONLY (hazard-decisions.md H1; REQ-RUI-08, REQ-RUI-06, REQ-RUI-07,
+///          REQ-RUI-09). The remote
 ///          UI (remote_ui.cpp) answers these verbs only in a CONFIG_HMI_BENCH_STICK_INJECT build;
 ///          any other build answers ERR, and a release build compiles no remote UI at all, so
 ///          a release ELF has none of this (the `bench_?verb` symbol check in build.yml).
@@ -37,6 +38,13 @@
 ///          - indicator: NONE, CHECKING, WAITING, FAILED, NOT_RUN; indicator_text (C3 2.8)
 ///          - reset_reason: esp_reset_reason_t without ESP_RST_: SW, PANIC, TASK_WDT... (C3)
 ///          - stick: the stick monitor, see StickBlock (C2 REQ-RUI-08)
+///          - seat, seat_sent, seat_refused, seat_reason, seat_publish_failures: the seat path
+///            (hazard-seat-spec.md REQ-RUI-09), see SeatBlock. Only in a firmware that wires
+///            the seat hook: these five keys are left out, not null, without it, so the line of
+///            a firmware before the seat fix keeps its exact form.
+///
+///          SEATFAIL <n> (REQ-RUI-09): the next n SeatCommand publishes return false (n 0..100;
+///          0 cancels what is left).
 
 #include <array>
 #include <cstddef>
@@ -46,6 +54,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace hmi::bench_verbs {
 
@@ -57,6 +66,7 @@ enum class Verb : std::uint8_t {
   POST_RERUN,  ///< `POST RERUN`: the POST runner restarts from NOT_RUN (C3 REQ-RUI-06)
   CRASH,       ///< `CRASH`: abort, a PANIC reset (C3 REQ-RUI-06)
   STALL,       ///< `STALL UI|ADC|CADC <ms>` (C4 REQ-RUI-07, C2 O14)
+  SEATFAIL,    ///< `SEATFAIL <n>`: the next n seat publishes fail (seat REQ-RUI-09)
 };
 
 /// @brief PERMIT POST's values: C1 §3.2's PostGate, in its order.
@@ -67,6 +77,8 @@ enum class StallTarget : std::uint8_t { UI, ADC, CADC };
 
 /// @brief The longest STALL accepted, ms. C4 asks for 3000 (a watchdog trip at 2 s); C2 for 1000.
 inline constexpr std::uint32_t kStallMaxMs = 10000;
+/// @brief The most seat publishes one SEATFAIL fails (the seat bench asks for 1).
+inline constexpr std::uint32_t kSeatFailMax = 100;
 
 /// @brief One parsed bench verb.
 struct Request {
@@ -74,6 +86,7 @@ struct Request {
   PostGateName post = PostGateName::NOT_RUN; ///< PERMIT_POST only
   StallTarget stall = StallTarget::UI;       ///< STALL only
   std::uint32_t stall_ms = 0;                ///< STALL only, 1..kStallMaxMs
+  std::uint32_t seat_fail = 0;               ///< SEATFAIL only, 0..kSeatFailMax
 };
 
 /// @brief What parse() made of a line.
@@ -113,6 +126,17 @@ struct StickBlock {
   std::int32_t joy_key = 0;             ///< the stick's key as the keypad sees it (0 = none)
 };
 
+/// @brief The seat path as STATE reports it (hazard-seat-spec.md REQ-RUI-09).
+struct SeatBlock {
+  /// Per seat axis, in RAMMP_SEAT_AXIS_TABLE's order: the raw value the HMI holds, or none
+  /// while it is unknown ("--" on screen).
+  std::vector<std::optional<std::int32_t>> axes;
+  std::uint32_t sent = 0;             ///< SeatCommands published (the publish returned true)
+  std::uint32_t refused = 0;          ///< presses the seat gate refused
+  std::string reason;                 ///< the last press' outcome: a SeatReason name, or NONE
+  std::uint32_t publish_failures = 0; ///< publishes that returned false
+};
+
 /// @brief Everything STATE reports. An empty optional is `null` on the line.
 struct State {
   std::optional<std::string> screen;
@@ -129,6 +153,7 @@ struct State {
   std::optional<std::string> indicator_text;
   std::optional<std::string> reset_reason;
   std::optional<StickBlock> stick;
+  std::optional<SeatBlock> seat; ///< left out of the line when empty (see the file comment)
 };
 
 /// @brief The firmware's side of the verbs. Each is filled by the lane that owns the value
@@ -148,11 +173,13 @@ struct Hooks {
   std::function<std::string()> indicator_text;            ///< C3: its text
   std::function<std::string()> reset_reason;              ///< C3: esp_reset_reason() at boot
   std::function<StickBlock()> stick;                      ///< C2: the monitor's atomics
+  std::function<SeatBlock()> seat;                        ///< seat REQ-RUI-09: the seat path
   // verbs; each returns false when the firmware refused the request
   std::function<bool(PostGateName)> permit_post;         ///< C1 §3.2 / C3 §2.4 (via the runner)
   std::function<bool()> cal_unsaved;                     ///< C1 §6
   std::function<bool()> post_rerun;                      ///< C3 REQ-RUI-06
   std::function<bool(StallTarget, std::uint32_t)> stall; ///< C4 REQ-RUI-07, C2 O14; posts
+  std::function<bool(std::uint32_t)> seat_fail;          ///< seat REQ-RUI-09: SEATFAIL <n>
 };
 
 namespace detail {
@@ -163,6 +190,7 @@ inline constexpr std::string_view kCalUsage = "usage: CAL UNSAVED";
 inline constexpr std::string_view kPostUsage = "usage: POST RERUN";
 inline constexpr std::string_view kCrashUsage = "usage: CRASH";
 inline constexpr std::string_view kStallUsage = "usage: STALL UI|ADC|CADC <ms> (ms 1..10000)";
+inline constexpr std::string_view kSeatFailUsage = "usage: SEATFAIL <n> (n 0..100)";
 
 /// Splits on single or repeated spaces; at most N words, the rest counted in `extra`.
 template <std::size_t N> struct Words {
@@ -207,6 +235,24 @@ template <std::size_t N> [[nodiscard]] constexpr Words<N> split(std::string_view
     value = value * 10U + static_cast<std::uint32_t>(c - '0');
   }
   if (value == 0U || value > kStallMaxMs) {
+    return std::nullopt;
+  }
+  return value;
+}
+
+/// Decimal digits only, 0..kSeatFailMax.
+[[nodiscard]] constexpr std::optional<std::uint32_t> seat_fail_count(std::string_view text) {
+  if (text.empty() || text.size() > 3) {
+    return std::nullopt;
+  }
+  std::uint32_t value = 0;
+  for (const char c : text) {
+    if (c < '0' || c > '9') {
+      return std::nullopt;
+    }
+    value = value * 10U + static_cast<std::uint32_t>(c - '0');
+  }
+  if (value > kSeatFailMax) {
     return std::nullopt;
   }
   return value;
@@ -270,6 +316,14 @@ template <std::size_t N> [[nodiscard]] constexpr Words<N> split(std::string_view
     return usage(kStallUsage);
   }
   return ok(Request{.verb = Verb::STALL, .stall = *target, .stall_ms = *ms});
+}
+
+[[nodiscard]] constexpr Parsed parse_seat_fail(const Words<3> &w) {
+  if (w.count != 2 || w.extra) {
+    return usage(kSeatFailUsage);
+  }
+  const auto n = seat_fail_count(w.word[1]);
+  return n ? ok(Request{.verb = Verb::SEATFAIL, .seat_fail = *n}) : usage(kSeatFailUsage);
 }
 
 /// A verb of exactly two words, `first second` (CAL UNSAVED, POST RERUN).
@@ -385,6 +439,31 @@ inline void put_stick(std::string &out, const std::optional<StickBlock> &stick) 
   out += '}';
 }
 
+inline void put_count(std::string &out, std::string_view key, std::uint32_t value) {
+  put_key(out, key);
+  out += std::to_string(value);
+}
+
+/// The seat keys, top level after `stick`; nothing at all when the hook is not wired.
+inline void put_seat(std::string &out, const std::optional<SeatBlock> &seat) {
+  if (!seat) {
+    return;
+  }
+  put_key(out, "seat");
+  out += '[';
+  for (std::size_t i = 0; i < seat->axes.size(); ++i) {
+    if (i != 0) {
+      out += ',';
+    }
+    out += seat->axes[i] ? std::to_string(*seat->axes[i]) : std::string("null");
+  }
+  out += ']';
+  put_count(out, "seat_sent", seat->sent);
+  put_count(out, "seat_refused", seat->refused);
+  put_opt(out, "seat_reason", std::optional<std::string>{seat->reason});
+  put_count(out, "seat_publish_failures", seat->publish_failures);
+}
+
 template <typename T, typename Fn> [[nodiscard]] std::optional<T> call(const Fn &fn) {
   if (!fn) {
     return std::nullopt;
@@ -404,7 +483,8 @@ template <typename T, typename Fn> [[nodiscard]] std::optional<T> call(const Fn 
 } // namespace detail
 
 /// @brief Parses one remote-UI line. `bench_verb` is false when the first word is none of
-///        STATE, PERMIT, CAL, POST, CRASH, STALL (the remote UI then tries its own verbs).
+///        STATE, PERMIT, CAL, POST, CRASH, STALL, SEATFAIL (the remote UI then tries its own
+///        verbs).
 ///        Verbs and their keywords are upper case, values lower case, as the specs write them.
 /// @param line One line, without its newline.
 /// @return The request, or the usage text when the verb is known and the line is not.
@@ -432,6 +512,9 @@ template <typename T, typename Fn> [[nodiscard]] std::optional<T> call(const Fn 
   if (verb == "STALL") {
     return detail::parse_stall(w);
   }
+  if (verb == "SEATFAIL") {
+    return detail::parse_seat_fail(w);
+  }
   return Parsed{};
 }
 
@@ -454,6 +537,7 @@ template <typename T, typename Fn> [[nodiscard]] std::optional<T> call(const Fn 
   detail::put_opt(out, "indicator_text", state.indicator_text);
   detail::put_opt(out, "reset_reason", state.reset_reason);
   detail::put_stick(out, state.stick);
+  detail::put_seat(out, state.seat);
   out += '}';
   return out;
 }
@@ -478,6 +562,7 @@ template <typename T, typename Fn> [[nodiscard]] std::optional<T> call(const Fn 
   s.indicator_text = detail::call<std::string>(hooks.indicator_text);
   s.reset_reason = detail::call<std::string>(hooks.reset_reason);
   s.stick = detail::call<StickBlock>(hooks.stick);
+  s.seat = detail::call<SeatBlock>(hooks.seat);
   return s;
 }
 
@@ -507,6 +592,10 @@ template <typename T, typename Fn> [[nodiscard]] std::optional<T> call(const Fn 
                                ? std::optional<bool>{hooks.stall(request.stall, request.stall_ms)}
                                : std::nullopt,
                            "STALL", "C4 REQ-RUI-07 / C2 O14");
+  case Verb::SEATFAIL:
+    return detail::verdict(hooks.seat_fail ? std::optional<bool>{hooks.seat_fail(request.seat_fail)}
+                                           : std::nullopt,
+                           "SEATFAIL", "seat REQ-RUI-09");
   case Verb::CRASH:
     return "ERR CRASH is answered by the remote UI";
   }

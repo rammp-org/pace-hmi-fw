@@ -185,6 +185,9 @@ void UiApp::init_screen_hooks() {
   // to them.
   seat_axis_count_ = static_cast<uint8_t>(rammp::kSeatAxisCount);
   seat_view_.init_values();
+  for (std::atomic<int32_t> &mirror : seat_value_pub_) { // the bench's: unknown until reported
+    mirror.store(hmi::format::VALUE_UNKNOWN, std::memory_order_release);
+  }
 
   // Hand the joystick between groups as the screen changes. Every screen ui_init builds, so
   // each route in and out is covered; the ones built on demand register it when built.

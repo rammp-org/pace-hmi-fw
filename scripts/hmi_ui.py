@@ -206,7 +206,8 @@ class Hmi:
     def state(self) -> dict:
         """STATE: the HMI's state as one dict (screen, phase, notice, banner, hold_reason,
         calibrating, menu_open, cal, post, post_check, indicator, indicator_text,
-        reset_reason, stick); a field whose hook is not in this firmware is None."""
+        reset_reason, stick; and with the seat fix seat, seat_sent, seat_refused, seat_reason,
+        seat_publish_failures); a field whose hook is not in this firmware is None or absent."""
         return parse_state(self.command("STATE"))
 
     def permit(self, what: str, value: str) -> str:
@@ -226,6 +227,11 @@ class Hmi:
     def stall(self, target: str, ms: int) -> str:
         """STALL UI|ADC|CADC <ms>: answered when the stall ends."""
         return self._bench(f"STALL {target.upper()} {int(ms)}")
+
+    def seat_fail(self, n: int) -> str:
+        """SEATFAIL <n>: the next n SeatCommand publishes return false (hazard-seat-spec.md
+        REQ-RUI-09); 0 cancels what is left."""
+        return self._bench(f"SEATFAIL {int(n)}")
 
     # --- the joystick, as a person would use it -------------------------------
 

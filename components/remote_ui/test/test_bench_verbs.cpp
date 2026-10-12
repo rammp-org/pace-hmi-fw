@@ -249,3 +249,66 @@ TEST_CASE("RUI-008 CRASH is never answered by the hooks: the remote UI replies a
   const std::string got = bv::answer(request_of("CRASH"), all_hooks(), std::nullopt);
   TEST_ASSERT_TRUE_MESSAGE(got.starts_with("ERR "), got.c_str());
 }
+
+TEST_CASE("RUI-009 SEATFAIL <n> parses for n 0..100; anything else gets its usage",
+          "[remote_ui][REQ-RUI-09]") {
+  struct Case {
+    const char *line;
+    std::uint32_t n;
+  };
+  for (const Case c : {Case{"SEATFAIL 1", 1}, Case{"SEATFAIL 0", 0}, Case{"SEATFAIL 100", 100},
+                       Case{"  SEATFAIL   3 ", 3}}) {
+    const bv::Request r = request_of(c.line);
+    TEST_ASSERT_TRUE_MESSAGE(r.verb == bv::Verb::SEATFAIL, c.line);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(c.n, r.seat_fail, c.line);
+  }
+  for (const char *line : {"SEATFAIL", "SEATFAIL 101", "SEATFAIL 1000", "SEATFAIL -1", "SEATFAIL x",
+                           "SEATFAIL 1 2", "SEATFAIL 1e1"}) {
+    expect_usage(line);
+  }
+  for (const char *line : {"SEATFAILS 1", "seatfail 1", "SEAT 1"}) {
+    TEST_ASSERT_FALSE_MESSAGE(bv::parse(line).bench_verb, line);
+  }
+}
+
+TEST_CASE("RUI-010 STATE with the seat hook adds the seat keys after stick: each axis raw or "
+          "null, the counters and the last reason",
+          "[remote_ui][REQ-RUI-09]") {
+  bv::Hooks h;
+  h.seat = [] {
+    bv::SeatBlock s;
+    s.axes = {225, std::nullopt, 1250, -50};
+    s.sent = 3;
+    s.refused = 2;
+    s.reason = "POSITION_UNKNOWN";
+    s.publish_failures = 1;
+    return s;
+  };
+  const std::string got =
+      bv::answer(request_of("STATE"), h, std::optional<std::string>{"SeatScreen"});
+  TEST_ASSERT_EQUAL_STRING(
+      "OK {\"screen\":\"SeatScreen\",\"phase\":null,\"notice\":null,\"banner\":null,"
+      "\"hold_reason\":null,\"calibrating\":null,\"menu_open\":null,\"cal\":null,\"post\":null,"
+      "\"post_check\":null,\"indicator\":null,\"indicator_text\":null,\"reset_reason\":null,"
+      "\"stick\":null,\"seat\":[225,null,1250,-50],\"seat_sent\":3,\"seat_refused\":2,"
+      "\"seat_reason\":\"POSITION_UNKNOWN\",\"seat_publish_failures\":1}",
+      got.c_str());
+}
+
+TEST_CASE("RUI-011 SEATFAIL reaches its hook with n, or says it is not wired",
+          "[remote_ui][REQ-RUI-09]") {
+  const std::string none = bv::answer(request_of("SEATFAIL 1"), bv::Hooks{}, std::nullopt);
+  TEST_ASSERT_TRUE_MESSAGE(none.starts_with("ERR SEATFAIL not wired in this firmware ("),
+                           none.c_str());
+  std::vector<std::uint32_t> seen;
+  bv::Hooks h;
+  h.seat_fail = [&seen](std::uint32_t n) {
+    seen.push_back(n);
+    return true;
+  };
+  TEST_ASSERT_EQUAL_STRING("OK", bv::answer(request_of("SEATFAIL 2"), h, {}).c_str());
+  TEST_ASSERT_EQUAL_STRING("OK", bv::answer(request_of("SEATFAIL 0"), h, {}).c_str());
+  TEST_ASSERT_EQUAL_size_t(2, seen.size());
+  TEST_ASSERT_EQUAL_UINT32(2, seen[0]);
+  TEST_ASSERT_EQUAL_UINT32(0, seen[1]);
+}

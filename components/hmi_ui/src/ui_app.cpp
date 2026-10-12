@@ -182,23 +182,60 @@ void UiApp::keypad_read(bool *up, bool *down, bool *left, bool *right, bool *ent
 void UiApp::seat_apply_state(const MIB::seatState &seat) {
   for (uint8_t i = 0; i < seat_axis_count_; i++) {
     const rammp::SeatAxisSpec &spec = rammp::kSeatAxes[i];
-    lv_subject_set_int(&seat_axis_value_[i],
-                       rammp::seat_raw(spec, rammp::seat_field(seat, spec.id)));
+    seat_store(i, rammp::seat_raw(spec, rammp::seat_field(seat, spec.id)));
   }
+}
+
+// One axis' value into its subject (LVGL notifies only a change) and the bench's mirror
+// (REQ-RUI-09).
+void UiApp::seat_store(size_t row, int32_t raw) {
+  lv_subject_set_int(&seat_axis_value_[row], raw);
+  seat_value_pub_[row].store(raw, std::memory_order_release);
+}
+
+// A press' outcome for the bench (REQ-RUI-09): sent, refused before a publish, or not sent.
+void UiApp::seat_outcome(hmi::seat::SeatReason reason) {
+  using hmi::seat::SeatReason;
+  if (reason == SeatReason::ALLOW) {
+    seat_sent_.fetch_add(1, std::memory_order_relaxed);
+  } else if (reason == SeatReason::NOT_SENT) {
+    seat_publish_failures_.fetch_add(1, std::memory_order_relaxed);
+  } else {
+    seat_refused_.fetch_add(1, std::memory_order_relaxed);
+  }
+  seat_reason_.store(static_cast<uint8_t>(reason), std::memory_order_release);
+}
+
+UiApp::SeatTelemetry UiApp::seat_telemetry() const {
+  SeatTelemetry t;
+  for (size_t i = 0; i < t.values.size(); ++i) {
+    t.values[i] = seat_value_pub_[i].load(std::memory_order_acquire);
+  }
+  constexpr auto relaxed = std::memory_order_relaxed;
+  t.sent = seat_sent_.load(relaxed);
+  t.refused = seat_refused_.load(relaxed);
+  t.publish_failures = seat_publish_failures_.load(relaxed);
+  const uint8_t reason = seat_reason_.load(std::memory_order_acquire);
+  t.pressed = reason != kSeatNoPress;
+  t.reason = t.pressed ? static_cast<hmi::seat::SeatReason>(reason) : hmi::seat::SeatReason::ALLOW;
+  return t;
 }
 
 // One seat request: an absolute target, clamped to the axis' range, so a lost or repeated
 // message cannot drift the seat. Before the start-up check passed (the POST gate not PASS) no
 // SeatCommand goes out: the press is refused, felt and named (C3 §2.10, REQ-UI-20).
 void UiApp::seat_request(rammp::SeatAxis axis, int32_t target) {
+  using hmi::seat::SeatReason;
   if (!post_passed()) {
+    seat_outcome(SeatReason::POST_NOT_PASSED);
     config_.cues->refused();
     DrivePort<DriveUi>{&drive_ui_}.show_refused(REFUSED_POST, DRIVE_REFUSED_SHOW_MS);
     return;
   }
   const rammp::SeatAxisSpec &spec = rammp::kSeatAxes[rammp::index_of(axis)];
-  (void)config_.link->publish_seat(
+  const bool sent = config_.link->publish_seat(
       axis, rammp::seat_units(spec, std::clamp(target, spec.min_value, spec.max_value)));
+  seat_outcome(sent ? SeatReason::ALLOW : SeatReason::NOT_SENT); // counted only (REQ-RUI-09)
 }
 
 // One step up or down from where the MCB last said the axis is. What a value reads before it

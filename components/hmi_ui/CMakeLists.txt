@@ -49,6 +49,7 @@ idf_component_register(SRCS "src/about_view.cpp"
                                 ota_parse
                                 post
                                 rammp_rtps_messages
+                                seat
                                 settings
                                 stick
                                 task

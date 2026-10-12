@@ -104,6 +104,7 @@
         "ota_parse",
         "post",
         "rammp_rtps_messages",
+        "seat",
         "settings",
         "stick"
       ],
@@ -259,6 +260,14 @@
         "pthread",
         "ui"
       ]
+    },
+    "seat": {
+      "reqs": [
+        "hmi_format",
+        "hmi_rtps_spec",
+        "stick"
+      ],
+      "priv_reqs": []
     },
     "settings": {
       "reqs": [],

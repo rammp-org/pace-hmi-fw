@@ -418,6 +418,7 @@ static void log_screen_init();
 static void internet_screen_init();
 static void update_screen_init();
 static void calibration_screen_init();
+static bool bench_verb_seat_publish(rammp::SeatAxis axis, float target);
 
 static constexpr hmi::ui::LinkPort kLinkPort{
     .state = [] { return static_cast<hmi::ui::LinkState>(rtps_comms_link_state()); },
@@ -432,7 +433,8 @@ static constexpr hmi::ui::LinkPort kLinkPort{
           *rate_tenths_hz = stats.rate_tenths_hz;
         },
     .publish_drive = rtps_comms_publish_drive,
-    .publish_seat = rtps_comms_publish_seat,
+    // SEATFAIL (REQ-RUI-09) in a stick-injection build; the release ELF has none of it.
+    .publish_seat = BENCH_STICK_INJECT ? bench_verb_seat_publish : rtps_comms_publish_seat,
 };
 
 // The drive session's inputs: the one DriveAdapter below (CS-SAF-08: these are its only
@@ -926,11 +928,43 @@ static void add_motion_guard_hooks(hmi::bench_verbs::Hooks &h) {
   };
 }
 
+// STATE's seat keys and SEATFAIL (hazard-seat-spec.md REQ-RUI-09): the UiApp's seat telemetry,
+// and the count bench_verb_seat_publish takes from. Remote-UI task, atomics only.
+static void add_seat_hooks(hmi::bench_verbs::Hooks &h) {
+  h.seat = [] {
+    const hmi::ui::UiApp::SeatTelemetry t = ui_app.seat_telemetry();
+    hmi::bench_verbs::SeatBlock b;
+    for (const int32_t raw : t.values) {
+      b.axes.push_back(hmi::seat::known(raw) ? std::optional<int32_t>{raw} : std::nullopt);
+    }
+    b.sent = t.sent;
+    b.refused = t.refused;
+    b.reason = t.pressed ? std::string(hmi::seat::to_string(t.reason)) : std::string("NONE");
+    b.publish_failures = t.publish_failures;
+    return b;
+  };
+  h.seat_fail = [](uint32_t n) {
+    ui_app.bench_seat_fails().store(n);
+    return true;
+  };
+}
+
+// The LinkPort's SeatCommand publish in a stick-injection build: while SEATFAIL's count is
+// above 0 a publish takes one and returns false without reaching the wire (REQ-RUI-09).
+static bool bench_verb_seat_publish(rammp::SeatAxis axis, float target) {
+  std::atomic<uint32_t> &left = ui_app.bench_seat_fails();
+  uint32_t n = left.load();
+  while (n > 0 && !left.compare_exchange_weak(n, n - 1)) {
+  }
+  return n == 0 && rtps_comms_publish_seat(axis, target);
+}
+
 static hmi::bench_verbs::Hooks bench_verb_hooks() {
   using hmi::bench_verbs::PostGateName;
   hmi::bench_verbs::Hooks h;
   add_drive_hooks(h);
   add_motion_guard_hooks(h);
+  add_seat_hooks(h);
   h.hold_reason = [] {
     return std::string(hmi::stick::to_string(ui_app.permit_hooks().hold_reason.read()));
   };

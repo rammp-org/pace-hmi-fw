@@ -23,6 +23,7 @@ the casts of its step-(a) commit.
 | REQ-RUI-06 | Bench builds only: `STATE` adds `post`, `post_check`, `indicator`, `reset_reason`; `POST RERUN` restarts the runner from NOT_RUN (facts re-gathered, gate back to PENDING); `CRASH` aborts (a PANIC reset); `PERMIT POST` is applied by the runner; `CAL UNSAVED` also makes the POST fact `saved` false. A release ELF has none of their symbols (hazard-c3-spec.md). | RUI-001, RUI-002, RUI-005..008; the release ELF symbol check |
 | REQ-RUI-07 | The bench verbs `STALL UI <ms>` and `STALL ADC <ms>` exist only with `CONFIG_HMI_BENCH_STICK_INJECT` (as REQ-RUI-08); a release ELF has none of their symbols (hazard-c4-spec.md, O6 = yes). | RUI-001, RUI-002, RUI-007; the release ELF symbol check |
 | REQ-RUI-08 | Bench builds only (`CONFIG_HMI_BENCH_STICK_INJECT`): `STATE`, `PERMIT POST` and `CAL UNSAVED` as REQ-RUI-05 said; `STATE` adds the stick state, reason, fault reason, counters and `xy_age_max_ms` (the `stick` block); `PERMIT STICK` is gone (the monitor is the only writer of stick health); `STALL CADC <ms>` (O14 = yes); a release ELF has none of these symbols (hazard-c2-spec.md §7.2). | RUI-001..008; the release ELF symbol check (`bench_?verb`, build.yml) and its match in the bench_inject ELF (l0.yml) |
+| REQ-RUI-09 | Bench builds only: `STATE` adds `seat` (per axis: raw value or null), `seat_sent`, `seat_refused`, `seat_reason` (last), `seat_publish_failures`; `SEATFAIL <n>` makes the next n seat publishes return false. A release ELF has none of their symbols (hazard-seat-spec.md §4.2). The five seat keys are left out of the line, not null, in a firmware that does not wire the seat hook. | RUI-009..011; the release ELF symbol check (`bench_?verb`: main's SEATFAIL wrapper is `bench_verb_seat_publish`) |
 
 ## Interface
 
@@ -30,13 +31,14 @@ the casts of its step-(a) commit.
 | --- | --- |
 | `remote_ui.hpp` | `RemoteUiConfig`, `remote_ui_start`, `kRemoteUiPort` |
 | `stick_inject.hpp` | `BENCH_STICK_INJECT`, the injection mailbox types and the slot main builds, `remote_ui_attach_stick_inject` |
-| `bench_verbs.hpp` | the hazard bench verbs (STATE, PERMIT, CAL UNSAVED, POST RERUN, CRASH, STALL): parser, the STATE line, `Hooks`, `remote_ui_attach_bench_verbs` |
+| `bench_verbs.hpp` | the hazard bench verbs (STATE, PERMIT, CAL UNSAVED, POST RERUN, CRASH, STALL, SEATFAIL): parser, the STATE line, `Hooks`, `remote_ui_attach_bench_verbs` |
 
 ## The hazard bench verbs (bench_verbs.hpp)
 
 hazard-decisions.md H1: `STATE`, `PERMIT POST`, `CAL UNSAVED` (C1), `POST RERUN`, `CRASH`
-(C3), `STALL UI|ADC|CADC <ms>` (C4 O6, C2 O14); C1's `PERMIT STICK` went with C2 (REQ-RUI-08:
-the stick monitor is the only writer of stick health). Answered only in a
+(C3), `STALL UI|ADC|CADC <ms>` (C4 O6, C2 O14), `SEATFAIL <n>` and the seat keys of `STATE`
+(the seat fix, REQ-RUI-09); C1's `PERMIT STICK` went with C2 (REQ-RUI-08: the stick monitor is
+the only writer of stick health). Answered only in a
 `CONFIG_HMI_BENCH_STICK_INJECT` build; any other bench build answers `ERR`, a release build has
 no remote UI. The remote UI parses the line and answers it; every value `STATE` reports and
 every change a verb asks for goes through a hook in `hmi::bench_verbs::Hooks`, which app_main

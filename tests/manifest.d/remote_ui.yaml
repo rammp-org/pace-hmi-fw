@@ -8,7 +8,7 @@
   title: remote UI bench verbs (parser, STATE line, hooks) for the hazard bench steps
   level: L1
   path: components/remote_ui/test
-  requirements: [REQ-RUI-06, REQ-RUI-07, REQ-RUI-08]
+  requirements: [REQ-RUI-06, REQ-RUI-07, REQ-RUI-08, REQ-RUI-09]
   resources: [host]
   timeout_s: 300
   expected_s: 30

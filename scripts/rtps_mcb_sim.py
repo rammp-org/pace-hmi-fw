@@ -32,6 +32,10 @@ stdin command and, where it makes sense at start-up, a flag; 'h' lists them all:
                     across an HMI reset; idle drops ENABLED to IDLE (--on-hmi-gone)
   p / r             pause / resume MibStatus: link loss as the HMI sees it (> 2 s)
   mark LABEL        a mark in the event log, for a script to find its place
+  seatval A V       publish V (nan, inf, -inf, a number) for seat axis A instead of the
+                    model's; 'seatval A off' ends it (hazard-seat-spec.md §6)
+  seatdrop N        drop the next N SeatCommands: logged, not applied, no reply
+  seatslow on|off   move the seat one axis step per MibStatus period toward its target
 --event-log PATH appends one JSON object per line: every DriveCommand and
 SeatCommand received (with what the sim did with it), every non-zero or
 button-changing XYTwist plus a per-second XYTwist summary, every MibStatus publish
@@ -84,7 +88,9 @@ import rtps_net  # noqa: E402
 #: per-request verdict, so a refusal never goes on the wire - on the HMI it shows up
 #: as an axis that simply did not move.
 SEAT_RESULT_OK = 0
-SEAT_RESULTS = {0: "OK", 1: "AT_MIN", 2: "AT_MAX", 3: "INHIBITED", 4: "UNKNOWN_AXIS"}
+SEAT_RESULT_DROPPED = 5  # `seatdrop`: as if lost on the wire
+SEAT_RESULTS = {0: "OK", 1: "AT_MIN", 2: "AT_MAX", 3: "INHIBITED", 4: "UNKNOWN_AXIS",
+                SEAT_RESULT_DROPPED: sim_logic.SEAT_DROPPED}
 
 #: Full stick deflection takes the emulated speed from 0 to max in roughly
 #: this many seconds. Deliberately unhurried so the number is readable as it
@@ -173,6 +179,13 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
         self.seat_values = [
             (a.min_value + a.max_value) // 2 for a in spec.SEAT_AXES
         ]
+        # Where each axis is going: the same as seat_values, except while `seatslow` moves an
+        # axis one step per MibStatus period (mcb_sim_logic.seat_tick).
+        self.seat_targets = list(self.seat_values)
+        # The seat fault modes: `seatval`, `seatdrop`, `seatslow` (hazard-seat-spec.md §6).
+        self.seat_modes = sim_logic.SeatModes(len(spec.SEAT_AXES))
+        self._seat_step_s = float(getattr(args, "publish_interval", 0.5) or 0.5)
+        self._last_seat_step = time.monotonic()
         # Per-axis override for the next request: None judges it normally, a
         # SEAT_RESULT_* value refuses it with that reason. This is the whole
         # point of the bench tool — the HMI's refusal paths are hard to reach
@@ -268,7 +281,8 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
                 f"ignore next {self.ignore_disable} DISABLE(s), drop next "
                 f"{self.drop_disable} DISABLE(s), on HMI gone: {self.on_hmi_gone}"
                 + (f", HMI back {self.presence.returns} time(s)" if self.presence.returns
-                   else ""))
+                   else "")
+                + f"; seat: {self.seat_modes.describe()}")
 
     def apply_mode_command(self, text: str) -> str:
         """One of mcb_sim_logic.MODE_COMMANDS; returns the line to print. ValueError
@@ -286,10 +300,27 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
             elif name == "drop":
                 self.drop_disable = value
                 reply = f"dropping the next {value} DISABLE(s)"
+            elif name == "seatval":
+                axis, override = value
+                self.seat_modes.override[axis] = override
+                shown = "off" if override is None else sim_logic.format_seat_value(override)
+                reply = f"seat axis {axis} publishes {shown}"
+                value = [axis, shown]
+            elif name == "seatdrop":
+                self.seat_modes.drop = value
+                reply = f"dropping the next {value} SeatCommand(s)"
+            elif name == "seatslow":
+                self.seat_modes.slow = value
+                if not value:  # the rest of any move at once
+                    self.seat_values[:] = self.seat_targets
+                reply = f"seat slow: {'on' if value else 'off'}"
             else:
                 self.on_hmi_gone = value
                 reply = f"on HMI gone: {value}"
         self.events.write("mode", **{name: value})
+        if name in ("seatval", "seatslow"):
+            self.seat_dirty = True
+            self.publish_now()  # the next MibStatus carries it
         return reply
 
     def _send_on(self, writer: rtps_host.WriterConfig, cdr_payload: bytes) -> int:
@@ -393,11 +424,17 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
             self.seat_result = override
             return self.seat_result
 
-        # The wire carries whole units; the model keeps the table's raw integers.
+        # The wire carries whole units; the model keeps the table's raw integers. `seatdrop`
+        # loses it here; `seatslow` only sets the target (mcb_sim_logic.seat_apply).
+        target_units = target
         target = round(target * 10 ** axis.decimals)
         current = self.seat_values[axis_id]
         clamped = max(axis.min_value, min(axis.max_value, target))
-        self.seat_values[axis_id] = clamped
+        with self._modes_lock:
+            if sim_logic.seat_apply(self.seat_values, self.seat_targets, self.seat_modes,
+                                    axis_id, target_units) == sim_logic.SEAT_DROPPED:
+                self.seat_result = SEAT_RESULT_DROPPED
+                return self.seat_result
         if clamped > target or (clamped == current == axis.min_value):
             # Asked for less than the axis can do, or asked again while already
             # at the stop: either way the answer is "that is as low as it goes".
@@ -442,8 +479,9 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
                 self.events.write("seat_command", axis=axis_id, axis_name=name, target=target,
                                   result=SEAT_RESULTS.get(result, str(result)))
                 # Answer immediately. The periodic republish below is the
-                # convergence path, not the reply path.
-                self.publish_now()
+                # convergence path, not the reply path. A dropped one never arrived.
+                if result != SEAT_RESULT_DROPPED:
+                    self.publish_now()
             elif topic == spec.TOPIC_JOYSTICK_DRIVE_COMMAND:
                 command = spec.unpack_drive_command(payload)
                 if command is None:
@@ -535,8 +573,22 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
         The table's rows are that struct's fields in that order, so zip is the whole
         mapping - one row added to the table is one field more here.
         """
-        return tuple(value / 10 ** axis.decimals
-                     for value, axis in zip(self.seat_values, spec.SEAT_AXES))
+        model = tuple(value / 10 ** axis.decimals
+                      for value, axis in zip(self.seat_values, spec.SEAT_AXES))
+        return sim_logic.seat_wire(model, self.seat_modes.override)  # `seatval` overrides
+
+    def _step_seat(self) -> None:
+        """`seatslow`: one axis step toward the target per MibStatus period, paused or not
+        (the MCB finishes a move on its own: hazard-seat-spec.md residual 2)."""
+        now = time.monotonic()
+        if now - self._last_seat_step < 0.9 * self._seat_step_s:
+            return
+        self._last_seat_step = now
+        with self._modes_lock:
+            moves = (sim_logic.seat_tick(self.seat_values, self.seat_targets)
+                     if self.seat_modes.slow else [])
+        for record in moves:
+            self.events.record(record)
 
     def publish_diagnostics(self) -> None:
         """Fake readings for every diagnostics item: slow sine waves, offset
@@ -558,8 +610,10 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
 
     def publish_now(self) -> None:
         """Called by the harness run loop every --period seconds."""
-        # Before the pause check: the HMI can go away while MibStatus is paused too.
+        # Before the pause check: the HMI can go away while MibStatus is paused too, and a
+        # slow seat keeps moving.
         self._check_hmi_gone()
+        self._step_seat()
         if self.paused:
             return
         self.publish_diagnostics()
@@ -571,9 +625,10 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
         self._last_speed_step = now
         writer = self.local_writers[0]
         sent_state = self.system_state
+        sent_seat = self.seat_units()
         payload = self.build_data_message(
             writer,
-            spec.pack_mib_status(sent_state, self.profile, self.seat_units(),
+            spec.pack_mib_status(sent_state, self.profile, sent_seat,
                                  self.seq, self.speed_mps, self.status_text,
                                  self.error_message, self.error_footer,
                                  clock=datetime.datetime.now()),  # sets the HMI's clock
@@ -589,7 +644,8 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
         # Every publish, with its time (hazard-c4-spec.md B5f/B5g grade XYTwist against the
         # first IDLE publish and the last one before a pause). Before the change record, so a
         # change's publish is already in the log when its mib_state follows.
-        self.events.record(sim_logic.mib_publish_event(sent_state, self.seq - 1, len(targets)))
+        self.events.record(sim_logic.mib_publish_event(sent_state, self.seq - 1, len(targets),
+                                                       sent_seat))
         previous = sent_state
         if targets:
             with self._modes_lock:
