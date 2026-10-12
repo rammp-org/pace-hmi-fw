@@ -26,7 +26,7 @@ idf_component_register(SRC_DIRS "."
                          m5stack-tab5
                          ui
                          esp_driver_ppa
-                         rtps
+                         espp_rtps
                          cdr
                          w5500
                          esp_eth

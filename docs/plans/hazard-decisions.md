@@ -62,6 +62,50 @@ Nothing here changes a §9 decision.
   open". Owner: **keep the table**; B5''-8 expects Locked with the menu closed. In EXIT_REFUSED a second
   burger-key press still asks again with the menu (row 28).
 
+## Answers (owner, 2026-10-11)
+
+On the Tuesday candidate (`dev_ai_hazard_candidate`, results:
+[hazard-candidate-results.md](hazard-candidate-results.md)). IDs are the coordinator's T-list,
+plus this sheet's E5.
+
+- **T11, approved:** espp RTPS's `rtps_worker_*` run at priority 20, raised at RTPS start
+  ([hazard-c4-rtps-priority.md](hazard-c4-rtps-priority.md), option 1).
+- **E5, approved:** the `ContinuousAdc Task` runs at priority 20 (`task_priority` in main's
+  StickIsland config; [hazard-c2-cadc-priority.md](hazard-c2-cadc-priority.md), option 1). This
+  replaces the 2026-10-08 answer "detect only".
+- **B5i:** the 240 ms is measured at the board's publish, not end to end; the network's share is
+  reported, not graded.
+- **T1:** the boot DISABLE is sent once the DriveCommand writer is matched (B5''-16's race; lane L1
+  implements it).
+  - Done (2026-10-11) with no table change (the fingerprint is unchanged): espp rtps is vendored
+    as `components/espp_rtps` (the D6 precedent) with one accessor, `matched_readers(topic)`; the
+    drive adapter holds row 50's DISABLE until `rtps_comms_drive_writer_matched()`, publishes it
+    once on the first tick that finds the match (a refused publish, which hands nothing to RTPS,
+    is tried on the next tick), and drops it when the user's own ask (the unlock hold's ENABLE)
+    leaves LOCKED. Still one message, no re-send (REQ-DAD-12; DAD-014..016, GLD-131..133).
+    Board evidence: in boot 2 of 5 the sim matched the HMI's DriveCommand writer at 8.06 s
+    (4.41 s otherwise), after the boot DISABLE had gone.
+  - **Residual for the owner:** under M1, Drive can be entered before the deferred DISABLE goes
+    out. With the MCB ENABLED at boot and the writer not matched yet, the first CONNECTED tick
+    marks the boot stop, the next tick enters Drive (rows 1-2), and the DISABLE leads the first
+    tick after the match (GLD-133). The stick output stays 0 until it is centred (C1 G1) and
+    POST has passed; before T1 the same DISABLE was lost.
+- **T15:** C2-16 runs without the stick injection (the real stick at rest), so the starved X/Y
+  producer is what the monitor judges (REQ-STK-26 unchanged).
+- **T12:** espp's `RtpsParticipant::publish` allocating per XYTwist on Read ADC is accepted for
+  now, documented as a residual, to fix later.
+- **T13:** C-ABI hook state is allowed (the allocation-hook lane).
+- **T8 / T18:** the new texts are approved: the calibration reject "Calibration failed: an end
+  reads too high." and the Joystick screen's stick-fault words (C2), and the others listed there.
+- **T4:** when click.wav fails to load, the UI keeps running without the click (an error in the
+  log).
+- **T6 / T16:** B5i/B5j grade the watchdog phase as proposed (phase 1: the report naming the task,
+  no reset); C2-14's `xy_age_max_ms` band is 250 ms until the measurement M8.
+- **T7:** golden rows 1876 and 1878 (the key re-engaging with a flick after an invalid row) and
+  GLD-126's order (the stop's DISABLE, then the relock's) are accepted.
+- **C2-8:** "exactly one DISABLE while the MCB reads ENABLED, at most one more at the relock" is
+  accepted as C2-8's pass rule.
+
 ## 2. How to answer
 
 Answer by ID: "rec" takes the recommendation. Rec = the spec agents' recommendation. "Blocks"

@@ -111,6 +111,13 @@ class Obj:
     source: Path    # the source file
 
 
+# Vendored upstream code compiled from the project tree (CS-LAY-05): its objects are not
+# first-party, as they were under managed_components/ before (owner decision T1 vendored espp
+# rtps; components/espp_rtps/README.md). Our own sources in such a folder stay first-party.
+VENDORED_UPSTREAM_DIRS = ("components/espp_rtps/",)
+VENDORED_OURS = ("components/espp_rtps/pace/",)
+
+
 @dataclass
 class Build:
     build_dir: Path
@@ -132,6 +139,10 @@ class Build:
         if not build.elf.is_file():
             build.elf = bd / Path(str(desc["app_elf"])).name
         managed = project + "managed_components/"
+        # vendored upstream sources in the project tree, kept out as managed_components are
+        # (only upstream files are exempt: our own sources there stay in, VENDORED_OURS)
+        vendored = tuple(project + v for v in VENDORED_UPSTREAM_DIRS)
+        ours = tuple(project + v for v in VENDORED_OURS)
         # a build folder inside the project (CI: build/, build_bench/) holds generated
         # sources (embedded files, the cert bundle, IPA config): not first-party code
         generated = norm(desc.get("build_dir") or bd).rstrip("/") + "/"
@@ -139,6 +150,8 @@ class Build:
         for e in json.loads(cc_file.read_text(encoding="utf-8")):
             src = norm(e["file"])
             if not src.startswith(project) or src.startswith((managed, generated)):
+                continue
+            if src.startswith(vendored) and not src.startswith(ours):
                 continue
             rel = e.get("output") or _output_of(e.get("command", ""))
             if not rel:

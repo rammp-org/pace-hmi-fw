@@ -629,6 +629,22 @@ def t_b5i_b5j_phase1() -> None:
           "300: zero from then to the stall's end", p)
     fails("B5i phase 1 motion in the 3 s stall", c4.grade_b5i, i(TB(), moving=3112.0).build(),
           "3000: XYTwist 0 from stall start + 240 ms", p)
+    # owner B5i (2026-10-11): graded on the board's publish time, the network reported only
+    expect("board time: arrival - mark - 2 x one-way",
+           round(c4.board_after(3100.30, 3100.0, 0.05), 3), 0.2)
+
+    def late(tb: TB) -> TB:
+        tb.mark("stall-300", 3100.0).mark("forward", 3101.0)
+        tb.stream(3099.0, 3100.30, 1.0).stream(3100.30, 3101.2).stream(3101.2, 3102.0, 1.0)
+        tb.mark("stall-3000", 3110.0).stream(3109.0, 3110.2, 1.0).stream(3110.2, 3113.2)
+        return tb.stream(3113.2, 3114.5, 1.0)
+    passes("B5i 300 at the sim +300 ms, slow network: on time on the board", c4.grade_b5i,
+           late(TB()).build(), {**p, "one_way_s": 0.05})
+    fails("B5i 300 at the sim +300 ms, fast network: late on the board", c4.grade_b5i,
+          late(TB()).build(), "300: XYTwist 0 published by stall start + 240 ms (board time)", p)
+    st = graded(c4.grade_b5i, late(TB()).build(), {**p, "one_way_s": 0.05})
+    expect("B5i records the network's share, not graded", st.records.get("b5i_300_network_s"),
+           0.1)
     fails("B5i phase 1 reset", c4.grade_b5i, i(TB()).build(), "no reset",
           {**p, "reset_reason": "TASK_WDT"})
     fails("B5i phase 1 report", c4.grade_b5i, i(TB()).build(), "reports lv_task",
@@ -893,7 +909,9 @@ def t_c2_13_14() -> None:
                 .polls(ok_at, 5404.0, stick=stick(xy_age_max_ms=age)))
     passes("C2-14", c2.grade_c2_14, d(TB()).build())
     fails("C2-14 slow", c2.grade_c2_14, d(TB(), ok_at=5402.0).build(), "within 1.5 s")
-    fails("C2-14 age", c2.grade_c2_14, d(TB(), age=240).build(), "xy_age_max_ms")
+    # owner T16 (2026-10-11): the band is 250 ms until M8
+    passes("C2-14 age 250", c2.grade_c2_14, d(TB(), age=250).build())
+    fails("C2-14 age", c2.grade_c2_14, d(TB(), age=251).build(), "xy_age_max_ms <= 250")
 
 
 def t_c2_cleanup_and_setup() -> None:
@@ -1051,12 +1069,21 @@ def t_c2_15_16() -> None:
           {"selftest": {**rows, "time.adc_max": {"value": 41000, "unit": "us"}}})
     fails("C2-15 no self test", c2.grade_c2_15, hg.Trace(), "the self test ran", {})
 
-    def s(tb: TB, zero: float = 5500.3) -> TB:
-        return (tb.mark("change", 5500.0).stream(5499.0, zero, 1.0).stream(zero, 5501.5)
-                .polls(5499.0, 5500.6, stick=stick())
-                .polls(5500.6, 5501.5, stick=stick("FAULT", fault_reason="STALE")))
+    # owner T15 (2026-10-11): no injection, the real stick rests at 0 through the stall
+    def s(tb: TB, moved: float | None = None, fault: str = "FAULT") -> TB:
+        tb = tb.mark("change", 5500.0)
+        tb = (tb.stream(5499.0, 5501.5) if moved is None else
+              tb.stream(5499.0, moved).stream(moved, moved + 0.2, 0.5).stream(moved + 0.2, 5501.5))
+        return (tb.polls(5499.0, 5500.6, stick=stick())
+                .polls(5500.6, 5501.5, stick=stick(fault, fault_reason="STALE")))
     passes("C2-16", c2.grade_c2_16, s(TB()).build(), {"one_way_s": 0.01})
-    fails("C2-16 slow", c2.grade_c2_16, s(TB(), 5500.5).build(), "by 340 ms", {"one_way_s": 0.01})
+    fails("C2-16 output", c2.grade_c2_16, s(TB(), moved=5500.8).build(),
+          "no non-zero XYTwist from the stall on", {"one_way_s": 0.01})
+    fails("C2-16 no fault", c2.grade_c2_16, s(TB(), fault="SUSPECT").build(), "FAULT",
+          {"one_way_s": 0.01})
+    expect("C2-16 pauses the injection",
+           "rig.inj.pause()" in pathlib.Path(c2.__file__).read_text(encoding="utf-8")
+           .split("def s_c2_16", 1)[1].split(chr(10) + "def ", 1)[0], True)
 
 
 # ---------------------------------------------------------------- plan, run_bench, boot

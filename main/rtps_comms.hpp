@@ -93,6 +93,9 @@ void rtps_comms_on_selftest_pong(std::function<void(uint16_t seq, int peer_rx)> 
 bool rtps_comms_publish_adc(float x, float y, float twist, rammp::Buttons buttons);
 /// Ask the MIB to enable or disable driving, with the profile to drive with.
 bool rtps_comms_publish_drive(rammp::DriveRequest request, MIB::DriveProfile profile);
+/// Whether the DriveCommand writer has a matched remote reader now (owner decision T1: the boot
+/// DISABLE waits for one). False until the endpoints exist. Any task.
+bool rtps_comms_drive_writer_matched();
 /// Ask the MIB to put one seat axis at `target` (absolute, in the axis' whole units).
 bool rtps_comms_publish_seat(rammp::SeatAxis axis, float target);
 bool rtps_comms_publish_selftest_ping(uint16_t seq);

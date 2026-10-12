@@ -389,6 +389,11 @@ inline hmi::stick::PostGate post_gate() {
   golden::raw(std::format("post_gate -> {}", hmi::stick::to_string(g)));
   return g;
 }
+inline bool drive_writer_matched() {
+  golden::raw(
+      std::format("rtps_comms_drive_writer_matched -> {}", int{golden::world().drive_matched}));
+  return golden::world().drive_matched;
+}
 inline bool stick_fault() {
   golden::raw(std::format("stick_fault -> {}", int{golden::world().stick_fault}));
   return golden::world().stick_fault;
@@ -465,6 +470,7 @@ struct MainUnitUi {
   hmi::stick::HoldReason hold_reason() const { return shim::hold_reason(); }
   hmi::stick::PostGate post_gate() const { return shim::post_gate(); }
   bool stick_fault() const { return shim::stick_fault(); }
+  bool drive_writer_matched() const { return shim::drive_writer_matched(); }
   void show_drive_notice(hmi::drive_adapter::DriveNotice notice) const {
     shim::show_drive_notice(notice);
   }

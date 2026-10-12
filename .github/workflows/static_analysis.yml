@@ -29,7 +29,16 @@ jobs:
         # components/ui is SquareLine Studio output: it is regenerated wholesale on
         # every export, so findings there cannot be fixed durably. Excluding it
         # keeps the report pointed at hand-written code.
-        exclude_dir: components/ui
+        # components/espp_rtps: the vendored espp rtps upstream files (owner decision T1,
+        # components/espp_rtps/README.md); our files there are scanned. The action prefixes
+        # only the first entry with the workspace, so the others are absolute (the
+        # container's /github/workspace).
+        exclude_dir: >-
+          components/ui
+          /github/workspace/components/espp_rtps/include/rtps/
+          /github/workspace/components/espp_rtps/include/rtps_
+          /github/workspace/components/espp_rtps/src/
+          /github/workspace/components/espp_rtps/upstream/
 
         # (Optional) cppcheck args. --std=c++20 per the refactor plan (4.2). CS-FMT-02
         # asks for the newest the action's cppcheck supports (at least c++20): raise it

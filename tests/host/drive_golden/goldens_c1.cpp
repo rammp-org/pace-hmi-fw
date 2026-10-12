@@ -410,6 +410,44 @@ std::vector<Golden> c3_goldens() {
                     .check(mib(Mib::ENABLED), kNothing)
                     .check(tick(), with(kEntry, {"P(D)", "B:STICK_FAULT", "N:STOPPING"}))
                     .done());
+
+  // --- Owner decision T1 (hazard-decisions.md): the boot DISABLE waits for the DriveCommand
+  // writer to have a matched reader; one message, dropped by the user's own ask --------------
+  out.push_back(
+      Builder("GLD-131 boot, the DriveCommand writer not matched yet: the boot "
+              "DISABLE is held, then sent once on the first tick after the match")
+          .boot()
+          .run({drive_matched(false), screen(ScreenId::LOCKED), link(true), mib(Mib::IDLE)})
+          .tick_at(0, kNothing)
+          .tick_at(250, kNothing)
+          .at_check(400, drive_matched(true), kNothing)
+          .tick_at(500, {"P(D)"})
+          .tick_at(750, kNothing)
+          .done());
+
+  out.push_back(
+      Builder("GLD-132 the boot DISABLE held, then the user's own ask: it is dropped, "
+              "not sent after the match")
+          .boot()
+          .run({drive_matched(false), screen(ScreenId::LOCKED), link(true), mib(Mib::IDLE)})
+          .tick_at(0, kNothing)
+          .at_check(100, unlock_hold(), {"ring_wait", "P(E)"})
+          .at_check(200, drive_matched(true), kNothing)
+          .tick_at(250, kNothing)
+          .done());
+
+  out.push_back(
+      Builder("GLD-133 the boot DISABLE held, the MCB ENABLED: Drive is entered (M1) "
+              "before the DISABLE goes (the residual), which leads the tick after the "
+              "match")
+          .boot()
+          .run({drive_matched(false), screen(ScreenId::LOCKED), link(true), mib(Mib::ENABLED)})
+          .tick_at(0, kNothing)
+          .tick_at(250, kEntry)
+          .at_check(400, drive_matched(true), kNothing)
+          .tick_at(500, {"P(D)"})
+          .tick_at(750, kNothing)
+          .done());
   return out;
 }
 

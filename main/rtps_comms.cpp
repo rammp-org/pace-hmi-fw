@@ -146,10 +146,15 @@ template <class T> bool subscribe(const rammp::Topic<T> &topic, void (*on_msg)(c
   return sub.is_valid();
 }
 
+// `f()` under endpoints_mutex, so no publisher or the participant is dropped under it.
+template <class F> bool under_endpoints(F &&f) {
+  std::lock_guard<std::mutex> lock(endpoints_mutex);
+  return f();
+}
+
 // Quiet until the endpoints exist and a peer has matched: no one to send to yet.
 template <class T> bool publish(const Publisher<T> &pub, const T &msg) {
-  std::lock_guard<std::mutex> lock(endpoints_mutex);
-  return endpoints_ready && peer_matched && pub->publish(msg);
+  return under_endpoints([&] { return endpoints_ready && peer_matched && pub->publish(msg); });
 }
 
 std::string ip_string(uint32_t addr) {
@@ -696,6 +701,15 @@ bool rtps_comms_publish_adc(float x, float y, float twist, rammp::Buttons button
 
 bool rtps_comms_publish_drive(rammp::DriveRequest request, MIB::DriveProfile profile) {
   return publish(drive_pub, rammp::DriveCommand{request, profile});
+}
+
+// Under the endpoints lock: the writers are added under it and endpoints_ready drops under it
+// before the participant goes, so matched_readers never races add_writer or stop.
+bool rtps_comms_drive_writer_matched() {
+  return under_endpoints([] {
+    return endpoints_ready && participant != nullptr &&
+           participant->matched_readers(rammp::kJoystickDriveCommand.name) > 0;
+  });
 }
 
 bool rtps_comms_publish_seat(rammp::SeatAxis axis, float target) {

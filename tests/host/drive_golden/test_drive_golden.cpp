@@ -228,3 +228,21 @@ TEST_CASE("GLD-130 the stick in FAULT, the MCB enables on its own: entry, then t
           "[drive_golden][REQ-DRV-43]") {
   expect_golden("GLD-130");
 }
+
+// ---- Owner decision T1 (docs/plans/hazard-decisions.md): the boot DISABLE and the match -------
+
+TEST_CASE("GLD-131 the boot DISABLE waits for the DriveCommand writer's match, then goes once",
+          "[drive_golden][REQ-DAD-12]") {
+  expect_golden("GLD-131");
+}
+
+TEST_CASE("GLD-132 the held boot DISABLE is dropped by the user's own ask",
+          "[drive_golden][REQ-DAD-12]") {
+  expect_golden("GLD-132");
+}
+
+TEST_CASE("GLD-133 the held boot DISABLE and the MCB ENABLED: entry first (the residual), then "
+          "the DISABLE",
+          "[drive_golden][REQ-DAD-12]") {
+  expect_golden("GLD-133");
+}

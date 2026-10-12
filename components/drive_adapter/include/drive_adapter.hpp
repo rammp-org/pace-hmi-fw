@@ -18,6 +18,7 @@
 /// with lvgl_mutex held, from an LVGL timer, event or animation callback. Not thread-safe; one
 /// owner. Allocates nothing after construction (CS-SAF-04).
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <concepts>
@@ -63,6 +64,7 @@ template <class View>
 concept DrivePort = requires(View &view, bool flag, DriveBanner banner, DriveNotice notice) {
   { view.sample() } -> std::same_as<DriveSample>;
   { view.now_us() } -> std::same_as<std::int64_t>;
+  { view.drive_writer_matched() } -> std::same_as<bool>;
   { view.publish(flag) } -> std::same_as<bool>;
   view.ring_wait();
   view.ring_rest();
@@ -148,6 +150,8 @@ public:
       return;
     }
     const std::int64_t first = view_.now_us();
+    now_ = first;
+    boot_disable_due(); // T1: before the sub-steps, so the DISABLE leads any entry this tick
     (void)apply(TICK_SEQUENCE[0], env(first), first);
     const std::int64_t now = view_.now_us();
     const hmi::drive_session::Env e = env(now);
@@ -158,6 +162,10 @@ public:
     publish_state();
     busy_ = false;
   }
+
+  /// @brief Whether row 50's boot DISABLE is held back, waiting for the DriveCommand writer to
+  ///        have a matched reader (owner decision T1).
+  [[nodiscard]] bool boot_disable_pending() const { return boot_disable_pending_; }
 
   /// @brief The unlock hold completed (rows 18-20).
   void unlock_hold_done() { (void)input(hmi::drive_session::Input::UNLOCK_HOLD_DONE); }
@@ -263,9 +271,12 @@ private:
                     static_cast<int>(in));
     }
     now_ = now;
+    // Row 50 (C3): the boot DISABLE is the SEND_DISABLE of the row that marks the boot stop.
+    boot_stop_row_ = std::ranges::find(actions, Action::MARK_BOOT_STOP) != actions.end();
     for (const hmi::drive_session::Action action : actions) {
       perform(action);
     }
+    boot_stop_row_ = false;
     return actions[0] != Action::NONE;
   }
 
@@ -295,13 +306,13 @@ private:
   // The DriveCommand, checked (H6): a refused publish is counted and logged at most once a
   // second; the re-send schedule does not change (the next re-send is the retry). Every
   // DISABLE published is the last DISABLE the re-send counts from.
-  void publish() {
+  bool publish() {
     const bool enable = request_enable_.load();
     if (!enable) {
       last_disable_us_ = now_;
     }
     if (view_.publish(enable)) {
-      return;
+      return true;
     }
     ++publish_failures_;
     if (last_fail_log_us_ == 0 || now_ - last_fail_log_us_ >= kPublishFailLogUs) {
@@ -309,24 +320,48 @@ private:
       logger_.warn("DriveCommand {} not published ({} failed since start)",
                    enable ? "ENABLE" : "DISABLE", publish_failures_);
     }
+    return false;
   }
   void ask(bool enable) {
     request_enable_.store(enable);
-    publish();
+    (void)publish();
+  }
+
+  // Owner decision T1: the boot DISABLE (row 50) goes once the DriveCommand writer has a matched
+  // reader: published now if it has one, else held and published by the first tick that finds
+  // one (boot_disable_due). One message: no re-send once handed to RTPS; a refused publish is
+  // tried again on the next tick. The user's own ask (SEND_ENABLE, row 18) drops it.
+  void boot_disable() {
+    request_enable_.store(false);
+    boot_disable_pending_ = true;
+    boot_disable_due();
+  }
+  void boot_disable_due() {
+    if (!boot_disable_pending_ || !view_.drive_writer_matched()) {
+      return;
+    }
+    if (publish()) {
+      boot_disable_pending_ = false;
+    }
   }
 
   // The DriveCommand: ask, re-ask, or re-publish the request as it stands.
   bool perform_request(hmi::drive_session::Action action) {
     switch (action) {
     case Action::SEND_ENABLE:
+      boot_disable_pending_ = false; // the user's own ask: the boot DISABLE is dropped (T1)
       ask_at_us_ = view_.now_us();
       ask(true);
       return true;
     case Action::SEND_DISABLE:
-      ask(false);
+      if (boot_stop_row_) {
+        boot_disable();
+      } else {
+        ask(false);
+      }
       return true;
     case Action::PUBLISH_DRIVE:
-      publish();
+      (void)publish();
       return true;
     default:
       return false;
@@ -522,6 +557,10 @@ private:
   std::uint32_t publish_failures_ = 0;
   std::uint32_t stop_faults_ = 0;
   std::int64_t last_fail_log_us_ = 0;
+  // Owner decision T1: row 50's DISABLE held until the DriveCommand writer has a matched reader;
+  // the actions being performed are row 50's.
+  bool boot_disable_pending_ = false;
+  bool boot_stop_row_ = false;
   // The clock of the decision whose actions are being performed.
   std::int64_t now_ = 0;
   // The stick's hold reason from the latest sample, and the notice last shown.

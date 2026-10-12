@@ -61,6 +61,9 @@ struct World {
   std::uint8_t post_gate = 2;
   // C2b: stick health FAULT (C2's monitor latched a fault); not unless a scenario says so.
   bool stick_fault = false;
+  // T1: the DriveCommand writer has a matched reader (rtps_comms_drive_writer_matched); yes
+  // unless a scenario says otherwise.
+  bool drive_matched = true;
   // The next DriveCommand publish blocks this long (the clock moves by it), then 0 again.
   std::int64_t publish_delay_us = 0;
   std::uint8_t hold = 0;
