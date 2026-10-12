@@ -89,6 +89,8 @@ public:
 
   /// The Settings page of the actuator rows, after the settings_spec.hpp pages.
   static constexpr int32_t ACTUATORS_PAGE = SETTINGS_PAGE_COUNT;
+  /// A failed SeatCommand publish is logged at most this often (hazard-seat-spec.md §2.5).
+  static constexpr int64_t kSeatPublishFailLogMs = 1000;
   /// How long the backlight level must stay unchanged before it is saved.
   static constexpr uint32_t BRIGHTNESS_SAVE_DELAY_MS = 1000;
   /// The bench gate's PIN: a "not by accident" barrier in front of a bench screen, not a
@@ -177,6 +179,10 @@ public:
   ///        UI task. app_main, before lv_task starts; @p log must outlive the firmware.
   void attach_stick_log(espp::Logger &log) noexcept { stick_log_ = &log; }
 
+  /// @brief The seat path's log (REQ-UI-29: a failed publish, at most once a second). app_main,
+  ///        before lv_task starts; @p log must outlive the firmware.
+  void attach_seat_log(espp::Logger &log) noexcept { seat_log_ = &log; }
+
   /// The seat path as the bench's STATE reports it (hazard-seat-spec.md REQ-RUI-09).
   struct SeatTelemetry {
     std::array<int32_t, rammp::kSeatAxisCount> values{}; ///< raw, or VALUE_UNKNOWN
@@ -249,8 +255,15 @@ private:
   // Seat, bench gate, Settings, Skunk Works, Diagnostics.
   void seat_apply_state(const MIB::seatState &seat);
   void seat_link_polled(LinkState state);
-  void seat_request(rammp::SeatAxis axis, int32_t target);
+  void seat_request(rammp::SeatAxis axis, hmi::seat::SeatAsk ask);
+  void seat_preset(rammp::SeatAxis axis, int32_t target);
   void seat_step(size_t row, int direction);
+  hmi::seat::SeatInputs seat_inputs(size_t row);
+  void seat_refuse(hmi::seat::SeatReason reason, size_t row);
+  void seat_banner(int32_t which);
+  void seat_log_not_sent(size_t row);
+  [[nodiscard]] bool seat_origin() const { return seat_origin_; }
+  bool seat_unknown_known();
   void seat_store(size_t row, int32_t raw);        ///< the subject and its mirror, on a change
   void seat_outcome(hmi::seat::SeatReason reason); ///< counts a press' outcome (REQ-RUI-09)
   void bench_accepted();
@@ -327,6 +340,14 @@ private:
   std::atomic<uint32_t> seat_publish_failures_{0};
   std::atomic<uint8_t> seat_reason_{kSeatNoPress};
   std::atomic<uint32_t> bench_seat_fails_{0}; ///< SEATFAIL's count (bench builds)
+  // The seat gate's banners (UI task): a seat refusal is being raised (seat_banner), the
+  // refusal up was a seat press' (refused_mirror_observer), the axis of a REFUSED_SEAT_UNKNOWN,
+  // when a failed publish was last logged, and the log.
+  bool seat_raising_ = false;
+  bool seat_origin_ = false;
+  uint8_t seat_unknown_row_ = 0;
+  int64_t seat_fail_logged_us_ = 0;
+  espp::Logger *seat_log_ = nullptr;
 
   SharedSubjects shared_{
       .locked = &locked_,
@@ -418,6 +439,8 @@ private:
       .post_reason = hmi::ui::bind<&UiApp::post_reason>(this),
       .stick_fault = hmi::ui::bind<&UiApp::stick_fault>(this),
       .stick_fault_words = hmi::ui::bind<&UiApp::stick_fault_words>(this),
+      .seat_origin = hmi::ui::bind<&UiApp::seat_origin>(this),
+      .seat_known = hmi::ui::bind<&UiApp::seat_unknown_known>(this),
       .grace_ms = HOLD_GRACE_MS,
   }};
   // Locked means "not driving", and the Locked screen is where that changes.
@@ -570,7 +593,7 @@ private:
       .nav = &nav_port_,
       .values = seat_axis_value_,
       .step = hmi::ui::bind<&UiApp::seat_step>(this),
-      .request = hmi::ui::bind<&UiApp::seat_request>(this),
+      .request = hmi::ui::bind<&UiApp::seat_preset>(this),
       .show_buttons_page = hmi::ui::bind<&SeatView::show_buttons_page>(&seat_view_),
       .keep_overlay_fill = keep_overlay_fill,
   }};

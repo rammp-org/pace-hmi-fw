@@ -91,6 +91,36 @@ void hmi::ui::RefusalView::fill_stick_fault(lv_obj_t *panel, const char *title) 
   lv_label_set_text(ui_comp_get_child(panel, UI_COMP_ERRORBANNER_BANNERBOX_BANNERFOOTER), "");
 }
 
+// The seat gate's banners (hazard-seat-spec.md §2.8). REFUSED_POST and REFUSED_STICK are shared
+// with the drive table: only when a seat press raised them do they read "Seat not ready".
+bool hmi::ui::RefusalView::fill_seat(lv_obj_t *panel, int32_t refused) {
+  const RefusalTexts &t = *config_.texts;
+  lv_obj_t *title = ui_comp_get_child(panel, UI_COMP_ERRORBANNER_BANNERTITLE);
+  lv_obj_t *body = ui_comp_get_child(panel, UI_COMP_ERRORBANNER_BANNERBOX_BANNERMESSAGE);
+  lv_obj_t *footer = ui_comp_get_child(panel, UI_COMP_ERRORBANNER_BANNERBOX_BANNERFOOTER);
+  if (refused == REFUSED_SEAT_UNKNOWN || refused == REFUSED_SEAT_NOT_SENT) {
+    const BannerText &b = refused == REFUSED_SEAT_UNKNOWN ? t.seat_unknown : t.seat_not_sent;
+    lv_label_set_text(title, b.title);
+    lv_label_set_text(body, b.body);
+    lv_label_set_text(footer, b.footer);
+    return true;
+  }
+  if (!config_.seat_origin()) {
+    return false;
+  }
+  if (refused == REFUSED_POST) {
+    fill_post_refused(panel, t.refused_post_seat_title);
+    return true;
+  }
+  if (refused == REFUSED_STICK) {
+    lv_label_set_text(title, t.refused_post_seat_title);
+    lv_label_set_text(body, t.seat_stick_body);
+    lv_label_set_text(footer, "");
+    return true;
+  }
+  return false;
+}
+
 // Binds `cb` on `panel` to every subject the cause depends on, so the subject
 // argument each observer gets is ignored: whichever fired, the answer depends
 // on all of them.
@@ -143,6 +173,13 @@ void hmi::ui::RefusalView::refused_panel_observer(lv_observer_t *observer, lv_su
     const BannerText &t = refused == REFUSED_DRIVE_STOPPED ? view->config_.texts->drive_stopped
                                                            : view->config_.texts->drive_not_granted;
     view->fill_mib_reason(panel, t.title, t.body, t.footer);
+    shown(true);
+    return;
+  }
+  // A seat press refused by the seat gate (hazard-seat-spec.md §2.8), here when the menu's Seat
+  // Functions row was refused or the Seat screen sent the user home: for its window, or until
+  // its own reason clears (poll).
+  if (view->fill_seat(panel, refused)) {
     shown(true);
     return;
   }
@@ -228,6 +265,13 @@ void hmi::ui::RefusalView::lost_panel_observer(lv_observer_t *observer, lv_subje
     view->show(panel, true);
     return;
   }
+  // The seat gate's refusals on the Seat screen (hazard-seat-spec.md §2.8), for their window or
+  // until their own reason clears (poll).
+  if (lv_obj_get_screen(panel) == ui_SeatScreen &&
+      view->fill_seat(panel, lv_subject_get_int(view->config_.refused))) {
+    view->show(panel, true);
+    return;
+  }
   // C3 §2.10: a seat press before the start-up check passed, for its window or until the
   // check passes (poll clears it).
   if (lv_subject_get_int(view->config_.refused) == REFUSED_POST &&
@@ -303,7 +347,8 @@ void hmi::ui::RefusalView::poll() {
                refused == REFUSED_DRIVE_MENU) &&
               config_.mcb_ready()) ||
              (refused == REFUSED_POST && config_.post_passed()) ||
-             (refused == REFUSED_STICK && !config_.stick_fault())) {
+             (refused == REFUSED_STICK && !config_.stick_fault()) ||
+             (refused == REFUSED_SEAT_UNKNOWN && config_.seat_known())) {
     // A refused drive is tied to the push on the Locked screen, so it goes
     // with it. A refused seat comes from the menu -- no push to hold it up --
     // so it stays its window (the dwell timer) unless the cause clears.

@@ -38,4 +38,6 @@ the MCB state (`mib_state`), the POST gate and stick health (acquire), the axis 
 
 `tests/host/seat` (L1-SEAT, `tests/manifest.d/seat.yaml`): SEAT-001..010, with ASan and UBSan
 (a NaN or an infinity that reached undefined behaviour stops the run) and the host allocation
-guard. Expected values are written from the spec, never from the code's output.
+guard; SEAT-011, the guard that the firmware calls `seat_raw` only here and `publish_seat` only
+in `UiApp::seat_request` (hmi_ui REQ-UI-28, REQ-UI-30). Expected values are written from the
+spec, never from the code's output.

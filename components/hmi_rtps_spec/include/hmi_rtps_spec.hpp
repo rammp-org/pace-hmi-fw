@@ -40,6 +40,19 @@ using std::chrono::milliseconds;
 // answer and find the row a refused request flashes.
 constexpr size_t index_of(SeatAxis axis) { return static_cast<size_t>(axis); }
 
+// A seat axis' name for the logs, RAMMP_SEAT_AXIS_TABLE's NAME ("ELEVATION"); "?" for a value
+// the table does not have.
+constexpr const char *to_string(SeatAxis axis) {
+  switch (axis) {
+#define RAMMP_SEAT_AXIS_NAME(id_, name_, ...)                                                      \
+  case SeatAxis::name_:                                                                            \
+    return #name_;
+    RAMMP_SEAT_AXIS_TABLE(RAMMP_SEAT_AXIS_NAME)
+#undef RAMMP_SEAT_AXIS_NAME
+  }
+  return "?";
+}
+
 // Names for the status labels, the fault banner (when the MCB sends no text) and the
 // logs. A value this firmware does not know reads "?".
 // Names for the status labels, the fault banner (when the MIB sends no text) and the
@@ -234,6 +247,18 @@ inline constexpr char kHmiNoticePostFailed[] = "Start-up check failed";   // C3
 // C3 §4.5: the refusal of a drive asked for before POST passed (its body: the check's words).
 inline constexpr char kHmiRefusedPostTitle[] = "Not ready to drive"; // C3
 inline constexpr char kHmiRefusedPostSeatTitle[] = "Seat not ready"; // C3, a seat press
+// The seat gate's refusals (hazard-seat-spec.md §2.8; texts Q11, approved 2026-10-11): the
+// axis' value unknown, and a SeatCommand the publish did not take. A seat press refused for a
+// stick FAULT reads kHmiRefusedPostSeatTitle over C2's kHmiNoticeStickFault.
+inline constexpr char kHmiSeatUnknownTitle[] = "SEAT REFUSED: POSITION UNKNOWN";
+inline constexpr char kHmiSeatUnknownText[] = "Wait for the MCB's seat position";
+inline constexpr char kHmiSeatNotSentTitle[] = "SEAT REFUSED: NOT SENT";
+inline constexpr char kHmiSeatNotSentText[] = "Press again";
+static_assert(sizeof(kHmiSeatUnknownTitle) <= kErrorTextLen &&
+                  sizeof(kHmiSeatUnknownText) <= kErrorTextLen &&
+                  sizeof(kHmiSeatNotSentTitle) <= kErrorTextLen &&
+                  sizeof(kHmiSeatNotSentText) <= kErrorTextLen,
+              "a seat refusal outgrows the banner it shares with MIB faults");
 // C2 (hazard-c2-spec.md §0, O11, F1): the Drive notice for a latched stick fault, and C3's
 // persistent indicator for it below every POST state (REQ-UI-26).
 inline constexpr char kHmiNoticeStickFault[] = "Joystick fault: recalibrate to clear"; // C2

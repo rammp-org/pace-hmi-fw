@@ -29,7 +29,7 @@ public:
     const NavPort *nav;
     lv_subject_t *values;                     ///< UiApp's seat_axis_value_[AXES]; int, raw units
     Fn<void(size_t row, int direction)> step; ///< UiApp's seat_step: one step from the MCB's value
-    Fn<void(rammp::SeatAxis axis, int32_t target)> request; ///< UiApp's seat_request (absolute)
+    Fn<void(rammp::SeatAxis axis, int32_t target)> request; ///< UiApp's seat_preset (absolute)
     Fn<void()> show_buttons_page; ///< this view's show_buttons_page (the grids' off_left)
     void (*keep_overlay_fill)(lv_obj_t *obj); ///< the overdraw exemption
   };

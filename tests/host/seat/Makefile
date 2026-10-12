@@ -10,7 +10,7 @@ HERE := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 REPO ?= $(abspath $(HERE)/../../..)
 
 SEAT_INC := $(REPO)/components/seat/include
-TEST_SRCS       := $(HERE)/test_seat.cpp
+TEST_SRCS       := $(HERE)/test_seat.cpp $(HERE)/test_seat_guard.cpp
 SRCS_UNDER_TEST :=
 INCLUDES        := $(SEAT_INC) \
                    $(REPO)/components/hmi_rtps_spec/include \
@@ -25,6 +25,9 @@ include $(REPO)/tests/host/common.mk
 
 # Safety code: every switch over an enum names every enumerator (CS-TYP-06).
 $(call obj_of,$(TEST_SRCS)): CXX_WARN := $(WARN_FLAGS) -Wswitch-enum
+
+# SEAT-011 reads the firmware sources under the worktree as text.
+$(call obj_of,$(HERE)/test_seat_guard.cpp): CXXFLAGS_ALL += -DSEAT_REPO_ROOT='"$(REPO)"'
 
 ifeq ($(COVERAGE),1)
 TEST_OBJ  := $(call obj_of,$(HERE)/test_seat.cpp)

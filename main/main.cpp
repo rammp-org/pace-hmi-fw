@@ -1240,6 +1240,8 @@ extern "C" void app_main(void) {
   // C2's stick monitor: each change of its state, logged by the UI task (REQ-UI-27).
   espp::Logger stick_logger({.tag = "stick", .level = espp::Logger::Verbosity::INFO});
   ui_app.attach_stick_log(stick_logger);
+  espp::Logger seat_logger({.tag = "seat", .level = espp::Logger::Verbosity::INFO});
+  ui_app.attach_seat_log(seat_logger); // REQ-UI-29: a failed SeatCommand publish
   {
     hmi::post::I2cSet i2c_found;
     for (const uint8_t address : found_addresses) {

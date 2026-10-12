@@ -237,30 +237,118 @@ UiApp::SeatTelemetry UiApp::seat_telemetry() const {
   return t;
 }
 
-// One seat request: an absolute target, clamped to the axis' range, so a lost or repeated
-// message cannot drift the seat. Before the start-up check passed (the POST gate not PASS) no
-// SeatCommand goes out: the press is refused, felt and named (C3 §2.10, REQ-UI-20).
-void UiApp::seat_request(rammp::SeatAxis axis, int32_t target) {
+// The seat gate (REQ-UI-28; hazard-seat-spec.md §2.2-§2.5). Every SeatCommand the HMI sends
+// passes here: the Seat screen's "-"/"+" and presets, Bench -> Actuators, Skunk Works "Seat up".
+// It is the only caller of publish_seat (SEAT-011). The inputs are read now: the link live
+// (LinkPort::state, not the 250 ms subject), the MCB state, the POST gate and stick health
+// (acquire), the axis value. A refused press publishes nothing and is felt and named (§2.8). An
+// allowed one is an absolute target within the axis range, published once: the result is
+// checked and counted, and the HMI never re-sends it (REQ-UI-29, Q7: a lost press means no
+// motion). C3's POST condition (REQ-UI-20) is the gate's condition 3. UI task.
+void UiApp::seat_request(rammp::SeatAxis axis, hmi::seat::SeatAsk ask) {
   using hmi::seat::SeatReason;
-  if (!post_passed()) {
-    seat_outcome(SeatReason::POST_NOT_PASSED);
-    config_.cues->refused();
-    DrivePort<DriveUi>{&drive_ui_}.show_refused(REFUSED_POST, DRIVE_REFUSED_SHOW_MS);
+  const size_t row = rammp::index_of(axis);
+  if (row >= seat_axis_count_) {
+    return; // not one of the table's axes
+  }
+  const rammp::SeatAxisSpec &spec = rammp::kSeatAxes[row];
+  const hmi::seat::SeatDecision decision = hmi::seat::decide(spec, seat_inputs(row), ask);
+  if (decision.reason != SeatReason::ALLOW) {
+    seat_refuse(decision.reason, row);
     return;
   }
-  const rammp::SeatAxisSpec &spec = rammp::kSeatAxes[rammp::index_of(axis)];
-  const bool sent = config_.link->publish_seat(
-      axis, rammp::seat_units(spec, std::clamp(target, spec.min_value, spec.max_value)));
-  seat_outcome(sent ? SeatReason::ALLOW : SeatReason::NOT_SENT); // counted only (REQ-RUI-09)
+  if (!config_.link->publish_seat(axis, rammp::seat_units(spec, decision.target))) {
+    seat_refuse(SeatReason::NOT_SENT, row);
+    return;
+  }
+  seat_outcome(SeatReason::ALLOW);
 }
 
-// One step up or down from where the MCB last said the axis is. What a value reads before it
-// is known (VALUE_UNKNOWN) steps from the axis minimum.
+// A preset: its absolute target, read off its label (SeatView), through the gate.
+void UiApp::seat_preset(rammp::SeatAxis axis, int32_t target) {
+  seat_request(axis, {.press = hmi::seat::SeatPress::PRESET, .amount = target});
+}
+
+// One step up or down from where the MCB last said the axis is, through the gate: an unknown
+// value is refused (no step from the axis minimum), and so is a step that would not move the
+// axis in the press' direction (AT_LIMIT, Q9).
 void UiApp::seat_step(size_t row, int direction) {
-  const rammp::SeatAxisSpec &spec = rammp::kSeatAxes[row];
-  const int32_t now = lv_subject_get_int(&seat_axis_value_[row]);
-  const int32_t from = now == hmi::format::VALUE_UNKNOWN ? spec.min_value : now;
-  seat_request(spec.id, from + direction * spec.step);
+  if (row >= seat_axis_count_) {
+    return;
+  }
+  seat_request(rammp::kSeatAxes[row].id,
+               {.press = hmi::seat::SeatPress::STEP, .amount = direction});
+}
+
+// The gate's inputs at the press (§2.2's "Read from").
+hmi::seat::SeatInputs UiApp::seat_inputs(size_t row) {
+  return {.link_connected = config_.link->state() == LinkState::CONNECTED,
+          .mcb_state = static_cast<uint8_t>(lv_subject_get_int(&mib_state_)),
+          .post = post_gate(),
+          .health = permit_hooks_.stick_health.read(),
+          .value = lv_subject_get_int(&seat_axis_value_[row])};
+}
+
+// A refused press (hazard-seat-spec.md §2.8): counted, felt, and named on the reason's banner.
+// AT_LIMIT is feedback only, as the Actuators page always did at a limit.
+void UiApp::seat_refuse(hmi::seat::SeatReason reason, size_t row) {
+  using hmi::seat::SeatReason;
+  seat_outcome(reason);
+  config_.cues->refused();
+  switch (reason) {
+  case SeatReason::LINK_DOWN:
+  case SeatReason::MCB_NOT_IDLE:
+    seat_banner(REFUSED_SEAT);
+    return;
+  case SeatReason::POST_NOT_PASSED:
+    seat_banner(REFUSED_POST);
+    return;
+  case SeatReason::STICK_FAULT:
+    seat_banner(REFUSED_STICK);
+    return;
+  case SeatReason::POSITION_UNKNOWN:
+    seat_unknown_row_ = static_cast<uint8_t>(row);
+    seat_banner(REFUSED_SEAT_UNKNOWN);
+    return;
+  case SeatReason::NOT_SENT:
+    seat_log_not_sent(row);
+    seat_banner(REFUSED_SEAT_NOT_SENT);
+    return;
+  case SeatReason::AT_LIMIT:
+  case SeatReason::ALLOW:
+    return;
+  }
+}
+
+// A seat refusal's banner, marked as the seat's (refused_mirror_observer reads the mark): the
+// shared REFUSED_POST and REFUSED_STICK then read "Seat not ready". The same value raised again
+// is re-notified, so the mark and the banner follow this press.
+void UiApp::seat_banner(int32_t which) {
+  seat_raising_ = true;
+  const bool same = lv_subject_get_int(&refused_) == which;
+  DrivePort<DriveUi>{&drive_ui_}.show_refused(which, DRIVE_REFUSED_SHOW_MS);
+  if (same) {
+    lv_subject_notify(&refused_);
+  }
+  seat_raising_ = false;
+}
+
+// REQ-UI-29: a failed publish is logged at most once a second, with the count since start.
+void UiApp::seat_log_not_sent(size_t row) {
+  const int64_t now = now_us();
+  if (seat_log_ == nullptr ||
+      (seat_fail_logged_us_ != 0 && now - seat_fail_logged_us_ < kSeatPublishFailLogMs * 1000)) {
+    return;
+  }
+  seat_fail_logged_us_ = now;
+  seat_log_->warn("SeatCommand {} not published ({} failed since start)",
+                  rammp::to_string(rammp::kSeatAxes[row].id),
+                  seat_publish_failures_.load(std::memory_order_relaxed));
+}
+
+// REFUSED_SEAT_UNKNOWN clears early once its axis is known again (REQ-UI-33).
+bool UiApp::seat_unknown_known() {
+  return hmi::seat::known(lv_subject_get_int(&seat_axis_value_[seat_unknown_row_]));
 }
 
 // The right PIN opens the actuators page.
@@ -288,7 +376,8 @@ void UiApp::store_setting(int param, int32_t value) {
 
 // ErrorBanner6. Raised only on a page that needs the MCB - the actuators - and then exactly as
 // on the drive and seat screens: while the link is down or the MCB's state is not OK; or, for its
-// window, when a press there came before the start-up check passed (C3). User data is the app.
+// window, when the seat gate refused a press there (hazard-seat-spec.md §2.8; C3's POST
+// refusal is one of them). User data is the app.
 void UiApp::setting_warning_observer(lv_observer_t *observer, lv_subject_t *) {
   UiApp *self = static_cast<UiApp *>(lv_observer_get_user_data(observer));
   lv_obj_t *panel = lv_observer_get_target_obj(observer);
@@ -296,7 +385,12 @@ void UiApp::setting_warning_observer(lv_observer_t *observer, lv_subject_t *) {
     self->refusal_view_.show(panel, false);
     return;
   }
-  if (lv_subject_get_int(self->drive_ui_.entry_refused_subject()) == REFUSED_POST) {
+  const int32_t refused = lv_subject_get_int(self->drive_ui_.entry_refused_subject());
+  if (self->refusal_view_.fill_seat(panel, refused)) { // the seat gate's (hazard-seat-spec §2.8)
+    self->refusal_view_.show(panel, true);
+    return;
+  }
+  if (refused == REFUSED_POST) {
     self->refusal_view_.fill_post_refused(panel, rammp::kHmiRefusedPostSeatTitle);
     self->refusal_view_.show(panel, true);
     return;
@@ -326,10 +420,13 @@ void UiApp::action_ready_observer(lv_observer_t *observer, lv_subject_t *) {
 // the MCB agrees, and a refusal flashes on that page.
 void UiApp::action_seat_up() { seat_step(rammp::index_of(rammp::SeatAxis::ELEVATION), +1); }
 
-// The refusal banner's value, mirrored for other tasks (refused_any_task). User data is the app.
+// The refusal banner's value, mirrored for other tasks (refused_any_task), and whether a seat
+// press raised it (seat_banner). The first observer of `refused`, so the banners read the mark
+// as of this change. User data is the app.
 void UiApp::refused_mirror_observer(lv_observer_t *observer, lv_subject_t *subject) {
-  static_cast<UiApp *>(lv_observer_get_user_data(observer))
-      ->refused_pub_.store(lv_subject_get_int(subject), std::memory_order_release);
+  auto *self = static_cast<UiApp *>(lv_observer_get_user_data(observer));
+  self->seat_origin_ = self->seat_raising_;
+  self->refused_pub_.store(lv_subject_get_int(subject), std::memory_order_release);
 }
 
 // DiagnosticsFreqLabel: the rate, or "No data" while stale. User data is the app.

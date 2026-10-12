@@ -55,6 +55,9 @@ inline constexpr RefusalTexts REFUSAL_TEXTS{
     .refused_post_title = rammp::kHmiRefusedPostTitle,
     .refused_post_seat_title = rammp::kHmiRefusedPostSeatTitle,
     .stick_fault_title = rammp::kHmiStickFaultTitle,
+    .seat_unknown = {rammp::kHmiSeatUnknownTitle, rammp::kHmiSeatUnknownText, ""},
+    .seat_not_sent = {rammp::kHmiSeatNotSentTitle, rammp::kHmiSeatNotSentText, ""},
+    .seat_stick_body = rammp::kHmiNoticeStickFault,
 };
 
 } // namespace hmi::ui

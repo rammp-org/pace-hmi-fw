@@ -30,6 +30,12 @@ enum Refused : int32_t {
   /// C2b: driving asked for (the unlock hold, a push on the Locked screen, the menu's DRIVE row)
   /// with the stick in FAULT (rows 57-59). Stays its window, or until the fault clears.
   REFUSED_STICK = 10,
+  /// The seat gate (hazard-seat-spec.md §2.8): a press on an axis whose value is not known.
+  /// Stays its window, or until that axis is known again.
+  REFUSED_SEAT_UNKNOWN = 11,
+  /// The seat gate: the SeatCommand's publish failed (nothing reached the wire, no re-send).
+  /// Stays its window.
+  REFUSED_SEAT_NOT_SENT = 12,
 };
 
 /// @brief A `refused` value's name, for logs and the bench's STATE line ("NONE" for
@@ -58,6 +64,10 @@ enum Refused : int32_t {
     return "STICK_FAULT";
   case REFUSED_STICK:
     return "REFUSED_STICK";
+  case REFUSED_SEAT_UNKNOWN:
+    return "REFUSED_SEAT_UNKNOWN";
+  case REFUSED_SEAT_NOT_SENT:
+    return "REFUSED_SEAT_NOT_SENT";
   default:
     return "?";
   }
