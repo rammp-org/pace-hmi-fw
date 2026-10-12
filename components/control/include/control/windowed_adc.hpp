@@ -4,7 +4,8 @@
 // sequence) in one consistent snapshot, without a lock. Our code: the upstream class stays as
 // it is apart from its hook lines (components/espp_adc/README.md).
 //
-// Not used by the firmware yet: C2's island commit reads both X/Y windows through it.
+// The firmware's X/Y source: C2's StickIsland reads both X/Y windows through get_windows()
+// every cycle (stick_island.hpp).
 
 #include <array>
 #include <cstddef>

@@ -1,7 +1,8 @@
 #pragma once
 // The quick POST evaluator: facts in, a verdict per check and an overall state out
 // (README, REQ-POST-01..13). Pure: no ESP-IDF, no FreeRTOS, no LVGL, no allocation, no logging.
-// Not wired into the firmware yet: that is hazard-fixes C3 (README, "Not yet wired").
+// Wired into the firmware by hazard fix C3: hmi_ui's PostStage runs it on the UI task, and its
+// gate is condition 5 of the stick's output permit (hazard-c3-spec.md).
 
 #include <algorithm>
 #include <array>
