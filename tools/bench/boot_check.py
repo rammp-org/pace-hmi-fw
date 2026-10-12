@@ -17,7 +17,9 @@ log's own order is what the firmware does):
   hazard-c4-spec.md's three ctl.* checks, 60 with hazard-c2-spec.md's three joy.* checks).
   A count that boot-expected.json does not declare is a problem; a declared one other than
   the baseline's is a finding (the baseline has no "joystick self test passed" line; these
-  two are the nearest boot-time evidence -- see README)
+  two are the nearest boot-time evidence -- see README). A build variant read from the
+  image's own config (common.VARIANT_ROWS: the allocation guard's Need::BENCH rows) adds its
+  rows on top of the tree's count, as a finding
 - `joy_cal/I ... loaded /storage/joystick_cal.txt: <mV>`  same mV as the baseline
 - `rtps_comms/I ... Network: WiFi`               the bench network's link (common.LINK):
   WiFi on the hotspot, Ethernet with BENCH_NET=lan. On Ethernet the settings line's
@@ -116,20 +118,29 @@ def idle_checks_off(tree: pathlib.Path) -> bool:
     return path.exists() and IDLE_CHECK_OFF_RE.search(path.read_text(encoding="utf-8")) is not None
 
 
-def expected_selftest_ready(base_value: str, count: int | None) -> tuple[str, list[str], list[str]]:
-    """(expected text, problems, findings) for the selftest_ready marker."""
+def expected_selftest_ready(base_value: str, count: int | None,
+                            variant: dict[str, dict] | None = None) -> tuple[str, list[str], list[str]]:
+    """(expected text, problems, findings) for the selftest_ready marker. `count` is the tree's
+    (declared in boot-expected.json); `variant` (common.variant_checks) the rows the image's
+    build options add on top of it."""
     m = SELFTEST_READY_RE.match(base_value)
     if count is None or m is None:
         return base_value, [], []
+    variant = variant or {}
     base_count = int(m.group(1))
-    text = f"ready: {count} checks {m.group(2)}"
+    text = f"ready: {count + len(variant)} checks {m.group(2)}"
+    findings = []
+    if variant:
+        whys = sorted({v["why"] for v in variant.values()})
+        findings.append(f"selftest_ready: +{len(variant)} rows of this build's variant "
+                        f"({', '.join(sorted(variant))}: {'; '.join(whys)})")
     if count == base_count:
-        return text, [], []
+        return text, [], findings
     if count not in SELFTEST_COUNTS:
         return text, [f"selftest_ready: the tree declares {count} checks, a count "
-                      f"boot-expected.json does not declare ({sorted(SELFTEST_COUNTS)})"], []
+                      f"boot-expected.json does not declare ({sorted(SELFTEST_COUNTS)})"], findings
     return text, [], [f"selftest_ready: {count} checks, a declared change from the "
-                      f"baseline's {base_count} ({SELFTEST_COUNTS[count]})"]
+                      f"baseline's {base_count} ({SELFTEST_COUNTS[count]})"] + findings
 
 
 def added_markers(lines: list[str], groups: set[str]) -> tuple[list[dict], list[str]]:
@@ -184,10 +195,11 @@ def wdt_signature(lines: list[str]) -> tuple[int, list[str]]:
 
 
 def analyse(capture: str, baseline: str, tree: pathlib.Path | None = None,
-            groups: tuple[str, ...] | set[str] = ()) -> dict:
+            groups: tuple[str, ...] | set[str] = (), variant: dict[str, dict] | None = None) -> dict:
     """Grade a boot capture. `tree` is the worktree that built the image (data for the
     self-test count and the watchdog rule; default this one); `groups` are the hazard fixes
-    the image has (run_bench.py --hazard), whose added markers are required."""
+    the image has (run_bench.py --hazard), whose added markers are required; `variant`
+    (common.variant_checks of the image's build dir) the self-test rows its options add."""
     tree = common.REPO if tree is None else pathlib.Path(tree)
     lines, base = capture.splitlines(), baseline.splitlines()
     problems, findings, markers = [], [], []
@@ -201,7 +213,7 @@ def analyse(capture: str, baseline: str, tree: pathlib.Path | None = None,
         value = OVERRIDES.get(name, {}).get("value", hits[0][1])
         value = for_link(name, value)
         if name == "selftest_ready":
-            value, why_not, why = expected_selftest_ready(value, selftest_count(tree))
+            value, why_not, why = expected_selftest_ready(value, selftest_count(tree), variant)
             problems += why_not
             findings += why
         expected.append((hits[0][0], name, regex, compare, value))
@@ -269,10 +281,14 @@ def main() -> int:
                    help="the worktree that built the image (self-test count, watchdog rule)")
     p.add_argument("--hazard", default="",
                    help="hazard fixes in the image (c1,c3,c4,c2): their boot markers are required")
+    p.add_argument("--build-dir", type=pathlib.Path,
+                   help="the image's build dir: its config/sdkconfig.h says which variant rows "
+                        "the self test adds (common.VARIANT_ROWS)")
     a = p.parse_args()
     report = analyse(a.capture.read_text(encoding="utf-8", errors="replace"),
                      a.baseline.read_text(encoding="utf-8", errors="replace"), a.tree,
-                     {g.strip().lower() for g in a.hazard.split(",") if g.strip()})
+                     {g.strip().lower() for g in a.hazard.split(",") if g.strip()},
+                     common.variant_checks(a.build_dir, a.tree))
     print(json.dumps(report, indent=2))
     return 0 if report["verdict"] == "PASS" else 1
 

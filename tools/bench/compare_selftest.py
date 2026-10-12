@@ -27,7 +27,12 @@ Bands:
   any      not compared (uptime)
 `detail` is compared too where marked `+detail` (the I2C address list).
 Report-only (REPORT_ONLY_PREFIXES, pwr.*): value, verdict and baseline are shown in
-the check's row, never graded; the check ID must still be there. Owner decision P3
+the check's row, never graded; the check ID must still be there.
+Declared new checks (common.variant_checks, from the image's build config, e.g. the
+allocation guard's mem.alloc_*): rows the baseline cannot have. They are not "extra" IDs;
+each must be there (the build's option adds it) and is graded on its own verdict (FAIL fails),
+unless it is report-only (mem.alloc_adc, owner T12); pc.report_complete counts them on top of
+the baseline's value. Owner decision P3
 (docs/project-profile.md, Bench > Power): board 2 has no battery and runs on PoE, so
 pwr.vbat measures no pack (4346 mV read as "no pack fitted", SKIP, on chrome-0677bb5).
 Until a battery is fitted.
@@ -116,10 +121,17 @@ def in_band(band: str, got: dict, base: dict) -> tuple[bool, str]:
     return ok, ("" if ok else why)
 
 
-def compare(run: dict, base: dict) -> dict:
+def compare(run: dict, base: dict, declared: dict[str, dict] | None = None) -> dict:
+    """`declared` (common.variant_checks): new checks this build adds, name -> {why, report_only}."""
+    declared = declared or {}
     problems, rows = [], []
-    got = {r["name"]: r for r in run.get("results", [])}
+    got_all = {r["name"]: r for r in run.get("results", [])}
+    got = {n: r for n, r in got_all.items() if n not in declared}
     want = {r["name"]: r for r in base.get("results", [])}
+    added = [n for n in got_all if n in declared]
+    gone = [n for n in declared if n not in got_all]
+    if gone:
+        problems.append(f"declared new checks missing: {gone} (the build's config adds them)")
     if list(got) != list(want):
         missing = [n for n in want if n not in got]
         extra = [n for n in got if n not in want]
@@ -131,6 +143,8 @@ def compare(run: dict, base: dict) -> dict:
         g = got.get(name)
         if g is None:
             continue
+        if name == "pc.report_complete" and added and isinstance(g.get("value"), int):
+            g = dict(g, value=g["value"] - len(added))  # the declared rows on top of the baseline's
         band = BANDS.get(name)
         row = {"name": name, "result": g.get("result"), "value": g.get("value"),
                "baseline": b.get("value"), "band": band}
@@ -147,11 +161,22 @@ def compare(run: dict, base: dict) -> dict:
         if "problem" in row:
             problems.append(f"{name}: {row['problem']}")
         rows.append(row)
+    for name in added:
+        g, d = got_all[name], declared[name]
+        row = {"name": name, "result": g.get("result"), "value": g.get("value"), "baseline": None,
+               "band": "new", "declared": d["why"]}
+        if d.get("report_only"):
+            row.update(graded=False, note=d["report_only"])
+        elif g.get("result") == "FAIL":
+            row["problem"] = f"declared new check FAILs on its own limits ({g.get('detail', '')})"
+            problems.append(f"{name}: {row['problem']}")
+        rows.append(row)
     return {"verdict": "PASS" if not problems else "FAIL", "problems": problems, "checks": rows}
 
 
-def run_selftest(ip: str, out: pathlib.Path, tree: pathlib.Path) -> tuple[str, dict]:
-    """(verdict, report). Runs rtps_selftest.py from `tree`."""
+def run_selftest(ip: str, out: pathlib.Path, tree: pathlib.Path,
+                 declared: dict[str, dict] | None = None) -> tuple[str, dict]:
+    """(verdict, report). Runs rtps_selftest.py from `tree`; `declared`: see compare()."""
     strays = common.stray_peers()
     if strays:
         return "INVALID", {"reason": "peer processes running (would double-publish MibStatus)",
@@ -172,7 +197,7 @@ def run_selftest(ip: str, out: pathlib.Path, tree: pathlib.Path) -> tuple[str, d
         return "FAIL", report
     run = json.loads(out.read_text(encoding="utf-8"))
     base = json.loads((common.BASELINE_DIR / "selftest.json").read_text(encoding="utf-8"))
-    cmp = compare(run, base)
+    cmp = compare(run, base, declared)
     report.update(cmp)
     if r.returncode != 0:
         report["problems"].insert(0, f"rtps_selftest.py exit {r.returncode}")
@@ -238,6 +263,65 @@ def t_vbat_must_still_be_there() -> None:
             "FAIL")
 
 
+def _guard_run(base: dict, adc: dict, lvgl: dict) -> dict:
+    """The baseline as an alloc-guard image reports it: three mem.alloc_* rows after the device
+    rows, pc.report_complete 3 more."""
+    run = copy.deepcopy(base)
+    device = [r for r in run["results"] if not r["name"].startswith("pc.")]
+    pc = [r for r in run["results"] if r["name"].startswith("pc.")]
+    new = [{"name": "mem.alloc_adc", "unit": "", "lo": 0, "hi": None, **adc},
+           {"name": "mem.alloc_lvgl", "unit": "", "lo": 0, "hi": None, **lvgl},
+           {"name": "mem.alloc_rtps", "unit": "", "lo": 0, "hi": None, "result": "PASS",
+            "value": 2, "detail": "first 16 B"}]
+    for r in pc:
+        if r["name"] == "pc.report_complete":
+            r.update(value=r["value"] + 3, lo=r["lo"] + 3, hi=r["hi"] + 3)
+    run["results"] = device + new + pc
+    return run
+
+
+GUARD = {"mem.alloc_adc": {"why": "guard", "report_only": "owner T12"},
+         "mem.alloc_lvgl": {"why": "guard", "report_only": None},
+         "mem.alloc_rtps": {"why": "guard", "report_only": None}}
+
+
+def t_declared_new_checks_pass() -> None:
+    base = _baseline()
+    run = _guard_run(base, {"result": "PASS", "value": 900, "detail": "first 24 B"},
+                     {"result": "PASS", "value": 4000, "detail": "first 64 B"})
+    report = compare(run, base, GUARD)
+    _expect("verdict", (report["verdict"], report["problems"]), ("PASS", []))
+    row = next(r for r in report["checks"] if r["name"] == "mem.alloc_adc")
+    _expect("the adc row is shown, not graded", (row["value"], row["graded"]), (900, False))
+    _expect("without the declaration the same run fails", compare(run, base)["verdict"], "FAIL")
+
+
+def t_declared_report_only_and_graded() -> None:
+    base = _baseline()
+    fail_adc = _guard_run(base, {"result": "FAIL", "value": 900, "detail": "first 24 B"},
+                          {"result": "PASS", "value": 4000, "detail": ""})
+    _expect("a FAIL on report-only mem.alloc_adc does not fail",
+            compare(fail_adc, base, GUARD)["verdict"], "PASS")
+    fail_lvgl = _guard_run(base, {"result": "PASS", "value": 0, "detail": ""},
+                           {"result": "FAIL", "value": 4000, "detail": ""})
+    report = compare(fail_lvgl, base, GUARD)
+    _expect("a FAIL on a graded declared row fails",
+            (report["verdict"], [p.split(":")[0] for p in report["problems"]]),
+            ("FAIL", ["mem.alloc_lvgl"]))
+
+
+def t_declared_missing_or_other_extra() -> None:
+    base = _baseline()
+    _expect("declared rows absent from the run fail", compare(copy.deepcopy(base), base, GUARD)[
+        "verdict"], "FAIL")
+    run = _guard_run(base, {"result": "PASS", "value": 0, "detail": ""},
+                     {"result": "PASS", "value": 0, "detail": ""})
+    only_two = {k: v for k, v in GUARD.items() if k != "mem.alloc_rtps"}
+    report = compare(run, base, only_two)
+    _expect("an undeclared extra row still fails", (report["verdict"], any(
+        "extra ['mem.alloc_rtps']" in p for p in report["problems"])), ("FAIL", True))
+
+
 CASES = [
     ("CMP-001 a run equal to the baseline passes", t_equal_passes),
     ("CMP-002 pwr.vbat SKIP vs baseline PASS does not fail; the row shows it (owner P3)",
@@ -247,6 +331,12 @@ CASES = [
     ("CMP-004 SKIP vs baseline PASS on any other check still fails", t_other_skip_still_fails),
     ("CMP-005 report-only does not drop the check from the ID comparison",
      t_vbat_must_still_be_there),
+    ("CMP-006 an alloc-guard image's declared mem.alloc_* rows and pc.report_complete +3 pass; "
+     "undeclared, the same run fails", t_declared_new_checks_pass),
+    ("CMP-007 declared rows: report-only mem.alloc_adc is never graded; another declared row's "
+     "FAIL fails", t_declared_report_only_and_graded),
+    ("CMP-008 a declared row missing from the run fails; an extra row not declared still fails",
+     t_declared_missing_or_other_extra),
 ]
 
 
@@ -275,17 +365,20 @@ def main() -> int:
     p.add_argument("--out", type=pathlib.Path, default=common.BENCH_HOME / f"selftest-{common.stamp()}.json")
     p.add_argument("--tree", type=pathlib.Path, default=common.REPO)
     p.add_argument("--compare-only", type=pathlib.Path)
+    p.add_argument("--build-dir", type=pathlib.Path,
+                   help="the image's build dir: its config says which new checks it declares")
     a = p.parse_args()
+    declared = common.variant_checks(a.build_dir, a.tree)
     if a.compare_only:
         base = json.loads((common.BASELINE_DIR / "selftest.json").read_text(encoding="utf-8"))
-        report = compare(json.loads(a.compare_only.read_text(encoding="utf-8")), base)
+        report = compare(json.loads(a.compare_only.read_text(encoding="utf-8")), base, declared)
         verdict = report["verdict"]
     else:
         if not a.ip:
             p.error("--ip is required unless --compare-only")
         import lease
         with lease.held():
-            verdict, report = run_selftest(a.ip, a.out, a.tree)
+            verdict, report = run_selftest(a.ip, a.out, a.tree, declared)
     print(json.dumps({k: v for k, v in report.items() if k != "checks"}, indent=2))
     return {"PASS": 0, "FAIL": 1, "INVALID": 2}[verdict]
 
