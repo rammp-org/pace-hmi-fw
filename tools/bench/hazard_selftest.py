@@ -1669,6 +1669,52 @@ def t_seat_targets_and_key_enter() -> None:
     expect("no step sends a bare KEY ENTER", any('"KEY ENTER"' in src for src in sources), False)
 
 
+def t_c2_11_restores_brightness() -> None:
+    """C2-11's sweep steps Display & sound's brightness; its clean-up puts the approved value
+    back by touch: '-' to the floor (19 taps from any value), then '+' up to it."""
+    class FakeRig:
+        set_brightness = hazard_rig.Rig.set_brightness
+
+        def __init__(self, row=hazard_rig.BRIGHTNESS_ROW) -> None:
+            self.log: list = []
+            self.row = row
+            self.st = hazard_rig.HazardStep("x", pathlib.Path(tempfile.gettempdir()))
+
+        def state(self) -> dict:
+            return {"stick": {"state": "OK"}}
+
+        def home(self) -> None:
+            self.log.append("home")
+
+        def go(self, row: str) -> None:
+            self.log.append(f"go:{row}")
+
+        def tap(self, x: int, y: int) -> None:
+            self.log.append({hazard_rig.BRIGHTNESS_MINUS: "-",
+                             hazard_rig.BRIGHTNESS_PLUS: "+"}.get((x, y), (x, y)))
+
+        def focus(self):
+            return (*self.row, 6)
+
+    with quiet():
+        r = FakeRig()
+        c2.c2_11_cleanup(r)
+    want = boot_check.expected_settings()["brightness"]
+    expect("the approved brightness, from boot-expected.json", want, 80)
+    expect("C2-11 has the brightness clean-up", c2.CLEANUP["C2-11"], c2.c2_11_cleanup)
+    expect("the taps", r.log, ["home", "go:Settings/Display"] + ["-"] * 19 + ["+"] * 15
+           + ["home"])
+    expect("recorded", r.st.records.get("cleanup_brightness"), 80)
+    r = FakeRig(row=(0, 310, 720, 115))
+    try:
+        with quiet():
+            r.set_brightness(80)
+        raise AssertionError("a tap that missed the Brightness row went on tapping")
+    except hazard_rig.NotRun as e:
+        expect("NOT_RUN on a missed row, after one tap", (e.kind, r.log.count("-"),
+                                                          r.log.count("+")), ("bench", 1, 0))
+
+
 CASES = [
     ("BENCH-015 the hazard steps: only behind --hazard or --steps; retired as the fixes land; "
      "B5pp names", t_plan),
@@ -1740,6 +1786,8 @@ CASES = [
      "the hold's completion", t_hold_polls),
     ("BENCH-057 B5''-19 presses the Seat screen by touch on widgets FOCUS placed, checked "
      "first (a wrong one is NOT_RUN); KEY ENTER is always released", t_seat_targets_and_key_enter),
+    ("BENCH-070 C2-11's clean-up sets the approved brightness back by touch ('-' to the "
+     "floor, '+' up to it); a tap off the Brightness row is NOT_RUN", t_c2_11_restores_brightness),
     ("BENCH-051 injection lapses come from the STICK send times in the remote-UI log, not "
      "the injector's own clock; a pause is not a lapse", t_stick_lapses),
     ("BENCH-051b only a lapse in a graded window voids a step: a lapse wholly in a drive set-up "

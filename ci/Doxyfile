@@ -1,0 +1,46 @@
+# Doxygen configuration for the CS-DOC-01 check (tools/l0/doxygen_gate.py).
+# First-party public headers only. HTML is generated into results/doxygen/html and not used:
+# doxygen 1.9.8 reads @param and @return while writing HTML, and with no HTML output it reports
+# every documented parameter list and return value as undocumented (checked on a 10-line header).
+# WARN_AS_ERROR stays NO: the gate ratchets the warning count instead (see the script).
+PROJECT_NAME           = "pace-hmi-fw"
+INPUT                  = components main
+RECURSIVE              = YES
+FILE_PATTERNS          = *.h *.hpp
+# Vendored, generated and test code is not ours to document (CS-LAY-04, CS-LAY-05).
+EXCLUDE                = components/ui \
+                         components/m5stack-tab5 \
+                         components/espp_adc/upstream \
+                         components/espp_adc/include/adc_types.hpp \
+                         components/espp_adc/include/oneshot_adc.hpp \
+                         main/boot_logo.h \
+                         managed_components \
+                         external
+EXCLUDE_PATTERNS       = */test/* */tests/* */build*/*
+EXTRACT_ALL            = NO
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = NO
+HIDE_UNDOC_MEMBERS     = NO
+JAVADOC_AUTOBRIEF      = NO
+QUIET                  = YES
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_DOC_ERROR      = YES
+WARN_IF_INCOMPLETE_DOC = YES
+WARN_NO_PARAMDOC       = YES
+WARN_AS_ERROR          = NO
+WARN_FORMAT            = "$file:$line: warning: $text"
+WARN_LOGFILE           = results/doxygen/warnings.log
+OUTPUT_DIRECTORY       = results/doxygen
+GENERATE_HTML          = YES
+# No graphs: they are not used, and Ubuntu's doxygen turns HAVE_DOT on by default, which with
+# no graphviz on the runner gives one "Problems running dot" warning per graph (540).
+HAVE_DOT               = NO
+GENERATE_LATEX         = NO
+GENERATE_XML           = NO
+GENERATE_RTF           = NO
+GENERATE_MAN           = NO
+CASE_SENSE_NAMES       = YES
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = NO
+CLANG_ASSISTED_PARSING = NO
