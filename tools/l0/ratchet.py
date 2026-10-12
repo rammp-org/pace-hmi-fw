@@ -147,7 +147,6 @@ VENDORED_FILES = frozenset({
     "components/espp_rtps/include/rtps/utils/udpUtils.hpp",
     "components/espp_rtps/include/rtps_action.hpp",
     "components/espp_rtps/include/rtps_message.hpp",
-    "components/espp_rtps/include/rtps_participant.hpp",
     "components/espp_rtps/include/rtps_pubsub.hpp",
     "components/espp_rtps/include/rtps_service.hpp",
     "components/espp_rtps/src/communication/EsppTransport.cpp",
@@ -168,9 +167,11 @@ VENDORED_FILES = frozenset({
     "components/espp_rtps/src/rtps_participant.cpp",
     "components/espp_rtps/src/utils/Diagnostics.cpp",
 })
-VENDORED_PRISTINE = ("components/espp_adc/upstream/",)
+VENDORED_PRISTINE = ("components/espp_adc/upstream/", "components/espp_rtps/upstream/")
 VENDORED_MODIFIED = {
     "components/espp_adc/include/continuous_adc.hpp": "components/espp_adc/upstream/continuous_adc.hpp",
+    "components/espp_rtps/include/rtps_participant.hpp":
+        "components/espp_rtps/upstream/include/rtps_participant.hpp",
 }
 EXCLUDED_DIRS = {"test", "generated"}
 EXCLUDED_FILES = {"main/boot_logo.c", "main/boot_logo.h"}

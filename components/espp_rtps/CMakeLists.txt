@@ -17,11 +17,19 @@ idf_component_register(
     "src/messages/MessageReceiver.cpp"
     "src/messages/MessageTypes.cpp"
     "src/utils/Diagnostics.cpp"
+    "pace/pace_matched_readers.cpp" # pace-hmi-fw: matched_readers (README.md)
   INCLUDE_DIRS
     "include"
   REQUIRES
     base_component cdr task thread_pool timer socket
 )
+
+# pace-hmi-fw: our source gets the first-party warning set (fw-standards'
+# fw_component_options, CS-LNG-02); upstream's sources keep upstream's flags. For it, upstream's
+# headers are system headers (-isystem wins over the component's own -I of the same folder), as
+# they are for every other user of this component.
+set_source_files_properties("pace/pace_matched_readers.cpp" PROPERTIES COMPILE_OPTIONS
+  "-isystem${COMPONENT_DIR}/include;-std=gnu++23;-Wnon-virtual-dtor;-Woverloaded-virtual;-Wall;-Wextra;-Wshadow;-Wconversion;-Wsign-conversion;-Wsign-compare;-Wnull-dereference;-Wimplicit-fallthrough;-Wunused-parameter;-Werror;-Werror=unused-variable;-Werror=unused-but-set-variable;-Werror=unused-function;-Werror=extra")
 
 # Select the RTPS static-limits profile from Kconfig (see Kconfig in this
 # component). The "embedded" profile is the default and is byte-identical to the

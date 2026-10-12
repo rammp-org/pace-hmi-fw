@@ -89,7 +89,8 @@ public:
   using sample_callback_t = std::function<void(std::span<const uint8_t> cdr_payload)>;
 
   /// Callback invoked when a remote endpoint matches one of this participant's
-  /// writers (publisher matched) or readers (subscriber matched).
+  /// readers (a remote publisher matched) or writers (a remote subscriber matched).
+  // pace-hmi-fw: the two were swapped (SEDPAgent.cpp calls them this way round).
   /// \note Runs on an engine worker thread - return quickly, do not block.
   using matched_callback_t = std::function<void()>;
 
@@ -162,8 +163,8 @@ public:
     /// to auto-detect the first non-loopback IPv4 interface. On ESP targets it
     /// must be set explicitly (e.g. from the WiFi/Ethernet netif IP).
     std::string interface_address{};
-    matched_callback_t on_publisher_matched{nullptr};     ///< A writer gained a remote reader.
-    matched_callback_t on_subscriber_matched{nullptr};    ///< A reader gained a remote writer.
+    matched_callback_t on_publisher_matched{nullptr};     ///< A reader gained a remote writer.
+    matched_callback_t on_subscriber_matched{nullptr};    ///< A writer gained a remote reader.
     Logger::Verbosity log_level{Logger::Verbosity::WARN}; ///< Facade log verbosity.
     /// Priority band for the metatraffic (SPDP/SEDP discovery) channels. High
     /// by default so discovery dispatch stays responsive when user traffic
@@ -256,6 +257,13 @@ public:
   /// \return True if the sample was accepted into the writer history; false if
   ///         the payload exceeds max_payload_size (see that constant).
   bool publish(std::string_view topic, std::span<const uint8_t> cdr_payload);
+
+  // pace-hmi-fw (vendored change, offered upstream; components/espp_rtps/README.md):
+  /// How many remote readers the writer on a topic has matched now. Not synchronised
+  /// with add_writer(), remove_writer() or stop(): the caller keeps them from running.
+  /// \param topic The topic name used in add_writer().
+  /// \return The writer's matched readers; 0 for a topic with no writer.
+  std::uint32_t matched_readers(std::string_view topic) const;
 
   // ---------------------------------------------------------------------------
   // Services (RMI: request/reply), ROS 2 (rmw_fastrtps) interoperable.
