@@ -308,6 +308,18 @@ def carry_over(modes_line: str, state: str | None, paused: bool) -> list[str]:
         out.append(STATE_COMMANDS[state])
     if paused:
         out.append("p")
+    # The seat modes (hazard-seat-spec.md §6), when the line has them: only those not at their
+    # default, which a fresh sim already has.
+    seat = re.search(r"seat: seatval (.*?), seatdrop (\d+), seatslow (on|off)", modes_line)
+    if seat is not None:
+        if seat.group(1) != "off":
+            for item in seat.group(1).split(", "):
+                axis, _, value = item.partition("=")
+                out.append(f"seatval {axis} {value}")
+        if int(seat.group(2)):
+            out.append(f"seatdrop {seat.group(2)}")
+        if seat.group(3) == "on":
+            out.append("seatslow on")
     return out
 
 

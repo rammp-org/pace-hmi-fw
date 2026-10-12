@@ -3,8 +3,8 @@
 Each step's grader is run on two kinds of hand-written trace: one built from the spec's
 pass criteria (it must grade PASS) and one that breaks one criterion (that check must fail,
 by name). The traces are written from the specs (hazard-c1-spec.md §6, hazard-c3-spec.md
-§7, hazard-c4-spec.md §8, hazard-c2-spec.md §9), never recorded from a board or from the
-graders. Also: the step plan (--hazard, retirements, names), run_bench's sole-sim proof and
+§7, hazard-c4-spec.md §8, hazard-c2-spec.md §9, hazard-seat-spec.md §6), never recorded from a
+board or from the graders. Also: the step plan (--hazard, retirements, names), run_bench's sole-sim proof and
 B2 wiring, boot_check's data-driven markers, the injector and the sim child's sample file.
 Stdlib only.
 """
@@ -12,6 +12,7 @@ Stdlib only.
 from __future__ import annotations
 
 import contextlib
+import math
 import pathlib
 import sys
 import tempfile
@@ -29,6 +30,7 @@ import scenario_c1 as c1
 import scenario_c2 as c2
 import scenario_c3 as c3
 import scenario_c4 as c4
+import scenario_seat as cs
 import sim_child
 
 DT = 0.035  # one ADC cycle, as measured (C4 §2.4)
@@ -88,6 +90,11 @@ class TB:
 
     def ev(self, t: float, ev: str, **kw: object) -> "TB":
         self.tr.events.append({"mono": t, "ev": ev, **kw})
+        return self
+
+    def pipe(self, fn: Callable[["TB"], object]) -> "TB":
+        """Applies a builder function, for chaining."""
+        fn(self)
         return self
 
     def dc(self, t: float, request: str, profile: str = "NORMAL",
@@ -1080,8 +1087,8 @@ def t_plan() -> None:
     expect("every step has a script, a grader and a title",
            all(len(hazard_steps.MODULES[hazard_steps.STEP_GROUP[s]].STEPS[s]) == 3
                for s in hazard_steps.ALL_STEPS), True)
-    expect("the specs' step count: C1 19, C3 11, C4 5, C2 19",
-           [len(hazard_steps.GROUPS[g]) for g in hazard_steps.GROUP_ORDER], [19, 11, 5, 19])
+    expect("the specs' step count: C1 19, C3 11, C4 5, C2 19, seat 17",
+           [len(hazard_steps.GROUPS[g]) for g in hazard_steps.GROUP_ORDER], [19, 11, 5, 19, 17])
 
 
 def t_run_bench_hazard() -> None:
@@ -1642,6 +1649,352 @@ def t_seat_targets_and_key_enter() -> None:
     expect("no step sends a bare KEY ENTER", any('"KEY ENTER"' in src for src in sources), False)
 
 
+# ---------------------------------------------------------------- the seat (B5s, scenario_seat)
+#
+# Traces written from hazard-seat-spec.md §6's pass criteria: the sim's model starts at its
+# mid values (elevation 125.0 mm, raw 1250), a step is 5.0 mm, MibStatus every 0.5 s.
+
+SEAT_MID = [22.5, 0.0, 125.0, 25.0]
+RAW_MID = [225, 0, 1250, 250]
+
+
+def seat_pubs(tb: TB, t0: float, t1: float, el: float | Callable[[float], float] = 125.0) -> TB:
+    k = 0
+    while (t := round(t0 + k * 0.5, 4)) < t1 - 1e-6:
+        e = el(t) if callable(el) else el
+        tb.ev(t, "mib_publish", state="IDLE", seq=k & 0xFF, targets=1,
+              seat=[SEAT_MID[0], SEAT_MID[1], e, SEAT_MID[3]])
+        k += 1
+    return tb
+
+
+def seat_polls(tb: TB, t0: float, t1: float, **fields: object) -> TB:
+    base = {"screen": "SeatScreen", "seat": list(RAW_MID), "seat_sent": 0, "seat_refused": 0,
+            "seat_reason": "NONE", "seat_publish_failures": 0}
+    return tb.polls(t0, t1, **{**base, **fields})
+
+
+def el_raw(raw: object) -> Callable[[float], list]:
+    """STATE's seat with elevation `raw` (a value or a function of t)."""
+    return lambda t: [RAW_MID[0], RAW_MID[1], raw(t) if callable(raw) else raw, RAW_MID[3]]
+
+
+def sc(tb: TB, t: float, target: float, result: str = "OK", axis: int = 2) -> TB:
+    return tb.ev(t, "seat_command", axis=axis, axis_name="M3", target=target, result=result)
+
+
+def steps_up(*at: float) -> Callable[[float], int]:
+    """A counter that goes up by one at each time in `at`."""
+    return lambda t: sum(1 for a in at if t >= a)
+
+
+def tr_s1(tb: TB) -> TB:
+    return (tb.mark("press", 100.0).pipe(lambda b: seat_pubs(b, 95.0, 103.0,
+                                                             lambda t: 125.0 if t < 100.3 else 130.0))
+            .pipe(lambda b: seat_polls(b, 99.0, 103.0, seat=el_raw(lambda t: 1250 if t < 100.6
+                                                                  else 1300),
+                                       seat_sent=steps_up(100.3)))
+            .pipe(lambda b: sc(b, 100.25, 130.0)))
+
+
+def t_seat_b1() -> None:
+    passes("B5s-1", cs.grade_b1, tr_s1(TB()).build())
+    fails("B5s-1 two steps", cs.grade_b1,
+          with_(tr_s1, lambda tb: tb.tr.events.__setitem__(
+              next(i for i, e in enumerate(tb.tr.events) if e["ev"] == "seat_command"),
+              {"mono": 100.25, "ev": "seat_command", "axis": 2, "target": 135.0,
+               "result": "OK"})), "target 130.0 mm")
+
+
+def hostile(tb: TB, tag: str, t: float, value: float, k_before: int = 0) -> TB:
+    """B5s-2's cycle for one value (and B5s-3's, k_before refusals earlier)."""
+    v, plus, pre, off, again = t, t + 1.1, t + 3.2, t + 5.3, t + 6.4
+    tb.mark(f"val{tag}", v).mark(f"plus{tag}", plus).mark(f"preset{tag}", pre)
+    tb.mark(f"off{tag}", off).mark(f"again{tag}", again)
+    seat_pubs(tb, v + 0.1, off, value)
+    seat_pubs(tb, off + 0.1, t + 8.4)
+    seat_polls(tb, v, t + 8.4,
+               seat=el_raw(lambda x: None if v + 0.4 <= x < off + 0.3 else 1250),
+               seat_refused=lambda x: (x >= plus + 0.2) + (x >= pre + 0.2) + 2 * k_before,
+               seat_reason=lambda x: "POSITION_UNKNOWN" if x >= plus + 0.2 else "NONE",
+               banner=lambda x: "REFUSED_SEAT_UNKNOWN" if plus + 0.2 <= x < off + 0.4
+               else "NONE")
+    return sc(tb, again + 0.3, 130.0)
+
+
+def t_seat_b2() -> None:
+    def b2(tb: TB) -> TB:
+        return hostile(tb, "", 100.0, float("nan"))
+    passes("B5s-2", cs.grade_b2, b2(TB()).build(), {"serial_text": "I (100) seat: ok"})
+    fails("B5s-2 sent while NaN", cs.grade_b2, with_(b2, lambda tb: sc(tb, 101.5, 130.0)),
+          "no SeatCommand", {"serial_text": ""})
+    fails("B5s-2 rebooted", cs.grade_b2, b2(TB()).build(), "no reboot",
+          {"serial_text": "ESP-ROM:esp32p4-eco2-20240710"})
+
+
+def t_seat_b3() -> None:
+    def b3(tb: TB) -> TB:
+        for i, (tag, value) in enumerate((("-inf", math.inf), ("-minf", -math.inf),
+                                          ("-1e30", 1e30), ("-m1e30", -1e30))):
+            hostile(tb, tag, 100.0 + 10.0 * i, value, i)
+        return tb
+    tags = {"values": ["-inf", "-minf", "-1e30", "-m1e30"], "serial_text": ""}
+    passes("B5s-3", cs.grade_b3, b3(TB()).build(), tags)
+    fails("B5s-3 a huge value shown", cs.grade_b3,
+          with_(b3, lambda tb: [s.__setitem__("seat", list(RAW_MID)) for t, s in tb.tr.states
+                                if 120.0 <= t < 125.0]), "null within 1.0 s", tags)
+
+
+def tr_s4(tb: TB, banner: str = "NONE") -> TB:
+    seat_pubs(tb, 95.0, 106.0, lambda t: 255.0 if t < 105.4 else 255.1)
+    seat_polls(tb, 99.0, 106.0, seat=el_raw(lambda t: 1250 if t < 100.3 else
+                                            (2550 if t < 105.6 else None)),
+               seat_refused=steps_up(101.4), seat_reason=lambda t: "AT_LIMIT" if t >= 101.4
+               else "NONE", seat_sent=steps_up(103.5),
+               banner=lambda t: banner if t >= 101.4 else "NONE")
+    return (tb.mark("band", 100.0).mark("plus", 101.2).mark("minus", 103.3).mark("past", 105.4)
+            .pipe(lambda b: sc(b, 103.5, 250.0)))
+
+
+def tr_s5(tb: TB, null_at: float = 102.0) -> TB:
+    seat_pubs(tb, 95.0, 100.0)
+    seat_pubs(tb, 105.05, 108.0)
+    seat_polls(tb, 99.0, 108.0, screen="SettingsScreen",
+               seat=lambda t: [None] * 4 if null_at <= t < 105.3 else list(RAW_MID))
+    return tb.mark("pause", 100.0).mark("press", 103.0).mark("resume", 105.0)
+
+
+def t_seat_b4() -> None:
+    passes("B5s-4", cs.grade_b4, tr_s4(TB()).build())
+    fails("B5s-4 a banner at the limit", cs.grade_b4, tr_s4(TB(), "REFUSED_SEAT_UNKNOWN").build(),
+          "no banner")
+
+
+def t_seat_b5() -> None:
+    passes("B5s-5", cs.grade_b5, tr_s5(TB()).build())
+    fails("B5s-5 unknown too early", cs.grade_b5, tr_s5(TB(), 101.2).build(), "1.5..2.9 s")
+    fails("B5s-5 a press went out", cs.grade_b5, with_(tr_s5, lambda tb: sc(tb, 103.2, 130.0)),
+          "no SeatCommand")
+
+
+def tr_s6(tb: TB, moves: bool = True) -> TB:
+    seat_pubs(tb, 95.0, 102.0, lambda t: 125.0 if t < 100.5 else 125.0 - 5.0 * (t - 100.0))
+    seat_pubs(tb, 107.0, 112.0, lambda t: max(0.0, 125.0 - 10.0 * (t - 100.0)))
+    seat_polls(tb, 99.0, 112.0,
+               screen=lambda t: "SeatScreen" if t < 104.4 else "LockedScreen",
+               banner=lambda t: "REFUSED_SEAT" if t >= 104.4 else "NONE",
+               phase="LOCKED")
+    k = 0
+    while (t := 100.5 + 0.5 * k) < 112.0:
+        if moves or not 102.0 <= t < 107.0:
+            tb.ev(t, "seat_move", axis=2, value=125.0 - 5.0 * (k + 1), target=0.0)
+        k += 1
+    return (tb.mark("press", 100.0).mark("pause", 102.0).mark("resume", 107.0)
+            .pipe(lambda b: sc(b, 100.2, 0.0)))
+
+
+def tr_s7(tb: TB, resend: bool = False) -> TB:
+    seat_pubs(tb, 95.0, 101.0)
+    seat_pubs(tb, 131.0, 148.0)
+    seat_polls(tb, 99.0, 101.0)
+    seat_polls(tb, 130.2, 148.0, seat=lambda t: [None] * 4 if t < 131.1 else list(RAW_MID))
+    sc(tb, 100.2, 0.0)
+    if resend:
+        sc(tb, 131.5, 0.0)
+    return (tb.mark("press", 100.0).mark("restart", 101.0).mark("back", 130.0)
+            .mark("plus", 145.0).pipe(lambda b: sc(b, 145.2, 130.0)))
+
+
+def t_seat_b6() -> None:
+    passes("B5s-6", cs.grade_b6, tr_s6(TB()).build())
+    fails("B5s-6 the MCB stopped in the pause", cs.grade_b6, tr_s6(TB(), False).build(),
+          "seat_move continues")
+
+
+def t_seat_b7() -> None:
+    serial = {"serial_text": "I (900) post: POST RESULT PASS 19/19 900"}
+    passes("B5s-7", cs.grade_b7, tr_s7(TB()).build(), serial)
+    fails("B5s-7 sent at the link's return", cs.grade_b7, tr_s7(TB(), True).build(),
+          "restart .. '+'", serial)
+
+
+def tr_s8(tb: TB, sent_in_e: bool = False) -> TB:
+    marks = {"key-e": 100.0, "key-z": 104.0, "key-ok": 108.0, "tile-e": 112.0,
+             "tile-z": 116.0, "tile-ok": 120.0}
+    for label, t in marks.items():
+        tb.mark(label, t)
+    seat_pubs(tb, 95.0, 123.0, lambda t: 125.0 if t < 108.5 else (130.0 if t < 120.5 else 135.0))
+    seat_polls(tb, 99.0, 123.0, screen="SettingsScreen",
+               seat_refused=steps_up(100.2, 104.2),
+               seat_reason=lambda t: "MCB_NOT_IDLE" if 100.2 <= t < 108.3 else
+               ("ALLOW" if t >= 108.3 else "NONE"),
+               seat_sent=steps_up(108.3, 120.3))
+    sc(tb, 108.3, 130.0)
+    sc(tb, 120.3, 135.0)
+    if sent_in_e:
+        sc(tb, 100.3, 130.0)
+    return tb
+
+
+def tr_s9(tb: TB, act_banner: bool = True) -> TB:
+    refused, sent = [], []
+    for tag, t in (("seat", 100.0), ("act", 110.0), ("skunk", 120.0)):
+        tb.mark(f"{tag}-1", t).mark(f"{tag}-centred", t + 2.2).mark(f"{tag}-2", t + 4.0)
+        refused.append(t + 0.2)
+        sent.append(t + 4.3)
+        sc(tb, t + 4.3, 130.0)
+    seat_pubs(tb, 95.0, 126.0)
+    seat_polls(tb, 99.0, 126.0, seat_refused=steps_up(*refused), seat_sent=steps_up(*sent),
+               seat_reason=lambda t: "POST_NOT_PASSED",
+               banner=lambda t: ("REFUSED_POST" if any(r <= t < r + 2.0 for r in refused)
+                                 and (act_banner or not 110.0 <= t < 113.0) else "NONE"))
+    return tb
+
+
+def t_seat_b8() -> None:
+    passes("B5s-8", cs.grade_b8, tr_s8(TB()).build())
+    fails("B5s-8 sent while ERROR", cs.grade_b8, tr_s8(TB(), True).build(), "no SeatCommand")
+
+
+def t_seat_b9() -> None:
+    passes("B5s-9", cs.grade_b9, tr_s9(TB()).build())
+    fails("B5s-9 no banner on the Actuators page", cs.grade_b9, tr_s9(TB(), False).build(),
+          "banner REFUSED_POST")
+
+
+def tr_s10(tb: TB, sent_in_fault: bool = False) -> TB:
+    seat_pubs(tb, 95.0, 108.0)
+    seat_pubs(tb, 140.0, 153.0)
+    stick = lambda t: {"state": "FAULT" if 100.3 <= t < 108.0 else "OK"}  # noqa: E731
+    seat_polls(tb, 99.0, 108.0, stick=stick, seat_refused=steps_up(105.2),
+               seat_reason=lambda t: "STICK_FAULT" if t >= 105.2 else "NONE",
+               banner=lambda t: "REFUSED_STICK" if 105.2 <= t < 108.0 else "NONE")
+    seat_polls(tb, 140.0, 153.0, stick=stick, seat_sent=steps_up(150.3))
+    sc(tb, 150.3, 130.0)
+    if sent_in_fault:
+        sc(tb, 105.3, 130.0)
+    return tb.mark("fault", 100.0).mark("plus-1", 105.0).mark("restart", 108.0).mark("plus-2",
+                                                                                    150.0)
+
+
+def t_seat_b10() -> None:
+    passes("B5s-10", cs.grade_b10, tr_s10(TB()).build())
+    fails("B5s-10 sent with the FAULT", cs.grade_b10, tr_s10(TB(), True).build(), "no SeatCommand")
+
+
+def t_seat_b11() -> None:
+
+    def b11(tb: TB) -> TB:
+        return tb.mark("key", 100.0).pipe(lambda b: sc(b, 100.2, 130.0))
+    passes("B5s-11", cs.grade_b11, b11(TB()).build())
+    fails("B5s-11 the key repeated", cs.grade_b11, with_(b11, lambda tb: sc(tb, 100.9, 135.0)),
+          "exactly 1")
+
+
+def t_seat_b12() -> None:
+    def b12(tb: TB) -> TB:
+        return tb.mark("press", 100.0).mark("release", 105.0).pipe(lambda b: sc(b, 105.2, 130.0))
+    passes("B5s-12", cs.grade_b12, b12(TB()).build())
+    fails("B5s-12 sent while held", cs.grade_b12, with_(b12, lambda tb: sc(tb, 101.0, 130.0)),
+          "during the 5 s hold")
+
+
+def tr_s13(tb: TB) -> TB:
+    seat_pubs(tb, 95.0, 108.0)
+    seat_polls(tb, 99.0, 108.0, seat_publish_failures=steps_up(100.3),
+               seat_reason=lambda t: "NOT_SENT" if 100.3 <= t < 105.7 else "NONE",
+               banner=lambda t: "REFUSED_SEAT_NOT_SENT" if 100.3 <= t < 103.3 else "NONE")
+    return (tb.mark("plus-1", 100.0).mark("plus-2", 105.5)
+            .pipe(lambda b: sc(b, 105.7, 130.0)))
+
+
+def tr_s14(tb: TB, moved: bool = False) -> TB:
+    seat_pubs(tb, 95.0, 106.0)
+    seat_polls(tb, 99.0, 106.0, seat=el_raw(lambda t: 1300 if moved and t > 101.0 else 1250))
+    return tb.mark("plus", 100.0).pipe(lambda b: sc(b, 100.2, 130.0, "DROPPED"))
+
+
+def t_seat_b13() -> None:
+    line = {"serial_text": "W (100) seat: SeatCommand ELEVATION not published (1 failed since start)"}
+    passes("B5s-13", cs.grade_b13, tr_s13(TB()).build(), line)
+    fails("B5s-13 re-sent", cs.grade_b13, with_(tr_s13, lambda tb: sc(tb, 101.0, 130.0)),
+          "no re-send", line)
+    fails("B5s-13 no log line", cs.grade_b13, tr_s13(TB()).build(), "not published",
+          {"serial_text": ""})
+
+
+def t_seat_b14() -> None:
+    passes("B5s-14", cs.grade_b14, tr_s14(TB()).build())
+    fails("B5s-14 the value moved", cs.grade_b14, tr_s14(TB(), True).build(), "value unchanged")
+
+
+def tr_s15(tb: TB, overshoot: bool = False) -> TB:
+    targets = [130.0, 135.0, 140.0]
+    times = [100.2, 100.9, 101.6]
+    el = lambda t: 125.0 + 5.0 * sum(1 for x in times if t > x + 0.05)  # noqa: E731
+    k = 0
+    while (t := round(95.0 + 0.05 * k, 3)) < 104.0:  # the sim answers each command at once
+        if any(abs(t - (x + 0.1)) < 1e-6 for x in times) or k % 10 == 0:
+            tb.ev(t, "mib_publish", state="IDLE", seq=k & 0xFF, targets=1,
+                  seat=[SEAT_MID[0], SEAT_MID[1], el(t), SEAT_MID[3]])
+        k += 1
+    for t, target in zip(times, targets):
+        sc(tb, t, target + (5.0 if overshoot and t > 101.0 else 0.0))
+    return tb.mark("taps", 100.0).mark("taps-end", 101.8)
+
+
+def tr_s16(tb: TB, opened: bool = False) -> TB:
+    seat_polls(tb, 99.0, 103.0, screen="LockedScreen",
+               banner=lambda t: "REFUSED_SEAT" if t >= 100.5 else "NONE",
+               menu_open=lambda t: 100.2 <= t < 102.5)
+    seat_polls(tb, 109.0, 113.0,
+               screen=lambda t: "SeatScreen" if opened and t >= 110.5 else "LockedScreen",
+               banner=lambda t: "REFUSED_STICK" if t >= 110.5 else "NONE",
+               menu_open=lambda t: t >= 110.2 and not opened, stick={"state": "FAULT"})
+    return tb.mark("row-e", 100.0).mark("row-fault", 110.0)
+
+
+def tr_s17(tb: TB, slow: bool = False) -> TB:
+    seat_pubs(tb, 95.0, 104.0, lambda t: 125.0 if t < 100.2 else 100.0)
+    seat_polls(tb, 99.0, 104.0, seat=el_raw(lambda t: 1000 if t >= (101.3 if slow else 100.6)
+                                            else 1250))
+    return tb.mark("val", 100.0)
+
+
+def t_seat_b15() -> None:
+    passes("B5s-15", cs.grade_b15, tr_s15(TB()).build())
+    fails("B5s-15 a step past the reported value", cs.grade_b15, tr_s15(TB(), True).build(),
+          "latest published elevation")
+
+
+def t_seat_b16() -> None:
+    passes("B5s-16", cs.grade_b16, tr_s16(TB()).build())
+    fails("B5s-16 the row opened the Seat screen", cs.grade_b16, tr_s16(TB(), True).build(),
+          "the menu stays")
+
+
+def t_seat_b17() -> None:
+    passes("B5s-17", cs.grade_b17, tr_s17(TB()).build())
+    fails("B5s-17 shown late", cs.grade_b17, tr_s17(TB(), True).build(), "within 1.0 s")
+
+
+def t_seat_tooling() -> None:
+    line = ("refuse ENABLE=False refuse DISABLE=False ignore next 0 DISABLE(s), drop next 0 "
+            "DISABLE(s), on HMI gone: keep; seat: seatval 2=nan, seatdrop 1, seatslow on")
+    expect("the seat modes carried to a fresh sim", hazard_rig.carry_over(line, "IDLE", False),
+           ["ongone keep", "ign 0", "drop 0", "ok", "seatval 2 nan", "seatdrop 1",
+            "seatslow on"])
+    off = line.replace("seatval 2=nan, seatdrop 1, seatslow on",
+                       "seatval off, seatdrop 0, seatslow off")
+    expect("defaults carry nothing more", hazard_rig.carry_over(off, "IDLE", False),
+           ["ongone keep", "ign 0", "drop 0", "ok"])
+    expect("the seat group: 17 steps, B5s-1..17, after c2",
+           (hazard_steps.GROUPS["seat"], hazard_steps.GROUP_ORDER[-1]),
+           ([f"B5s-{i}" for i in range(1, 18)], "seat"))
+    expect("B5s names in any case", hazard_steps.canonical("b5S-12"), "B5s-12")
+    expect("the Actuators '+' is 629 px into its row", cs.ROW_PLUS_DX, 629)
+
+
 CASES = [
     ("BENCH-015 the hazard steps: only behind --hazard or --steps; retired as the fixes land; "
      "B5pp names", t_plan),
@@ -1718,6 +2071,42 @@ CASES = [
     ("BENCH-051b only a lapse in a graded window voids a step: a lapse wholly in a drive set-up "
      "that succeeded is recorded; a failed set-up and a graded-window lapse stay NOT_RUN",
      t_lapses_in_graded_windows),
+    ("BENCH-058 B5s-1 grader: one press, one step: reported + 5.0 mm within 0.5 s, shown within 1.0 s",
+     t_seat_b1),
+    ("BENCH-059 B5s-2 grader: NaN: unknown, both presses refused POSITION_UNKNOWN, known again, then one",
+     t_seat_b2),
+    ("BENCH-060 B5s-3 grader: inf, -inf, 1e30, -1e30, each as B5s-2",
+     t_seat_b3),
+    ("BENCH-061 B5s-4 grader: the tolerance band: 255.0 known, '+' AT_LIMIT without a banner, '-' to 250.0; 255.1 unknown",
+     t_seat_b4),
+    ("BENCH-062 B5s-5 grader: link loss: unknown 1.5..2.9 s after p, nothing sent, known within 1.0 s of r",
+     t_seat_b5),
+    ("BENCH-063 B5s-6 grader: link loss mid-move: one command, Locked with the seat banner, the move goes on",
+     t_seat_b6),
+    ("BENCH-064 B5s-7 grader: HMI reset mid-move: nothing sent at the reboot, unknown until MibStatus, then one",
+     t_seat_b7),
+    ("BENCH-065 B5s-8 grader: MCB not IDLE: refused MCB_NOT_IDLE, the greyed tile never reaches the gate",
+     t_seat_b8),
+    ("BENCH-066 B5s-9 grader: POST not passed on the Seat screen, the Actuators page and Skunk Works",
+     t_seat_b9),
+    ("BENCH-067 B5s-10 grader: stick FAULT: refused REFUSED_STICK, one after the reboot",
+     t_seat_b10),
+    ("BENCH-068 B5s-11 grader: a stuck key: one step",
+     t_seat_b11),
+    ("BENCH-069 B5s-12 grader: a stuck touch: nothing while held, at most one at the release",
+     t_seat_b12),
+    ("BENCH-070 B5s-13 grader: a failed publish: counted, banner, logged, never re-sent",
+     t_seat_b13),
+    ("BENCH-071 B5s-14 grader: a lost command: one dropped, nothing re-sent, the value unchanged",
+     t_seat_b14),
+    ("BENCH-072 B5s-15 grader: rapid presses: every target within one step of the reported value",
+     t_seat_b15),
+    ("BENCH-073 B5s-16 grader: the menu's Seat Functions row: refused with the reason's banner, menu stays",
+     t_seat_b16),
+    ("BENCH-074 B5s-17 grader: the MCB moves the seat: shown within 1.0 s, nothing sent",
+     t_seat_b17),
+    ("BENCH-075 the seat tooling: seat modes carried over a reboot, the seat group's "
+     "steps and names, the Actuators '+' offset", t_seat_tooling),
 ]
 
 

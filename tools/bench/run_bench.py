@@ -471,7 +471,7 @@ def main() -> int:
                    help=f"comma-separated (default {','.join(DEFAULT_STEPS)}, plus the "
                         "--hazard steps)")
     p.add_argument("--hazard", default="",
-                   help="the hazard fixes in the image: c1,c3,c4,c2 or all. Adds their bench "
+                   help="the hazard fixes in the image: c1,c3,c4,c2,seat or all. Adds their bench "
                         "steps (hazard_steps.py) and their B2 markers; not run otherwise")
     p.add_argument("--no-save", action="store_true",
                    help="never save this build as last-good (drafts that must not stay on the board)")

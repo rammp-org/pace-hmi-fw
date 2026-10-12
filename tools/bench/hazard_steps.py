@@ -8,7 +8,7 @@ plan for a firmware image, and the runner run_bench.py and the command line use.
 
 Groups, in the order the fixes land (hazard-decisions.md §4): c1 (B5''-1..15,
 scenario_c1.py), c3 (B5''-16..22, scenario_c3.py), c4 (B5f..B5j, scenario_c4.py), c2
-(C2-1..16, scenario_c2.py). `--hazard` names the fixes the image has: it selects their
+(C2-1..16, scenario_c2.py), seat (B5s-1..17, scenario_seat.py; hazard-seat-spec.md §6). `--hazard` names the fixes the image has: it selects their
 steps and sets what the steps expect (C3 F6: with c3 every step's start reads
 STATE post = PASS instead of sending PERMIT POST pass). None of these steps is in
 run_bench.py's default list: they need firmware that has the fixes' bench verbs, so they run
@@ -41,17 +41,20 @@ import scenario_c1  # noqa: E402
 import scenario_c2  # noqa: E402
 import scenario_c3  # noqa: E402
 import scenario_c4  # noqa: E402
+import scenario_seat  # noqa: E402
 import ui_client  # noqa: E402
 
-GROUP_ORDER = ("c1", "c3", "c4", "c2")
-MODULES = {"c1": scenario_c1, "c3": scenario_c3, "c4": scenario_c4, "c2": scenario_c2}
+GROUP_ORDER = ("c1", "c3", "c4", "c2", "seat")
+MODULES = {"c1": scenario_c1, "c3": scenario_c3, "c4": scenario_c4, "c2": scenario_c2,
+           "seat": scenario_seat}
 GROUPS: dict[str, list[str]] = {g: list(MODULES[g].STEPS) for g in GROUP_ORDER}
 ALL_STEPS: list[str] = [s for g in GROUP_ORDER for s in GROUPS[g]]
 STEP_GROUP = {s: g for g in GROUP_ORDER for s in GROUPS[g]}
 # Retired by a later fix: (step, the fix that retires it, why).
 RETIRED_BY = {"B5''-15": ("c3", "C3 F5: replaced by B5''-18b"),
               "B5''-12": ("c2", "C2 E9: PERMIT STICK is gone, the monitor writes stick health")}
-NEEDS_SERIAL = scenario_c1.NEEDS_SERIAL | scenario_c3.NEEDS_SERIAL | scenario_c4.NEEDS_SERIAL
+NEEDS_SERIAL = (scenario_c1.NEEDS_SERIAL | scenario_c3.NEEDS_SERIAL | scenario_c4.NEEDS_SERIAL
+                | scenario_seat.NEEDS_SERIAL)
 # Steps whose injection is expected to lapse: a STALL blocks the remote-UI connection.
 ALLOW_LAPSE = {"B5i", "B5j", "C2-16"}
 # Steps whose graders read inside the drive set-up (C2-8: no DISABLE from the "enter" mark,
@@ -72,6 +75,7 @@ CLEANUP: dict[str, Callable[[hazard_rig.Rig], None]] = {
     **{s: _restart_after for s in scenario_c1.RESTART_AFTER},
     **scenario_c3.CLEANUP,
     **scenario_c2.CLEANUP,
+    **scenario_seat.CLEANUP,
 }
 SELFTEST_AFTER = scenario_c2.SELFTEST_AFTER
 NOT_RUNNABLE = scenario_c2.NOT_RUNNABLE
@@ -189,7 +193,7 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--ip")
-    p.add_argument("--hazard", default="", help="fixes in the image: c1,c3,c4,c2 or all")
+    p.add_argument("--hazard", default="", help="fixes in the image: c1,c3,c4,c2,seat or all")
     p.add_argument("--steps", default=None, help="comma-separated (default: the --hazard plan)")
     p.add_argument("--port", default=None, help="the board's serial port (serial steps)")
     p.add_argument("--out", type=pathlib.Path,
