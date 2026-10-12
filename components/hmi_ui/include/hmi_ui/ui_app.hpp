@@ -260,6 +260,7 @@ private:
   void seat_step(size_t row, int direction);
   hmi::seat::SeatInputs seat_inputs(size_t row);
   void seat_refuse(hmi::seat::SeatReason reason, size_t row);
+  void seat_reason_banner(hmi::seat::SeatReason reason, size_t row);
   void seat_banner(int32_t which);
   void seat_log_not_sent(size_t row);
   [[nodiscard]] bool seat_origin() const { return seat_origin_; }
@@ -277,7 +278,8 @@ private:
   static void refused_mirror_observer(lv_observer_t *observer, lv_subject_t *subject);
 
   // Navigation and the screens built on demand.
-  void refuse_seat();
+  bool seat_row_refused();
+  [[nodiscard]] uint32_t key_presses() const { return key_presses_; }
   bool nav_drive_row();
   void nav_drive_key();
   void open_dest(NavDest dest);
@@ -348,6 +350,10 @@ private:
   uint8_t seat_unknown_row_ = 0;
   int64_t seat_fail_logged_us_ = 0;
   espp::Logger *seat_log_ = nullptr;
+  // The keypad's direction presses (keypad_read, UI task): SettingsView's seat rows step once
+  // per press (REQ-UI-31).
+  uint32_t key_last_ = 0;
+  uint32_t key_presses_ = 0;
 
   SharedSubjects shared_{
       .locked = &locked_,
@@ -648,6 +654,7 @@ private:
       .actuators_page = ACTUATORS_PAGE,
       .seat_step = hmi::ui::bind<&UiApp::seat_step>(this),
       .refuse = config_.cues->refused,
+      .key_presses = hmi::ui::bind<&UiApp::key_presses>(this),
   }};
   // SkunkWorksScreen: a grid of one-press actions
   //
@@ -762,7 +769,7 @@ private:
       .ready_observer = action_ready_observer,
       .ready_data = this,
       .mcb_ready = hmi::ui::bind<&UiApp::mcb_ready>(this),
-      .refuse_seat = hmi::ui::bind<&UiApp::refuse_seat>(this),
+      .seat_row = hmi::ui::bind<&UiApp::seat_row_refused>(this),
       .drive_row = hmi::ui::bind<&UiApp::nav_drive_row>(this),
       .drive_key = hmi::ui::bind<&UiApp::nav_drive_key>(this),
       .open_dest = hmi::ui::bind<&UiApp::open_dest>(this),

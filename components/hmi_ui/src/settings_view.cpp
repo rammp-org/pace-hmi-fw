@@ -216,17 +216,37 @@ void hmi::ui::SettingsView::step(const Row *row, int direction) {
                                             row->spec.max_value));
 }
 
+// An actuator row steps once per key press (REQ-UI-31, Q8): LVGL's repeats of a held key are
+// ignored until it is released, so a stuck key is one step, not a walk to the limit. The keypad
+// counts the presses (UiApp::keypad_read); a repeat comes with the count it stepped on.
+bool hmi::ui::SettingsView::seat_key_repeat() {
+  if (lv_subject_get_int(&page_) != config_.actuators_page) {
+    return false;
+  }
+  const uint32_t press = config_.key_presses();
+  if (press == seat_key_press_) {
+    return true;
+  }
+  seat_key_press_ = press;
+  return false;
+}
+
 // Up/down walk the rows, left/right step the focused one. Holding the stick
-// repeats: lv_indev raises LV_EVENT_KEY again every long_press_repeat_time.
+// repeats: lv_indev raises LV_EVENT_KEY again every long_press_repeat_time. Not on the actuators
+// page: there a held key steps once (seat_key_repeat).
 void hmi::ui::SettingsView::key_cb(lv_event_t *e) {
   const auto *row = static_cast<const Row *>(lv_event_get_user_data(e));
   SettingsView *view = row->view;
   switch (lv_event_get_key(e)) {
   case LV_KEY_LEFT:
-    view->step(row, -1);
+    if (!view->seat_key_repeat()) {
+      view->step(row, -1);
+    }
     return;
   case LV_KEY_RIGHT:
-    view->step(row, +1);
+    if (!view->seat_key_repeat()) {
+      view->step(row, +1);
+    }
     return;
   case LV_KEY_UP:
     view->focus(view->cursor_ - 1);

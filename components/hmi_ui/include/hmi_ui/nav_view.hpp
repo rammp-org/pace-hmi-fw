@@ -54,9 +54,11 @@ public:
     void (*keep_overlay_fill)(lv_obj_t *obj); ///< the overdraw exemption
     /// Greys a gated row while the MCB could not act on it (UiApp's action_ready_observer).
     lv_observer_cb_t ready_observer;
-    void *ready_data;       ///< the observer's user data
-    Fn<bool()> mcb_ready;   ///< link CONNECTED and the MIB IDLE or ENABLED
-    Fn<void()> refuse_seat; ///< Seat Functions refused: the refusal feedback and banner
+    void *ready_data;     ///< the observer's user data
+    Fn<bool()> mcb_ready; ///< link CONNECTED and the MIB IDLE or ENABLED
+    /// The Seat Functions row: true when the seat gate's conditions 1-4 refused it (it gave
+    /// the refusal feedback and raised the reason's banner; UiApp, REQ-UI-32).
+    Fn<bool()> seat_row;
     /// The DRIVE row: the drive session's MENU_ROW_DRIVE; true when it refused the pick.
     Fn<bool()> drive_row;
     Fn<void()> drive_key; ///< the burger key on Drive, unlocked: MENU_KEY_DRIVE

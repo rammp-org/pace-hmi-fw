@@ -40,6 +40,9 @@ public:
     int32_t actuators_page;   ///< the page number of the actuator rows
     Fn<void(size_t row, int direction)> seat_step; ///< UiApp's: one actuator step, a request
     void (*refuse)();                              ///< the refusal cue
+    /// The keypad's count of direction presses (UiApp::keypad_read): an actuator row steps on
+    /// a new press only, never on a held key's repeat (REQ-UI-31, hazard-seat-spec.md §2.6).
+    Fn<uint32_t()> key_presses;
   };
 
   constexpr explicit SettingsView(const Config &config) noexcept
@@ -108,6 +111,7 @@ private:
   void press_flash_end();
   void press_flash(lv_obj_t *button);
   void step(const Row *row, int direction);
+  bool seat_key_repeat();
 
   Config config_;
   lv_subject_t page_{};
@@ -120,6 +124,7 @@ private:
   /// The rejection flash: which actuator was refused (low byte); REJECT_NONE = nothing.
   lv_subject_t reject_subject_{};
   lv_timer_t *reject_timer_ = nullptr;
+  uint32_t seat_key_press_ = 0; ///< the key press an actuator row last stepped on
 };
 
 } // namespace hmi::ui

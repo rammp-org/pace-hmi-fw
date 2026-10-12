@@ -151,6 +151,7 @@ void UiApp::keypad_read(bool *up, bool *down, bool *left, bool *right, bool *ent
   // has finished. This read runs on the LVGL task, under its lock.
   if (config_.selftest->overlay_visible()) {
     *left = *right = *up = *down = *enter = *escape = false;
+    key_last_ = 0;
     if (select_key.exchange(false)) {
       config_.selftest->dismiss();
     }
@@ -161,6 +162,12 @@ void UiApp::keypad_read(bool *up, bool *down, bool *left, bool *right, bool *ent
   if (key == 0) {
     key = flick; // pressed for this one read, released on the next
   }
+  // A new press of a direction (REQ-UI-31): what tells an actuator row a held key's repeat
+  // from the next press (SettingsView::seat_key_repeat).
+  if (key != 0 && key != key_last_) {
+    ++key_presses_;
+  }
+  key_last_ = key;
   *left = key == LV_KEY_LEFT;
   *right = key == LV_KEY_RIGHT;
   *up = key == LV_KEY_UP;
@@ -292,9 +299,14 @@ hmi::seat::SeatInputs UiApp::seat_inputs(size_t row) {
 // A refused press (hazard-seat-spec.md §2.8): counted, felt, and named on the reason's banner.
 // AT_LIMIT is feedback only, as the Actuators page always did at a limit.
 void UiApp::seat_refuse(hmi::seat::SeatReason reason, size_t row) {
-  using hmi::seat::SeatReason;
   seat_outcome(reason);
   config_.cues->refused();
+  seat_reason_banner(reason, row);
+}
+
+// The banner of each refusal reason (hazard-seat-spec.md §2.8).
+void UiApp::seat_reason_banner(hmi::seat::SeatReason reason, size_t row) {
+  using hmi::seat::SeatReason;
   switch (reason) {
   case SeatReason::LINK_DOWN:
   case SeatReason::MCB_NOT_IDLE:
@@ -437,10 +449,18 @@ void UiApp::diag_freq_observer(lv_observer_t *observer, lv_subject_t *) {
 
 // --- Navigation and the screens built on demand -----------------------------------------------
 
-// Seat Functions refused where it was picked: the feedback, and the banner underneath.
-void UiApp::refuse_seat() {
+// The menu's Seat Functions row (REQ-UI-32, Q10): refused where it was picked when the seat
+// gate's conditions 1-4 fail (link, MCB state, POST, stick; not the value, not the limit), with
+// the refusal feedback and that reason's banner underneath; the menu stays. Not a seat press:
+// the bench's seat counters do not count it.
+bool UiApp::seat_row_refused() {
+  const hmi::seat::SeatReason reason = hmi::seat::ready(seat_inputs(0));
+  if (reason == hmi::seat::SeatReason::ALLOW) {
+    return false;
+  }
   config_.cues->refused();
-  DrivePort<DriveUi>{&drive_ui_}.show_refused(REFUSED_SEAT, DRIVE_REFUSED_SHOW_MS);
+  seat_reason_banner(reason, 0);
+  return true;
 }
 
 bool UiApp::nav_drive_row() {

@@ -417,12 +417,11 @@ void hmi::ui::NavView::row_picked(lv_event_t *e, NavDest dest) {
     }
     return;
   }
-  // Seat Functions needs the MCB, as the old seat page did: refused on the
-  // spot rather than opening a screen whose every button would be refused in
-  // turn. The menu stays up, the row stays greyed, and the reason is waiting on
-  // the banner underneath once it closes.
-  if (dest == NAV_SEAT && !config_.mcb_ready()) {
-    config_.refuse_seat();
+  // Seat Functions asks the seat gate's conditions 1-4 (link, MCB IDLE, POST, stick;
+  // REQ-UI-32): refused on the spot rather than opening a screen whose every button would be
+  // refused in turn. The menu stays up, and the reason is waiting on the banner underneath
+  // once it closes.
+  if (dest == NAV_SEAT && config_.seat_row()) {
     return;
   }
   // Drive the same way, while there is a drive to ask for: driving already,
