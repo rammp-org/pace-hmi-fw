@@ -72,7 +72,10 @@ import mcb_sim_logic as sim_logic  # noqa: E402  (path setup must run first)
 if __name__ == "__main__" and sys.argv[1:] == ["selftest"]:
     # Before the imports below: rtps_drive_game needs tkinter, which CI's python3
     # (and WSL's) does not have, and the decision logic's cases need none of it.
-    sys.exit(sim_logic.selftest())
+    import rtps_host as _host  # stdlib only
+    sys.exit(sim_logic.run_cases("scripts/rtps_mcb_sim.py", sim_logic.CASES + [
+        ("SIM-015 the sim's SEDP rounds go from their own thread: the loop that receives and "
+         "stamps XYTwist and DriveCommand never sleeps in them", _host.sedp_off_loop_case)]))
 
 import rammp_rtps as spec  # noqa: E402
 import rtps_host  # noqa: E402
@@ -98,6 +101,10 @@ SPEED_DEADZONE = 0.15
 
 class SystemStatePublisher(rtps_host.RtpsHostHarness):
     """Plays the MCB: publishes SystemState, and answers the joystick's commands."""
+
+    # It stamps XYTwist and DriveCommand as its receive loop decodes them: no SEDP round may
+    # hold that loop (rtps_host.SEDP_OFF_LOOP; cand3-1485932's 0.19-0.22 s bursts).
+    SEDP_OFF_LOOP = True
 
     def __init__(self, args: argparse.Namespace,
                  car: "rtps_drive_game.CarModel | None" = None) -> None:
