@@ -28,7 +28,10 @@ IP = "192.168.137.218"
 
 
 class FakeBoard:
-    def __init__(self, comes_back: bool = True, ip_after_reset: str = IP):
+    def __init__(self, comes_back: bool = True, ip_after_reset: str = IP,
+                 settings: str | None = None, changes: tuple[str, ...] = ()):
+        self.settings = settings     # the saved settings line its boots print (None: none)
+        self.changes = changes       # app steps that change a saved setting (brightness -10)
         self.up = True
         self.ip = IP
         self.comes_back = comes_back
@@ -47,6 +50,7 @@ class FakeBoard:
         if not self.up and self.comes_back:
             self.ip = self.ip_after_reset
             lines = ["ESP-ROM:esp32p4", "Calling app_main()",
+                     *([f"[settings/I][7.872]: {self.settings}"] if self.settings else []),
                      f"[rtps_comms/I][27.158]: Got IP {self.ip} (gateway 192.168.137.2)",
                      "after Got IP"]
             for line in lines:
@@ -64,6 +68,8 @@ class FakeBoard:
     def app_step(self, name: str, ip: str) -> dict:
         ok = self.up and ip == self.ip
         self.log.append(f"{name}:{'up' if ok else 'BOOTING'}")
+        if name in self.changes and self.settings:
+            self.settings = self.settings.replace("brightness 80", "brightness 70")
         return {"verdict": "PASS" if ok else "FAIL",
                 "problems": [] if ok else [f"{name} ran while the board was not up at {ip}"]}
 
@@ -97,8 +103,11 @@ def fake_bench(fake: FakeBoard, backup_made: bool = False):
         patch(board, "backup_storage", backup)
         patch(run_bench.Run, "hotspot", lambda self, action: (0, "STATE On"))
         patch(run_bench.Run, "rtps_sweep", lambda self: [fake.ip])
-        patch(run_bench.boot_check, "analyse",
-              lambda text, baseline, **k: {"verdict": "PASS", "problems": [], "ip": fake.ip})
+        def analyse(text, baseline, **k):
+            hits = board_settings(text)
+            return {"verdict": "PASS", "problems": [], "ip": fake.ip,
+                    "markers": [{"name": "settings_loaded", "value": h} for h in hits[:1]]}
+        patch(run_bench.boot_check, "analyse", analyse)
         patch(run_bench.ui_client, "ping", fake.ping)
         patch(run_bench.compare_selftest, "run_selftest",
               lambda ip, out, tree: (fake.app_step("B3", ip)["verdict"], {}))
@@ -112,6 +121,10 @@ def fake_bench(fake: FakeBoard, backup_made: bool = False):
         finally:
             for obj, name, value in reversed(saved):
                 setattr(obj, name, value)
+
+
+def board_settings(text: str) -> list[str]:
+    return [v for _, v in run_bench.boot_check.find(text.splitlines(), run_bench.SETTINGS_RE)]
 
 
 def bench(fake: FakeBoard, steps: str, ip: str | None = IP,
@@ -308,6 +321,29 @@ def t_boot_check_on_ethernet() -> None:
     finally:
         common.LINK = saved
 
+SETTINGS = ("loaded: brightness 80, theme 0, menu_slide 0, flip 0, stick_sensitivity 9, "
+            "drive_speed 10, stick_invert_x 0, stick_invert_y 0, stick_swap 0, sounds 1, network 1")
+
+
+def t_settings_guard() -> None:
+    summary, log = bench(FakeBoard(settings=SETTINGS), "B0,B2,B5", ip=None)
+    expect("unchanged: SETTINGS PASS after a closing reset", (
+        verdicts(summary), log[-2:], run_bench_verdict(summary)),
+        ({"B0": "PASS", "B2": "PASS", "B5": "PASS", "SETTINGS": "PASS"},
+         ["reset:B2", "capture:reset=True"], "PASS"))
+    summary, log = bench(FakeBoard(settings=SETTINGS, changes=("B5",)), "B0,B2,B5", ip=None)
+    g = summary["steps"]["SETTINGS"]
+    expect("changed by a step: a rig fault, INVALID, both lines in the record",
+           (g["verdict"], g["reason"].startswith("rig fault"), "brightness 80" in g["before"],
+            "brightness 70" in g["after"], run_bench_verdict(summary)),
+           ("INVALID", True, True, True, "INVALID"))
+    summary, log = bench(FakeBoard(settings=SETTINGS), "B0,B2", ip=None)
+    expect("nothing ran after B2: no closing reset", ("SETTINGS" in summary["steps"],
+                                                      log.count("capture:reset=True")), (False, 1))
+    expect("no line after the reset: NOT_RUN", run_bench.settings_verdict(SETTINGS, None)[0],
+           "NOT_RUN")
+
+
 CASES = [
     ("BENCH-001 after B0's reset, B5 waits for the boot (Got IP) and PING before it runs",
      t_b0_then_b5_waits),
@@ -333,6 +369,8 @@ CASES = [
      "anything else refused", t_net_spec),
     ("BENCH-014 on Ethernet B2 expects 'Network: Ethernet' and network 0, nothing else",
      t_boot_check_on_ethernet),
+    ("BENCH-071 SETTINGS: a run whose steps change a saved setting ends INVALID (rig fault) "
+     "after a closing reset; unchanged is PASS; no step after B2, no reset", t_settings_guard),
 ]
 
 

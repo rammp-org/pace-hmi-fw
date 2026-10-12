@@ -54,6 +54,12 @@ B5''-1..22, B5f..B5j, C2-1..16: the hazard fixes' bench steps (hazard_steps.py; 
     the runner proves the sim is the only RTPS participant (no stray peer process, an RTPS
     sweep finds only the board); if not, every hazard step is INVALID and nothing is
     injected. Their serial steps use the port B0 found.
+SETTINGS (post-check): when B2 PASSed with a settings line and any step ran after it, the
+    runner resets the board once more at the end and reads the settings line of that boot
+    (SETTINGS_GUARD_S). A line that differs from B2's is INVALID, a rig fault: a step left a
+    saved setting changed (C2-11's key sweep stepped Display & sound's brightness 80 -> 70
+    over the 2026-10-11 runs, and every later B2 failed on it). No line: NOT_RUN. Saved as
+    boot-settings-guard.log.
 Last-good (with --flash, without --no-save): saved when every step recorded is
     PASS, or RECORD with a non-empty `checks` list that all passed and no
     `problems` (last_good_decision). SKIP, NOT_RUN, FAIL, INVALID, or a RECORD
@@ -100,6 +106,8 @@ BOOT_CAPTURE_S = 90.0
 NO_IP_AFTER_JOIN_S = 60.0
 PING_WITHIN_S = 30.0
 GOT_IP_RE = re.compile(r"Got IP (\d+\.\d+\.\d+\.\d+)")
+SETTINGS_GUARD_S = 30.0
+SETTINGS_RE = dict((name, regex) for name, regex, _ in boot_check.MARKERS)["settings_loaded"]
 # Steps that need the app running on the board (and its IP).
 APP_STEPS = ("B3", "B4", "B4b", "B5", *SIM_MODE_STEPS, *HAZARD_STEPS)
 
@@ -292,6 +300,20 @@ class Run:
             return self.record("B2", "FAIL", notes=notes, **report)
         return self.record("B2", "INVALID", notes=notes, **report)
 
+    def settings_after_run(self) -> tuple[str | None, list[str]]:
+        """Reset once more and read the settings line of that boot: (line or None, notes)."""
+        found: dict = {}
+
+        def on_line(cap: board.Capture, line: str) -> bool:
+            hit = boot_check.find([line], SETTINGS_RE)
+            if hit:
+                found["line"] = hit[0][1]
+            return bool(hit)
+
+        cap = board.capture(self.port, SETTINGS_GUARD_S, reset=True, on_line=on_line)
+        (self.dir / "boot-settings-guard.log").write_text(cap.text(), encoding="utf-8")
+        return found.get("line"), cap.notes
+
     def last_good(self) -> str | None:
         dirs = [d for d in common.GOOD_DIR.glob("*")
                 if d.is_dir() and not d.name.endswith(".tmp") and d.name != self.a.label]
@@ -420,6 +442,45 @@ def plan_steps(steps_arg: str | None,
     return sequence, steps
 
 
+def settings_reference(summary: dict, sequence: list[str]) -> str | None:
+    """B2's settings line, when the settings post-check applies: B2 PASSed with one and a
+    step after B2 ran (any verdict but SKIP). None otherwise."""
+    steps = summary["steps"]
+    b2 = steps.get("B2", {})
+    if b2.get("verdict") != "PASS":
+        return None
+    line = next((m.get("value") for m in b2.get("markers") or []
+                 if m.get("name") == "settings_loaded"), None)
+    after = sequence[sequence.index("B2") + 1:]
+    ran = any(steps.get(step, {}).get("verdict", "SKIP") != "SKIP" for step in after)
+    return line if line and ran else None
+
+
+def settings_verdict(before: str, after: str | None) -> tuple[str, str]:
+    """(verdict, reason) of the settings post-check."""
+    if after is None:
+        return "NOT_RUN", (f"no settings line within {SETTINGS_GUARD_S:.0f} s of the closing "
+                           "reset")
+    if after != before:
+        return "INVALID", (f"rig fault: the board's saved settings changed during the run: "
+                           f"B2 '{before}', now '{after}'. A step left a setting changed; "
+                           "restore it on the board (by touch) before the next run")
+    return "PASS", "the settings line is B2's"
+
+
+def settings_guard(run: Run, sequence: list[str]) -> None:
+    before = settings_reference(run.summary, sequence)
+    if before is None:
+        return
+    try:
+        after, notes = run.settings_after_run()
+    except Exception as e:  # noqa: BLE001 - the port, not the firmware
+        run.record("SETTINGS", "NOT_RUN", reason=f"runner error: {e}")
+        return
+    verdict, reason = settings_verdict(before, after)
+    run.record("SETTINGS", verdict, reason=reason, before=before, after=after, notes=notes)
+
+
 def run_steps(run: Run, sequence: list[str], steps: list[str]) -> None:
     """Run the asked-for steps in sequence order; record SKIP/NOT_RUN for the rest."""
     order = {"B0": run.b0, "B1": run.b1, "B2": run.b2, "B3": run.b3, "B4": run.b4,
@@ -460,6 +521,7 @@ def run_steps(run: Run, sequence: list[str], steps: list[str]) -> None:
             stop_reason = "B0 preflight INVALID"
         if step == "B1" and verdict in ("FAIL", "INVALID"):
             stop_reason = f"B1 {verdict}"
+    settings_guard(run, sequence)
 
 
 def main() -> int:
