@@ -79,6 +79,44 @@ def python() -> str:
         return VENV_PY
 
 
+# The bench times everything with time.monotonic(): the sim stamps each XYTwist with it, the
+# runner its marks, STATE polls and STICK refreshes. Python 3.13 reads QueryPerformanceCounter
+# for it; earlier Pythons on Windows (ESP-IDF's 3.11 and its venv) read GetTickCount64, which
+# moves in 15.6 ms steps: a 2026-10-11 candidate run on it measured PING round trips of 0 and
+# stamped samples to the tick. 1 ms is the most the graders' bands can take.
+CLOCK_RESOLUTION_MAX_S = 0.001
+
+
+def clock_resolution(python_exe: str | None = None) -> float:
+    """time.monotonic()'s resolution in this interpreter, or in `python_exe` (a child's)."""
+    import time
+    if python_exe is None or python_exe == sys.executable:
+        return time.get_clock_info("monotonic").resolution
+    out = subprocess.run([python_exe, "-I", "-c", "import time; print(time.get_clock_info("
+                          "'monotonic').resolution)"], capture_output=True, text=True,
+                         timeout=30)
+    return float(out.stdout.strip())
+
+
+def clock_check() -> tuple[bool, str]:
+    """(ok, detail): the runner and the child scripts (the sim) both have a fine clock."""
+    parts, ok = [], True
+    for who, exe in (("runner", sys.executable), ("children", python())):
+        try:
+            res = clock_resolution(exe)
+        except (OSError, ValueError, subprocess.SubprocessError) as e:
+            ok = False
+            parts.append(f"{who} {exe}: could not read its clock ({e})")
+            continue
+        fine = res <= CLOCK_RESOLUTION_MAX_S
+        ok = ok and fine
+        parts.append(f"{who} {exe}: monotonic resolution {res * 1000:.4g} ms")
+    if not ok:
+        parts.append(f"needs <= {CLOCK_RESOLUTION_MAX_S * 1000:.0f} ms: run the bench with "
+                     "Python 3.13+ (with pyserial), not ESP-IDF's python")
+    return ok, "; ".join(parts)
+
+
 def child_env(**extra: str) -> dict:
     """Environment for child processes. No .pyc files: the scripts we run may sit
     in a worktree we must not write to."""

@@ -1715,6 +1715,54 @@ def t_c2_11_restores_brightness() -> None:
                                                           r.log.count("+")), ("bench", 1, 0))
 
 
+def t_once_hold_and_clock() -> None:
+    """A one-cycle message stands two ADC cycles: no refresh, inline or periodic, replaces it
+    before the board's next cycle has taken it (C2-4b/c, cand3-1485932). The bench refuses a
+    15.6 ms clock; the one-way delay uses perf_counter."""
+    sent: list[tuple] = []
+    inj = hazard_rig.Injector(lambda h, v, tw, mask, seq: sent.append((time.monotonic(), mask)))
+    try:
+        inj.set(1507, 1510, 1477)
+        time.sleep(0.15)
+        t = inj.set(1507, 1510, 1477, mask=0x81, once=True)
+        held = inj.due(hazard_rig.PRE_REFRESH_S)
+        time.sleep(0.03)
+        held_later = inj.due(hazard_rig.PRE_REFRESH_S)
+        time.sleep(hazard_rig.ONCE_HOLD_S)
+        after = inj.due(0.0)  # the periodic refresh may have gone meanwhile
+        time.sleep(0.15)
+    finally:
+        inj.stop()
+    expect("no pre-command refresh inside the hold (at once, 30 ms on)", (held, held_later),
+           (None, None))
+    expect("the standing target again after the hold", after, (1507, 1510, 1477, 0))
+    nxt = [r for r in sent if r[0] > t and r[1] == 0]
+    expect("the next refresh no sooner than the hold", bool(nxt) and nxt[0][0] - t
+           >= hazard_rig.ONCE_HOLD_S - 0.005, True)
+    expect("two ADC cycles at least", hazard_rig.ONCE_HOLD_S >= 2 * 0.035, True)
+
+    saved = common.clock_resolution
+    try:
+        common.clock_resolution = lambda exe=None: 0.015625
+        ok, detail = common.clock_check()
+        expect("a 15.6 ms clock is refused, and says what to run", (ok, "Python 3.13" in detail),
+               (False, True))
+        common.clock_resolution = lambda exe=None: 1e-07
+        expect("a QPC clock passes", common.clock_check()[0], True)
+    finally:
+        common.clock_resolution = saved
+
+    class Hmi:
+        def command(self, text: str) -> str:
+            time.sleep(0.004)
+            return "OK"
+
+    class FakeRig:
+        hmi = Hmi()
+    w = c4.one_way_s(FakeRig())
+    expect("one-way from 4 ms round trips (not 0)", 0.0015 <= w <= 0.02, True)
+
+
 CASES = [
     ("BENCH-015 the hazard steps: only behind --hazard or --steps; retired as the fixes land; "
      "B5pp names", t_plan),
@@ -1788,6 +1836,9 @@ CASES = [
      "first (a wrong one is NOT_RUN); KEY ENTER is always released", t_seat_targets_and_key_enter),
     ("BENCH-070 C2-11's clean-up sets the approved brightness back by touch ('-' to the "
      "floor, '+' up to it); a tap off the Brightness row is NOT_RUN", t_c2_11_restores_brightness),
+    ("BENCH-072 a one-cycle STICK stands 80 ms (no refresh replaces it unseen); a 15.6 ms "
+     "monotonic clock is refused; the one-way delay is never 0 on a slow clock",
+     t_once_hold_and_clock),
     ("BENCH-051 injection lapses come from the STICK send times in the remote-UI log, not "
      "the injector's own clock; a pause is not a lapse", t_stick_lapses),
     ("BENCH-051b only a lapse in a graded window voids a step: a lapse wholly in a drive set-up "

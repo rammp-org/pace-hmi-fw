@@ -83,6 +83,11 @@ RESTART_ACTION = "RESTART_HMI"
 # A command never makes the stick wait: a refresh goes first once the last is this old (a
 # WiFi stall of 0.27 + 0.20 s on two commands in a row lapsed it on 2026-10-09 at 50 ms).
 PRE_REFRESH_S = 0.02
+# A one-cycle message (fail_mask bit 7) acts on the first ADC cycle after the board notes it;
+# a refresh noted before that cycle replaces it unseen (2026-10-11: C2-4b/c lost 1-2 of their
+# bad cycles to a pre-command refresh 6-28 ms after a STICK answered slowly). Nothing replaces
+# it for two ADC cycles (35 ms each) after its send returns; the injection lasts 300 ms.
+ONCE_HOLD_S = 0.080
 
 
 def skunk_actions(tree: pathlib.Path) -> list[str]:
@@ -186,6 +191,7 @@ class Injector:
         self._once: tuple[int, int, int, int] | None = None
         self._seq = itertools.count(1)  # thread-safe enough: next() is atomic in CPython
         self._last: float | None = None
+        self._hold_until = 0.0  # time.monotonic(): no refresh before (a one-cycle message)
         # (sent, gap) over INJECT_LAPSE_S between STICK sends, from the remote-UI log
         # (stick_lapses, at collect); pauses (wall clock) end a run of refreshes on purpose.
         self.lapses: list[tuple[str, float]] = []
@@ -200,7 +206,8 @@ class Injector:
     def due(self, age: float) -> tuple[int, int, int, int] | None:
         """The standing target when its last refresh is at least `age` s old, else None."""
         target, last = self._target, self._last
-        if target is None or last is None or time.monotonic() - last < age:
+        now = time.monotonic()
+        if target is None or last is None or now - last < age or now < self._hold_until:
             return None
         return target
 
@@ -225,9 +232,11 @@ class Injector:
                 if self._target is None:
                     raise NotRun("bench", "a one-cycle message needs a standing target")
                 t = self._push(msg)
+                self._hold_until = time.monotonic() + ONCE_HOLD_S
             else:
                 self._target = msg
                 t = self._push(msg)
+                self._hold_until = 0.0
             self._wake.set()
             return t
 
@@ -245,7 +254,8 @@ class Injector:
             with self._lock:
                 if self._target is None or self._stop.is_set():
                     continue
-                if self._last is not None and time.monotonic() - self._last < INJECT_PERIOD_S * 0.8:
+                now = time.monotonic()
+                if (self._last is not None and now - self._last < INJECT_PERIOD_S * 0.8)                         or now < self._hold_until:
                     continue
                 try:
                     self._push(self._target)
@@ -392,6 +402,9 @@ class Rig:
 
     def __enter__(self) -> "Rig":
         self.out.mkdir(parents=True, exist_ok=True)
+        clock_ok, clock = common.clock_check()
+        if not clock_ok:
+            raise NotRun("bench", f"clock: {clock}")
         if self.proof is None:
             ok, detail = sole_sim_proof(self.ip, self._sweep)
             if not ok:

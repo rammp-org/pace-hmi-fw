@@ -61,12 +61,17 @@ def drive_y_half(rig: Rig, label: str) -> None:
     time.sleep(1.05)  # y > 0.5 for 1 s
 
 
+ONE_WAY_PINGS = 7
+
+
 def one_way_s(rig: Rig) -> float:
+    """Half the median remote-UI PING round trip (perf_counter: whatever the interpreter's
+    monotonic clock; 3 PINGs on a 15.6 ms clock gave a median of 0 on 2026-10-11)."""
     rtts = []
-    for _ in range(3):
-        t = time.monotonic()
+    for _ in range(ONE_WAY_PINGS):
+        t = time.perf_counter()
         rig.hmi.command("PING")
-        rtts.append(time.monotonic() - t)
+        rtts.append(time.perf_counter() - t)
     return statistics.median(rtts) / 2.0
 
 
