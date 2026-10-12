@@ -1,0 +1,17 @@
+# L1 host app for components/seat (cases SEAT-001..SEAT-010 in tests/host/seat): the seat
+# reading (H8: NaN, infinities, the conversion bound, the range and its one-step tolerance) and
+# the seat gate (every input combination, the step and preset targets, a random-input property,
+# compile-time cases, no allocation), written from docs/plans/hazard-seat-spec.md §5.1.
+# spec-deviation(TS-UNIT-01): host-native g++ in WSL, not the IDF linux target (owner, 2026-10-06).
+- id: L1-SEAT
+  title: seat gate and seat reading (H8, H10 seat) on host inputs, UBSan on
+  level: L1
+  path: tests/host/seat
+  requirements: [REQ-SEAT-01, REQ-SEAT-02, REQ-SEAT-03, REQ-SEAT-04, REQ-SEAT-05, REQ-SEAT-06]
+  resources: [host]
+  timeout_s: 300
+  expected_s: 30
+  repeat: 1
+  pass_threshold: 1
+  safety: true
+  artifact: test

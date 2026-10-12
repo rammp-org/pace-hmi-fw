@@ -81,6 +81,7 @@ yet measured or decided, and "none" means checked and absent.
 | `components/m5stack-tab5` | vendored espp Tab5 BSP 1.2.0 (sha 615b8df), modified (VENDORED.md + upstream.diff) | no | no | none |
 | `components/ota` | the firmware image: identity and release match, the GitHub release list, download, install and rollback confirm | no (never commands motion; the restart after an install is main's, gated on the chair not driving) | no (HTTPS, flash) | README |
 | `components/remote_ui` | the bench debug channel: a TCP server on port 3333 for screenshots, taps, keys and (with stick injection) the stick; a no-op unless `CONFIG_HMI_REMOTE_UI` | no in release builds (absent); in bench builds it can move the stick, on the simulated MCB only | no (LVGL and sockets; bench) | none |
+| `components/seat` | the seat gate and the seat reading: whether a seat press may become a SeatCommand, and whether a reported seat value is known (hazard-seat-spec.md; header-only, constexpr) | yes (decides every seat request the HMI sends) | host L1 (L1-SEAT) | README |
 | `components/settings` | the persisted user settings: spec table, settings.txt, getters and setters | no (two values feed the stick through main's atomics) | host L1 (L1-SET) | README |
 | `components/stick` | `StickPipeline`: the three pots' raw millivolts in, the keypad key and the XYTwist motion command out | yes (turns the joystick into the motion command) | host L1 (L1-STK) | none |
 | `components/storage` | files on the storage partition: paths, atomic write, legacy migration | no | no (flash) | README |
