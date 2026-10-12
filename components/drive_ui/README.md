@@ -11,6 +11,7 @@ transfer grants (ratchet V2), two approvals per change (CS-SAF-05). What it comm
 | Command | Where | Read by |
 | --- | --- | --- |
 | The DriveCommand (ENABLE, DISABLE, with the drive profile the user picked) | `DrivePort::publish` -> `DriveUi::publish_drive` -> main's `rtps_comms_publish_drive` (result ignored: H6) | the MCB |
+| Whether a DriveCommand would reach a reader now (owner decision T1, the boot DISABLE) | `DrivePort::drive_writer_matched` -> `DriveUi::drive_writer_matched` -> main's `rtps_comms_drive_writer_matched` | the drive adapter |
 | The stick gate: may the stick drive the chair now | `DriveUi::update_stick_gate` writes app_state's `stick_drives` from drive_session's `stick_drives` | the ADC task, which sends the MCB a centred stick whenever it is false |
 | The stick button's raw level | `StickButton::edge` writes app_state's `joy_button_pressed` | the ADC task, which publishes it with the stick; the holds (unlock, drive exit) |
 | The relocks the drive session decides (Locked screen, `locked`, the gate) | `DrivePort`'s actions | the UI |

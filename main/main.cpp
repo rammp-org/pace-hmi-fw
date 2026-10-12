@@ -432,6 +432,7 @@ static constexpr hmi::ui::LinkPort kLinkPort{
           *rate_tenths_hz = stats.rate_tenths_hz;
         },
     .publish_drive = rtps_comms_publish_drive,
+    .drive_writer_matched = rtps_comms_drive_writer_matched,
     .publish_seat = rtps_comms_publish_seat,
 };
 

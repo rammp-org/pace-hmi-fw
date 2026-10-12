@@ -1,5 +1,5 @@
 // L1 host app for components/drive_adapter: the adapter's own contract (DAD-001..005,
-// DAD-007..013). Its behaviour at the port is pinned by the drive goldens
+// DAD-007..016). Its behaviour at the port is pinned by the drive goldens
 // (tests/host/drive_golden, GLD-101..116). DAD-006 (TABLE.md U3) is removed: the exit hold while
 // locked is now the table's rows 42-43 (hazard-c1-spec.md E8).
 
@@ -80,6 +80,9 @@ struct Port {
   std::array<DriveNotice, 64> notices{};
   std::size_t notice_count = 0;
   bool publish_result = true;
+  // T1: the DriveCommand writer has a matched reader; how often the adapter asked.
+  bool drive_matched = true;
+  std::size_t matched_reads = 0;
   // A port method that calls back into the adapter (DAD-002).
   bool (*on_gate_update)() = nullptr;
   bool reentry_result = true;
@@ -112,6 +115,10 @@ struct FakeView {
   [[nodiscard]] std::int64_t now_us() const {
     g_port.add(Call::NOW);
     return g_port.now;
+  }
+  [[nodiscard]] bool drive_writer_matched() const {
+    ++g_port.matched_reads;
+    return g_port.drive_matched;
   }
   bool publish(bool enable) const {
     g_port.add(enable ? Call::PUBLISH_ENABLE : Call::PUBLISH_DISABLE);
@@ -518,4 +525,81 @@ TEST_CASE("DAD-013 stick health FAULT in the sample is the Env's STICK_FAULT; a 
   TEST_ASSERT_TRUE(g_port.last_banner == DriveBanner::REFUSED_STICK);
   TEST_ASSERT_EQUAL_UINT(1, g_port.count_of(Call::REFUSAL_FEEDBACK));
   TEST_ASSERT_TRUE(locked.locked());
+}
+
+// ---- Owner decision T1 (docs/plans/hazard-decisions.md): the boot DISABLE waits for a reader ---
+
+TEST_CASE("DAD-014 the boot DISABLE is held while the DriveCommand writer has no matched reader, "
+          "then published once, on the first tick that finds one",
+          "[drive_adapter][REQ-DAD-12]") {
+  fresh_port();
+  Adapter adapter{{.view = FakeView{}}};
+  g_port.drive_matched = false;
+  adapter.tick(); // row 50: the boot stop is marked, its DISABLE held
+  TEST_ASSERT_EQUAL_UINT(0, g_port.publishes());
+  TEST_ASSERT_TRUE(adapter.boot_disable_pending());
+  adapter.tick();
+  adapter.tick();
+  TEST_ASSERT_EQUAL_UINT(0, g_port.publishes());
+  g_port.drive_matched = true;
+  adapter.tick();
+  TEST_ASSERT_EQUAL_UINT(1, g_port.count_of(Call::PUBLISH_DISABLE));
+  TEST_ASSERT_EQUAL_UINT(0, g_port.count_of(Call::PUBLISH_ENABLE));
+  TEST_ASSERT_FALSE(adapter.boot_disable_pending());
+  // One message: nothing more, and the port is no longer asked.
+  const std::size_t reads = g_port.matched_reads;
+  for (int i = 0; i < 8; ++i) {
+    adapter.tick();
+  }
+  TEST_ASSERT_EQUAL_UINT(1, g_port.publishes());
+  TEST_ASSERT_EQUAL_UINT(reads, g_port.matched_reads);
+  // With the writer matched at the first tick, the DISABLE goes on that tick (as before T1).
+  fresh_port();
+  Adapter matched{{.view = FakeView{}}};
+  matched.tick();
+  TEST_ASSERT_EQUAL_UINT(1, g_port.count_of(Call::PUBLISH_DISABLE));
+  TEST_ASSERT_FALSE(matched.boot_disable_pending());
+}
+
+TEST_CASE("DAD-015 the held boot DISABLE is dropped by the user's own ask (the unlock hold's "
+          "ENABLE), and not sent after the match",
+          "[drive_adapter][REQ-DAD-12]") {
+  fresh_port();
+  Adapter adapter{{.view = FakeView{}}};
+  g_port.drive_matched = false;
+  adapter.tick();
+  TEST_ASSERT_TRUE(adapter.boot_disable_pending());
+  adapter.unlock_hold_done(); // row 18: ENABLE asked
+  TEST_ASSERT_EQUAL_UINT(1, g_port.count_of(Call::PUBLISH_ENABLE));
+  TEST_ASSERT_FALSE(adapter.boot_disable_pending());
+  g_port.drive_matched = true;
+  adapter.tick();
+  TEST_ASSERT_EQUAL_UINT(0, g_port.count_of(Call::PUBLISH_DISABLE));
+}
+
+TEST_CASE("DAD-016 a refused publish of the held boot DISABLE (nothing handed to RTPS) is tried "
+          "again on the next tick, then not again; the M1 entry keeps it held",
+          "[drive_adapter][REQ-DAD-12]") {
+  fresh_port();
+  Adapter adapter{{.view = FakeView{}}};
+  g_port.drive_matched = false;
+  adapter.tick();
+  // The MCB ENABLED on its own before the match: entry (M1), the DISABLE still held.
+  g_port.sample.mib = ds::MibState::ENABLED;
+  adapter.tick();
+  TEST_ASSERT_FALSE(adapter.locked());
+  TEST_ASSERT_TRUE(adapter.boot_disable_pending());
+  TEST_ASSERT_EQUAL_UINT(0, g_port.publishes());
+  g_port.drive_matched = true;
+  g_port.publish_result = false;
+  adapter.tick();
+  TEST_ASSERT_EQUAL_UINT(1, g_port.count_of(Call::PUBLISH_DISABLE));
+  TEST_ASSERT_TRUE(adapter.boot_disable_pending());
+  TEST_ASSERT_EQUAL_UINT(1, adapter.publish_failures());
+  g_port.publish_result = true;
+  adapter.tick();
+  TEST_ASSERT_EQUAL_UINT(2, g_port.count_of(Call::PUBLISH_DISABLE));
+  TEST_ASSERT_FALSE(adapter.boot_disable_pending());
+  adapter.tick();
+  TEST_ASSERT_EQUAL_UINT(2, g_port.count_of(Call::PUBLISH_DISABLE));
 }

@@ -415,6 +415,7 @@ private:
       .profile = &drive_profile_published,
       .publish_drive = config_.link->publish_drive,
       .link_state = config_.link->state,
+      .drive_writer_matched = config_.link->drive_writer_matched,
       .calibrating = config_.screens->calibrating,
       .hold_reason = hmi::ui::bind<&UiApp::hold_reason>(this),
       .post_gate = hmi::ui::bind<&UiApp::post_gate>(this),

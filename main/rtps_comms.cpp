@@ -703,6 +703,15 @@ bool rtps_comms_publish_drive(rammp::DriveRequest request, MIB::DriveProfile pro
   return publish(drive_pub, rammp::DriveCommand{request, profile});
 }
 
+// Under the endpoints lock: the writers are added under it and endpoints_ready drops under it
+// before the participant goes, so matched_readers never races add_writer or stop.
+bool rtps_comms_drive_writer_matched() {
+  return under_endpoints([] {
+    return endpoints_ready && participant != nullptr &&
+           participant->matched_readers(rammp::kJoystickDriveCommand.name) > 0;
+  });
+}
+
 bool rtps_comms_publish_seat(rammp::SeatAxis axis, float target) {
   return publish(seat_pub, rammp::SeatCommand{axis, target});
 }

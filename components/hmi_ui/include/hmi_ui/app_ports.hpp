@@ -31,6 +31,9 @@ struct LinkPort {
   /// The DriveCommand (rtps_comms_publish_drive): safety-relevant. True when handed to RTPS;
   /// the drive adapter counts and logs a failure (H6).
   bool (*publish_drive)(rammp::DriveRequest request, MIB::DriveProfile profile);
+  /// Whether the DriveCommand writer has a matched reader now (rtps_comms_drive_writer_matched;
+  /// owner decision T1: the boot DISABLE waits for one).
+  bool (*drive_writer_matched)();
   /// One SeatCommand: an absolute target in the axis' units (rtps_comms_publish_seat).
   bool (*publish_seat)(rammp::SeatAxis axis, float target);
 };

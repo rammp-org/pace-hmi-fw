@@ -56,6 +56,8 @@ enum class Op : std::uint8_t {
   POST, // arg: hmi::stick::PostGate's value: the POST gate
   // C2b (hazard-c2-spec.md §8.5)
   STICK_FAULT, // arg: 0/1: stick health leaves or enters FAULT
+  // Owner decision T1 (hazard-decisions.md)
+  DRIVE_MATCHED, // arg: 0/1: the DriveCommand writer has a matched reader, or not
 };
 
 struct Step {
@@ -101,5 +103,6 @@ Step live_link(bool up);
 Step publish_delay(std::int64_t us);
 Step post(std::uint8_t gate);
 Step stick_fault(bool fault);
+Step drive_matched(bool matched);
 
 } // namespace golden

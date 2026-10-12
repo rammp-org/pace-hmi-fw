@@ -48,6 +48,9 @@ public:
     bool (*publish_drive)(rammp::DriveRequest request, MIB::DriveProfile profile);
     /// The link state now (main's rtps_comms_link_state), read live at every drive sample.
     LinkState (*link_state)();
+    /// The DriveCommand writer has a matched reader now (main's rtps_comms_drive_writer_matched;
+    /// owner decision T1).
+    bool (*drive_writer_matched)();
     /// A calibration run owns the stick (main's joystick_cal_running).
     bool (*calibrating)();
     /// The stick's hold reason, as the ADC task last stored it (the permit hooks', acquire).
@@ -110,6 +113,7 @@ public:
     return config_.publish_drive(request, profile);
   }
   [[nodiscard]] LinkState link_state_now() const { return config_.link_state(); }
+  [[nodiscard]] bool drive_writer_matched() const { return config_.drive_writer_matched(); }
   [[nodiscard]] bool calibrating() const { return config_.calibrating(); }
   [[nodiscard]] hmi::stick::HoldReason hold_reason() const { return config_.hold_reason(); }
   [[nodiscard]] hmi::stick::PostGate post_gate() const { return config_.post_gate(); }

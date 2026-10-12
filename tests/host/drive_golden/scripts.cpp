@@ -57,6 +57,7 @@ Step live_link(bool up) { return {Op::LIVE_LINK, up ? 1 : 0}; }
 Step publish_delay(std::int64_t us) { return {Op::PUBLISH_DELAY, us}; }
 Step post(std::uint8_t gate) { return {Op::POST, gate}; }
 Step stick_fault(bool fault) { return {Op::STICK_FAULT, fault ? 1 : 0}; }
+Step drive_matched(bool matched) { return {Op::DRIVE_MATCHED, matched ? 1 : 0}; }
 
 namespace {
 
@@ -439,6 +440,10 @@ void play_c1(const Step &step) {
     w.stick_fault = step.arg != 0;
     both(std::format("> stick fault {}", step.arg));
     break;
+  case Op::DRIVE_MATCHED:
+    w.drive_matched = step.arg != 0;
+    both(std::format("> drive writer matched {}", step.arg));
+    break;
   default:
     break;
   }
@@ -521,6 +526,7 @@ void play(const Step &step, const Target &t) {
   case Op::PUBLISH_DELAY:
   case Op::POST:
   case Op::STICK_FAULT:
+  case Op::DRIVE_MATCHED:
     play_c1(step);
     break;
   }

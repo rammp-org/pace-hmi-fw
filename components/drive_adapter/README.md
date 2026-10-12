@@ -52,6 +52,7 @@ does is dropped and logged, see REQ-DAD-03).
 | --- | --- | --- |
 | `sample()` | every input | the link live (`rtps_comms_link_state`, REQ-UI-18), `mib_state_subject`, `lv_screen_active()`, `nav_menu_open`, `joystick_cal_running()`, the stick's hold reason, the POST gate (PASS: `post_ok`, C3), stick health (FAULT: `stick_fault`, C2b), in that order |
 | `now_us()` | every input; SEND_ENABLE; ARM_EXIT_DEADLINE | `esp_timer_get_time()` |
+| `drive_writer_matched()` | row 50's SEND_DISABLE, and each tick while it is held (T1) | `rtps_comms_drive_writer_matched()`: the DriveCommand writer has a matched reader (`components/espp_rtps`'s `matched_readers`) |
 | `publish(enable)` | SEND_ENABLE, SEND_DISABLE, PUBLISH_DRIVE | `rtps_comms_publish_drive(request, drive_profile_published)`; returns its result, which the adapter does not use yet (H6) |
 | `ring_wait()`, `ring_rest()` | RING_WAIT, RING_REST | `lock_visual_wait()`, `lock_visual_rest()` |
 | `lock_open_visual()` | LOCK_OPEN_VISUAL | ring full, shackle up, STRONG_CLICK |
@@ -79,6 +80,7 @@ does is dropped and logged, see REQ-DAD-03).
 | REQ-DAD-09 | Every DriveCommand publish result is checked; a failure is counted and logged at most once a second, and the re-send schedule does not change | DAD-009 |
 | REQ-DAD-10 | After every input and tick, the Drive notice (MCB did not stop > Stopping > the hold reason in its order > none) is handed to the port once per change | DAD-010, DAD-012 |
 | REQ-DAD-11 | (C2b) The Env's STICK_FAULT is stick health FAULT, read live at the sample (`DriveSample::stick_fault`); SHOW_STICK_FAULT and SHOW_REFUSED_STICK reach the port as the STICK_FAULT and REFUSED_STICK banners | DAD-013, GLD-126, GLD-128 |
+| REQ-DAD-12 | (owner decision T1) Row 50's boot DISABLE is published only when the DriveCommand writer has a matched reader: at once if it has one, else on the first tick that finds one, once (a refused publish is tried on the next tick); the user's own ask (SEND_ENABLE) drops it. The table and its fingerprint do not change | DAD-014, DAD-015, DAD-016, GLD-131, GLD-132, GLD-133 |
 
 ## Tasks
 
