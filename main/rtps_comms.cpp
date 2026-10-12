@@ -554,8 +554,8 @@ bool initialize_wifi() {
 ///////////////////////////////////////////////////////////////////////////////
 // RTPS
 
-// PROPOSAL (docs/plans/hazard-c4-rtps-priority.md; the owner decides, task configs are
-// ask-first): espp RTPS sends every publish, XYTwist included, from its worker pool, two
+// Approved by the owner (T11, 2026-10-11; docs/plans/hazard-c4-rtps-priority.md, option 1):
+// espp RTPS sends every publish, XYTwist included, from its worker pool, two
 // tasks at priority 5, each pinned to the core of its first FPU use. On core 1 a stuck
 // lv_task (priority 20) starves them, and XYTwist stops for the whole UI stall (C4 B5i:
 // hazard-c4-spec.md wants it to keep flowing, neutral). Raised to lv_task's 20 they share

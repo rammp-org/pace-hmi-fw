@@ -58,5 +58,8 @@
 {"order": 56, "id": "CTL_UI_STALLS_DRIVE", "name": "ctl.ui_stalls_drive", "unit": "", "lo": 0, "hi": 0, "need": "required", "why": "UI stalls that paused the stick in Drive"},
 {"order": 57, "id": "JOY_HEALTH", "name": "joy.health", "unit": "", "lo": 1, "hi": 1, "need": "required", "why": "Stick monitor reads the stick as OK"},
 {"order": 58, "id": "JOY_BAD_SAMPLES", "name": "joy.bad_samples", "unit": "", "lo": 0, "hi": 0, "need": "required", "why": "Implausible stick samples since boot"},
-{"order": 59, "id": "JOY_XY_AGE_MAX", "name": "joy.xy_age_max", "unit": "ms", "lo": 0, "hi": 200, "need": "required", "why": "Longest X/Y window age the stick saw"}
+{"order": 59, "id": "JOY_XY_AGE_MAX", "name": "joy.xy_age_max", "unit": "ms", "lo": 0, "hi": 200, "need": "required", "why": "Longest X/Y window age the stick saw"},
+{"order": 60, "id": "MEM_ALLOC_ADC", "name": "mem.alloc_adc", "unit": "", "lo": 0, "hi": 2147483647, "need": "bench", "why": "Read ADC allocations after boot (T12: report-only)"},
+{"order": 61, "id": "MEM_ALLOC_LVGL", "name": "mem.alloc_lvgl", "unit": "", "lo": 0, "hi": 2147483647, "need": "bench", "why": "lv_task allocations after boot"},
+{"order": 62, "id": "MEM_ALLOC_RTPS", "name": "mem.alloc_rtps", "unit": "", "lo": 0, "hi": 2147483647, "need": "bench", "why": "rtps_pub allocations after boot"}
 ]

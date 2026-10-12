@@ -76,13 +76,13 @@ public:
     /// C2b: stick health is FAULT, and the fault in words ("Joystick fault: <axis> <what>",
     /// UiApp::stick_fault_words): REFUSED_STICK's and STICK_FAULT's body.
     Fn<bool()> stick_fault;
-    Fn<const char *()> stick_fault_words;
+    Fn<const char *()> stick_fault_words; ///< the fault in words (see stick_fault above)
     /// The seat path (hazard-seat-spec.md §2.8): the refusal up was raised by a seat press
     /// (REFUSED_POST and REFUSED_STICK then read "Seat not ready"), and REFUSED_SEAT_UNKNOWN's
     /// axis is known again (it clears early then, REQ-UI-33).
     Fn<bool()> seat_origin;
-    Fn<bool()> seat_known;
-    uint32_t grace_ms; ///< a press shorter than this is a tap, not a push (kBarGraceMs)
+    Fn<bool()> seat_known; ///< REFUSED_SEAT_UNKNOWN's axis is known again (see seat_origin)
+    uint32_t grace_ms;     ///< a press shorter than this is a tap, not a push (kBarGraceMs)
   };
 
   constexpr explicit RefusalView(const Config &config) noexcept
@@ -122,15 +122,21 @@ public:
   /// @brief Fills a banner with a request refused before the start-up check passed (C3,
   ///        REFUSED_POST): `title`, the blocking check's words (post_reason) as the body, no
   ///        footer.
+  /// @param panel the ErrorBanner to fill
+  /// @param title its title
   /// UI task, lvgl_mutex held.
   void fill_post_refused(lv_obj_t *panel, const char *title);
   /// @brief Fills a banner with the stick's latched fault (C2b, REFUSED_STICK and STICK_FAULT):
   ///        `title`, the fault in words (stick_fault_words) as the body, no footer.
+  /// @param panel the ErrorBanner to fill
+  /// @param title its title
   /// UI task, lvgl_mutex held.
   void fill_stick_fault(lv_obj_t *panel, const char *title);
   /// @brief Fills a banner with a seat refusal (hazard-seat-spec.md §2.8): REFUSED_SEAT_UNKNOWN
   ///        and REFUSED_SEAT_NOT_SENT always; REFUSED_POST and REFUSED_STICK when a seat press
   ///        raised them ("Seat not ready" over the check's words, or over C2's fault text).
+  /// @param panel the ErrorBanner to fill
+  /// @param refused the `refused` value up (a Refused)
   /// @return Whether `refused` was a seat refusal (the panel was filled).
   /// UI task, lvgl_mutex held.
   bool fill_seat(lv_obj_t *panel, int32_t refused);

@@ -6,6 +6,10 @@
       "reqs": [],
       "priv_reqs": []
     },
+    "alloc_guard": {
+      "reqs": [],
+      "priv_reqs": []
+    },
     "board": {
       "reqs": [
         "espp__logger",
@@ -137,6 +141,7 @@
     "main": {
       "reqs": [],
       "priv_reqs": [
+        "alloc_guard",
         "app_update",
         "board",
         "bootloader_support",

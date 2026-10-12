@@ -216,8 +216,8 @@ struct Env {
   bool calibrating;        // C1: joystick_cal_running() at the sample
   bool stop_fault_elapsed; // C1: the stop timer is armed and kStopFaultAfter has passed
   Resend resend;           // C1: which DISABLE re-send is due
-  bool post_ok;            // C3: the POST gate is PASS (read live at the sample)
-  bool stick_fault;        // C2b: stick health is FAULT (read live at the sample)
+  bool post_ok;            ///< C3: the POST gate is PASS (read live at the sample)
+  bool stick_fault;        ///< C2b: stick health is FAULT (read live at the sample)
 };
 constexpr GuardMask env_guards(const Env &e) noexcept {
   GuardMask m = 0;

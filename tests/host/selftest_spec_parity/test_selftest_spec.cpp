@@ -4,6 +4,7 @@
 // scripts/rammp_rtps.py (used by rtps_selftest.py) makes of the header. Then the table's
 // invariants, and the behaviour each row carries (in_limits, required, is_yes_no).
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -48,6 +49,8 @@ const char *need_name(Need need) {
     return "optional";
   case Need::REMOTE:
     return "remote";
+  case Need::BENCH:
+    return "bench";
   }
   return "?";
 }
@@ -75,6 +78,7 @@ constexpr std::string_view kIdNames[] = {
     "JOY_Y_CAL",       "JOY_TWIST_CAL",   "JOY_BUTTON",
     "CTL_WDT",         "CTL_UI_AGE_MAX",  "CTL_UI_STALLS_DRIVE",
     "JOY_HEALTH",      "JOY_BAD_SAMPLES", "JOY_XY_AGE_MAX",
+    "MEM_ALLOC_ADC",   "MEM_ALLOC_LVGL",  "MEM_ALLOC_RTPS",
 };
 static_assert(std::size(kIdNames) == kChecks.size());
 
@@ -120,6 +124,22 @@ void expect_table(std::span<const Row> golden) {
     TEST_ASSERT_EQUAL_STRING_MESSAGE(g.need, need_name(c.need), at);
     expect_text(g.why, c.why, at);
   }
+}
+
+// The first "bench" row of `golden`, failing the case if any other row follows one. A span,
+// as expect_table takes: cppcheck, with no build folder, cannot see golden_rows.inc.
+std::size_t first_bench_row(std::span<const Row> golden) {
+  std::size_t first = golden.size();
+  for (std::size_t i = 0; i < golden.size(); ++i) {
+    if (std::string_view(golden[i].need) == "bench") {
+      first = std::min(first, i);
+    } else {
+      char at[96];
+      where(at, i, golden[i].name);
+      TEST_ASSERT_TRUE_MESSAGE(i < first, at); // no other row after a bench row
+    }
+  }
+  return first;
 }
 
 } // namespace
@@ -179,7 +199,8 @@ TEST_CASE("SST-005 an unmeasurable check fails when required, and a remote one o
     char at[96];
     where(at, i, kGolden[i].name);
     const std::string_view need(kGolden[i].need);
-    TEST_ASSERT_EQUAL_MESSAGE(need != "optional", c.required(true), at);
+    // optional and bench rows SKIP when they cannot be measured, wherever the run came from
+    TEST_ASSERT_EQUAL_MESSAGE(need == "required" || need == "remote", c.required(true), at);
     TEST_ASSERT_EQUAL_MESSAGE(need == "required", c.required(false), at);
   }
 }
@@ -195,4 +216,37 @@ TEST_CASE("SST-006 a yes/no check is the one with limits 1..1 and no unit", "[se
   TEST_ASSERT_TRUE(selftest_spec::check(Id::SYS_RESET).is_yes_no());
   TEST_ASSERT_FALSE(selftest_spec::check(Id::I2C_MISSING).is_yes_no()); // 0..0: a count
   TEST_ASSERT_FALSE(selftest_spec::check(Id::JOY_VALID).is_yes_no());   // 99..100 %
+}
+
+TEST_CASE("SST-007 the bench rows come last: a build without the allocation guard reports the "
+          "rows before them, one with it every row",
+          "[selftest_spec]") {
+  const std::size_t first_bench = first_bench_row(kGolden);
+  // the 54 rows of the B3 baseline, then C4's three ctl.* and C2's three joy.* (declared new)
+  TEST_ASSERT_EQUAL_UINT32(60U, first_bench);
+  TEST_ASSERT_EQUAL_UINT32(first_bench, selftest_spec::reported_rows(false));
+  TEST_ASSERT_EQUAL_UINT32(kChecks.size(), selftest_spec::reported_rows(true));
+}
+
+TEST_CASE("SST-008 each mem.alloc_* row watches its task: Read ADC, lv_task and rtps_pub, all "
+          "counted with no upper limit (Read ADC report-only, owner T12)",
+          "[selftest_spec]") {
+  TEST_ASSERT_EQUAL_UINT32(3U, selftest_spec::kAllocRows.size());
+  const struct {
+    Id id;
+    const char *task;
+    int32_t hi;
+  } want[] = {{Id::MEM_ALLOC_ADC, "Read ADC", kAnyHi}, // 0 again once espp stops allocating
+              {Id::MEM_ALLOC_LVGL, "lv_task", kAnyHi},
+              {Id::MEM_ALLOC_RTPS, "rtps_pub", kAnyHi}};
+  for (std::size_t i = 0; i < std::size(want); ++i) {
+    const selftest_spec::AllocRow &row = selftest_spec::kAllocRows[i];
+    TEST_ASSERT_TRUE(row.id == want[i].id);
+    TEST_ASSERT_TRUE(row.task == want[i].task);
+    TEST_ASSERT_TRUE(selftest_spec::kAllocTasks[i] == want[i].task);
+    const Check &c = selftest_spec::check(row.id);
+    TEST_ASSERT_TRUE(c.need == Need::BENCH);
+    TEST_ASSERT_EQUAL_INT32(0, c.lo);
+    TEST_ASSERT_EQUAL_INT32(want[i].hi, c.hi);
+  }
 }

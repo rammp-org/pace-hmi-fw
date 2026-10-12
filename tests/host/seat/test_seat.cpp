@@ -25,6 +25,7 @@ namespace {
 using hmi::seat::SeatAsk;
 using hmi::seat::SeatDecision;
 using hmi::seat::SeatInputs;
+using hmi::seat::SeatLink;
 using hmi::seat::SeatPress;
 using hmi::seat::SeatReason;
 using hmi::stick::PostGate;
@@ -49,7 +50,7 @@ float units(const SeatAxisSpec &spec, int32_t raw) {
 
 // The inputs the spec's every-step start has: CONNECTED, IDLE, POST PASS, stick OK.
 SeatInputs good(int32_t value) {
-  return SeatInputs{.link_connected = true,
+  return SeatInputs{.link = SeatLink::CONNECTED,
                     .mcb_state = static_cast<uint8_t>(MIB::MibSystemState::IDLE),
                     .post = PostGate::PASS,
                     .health = StickHealth::OK,
@@ -154,8 +155,10 @@ SeatReason spec_gate(bool connected, uint8_t state, uint8_t post, uint8_t health
 TEST_CASE("SEAT-005 the gate over every input combination: ALLOW exactly when all five hold, "
           "else the first failing reason in REQ-SEAT-02's order",
           "[seat][REQ-SEAT-02][safety]") {
-  // link {CONNECTED, NO_PEER, DOWN}: the gate reads CONNECTED or not (LinkPort::state, live).
-  const bool links[] = {true, false, false};
+  // link {CONNECTED, NO_PEER, DOWN}: the gate reads CONNECTED or not (LinkPort::state, live),
+  // and a byte outside SeatLink refuses too.
+  const SeatLink links[] = {SeatLink::CONNECTED, SeatLink::NOT_CONNECTED, SeatLink::NOT_CONNECTED,
+                            static_cast<SeatLink>(7)};
   const uint8_t states[] = {0, 1, 2, 3, 4, 255}; // INITIALIZING, IDLE, ENABLED, ERROR, 4, 255
   const uint8_t posts[] = {0, 1, 2, 3, 7};       // NOT_RUN, PENDING, PASS, FAIL, 7
   const uint8_t healths[] = {0, 1, 2, 3, 9};     // NOT_MONITORED, OK, CHECK, FAULT, 9
@@ -163,25 +166,26 @@ TEST_CASE("SEAT-005 the gate over every input combination: ALLOW exactly when al
   int cases = 0;
   for (const SeatAxisSpec &spec : kSeatAxes) {
     const int32_t mid = (spec.min_value + spec.max_value) / 2;
-    for (const bool link : links) {
+    for (const SeatLink link : links) {
       for (const uint8_t state : states) {
         for (const uint8_t post : posts) {
           for (const uint8_t health : healths) {
             for (const bool known : {true, false}) {
-              const SeatInputs in{.link_connected = link,
+              const SeatInputs in{.link = link,
                                   .mcb_state = state,
                                   .post = static_cast<PostGate>(post),
                                   .health = static_cast<StickHealth>(health),
                                   .value = known ? mid : kUnknown};
-              const SeatReason want = spec_gate(link, state, post, health, known);
+              const SeatReason want =
+                  spec_gate(link == SeatLink::CONNECTED, state, post, health, known);
               ++cases;
               const SeatReason got = hmi::seat::gate(in);
               const SeatDecision d =
                   hmi::seat::decide(spec, in, SeatAsk{.press = SeatPress::STEP, .amount = 1});
               if (got != want || d.reason != want) {
                 char msg[128];
-                std::snprintf(msg, sizeof msg, "%s link %d state %u post %u health %u known %d",
-                              spec.label, link, state, post, health, known);
+                std::snprintf(msg, sizeof msg, "%s link %u state %u post %u health %u known %d",
+                              spec.label, static_cast<unsigned>(link), state, post, health, known);
                 TEST_FAIL_MESSAGE(msg);
               }
               allowed += got == SeatReason::ALLOW;
@@ -193,7 +197,7 @@ TEST_CASE("SEAT-005 the gate over every input combination: ALLOW exactly when al
   }
   // Per axis: CONNECTED x IDLE x PASS x {NOT_MONITORED, OK, CHECK} x known = 3 ALLOW.
   TEST_ASSERT_EQUAL_INT(3 * static_cast<int>(kSeatAxes.size()), allowed);
-  TEST_ASSERT_EQUAL_INT(3 * 6 * 5 * 5 * 2 * static_cast<int>(kSeatAxes.size()), cases);
+  TEST_ASSERT_EQUAL_INT(4 * 6 * 5 * 5 * 2 * static_cast<int>(kSeatAxes.size()), cases);
 }
 
 TEST_CASE("SEAT-006 a step moves at most one step and never against the press: AT_LIMIT at an "
@@ -263,7 +267,7 @@ TEST_CASE("SEAT-008 property: 100 000 random values and inputs, every allowed ta
                                                                    spec.max_value - spec.min_value +
                                                                    6 * spec.step + 1)));
     SeatInputs in = good(hmi::seat::seat_reading(spec, wire));
-    in.link_connected = pick(rng) != 0;
+    in.link = pick(rng) != 0 ? SeatLink::CONNECTED : SeatLink::NOT_CONNECTED;
     in.mcb_state = static_cast<uint8_t>(pick(rng) < 8 ? 1 : bits(rng));
     in.post = static_cast<PostGate>(pick(rng) < 8 ? 2 : bits(rng) % 256);
     in.health = static_cast<StickHealth>(pick(rng) < 8 ? 1 : bits(rng) % 256);
@@ -302,12 +306,12 @@ static_assert(hmi::seat::kGateOrder[0] == SeatReason::LINK_DOWN &&
 static_assert(hmi::seat::seat_reading(kElevation, 125.0f) == 1250);
 static_assert(hmi::seat::seat_reading(kElevation, kNan) == INT32_MIN);
 static_assert(hmi::seat::seat_reading(kElevation, 1e30f) == INT32_MIN);
-static_assert(hmi::seat::gate(SeatInputs{.link_connected = true,
+static_assert(hmi::seat::gate(SeatInputs{.link = SeatLink::CONNECTED,
                                          .mcb_state = 1,
                                          .post = PostGate::PASS,
                                          .health = StickHealth::CHECK,
                                          .value = 1250}) == SeatReason::ALLOW);
-static_assert(hmi::seat::gate(SeatInputs{.link_connected = true,
+static_assert(hmi::seat::gate(SeatInputs{.link = SeatLink::CONNECTED,
                                          .mcb_state = 2,
                                          .post = PostGate::FAIL,
                                          .health = StickHealth::FAULT,
@@ -334,4 +338,16 @@ TEST_CASE("SEAT-010 10 000 gate decisions and readings make no allocation", "[se
     }
   });
   TEST_ASSERT_TRUE(sum != 0);
+}
+
+TEST_CASE("SEAT-012 a step with a direction of 0 never moves: AT_LIMIT on every axis and value",
+          "[seat][REQ-SEAT-03]") {
+  for (const SeatAxisSpec &spec : kSeatAxes) {
+    for (const int32_t v :
+         {spec.min_value, (spec.min_value + spec.max_value) / 2, spec.max_value}) {
+      const SeatDecision d =
+          hmi::seat::decide(spec, good(v), SeatAsk{.press = SeatPress::STEP, .amount = 0});
+      TEST_ASSERT_TRUE_MESSAGE(d.reason == SeatReason::AT_LIMIT, spec.label);
+    }
+  }
 }

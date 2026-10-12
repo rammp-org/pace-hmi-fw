@@ -10,9 +10,36 @@
 #include <optional>
 #include <string>
 
+#include "alloc_guard/alloc_guard.hpp"
 #include "feedback/da7280_bench.hpp"
+#include "format.hpp"
 #include "joystick_cal.hpp"
 #include "m5stack-tab5.hpp"
+#include "selftest_spec.hpp"
+
+namespace {
+
+/// @brief The allocation guard's counts for the mem.alloc_* rows (selftest_spec.hpp kAllocRows) in
+///        a build with the guard; empty in any other (the rows are then not in the run).
+/// @return The probe: slot -> (allocations, the first one's size as detail), or no count and why.
+decltype(SelfTestPlatform::allocs_after_boot) alloc_guard_probe() {
+  if constexpr (hmi::alloc_guard::ENABLED) {
+    return [](std::size_t slot) -> std::pair<std::optional<int32_t>, std::string> {
+      const std::string_view task = selftest_spec::kAllocTasks.at(slot);
+      const auto count = hmi::alloc_guard::count(slot, task);
+      if (!count) {
+        return {std::nullopt, fmt::format("no task named '{}' since start-up", task)};
+      }
+      return {static_cast<int32_t>(count->allocations),
+              count->allocations == 0 ? std::string()
+                                      : fmt::format("first {} B", count->first_size)};
+    };
+  } else {
+    return {};
+  }
+}
+
+} // namespace
 
 SelfTestPlatform selftest_platform(hmi::feedback::Feedback *feedback,
                                    const std::vector<uint8_t> &found_addresses,
@@ -70,5 +97,6 @@ SelfTestPlatform selftest_platform(hmi::feedback::Feedback *feedback,
       },
       .motion_guard = {},  // app_main's, from the UiApp's motion guard channels
       .stick_monitor = {}, // app_main's, from the UiApp's stick monitor telemetry
+      .allocs_after_boot = alloc_guard_probe(),
   };
 }

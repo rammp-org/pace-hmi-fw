@@ -1,0 +1,9 @@
+# CI-only overlay for the alloc_guard variant (CS-LAY-09: every build variant is built in L0).
+# Used on top of the bench overlay:
+#   SDKCONFIG_DEFAULTS="sdkconfig.defaults;ci/sdkconfig.bench;ci/sdkconfig.allocguard"
+# The on-chip allocation guard (TS-DET-08, components/alloc_guard): ESP-IDF's heap hook counts
+# what Read ADC, lv_task and rtps_pub allocate after start-up; the self test reports it
+# (mem.alloc_*). A separate overlay, not part of ci/sdkconfig.bench: the hook adds the
+# mem.alloc_* rows to the self test's report, so a plain bench image keeps the check list its
+# B3 baseline was taken with. Never in sdkconfig.defaults.
+CONFIG_HMI_BENCH_ALLOC_GUARD=y

@@ -153,11 +153,13 @@ public:
     return guard_sources_;
   }
   /// The motion guard's observability, written by the ADC task only (C4 §3.1).
+  /// @return the telemetry block the ADC task writes
   [[nodiscard]] constexpr hmi::control::GuardTelemetry &guard_telemetry() noexcept {
     return guard_telemetry_;
   }
   /// C2's stick monitor telemetry (stick/monitor_cycle.hpp, REQ-STK-24): written by the ADC task
   /// only; the UI's indicator and log, the self test and the bench read it. Any task.
+  /// @return the telemetry block the ADC task writes
   [[nodiscard]] constexpr hmi::stick::MonitorTelemetry &stick_telemetry() noexcept {
     return stick_telemetry_;
   }
@@ -165,22 +167,26 @@ public:
   [[nodiscard]] constexpr hmi::control::BenchStall &bench_stall() noexcept { return bench_stall_; }
   /// The refusal banner up (`refused`, a Refused value) as of its last change. Any task (an
   /// acquire load): the bench's STATE line reads it from the remote-UI task.
+  /// @return the Refused value
   [[nodiscard]] int32_t refused_any_task() const {
     return refused_pub_.load(std::memory_order_acquire);
   }
   /// The drive UI's menu mirror (DriveUi::menu_open_any_task). Any task.
+  /// @return whether the burger menu is open
   [[nodiscard]] bool menu_open_any_task() const { return drive_ui_.menu_open_any_task(); }
   /// The quick POST on the UI task: its runner, the rest windows, the indicator's state.
   [[nodiscard]] constexpr PostStage &post() noexcept { return post_stage_; }
   /// Whether the persistent indicator shows C2's stick FAULT: the POST's shows nothing and
   /// stick health is FAULT (REQ-UI-26, below every POST state). Any task.
+  /// @return whether the indicator shows the stick FAULT
   [[nodiscard]] bool stick_fault_indicated() const;
   /// @brief The stick monitor's log (C2 REQ-UI-27): each change of its state, once, from the
   ///        UI task. app_main, before lv_task starts; @p log must outlive the firmware.
   void attach_stick_log(espp::Logger &log) noexcept { stick_log_ = &log; }
 
   /// @brief The seat path's log (REQ-UI-29: a failed publish, at most once a second). app_main,
-  ///        before lv_task starts; @p log must outlive the firmware.
+  ///        before lv_task starts.
+  /// @param log The logger; must outlive the firmware.
   void attach_seat_log(espp::Logger &log) noexcept { seat_log_ = &log; }
 
   /// The seat path as the bench's STATE reports it (hazard-seat-spec.md REQ-RUI-09).
@@ -192,10 +198,12 @@ public:
     bool pressed = false;          ///< a seat press has happened since boot
     hmi::seat::SeatReason reason = hmi::seat::SeatReason::ALLOW; ///< the last press' outcome
   };
-  /// The seat values and counters as last stored. Any task (atomics).
+  /// @brief The seat values and counters as last stored. Any task (atomics).
+  /// @return A copy of them.
   [[nodiscard]] SeatTelemetry seat_telemetry() const;
-  /// SEATFAIL <n> (REQ-RUI-09): how many seat publishes main's bench wrapper still fails.
-  /// Bench builds write and take it; a release build never reads it. Any task.
+  /// @brief SEATFAIL n (REQ-RUI-09): how many seat publishes main's bench wrapper still fails.
+  ///        Bench builds write and take it; a release build never reads it. Any task.
+  /// @return The count.
   [[nodiscard]] constexpr std::atomic<uint32_t> &bench_seat_fails() noexcept {
     return bench_seat_fails_;
   }

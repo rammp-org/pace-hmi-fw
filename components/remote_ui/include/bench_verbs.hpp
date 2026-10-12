@@ -43,7 +43,7 @@
 ///            the seat hook: these five keys are left out, not null, without it, so the line of
 ///            a firmware before the seat fix keeps its exact form.
 ///
-///          SEATFAIL <n> (REQ-RUI-09): the next n SeatCommand publishes return false (n 0..100;
+///          `SEATFAIL <n>` (REQ-RUI-09): the next n SeatCommand publishes return false (n 0..100;
 ///          0 cancels what is left).
 
 #include <array>
@@ -179,7 +179,7 @@ struct Hooks {
   std::function<bool()> cal_unsaved;                     ///< C1 §6
   std::function<bool()> post_rerun;                      ///< C3 REQ-RUI-06
   std::function<bool(StallTarget, std::uint32_t)> stall; ///< C4 REQ-RUI-07, C2 O14; posts
-  std::function<bool(std::uint32_t)> seat_fail;          ///< seat REQ-RUI-09: SEATFAIL <n>
+  std::function<bool(std::uint32_t)> seat_fail;          ///< seat REQ-RUI-09: `SEATFAIL <n>`
 };
 
 namespace detail {
@@ -190,6 +190,7 @@ inline constexpr std::string_view kCalUsage = "usage: CAL UNSAVED";
 inline constexpr std::string_view kPostUsage = "usage: POST RERUN";
 inline constexpr std::string_view kCrashUsage = "usage: CRASH";
 inline constexpr std::string_view kStallUsage = "usage: STALL UI|ADC|CADC <ms> (ms 1..10000)";
+/// SEATFAIL's usage text.
 inline constexpr std::string_view kSeatFailUsage = "usage: SEATFAIL <n> (n 0..100)";
 
 /// Splits on single or repeated spaces; at most N words, the rest counted in `extra`.
@@ -240,7 +241,9 @@ template <std::size_t N> [[nodiscard]] constexpr Words<N> split(std::string_view
   return value;
 }
 
-/// Decimal digits only, 0..kSeatFailMax.
+/// @brief SEATFAIL's count: decimal digits only, 0..kSeatFailMax.
+/// @param text The word after SEATFAIL.
+/// @return The count, or nullopt when the word is not one.
 [[nodiscard]] constexpr std::optional<std::uint32_t> seat_fail_count(std::string_view text) {
   if (text.empty() || text.size() > 3) {
     return std::nullopt;
@@ -318,6 +321,9 @@ template <std::size_t N> [[nodiscard]] constexpr Words<N> split(std::string_view
   return ok(Request{.verb = Verb::STALL, .stall = *target, .stall_ms = *ms});
 }
 
+/// @brief `SEATFAIL <n>`.
+/// @param w The line's words.
+/// @return The request, or SEATFAIL's usage.
 [[nodiscard]] constexpr Parsed parse_seat_fail(const Words<3> &w) {
   if (w.count != 2 || w.extra) {
     return usage(kSeatFailUsage);
@@ -439,12 +445,18 @@ inline void put_stick(std::string &out, const std::optional<StickBlock> &stick) 
   out += '}';
 }
 
+/// @brief A key and its count.
+/// @param out The line so far.
+/// @param key The key.
+/// @param value The count.
 inline void put_count(std::string &out, std::string_view key, std::uint32_t value) {
   put_key(out, key);
   out += std::to_string(value);
 }
 
-/// The seat keys, top level after `stick`; nothing at all when the hook is not wired.
+/// @brief The seat keys, top level after `stick`; nothing at all when the hook is not wired.
+/// @param out The line so far.
+/// @param seat The seat block, or nullopt.
 inline void put_seat(std::string &out, const std::optional<SeatBlock> &seat) {
   if (!seat) {
     return;

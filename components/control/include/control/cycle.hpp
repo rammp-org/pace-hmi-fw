@@ -50,8 +50,10 @@ public:
   bool run(Stick &stick, Io &io, const Raw &raw) {
     if (!started_) {
       started_ = true;
-      adc_wdt_ok_ = watchdog_.subscribe(); // start-up only (CS-SAF-04): the port logs a failure
-      telemetry_.adc_wdt_ok.store(adc_wdt_ok_, std::memory_order_relaxed);
+      // start-up only (CS-SAF-04): the port logs a failure. Published first and read back, so
+      // the member is written from the atomic's value, not read as a plain bool here.
+      telemetry_.adc_wdt_ok.store(watchdog_.subscribe(), std::memory_order_relaxed);
+      adc_wdt_ok_ = telemetry_.adc_wdt_ok.load(std::memory_order_relaxed);
     }
     std::uint32_t now_ms = 0;
     const GuardInputs in = load_guard_inputs(sources_, flags_, adc_wdt_ok_, clock_, now_ms);

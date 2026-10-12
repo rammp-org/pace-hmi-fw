@@ -2025,6 +2025,52 @@ def t_seat_tooling() -> None:
     expect("the Actuators '+' is 629 px into its row", cs.ROW_PLUS_DX, 629)
 
 
+def t_c2_11_restores_brightness() -> None:
+    """C2-11's sweep steps Display & sound's brightness; its clean-up puts the approved value
+    back by touch: '-' to the floor (19 taps from any value), then '+' up to it."""
+    class FakeRig:
+        set_brightness = hazard_rig.Rig.set_brightness
+
+        def __init__(self, row=hazard_rig.BRIGHTNESS_ROW) -> None:
+            self.log: list = []
+            self.row = row
+            self.st = hazard_rig.HazardStep("x", pathlib.Path(tempfile.gettempdir()))
+
+        def state(self) -> dict:
+            return {"stick": {"state": "OK"}}
+
+        def home(self) -> None:
+            self.log.append("home")
+
+        def go(self, row: str) -> None:
+            self.log.append(f"go:{row}")
+
+        def tap(self, x: int, y: int) -> None:
+            self.log.append({hazard_rig.BRIGHTNESS_MINUS: "-",
+                             hazard_rig.BRIGHTNESS_PLUS: "+"}.get((x, y), (x, y)))
+
+        def focus(self):
+            return (*self.row, 6)
+
+    with quiet():
+        r = FakeRig()
+        c2.c2_11_cleanup(r)
+    want = boot_check.expected_settings()["brightness"]
+    expect("the approved brightness, from boot-expected.json", want, 80)
+    expect("C2-11 has the brightness clean-up", c2.CLEANUP["C2-11"], c2.c2_11_cleanup)
+    expect("the taps", r.log, ["home", "go:Settings/Display"] + ["-"] * 19 + ["+"] * 15
+           + ["home"])
+    expect("recorded", r.st.records.get("cleanup_brightness"), 80)
+    r = FakeRig(row=(0, 310, 720, 115))
+    try:
+        with quiet():
+            r.set_brightness(80)
+        raise AssertionError("a tap that missed the Brightness row went on tapping")
+    except hazard_rig.NotRun as e:
+        expect("NOT_RUN on a missed row, after one tap", (e.kind, r.log.count("-"),
+                                                          r.log.count("+")), ("bench", 1, 0))
+
+
 CASES = [
     ("BENCH-015 the hazard steps: only behind --hazard or --steps; retired as the fixes land; "
      "B5pp names", t_plan),
@@ -2096,46 +2142,48 @@ CASES = [
      "the hold's completion", t_hold_polls),
     ("BENCH-057 B5''-19 presses the Seat screen by touch on widgets FOCUS placed, checked "
      "first (a wrong one is NOT_RUN); KEY ENTER is always released", t_seat_targets_and_key_enter),
+    ("BENCH-070 C2-11's clean-up sets the approved brightness back by touch ('-' to the "
+     "floor, '+' up to it); a tap off the Brightness row is NOT_RUN", t_c2_11_restores_brightness),
     ("BENCH-051 injection lapses come from the STICK send times in the remote-UI log, not "
      "the injector's own clock; a pause is not a lapse", t_stick_lapses),
     ("BENCH-051b only a lapse in a graded window voids a step: a lapse wholly in a drive set-up "
      "that succeeded is recorded; a failed set-up and a graded-window lapse stay NOT_RUN",
      t_lapses_in_graded_windows),
-    ("BENCH-058 B5s-1 grader: one press, one step: reported + 5.0 mm within 0.5 s, shown within 1.0 s",
+    ("BENCH-073 B5s-1 grader: one press, one step: reported + 5.0 mm within 0.5 s, shown within 1.0 s",
      t_seat_b1),
-    ("BENCH-059 B5s-2 grader: NaN: unknown, both presses refused POSITION_UNKNOWN, known again, then one",
+    ("BENCH-074 B5s-2 grader: NaN: unknown, both presses refused POSITION_UNKNOWN, known again, then one",
      t_seat_b2),
-    ("BENCH-060 B5s-3 grader: inf, -inf, 1e30, -1e30, each as B5s-2",
+    ("BENCH-075 B5s-3 grader: inf, -inf, 1e30, -1e30, each as B5s-2",
      t_seat_b3),
-    ("BENCH-061 B5s-4 grader: the tolerance band: 255.0 known, '+' AT_LIMIT without a banner, '-' to 250.0; 255.1 unknown",
+    ("BENCH-076 B5s-4 grader: the tolerance band: 255.0 known, '+' AT_LIMIT without a banner, '-' to 250.0; 255.1 unknown",
      t_seat_b4),
-    ("BENCH-062 B5s-5 grader: link loss: unknown 1.5..2.9 s after p, nothing sent, known within 1.0 s of r",
+    ("BENCH-077 B5s-5 grader: link loss: unknown 1.5..2.9 s after p, nothing sent, known within 1.0 s of r",
      t_seat_b5),
-    ("BENCH-063 B5s-6 grader: link loss mid-move: one command, Locked with the seat banner, the move goes on",
+    ("BENCH-078 B5s-6 grader: link loss mid-move: one command, Locked with the seat banner, the move goes on",
      t_seat_b6),
-    ("BENCH-064 B5s-7 grader: HMI reset mid-move: nothing sent at the reboot, unknown until MibStatus, then one",
+    ("BENCH-079 B5s-7 grader: HMI reset mid-move: nothing sent at the reboot, unknown until MibStatus, then one",
      t_seat_b7),
-    ("BENCH-065 B5s-8 grader: MCB not IDLE: refused MCB_NOT_IDLE, the greyed tile never reaches the gate",
+    ("BENCH-080 B5s-8 grader: MCB not IDLE: refused MCB_NOT_IDLE, the greyed tile never reaches the gate",
      t_seat_b8),
-    ("BENCH-066 B5s-9 grader: POST not passed on the Seat screen, the Actuators page and Skunk Works",
+    ("BENCH-081 B5s-9 grader: POST not passed on the Seat screen, the Actuators page and Skunk Works",
      t_seat_b9),
-    ("BENCH-067 B5s-10 grader: stick FAULT: refused REFUSED_STICK, one after the reboot",
+    ("BENCH-082 B5s-10 grader: stick FAULT: refused REFUSED_STICK, one after the reboot",
      t_seat_b10),
-    ("BENCH-068 B5s-11 grader: a stuck key: one step",
+    ("BENCH-083 B5s-11 grader: a stuck key: one step",
      t_seat_b11),
-    ("BENCH-069 B5s-12 grader: a stuck touch: nothing while held, at most one at the release",
+    ("BENCH-084 B5s-12 grader: a stuck touch: nothing while held, at most one at the release",
      t_seat_b12),
-    ("BENCH-070 B5s-13 grader: a failed publish: counted, banner, logged, never re-sent",
+    ("BENCH-085 B5s-13 grader: a failed publish: counted, banner, logged, never re-sent",
      t_seat_b13),
-    ("BENCH-071 B5s-14 grader: a lost command: one dropped, nothing re-sent, the value unchanged",
+    ("BENCH-086 B5s-14 grader: a lost command: one dropped, nothing re-sent, the value unchanged",
      t_seat_b14),
-    ("BENCH-072 B5s-15 grader: rapid presses: every target within one step of the reported value",
+    ("BENCH-087 B5s-15 grader: rapid presses: every target within one step of the reported value",
      t_seat_b15),
-    ("BENCH-073 B5s-16 grader: the menu's Seat Functions row: refused with the reason's banner, menu stays",
+    ("BENCH-088 B5s-16 grader: the menu's Seat Functions row: refused with the reason's banner, menu stays",
      t_seat_b16),
-    ("BENCH-074 B5s-17 grader: the MCB moves the seat: shown within 1.0 s, nothing sent",
+    ("BENCH-089 B5s-17 grader: the MCB moves the seat: shown within 1.0 s, nothing sent",
      t_seat_b17),
-    ("BENCH-075 the seat tooling: seat modes carried over a reboot, the seat group's "
+    ("BENCH-090 the seat tooling: seat modes carried over a reboot, the seat group's "
      "steps and names, the Actuators '+' offset", t_seat_tooling),
 ]
 

@@ -40,8 +40,9 @@ using std::chrono::milliseconds;
 // answer and find the row a refused request flashes.
 constexpr size_t index_of(SeatAxis axis) { return static_cast<size_t>(axis); }
 
-// A seat axis' name for the logs, RAMMP_SEAT_AXIS_TABLE's NAME ("ELEVATION"); "?" for a value
-// the table does not have.
+/// @brief A seat axis' name for the logs.
+/// @param axis A seat axis.
+/// @return RAMMP_SEAT_AXIS_TABLE's NAME ("ELEVATION"); "?" for a value the table does not have.
 constexpr const char *to_string(SeatAxis axis) {
   switch (axis) {
 #define RAMMP_SEAT_AXIS_NAME(id_, name_, ...)                                                      \
@@ -250,9 +251,13 @@ inline constexpr char kHmiRefusedPostSeatTitle[] = "Seat not ready"; // C3, a se
 // The seat gate's refusals (hazard-seat-spec.md §2.8; texts Q11, approved 2026-10-11): the
 // axis' value unknown, and a SeatCommand the publish did not take. A seat press refused for a
 // stick FAULT reads kHmiRefusedPostSeatTitle over C2's kHmiNoticeStickFault.
+/// The seat gate's POSITION_UNKNOWN banner title.
 inline constexpr char kHmiSeatUnknownTitle[] = "SEAT REFUSED: POSITION UNKNOWN";
+/// The seat gate's POSITION_UNKNOWN banner body.
 inline constexpr char kHmiSeatUnknownText[] = "Wait for the MCB's seat position";
+/// The seat gate's NOT_SENT banner title.
 inline constexpr char kHmiSeatNotSentTitle[] = "SEAT REFUSED: NOT SENT";
+/// The seat gate's NOT_SENT banner body.
 inline constexpr char kHmiSeatNotSentText[] = "Press again";
 static_assert(sizeof(kHmiSeatUnknownTitle) <= kErrorTextLen &&
                   sizeof(kHmiSeatUnknownText) <= kErrorTextLen &&

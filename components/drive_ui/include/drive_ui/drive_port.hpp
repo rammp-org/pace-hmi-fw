@@ -111,8 +111,9 @@ public:
     };
   }
   [[nodiscard]] int64_t now_us() const { return esp_timer_get_time(); }
-  // Owner decision T1: whether a DriveCommand published now reaches a reader (the DriveCommand
-  // writer has a matched one), for the boot DISABLE.
+  /// Owner decision T1: whether a DriveCommand published now reaches a reader (the
+  /// DriveCommand writer has a matched one), for the boot DISABLE.
+  /// @return the DriveCommand writer has a matched reader
   [[nodiscard]] bool drive_writer_matched() const { return ui_->drive_writer_matched(); }
   // The DriveCommand, with the profile the user picked (one-shot). Returns whether it was
   // handed to RTPS; the adapter counts and logs a failure (H6).

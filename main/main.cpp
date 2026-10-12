@@ -33,6 +33,7 @@
 #include "keypad_input.hpp"
 
 #include "about_ui.hpp"
+#include "alloc_guard/alloc_guard.hpp"
 #include "bench_verbs.hpp"
 #include "board/board.hpp"
 #include "board/board_port.hpp"
@@ -49,6 +50,7 @@
 #include "rtps_comms.hpp"
 #include "selftest.hpp"
 #include "selftest_platform.hpp"
+#include "selftest_spec.hpp"
 #include "settings.hpp"
 #include "settings_applied.hpp"
 #include "storage.hpp"
@@ -1359,9 +1361,9 @@ extern "C" void app_main(void) {
                   {{.unit = ADC_UNIT_1, .channel = ADC_CHANNEL_0, .attenuation = ADC_ATTEN_DB_12},
                    {.unit = ADC_UNIT_1, .channel = ADC_CHANNEL_1, .attenuation = ADC_ATTEN_DB_12}},
               .convert_mode = ADC_CONV_SINGLE_UNIT_1,
-              // PROPOSAL (docs/plans/hazard-c2-cadc-priority.md; the owner's E5): the X/Y
-              // producer at lv_task's priority, so a busy UI task on its core cannot starve it
-              // into C2's STALE fault. espp's default is 5.
+              // Approved by the owner (E5, 2026-10-11; docs/plans/hazard-c2-cadc-priority.md):
+              // the X/Y producer at lv_task's priority, so a busy UI task on its core cannot
+              // starve it into C2's STALE fault. espp's default is 5.
               .task_priority = 20,
               .window_size_bytes = 1024,
               .log_level = espp::Logger::Verbosity::WARN},
@@ -1439,6 +1441,11 @@ extern "C" void app_main(void) {
   }
   remote_ui_start(remote_ui_config());
 
+  // Start-up is complete. From here the bench allocation guard (CONFIG_HMI_BENCH_ALLOC_GUARD,
+  // TS-DET-08) counts every heap allocation of the self test's mem.alloc_* tasks.
+  if constexpr (hmi::alloc_guard::ENABLED) {
+    hmi::alloc_guard::start(selftest_spec::kAllocTasks);
+  }
   park_main_task();
 }
 

@@ -165,6 +165,7 @@ First-party components (`main` and `components/*` except `espp_adc`, `espp_rtps`
 ```mermaid
 flowchart LR
   c_adc_window["adc_window"]
+  c_alloc_guard["alloc_guard"]
   c_board["board"]
   c_control["control"]:::safety
   c_drive_adapter["drive_adapter"]:::safety
@@ -246,6 +247,7 @@ flowchart LR
   c_housekeeping -.-> g_espp
   c_joystick_cal -.-> c_stick
   c_joystick_cal -.-> g_espp
+  c_main -.-> c_alloc_guard
   c_main -.-> c_board
   c_main -.-> c_control
   c_main -.-> c_drive_adapter

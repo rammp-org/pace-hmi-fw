@@ -102,7 +102,7 @@ sim's seat modes `seatval`, `seatdrop`, `seatslow`, the HMI's `SEATFAIL` and STA
   clean reset). **The bench never runs a calibration that writes flash** (the owner's
   standing rule): C2-13, whose way out is a completed run, is NOT_RUN.
 - Their graders are tested without a board on hand-written traces built from the specs
-  (`hazard_selftest.py`, BENCH-015..075 in `run_bench.py selftest`; the seat's BENCH-058..075).
+  (`hazard_selftest.py`, BENCH-015..090 in `run_bench.py selftest`; the seat's BENCH-073..090).
 
 ## Rules the code enforces
 - Never erases. `common.esptool()` refuses any erase option. The only write is
@@ -173,6 +173,13 @@ image. Children run with `PYTHONDONTWRITEBYTECODE=1`.
   `main/selftest_spec.hpp` (54 today; 57 with C4, 60 with C2: the counts declared in
   `boot-expected.json`, anything else is a problem). With the idle-task watchdog checks off in
   the tree's `sdkconfig.defaults` (C4), no `task_wdt` line may appear at all.
+- **Build variants that add self-test rows** are read from the image's own build config
+  (`<build dir>/config/sdkconfig.h`, `common.VARIANT_ROWS`), never from a fixed count. Today one:
+  `CONFIG_HMI_BENCH_ALLOC_GUARD` (the on-chip allocation guard) adds the tree's `Need::BENCH`
+  rows (`mem.alloc_*`). B2 expects the tree's count plus those rows (a finding, so it stays
+  additive with C4's and C2's rows); B3 takes them as declared new checks: each must be there,
+  each is graded on its own verdict, `mem.alloc_adc` is report-only (owner T12), and
+  `pc.report_complete` counts them on top of the baseline's value (CMP-006..008, BENCH-072).
 - **Marker order** is the baseline log's (settings → joystick → selftest ready → joy_cal →
   Network: WiFi → Got IP), not the order the plan lists them in.
 - **Task watchdog at ~8 s** (IDLE0 starved, `main` on CPU 0) is in the baseline. The same trip is

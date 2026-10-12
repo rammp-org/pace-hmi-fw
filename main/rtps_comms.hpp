@@ -78,9 +78,9 @@ void rtps_comms_on_mib_status(std::function<void(const MIB::MibStatus &)> handle
 /// The link's lock-free flags, for the motion guard's LINK_DOWN (hazard fix C4, C4-b): net
 /// failed, link up, IP held. Any task, acquire loads; the atomics live as long as the firmware.
 struct RtpsLinkFlags {
-  const std::atomic<bool> &net_failed;
-  const std::atomic<bool> &link_up;
-  const std::atomic<bool> &got_ip;
+  const std::atomic<bool> &net_failed; ///< the network interface failed to start
+  const std::atomic<bool> &link_up;    ///< the Ethernet or Wi-Fi link is up
+  const std::atomic<bool> &got_ip;     ///< an IP address is held
 };
 RtpsLinkFlags rtps_comms_link_flags();
 void rtps_comms_on_diagnostics(std::function<void(const rammp::Diagnostics &)> handler);

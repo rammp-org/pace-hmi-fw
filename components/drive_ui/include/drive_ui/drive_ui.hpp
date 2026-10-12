@@ -113,10 +113,12 @@ public:
     return config_.publish_drive(request, profile);
   }
   [[nodiscard]] LinkState link_state_now() const { return config_.link_state(); }
+  /// @return the DriveCommand writer has a matched reader now (owner decision T1)
   [[nodiscard]] bool drive_writer_matched() const { return config_.drive_writer_matched(); }
   [[nodiscard]] bool calibrating() const { return config_.calibrating(); }
   [[nodiscard]] hmi::stick::HoldReason hold_reason() const { return config_.hold_reason(); }
   [[nodiscard]] hmi::stick::PostGate post_gate() const { return config_.post_gate(); }
+  /// @return stick health is FAULT now (C2b)
   [[nodiscard]] bool stick_fault() const { return config_.stick_fault(); }
   void show_drive_notice(hmi::drive_adapter::DriveNotice notice) const {
     if (config_.show_notice) {

@@ -59,7 +59,9 @@ jobs:
     # so a missing or failing nm fails the step instead of passing as "no match". l0.yml's
     # bench_inject build checks that the same patterns do match there. The hazard bench verbs
     # (STATE, PERMIT, CAL UNSAVED, POST RERUN, CRASH, STALL; REQ-RUI-05..07) are `bench_?verb`.
-    - name: Release ELF has no stick injection and no bench verbs
+    # Nor does the allocation guard (REQ-AGC-05): no heap hooks, no hook, no alloc_guard
+    # symbol; l0.yml's alloc_guard build checks those patterns match there.
+    - name: Release ELF has no stick injection, no bench verbs and no allocation guard
       uses: espressif/esp-idf-ci-action@v1
       with:
         esp_idf_version: ${{ env.IDF_VERSION }}
@@ -72,6 +74,9 @@ jobs:
           && test -s build/release_nm.txt
           && ! grep -Ei "stick_?inject" build/release_nm.txt
           && ! grep -Ei "bench_?verb" build/release_nm.txt
+          && grep -qx "#define CONFIG_HMI_BENCH_ALLOC_GUARD_AS_INT 0" build/config/sdkconfig.h
+          && ! grep -q "^#define CONFIG_HEAP_USE_HOOKS 1" build/config/sdkconfig.h
+          && ! grep -E "esp_heap_trace_alloc_hook|alloc_guard" build/release_nm.txt
 
     - name: Determine Size Delta
       uses: esp-cpp/esp-idf-size-delta@v1

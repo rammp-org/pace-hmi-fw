@@ -402,7 +402,8 @@ SELFTEST_SPEC_PATH = find_header(os.path.join("main", "selftest_spec.hpp"))
 _SELFTEST_ROW_RE = re.compile(
     r'^\s*Check\{\s*Id::([A-Z0-9_]+)\s*,\s*"([^"]*)"\s*,\s*"([^"]*)"\s*,\s*([^,]+?)\s*,'
     r'\s*([^,]+?)\s*,\s*Need::([A-Z]+)\s*,\s*"([^"]*)"\s*\}', re.M)
-_SELFTEST_NEEDS = {"REQUIRED": "required", "OPTIONAL": "optional", "REMOTE": "remote"}
+_SELFTEST_NEEDS = {"REQUIRED": "required", "OPTIONAL": "optional", "REMOTE": "remote",
+                   "BENCH": "bench"}
 
 
 def _selftest_limit(text: str, no_limit_name: str, no_limit: int) -> int:
@@ -418,7 +419,8 @@ class SelfTestSpecRow(NamedTuple):
     unit: str
     lo: int
     hi: int
-    need: str  # "required", "optional" or "remote"
+    need: str  # "required", "optional", "remote" or "bench" (only a build with the alloc guard
+    #            reports a bench row; the others leave it out)
     desc: str  # what the check proves
 
 

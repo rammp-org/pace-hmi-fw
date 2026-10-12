@@ -26,15 +26,15 @@ namespace hmi::stick {
 /// relaxed stores: each value is a diagnostic on its own. What the permit acts on, the stick
 /// health, goes through PermitHooks::stick_health (release/acquire), not through these.
 struct MonitorTelemetry {
-  std::atomic<std::uint8_t> state{static_cast<std::uint8_t>(MonitorState::INIT)};
-  std::atomic<std::uint8_t> last_kind{0};  ///< SampleFault of the last implausible sample
-  std::atomic<std::uint8_t> last_axis{0};  ///< its StickAxis
-  std::atomic<std::uint8_t> fault_kind{0}; ///< SampleFault the latch stored
-  std::atomic<std::uint8_t> fault_axis{0}; ///< its StickAxis
-  std::atomic<std::uint32_t> suspect_onsets{0};
-  std::atomic<std::uint32_t> faults{0};
+  std::atomic<std::uint8_t> state{static_cast<std::uint8_t>(MonitorState::INIT)}; ///< MonitorState
+  std::atomic<std::uint8_t> last_kind{0};       ///< SampleFault of the last implausible sample
+  std::atomic<std::uint8_t> last_axis{0};       ///< its StickAxis
+  std::atomic<std::uint8_t> fault_kind{0};      ///< SampleFault the latch stored
+  std::atomic<std::uint8_t> fault_axis{0};      ///< its StickAxis
+  std::atomic<std::uint32_t> suspect_onsets{0}; ///< OK -> SUSPECT transitions since boot
+  std::atomic<std::uint32_t> faults{0};         ///< entries into FAULT since boot
   std::array<std::atomic<std::uint32_t>, kSampleFaultCount> implausible{}; ///< per SampleFault
-  std::atomic<std::uint32_t> xy_age_max_ms{0};
+  std::atomic<std::uint32_t> xy_age_max_ms{0}; ///< the oldest X/Y window age seen, ms
   /// The largest window or oneshot maximum seen since boot, whole mV, horizontal, vertical,
   /// twist (C2 M-1: compare with the calibrated ends); -1 before the first.
   std::array<std::atomic<std::int32_t>, 3> max_mv{{{-1}, {-1}, {-1}}};
@@ -133,6 +133,7 @@ public:
 
   /// The calibration in use is now @p cal (at start, and whenever the pipeline takes a new one):
   /// its high limits apply from the next step.
+  /// @param cal the calibration in use, mV per axis
   constexpr void use_calibration(const CalibrationMv &cal) noexcept { limits_ = limits_of(cal); }
 
   /// One cycle, valid or not, before the pipeline (REQ-CTL-15): the monitor's input from
@@ -153,12 +154,15 @@ public:
   }
 
   /// Whether the stick's keys are live (§3.1: OK and RECOVERING; D11).
+  /// @return true in OK and RECOVERING
   [[nodiscard]] constexpr bool keys_live() const noexcept {
     return stick::keys_live(monitor_.state());
   }
   /// The monitor (tests, and what the telemetry is taken from).
+  /// @return the state machine this cycle steps
   [[nodiscard]] constexpr const StickMonitor &monitor() const noexcept { return monitor_; }
   /// The limits in use (tests).
+  /// @return the high limits from the calibration in use
   [[nodiscard]] constexpr const HighLimitsMv &limits() const noexcept { return limits_; }
 
 private:

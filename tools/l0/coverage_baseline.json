@@ -1,0 +1,149 @@
+{
+  "comment": "L1 coverage floor per file, percent (tools/l0/coverage_gate.py). Raised by `update`, never lowered; branches null = gcov n/a.",
+  "files": {
+    "components/adc_window/include/adc_window/adc_window.hpp": {
+      "lines": 100.0,
+      "branches": 100.0
+    },
+    "components/control/include/control/cycle.hpp": {
+      "lines": 100.0,
+      "branches": 78.57
+    },
+    "components/control/include/control/motion_guard.hpp": {
+      "lines": 100.0,
+      "branches": 85.94
+    },
+    "components/drive_session/drive_session_table.hpp": {
+      "lines": 94.44,
+      "branches": 91.67
+    },
+    "components/drive_session/src/drive_session.cpp": {
+      "lines": 99.56,
+      "branches": 98.98
+    },
+    "components/fw_core/TOTAL": {
+      "lines": 98.6,
+      "branches": 85.9
+    },
+    "components/hmi_format/src/about.cpp": {
+      "lines": 100.0,
+      "branches": 96.15
+    },
+    "components/hmi_format/src/diag.cpp": {
+      "lines": 100.0,
+      "branches": null
+    },
+    "components/hmi_format/src/net.cpp": {
+      "lines": 100.0,
+      "branches": 100.0
+    },
+    "components/hmi_format/src/speed.cpp": {
+      "lines": 100.0,
+      "branches": 100.0
+    },
+    "components/hmi_format/src/stepper.cpp": {
+      "lines": 100.0,
+      "branches": 80.95
+    },
+    "components/hmi_format/src/topbar.cpp": {
+      "lines": 100.0,
+      "branches": 100.0
+    },
+    "components/hmi_format/src/update.cpp": {
+      "lines": 97.33,
+      "branches": 91.94
+    },
+    "components/hmi_models/src/grid.cpp": {
+      "lines": 100.0,
+      "branches": 88.89
+    },
+    "components/hmi_models/src/pin.cpp": {
+      "lines": 100.0,
+      "branches": 100.0
+    },
+    "components/hmi_rtps_spec/include/hmi_rtps_spec.hpp": {
+      "lines": 100.0,
+      "branches": 100.0
+    },
+    "components/joystick/src/joystick.cpp": {
+      "lines": 58.57,
+      "branches": 41.67
+    },
+    "components/joystick_cal/src/cal_record.cpp": {
+      "lines": 95.0,
+      "branches": 80.95
+    },
+    "components/joystick_cal/src/cal_run.cpp": {
+      "lines": 98.66,
+      "branches": 93.55
+    },
+    "components/ota_parse/src/fw_record.cpp": {
+      "lines": 100.0,
+      "branches": 70.83
+    },
+    "components/ota_parse/src/image_header.cpp": {
+      "lines": 100.0,
+      "branches": 64.58
+    },
+    "components/ota_parse/src/marker_search.cpp": {
+      "lines": 100.0,
+      "branches": 66.67
+    },
+    "components/ota_parse/src/release_list.cpp": {
+      "lines": 98.44,
+      "branches": 77.08
+    },
+    "components/post/src/indicator.cpp": {
+      "lines": 100.0,
+      "branches": 92.31
+    },
+    "components/post/src/post.cpp": {
+      "lines": 98.91,
+      "branches": 94.38
+    },
+    "components/post/src/runner.cpp": {
+      "lines": 98.28,
+      "branches": 90.91
+    },
+    "components/remote_ui/include/bench_verbs.hpp": {
+      "lines": 98.85,
+      "branches": 68.14
+    },
+    "components/settings/src/settings.cpp": {
+      "lines": 97.78,
+      "branches": 69.23
+    },
+    "components/stick/include/stick/bench_inject.hpp": {
+      "lines": 100.0,
+      "branches": 90.0
+    },
+    "components/stick/include/stick/output_permit.hpp": {
+      "lines": 100.0,
+      "branches": 82.61
+    },
+    "components/stick/include/stick/stick_monitor.hpp": {
+      "lines": 100.0,
+      "branches": 95.86
+    },
+    "components/stick/include/stick/stick_pipeline.hpp": {
+      "lines": 100.0,
+      "branches": 49.07
+    },
+    "components/stick/src/stick_pipeline.cpp": {
+      "lines": 100.0,
+      "branches": 76.67
+    },
+    "components/topology/include/topology_espp.hpp": {
+      "lines": 99.44,
+      "branches": 50.0
+    },
+    "components/topology/include/topology_validate.hpp": {
+      "lines": 97.21,
+      "branches": 88.19
+    },
+    "main/joystick_cal.cpp": {
+      "lines": 95.51,
+      "branches": 63.85
+    }
+  }
+}

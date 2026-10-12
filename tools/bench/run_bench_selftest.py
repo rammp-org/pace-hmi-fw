@@ -28,7 +28,10 @@ IP = "192.168.137.218"
 
 
 class FakeBoard:
-    def __init__(self, comes_back: bool = True, ip_after_reset: str = IP):
+    def __init__(self, comes_back: bool = True, ip_after_reset: str = IP,
+                 settings: str | None = None, changes: tuple[str, ...] = ()):
+        self.settings = settings     # the saved settings line its boots print (None: none)
+        self.changes = changes       # app steps that change a saved setting (brightness -10)
         self.up = True
         self.ip = IP
         self.comes_back = comes_back
@@ -47,6 +50,7 @@ class FakeBoard:
         if not self.up and self.comes_back:
             self.ip = self.ip_after_reset
             lines = ["ESP-ROM:esp32p4", "Calling app_main()",
+                     *([f"[settings/I][7.872]: {self.settings}"] if self.settings else []),
                      f"[rtps_comms/I][27.158]: Got IP {self.ip} (gateway 192.168.137.2)",
                      "after Got IP"]
             for line in lines:
@@ -64,6 +68,8 @@ class FakeBoard:
     def app_step(self, name: str, ip: str) -> dict:
         ok = self.up and ip == self.ip
         self.log.append(f"{name}:{'up' if ok else 'BOOTING'}")
+        if name in self.changes and self.settings:
+            self.settings = self.settings.replace("brightness 80", "brightness 70")
         return {"verdict": "PASS" if ok else "FAIL",
                 "problems": [] if ok else [f"{name} ran while the board was not up at {ip}"]}
 
@@ -97,8 +103,11 @@ def fake_bench(fake: FakeBoard, backup_made: bool = False):
         patch(board, "backup_storage", backup)
         patch(run_bench.Run, "hotspot", lambda self, action: (0, "STATE On"))
         patch(run_bench.Run, "rtps_sweep", lambda self: [fake.ip])
-        patch(run_bench.boot_check, "analyse",
-              lambda text, baseline, **k: {"verdict": "PASS", "problems": [], "ip": fake.ip})
+        def analyse(text, baseline, **k):
+            hits = board_settings(text)
+            return {"verdict": "PASS", "problems": [], "ip": fake.ip,
+                    "markers": [{"name": "settings_loaded", "value": h} for h in hits[:1]]}
+        patch(run_bench.boot_check, "analyse", analyse)
         patch(run_bench.ui_client, "ping", fake.ping)
         patch(run_bench.compare_selftest, "run_selftest",
               lambda ip, out, tree: (fake.app_step("B3", ip)["verdict"], {}))
@@ -112,6 +121,10 @@ def fake_bench(fake: FakeBoard, backup_made: bool = False):
         finally:
             for obj, name, value in reversed(saved):
                 setattr(obj, name, value)
+
+
+def board_settings(text: str) -> list[str]:
+    return [v for _, v in run_bench.boot_check.find(text.splitlines(), run_bench.SETTINGS_RE)]
 
 
 def bench(fake: FakeBoard, steps: str, ip: str | None = IP,
@@ -313,6 +326,83 @@ def t_boot_check_on_ethernet() -> None:
     finally:
         common.LINK = saved
 
+def t_boot_check_variant_rows() -> None:
+    import boot_check
+    baseline = (common.BASELINE_DIR / "boot-board2.log").read_text(encoding="utf-8",
+                                                                    errors="replace")
+    settings_re = boot_check.MARKERS[0][1]
+    (_, base_settings), = boot_check.find(baseline.splitlines(), settings_re)[:1]
+    wanted = boot_check.OVERRIDES.get("settings_loaded", {}).get("value", base_settings)
+    plain = boot_check.selftest_count(common.REPO)
+    # As BENCH-014: a boot of this tree, its own self-test count, no task_wdt line once C4 turns
+    # the idle-task checks off.
+    log = baseline.replace(base_settings, wanted).replace("ready: 54 checks",
+                                                          f"ready: {plain} checks")
+    if boot_check.idle_checks_off(common.REPO):
+        log = "\n".join(ln for ln in log.splitlines() if "task_wdt" not in ln)
+    guard = common.variant_checks(None, common.REPO, {"CONFIG_HMI_BENCH_ALLOC_GUARD": "1"})
+    expect("the guard's rows come from the tree's Need::BENCH rows", sorted(guard),
+           ["mem.alloc_adc", "mem.alloc_lvgl", "mem.alloc_rtps"])
+    expect("report-only per T12", [n for n, v in guard.items() if v["report_only"]],
+           ["mem.alloc_adc"])
+    expect("option off or absent: no rows",
+           (common.variant_checks(None, common.REPO, {"CONFIG_HMI_BENCH_ALLOC_GUARD": "0"}),
+            common.variant_checks(None, common.REPO, {})), ({}, {}))
+    guard_log = log.replace(f"ready: {plain} checks", f"ready: {plain + 3} checks")
+    saved = common.LINK
+    try:
+        common.LINK = "WiFi"
+        expect("plain image, no variant: PASS", boot_check.analyse(log, baseline)["problems"], [])
+        report = boot_check.analyse(guard_log, baseline, variant=guard)
+        expect("guard image, guard variant: PASS with a finding",
+               (report["problems"], any("+3 rows" in f for f in report["findings"])), ([], True))
+        expect("guard image read as plain: selftest_ready fails", [
+            p.split(":")[0] for p in boot_check.analyse(guard_log, baseline)["problems"]],
+            ["selftest_ready"])
+        expect("plain image with the variant claimed: selftest_ready fails", [
+            p.split(":")[0] for p in boot_check.analyse(log, baseline, variant=guard)["problems"]],
+            ["selftest_ready"])
+    finally:
+        common.LINK = saved
+    # additive: a tree count the hazard fixes declare (57 with C4) plus the guard's rows
+    text, problems, findings = boot_check.expected_selftest_ready(
+        f"ready: {plain} checks (selftest_spec.h)", 57, guard)
+    expect("C4's 57 plus the guard: 60 expected, no problem",
+           (text, problems, len(findings)), ("ready: 60 checks (selftest_spec.h)", [], 2))
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = pathlib.Path(tmp) / "config"
+        cfg.mkdir()
+        (cfg / "sdkconfig.h").write_text("#define CONFIG_HMI_REMOTE_UI 1\n"
+                                         "#define CONFIG_HMI_BENCH_ALLOC_GUARD 1\n",
+                                         encoding="utf-8")
+        expect("read from the build dir's sdkconfig.h",
+               sorted(common.variant_checks(pathlib.Path(tmp), common.REPO)),
+               ["mem.alloc_adc", "mem.alloc_lvgl", "mem.alloc_rtps"])
+
+
+SETTINGS = ("loaded: brightness 80, theme 0, menu_slide 0, flip 0, stick_sensitivity 9, "
+            "drive_speed 10, stick_invert_x 0, stick_invert_y 0, stick_swap 0, sounds 1, network 1")
+
+
+def t_settings_guard() -> None:
+    summary, log = bench(FakeBoard(settings=SETTINGS), "B0,B2,B5", ip=None)
+    expect("unchanged: SETTINGS PASS after a closing reset", (
+        verdicts(summary), log[-2:], run_bench_verdict(summary)),
+        ({"B0": "PASS", "B2": "PASS", "B5": "PASS", "SETTINGS": "PASS"},
+         ["reset:B2", "capture:reset=True"], "PASS"))
+    summary, log = bench(FakeBoard(settings=SETTINGS, changes=("B5",)), "B0,B2,B5", ip=None)
+    g = summary["steps"]["SETTINGS"]
+    expect("changed by a step: a rig fault, INVALID, both lines in the record",
+           (g["verdict"], g["reason"].startswith("rig fault"), "brightness 80" in g["before"],
+            "brightness 70" in g["after"], run_bench_verdict(summary)),
+           ("INVALID", True, True, True, "INVALID"))
+    summary, log = bench(FakeBoard(settings=SETTINGS), "B0,B2", ip=None)
+    expect("nothing ran after B2: no closing reset", ("SETTINGS" in summary["steps"],
+                                                      log.count("capture:reset=True")), (False, 1))
+    expect("no line after the reset: NOT_RUN", run_bench.settings_verdict(SETTINGS, None)[0],
+           "NOT_RUN")
+
+
 CASES = [
     ("BENCH-001 after B0's reset, B5 waits for the boot (Got IP) and PING before it runs",
      t_b0_then_b5_waits),
@@ -338,6 +428,11 @@ CASES = [
      "anything else refused", t_net_spec),
     ("BENCH-014 on Ethernet B2 expects 'Network: Ethernet' and network 0, nothing else",
      t_boot_check_on_ethernet),
+    ("BENCH-072 B2 with a build variant: the alloc guard's config adds the tree's Need::BENCH "
+     "rows to the self-test count, on top of the tree's (and C4's) count; read from the build "
+     "dir's sdkconfig.h", t_boot_check_variant_rows),
+    ("BENCH-071 SETTINGS: a run whose steps change a saved setting ends INVALID (rig fault) "
+     "after a closing reset; unchanged is PASS; no step after B2, no reset", t_settings_guard),
 ]
 
 

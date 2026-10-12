@@ -4,7 +4,8 @@
 // sequence) in one consistent snapshot, without a lock. Our code: the upstream class stays as
 // it is apart from its hook lines (components/espp_adc/README.md).
 //
-// Not used by the firmware yet: C2's island commit reads both X/Y windows through it.
+// The firmware's X/Y source: C2's StickIsland reads both X/Y windows through get_windows()
+// every cycle (stick_island.hpp).
 
 #include <array>
 #include <cstddef>
@@ -52,6 +53,7 @@ public:
 
   /// The reader task's handle once it has run (nullptr before): bench builds suspend it for
   /// C2's STALL CADC (O14).
+  /// @return the task handle, or nullptr
   [[nodiscard]] TaskHandle_t task_handle() const noexcept { return task_handle_.load(); }
 };
 

@@ -21,10 +21,14 @@ enum class StallTask : std::uint8_t { UI, ADC, CADC };
 class BenchStall {
 public:
   /// Asks @p task to stall for @p ms at its next cycle (the remote UI's task).
+  /// @param task the task to stall
+  /// @param ms how long, in ms (0 cancels)
   void request(StallTask task, std::uint32_t ms) noexcept {
     ms_[index(task)].store(ms, std::memory_order_release);
   }
   /// The stall asked of @p task, cleared (the task itself, once per cycle).
+  /// @param task the task asking
+  /// @return the stall in ms, 0 for none
   [[nodiscard]] std::uint32_t take(StallTask task) noexcept {
     return ms_[index(task)].exchange(0, std::memory_order_acq_rel);
   }

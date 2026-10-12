@@ -187,6 +187,13 @@ yet measured or decided, and "none" means checked and absent.
 | CS-SAF-03 (open circuit) | joystick low rail | firmware cannot tell an open pot (0 mV) from full travel (calibrated min 6-11 mV on board 2); firmware-only for now, residual hazard documented in `docs/plans/hazard-fixes.md` | owner | revisit with an EE change |
 | CS-LNG-02 | `main` | `main` builds at gnu++23 like all first-party code (since `dev_ai_refactor_main23`), but keeps IDF's default warnings. The CS-LNG-02 warning set (`-Wconversion`, `-Wshadow`, ...) comes in a later step, as the legacy counts in the ratchet come down. Components use `fw_component_options` | owner | open (warnings only) |
 
+### Approved 2026-10-11 (owner)
+
+| Rule ID | Location | Reason | Owner | Review date |
+| --- | --- | --- | --- | --- |
+| CS-CMP-03 (no mutable namespace state) | `components/alloc_guard/src/alloc_guard.cpp` (the counter) | C-ABI hook state: ESP-IDF's `esp_heap_trace_alloc_hook` takes no context argument. Allowed by a ratchet rule (`C_HOOK_STATE`, tools/l0/README.md), not a baseline entry: listed file, callback defined with C linkage, compiled only under its bench Kconfig option, off in release | owner (T13) | per new entry |
+| CS-SAF-04, TS-DET-08 (safety task allocates nothing after start-up) | `mem.alloc_adc` in `main/selftest_spec.hpp` | `Read ADC` allocates 24 B per XYTwist publish inside espp's `RtpsParticipant::publish` (`std::string(topic)`); the row is report-only (0..kAnyHi) with the count shown, instead of 0..0 | owner (T12) | when espp's publish stops allocating |
+
 ### Approved 2026-10-08 (owner), from the compliance audit
 
 In force. Each row comes from `docs/plans/compliance-gaps.md` and states a deviation that

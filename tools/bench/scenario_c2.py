@@ -25,7 +25,7 @@ first changed STICK message was sent (its mark).
 | C2-8 | sim normal; forward; rail | 1 DISABLE in [t, t + 600 ms], none before; Locked by t + 1.5 s; banner STICK_FAULT; no ENABLE; 0 after t + 200 ms |
 | C2-9 | sim s; as C2-8; 7 s | Drive throughout; every XYTwist after t + 200 ms 0; B5''-6's DISABLE timing |
 | C2-10 | after C2-3: centre 5 s, forward 2 s, sim a, centre 0.5 s, forward 2 s | no non-zero XYTwist; FAULT throughout; notice STICK_FAULT |
-| C2-11 | OK then FAULT; Settings; down, up, right, left 0.5 s each | FAULT: focus and screen unchanged, joy_key 0; OK (control): the focus moves |
+| C2-11 | OK then FAULT; Settings; down, up, right, left 0.5 s each | FAULT: focus and screen unchanged, joy_key 0; OK (control): the focus moves. Clean-up: brightness back to the approved value by touch (the sweep steps it) |
 | C2-12 | FAULT; Home, Settings, Joystick, Drive 15 s each | the fault indicator on every screen; FAULT after 60 s |
 | C2-13 | FAULT; Calibrate by touch; inject the run | NOT_RUN: a completed run saves the record (REQ-CAL-06), which the bench may not do; CAL UNSAVED cannot stand in (it moves no generation counter) |
 | C2-14 | Restart HMI; centre from the start | stick OK within 1.5 s of the first STATE; never FAULT; xy_age_max_ms <= 250 (until M8) |
@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import time
 
+import boot_check
 import hazard_grade as hg
 from hazard_rig import HazardStep, NotRun, Rig
 from scenario_c1 import (DRIVE, LOCKED, check_no_nonzero, check_resume, check_within,
@@ -698,5 +699,17 @@ STEPS = {
     "C2-15": (s_c2_15, grade_c2_15, "30 min soak, then the self test"),
     "C2-16": (s_c2_16, grade_c2_16, "ContinuousAdc starvation (STALL CADC)"),
 }
+def c2_11_cleanup(rig: Rig) -> None:
+    """C2-11's key sweep runs on the Settings list, so its RIGHT opens Display & sound and the
+    LEFT that follows steps Brightness (a held RIGHT can step it too). The value is saved, and
+    every later B2 failed on 'brightness 70' (2026-10-11). Put it back to the bench's approved
+    value by touch after the reboot clean-up."""
+    reboot_cleanup(rig)
+    want = boot_check.expected_settings()["brightness"]
+    rig.set_brightness(want)
+    rig.st.record("cleanup_brightness", want)  # B2 and run_bench's SETTINGS check the saved line
+
+
 CLEANUP = {name: reboot_cleanup for name in STEPS if name not in NOT_RUNNABLE}
+CLEANUP["C2-11"] = c2_11_cleanup
 SELFTEST_AFTER = {"C2-15"}

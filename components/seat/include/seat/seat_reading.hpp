@@ -22,8 +22,10 @@ inline constexpr int32_t kValueUnknown = hmi::format::VALUE_UNKNOWN;
 /// conversion to raw is exact and defined (RTPS-006, the seat spec §3).
 inline constexpr float kConversionBound = 8388608.0f; // 2^23
 
-/// How far outside an axis' range a reported value is still taken as known: one step (Q4 = a,
-/// approved 2026-10-11; revisit with the MCB team's answer S5).
+/// @brief How far outside an axis' range a reported value is still taken as known: one step
+///        (Q4 = a, approved 2026-10-11; revisit with the MCB team's answer S5).
+/// @param spec The axis' row of RAMMP_SEAT_AXIS_TABLE.
+/// @return The tolerance in raw units (the axis' step).
 [[nodiscard]] constexpr int32_t range_tolerance(const rammp::SeatAxisSpec &spec) noexcept {
   return spec.step;
 }
@@ -50,7 +52,9 @@ inline constexpr float kConversionBound = 8388608.0f; // 2^23
   return raw;
 }
 
-/// Whether a raw value (as seat_reading returns it) is known.
+/// @brief Whether a raw value (as seat_reading returns it) is known.
+/// @param raw A raw value, or kValueUnknown.
+/// @return False for kValueUnknown, true otherwise.
 [[nodiscard]] constexpr bool known(int32_t raw) noexcept { return raw != kValueUnknown; }
 
 } // namespace hmi::seat

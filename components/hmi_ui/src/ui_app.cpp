@@ -289,7 +289,9 @@ void UiApp::seat_step(size_t row, int direction) {
 
 // The gate's inputs at the press (§2.2's "Read from").
 hmi::seat::SeatInputs UiApp::seat_inputs(size_t row) {
-  return {.link_connected = config_.link->state() == LinkState::CONNECTED,
+  return {.link = config_.link->state() == LinkState::CONNECTED
+                      ? hmi::seat::SeatLink::CONNECTED
+                      : hmi::seat::SeatLink::NOT_CONNECTED,
           .mcb_state = static_cast<uint8_t>(lv_subject_get_int(&mib_state_)),
           .post = post_gate(),
           .health = permit_hooks_.stick_health.read(),

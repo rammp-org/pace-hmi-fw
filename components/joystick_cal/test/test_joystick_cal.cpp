@@ -1076,3 +1076,20 @@ TEST_CASE("CAL-414 the Joystick screen's note (C2 REQ-UI-26): shown in place of 
   (void)joystick_cal_take_new();
   (void)quiet.stop();
 }
+
+TEST_CASE("CAL-415 a timer period while idle only pauses the timer (cal_run IDLE + TICK); "
+          "joystick_cal_forget_measured (bench CAL UNSAVED) makes the calibration not measured",
+          "[cal][measured][REQ-CAL-08]") {
+  start_clean();
+  TEST_ASSERT_FALSE(joystick_cal_running());
+  lv_timer_t *timer = widgets().timer;
+  timer->paused = false; // an LVGL period that lands after the run ended
+  TEST_ASSERT_TRUE(fake_lvgl::tick(timer));
+  TEST_ASSERT_TRUE(timer->paused);
+  TEST_ASSERT_FALSE(joystick_cal_running());
+  (void)load_text(kBoard2File);
+  TEST_ASSERT_TRUE(joystick_cal_measured());
+  joystick_cal_forget_measured();
+  TEST_ASSERT_FALSE(joystick_cal_measured());
+  TEST_ASSERT_FALSE(joystick_cal_saved());
+}

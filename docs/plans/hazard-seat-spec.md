@@ -7,11 +7,12 @@ approval (CS-SAF-05; D1: the owner is the only approver for now); base then
 `dev_ai_hazard_table` 670dcc7.
 
 Implementation notes (what differs in form, not in rule): the bench graders' cases are
-BENCH-058..074 (055-057 were taken; §5.3 allowed the renumbering), plus BENCH-075 for the seat
-tooling; STATE's five seat keys are left out of the line, not null, in a firmware without the
-seat hook (REQ-RUI-09), so the C1-C2 STATE lines keep their exact form; REQ-UI-30's README row
-lands with REQ-UI-28/29 (commit 4) and REQ-UI-33's with REQ-UI-31/32 (commit 5), as the
-requirement matrix allows no gap in an ID series.
+BENCH-073..089 and the seat tooling's BENCH-090 (055-057 and 070-072 were taken; §5.3 allowed
+the renumbering), and the remote UI's seat cases RUI-011..013; STATE's five seat keys are left
+out of the line, not null, in a firmware without the seat hook (REQ-RUI-09), so the C1-C2
+STATE lines keep their exact form; REQ-UI-30's README row lands with REQ-UI-28/29 (commit 4)
+and REQ-UI-33's with REQ-UI-31/32 (commit 5), as the requirement matrix allows no gap in an ID
+series.
 
 Inputs: `hazard-fixes.md` §4 "Seat path" (v2 rule), §9 (M1, G1-G5, D3, D4), §10; the owner's
 answers (`hazard-decisions.md`); the C1, C3, C4 and C2 specs; hazards H6, H8, H10
