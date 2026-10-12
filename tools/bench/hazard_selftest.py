@@ -1536,6 +1536,7 @@ def t_lapses_in_graded_windows() -> None:
         def __init__(self, st, script_lapses, spans, fail_setup):
             self.st, self.inj = st, type("Inj", (), {"lapses": script_lapses})()
             self.setup_spans, self.fail_setup = spans, fail_setup
+            self.link_stalls: list = []
 
         def __enter__(self):
             return self
@@ -1721,6 +1722,60 @@ def t_c2_11_restores_brightness() -> None:
                                                           r.log.count("+")), ("bench", 1, 0))
 
 
+def t_link_stalls() -> None:
+    """A proven link stall (an XYTwist gap over 0.15 s under an unrelated remote-UI reply
+    delayed over 0.15 s) in a graded window voids the step: NOT_RUN, never PASS."""
+    import datetime as dt
+    t0 = dt.datetime(2026, 10, 11, 21, 47, 0)
+    events = [{"t": t0.isoformat(), "mono": 1000.0, "ev": "mark", "label": "step-start"}]
+
+    def samples(gap_at: float, gap: float) -> list:
+        out, t = [], 1000.0
+        while t < 1010.0:
+            out.append((round(t, 3), 0.0, 0.0, 0.0, 0))
+            t += gap if abs(t - gap_at) < 0.017 else 0.035
+        return out
+
+    def row(at: float, dur: float, cmd: str = "STATE") -> dict:
+        return {"cmd": cmd, "sent": (t0 + dt.timedelta(seconds=at)).isoformat(
+            timespec="milliseconds"), "dur_s": dur}
+    s = samples(1005.005, 0.22)
+    gap_start = next(a for a, b in zip([x[0] for x in s], [x[0] for x in s][1:]) if b - a > 0.2)
+    at = gap_start - 1000.0 + 0.02
+    stalls = hazard_rig.link_stalls(s, events, [row(at, 0.2)], [])
+    expect("a gap under a delayed reply: one stall", (len(stalls), stalls[0][1], stalls[0][2]),
+           (1, 0.22, "STATE"))
+    expect("a STALL command's own slow reply is not proof",
+           hazard_rig.link_stalls(s, events, [row(at, 0.2, "STALL UI 300")], []), [])
+    expect("a gap with every reply fast", hazard_rig.link_stalls(s, events, [row(at, 0.05)], []),
+           [])
+    expect("a slow reply with no gap", hazard_rig.link_stalls(
+        samples(0.0, 0.035), events, [row(at, 0.3)], []), [])
+    expect("a gap over 1 s is the board stopping, not the link", hazard_rig.link_stalls(
+        samples(1005.005, 1.5), events, [row(at, 1.6)], []), [])
+    span = (t0 + dt.timedelta(seconds=4), t0 + dt.timedelta(seconds=6))
+    expect("a gap wholly in a set-up span that succeeded", hazard_rig.link_stalls(
+        s, events, [row(at, 0.2)], [span]), [])
+
+    class FakeRig:
+        def __init__(self, stalls):
+            self.link_stalls = stalls
+            self.st = hazard_rig.HazardStep("x", pathlib.Path(tempfile.gettempdir()))
+            self.st.check("graded", True, "")
+    r = FakeRig(stalls)
+    hazard_steps._check_link_stalls(r, "B5''-6")
+    res = r.st.result()
+    expect("proven: NOT_RUN 'bench network stall', the checks kept",
+           (res["verdict"], res["reason"].startswith("bench network stall"), len(res["checks"])),
+           ("NOT_RUN", True, 1))
+    r = FakeRig([])
+    hazard_steps._check_link_stalls(r, "B5''-6")
+    expect("not proven: the verdict stands", r.st.result()["verdict"], "PASS")
+    r = FakeRig(stalls)
+    hazard_steps._check_link_stalls(r, "B5i")
+    expect("a step whose silence is its own: exempt", r.st.result()["verdict"], "PASS")
+
+
 def t_once_hold_and_clock() -> None:
     """A one-cycle message stands two ADC cycles: no refresh, inline or periodic, replaces it
     before the board's next cycle has taken it (C2-4b/c, cand3-1485932). The bench refuses a
@@ -1842,6 +1897,9 @@ CASES = [
      "first (a wrong one is NOT_RUN); KEY ENTER is always released", t_seat_targets_and_key_enter),
     ("BENCH-070 C2-11's clean-up sets the approved brightness back by touch ('-' to the "
      "floor, '+' up to it); a tap off the Brightness row is NOT_RUN", t_c2_11_restores_brightness),
+    ("BENCH-073 a proven link stall (XYTwist gap > 0.15 s under an unrelated remote-UI reply "
+     "> 0.15 s) in a graded window: NOT_RUN 'bench network stall', never PASS; else the "
+     "verdict stands", t_link_stalls),
     ("BENCH-072 a one-cycle STICK stands 80 ms (no refresh replaces it unseen); a 15.6 ms "
      "monotonic clock is refused; the one-way delay is never 0 on a slow clock",
      t_once_hold_and_clock),

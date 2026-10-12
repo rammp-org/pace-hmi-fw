@@ -301,6 +301,51 @@ def stick_lapses(rows: list[dict], pauses: list[datetime.datetime],
     return out
 
 
+# A proven link stall (orchestrator, 2026-10-11, measurement fix): an XYTwist gap at the sim
+# over LINK_STALL_GAP_S that an unrelated remote-UI reply, delayed over LINK_STALL_REPLY_S,
+# overlaps. Both channels stalled at once: the network, not the firmware (B5''-6 on
+# cand3-1485932: a 0.453 s DISABLE gap behind a 0.219 s XYTwist gap). Gaps over
+# LINK_STALL_GAP_MAX_S are the board stopping (a reboot, a stall), not the link.
+LINK_STALL_GAP_S = 0.15
+LINK_STALL_REPLY_S = 0.15
+LINK_STALL_GAP_MAX_S = 1.0
+
+
+def link_stalls(samples: list, events: list[dict], rows: list[dict],
+                setups: list[tuple[datetime.datetime, datetime.datetime]]) -> list[list]:
+    """[gap end (wall, ISO ms), gap s, command, its reply s] for each proven link stall outside
+    a set-up span that succeeded. A STALL command's own slow reply is related, not proof."""
+    ref = next((e for e in events if "mono" in e and "t" in e), None)
+    if ref is None:
+        return []
+    off = datetime.datetime.fromisoformat(ref["t"]).timestamp() - ref["mono"]
+    slow = []
+    for r in rows:
+        cmd = str(r.get("cmd", ""))
+        if "error" in r or not r.get("sent") or cmd.startswith("STALL"):
+            continue
+        dur = r.get("dur_s") or 0.0
+        if dur > LINK_STALL_REPLY_S:
+            a = datetime.datetime.fromisoformat(r["sent"]).timestamp()
+            slow.append((a, a + dur, cmd, dur))
+    out = []
+    times = sorted(s[0] for s in samples)
+    for a, b in zip(times, times[1:]):
+        gap = b - a
+        if not LINK_STALL_GAP_S < gap <= LINK_STALL_GAP_MAX_S:
+            continue
+        wa, wb = a + off, b + off
+        hit = next((x for x in slow if x[0] < wb and x[1] > wa), None)
+        if hit is None:
+            continue
+        da, db = (datetime.datetime.fromtimestamp(w) for w in (wa, wb))
+        if any(s0 <= da and db <= s1 for s0, s1 in setups):
+            continue
+        out.append([db.isoformat(timespec="milliseconds"), round(gap, 3), hit[2][:40],
+                    round(hit[3], 3)])
+    return out
+
+
 SIM_RESTART_NOTE = "sim restarted after HMI reboot (RTPS rediscovery not supported by the sim)"
 STATE_COMMANDS = {"ENABLED": "a", "IDLE": "ok", "ERROR": "e", "INITIALIZING": "z"}
 
@@ -394,6 +439,7 @@ class Rig:
         self.inj: Injector | None = None
         # drive set-ups that succeeded, wall clock as the remote-UI log (graded_lapses)
         self.setup_spans: list[tuple[datetime.datetime, datetime.datetime]] = []
+        self.link_stalls: list[list] = []  # proven link stalls in graded windows (collect)
         self._io = threading.RLock()  # re-entered by the inline refresh before a command
         self._hmi_ui = None
         self._t0 = time.monotonic()
@@ -904,6 +950,8 @@ class Rig:
                     if line.strip()] if log.exists() else []
             self.inj.lapses = stick_lapses(rows, self.inj.pauses)
             self.st.record("injection_lapses", self.inj.lapses)
+            self.link_stalls = link_stalls(self.trace.samples, events, rows, self.setup_spans)
+            self.st.record("link_stalls", self.link_stalls)
         (self.out / "states.jsonl").write_text(
             "".join(json.dumps([t, s]) + "\n" for t, s in self.trace.states), encoding="utf-8")
         return self.trace
