@@ -90,8 +90,13 @@ the check. The stick task then takes no lock to read the ADC at all.
 services; pinned to core 0, away from `lv_task` and `tab5_audio`; 6144 B. The G10 task dump
 (`tools/guards/baselines/tasks.json`) holds the same row. The topology's `control` row
 (`components/topology`, CS-CON-02) is the islands work's target (it says priority 22; C4 O2:
-21, align the draft). The continuous ADC's own task is espp's (`ContinuousAdc`, priority 5,
-unpinned; C4 O9 / C2 O14: not changed).
+21, align the draft). The continuous ADC's own task is espp's (`ContinuousAdc`,
+unpinned) at priority 20, `lv_task`'s, set by main's StickIsland config (owner E5, 2026-10-11;
+`docs/plans/hazard-c2-cadc-priority.md`; espp's default is 5).
+
+Residual (owner T12, 2026-10-11): espp's `RtpsParticipant::publish` allocates a `std::string`
+per XYTwist on `Read ADC`. Accepted by the owner 2026-10-11, to fix later
+(`docs/plans/hazard-fixes.md` §11).
 
 ## Dependencies
 

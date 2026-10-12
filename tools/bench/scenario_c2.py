@@ -28,9 +28,9 @@ first changed STICK message was sent (its mark).
 | C2-11 | OK then FAULT; Settings; down, up, right, left 0.5 s each | FAULT: focus and screen unchanged, joy_key 0; OK (control): the focus moves |
 | C2-12 | FAULT; Home, Settings, Joystick, Drive 15 s each | the fault indicator on every screen; FAULT after 60 s |
 | C2-13 | FAULT; Calibrate by touch; inject the run | NOT_RUN: a completed run saves the record (REQ-CAL-06), which the bench may not do; CAL UNSAVED cannot stand in (it moves no generation counter) |
-| C2-14 | Restart HMI; centre from the start | stick OK within 1.5 s of the first STATE; never FAULT; xy_age_max_ms <= 200 |
+| C2-14 | Restart HMI; centre from the start | stick OK within 1.5 s of the first STATE; never FAULT; xy_age_max_ms <= 250 (until M8) |
 | C2-15 | 30 min on Drive, centred; then the self test | joy.bad_samples 0, joy.xy_age_max <= 200, joy.health OK; time.adc_avg 34.5..35.5; time.adc_max <= 40; mem.stk_adc >= 2048 |
-| C2-16 | STALL CADC 1000 | FAULT STALE; output 0 by 340 ms after the stall start (+ transport) |
+| C2-16 | injection off (real stick at rest), Drive; STALL CADC 1000 | FAULT STALE; no non-zero XYTwist (the 340 ms output-0 is not observable at rest) |
 
 Banners: STATE's `banner` (owner, 2026-10-08). Not graded: the indicator in a SHOT (C2-12:
 STATE grades it).
@@ -287,6 +287,11 @@ def grade_c2_12(st: HazardStep, tr: hg.Trace, p: dict) -> None:
              "" if last is None else f"at +{last[0] - t:.0f} s: {_stick(last[1], 'state')}")
 
 
+# C2-14's X/Y age band after a reboot: 250 ms until the owner's measurement M8 (owner T16,
+# 2026-10-11; C2 §9 said 200, and a boot measured 203 on c2cadc-7a10576).
+C2_14_XY_AGE_MAX_MS = 250
+
+
 def grade_c2_14(st: HazardStep, tr: hg.Trace, p: dict) -> None:
     b = tr.mark("back")
     first = hg.first_state(tr.states, lambda s: True, b)
@@ -300,7 +305,8 @@ def grade_c2_14(st: HazardStep, tr: hg.Trace, p: dict) -> None:
     st.check("never FAULT", fault is None, "")
     last = tr.states[-1][1]
     age = _stick(last, "xy_age_max_ms")
-    st.check("xy_age_max_ms <= 200", age is not None and age <= 200, str(age))
+    st.check(f"xy_age_max_ms <= {C2_14_XY_AGE_MAX_MS}", age is not None
+             and age <= C2_14_XY_AGE_MAX_MS, str(age))
 
 
 SOAK_BANDS = {  # C2-15, in the spec's units (ms, B, counts)
@@ -334,11 +340,9 @@ def grade_c2_15(st: HazardStep, tr: hg.Trace, p: dict) -> None:
 
 def grade_c2_16(st: HazardStep, tr: hg.Trace, p: dict) -> None:
     t = tr.mark("change")
-    allow = p.get("one_way_s", 0.0)
-    z = hg.first_sample(tr.samples, hg.is_exact_zero, t)
-    st.check("output 0 by 340 ms after the stall start (+ transport)",
-             z is not None and z[0] - t <= 0.340 + allow,
-             "never" if z is None else f"at +{z[0] - t:.3f} s (allowance {allow:.3f})")
+    check_exact_zero_after(st, tr, t, t + 1.5, "no non-zero XYTwist from the stall on")
+    held = hg.first_state(tr.states, lambda s: _stick(s, "state") not in (None, "OK"), t)
+    st.record("c2_16_first_not_ok_s", None if held is None else round(held[0] - t, 3))
     f = hg.first_state(tr.states, _state("FAULT"), t)
     st.check("FAULT STALE", f is not None and _stick(f[1], "fault_reason") == "STALE",
              "never" if f is None else str(_stick(f[1], "fault_reason")))
@@ -652,13 +656,24 @@ def s_c2_15(rig: Rig) -> dict:
 
 
 def s_c2_16(rig: Rig) -> dict:
+    """Without the stick injection (owner T15, 2026-10-11): an injected sample is fresh every
+    cycle (REQ-STK-26), so the monitor would never see the starved producer. The real stick at
+    rest, on Drive; STALL CADC 1000."""
     begin_c2(rig)
-    driving_forward(rig)
+    rig.inj.pause()
+    s = rig.watch(1.5, until=_state("OK"))  # the injection lets go 300 ms after its last refresh
+    if not rig.st.check("set-up: injection off, real stick OK", s is not None,
+                        str(_stick(rig.state(), "state"))):
+        raise NotRun("bench", "the real stick is not OK with the injection off")
+    to_drive_by_mcb(rig)
+    wait_neutral_latch(rig)
     from scenario_c4 import _stall, one_way_s
     one_way = one_way_s(rig)
     rig.mark("change")
     _stall(rig, "CADC", 1000)
-    rig.watch(1.0)
+    rig.watch(1.5)
+    rig.st.not_verified.append("C2 §9's output 0 by 340 ms: the real stick rests at 0, so the "
+                               "zero cannot tell the hold from the stick")
     return {"one_way_s": one_way}
 
 
