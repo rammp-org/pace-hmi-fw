@@ -117,6 +117,22 @@ void expect_table(std::span<const Row> golden) {
   }
 }
 
+// The first "bench" row of `golden`, failing the case if any other row follows one. A span,
+// as expect_table takes: cppcheck, with no build folder, cannot see golden_rows.inc.
+std::size_t first_bench_row(std::span<const Row> golden) {
+  std::size_t first = golden.size();
+  for (std::size_t i = 0; i < golden.size(); ++i) {
+    if (std::string_view(golden[i].need) == "bench") {
+      first = std::min(first, i);
+    } else {
+      char at[96];
+      where(at, i, golden[i].name);
+      TEST_ASSERT_TRUE_MESSAGE(i < first, at); // no other row after a bench row
+    }
+  }
+  return first;
+}
+
 } // namespace
 
 TEST_CASE("SST-001 the firmware's check table matches the golden rows, in order",
@@ -196,16 +212,7 @@ TEST_CASE("SST-006 a yes/no check is the one with limits 1..1 and no unit", "[se
 TEST_CASE("SST-007 the bench rows come last: a build without the allocation guard reports the "
           "rows before them, one with it every row",
           "[selftest_spec]") {
-  std::size_t first_bench = std::size(kGolden);
-  for (std::size_t i = 0; i < std::size(kGolden); ++i) {
-    if (std::string_view(kGolden[i].need) == "bench") {
-      first_bench = std::min(first_bench, i);
-    } else {
-      char at[96];
-      where(at, i, kGolden[i].name);
-      TEST_ASSERT_TRUE_MESSAGE(i < first_bench, at); // no other row after a bench row
-    }
-  }
+  const std::size_t first_bench = first_bench_row(kGolden);
   TEST_ASSERT_EQUAL_UINT32(54U, first_bench); // the 54 rows of the B3 baseline
   TEST_ASSERT_EQUAL_UINT32(first_bench, selftest_spec::reported_rows(false));
   TEST_ASSERT_EQUAL_UINT32(kChecks.size(), selftest_spec::reported_rows(true));

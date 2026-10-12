@@ -399,14 +399,17 @@ inline constexpr std::array kAllocRows{
     AllocRow{Id::MEM_ALLOC_RTPS, "rtps_pub"},
 };
 
-/// @brief The task names of kAllocRows, in its order (what the guard's start() takes).
-inline constexpr std::array<std::string_view, kAllocRows.size()> kAllocTasks = [] {
+/// @brief The task names of kAllocRows, in its order.
+/// @return one name per kAllocRows row
+consteval std::array<std::string_view, kAllocRows.size()> alloc_task_names() {
   std::array<std::string_view, kAllocRows.size()> tasks{};
-  for (std::size_t i = 0; i < kAllocRows.size(); ++i) {
-    tasks[i] = kAllocRows[i].task;
-  }
+  std::transform(kAllocRows.begin(), kAllocRows.end(), tasks.begin(),
+                 [](const AllocRow &row) { return row.task; });
   return tasks;
-}();
+}
+
+/// @brief The task names of kAllocRows, in its order (what the guard's start() takes).
+inline constexpr auto kAllocTasks = alloc_task_names();
 
 /// @brief Every kAllocRows row is a Need::BENCH row, each one once, and each task name fits
 ///        FreeRTOS's (15 characters and the NUL).
