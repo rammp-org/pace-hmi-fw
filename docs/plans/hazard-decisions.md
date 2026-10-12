@@ -127,6 +127,13 @@ firmware; no pass band moves and no safety property changes.
   DISABLE gap). Exempt: B5i, B5j, C2-16, C2-15. Orchestrator, 2026-10-11, measurement fix, for
   owner review.
 
+- **B5''-18c's DISABLEs (orchestrator 2026-10-12, consistent with T1 residual + C2-8, for owner
+  review):** after the HMI reboot, exactly one DISABLE while the MCB reads ENABLED (the boot
+  DISABLE), and at most one more once it has left ENABLED: the relock's own DISABLE (C1 B1) after
+  a one-tick M1 entry, the owner-accepted T1 residual (GLD-133, C3 §2.5), as the owner's C2-8
+  rule. That relock must show C1's DRIVE_STOPPED banner, and XYTwist stays 0 from the HMI's link
+  on (cand4-1485932: the second DISABLE 0.236 s after the first, with the sim IDLE).
+
 ## 2. How to answer
 
 Answer by ID: "rec" takes the recommendation. Rec = the spec agents' recommendation. "Blocks"

@@ -14,7 +14,7 @@ the stick centred; one that leaves POST FAIL latched restarts the HMI (a clean r
 | B5''-17b | IDLE | button held, POST RERUN: joy.button_idle, "Release the joystick button"; PASS within 2.5 s of release |
 | B5''-18 | ENABLED, s | Drive, forward, POST RERUN: Drive stays; zero from the first poll off PASS + 35 ms to PASS at >= 25 Hz; notice names the check; after PASS and 0.5 s centred: y > 0 within 0.3 s |
 | B5''-18b | ongone keep, a, s | Restart HMI: first DriveCommand a DISABLE, exactly 1 in the link's first 2 s; no ENABLE; DriveScreen within 3 s of the link; zero until centred 0.5 s; serial POST RESULT PASS |
-| B5''-18c | ongone keep, a | Restart HMI: 1 DISABLE; the sim goes IDLE; Locked for 10 s |
+| B5''-18c | ongone keep, a | Restart HMI: 1 DISABLE while the MCB reads ENABLED, at most 1 more at the relock (DRIVE_STOPPED banner); XYTwist 0; the sim goes IDLE; Locked for 10 s |
 | B5''-19 | IDLE | y +25 %, POST RERUN, Seat: no SeatCommand for 2 s, banner REFUSED_POST; centred, PASS: exactly 1 SeatCommand |
 | B5''-20 | IDLE | CAL UNSAVED, POST RERUN: FAIL joy.cal_saved, FAILED "The joystick must be calibrated first", FAIL 10 s; hold refused; Restart HMI clears it |
 | B5''-21 | IDLE | CRASH: serial POST sys.clean_reset FAIL 0, POST RESULT FAIL; reset_reason PANIC, FAILED "Restarted after a fault: PANIC"; hold refused; Restart HMI: PASS, SW |
@@ -217,7 +217,23 @@ def grade_b18b(st: HazardStep, tr: hg.Trace, p: dict) -> None:
 def grade_b18c(st: HazardStep, tr: hg.Trace, p: dict) -> None:
     r, b = tr.mark("restart"), tr.mark("back")
     dis = hg.drive_commands(tr.events, r, float("inf"), "DISABLE")
-    st.check("1 DISABLE", len(dis) == 1, f"{len(dis)}")
+    # As the owner's C2-8 rule (orchestrator 2026-10-12, consistent with the T1 residual,
+    # GLD-133, C3 §2.5): the boot DISABLE while the MCB reads ENABLED, and at most one more
+    # once it has left: the relock's own (C1 B1) after a one-tick M1 entry. That relock shows
+    # C1's DRIVE_STOPPED banner; XYTwist stays 0 from the HMI's link on.
+    left = next((e["mono"] for e in hg.publishes(tr.events, r) if e.get("state") != "ENABLED"),
+                float("inf"))
+    stop = [e for e in dis if e["mono"] < left]
+    relock = [e for e in dis if e["mono"] >= left]
+    st.check("exactly one DISABLE while the MCB reads ENABLED, at most one more at the relock",
+             len(stop) == 1 and len(relock) <= 1,
+             f"{len(stop)} while ENABLED, {len(relock)} after it left")
+    if relock:
+        check_banner(st, tr, "the relock", "DRIVE_STOPPED", relock[0]["mono"],
+                     relock[0]["mono"] + 3.0)
+    link = _link_after(tr, r)
+    check_no_nonzero(st, "XYTwist 0 throughout, from the HMI's link", tr,
+                     b if link is None else link, b + 10.0)
     idle = hg.first_event(tr.events, lambda e: e.get("ev") == "mib_state"
                           and e.get("state") == "IDLE", r)
     st.check("the sim goes IDLE", idle is not None, "")

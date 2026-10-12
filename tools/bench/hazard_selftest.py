@@ -477,8 +477,33 @@ def t_b18() -> None:
 
     def b18c(tb: TB) -> TB:
         return (tb.mark("restart", 500.0).mark("back", 520.0).dc(519.0, "DISABLE")
-                .ev(519.05, "mib_state", state="IDLE").polls(520.0, 530.3))
+                .ev(519.05, "mib_state", state="IDLE").polls(520.0, 530.3)
+                .stream(519.0, 530.3))
     passes("B5''-18c", c3.grade_b18c, b18c(TB()).build())
+
+    # cand4-1485932 (L1): the boot DISABLE while ENABLED, the sim IDLE, then the relock's own
+    # DISABLE 0.236 s later after a one-tick M1 entry, DRIVE_STOPPED shown: the T1 residual.
+    def b18c2(tb: TB, second: float = 519.236, mib_idle: float = 519.001,
+              banner: str = "DRIVE_STOPPED", leak: float | None = None) -> TB:
+        tb = (tb.mark("restart", 500.0).mark("back", 520.0).ev(518.6, "hmi_seen")
+              .ev(518.608, "mib_publish", state="ENABLED", seq=0, targets=1)
+              .dc(519.0, "DISABLE")
+              .ev(mib_idle, "mib_publish", state="IDLE", seq=1, targets=1)
+              .ev(mib_idle, "mib_state", state="IDLE")
+              .dc(second, "DISABLE")
+              .polls(520.0, 522.6, banner=banner).polls(522.6, 530.3)
+              .stream(518.6, 530.3))
+        if leak:
+            tb.tr.samples.append((leak, 0, 0.6, 0, 0))
+            tb.tr.samples.sort()
+        return tb
+    passes("B5''-18c the relock's DISABLE after the MCB left ENABLED", c3.grade_b18c,
+           b18c2(TB()).build())
+    fails("B5''-18c two DISABLEs while the MCB reads ENABLED", c3.grade_b18c,
+          b18c2(TB(), mib_idle=519.3).build(), "exactly one DISABLE while the MCB reads ENABLED")
+    fails("B5''-18c a relock without DRIVE_STOPPED", c3.grade_b18c,
+          b18c2(TB(), banner="NONE").build(), "banner DRIVE_STOPPED")
+    fails("B5''-18c motion", c3.grade_b18c, b18c2(TB(), leak=521.0).build(), "XYTwist 0")
     fails("B5''-18c Drive", c3.grade_b18c,
           with_(b18c, lambda tb: tb.polls(525.0, 525.05, screen="DriveScreen",
                                           phase="DRIVING")), "Locked for 10 s")
