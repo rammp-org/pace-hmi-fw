@@ -249,3 +249,53 @@ TEST_CASE("RUI-008 CRASH is never answered by the hooks: the remote UI replies a
   const std::string got = bv::answer(request_of("CRASH"), all_hooks(), std::nullopt);
   TEST_ASSERT_TRUE_MESSAGE(got.starts_with("ERR "), got.c_str());
 }
+
+TEST_CASE("RUI-009 a wired hook that refuses gets ERR <verb> refused; a STALL time longer than "
+          "five digits or a pair verb with the wrong second word gets its usage",
+          "[remote_ui][REQ-RUI-06][REQ-RUI-07][REQ-RUI-08]") {
+  bv::Hooks h;
+  h.permit_post = [](bv::PostGateName) { return false; };
+  h.cal_unsaved = [] { return false; };
+  h.post_rerun = [] { return false; };
+  h.stall = [](bv::StallTarget, std::uint32_t) { return false; };
+  TEST_ASSERT_EQUAL_STRING("ERR PERMIT POST refused",
+                           bv::answer(request_of("PERMIT POST pass"), h, {}).c_str());
+  TEST_ASSERT_EQUAL_STRING("ERR CAL UNSAVED refused",
+                           bv::answer(request_of("CAL UNSAVED"), h, {}).c_str());
+  TEST_ASSERT_EQUAL_STRING("ERR POST RERUN refused",
+                           bv::answer(request_of("POST RERUN"), h, {}).c_str());
+  TEST_ASSERT_EQUAL_STRING("ERR STALL refused",
+                           bv::answer(request_of("STALL UI 300"), h, {}).c_str());
+  // A request whose verb is none of the enum's (a corrupted value) is refused, not answered.
+  bv::Request corrupt{};
+  corrupt.verb = static_cast<bv::Verb>(0x7F);
+  TEST_ASSERT_EQUAL_STRING("ERR unknown bench verb", bv::answer(corrupt, h, {}).c_str());
+  expect_usage("STALL UI 100000");
+  expect_usage("CAL SAVED");
+  expect_usage("POST RESTART");
+}
+
+TEST_CASE("RUI-010 a hook that throws: answer() lets the exception through unchanged; an empty "
+          "STALL time is no time",
+          "[remote_ui][REQ-RUI-06][REQ-RUI-07]") {
+  struct HookFailed {};
+  bv::Hooks h;
+  h.permit_post = [](bv::PostGateName) -> bool { throw HookFailed{}; };
+  h.stall = [](bv::StallTarget, std::uint32_t) -> bool { throw HookFailed{}; };
+  bool thrown = false;
+  try {
+    (void)bv::answer(request_of("PERMIT POST pass"), h, {});
+  } catch (const HookFailed &) {
+    thrown = true;
+  }
+  TEST_ASSERT_TRUE(thrown);
+  thrown = false;
+  try {
+    (void)bv::answer(request_of("STALL UI 300"), h, {});
+  } catch (const HookFailed &) {
+    thrown = true;
+  }
+  TEST_ASSERT_TRUE(thrown);
+  TEST_ASSERT_FALSE(bv::detail::stall_ms("").has_value());
+  TEST_ASSERT_FALSE(bv::detail::stall_ms("123456").has_value());
+}

@@ -835,6 +835,21 @@ bool fault_is(const RawSample &s, SampleFault kind, StickAxis axis) {
 }
 } // namespace
 
+TEST_CASE("STK-105 a clock that reads earlier than the message ends the injection: the real "
+          "reads and the real sample pass unchanged",
+          "[stick][inject]") {
+  StickInjector inject;
+  inject.note(inject_msg(10.0f, 20.0f, 30.0f, 0), T0);
+  const auto earlier = T0 - std::chrono::nanoseconds{1};
+  TEST_ASSERT_FALSE(inject.active(earlier));
+  TEST_ASSERT_TRUE(same_reads(REAL_MV, inject.apply(REAL_MV, earlier)));
+  const RawSample s = inject.sample(REAL_SAMPLE, earlier);
+  TEST_ASSERT_EQUAL_FLOAT(REAL_SAMPLE.horizontal.max_mv, s.horizontal.max_mv);
+  TEST_ASSERT_EQUAL_UINT32(REAL_SAMPLE.horizontal.sequence, s.horizontal.sequence);
+  TEST_ASSERT_EQUAL_UINT32(REAL_SAMPLE.vertical.sequence, s.vertical.sequence);
+  TEST_ASSERT_TRUE(inject.active(T0)); // the message itself still holds at its own time
+}
+
 TEST_CASE("STK-103 injection mask bits 3-5 make a value NaN (mean and max), 6 freezes the X/Y "
           "sequences while set, 7 limits the faults to the first cycle that takes the message",
           "[stick][inject][REQ-STK-26]") {
