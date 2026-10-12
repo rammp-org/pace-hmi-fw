@@ -1253,19 +1253,17 @@ extern "C" void app_main(void) {
     park_main_task();
   }
 
-  // load the audio file (wav file bundled in memory)
+  // The click sound (click.wav, bundled in the image). Without it the HMI carries on silent:
+  // the UI keeps running and the boot goes on (owner, T4, 2026-10-11); ClickSound plays nothing
+  // before a successful load, and the speaker stays muted. No self-test or POST check covers it.
   size_t wav_size = 0;
   size_t wav_sample_rate = 0;
-  if (!load_audio(wav_size, wav_sample_rate)) {
-    logger.error("Failed to load audio file!");
-    // The boot stops here with the UI stopped, as it always has (the return destroyed the
-    // UiIsland); the tasks already started keep running, on live objects.
-    (void)ui_island.stop();
-    park_main_task();
+  if (load_audio(wav_size, wav_sample_rate)) {
+    logger.info("Loaded {} bytes of audio", wav_size);
+    board.start_speaker(wav_sample_rate);
+  } else {
+    logger.error("Failed to load the click sound (click.wav): carrying on without it");
   }
-  logger.info("Loaded {} bytes of audio", wav_size);
-
-  board.start_speaker(wav_sample_rate);
 
   // (brightness is the saved setting, applied when the BrightnessView adds its observer)
 
