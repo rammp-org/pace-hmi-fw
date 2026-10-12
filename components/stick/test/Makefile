@@ -63,6 +63,14 @@ header-cov-links: $(TEST_OBJ) $(MONITOR_TEST_OBJ)
 	  ln -sf $(MONITOR_TEST_OBJ) $(MONITOR_OBJ) && \
 	  ln -sf $(MONITOR_TEST_OBJ:.o=.gcno) $(MONITOR_OBJ:.o=.gcno) && \
 	  ln -sf $(MONITOR_TEST_OBJ:.o=.gcda) $(MONITOR_OBJ:.o=.gcda)
+	@# C2: both test objects use these headers, and the linker keeps one copy of each inline
+	@# function: each header's figure is the union of the two (gcov_summary.py, .alt1).
+	@for obj in $(HEADER_OBJS) $(MONITOR_OBJ); do \
+	  if [ "$$obj" = "$(MONITOR_OBJ)" ]; then other=$(TEST_OBJ); else other=$(MONITOR_TEST_OBJ); fi; \
+	  ln -sf $$other $${obj%.o}.alt1.o && \
+	  ln -sf $${other%.o}.gcno $${obj%.o}.alt1.gcno && \
+	  ln -sf $${other%.o}.gcda $${obj%.o}.alt1.gcda; \
+	done
 test: header-cov-links
 endif
 
