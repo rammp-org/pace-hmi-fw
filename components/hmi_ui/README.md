@@ -129,7 +129,7 @@ dwells), `drive_ui/shared_subjects.hpp` (`SharedSubjects`) and `drive_ui/hold_ra
   and it comes with its own G10 baseline.
 - Dependencies, public (the headers use their types): `drive_ui` (DriveUi, StickButton, the
   shared vocabulary; DrivePort in `ui_app.cpp`), `drive_session` (its inputs and timings),
-  `stick` (`SELECT_MAX_US`), `lvgl`, `hmi_format` (texts,
+  `stick` (`SELECT_MAX_US`), `seat` (the seat gate and the seat reading, hazard-seat-spec.md), `lvgl`, `hmi_format` (texts,
   `StepperSpec`), `hmi_models` (`grid.hpp`, `pin.hpp`), `hmi_rtps_spec` (the refusal texts, seat units, the
   MIB timeouts), `rammp_rtps_messages`
   (`MIB::MibSystemState`, the seat axis table), `ota_parse` (`hmi::ota::Release`),

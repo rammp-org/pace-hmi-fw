@@ -65,11 +65,12 @@ before each UI action the step writes a `mark` into it and grades only what foll
 `scenario_hazards.py`'s docstring. Not covered here: the sim's `ongone` policy (an HMI reset
 needs a serial reset; it belongs with C3's boot steps).
 
-## Hazard fixes C1, C3, C4, C2: B5''-1..22, B5f..B5j, C2-1..16
+## Hazard fixes C1, C3, C4, C2, seat: B5''-1..22, B5f..B5j, C2-1..16, B5s-1..17
 `hazard_steps.py` (scenarios in `scenario_c1.py`, `scenario_c3.py`, `scenario_c4.py`,
-`scenario_c2.py`; rig in `hazard_rig.py`; grading helpers in `hazard_grade.py`), from
-docs/plans/hazard-c1-spec.md §6, hazard-c3-spec.md §7, hazard-c4-spec.md §8 and
-hazard-c2-spec.md §9. Each step's pass criteria are in its scenario file's table.
+`scenario_c2.py`, `scenario_seat.py`; rig in `hazard_rig.py`; grading helpers in
+`hazard_grade.py`), from docs/plans/hazard-c1-spec.md §6, hazard-c3-spec.md §7,
+hazard-c4-spec.md §8, hazard-c2-spec.md §9 and hazard-seat-spec.md §6 (`--hazard seat`; the
+sim's seat modes `seatval`, `seatdrop`, `seatslow`, the HMI's `SEATFAIL` and STATE's seat keys). Each step's pass criteria are in its scenario file's table.
 - **Not in the default list.** They need a stick-injection image with the fixes' bench verbs
   (STATE, PERMIT, CAL UNSAVED, POST RERUN, CRASH, STALL: components/remote_ui/
   include/bench_verbs.hpp). `run_bench.py ... --hazard c1,c3` names the fixes the image has:
@@ -101,7 +102,7 @@ hazard-c2-spec.md §9. Each step's pass criteria are in its scenario file's tabl
   clean reset). **The bench never runs a calibration that writes flash** (the owner's
   standing rule): C2-13, whose way out is a completed run, is NOT_RUN.
 - Their graders are tested without a board on hand-written traces built from the specs
-  (`hazard_selftest.py`, BENCH-015..046 in `run_bench.py selftest`).
+  (`hazard_selftest.py`, BENCH-015..075 in `run_bench.py selftest`; the seat's BENCH-058..075).
 
 ## Rules the code enforces
 - Never erases. `common.esptool()` refuses any erase option. The only write is

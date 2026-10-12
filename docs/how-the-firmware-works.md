@@ -698,23 +698,34 @@ EXIT_REFUSED banner later. The owner has it parked.
 
 ## 9. The seat
 
-- **Getting there.** The menu "Seat Functions" row is refused while `!mcb_ready`
-  (`NavView::row_picked` → `UiApp::refuse_seat`). On the Seat screen, losing the MCB sends
-  you home with a banner on the next tick (table rows 10–11).
-- **The function page.** A 3×2 grid picks an axis from `RAMMP_SEAT_AXIS_TABLE`. A click shows
-  the adjustment page (`SeatView`).
-- **The adjustment page.** "−"/"+" call `UiApp::seat_step(row, ∓1)` from the last known
-  value, or from the axis minimum if unknown. Presets call `UiApp::seat_request(axis, value)`.
-  Both clamp and send one `SeatCommand{axis, absolute target}` through `LinkPort`, best
-  effort, once per press (`ui_app.cpp:170-183`).
-- **Feedback.** MibStatus `currentSeatState` → `RtpsUiBridge` → `UiApp::seat_apply_state` →
-  the `seat_axis_value_[]` subjects, on the RTPS task under the lock.
-- **The bench Actuators page** (Settings, behind PIN 1234) steps the same axes through
-  `seat_step`; it refuses only a press at a limit or with an unknown value.
-- **What the code does not check:**
-  - Presses on the Seat screen check neither `mcb_ready` nor `seat_ready` (H10).
-  - A NaN or huge seat value from the MIB is undefined behaviour in `rammp::seat_raw`
-    (`hmi_rtps_spec.hpp:90-95`, H8).
+The seat-path hazard fix ([plans/hazard-seat-spec.md](plans/hazard-seat-spec.md), H8, H10
+seat, H6 seat) is on `dev_ai_hazard_seat`. The MCB decides seat motion; the HMI only asks,
+through one gate, and never stops, re-sends or asks on its own (Q1).
+
+- **One gate.** Every SeatCommand (the Seat screen's "−"/"+" and presets, Bench → Actuators,
+  Skunk Works "Seat up") goes through `UiApp::seat_request`, the only caller of
+  `LinkPort::publish_seat` (SEAT-011). It asks components/seat's `decide` on inputs read at
+  the press: the link live, the MCB state (IDLE only), the POST gate, stick health (not FAULT),
+  the axis value (known). Then the target: a step is one step from the reported value and must
+  move in the press' direction (`AT_LIMIT`), a preset is clamped. A refused press sends nothing,
+  plays the refusal cue and names the reason on the banner (`REFUSED_SEAT`, `REFUSED_POST`,
+  `REFUSED_STICK` as "Seat not ready", `REFUSED_SEAT_UNKNOWN`; `AT_LIMIT` is feedback only).
+- **Delivery.** The publish result is checked: a failure is counted, logged at most once a
+  second ("SeatCommand ELEVATION not published (n failed since start)") and shown
+  (`REFUSED_SEAT_NOT_SENT`). Nothing is ever re-sent: a lost press means no motion (Q7).
+- **Values.** MibStatus `currentSeatState` → `RtpsUiBridge` → `UiApp::seat_apply_state`, each
+  field through `seat_reading`: a NaN, an infinity or a value more than one step outside the
+  axis range reads unknown ("--"). Every UI poll tick with the link not CONNECTED sets every axis
+  unknown (`UiApp::seat_link_polled`), until the next MibStatus.
+- **Getting there.** The menu "Seat Functions" row asks the gate's first four conditions
+  (`UiApp::seat_row_refused`): refused with the reason's banner, the menu stays. On the Seat
+  screen, losing the MCB sends you home with a banner on the next tick (table rows 10–11).
+- **Input.** The Seat screen and Skunk Works act on release; a Bench → Actuators seat row steps
+  once per key press, never on a held key's repeat (`SettingsView::seat_key_repeat`).
+- **Residual hazards** (the spec's §1): the HMI cannot stop a seat move (SeatCommand is an
+  absolute target); the MCB finishes a move through a link loss or an HMI reset unless it has a
+  timeout of its own; a lost command is not detected. The sign-off waits for the MCB team
+  (S1-S3).
 
 ## 10. Screens, navigation and data binding
 
@@ -923,11 +934,11 @@ The hazard IDs come from [plans/refactor.md §1](plans/refactor.md). Locations a
 | H3 | An out-of-calibration raw value is clamped to ±1: an open or shorted pot reads as full deflection (C2, `dev_ai_hazard_c2`: the stick monitor holds a read above its limit at 0; the 0 mV low rail stays a residual) | espp range mapper via `StickPipeline::map`; `joystick_cal`'s `plausible()` had no upper bound (C2: `check()`) |
 | H4 | The gate is written only by the UI task; the ADC task checks no link age, MIB state or UI liveness | `DriveUi::update_stick_gate` (`drive_ui.cpp:124`); `stick_pipeline.hpp:210` |
 | H5 | A relock on an unrequested stop or link loss sends no DISABLE; the request stays ENABLE and a profile tap re-sends it | rows 3–9 and 29–34; `DriveAdapter::perform_request` |
-| H6 | DriveCommand and SeatCommand are one-shot, best effort, result ignored; a refused exit is not re-sent | `DrivePort::publish` (`drive_port.hpp:103`); `UiApp::seat_request`; row 14; `rtps_comms.cpp:149` |
+| H6 | DriveCommand and SeatCommand are one-shot, best effort, result ignored; a refused exit is not re-sent (seat: the result is checked, counted and shown, never re-sent, `dev_ai_hazard_seat`) | `DrivePort::publish` (`drive_port.hpp:103`); `UiApp::seat_request`; row 14; `rtps_comms.cpp:149` |
 | H7 | Any RTPS peer can start a self test; its overlay blocks the exit hold and the keys while `XYTwist` keeps flowing | `rtps_comms.cpp:160` (`on_command`); `HoldEngine::poll_all`; `UiApp::keypad_read` |
-| H8 | A NaN or huge seat value is UB in `seat_raw`; an unknown value steps from the axis minimum | `hmi_rtps_spec.hpp:90-95`; `UiApp::seat_step` |
+| H8 | A NaN or huge seat value is UB in `seat_raw`; an unknown value steps from the axis minimum (`dev_ai_hazard_seat`: `seat_reading` reads it unknown; a step from unknown is refused) | `hmi_rtps_spec.hpp:90-95`; `UiApp::seat_step` |
 | H9 | A failed ADC read publishes nothing instead of neutral (C2, `dev_ai_hazard_c2`: neutral) | `stick_pipeline.hpp:187` |
-| H10 | No neutral-stick check before ENABLE or the gate; seat presses not gated on `seat_ready` | row 18; `SeatView` (`seat_view.cpp:58, 70`) |
+| H10 | No neutral-stick check before ENABLE or the gate; seat presses not gated on `seat_ready` (`dev_ai_hazard_seat`: every seat press goes through the seat gate) | row 18; `SeatView` (`seat_view.cpp:58, 70`) |
 | H11 | No task watchdog on the app tasks; the ADC task is below the UI (5 vs 20), with a boot-dependent core and a 4 KB stack | `main.cpp:826-836`; [§4.1](#41-the-tasks) |
 | H12 | A reset or panic is never shown (only the self test reads `esp_reset_reason`); the battery and range on the TopBar are placeholders | `main/selftest.cpp:414`; the export's TopBar |
 | H13 | The remote UI has no authentication and can press the stick button (bench builds only) | `components/remote_ui` |
@@ -951,6 +962,8 @@ the specs, not this page:
   permit; the ADC task's priority, core and stack; watchdogs.
 - [hazard-c2-spec.md](plans/hazard-c2-spec.md) (H3, H9): stick plausibility and a stick fault
   state machine.
+- [hazard-seat-spec.md](plans/hazard-seat-spec.md) (H8, H10 seat, H6 seat): one seat gate,
+  seat values validated, delivery checked, no seat re-send ([§9](#9-the-seat)).
 - [hazard-decisions.md](plans/hazard-decisions.md): the open questions for the owner.
 
 ## 17. Known oddities

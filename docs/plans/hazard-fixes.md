@@ -109,6 +109,11 @@ Unpinned FPU tasks (Read ADC, ContinuousAdc, rtps_*) get a boot-dependent core: 
 | --- |
 | Seat presses gated by POST_OK, STICK_OK and `seat_ready` (from Bench → Actuators and Skunk Works too); MIB seat values validated (non-finite or out of range → unknown, R2's RTPS findings); SeatCommand delivery gets the same check-and-count |
 
+Status (2026-10-11): specified in `hazard-seat-spec.md` (approved, Q1-Q15 as recommended) and
+implemented on `dev_ai_hazard_seat`: components/seat's gate and reading, the gate in
+`UiApp::seat_request`, B5s-1..17 on the bench. The seat sign-off waits for the MCB team's
+S1-S3 (does the MCB stop a seat move when the HMI goes silent, a seat stop, refusal unless IDLE).
+
 ## 5. Bench B5'' (with injection and sim modes; verdicts by script)
 
 | Step | Check |
