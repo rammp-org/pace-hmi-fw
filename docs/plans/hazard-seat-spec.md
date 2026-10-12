@@ -6,6 +6,16 @@ seat sign-off still waits for the MCB team's answers S1-S3 (§8, Q13). Written 2
 approval (CS-SAF-05; D1: the owner is the only approver for now); base then
 `dev_ai_hazard_table` 670dcc7.
 
+Bench (board 2, sim only, 2026-10-11): image v3.0.0-alpha-708-g3500053 (bench + stick
+injection, `C:\b\dev_ai_hazard_seat_bench`), run `seat-3500053-b`
+(`C:\b\bench\results\seat-3500053-b-20261011-224817`): B0, B1, B2 PASS; C3's B5''-19 PASS;
+B5s-1..17 PASS. Not verified by script: the banners' words (STATE names the banner, not its
+text), ErrorBanner6 on the Actuators page (B5s-5) and the greyed "Seat up" tile's look (B5s-8).
+The run before it (`seat-3500053`) stopped at B2: that boot's POST failed on the board's I2C
+bus (11 devices timing out) and the stick's rest reads; the next flash and boot were clean
+(hardware, not the image). The same steps passed on ce29d6f (`seat-ce29d6f-r3`), before the
+SeatLink refactor.
+
 Implementation notes (what differs in form, not in rule):
 - The bench graders' cases are BENCH-100..116 and the seat tooling's BENCH-117 (055-057 and
   070-073 were taken by other lanes; §5.3 allowed the renumbering; a block of its own, as the
