@@ -164,14 +164,16 @@ step_target(const rammp::SeatAxisSpec &spec, std::int32_t value, std::int32_t di
   return "?";
 }
 
-// REQ-SEAT-02's order, as the enumerators count it (SEAT-009).
-static_assert([] {
+/// Whether kGateOrder lists the gate's reasons in the enumerators' order, 1 to 5.
+[[nodiscard]] constexpr bool gate_order_is_enum_order() noexcept {
   for (std::size_t i = 0; i < kGateOrder.size(); ++i) {
     if (static_cast<std::size_t>(kGateOrder[i]) != i + 1) {
       return false;
     }
   }
   return true;
-}());
+}
+// REQ-SEAT-02's order, as the enumerators count it (SEAT-009).
+static_assert(gate_order_is_enum_order());
 
 } // namespace hmi::seat
