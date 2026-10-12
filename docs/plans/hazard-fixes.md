@@ -223,3 +223,10 @@ No §9 decision changed. Open questions moved to `hazard-decisions.md`.
 26. C1 Q4 restated: C1 and C3 merge together, so the NOT_RUN block never ships alone; the motion-guard hook added.
 27. C1 "every 33 ms" → the ADC cycle (33 ms wait, 35 ms measured), as C3 and C4 use.
 28. §4 and §6 here marked superseded by the specs and `hazard-decisions.md` §4.
+
+## 11. Accepted residuals
+
+| # | Residual | Accepted |
+| --- | --- | --- |
+| D2 | The stick's low-rail open circuit (0 mV) reads as full travel (§7) | owner, 2026-10-06 |
+| T12 | espp's `RtpsParticipant::publish` allocates a `std::string` per XYTwist on `Read ADC` (the stick island's task, every cycle) | owner, 2026-10-11; to fix later ([hazard-decisions.md](hazard-decisions.md), Answers 2026-10-11) |

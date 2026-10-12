@@ -93,6 +93,10 @@ services; pinned to core 0, away from `lv_task` and `tab5_audio`; 6144 B. The G1
 21, align the draft). The continuous ADC's own task is espp's (`ContinuousAdc`, priority 5,
 unpinned; C4 O9 / C2 O14: not changed).
 
+Residual (owner T12, 2026-10-11): espp's `RtpsParticipant::publish` allocates a `std::string`
+per XYTwist on `Read ADC`. Accepted by the owner 2026-10-11, to fix later
+(`docs/plans/hazard-fixes.md` §11).
+
 ## Dependencies
 
 espp `adc`, vendored as `components/espp_adc` (continuous and oneshot), `adc_window` (the window
