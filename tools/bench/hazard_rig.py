@@ -61,6 +61,15 @@ SIM_RETRY_S = 3.0
 SIM_FIND_S = 90.0
 
 MENU_KEY = (360, 1198)                 # scripts/hmi_ui.py MENU_KEY
+# Settings > Display & sound, row D1 Brightness (SHOT on board 2, 2026-10-11): its "-" and "+"
+# buttons, and the row FOCUS reports once a tap has moved the cursor to it. 5..100 in steps of
+# 5 (components/settings/include/settings_spec.hpp); saved 1 s after the last change
+# (ui_app.hpp BRIGHTNESS_SAVE_DELAY_MS).
+BRIGHTNESS_MINUS = (477, 391)
+BRIGHTNESS_PLUS = (639, 391)
+BRIGHTNESS_ROW = (10, 342, 700, 98)
+BRIGHTNESS_MIN, BRIGHTNESS_MAX, BRIGHTNESS_STEP = 5, 100, 5
+BRIGHTNESS_SAVE_S = 1.0
 PROFILE_Y = 195 + 675 + 162 // 2       # scenario_hazards: DriveScreen's profile buttons
 PROFILE_NORMAL = (257 + 207 // 2, PROFILE_Y)
 PROFILE_LOW = (484 + 207 // 2, PROFILE_Y)
@@ -583,6 +592,24 @@ class Rig:
             time.sleep(0.12)  # one keypad read
         finally:
             self.hmi.command("KEY NONE")
+
+    def set_brightness(self, percent: int) -> None:
+        """Display & sound's brightness to `percent` by touch, as the user would: "-" down to
+        the floor (the value cannot be read back), then "+" up to it; waits for the save.
+        NotRun when the taps do not land on the Brightness row."""
+        self.home()
+        self.go("Settings/Display")
+        self.tap(*BRIGHTNESS_MINUS)
+        f = self.focus()
+        if f is None or f[:4] != BRIGHTNESS_ROW:
+            raise NotRun("bench", f"set brightness: the cursor is not on Display & sound's "
+                                  f"Brightness row after a tap on its '-' (FOCUS {f})")
+        for _ in range((BRIGHTNESS_MAX - BRIGHTNESS_MIN) // BRIGHTNESS_STEP - 1):
+            self.tap(*BRIGHTNESS_MINUS)
+        for _ in range((percent - BRIGHTNESS_MIN) // BRIGHTNESS_STEP):
+            self.tap(*BRIGHTNESS_PLUS)
+        time.sleep(BRIGHTNESS_SAVE_S + 0.5)
+        self.home()
 
     def burger(self) -> None:
         self.tap(*MENU_KEY)
