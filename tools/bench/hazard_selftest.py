@@ -805,6 +805,17 @@ def t_c2_8_9_10() -> None:
             tb.dc(4799.0, "DISABLE")
         return tb
     passes("C2-8", c2.grade_c2_8, e(TB()).build())
+
+    def relock(tb: TB, second_at: float = 4800.51, idle_at: float = 4800.31) -> TB:
+        # candidate retry1: the stop's DISABLE, the sim IDLE, the relock's DISABLE 214 ms later
+        e(tb).ev(4799.9, "mib_publish", state="ENABLED", seq=1, targets=1)
+        tb.ev(idle_at, "mib_publish", state="IDLE", seq=2, targets=1)
+        return tb.dc(second_at, "DISABLE")
+    passes("C2-8 the relock's DISABLE after IDLE (GLD-126)", c2.grade_c2_8, relock(TB()).build())
+    fails("C2-8 a second DISABLE while still ENABLED", c2.grade_c2_8,
+          relock(TB(), idle_at=4800.55).build(), "exactly one DISABLE")
+    fails("C2-8 three DISABLEs", c2.grade_c2_8,
+          with_(relock, lambda tb: tb.dc(4800.55, "DISABLE")), "exactly one DISABLE")
     fails("C2-8 earlier DISABLE", c2.grade_c2_8, e(TB(), before=True).build(), "none before")
     fails("C2-8 no banner", c2.grade_c2_8, e(TB(), banner=False).build(), "banner STICK_FAULT")
     passes("C2-9", c2.grade_c2_9, tr_b6(TB(), t1=4900.3, label="change", output="zero").build())

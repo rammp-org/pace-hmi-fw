@@ -208,8 +208,17 @@ def grade_c2_8(st: HazardStep, tr: hg.Trace, p: dict) -> None:
     t = tr.mark("change")
     before = hg.drive_commands(tr.events, tr.mark("enter"), t, "DISABLE")
     dis = hg.drive_commands(tr.events, t, t + 0.6, "DISABLE")
-    st.check("exactly one DISABLE in [t, t + 600 ms], none before", len(dis) == 1 and not before,
-             f"{len(dis)} in the window, {len(before)} before")
+    # The stop's DISABLE (row 55/56), then, once the MCB has left ENABLED, the relock's own
+    # DISABLE (C1: every move to LOCKED sends one; GLD-126's second tick `P(D)`). Only the
+    # stop's may come while the MCB still reads ENABLED.
+    left = next((e["mono"] for e in hg.publishes(tr.events, t) if e.get("state") != "ENABLED"),
+                float("inf"))
+    stop = [e for e in dis if e["mono"] < left]
+    relock = [e for e in dis if e["mono"] >= left]
+    st.check("exactly one DISABLE in [t, t + 600 ms] while the MCB is ENABLED (the stop), at "
+             "most one more after it left (the relock's, GLD-126), none before",
+             len(stop) == 1 and len(relock) <= 1 and not before,
+             f"{len(stop)} while ENABLED, {len(relock)} after, {len(before)} before")
     check_within(st, "Locked", hg.first_state(tr.states, hg.screen_is(LOCKED), t), t, 1.5)
     seen = hg.first_state(tr.states, hg.field_is("banner", "STICK_FAULT"), t, t + 2.0)
     st.check("banner STICK_FAULT", seen is not None,
