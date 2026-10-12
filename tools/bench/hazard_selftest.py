@@ -1900,7 +1900,7 @@ CASES = [
     ("BENCH-073 a proven link stall (XYTwist gap > 0.15 s under an unrelated remote-UI reply "
      "> 0.15 s) in a graded window: NOT_RUN 'bench network stall', never PASS; else the "
      "verdict stands", t_link_stalls),
-    ("BENCH-072 a one-cycle STICK stands 80 ms (no refresh replaces it unseen); a 15.6 ms "
+    ("BENCH-074 a one-cycle STICK stands 80 ms (no refresh replaces it unseen); a 15.6 ms "
      "monotonic clock is refused; the one-way delay is never 0 on a slow clock",
      t_once_hold_and_clock),
     ("BENCH-051 injection lapses come from the STICK send times in the remote-UI log, not "
