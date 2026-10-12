@@ -95,7 +95,8 @@ struct StickInjectMsg {
     const char *first = args.data() + i;
     const char *last = args.data() + args.size();
     const auto [end, ec] = std::from_chars(first, last, values.at(count));
-    if (ec != std::errc{} || end == first || (end != last && *end != ' ')) {
+    // from_chars succeeds only after at least one digit (else invalid_argument, end == first).
+    if (ec != std::errc{} || (end != last && *end != ' ')) {
       return std::nullopt; // not a number, out of range, or a number with text stuck to it
     }
     i = static_cast<std::size_t>(end - args.data());
