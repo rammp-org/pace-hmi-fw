@@ -89,6 +89,9 @@ constexpr int32_t scale_of(const SeatAxisSpec &spec) {
   return scale;
 }
 
+// Precondition: `value` is finite and |value x scale| < 2^23 (hazard-seat-spec.md §2.3, H8);
+// outside it the conversion is undefined (RTPS-009..013 pin that domain). The firmware calls it
+// only through components/seat's seat_reading, which checks the precondition first (SEAT-011).
 constexpr int32_t seat_raw(const SeatAxisSpec &spec, float value) {
   const float scaled = value * static_cast<float>(scale_of(spec));
   // Rounded away from zero by hand: std::lround is not constexpr, and a plain cast

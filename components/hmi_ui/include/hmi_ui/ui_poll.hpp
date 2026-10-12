@@ -29,6 +29,9 @@ public:
     LinkState (*link_state)();
     /// Called with the state on every tick, before the subject is set: main logs a change.
     void (*link_seen)(LinkState state);
+    /// Called with the state on every tick, after the subject is set: UiApp's seat values go
+    /// unknown while it is not CONNECTED (REQ-UI-30). UI task, lvgl_mutex held.
+    Fn<void(LinkState state)> link_polled;
     /// Diagnostics staleness (DiagnosticsView::poll). UI task, lvgl_mutex held.
     Fn<void()> diag_poll;
     /// The POST runner's tick (UiApp's PostStage), before the drive tick so a pass seen on a
@@ -49,8 +52,9 @@ public:
   constexpr explicit UiPoll(const Config &config) noexcept
       : config_(config) {}
 
-  /// @brief One tick, in this order: the link state (seen, then into `rtps_link`), the blink
-  ///        phase, diag_poll, post_tick, drive_tick, post_indicator, then the theme check.
+  /// @brief One tick, in this order: the link state (seen, then into `rtps_link`, then
+  ///        link_polled), the blink phase, diag_poll, post_tick, drive_tick, post_indicator,
+  ///        then the theme check.
   /// UI task (an LVGL timer callback), lvgl_mutex held by lv_task.
   void poll();
 

@@ -178,11 +178,27 @@ void UiApp::keypad_read(bool *up, bool *down, bool *left, bool *right, bool *ent
 
 // Seat values come from the MIB and nowhere else: a press publishes a request, and the number
 // on screen moves only when the next MibStatus says the seat moved. The wire carries whole
-// units, the screens raw integers, so each field is converted here.
+// units, the screens raw integers, so each field is converted here, and only through
+// seat_reading (REQ-UI-30, H8): a NaN, an infinity or a value outside the axis range (one step
+// of tolerance) reads unknown, "--". A MibStatus arriving is a CONNECTED link: rtps_comms stamps
+// its arrival before this handler runs. RTPS task, lvgl_mutex held.
 void UiApp::seat_apply_state(const MIB::seatState &seat) {
   for (uint8_t i = 0; i < seat_axis_count_; i++) {
     const rammp::SeatAxisSpec &spec = rammp::kSeatAxes[i];
-    seat_store(i, rammp::seat_raw(spec, rammp::seat_field(seat, spec.id)));
+    seat_store(i, hmi::seat::seat_reading(spec, rammp::seat_field(seat, spec.id)));
+  }
+}
+
+// Stale -> unknown (REQ-UI-30, hazard-seat-spec.md §2.3): every UI poll tick that finds the link
+// not CONNECTED sets every axis unknown, so "--" shows within 2.25 s of the last MibStatus and a
+// value is never stepped from after the MCB stopped saying it. It stays unknown until a
+// MibStatus arrives (seat_apply_state). UI task.
+void UiApp::seat_link_polled(LinkState state) {
+  if (state == LinkState::CONNECTED) {
+    return;
+  }
+  for (uint8_t i = 0; i < seat_axis_count_; i++) {
+    seat_store(i, hmi::format::VALUE_UNKNOWN);
   }
 }
 

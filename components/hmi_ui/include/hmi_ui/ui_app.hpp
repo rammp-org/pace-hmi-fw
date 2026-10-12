@@ -248,6 +248,7 @@ private:
 
   // Seat, bench gate, Settings, Skunk Works, Diagnostics.
   void seat_apply_state(const MIB::seatState &seat);
+  void seat_link_polled(LinkState state);
   void seat_request(rammp::SeatAxis axis, int32_t target);
   void seat_step(size_t row, int direction);
   void seat_store(size_t row, int32_t raw);        ///< the subject and its mirror, on a change
@@ -775,6 +776,8 @@ private:
       .theme = setting_subjects.value(SETTINGS_PARAM_THEME),
       .link_state = config_.link->state,
       .link_seen = config_.link->seen,
+      // The seat values go unknown on every tick the link is not CONNECTED (REQ-UI-30).
+      .link_polled = hmi::ui::bind<&UiApp::seat_link_polled>(this),
       .diag_poll = hmi::ui::bind<&DiagnosticsView::poll>(&diag_view_), // staleness, same tick
       .post_tick = hmi::ui::bind<&PostStage::tick>(&post_stage_),      // before the drive tick
       .drive_tick = config_.drive->tick, // and the wait for the MCB to drive

@@ -31,7 +31,10 @@ carries, and the drive session's windows are held to `kMibStatusPeriod` and `kMi
 
 No REQ IDs are written for it yet. The L1 app `tests/host/rtps_spec` (L1-RTPS, cases
 RTPS-001..065) characterises every helper, the H8 hazard inputs of `seat_raw` (NaN and huge
-values), the names and tags, and parity with the host codec.
+values), the names and tags, and parity with the host codec. `seat_raw`'s undefined domain stays
+as a stated precondition: the firmware's seat path reaches it only through components/seat's
+`seat_reading`, which checks the value first (hazard-seat-spec.md §2.3, REQ-SEAT-01; SEAT-011
+guards the call sites).
 
 ## Tasks and dependencies
 

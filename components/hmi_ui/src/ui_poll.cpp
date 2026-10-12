@@ -8,6 +8,7 @@ void hmi::ui::UiPoll::poll() {
   const LinkState state = config_.link_state();
   config_.link_seen(state);
   lv_subject_set_int(config_.shared->rtps_link, static_cast<int32_t>(state));
+  config_.link_polled(state);
   // flip every other tick: a 500 ms half-period, i.e. a 1 Hz blink
   lv_subject_set_int(config_.shared->rtps_blink, static_cast<int32_t>((++ticks_ / 2) & 1u));
   config_.diag_poll();
