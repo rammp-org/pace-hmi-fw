@@ -12,7 +12,11 @@ the renumbering), and the remote UI's seat cases RUI-011..013; STATE's five seat
 out of the line, not null, in a firmware without the seat hook (REQ-RUI-09), so the C1-C2
 STATE lines keep their exact form; REQ-UI-30's README row lands with REQ-UI-28/29 (commit 4)
 and REQ-UI-33's with REQ-UI-31/32 (commit 5), as the requirement matrix allows no gap in an ID
-series.
+series; the gate takes the link as a byte (`SeatLink`, any value but CONNECTED refuses) rather
+than a bool, and SEAT-012 (a step of direction 0 never moves) was added, both for the coverage
+ratchet's 100 % branches on new safety code. B5s-10 opens the Elevation page before the stick
+FAULT: with a FAULT the menu's Seat Functions row is refused (REQ-UI-32, B5s-16), so the step's
+"Seat screen by touch" after the FAULT cannot be done; its press and verdicts are as written.
 
 Inputs: `hazard-fixes.md` §4 "Seat path" (v2 rule), §9 (M1, G1-G5, D3, D4), §10; the owner's
 answers (`hazard-decisions.md`); the C1, C3, C4 and C2 specs; hazards H6, H8, H10

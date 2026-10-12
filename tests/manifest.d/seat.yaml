@@ -1,4 +1,4 @@
-# L1 host app for components/seat (cases SEAT-001..SEAT-011 in tests/host/seat): the seat
+# L1 host app for components/seat (cases SEAT-001..SEAT-012 in tests/host/seat): the seat
 # reading (H8: NaN, infinities, the conversion bound, the range and its one-step tolerance) and
 # the seat gate (every input combination, the step and preset targets, a random-input property,
 # compile-time cases, no allocation) and SEAT-011, the call-site guard of seat_raw and
