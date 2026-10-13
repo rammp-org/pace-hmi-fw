@@ -2,3 +2,6 @@
 # so the guard's diagnostic can walk the call chain of Read ADC's allocations.
 CONFIG_HMI_BENCH_ALLOC_GUARD=y
 CONFIG_ESP_SYSTEM_USE_FRAME_POINTER=y
+# The frame pointer also reaches the bootloader (0x6610 B > the 0x6000 before the table at
+# 0x8000, which the bench never changes): its log goes down to warnings to fit.
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
