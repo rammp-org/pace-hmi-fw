@@ -331,19 +331,14 @@ private:
   // reader: published now if it has one, else held and published by the first tick that finds
   // one (boot_disable_due). One message: no re-send once handed to RTPS; a refused publish is
   // tried again on the next tick. The user's own ask (SEND_ENABLE, row 18) drops it.
+  // DIAGNOSTIC B (dev_ai_diag_ab, owner-approved 2026-10-13; never merged): T1's deferred
+  // path compiled out. The boot DISABLE is published at once, as before T1, whether or not the
+  // writer has a matched reader; nothing is held and drive_writer_matched() is never called.
   void boot_disable() {
     request_enable_.store(false);
-    boot_disable_pending_ = true;
-    boot_disable_due();
+    (void)publish();
   }
-  void boot_disable_due() {
-    if (!boot_disable_pending_ || !view_.drive_writer_matched()) {
-      return;
-    }
-    if (publish()) {
-      boot_disable_pending_ = false;
-    }
-  }
+  void boot_disable_due() {}
 
   // The DriveCommand: ask, re-ask, or re-publish the request as it stands.
   bool perform_request(hmi::drive_session::Action action) {
