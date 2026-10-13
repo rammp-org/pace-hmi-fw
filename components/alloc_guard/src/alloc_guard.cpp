@@ -14,7 +14,6 @@
 #include "esp_attr.h"
 #include "esp_cpu.h"
 #include "esp_heap_caps.h"
-#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/freertos_debug.h"
 #include "freertos/idf_additions.h"
@@ -167,11 +166,12 @@ void print_words(const char *label, const std::uint32_t *w, std::uint32_t n) {
 void dump_task(void * /*arg*/) {
   vTaskDelay(pdMS_TO_TICKS(5000));
   for (unsigned round = 0;; ++round) {
-    std::printf("AGDIAG t_us=%lld allocs=%lu bytes=%lu frees=%lu paths=%lu unpathed=%lu "
+    std::printf("AGDIAG t_ms=%lu allocs=%lu bytes=%lu frees=%lu paths=%lu unpathed=%lu "
                 "guard=%lu recs=%lu\n",
-                static_cast<long long>(esp_timer_get_time()), static_cast<unsigned long>(n_allocs),
-                static_cast<unsigned long>(n_bytes), static_cast<unsigned long>(n_frees),
-                static_cast<unsigned long>(n_paths), static_cast<unsigned long>(n_unpathed),
+                static_cast<unsigned long>(pdTICKS_TO_MS(xTaskGetTickCount())),
+                static_cast<unsigned long>(n_allocs), static_cast<unsigned long>(n_bytes),
+                static_cast<unsigned long>(n_frees), static_cast<unsigned long>(n_paths),
+                static_cast<unsigned long>(n_unpathed),
                 static_cast<unsigned long>(counter.count(0).allocations),
                 static_cast<unsigned long>(n_recs));
     for (std::uint32_t p = 0; p < n_paths; ++p) {
