@@ -1,0 +1,4 @@
+# DIAGNOSTIC ONLY (dev_ai_diag_heaptrace, finding T12): the alloc guard plus frame pointers,
+# so the guard's diagnostic can walk the call chain of Read ADC's allocations.
+CONFIG_HMI_BENCH_ALLOC_GUARD=y
+CONFIG_ESP_SYSTEM_USE_FRAME_POINTER=y
