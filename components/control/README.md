@@ -12,7 +12,6 @@ function-local statics, are members.
 | --- | --- |
 | `include/control/stick_island.hpp` | `StickIsland<Stick, Io, kCycle>`: brings the continuous ADC (X/Y) and the twist's oneshot ADC up, builds the stick on its calibration (`start`), and every `kCycle.period_ms` reads the three pots and runs one `Stick::cycle` on them, then `Io::note_cycle`. `Cycle`: the period and the twist read, a template argument so they stay compile-time constants. Its private `read_twist_mv`, the twist's oversampled oneshot read, is out of line on purpose (its comment says why) |
 | `include/control/motion_guard.hpp` | Hazard fix C4 ([hazard-c4-spec.md](../../docs/plans/hazard-c4-spec.md)): `MotionGuard`, the ADC task's own check of the UI heartbeat, the link, the MibStatus age and the MCB state; its constants (`UI_HEARTBEAT_MAX_AGE_MS` 200, `MIB_STATUS_MAX_AGE_MS` 2000), the `GuardReason` verdict, the stale latch (`StampWatch`), the shared 32-bit stamps and atomics (`StampCell`, `GuardSources`, `GuardTelemetry`) and the ordered load (`load_guard_inputs`). Pure C++, time as a parameter |
-| `include/control/windowed_adc.hpp` | `WindowedContinuousAdc`: espp's `ContinuousAdc` (vendored, `components/espp_adc`) plus `get_windows(configs)`, each channel's newest window (mean, max, sequence) from one publish, read lock-free from `components/adc_window` (hazard fix C2, REQ-CTL-16). Not used by the firmware yet |
 | `include/control/cycle.hpp` | `ControlCycle<Watchdog, Clock>`: one ADC cycle after the reads, in C4's order: (first cycle) subscribe to the task watchdog, evaluate the guard once, hand the verdict to the Io, one `Stick::cycle`, `Io::note_cycle`, reset the watchdog. No espp or IDF type, so the host tests drive it |
 
 **Status (2026-10-08).** `motion_guard.hpp` and `cycle.hpp` are C4's first commit: tested on
@@ -34,7 +33,7 @@ The pipeline's own requirements are `components/stick`'s. The rows below are haz
 host app `test/` (`tests/manifest.d/control.yaml`, L1-CTL). Cases CTL-012, 013, 015, 016, 020
 and 021 run the guard through C1's output permit and come with the wiring commit (C4 commit
 3); B-steps are bench checks (hazard-c4-spec.md §8). REQ-CTL-15 and 16 are hazard fix C2's
-(hazard-c2-spec.md §7.2); CTL-022 and 023 come with C2's island commit.
+(hazard-c2-spec.md §7.2), parked: see "The ADC window read" below.
 
 | ID | Requirement | Tests |
 | --- | --- | --- |
@@ -52,8 +51,8 @@ and 021 run the guard through C1's output permit and come with the wiring commit
 | REQ-CTL-12 | The ADC task subscribes to the TWDT at its first cycle and resets it at the end of every cycle, valid or not. | CTL-019, B5j |
 | REQ-CTL-13 | `Read ADC` runs at priority 21, pinned to core 0, with a 6144 B stack. | G10, B3 |
 | REQ-CTL-14 | After any non-OK verdict, output resumes only through C1's neutral latch: the non-OK verdict clears it, and it sets again only after `kNeutralHold` of neutral cycles (REQ-STK-12). | CTL-020, CTL-021 |
-| REQ-CTL-15 | Each cycle the island reads both X/Y windows (mean, max, sequence) in one call, the twist's reads (mean, max, count), samples `calibrating` once, steps the monitor once, then runs the pipeline with the same `calibrating`. On valid and invalid cycles alike. (Hazard fix C2; C2 commit 4.) | CTL-022 |
-| REQ-CTL-16 | The vendored `ContinuousAdc` keeps espp's mean per window and adds, per channel, the window's largest conversion in mV and a `uint32` sequence that advances only for a window holding at least one conversion of that channel. Its `README.md` lists every change from espp. (Hazard fix C2.) | CTL-024, CTL-027 |
+| REQ-CTL-15 | RETIRED 2026-10-13, parked until espp releases the window read (see below). Each cycle the island reads both X/Y windows (mean, max, sequence) in one call, the twist's reads (mean, max, count), samples `calibrating` once, steps the monitor once, then runs the pipeline with the same `calibrating`. On valid and invalid cycles alike. (Hazard fix C2; C2 commit 4.) | – |
+| REQ-CTL-16 | RETIRED 2026-10-13, parked until espp releases the window read (see below). The vendored `ContinuousAdc` keeps espp's mean per window and adds, per channel, the window's largest conversion in mV and a `uint32` sequence that advances only for a window holding at least one conversion of that channel. Its `README.md` lists every change from espp. (Hazard fix C2.) | – |
 
 How the guard reads the spec where it leaves a choice (C4 §2, §3):
 
@@ -69,10 +68,17 @@ How the guard reads the spec where it leaves a choice (C4 §2, §3):
 
 The owner accepted these choices on 2026-10-08.
 
-One difference from hazard-c2-spec.md §10.3: the X/Y windows are read without a lock (a
-sequence lock in `components/adc_window`, CTL-027), not by one take of espp's `data_mutex_`. A
-lock in our code trips the L0 ratchet, and the owner's rule (2026-10-08) is to fix the code, not
-the check. The stick task then takes no lock to read the ADC at all.
+### The ADC window read (hazard fix C2), parked
+
+C2 needs each X/Y channel's window max and a per-channel sequence from espp's `ContinuousAdc`
+(REQ-CTL-16), read by the island each cycle (REQ-CTL-15). It was built on a vendored copy of
+espp's `adc` (`components/espp_adc`, with `components/adc_window` and
+`include/control/windowed_adc.hpp`; CTL-024, CTL-027; never used by the firmware). The owner
+decided on 2026-10-13 to use espp's components as released, not vendored, so that code was
+removed and both requirements are retired. The same capability is proposed upstream (an espp PR,
+drafted separately). It returns, on the managed `espp/adc`, once espp releases it, with the
+requirements re-declared under new IDs; the removed code is in this repository's history
+(commits cfa5c60, df5326c, abf25e1, a4339b4).
 
 ## Tasks
 
@@ -90,8 +96,7 @@ task is espp's (`ContinuousAdc`, priority 5).
 
 ## Dependencies
 
-espp `adc`, vendored as `components/espp_adc` (continuous and oneshot), `adc_window` (the window
-bookkeeping), `filters` (the lowpass), `logger`, `task`;
+espp `adc` (continuous and oneshot), `filters` (the lowpass), `logger`, `task`;
 `hmi_rtps_spec` (the MibStatus timeout and the ENABLED state the guard checks against). The
 stick pipeline (`components/stick`) and main's Io come in as template arguments.
 

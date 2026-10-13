@@ -10,9 +10,6 @@ FILE_PATTERNS          = *.h *.hpp
 # Vendored, generated and test code is not ours to document (CS-LAY-04, CS-LAY-05).
 EXCLUDE                = components/ui \
                          components/m5stack-tab5 \
-                         components/espp_adc/upstream \
-                         components/espp_adc/include/adc_types.hpp \
-                         components/espp_adc/include/oneshot_adc.hpp \
                          main/boot_logo.h \
                          managed_components \
                          external

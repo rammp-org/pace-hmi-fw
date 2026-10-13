@@ -13,7 +13,7 @@ waiting for ONE owner decision (below) before they merge.
 | --- | --- |
 | Fragments | none (26 → 0) |
 | `main.cpp` | 900 physical / 536 code lines (CS-FIL-01 met); `app_main` 165 |
-| Components | board (bring-up on the Tab5 BSP), drive_ui (safety), control, housekeeping, hmi_rtps_spec, adc_window, alloc_guard, espp_adc (vendored) … see docs |
+| Components | board (bring-up on the Tab5 BSP), drive_ui (safety), control, housekeeping, hmi_rtps_spec, alloc_guard … see docs (espp_adc and adc_window removed 2026-10-13: espp as released) |
 | On `dev_refactor` | C1 + C3 hazard fixes; coverage ratchet; Doxygen ratchet; on-chip allocation guard (bench builds); settings post-check; all benched |
 | Branch `dev_ai_hazard_candidate` (e65c051) | C4 + C2 + C2b + approved RTPS-worker / ContinuousAdc priority 20 + T1 (boot DISABLE after match, vendored espp_rtps) + all owner decisions of 2026-10-11. Bench cand4: 59 PASS; remaining FAILs: `joy.xy_age_max` 210 > 200 at boot (B3, C2-15), see decision below |
 | Branch `dev_ai_hazard_seat` (440665b) | Seat path on top of the candidate: B5s-1..17 + B5''-19 PASS. Merges after the candidate |
