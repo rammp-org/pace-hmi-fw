@@ -39,6 +39,7 @@
 #include "board/board.hpp"
 #include "board/board_port.hpp"
 #include "boot_logo.h"
+#include "cues.hpp"
 #include "drive_adapter.hpp"
 #include "drive_session.hpp"
 #include "fw_info.hpp"
@@ -115,22 +116,6 @@ static_assert(same_link_state(RtpsLinkState::NO_IP, hmi::ui::LinkState::NO_IP));
 static_assert(same_link_state(RtpsLinkState::NO_PEER, hmi::ui::LinkState::NO_PEER));
 static_assert(same_link_state(RtpsLinkState::CONNECTED, hmi::ui::LinkState::CONNECTED));
 
-// The user's haptic and sound cues (hmi::feedback::Feedback). app_main builds
-// them (app-main-shrink V6) and points this at them before any task starts; the
-// rest of the unit cues through haptic_play below, and through play_click,
-// play_refusal and refusal_feedback (after app_main, with load_audio).
-static hmi::feedback::Feedback *feedback = nullptr;
-using hmi::feedback::kHapticBuzzSlots;
-// The self test reports whether the DA7280 answered the boot scan.
-using hmi::feedback::kDa7280Address;
-
-// HAPTIC TEST settings row -> kHapticBuzzDuration of vibration; the unlock and
-// hold clicks; a refusal's double click. Returns false (having logged) if there
-// is no motor or the I2C burst fails, so callers can leave their own UI alone.
-static bool haptic_play(espp::Drv2605::Waveform w, uint8_t slots) {
-  return feedback != nullptr && feedback->haptics().play(w, slots);
-}
-
 // How the click sound reaches the speaker and the LVGL task, for app_main's Feedback.
 static hmi::feedback::ClickSound::Config click_sound_config() {
   return {
@@ -151,13 +136,6 @@ static hmi::feedback::ClickSound::Config click_sound_config() {
           },
   };
 }
-
-static bool load_audio(size_t &out_size, size_t &out_sample_rate);
-static void play_click(espp::M5StackTab5 &tab5);
-// "Can't do that", heard (play_refusal) or heard and felt (refusal_feedback);
-// defined with play_click. A warning or error sounds even with Sounds off.
-static void play_refusal(bool warning = false);
-static void refusal_feedback();
 
 // The TopBar's link label: what RTPS runs over. The design's "BT · WI-FI" is only
 // a placeholder; it is set from the setting before rtps_comms_start, then from the
@@ -231,15 +209,6 @@ static constexpr hmi::ui::DriveInputs kDriveInputs{
     .unlock_hold_done = drive_unlock_hold_done,
     .exit_hold_done = drive_exit_hold_done,
     .refresh_notice = drive_refresh_notice,
-};
-
-static constexpr hmi::ui::CuesPort kCuesPort{
-    .click = [] { play_click(espp::M5StackTab5::get()); },
-    .refusal = [](bool warning) { play_refusal(warning); },
-    .refused = refusal_feedback,
-    .haptic_click = [] { (void)haptic_play(espp::Drv2605::Waveform::STRONG_CLICK, 1); },
-    .haptic_test =
-        [] { (void)haptic_play(espp::Drv2605::Waveform::ALERT_1000MS, kHapticBuzzSlots); },
 };
 
 static constexpr hmi::ui::SelfTestPort kSelfTestPort{
@@ -552,9 +521,9 @@ extern "C" void app_main(void) {
   // The haptic and sound cues: the DRV2605 comes up here (the HAPTIC TEST slot,
   // the unlock and hold clicks, a refusal); the click's samples load after the
   // LVGL task starts. Lives as long as app_main, which never returns
-  // (park_main_task); the unit reaches it through `feedback`.
+  // (park_main_task); the cues (cues.cpp) reach it once attached.
   hmi::feedback::Feedback cues({.i2c = i2c, .boot_log = logger, .sound = click_sound_config()});
-  feedback = &cues;
+  cues_attach(cues);
 
   // DA7280 bring-up test (raw register read) and driver functional test (Da7280
   // driver class, DRO mode): bench only, CONFIG_HMI_BENCH_DA7280_TEST.
@@ -657,7 +626,7 @@ extern "C" void app_main(void) {
   // or by a PC over RTPS (scripts/rtps_selftest.py) — which is why this comes
   // before rtps_comms_start: selftest_init registers the self-test RTPS
   // handlers.
-  SelfTestPlatform selftest_board = selftest_platform(feedback, found_addresses, direct_render);
+  SelfTestPlatform selftest_board = selftest_platform(&cues, found_addresses, direct_render);
   selftest_board.lvgl_mutex = &lvgl_mutex;
   selftest_board.motion_guard = [] {
     const hmi::control::GuardTelemetry &t = ui_app.guard_telemetry();
@@ -850,23 +819,3 @@ extern "C" void app_main(void) {
   }
   park_main_task();
 }
-
-// The click sound's samples: click.wav, embedded by main/CMakeLists.txt
-// (EMBED_TXTFILES). The sound itself is hmi::feedback::ClickSound.
-static bool load_audio(size_t &out_size, size_t &out_sample_rate) {
-  extern const uint8_t click_wav_start[] asm("_binary_click_wav_start");
-  extern const uint8_t click_wav_end[] asm("_binary_click_wav_end");
-  return feedback->sound().load({click_wav_start, click_wav_end}, out_size, out_sample_rate);
-}
-
-// The click: a touch landing, the stick button selecting, a hold completing.
-// Silent with Settings "Sounds" off. Every caller passes the one Tab5, which is
-// the speaker the Feedback plays on.
-static void play_click(espp::M5StackTab5 & /*tab5*/) { feedback->sound().play_click(); }
-
-// "Can't do that", heard. `warning` is a banner coming up: it sounds even with
-// Sounds off. LVGL task, or under lvgl_mutex.
-static void play_refusal(bool warning) { feedback->sound().play_refusal(warning); }
-
-// A refused press: the DRV2605's double click, which says the same by touch.
-static void refusal_feedback() { feedback->refusal(); }
