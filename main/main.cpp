@@ -77,6 +77,7 @@
 #include "post_facts/post_facts.hpp"
 #include "stick/mapping_selftest.hpp"
 #include "stick_io.hpp"
+#include "task_configs.hpp"
 #include "ui_ports.hpp"
 
 using namespace std::chrono_literals;
@@ -396,18 +397,7 @@ extern "C" void app_main(void) {
 
   // The housekeeping island (IMU, battery, RTC). Built here because the IMU takes its
   // orientation filter; its task starts after the click sound is loaded, below.
-  hmi::housekeeping::Housekeeping housekeeping({
-      .task =
-          {
-              .name = "Data Display Task",
-              .stack_size_bytes = 6 * 1024,
-              .priority = 10,
-              .core_id = 1,
-          },
-      .period = 20ms,
-      .angle_noise = 0.001f,
-      .rate_noise = 0.1f,
-  });
+  hmi::housekeeping::Housekeeping housekeeping(housekeeping_config());
 
   if (!board.start_imu(housekeeping.orientation_filter())) {
     park_main_task();
@@ -439,18 +429,7 @@ extern "C" void app_main(void) {
   // interrupt task starts here and its callback writes them. The internal
   // pull-up is redundant against the external one but harmless.
   logger.info("Initializing GPIO48 test button...");
-  static espp::Button gpio48_button({
-      .name = "GPIO48 Button",
-      .interrupt_config =
-          {
-              .gpio_num = 48,
-              .callback = gpio48_button_callback,
-              .active_level = espp::Button::ActiveLevel::LOW,
-              .interrupt_type = espp::Button::InterruptType::ANY_EDGE,
-              .pullup_enabled = true,
-          },
-      .task_config = {.name = "Button", .stack_size_bytes = 4 * 1024, .priority = 5},
-  });
+  static espp::Button gpio48_button(gpio48_button_config(gpio48_button_callback));
 
   // Joystick as an LVGL keypad input device, moving the cursor through each
   // screen's focus group. The read function runs on the LVGL task and drains the
@@ -504,40 +483,7 @@ extern "C" void app_main(void) {
     ui_app.post().attach(hmi::fw::reader(rest_windows), i2c_found, post_logger);
   }
 
-  hmi::ui::UiIsland ui_island({
-      .task =
-          {
-              .name = "lv_task",
-              // Measured peak ~6 KB (self test mem.stk_lvgl: 26964 B of 32 KB
-              // never used). The stack is internal DMA-capable RAM, which RTPS
-              // start-up runs dry on: at 32 KB the W5500 driver's bounce buffer
-              // failed to allocate and the board boot-looped. mem.stk_lvgl
-              // guards the headroom.
-              .stack_size_bytes = 16 * 1024,
-              .priority = 20,
-              .core_id = 1,
-          },
-      .cycle = lvgl_cycle,
-      .period = 8ms,
-      .fps_meter = kFpsInstrument ? &fps_meter : nullptr,
-      // The motion guard's UI heartbeat (hazard-c4-spec.md §3.1), on the ADC side's clock.
-      .heartbeat =
-          [] {
-            // Bench builds: STALL UI, before this cycle's stamp: the cycle in progress runs
-            // `ms` longer, so the heartbeat's age counts from the last stamp before the request
-            // (B5i: XYTwist 0 by request + 240 ms), and the watchdog reset waits for it too.
-            if constexpr (BENCH_STICK_INJECT) {
-              hmi::control::spin_for_ms(ui_app.bench_stall().take(hmi::control::StallTask::UI),
-                                        adc_clock_ms);
-            }
-            ui_app.guard_sources().note_ui_cycle(adc_clock_ms());
-          },
-      // The task watchdog (C4 §4.3): the UI task subscribes at its first cycle; the result is
-      // the motion guard's ui_wdt_ok.
-      .watchdog_subscribe = task_watchdog_subscribe,
-      .watchdog_subscribed = [](bool ok) { ui_app.guard_sources().note_ui_wdt(ok); },
-      .watchdog_reset = task_watchdog_reset,
-  });
+  hmi::ui::UiIsland ui_island(ui_island_config(lvgl_cycle, kFpsInstrument ? &fps_meter : nullptr));
   if (!ui_island.start()) {
     logger.error("Failed to start LVGL task!");
     park_main_task();
