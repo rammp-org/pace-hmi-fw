@@ -51,9 +51,9 @@ void DisplayFlip::use_panel_buffers(lv_display_t *disp, void *fb0, void *fb1, si
 // instead of copying 1.8 MB.
 //
 // That branch is not self-synchronising: it fires on_color_trans_done
-// SYNCHRONOUSLY (esp_lcd_panel_dpi.c), which the BSP wires to
-// lv_display_flush_ready, so disp->flushing clears before this function even
-// returns. The actual buffer swap only lands when the DSI DMA re-arms at the
+// SYNCHRONOUSLY (esp_lcd_panel_dpi.c). Since espp #738 the BSP's handler only
+// completes its own draw, so this callback calls lv_display_flush_ready itself
+// once present_frame() returns. The actual buffer swap only lands when the DSI DMA re-arms at the
 // end of the current frame. present_frame() blocks until it does. Blocking here
 // is what gates the renderer: LVGL is single-threaded and cannot start the next
 // refresh while flush_cb is on the stack, so by the time this returns the DMA
@@ -70,9 +70,11 @@ void DisplayFlip::direct_flush_cb(lv_display_t *disp, const lv_area_t * /*area*/
     return;
   }
   const DisplayFlip &self = *static_cast<const DisplayFlip *>(lv_display_get_driver_data(disp));
-  // flush_ready itself arrives via the panel's on_color_trans_done; this call
-  // additionally waits for the swap before letting LVGL render again.
+  // Waits for the swap before letting LVGL render again. Signal LVGL here: the
+  // board's on_color_trans_done only completes the board's own draw (espp
+  // #738), it no longer calls lv_display_flush_ready.
   self.config_.present(px_map);
+  lv_display_flush_ready(disp);
 }
 
 void DisplayFlip::flip_flush_cb(lv_display_t *disp, const lv_area_t *, uint8_t *px_map) {
@@ -113,10 +115,10 @@ void DisplayFlip::flip_flush_cb(lv_display_t *disp, const lv_area_t *, uint8_t *
                       LV_DISPLAY_ROTATION_180, LV_COLOR_FORMAT_RGB565);
     esp_cache_msync(target, self.panel_fb_bytes_, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
   }
-  // The same vsync-gated swap as direct_flush_cb; flush_ready arrives through
-  // the panel's on_color_trans_done.
+  // The same vsync-gated swap and flush_ready as direct_flush_cb.
   self.config_.present(target);
   self.flip_back_ ^= 1;
+  lv_display_flush_ready(disp);
 }
 
 void DisplayFlip::set_flipped(bool on) {
