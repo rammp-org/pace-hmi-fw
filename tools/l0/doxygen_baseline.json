@@ -1,6 +1,6 @@
 {
   "comment": "Doxygen warnings per file (tools/l0/doxygen_gate.py, ci/Doxyfile). Lowered by `update`, never raised.",
-  "total": 1173,
+  "total": 1166,
   "files": {
     "components/board/include/board/adapters.hpp": 4,
     "components/board/include/board/board.hpp": 13,
@@ -102,7 +102,6 @@
     "components/topology/include/topology_validate.hpp": 24,
     "main/internet_ui.hpp": 3,
     "main/joystick_cal.hpp": 15,
-    "main/log_capture.hpp": 7,
     "main/log_view.hpp": 4,
     "main/rtps_comms.hpp": 1,
     "main/selftest.hpp": 8,

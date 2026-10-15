@@ -120,6 +120,20 @@
         "guard variable for fmt::v12::format_facet<std::locale>::id"
       ]
     },
+    "log_capture/src/log_capture.cpp.obj": {
+      "init_functions": 1,
+      "objects": [
+        "(anonymous namespace)::ring_mutex"
+      ],
+      "reads_external": [],
+      "lazy_statics": [],
+      "calls": [
+        "__cxa_atexit",
+        "pthread_mutex_init",
+        "std::mutex::~mutex()"
+      ],
+      "shared": []
+    },
     "m5stack-tab5/src/audio.cpp.obj": {
       "init_functions": 1,
       "objects": [],
@@ -263,20 +277,6 @@
       "shared": [
         "guard variable for fmt::v12::format_facet<std::locale>::id"
       ]
-    },
-    "main/log_capture.cpp.obj": {
-      "init_functions": 1,
-      "objects": [
-        "(anonymous namespace)::ring_mutex"
-      ],
-      "reads_external": [],
-      "lazy_statics": [],
-      "calls": [
-        "__cxa_atexit",
-        "pthread_mutex_init",
-        "std::mutex::~mutex()"
-      ],
-      "shared": []
     },
     "main/main.cpp.obj": {
       "init_functions": 1,

@@ -18,7 +18,6 @@
       "main/selftest.cpp": 2
     },
     "heap_raw": {
-      "main/log_capture.cpp": 1,
       "main/log_view.cpp": 1,
       "main/lv_mem_psram.c": 4,
       "main/selftest.cpp": 2
@@ -31,7 +30,6 @@
       "main/internet_ui.cpp": 2,
       "main/internet_ui.hpp": 1,
       "main/joystick_cal.cpp": 9,
-      "main/log_capture.cpp": 7,
       "main/main.cpp": 19,
       "main/rtps_comms.cpp": 36,
       "main/selftest.cpp": 30,
@@ -50,7 +48,6 @@
       "main/about_ui.cpp": 1,
       "main/internet_ui.cpp": 4,
       "main/joystick_cal.cpp": 15,
-      "main/log_capture.cpp": 8,
       "main/log_view.cpp": 1,
       "main/main.cpp": 6,
       "main/rtps_comms.cpp": 32,
@@ -192,6 +189,36 @@
       "heap_raw": {
         "main/main.cpp@f1eb6ce8e1d7311c18b9014104c91a6b1eb0f728": [
           "72f926642a9f8eb85604f5c0c6366a3bd4fe5448"
+        ]
+      }
+    },
+    "components/log_capture/src/log_capture.cpp": {
+      "heap_raw": {
+        "main/log_capture.cpp@8b365c64444bcd5a07fab48c58e9cc45b84724d0": [
+          "2477454d9443fd3045f88f7af7d6a9529900a8e3"
+        ]
+      },
+      "locks": {
+        "main/log_capture.cpp@8b365c64444bcd5a07fab48c58e9cc45b84724d0": [
+          "7fc9060d211b4175fdad5c0ad5acd59b56d04d92",
+          "fb7c2c9405f0b135f067e7af644db46d83c7f194",
+          "fb7c2c9405f0b135f067e7af644db46d83c7f194",
+          "fb7c2c9405f0b135f067e7af644db46d83c7f194",
+          "fb7c2c9405f0b135f067e7af644db46d83c7f194",
+          "fb7c2c9405f0b135f067e7af644db46d83c7f194",
+          "fb7c2c9405f0b135f067e7af644db46d83c7f194"
+        ]
+      },
+      "mutable_globals": {
+        "main/log_capture.cpp@8b365c64444bcd5a07fab48c58e9cc45b84724d0": [
+          "0e489061274f72ae80c0633e7184fc70bafc2ef6",
+          "1f1d8059c821cdbfed9814e17693692bf826bf16",
+          "5614147fca64c7c636b40675421291fc3bab306e",
+          "7f2d835c735b328a19208e89932755289c07b4f9",
+          "7fc9060d211b4175fdad5c0ad5acd59b56d04d92",
+          "8c2f8f2da1b41cdc3ecc8ac14070782d1a475414",
+          "ac84850f4275f13da866a498f530f8aac690e33a",
+          "c5afb51486a48b9f12ddac79a1137f8f1b857c61"
         ]
       }
     },
