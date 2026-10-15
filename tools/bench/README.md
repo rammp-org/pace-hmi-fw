@@ -10,7 +10,8 @@ the PC's LAN (its Connection setting, Settings > Internet, saved as Ethernet: `n
 Then B0's tethering check is not applicable, there is no hotspot restart, the RTPS sweep
 covers that subnet (at most a /22), the sim binds that PC address, and B2 expects
 `Network: Ethernet` and `network 0` in place of the baseline's `Network: WiFi` and
-`network 1` (BENCH-014); every other marker is unchanged.
+`network 1` (BENCH-014); every other marker is unchanged. B3 accepts a SKIP of
+`net.wifi_rssi` (no WiFi link) and grades every other row as on WiFi (see Decided).
 `routed:<pc ip>@<board subnet>` (e.g. `routed:100.92.133.114@10.0.0.0/24`): the same, with the
 board in a subnet the PC reaches through a router (a Tailscale subnet route): the sim binds the
 PC's address on that route, the sweep covers the board's subnet, and round-trip times include
@@ -199,12 +200,17 @@ On Linux the same commands with `$PY` and forward slashes; `hotspot.ps1` does no
 `--tree` (default: this worktree) is where `scripts/` is run from: run the tree that built the
 image. Children run with `PYTHONDONTWRITEBYTECODE=1`.
 
+## Decided
+- **B3 on Ethernet** (owner, 2026-10-15; found 2026-10-14, first BENCH_NET=lan run, Ubuntu):
+  the firmware SKIPs `net.wifi_rssi` with no WiFi link, and B3 graded that against the WiFi
+  baseline's PASS, so B3 FAILed on that one row (every other row passed). Decision: on an
+  Ethernet bench (`common.LINK == "Ethernet"`, the signal B2's Ethernet rule BENCH-014 uses)
+  B3 accepts a SKIP of `net.wifi_rssi` only (`compare_selftest.ETHERNET_SKIP_OK`); the row is
+  shown with its baseline result and the reason, not graded. Every other row stays strict, a
+  FAIL of `net.wifi_rssi` still fails, and on WiFi the row is graded as before. The baseline
+  is not edited. CMP-009..012.
+
 ## Decisions to revisit
-- **B3 on Ethernet** (found 2026-10-14, first BENCH_NET=lan run, Ubuntu): the firmware
-  SKIPs `net.wifi_rssi` with no WiFi link, and B3 grades that against the WiFi baseline's
-  PASS, so B3 FAILs on that one row (every other row passed). B2 has its Ethernet rule
-  (BENCH-014); B3 has none yet. Needs the owner's call (a link-dependent expectation, not a
-  silent edit of the baseline).
 - **The sim does not follow an HMI reboot** (found 2026-10-09): after the HMI restarts, the
   sim's RTPS discovery never re-matches the new participant, so it hears no XYTwist or
   DriveCommand again. Until rtps_host and the sim rediscover a restarted peer (the proper

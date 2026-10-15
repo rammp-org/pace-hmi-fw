@@ -36,6 +36,10 @@ the baseline's value. Owner decision P3
 (docs/project-profile.md, Bench > Power): board 2 has no battery and runs on PoE, so
 pwr.vbat measures no pack (4346 mV read as "no pack fitted", SKIP, on chrome-0677bb5).
 Until a battery is fitted.
+On Ethernet (BENCH_NET lan/routed, common.LINK == "Ethernet": the signal B2's Ethernet rule
+uses, BENCH-014) a SKIP of net.wifi_rssi is accepted against the WiFi baseline's PASS: the
+firmware SKIPs it with no WiFi link. That row only (ETHERNET_SKIP_OK), only a SKIP (a FAIL
+still fails), and on WiFi it is graded as before. Owner decision 2026-10-15.
 """
 
 from __future__ import annotations
@@ -87,6 +91,13 @@ REPORT_ONLY_PREFIXES = ("pwr.",)
 REPORT_ONLY_WHY = "report-only: owner P3, board 2 has no battery (PoE); see project-profile Bench"
 
 
+# Owner decision 2026-10-15: rows whose SKIP is the expected answer on an Ethernet bench.
+# The baseline was taken on WiFi; the firmware SKIPs these with no WiFi link. Every other
+# row stays strict on Ethernet, and on WiFi these rows are graded as before.
+ETHERNET_SKIP_OK = ("net.wifi_rssi",)
+ETHERNET_SKIP_WHY = "SKIP accepted on Ethernet (no WiFi link): owner decision 2026-10-15"
+
+
 def report_only(name: str) -> bool:
     return name.startswith(REPORT_ONLY_PREFIXES)
 
@@ -121,9 +132,12 @@ def in_band(band: str, got: dict, base: dict) -> tuple[bool, str]:
     return ok, ("" if ok else why)
 
 
-def compare(run: dict, base: dict, declared: dict[str, dict] | None = None) -> dict:
-    """`declared` (common.variant_checks): new checks this build adds, name -> {why, report_only}."""
+def compare(run: dict, base: dict, declared: dict[str, dict] | None = None,
+            link: str | None = None) -> dict:
+    """`declared` (common.variant_checks): new checks this build adds, name -> {why, report_only}.
+    `link`: the bench network's link, common.LINK unless given (ETHERNET_SKIP_OK)."""
     declared = declared or {}
+    link = link or common.LINK
     problems, rows = [], []
     got_all = {r["name"]: r for r in run.get("results", [])}
     got = {n: r for n, r in got_all.items() if n not in declared}
@@ -152,6 +166,8 @@ def compare(run: dict, base: dict, declared: dict[str, dict] | None = None) -> d
             row.update(baseline_result=b.get("result"), graded=False, note=REPORT_ONLY_WHY)
         elif band is None:
             row["problem"] = "no band defined for this check"
+        elif link == "Ethernet" and name in ETHERNET_SKIP_OK and g.get("result") == "SKIP":
+            row.update(baseline_result=b.get("result"), graded=False, note=ETHERNET_SKIP_WHY)
         elif g.get("result") != b.get("result"):
             row["problem"] = f"verdict {g.get('result')} != baseline {b.get('result')}"
         else:
@@ -322,6 +338,42 @@ def t_declared_missing_or_other_extra() -> None:
         "extra ['mem.alloc_rtps']" in p for p in report["problems"])), ("FAIL", True))
 
 
+def t_wifi_rssi_skip_on_ethernet() -> None:
+    base = _baseline()
+    run = _with(base, "net.wifi_rssi", result="SKIP", value=None, detail="on Ethernet, not WiFi")
+    report = compare(run, base, link="Ethernet")
+    _expect("verdict on Ethernet", (report["verdict"], report["problems"]), ("PASS", []))
+    row = next(r for r in report["checks"] if r["name"] == "net.wifi_rssi")
+    _expect("the row says why", (row["result"], row["baseline_result"], row["graded"],
+                                 row["note"]), ("SKIP", "PASS", False, ETHERNET_SKIP_WHY))
+
+
+def t_wifi_rssi_skip_on_wifi_fails() -> None:
+    base = _baseline()
+    run = _with(base, "net.wifi_rssi", result="SKIP", value=None, detail="on Ethernet, not WiFi")
+    report = compare(run, base, link="WiFi")
+    _expect("SKIP vs PASS on WiFi", (report["verdict"], [p.split(":")[0] for p in
+                                                         report["problems"]]),
+            ("FAIL", ["net.wifi_rssi"]))
+
+
+def t_other_skip_on_ethernet_fails() -> None:
+    base = _baseline()
+    for name in ("net.link", "net.ip", "rtps.mcb_link", "imu.accel", "joy.x_rest"):
+        report = compare(_with(base, name, result="SKIP"), base, link="Ethernet")
+        _expect(f"SKIP vs PASS on {name} on Ethernet", (report["verdict"], [
+            p.split(":")[0] for p in report["problems"]]), ("FAIL", [name]))
+
+
+def t_wifi_rssi_fail_on_ethernet_fails() -> None:
+    base = _baseline()
+    for value in (-90, -31):  # out of its limits, and in them but reported FAIL
+        report = compare(_with(base, "net.wifi_rssi", result="FAIL", value=value), base,
+                         link="Ethernet")
+        _expect(f"FAIL ({value} dBm) on Ethernet", (report["verdict"], [
+            p.split(":")[0] for p in report["problems"]]), ("FAIL", ["net.wifi_rssi"]))
+
+
 CASES = [
     ("CMP-001 a run equal to the baseline passes", t_equal_passes),
     ("CMP-002 pwr.vbat SKIP vs baseline PASS does not fail; the row shows it (owner P3)",
@@ -337,6 +389,12 @@ CASES = [
      "FAIL fails", t_declared_report_only_and_graded),
     ("CMP-008 a declared row missing from the run fails; an extra row not declared still fails",
      t_declared_missing_or_other_extra),
+    ("CMP-009 on Ethernet a SKIP of net.wifi_rssi vs baseline PASS passes; the row says why "
+     "(owner 2026-10-15)", t_wifi_rssi_skip_on_ethernet),
+    ("CMP-010 on WiFi the same SKIP of net.wifi_rssi still fails", t_wifi_rssi_skip_on_wifi_fails),
+    ("CMP-011 on Ethernet a SKIP of any other row still fails", t_other_skip_on_ethernet_fails),
+    ("CMP-012 on Ethernet a FAIL (not SKIP) of net.wifi_rssi still fails",
+     t_wifi_rssi_fail_on_ethernet_fails),
 ]
 
 
