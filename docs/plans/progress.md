@@ -2,6 +2,11 @@
 
 ## Release candidate `dev_ai_rc` (2026-10-15)
 
+**RC commit:** the `dev_ai_rc` commit that adds this line. Its code is `f3574c4` (the cppcheck
+fix 61d91b7 and the stale-comment fix f3574c4 on top of 478d03d); the commit itself changes
+only this file and testing-overview.md. The bench images are built from it, so a board running
+the RC shows a version ending in its own short SHA.
+
 **Status:** built, partly benched, **TEST-ONLY and held**. Not merged into `dev_refactor` (the
 owner's "hold the candidate" decision stands); nothing went to `dev` or `main`; no PR.
 **Why test-only:** every espp component comes from the local espp worktree
@@ -68,26 +73,32 @@ rule is proven by its selftests (CMP-010..013), not yet on a board.
    Bench-only path; needs a faster Settings load or a decision on the step.
 
 Also found while writing this (not in the list above):
-- CI's cppcheck fails the RC on one style finding: `main/cues.cpp:20` `cues_attach`'s parameter
-  is `cues` in the definition and `feedback` in the declaration (`funcArgNamesDifferent`). A
-  one-word code fix for the code lane.
+- Fixed (61d91b7): CI's cppcheck failed the RC on one style finding, `main/cues.cpp:20`
+  `cues_attach`'s parameter `cues` in the definition and `feedback` in the declaration
+  (`funcArgNamesDifferent`). The declaration now says `cues`.
 - With espp's `get_windows()` (PR 1) the stick task's window read takes a lock inside espp,
   where the vendored copy was lock-free (owner decision pending, `components/control/README.md`).
-- Stale text outside the docs (code comments and declarations, left for the code lane):
-  `main/idf_component.yml`'s comment names `../../espp-test` / `test-all-prs` where the paths
-  are `../../espp-738` / `test-all-on-738`; `tools/guards/baselines/tasks.json`'s `tab5_audio`,
-  `tab5_audio microphone` and `tab5 interrupts` rows cite the deleted `components/m5stack-tab5`;
-  `components/hmi_ui/src/display_flip.cpp`'s header says "the vendored board support";
-  `components/alloc_guard/README.md` still says 24 B per publish and 54/57 checks (the self
-  test has 60, 63 with the alloc rows).
+- Fixed (f3574c4, comments and citations only): `main/idf_component.yml`'s comment now names
+  `../../espp-738` / `test-all-on-738`; `tools/guards/baselines/tasks.json`'s `tab5_audio`,
+  `tab5_audio microphone` and `tab5 interrupts` rows cite espp's m5stack-tab5 (the guard reads
+  neither `source` nor `origin`); `display_flip.cpp`'s header names espp's board support;
+  `components/alloc_guard/README.md` says 60 checks (63 with the alloc rows) and 20 B per
+  publish from espp's RTPS publish path, as the heap trace found.
 - Diagram D3 folds espp into the ESP-IDF node on the RC (the `override_path` folders sit
   outside the project); architecture.md lists which ones are espp.
 
 ### Checks on this RC commit
 
-L0 as in `l0.yml` (ratchet, include_boundary, pre-commit, ui_contract, gen_diagrams, guard
-selftests, sim and bench selftests, `tests/run.py` selftest and check): PASS. Doxygen gate
-(doxygen 1.9.8): PASS. Host L1 and the builds: not run for this docs-only commit.
+- cppcheck 2.20.0 (the version in CI's `jdomagala/static_analysis` image), CI's arguments and
+  file list (403 files, `components/ui` out): 0 findings; the same run on 478d03d reproduces
+  CI's one finding.
+- Bench images `build_bench` and `build_bench_inject` (stick injection), clean builds with
+  IDF 6.0.0: 0 warnings. G4 init_order and G2 exports on them, L0 and gen_diagrams check: PASS.
+- On 478d03d (docs): L0 as in `l0.yml` (ratchet, include_boundary, pre-commit, ui_contract,
+  gen_diagrams, guard selftests, sim and bench selftests, `tests/run.py` selftest and check):
+  PASS. Doxygen gate (doxygen 1.9.8): PASS.
+- Not run on this commit: host L1, the release and alloc-guard variants (the code change since
+  ba2c7b3's four-variant build is one parameter name).
 
 ---
 

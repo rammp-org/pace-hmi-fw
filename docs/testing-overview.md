@@ -151,11 +151,11 @@ The RC takes every espp component from a folder outside the repo (`override_path
 `main/idf_component.yml`), which CI's runners do not have. So on `dev_ai_rc` CI's Python checks
 run, and every job that builds or runs ESP-IDF fails at dependency resolution:
 
-| Job | On `dev_ai_rc` (2026-10-15, `ba2c7b3`) |
+| Job | On `dev_ai_rc` (2026-10-15, `ba2c7b3`; cppcheck row: the RC commit) |
 | --- | --- |
 | L0 / checks, L0 / doxygen | PASS |
 | L0 / host-l1, L0 / bench-build (3 variants), Build / build | FAIL: the `override_path` folders are missing on the runner |
-| Static analysis (cppcheck) | FAIL: one style finding, `main/cues.cpp:20` `cues_attach` parameter named `cues` in the definition and `feedback` in the declaration (`funcArgNamesDifferent`) |
+| Static analysis (cppcheck) | FAIL until 61d91b7 (`main/cues.cpp:20` `cues_attach`'s parameter named `cues` in the definition and `feedback` in the declaration, `funcArgNamesDifferent`); fixed: the declaration says `cues`, and cppcheck 2.20.0 run locally as CI runs it finds 0 |
 
 The builds, guards G2 and G4, and the release-ELF checks were run locally on the RC lane's
 builds (all four variants, 0 warnings). They come back to CI when espp merges the PRs and the
