@@ -1,107 +1,85 @@
 /**
  * @file main.cpp
- * @brief The HMI's app_main: brings up the Tab5 board, builds the components from their
- *        Configs and starts them (CS-LAY-01). The UI island is hmi_ui's UiApp; the ports it
- *        reaches the rest of the firmware through (rtps_comms, the drive adapter, the cues, the
- *        self test, the board, the screens main keeps) are filled here.
+ * @brief The HMI's composition: app_main brings up the Tab5 board, builds the components from
+ *        their Configs in order, wires them and starts the tasks (CS-LAY-01). It never returns.
+ *
+ * Besides app_main this file holds what has to be in the LVGL lock's owner (CS-OWN-08: the
+ * views take no lock, callers on other tasks take main's): `lvgl_mutex`, the entry points other
+ * tasks reach the UI through, and the few configs that hand the lock or call LVGL. It also
+ * defines the UiApp and the drive adapter (constinit / made at start-up), whose ports and
+ * wiring are main's other files:
+ *
+ * | File | What |
+ * | --- | --- |
+ * | `ui_ports` | the UiApp's ports (link, drive inputs, self test, board, screens, POST) |
+ * | `cues` | the haptic and sound cues over app_main's Feedback |
+ * | `stick_io` | the stick task's I/O (AdcStickIo), its Ports and its Config |
+ * | `task_configs` | the housekeeping, GPIO48 button and UI island task configs |
+ * | `bench_hooks` | the hazard bench verbs' hooks (bench inject builds) |
+ * | `selftest_platform` | the self test's board probes |
  */
 
 #include <atomic>
 #include <chrono>
 #include <cmath>
-#include <ctime>
-#include <limits>
-#include <numeric>
-#include <optional>
-#include <string>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <mutex>
+#include <span>
+#include <thread>
 #include <vector>
-
-#include "m5stack-tab5.hpp"
-
-#include "drv2605.hpp"
-#include "feedback/da7280_bench.hpp"
-#include "feedback/feedback.hpp"
-#include "housekeeping/housekeeping.hpp"
-#include "housekeeping/system_clock.hpp"
-
-#include "simple_lowpass_filter.hpp"
-
-#include "ui.h"
 
 #include "button.hpp"
 #include "keypad_input.hpp"
+#include "m5stack-tab5.hpp"
+#include "ui.h"
 
-#include "about_ui.hpp"
 #include "alloc_guard/alloc_guard.hpp"
-#include "app_instances.hpp"
-#include "bench_hooks.hpp"
-#include "bench_verbs.hpp"
 #include "board/board.hpp"
-#include "board/board_port.hpp"
 #include "boot_logo.h"
-#include "cues.hpp"
-#include "drive_adapter.hpp"
-#include "drive_session.hpp"
+#include "feedback/da7280_bench.hpp"
+#include "feedback/feedback.hpp"
 #include "fw_info.hpp"
 #include "github_ota.hpp"
-#include "internet_ui.hpp"
-#include "joystick_cal.hpp"
-#include "log_capture.hpp"
-#include "log_view.hpp"
-#include "remote_ui.hpp"
-#include "rtps_comms.hpp"
-#include "selftest.hpp"
-#include "selftest_platform.hpp"
-#include "selftest_spec.hpp"
-#include "settings.hpp"
-#include "settings_applied.hpp"
-#include "storage.hpp"
-#include "update_ui.hpp"
-
-#include "esp_heap_caps.h"
-#include "esp_ota_ops.h"
-#include "esp_system.h"
-#include "esp_task_wdt.h"
-#include "esp_timer.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-
-#include "drive_ui/drive_port.hpp"
-#include "hmi_format/topbar.hpp"
 #include "hmi_ui/app_state.hpp"
 #include "hmi_ui/fps_meter.hpp"
 #include "hmi_ui/post_stage.hpp"
 #include "hmi_ui/ui_app.hpp"
 #include "hmi_ui/ui_build.hpp"
 #include "hmi_ui/ui_island.hpp"
-#include "post_facts/post_facts.hpp"
+#include "housekeeping/housekeeping.hpp"
+#include "housekeeping/system_clock.hpp"
+#include "internet_ui.hpp"
+#include "joystick_cal.hpp"
+#include "log_capture.hpp"
+#include "remote_ui.hpp"
+#include "rtps_comms.hpp"
+#include "selftest.hpp"
+#include "selftest_spec.hpp"
+#include "settings.hpp"
+#include "settings_applied.hpp"
 #include "stick/mapping_selftest.hpp"
+#include "storage.hpp"
+#include "update_ui.hpp"
+
+#include "app_instances.hpp"
+#include "bench_hooks.hpp"
+#include "cues.hpp"
+#include "selftest_platform.hpp"
 #include "stick_io.hpp"
 #include "task_configs.hpp"
 #include "ui_ports.hpp"
 
 using namespace std::chrono_literals;
 
+// The one LVGL lock: lv_subject_set_* runs every observer on the caller's task and observers
+// touch widgets, so every LVGL call off the UI task takes it, here.
 static std::recursive_mutex lvgl_mutex;
 
-// ---------------------------------------------------------------------------
-// Frame-rate instrumentation: a debug feature, off unless CONFIG_HMI_DEBUG_FPS
-// (CS-LAY-09), and never in sdkconfig.defaults, which ships.
-//
-// Reports over serial rather than the LVGL perf overlay, so throughput can be
-// measured without eyes on the panel. RENDER_START/RENDER_READY fire only when
-// LVGL actually rasterizes, so these numbers are real frame cost -- REFR_*
-// would tick even on an idle screen and read as a meaningless "infinite fps".
-//
-// kFpsStress forces a full-screen invalidation every LVGL cycle. Without it a
-// static SquareLine screen invalidates nothing and renders nothing, which
-// measures the redraw path not at all. With it we get sustained worst case
-// (CONFIG_HMI_DEBUG_FPS_STRESS).
-//
-// The once-a-second report goes through its own espp::Logger at debug level,
-// tag "fps" (CS-LOG-01/03): developer detail, and only in this debug build.
-// The counters are hmi::ui::FpsMeter's members.
-// ---------------------------------------------------------------------------
+// Frame-rate instrumentation (hmi::ui::FpsMeter): a debug feature, off unless
+// CONFIG_HMI_DEBUG_FPS (CS-LAY-09), never in sdkconfig.defaults. kFpsStress
+// (CONFIG_HMI_DEBUG_FPS_STRESS) invalidates the whole screen every cycle: the worst case.
 static constexpr bool kFpsInstrument = CONFIG_HMI_DEBUG_FPS_AS_INT != 0;
 static constexpr bool kFpsStress = CONFIG_HMI_DEBUG_FPS_STRESS_AS_INT != 0;
 
@@ -130,8 +108,7 @@ static hmi::feedback::ClickSound::Config click_sound_config() {
 }
 
 // The system clock's validity: set by hmi::housekeeping::SystemClock (app_main's
-// system_clock), read by the TopBar. The time sync itself is the housekeeping
-// component's.
+// system_clock), read by the TopBar.
 static std::atomic<bool> clock_valid{false};
 
 // The UI's loggers, made at start-up in this order (the three tags the UI logs under).
@@ -154,21 +131,12 @@ constinit hmi::ui::UiApp ui_app{{
     .post = &kPostPort,
 }};
 
-// The drive session: lock, ask, unlock, drive, ask to stop. The decisions live in
-// components/drive_session (DriveSession, checked against the AS-IS table in
-// drive_session_table.hpp and its TABLE.md); sampling, the deadlines and performing the
-// actions live in components/drive_adapter (DriveAdapter); each action's LVGL and RTPS call is
-// drive_ui's DrivePort (drive_port.hpp), over the drive UI (DriveUi: the padlock and the advance
-// to Drive). Every input arrives on the LVGL task: the 250 ms poll, the hold completions, the
-// nav callbacks and the unlock timer.
-//
-// The drive adapter's port: stateless over the UiApp's DriveUi.
+// The drive session: the decisions are components/drive_session's (the table), the sampling,
+// deadlines and actions components/drive_adapter's, each action's LVGL and RTPS call drive_ui's
+// DrivePort over the UiApp's DriveUi. Every input arrives on the LVGL task. The port is
+// stateless; the adapter's constructor makes only the logger for a corrupted state (CS-SAF-04).
 static constexpr hmi::ui::DrivePort<hmi::ui::DriveUi> drive_port{ui_app.drive_ui()};
 static_assert(hmi::drive_adapter::DrivePort<hmi::ui::DrivePort<hmi::ui::DriveUi>>);
-
-// The drive session's adapter: the session, its deadlines and latches, and the logger for a
-// corrupted state, made at start-up with the rest (CS-SAF-04). Its windows are the table's
-// kDriveAnswer and kDriveWait (pinned to the RTPS spec in hmi_ui's ui_app.cpp).
 MainDriveAdapter drive_adapter{{.view = drive_port}};
 
 // How long an updated image runs before it keeps itself (github_ota_boot_confirm).
@@ -228,10 +196,7 @@ inline void AdcStickIo::show(const hmi::stick::Position &mounted) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Entry points from other tasks: each takes the LVGL lock around the view it
-// reaches (the views take none, CS-OWN-08).
-// ---------------------------------------------------------------------------
+// --- Entry points from other tasks: each takes the LVGL lock around the view it reaches ------
 
 // Any task. Clamped, so nothing can turn the screen fully off.
 static void brightness_set(int percent) {
@@ -269,12 +234,8 @@ static void lvgl_cycle() {
   lv_task_handler();
 }
 
-// ---------------------------------------------------------------------------
-// Board and service wiring: app_main's Configs and bring-up steps, by concern.
-// ---------------------------------------------------------------------------
-
-// app_main: the remote UI's hooks into the same latches the ADC task and the GPIO48 callback
-// write (remote_ui.cpp).
+// The remote UI's hooks into the same latches the ADC task and the GPIO48 callback write
+// (remote_ui.cpp).
 static RemoteUiConfig remote_ui_config() {
   return {
       .lvgl_mutex = &lvgl_mutex,
@@ -301,8 +262,7 @@ static RemoteUiConfig remote_ui_config() {
 }
 
 extern "C" void app_main(void) {
-  // First, so the LogScreen has everything printed from here on - including
-  // what the tasks started below print.
+  // First, so the LogScreen has everything printed from here on.
   log_capture_start();
   espp::Logger logger({.tag = "main", .level = espp::Logger::Verbosity::INFO});
   logger.info("Starting the HMI");
@@ -314,8 +274,8 @@ extern "C" void app_main(void) {
   espp::M5StackTab5 &tab5 = espp::M5StackTab5::get();
   logger.info("Running on M5Stack Tab5");
 
-  // The board's bring-up on the BSP (components/board): each step logs to `logger` as it
-  // did here, and a step that returns false has logged why. Lives as long as app_main.
+  // The board's bring-up on the BSP (components/board): a step that returns false has logged
+  // why, and the boot stops (park_main_task). Lives as long as app_main.
   hmi::board::Board board({
       .tab5 = tab5,
       .log = logger,
@@ -326,36 +286,25 @@ extern "C" void app_main(void) {
   auto &i2c = tab5.internal_i2c();
   const std::vector<uint8_t> &found_addresses = board.i2c_devices();
 
-  // The haptic and sound cues: the DRV2605 comes up here (the HAPTIC TEST slot,
-  // the unlock and hold clicks, a refusal); the click's samples load after the
-  // LVGL task starts. Lives as long as app_main, which never returns
-  // (park_main_task); the cues (cues.cpp) reach it once attached.
+  // The haptic and sound cues: the DRV2605 comes up here; the click's samples load after the
+  // LVGL task starts.
   hmi::feedback::Feedback cues({.i2c = i2c, .boot_log = logger, .sound = click_sound_config()});
   cues_attach(cues);
 
-  // DA7280 bring-up test (raw register read) and driver functional test (Da7280
-  // driver class, DRO mode): bench only, CONFIG_HMI_BENCH_DA7280_TEST.
+  // DA7280 bring-up and driver tests: bench only, CONFIG_HMI_BENCH_DA7280_TEST.
   hmi::feedback::run_da7280_bench(logger, i2c, found_addresses);
 
   if (!board.start_io_expanders() || !board.start_display()) {
     park_main_task();
   }
 
-  // Switch LVGL to DIRECT render mode over the panel's own frame buffers. The
-  // BSP already handed those buffers to lv_display_set_buffers, but espp's
-  // Display hardcodes RENDER_MODE_PARTIAL; DIRECT is what lets LVGL treat them
-  // as real frame buffers (tracking dirty areas across both) so a flush is a
-  // vsync-gated flip (see direct_flush_cb) rather than a copy. DIRECT requires
-  // rotation 0, which is what this panel runs at. The self test reports whether it
-  // came up.
-  // the panel's frame buffers (CONFIG_M5STACK_TAB5_DPI_NUM_FBS=2; espp PR A)
+  // LVGL in DIRECT render mode over the panel's own frame buffers (DisplayFlip): a flush is a
+  // vsync-gated flip rather than a copy. The self test reports whether it came up.
   const bool direct_render = ui_app.display_flip().start_direct_render(
       tab5.frame_buffers(), espp::M5StackTab5::frame_buffer_size(), tab5.display_width(),
       tab5.display_height(), logger);
 
-  // run the LVGL refresh timer at 60 fps — the espp lv_conf.h compiles in a
-  // 33 ms (30 fps) default period; the lv_task loop below already calls
-  // lv_task_handler every 8 ms so it can keep up
+  // The LVGL refresh timer at 60 fps (espp's lv_conf.h has 33 ms); lv_task runs every 8 ms.
   lv_display_t *const display = lv_display_get_default();
   lv_timer_set_period(lv_display_get_refr_timer(display), 16);
 
@@ -373,8 +322,7 @@ extern "C" void app_main(void) {
   }
   board.start_sdcard();
 
-  // The system clock and the RTC, kept to the MCB's time (housekeeping). Lives as long
-  // as app_main, which never returns (park_main_task).
+  // The system clock and the RTC, kept to the MCB's time (housekeeping).
   hmi::housekeeping::SystemClock system_clock({.valid = &clock_valid, .max_drift_s = 2});
 
   if (!board.start_rtc(system_clock) || !board.start_battery() || !board.start_audio()) {
@@ -383,9 +331,7 @@ extern "C" void app_main(void) {
   board.start_side_button();
 
   logger.info("Setting up LVGL UI...");
-  // Load the SquareLine Studio UI. This creates every screen and makes
-  // ui_BootScreen the active one; the default screen LVGL started on stays
-  // behind it, empty.
+  // Every SquareLine screen; ui_BootScreen becomes the active one.
   logger.info("Loading SquareLine UI...");
   hmi::ui::build_screens(&boot_logo, kFpsInstrument);
 
@@ -393,28 +339,21 @@ extern "C" void app_main(void) {
   // Joystick screen (UiApp::build lists the order).
   ui_app.build();
 
-  // GPIO48, pulled up and shorted to ground on press (board-wide convention),
-  // so active LOW. Constructed after the subjects are initialized, because the
-  // interrupt task starts here and its callback writes them. The internal
-  // pull-up is redundant against the external one but harmless.
+  // The GPIO48 stick button. Constructed after the subjects are initialized, because the
+  // interrupt task starts here and its callback writes them.
   logger.info("Initializing GPIO48 test button...");
   static espp::Button gpio48_button(gpio48_button_config(gpio48_button_callback));
 
-  // Joystick as an LVGL keypad input device, moving the cursor through each
-  // screen's focus group. The read function runs on the LVGL task and drains the
-  // latch the ADC task fills, so one flick of the stick = one PRESSED cycle =
-  // one LV_EVENT_KEY. Touch keeps working; indevs coexist.
+  // The stick as an LVGL keypad, moving the cursor through each screen's focus group: one
+  // flick = one LV_EVENT_KEY. Touch keeps working; indevs coexist.
   logger.info("Adding joystick keypad input device...");
   static espp::KeypadInput joystick_keypad({.read = joystick_keypad_read});
   // The joystick's input, the holds, the remaining screens and the build's finish
   // (UiApp::build_input lists the order).
   ui_app.build_input(joystick_keypad.get_input_device());
 
-  // The self test's checks and their limits are in selftest_spec.hpp;
-  // selftest.cpp measures them. Started from the "Self test" Skunk Works slot,
-  // or by a PC over RTPS (scripts/rtps_selftest.py) — which is why this comes
-  // before rtps_comms_start: selftest_init registers the self-test RTPS
-  // handlers.
+  // The self test (selftest_spec.hpp has its checks), from the Skunk Works slot or a PC over
+  // RTPS: before rtps_comms_start, because selftest_init registers its RTPS handlers.
   SelfTestPlatform selftest_board = selftest_platform(&cues, found_addresses, direct_render);
   selftest_board.lvgl_mutex = &lvgl_mutex;
   selftest_init(selftest_board);
@@ -429,8 +368,6 @@ extern "C" void app_main(void) {
     ui_app.display_flip().wrap_touch(touchpad->get_touchpad_input_device());
   }
 
-  // The UI island: lv_task_handler every 8ms -- the refresh timer runs at 16ms
-  // (60 fps), polling at twice that rate keeps its firing jitter well under a frame.
   logger.info("Starting LVGL task...");
   // The POST's rest windows (hazard-c3-spec.md §2.4): the ADC task writes, the POST runner on
   // the UI task reads (bound before lv_task starts). The ADC task's own state holds the write
@@ -452,6 +389,7 @@ extern "C" void app_main(void) {
     ui_app.post().attach(hmi::fw::reader(rest_windows), i2c_found, post_logger);
   }
 
+  // The UI island ("lv_task", task_configs.cpp).
   hmi::ui::UiIsland ui_island(ui_island_config(lvgl_cycle, kFpsInstrument ? &fps_meter : nullptr));
   if (!ui_island.start()) {
     logger.error("Failed to start LVGL task!");
@@ -478,10 +416,8 @@ extern "C" void app_main(void) {
     logger.error("Failed to start the data display task!");
   }
 
-  // guards the joystick range-mapping math (center/range deadbands, circular
-  // clamp, and that twist stays independent of the X/Y gimbal). A regression
-  // aborts the boot loudly, as the espp fork's joystick_selftest() asserts did
-  // in every image (J2, components/stick; no image sets NDEBUG).
+  // The joystick range-mapping math (deadbands, circular clamp, twist independent of X/Y): a
+  // regression aborts the boot loudly (J2, components/stick).
   if (!hmi::stick::mapping_selftest()) {
     logger.error("Stick mapping self test FAILED");
     abort();
@@ -498,19 +434,17 @@ extern "C" void app_main(void) {
   // the safe direction: no XYTwist, no motion. The boot goes on so the failure is seen: this
   // line, and post_facts' stick_task_running().
   const JoystickCal joystick_cal = stick_calibration_at_boot(adc_state);
-  // The stick pipeline (components/stick): the joystick mapping on this calibration, the key
-  // trigger and the gate, owned by the island's task. A StickSlot is the StickPipeline itself, or
-  // with CONFIG_HMI_BENCH_STICK_INJECT the bench stick injection in front of its reads.
+  // The stick pipeline (components/stick) on this calibration, owned by the island's task; with
+  // CONFIG_HMI_BENCH_STICK_INJECT the bench stick injection sits in front of its reads.
   if (!stick_island.start(stick_pipeline_config(joystick_cal), adc_state)) {
     logger.error("Failed to start the Read ADC task: no stick output (XYTwist) until reset!");
   }
 
-  // bring up W5500 Ethernet + RTPS last so a missing cable / module can't
-  // delay the HMI; on failure the UI keeps running without comms
+  // The network and RTPS last, so a missing cable or module can't delay the HMI; on failure
+  // the UI keeps running without comms.
   logger.info("Starting RTPS comms...");
-  // remote LCD brightness (kHmiBrightness); floor at 5% so a remote command
-  // can't turn the screen fully off. brightness_set takes the LVGL lock and
-  // sets the brightness subject, so it is safe from the RTPS receive task.
+  // The remote LCD brightness (kHmiBrightness), floored at 5 % by brightness_set, which takes
+  // the LVGL lock, so it is safe from the RTPS receive task.
   rtps_comms_on_brightness(
       [](float percent) { brightness_set(static_cast<int>(std::lround(percent))); });
   // RTPS handlers run on the RTPS receive task: subjects only (UiApp's RtpsUiBridge), under
@@ -535,16 +469,14 @@ extern "C" void app_main(void) {
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
     ui_app.topbar().set_link(link_text(rtps_comms_net_link()));
   }
-  // The firmware's SHA-256 for the About screen: ~4 MB of flash read on a
-  // low-priority thread. Only once rtps_comms_start has set the W5500 up: run
-  // across that, it left the chip with no TX buffer on most boots (no
-  // link, or no DHCP lease).
+  // The firmware's SHA-256 for the About screen (~4 MB of flash, a low-priority thread). Only
+  // once rtps_comms_start has set the W5500 up: run across it, it left the chip with no TX
+  // buffer on most boots.
   fw_info_start();
 
-  // The remote UI debug channel (CONFIG_HMI_REMOTE_UI, off by default). Last,
-  // because it drives everything above it: input goes into the same latches the
-  // ADC task and the GPIO48 callback write, so what a script exercises is the
-  // real handling and not a parallel path.
+  // The remote UI debug channel (CONFIG_HMI_REMOTE_UI, off by default). Last, because it
+  // drives everything above it, through the same latches the ADC task and the GPIO48 callback
+  // write.
   if constexpr (BENCH_STICK_INJECT) {
     remote_ui_attach_bench_verbs(bench_verb_hooks()); // the one call, before the server starts
   }
