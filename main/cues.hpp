@@ -18,8 +18,8 @@
 
 /// @brief Points the cues at app_main's Feedback. app_main, once, before any task starts; the
 /// Feedback lives as long as app_main, which never returns.
-/// @param feedback The DRV2605 haptics and the click sound.
-void cues_attach(hmi::feedback::Feedback &feedback);
+/// @param cues The DRV2605 haptics and the click sound.
+void cues_attach(hmi::feedback::Feedback &cues);
 
 /// @brief A DRV2605 waveform: the HAPTIC TEST settings row's buzz, the unlock and hold clicks,
 /// a refusal's double click.
