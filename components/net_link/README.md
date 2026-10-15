@@ -12,7 +12,7 @@ on the NET task). Safety-relevant: `XYTwist`, `DriveCommand` and `SeatCommand` l
 
 | Header | What |
 | --- | --- |
-| `rtps_comms.hpp` | `rtps_comms_start`; the link (`NetLink`, `RtpsLinkState`, `RtpsLinkFlags`, Wi-Fi scan and join); the handlers (`rtps_comms_on_*`, registered before start); the publishers (`rtps_comms_publish_*`); diagnostics and MibStatus statistics |
+| `rtps_comms.hpp` | `rtps_comms_start`; the link (`NetLink`, `RtpsLinkState`, `RtpsLinkFlags`, Wi-Fi scan and join); the handlers (`rtps_comms_on_*`, registered before start); the publishers (`rtps_comms_publish_*`); diagnostics and MibStatus statistics; `rtps_comms_log_link_change` (each change of the link state to the log, `rtps_link` tag; `src/link_log.cpp`, from main.cpp's `log_link_change`) |
 
 The header keeps its name and the functions their names, so the callers (`main.cpp`,
 `selftest.cpp`, `about_ui.cpp`, `internet_ui.cpp`) only gained the component dependency. Log
@@ -35,5 +35,6 @@ lines keep the `rtps_comms` tag (the bench's boot check reads it).
 ## Ratchet
 
 Legacy debt moved with it under `tools/l0/ratchet.py transfer` grants (its mutexes, the
-namespace-scope state, the start-up sleeps, the function-local statics). Its four functions over
+namespace-scope state, the start-up sleeps, the function-local statics; `link_log.cpp`'s two
+function-local statics from `main/main.cpp`). Its four functions over
 60 lines keep their `fn_over_60` baseline entry (4), moved with the file.

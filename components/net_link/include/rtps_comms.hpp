@@ -67,6 +67,12 @@ enum class RtpsLinkState {
 RtpsLinkState rtps_comms_link_state();                          ///< any task
 const char *rtps_comms_link_state_name(RtpsLinkState state);    ///< "NO_PEER"
 std::string rtps_comms_link_state_meaning(RtpsLinkState state); ///< the likely cause
+/// @brief Logs a change of the link state under the `rtps_link` tag, once per change:
+/// warnings on the way down, info on the way up, with the likely cause. The TopBar shows where
+/// the link is now; the log (and so the LogScreen) keeps when it changed. The UI task only (the
+/// UI poll, through hmi_ui's LinkPort `seen`): it keeps the last state seen.
+/// @param state The link state just polled; nothing is logged if it has not changed.
+void rtps_comms_log_link_change(RtpsLinkState state);
 
 // Handlers: register before rtps_comms_start(). They run on the RTPS receive task,
 // so they reach the UI only through subjects, under lvgl_mutex.

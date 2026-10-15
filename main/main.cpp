@@ -355,28 +355,6 @@ struct AdcStickIo {
   }
 };
 
-// Every change of the link state goes to the serial log, and so to the
-// LogScreen: the TopBar shows where the link is now, the log keeps when it
-// changed. Warnings on the way down, info on the way up.
-static void log_link_change(RtpsLinkState state) {
-  static espp::Logger link_logger({.tag = "rtps_link", .level = espp::Logger::Verbosity::INFO});
-  static std::optional<RtpsLinkState> last;
-  if (last == state) {
-    return;
-  }
-  const std::string meaning = rtps_comms_link_state_meaning(state);
-  if (!last) {
-    link_logger.info("{} ({})", rtps_comms_link_state_name(state), meaning);
-  } else if (state > *last) {
-    link_logger.info("{} -> {} ({})", rtps_comms_link_state_name(*last),
-                     rtps_comms_link_state_name(state), meaning);
-  } else {
-    link_logger.warn("{} -> {} ({})", rtps_comms_link_state_name(*last),
-                     rtps_comms_link_state_name(state), meaning);
-  }
-  last = state;
-}
-
 // The TopBar's link label: what RTPS runs over. The design's "BT · WI-FI" is only
 // a placeholder; it is set from the setting before rtps_comms_start, then from the
 // link it brought up (WiFi with no network known runs Ethernet).
@@ -423,7 +401,10 @@ static bool bench_verb_seat_publish(rammp::SeatAxis axis, float target);
 
 static constexpr hmi::ui::LinkPort kLinkPort{
     .state = [] { return static_cast<hmi::ui::LinkState>(rtps_comms_link_state()); },
-    .seen = [](hmi::ui::LinkState state) { log_link_change(static_cast<RtpsLinkState>(state)); },
+    .seen =
+        [](hmi::ui::LinkState state) {
+          rtps_comms_log_link_change(static_cast<RtpsLinkState>(state));
+        },
     .wifi = [] { return rtps_comms_net_link() == NetLink::WIFI; },
     .setting_text =
         [] { return link_text(static_cast<NetLink>(settings_get(SETTINGS_PARAM_NETWORK))); },

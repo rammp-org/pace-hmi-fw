@@ -303,8 +303,7 @@
         "guard variable for app_main::{lambda(std::mutex&, std::condition_variable&)#2}::operator()(std::mutex&, std::condition_variable&) const::imu",
         "guard variable for app_main::{lambda(std::mutex&, std::condition_variable&)#2}::operator()(std::mutex&, std::condition_variable&) const::t0",
         "guard variable for app_main::{lambda(std::mutex&, std::condition_variable&)#2}::operator()(std::mutex&, std::condition_variable&) const::tab5",
-        "guard variable for clock_note_mcb_time(MIB::MibStatus const&)::clock_logger",
-        "guard variable for log_link_change(RtpsLinkState)::link_logger"
+        "guard variable for clock_note_mcb_time(MIB::MibStatus const&)::clock_logger"
       ],
       "calls": [
         "__cxa_atexit",
@@ -360,6 +359,18 @@
         "pthread_mutex_init",
         "std::vector<hmi::ota::Release, std::allocator<hmi::ota::Release> >::~vector()"
       ],
+      "shared": [
+        "guard variable for fmt::v12::format_facet<std::locale>::id"
+      ]
+    },
+    "net_link/src/link_log.cpp.obj": {
+      "init_functions": 1,
+      "objects": [],
+      "reads_external": [],
+      "lazy_statics": [
+        "guard variable for rtps_comms_log_link_change(RtpsLinkState)::link_logger"
+      ],
+      "calls": [],
       "shared": [
         "guard variable for fmt::v12::format_facet<std::locale>::id"
       ]

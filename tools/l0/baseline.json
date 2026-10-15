@@ -56,7 +56,7 @@
       "main/main.cpp": 1
     },
     "static_state": {
-      "main/main.cpp": 5
+      "main/main.cpp": 3
     },
     "std_thread": {
       "main/internet_ui.cpp": 1,
@@ -215,6 +215,14 @@
           "8c2f8f2da1b41cdc3ecc8ac14070782d1a475414",
           "ac84850f4275f13da866a498f530f8aac690e33a",
           "c5afb51486a48b9f12ddac79a1137f8f1b857c61"
+        ]
+      }
+    },
+    "components/net_link/src/link_log.cpp": {
+      "static_state": {
+        "main/main.cpp@4babbd13a8d6b44d175fcfe2f4a8da641c876581": [
+          "0258e3093e6eb3bf81abf82e7f3045f518f8889d",
+          "57b073601bf43600c44dc918656d44f8c4c9d84a"
         ]
       }
     },
