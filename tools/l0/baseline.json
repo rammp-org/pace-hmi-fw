@@ -56,7 +56,7 @@
       "main/main.cpp": 1
     },
     "static_state": {
-      "main/main.cpp": 3
+      "main/main.cpp": 2
     },
     "std_thread": {
       "main/internet_ui.cpp": 1,
@@ -490,6 +490,13 @@
       "mutable_globals": {
         "main/main.cpp@76e413794eac32576e9b3d06d27f6105559dc9a3": [
           "42c295381bcd2fa5fa43bc0e28d4da9881ab9106"
+        ]
+      }
+    },
+    "main/ui_ports.cpp": {
+      "static_state": {
+        "main/main.cpp@7a08f2fb3c10e485560a43d2a96d90fa04621b91": [
+          "3f42b63a84dd31ef7fe73eb4322a526131abbd77"
         ]
       }
     }

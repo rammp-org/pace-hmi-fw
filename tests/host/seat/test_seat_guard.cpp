@@ -136,7 +136,7 @@ TEST_CASE("SEAT-011 seat_raw is called only in components/seat, the LinkPort's p
     if (count(s.code, impl_name) != 0) {
       TEST_ASSERT_TRUE_MESSAGE(s.rel == "components/net_link/src/rtps_comms.cpp" ||
                                    s.rel == "components/net_link/include/rtps_comms.hpp" ||
-                                   s.rel == "main/main.cpp" || s.rel == "main/bench_hooks.cpp",
+                                   s.rel == "main/ui_ports.hpp" || s.rel == "main/bench_hooks.cpp",
                                ("rtps_comms_publish_seat named in " + s.rel).c_str());
     }
   }

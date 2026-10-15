@@ -289,7 +289,6 @@
       ],
       "reads_external": [],
       "lazy_statics": [
-        "guard variable for action_restart_hmi()::action_logger",
         "guard variable for app_main::f",
         "guard variable for app_main::gpio48_button",
         "guard variable for app_main::joystick_keypad",
@@ -342,6 +341,19 @@
         "std::unique_ptr<(anonymous namespace)::PingLog, std::default_delete<(anonymous namespace)::PingLog> >::~unique_ptr()"
       ],
       "shared": [
+        "guard variable for fmt::v12::format_facet<std::locale>::id"
+      ]
+    },
+    "main/ui_ports.cpp.obj": {
+      "init_functions": 1,
+      "objects": [],
+      "reads_external": [],
+      "lazy_statics": [
+        "guard variable for action_restart_hmi()::action_logger"
+      ],
+      "calls": [],
+      "shared": [
+        "guard variable for espp::M5StackTab5::get()::instance",
         "guard variable for fmt::v12::format_facet<std::locale>::id"
       ]
     },

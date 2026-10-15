@@ -77,6 +77,7 @@
 #include "post_facts/post_facts.hpp"
 #include "stick/mapping_selftest.hpp"
 #include "stick_io.hpp"
+#include "ui_ports.hpp"
 
 using namespace std::chrono_literals;
 
@@ -106,16 +107,6 @@ static constexpr bool kFpsStress = CONFIG_HMI_DEBUG_FPS_STRESS_AS_INT != 0;
 // The one meter. Attached and reported only when kFpsInstrument.
 static constinit hmi::ui::FpsMeter fps_meter;
 
-// rtps_comms' RtpsLinkState is what the UI's link subject carries, as hmi::ui::LinkState.
-static constexpr bool same_link_state(RtpsLinkState a, hmi::ui::LinkState b) {
-  return static_cast<int32_t>(a) == static_cast<int32_t>(b);
-}
-static_assert(same_link_state(RtpsLinkState::NET_FAILED, hmi::ui::LinkState::NET_FAILED));
-static_assert(same_link_state(RtpsLinkState::LINK_DOWN, hmi::ui::LinkState::LINK_DOWN));
-static_assert(same_link_state(RtpsLinkState::NO_IP, hmi::ui::LinkState::NO_IP));
-static_assert(same_link_state(RtpsLinkState::NO_PEER, hmi::ui::LinkState::NO_PEER));
-static_assert(same_link_state(RtpsLinkState::CONNECTED, hmi::ui::LinkState::CONNECTED));
-
 // How the click sound reaches the speaker and the LVGL task, for app_main's Feedback.
 static hmi::feedback::ClickSound::Config click_sound_config() {
   return {
@@ -137,22 +128,6 @@ static hmi::feedback::ClickSound::Config click_sound_config() {
   };
 }
 
-// The TopBar's link label: what RTPS runs over. The design's "BT · WI-FI" is only
-// a placeholder; it is set from the setting before rtps_comms_start, then from the
-// link it brought up (WiFi with no network known runs Ethernet).
-// NetLink -> hmi_format's Link (REQ-FMT-07): anything but WiFi reads Ethernet.
-static const char *link_text(NetLink link) {
-  return hmi::format::link_text(link == NetLink::WIFI ? hmi::format::Link::WIFI
-                                                      : hmi::format::Link::ETHERNET);
-}
-
-// The Restart HMI tile.
-static void action_restart_hmi() {
-  static espp::Logger action_logger({.tag = "actions", .level = espp::Logger::Verbosity::INFO});
-  action_logger.warn("restart requested from the actions screen");
-  esp_restart();
-}
-
 // The system clock's validity: set by hmi::housekeeping::SystemClock (app_main's
 // system_clock), read by the TopBar. The time sync itself is the housekeeping
 // component's.
@@ -162,107 +137,6 @@ static std::atomic<bool> clock_valid{false};
 static espp::Logger logger_overdraw({.tag = "overdraw", .level = espp::Logger::Verbosity::INFO});
 static espp::Logger logger_nav({.tag = "nav", .level = espp::Logger::Verbosity::INFO});
 static espp::Logger logger_flip({.tag = "flip", .level = espp::Logger::Verbosity::INFO});
-
-// ---------------------------------------------------------------------------
-// The UI island (components/hmi_ui UiApp) and the ports it reaches the rest of
-// the firmware through (hmi_ui/app_ports.hpp): each port's functions delegate to
-// what main owns. Declared here, defined after the one UiApp: the drive inputs
-// (the DriveAdapter is made over the UiApp's DriveUi) and the screens whose
-// adapters stay in main (they hand their groups to the UiApp's NavView).
-// ---------------------------------------------------------------------------
-static bool drive_session_input(hmi::drive_session::Input input);
-static void drive_wait_poll();
-static void drive_unlock_hold_done();
-static void drive_exit_hold_done();
-static void drive_refresh_notice(hmi::stick::HoldReason hold);
-static void log_screen_init();
-static void internet_screen_init();
-static void update_screen_init();
-static void calibration_screen_init();
-
-static constexpr hmi::ui::LinkPort kLinkPort{
-    .state = [] { return static_cast<hmi::ui::LinkState>(rtps_comms_link_state()); },
-    .seen =
-        [](hmi::ui::LinkState state) {
-          rtps_comms_log_link_change(static_cast<RtpsLinkState>(state));
-        },
-    .wifi = [] { return rtps_comms_net_link() == NetLink::WIFI; },
-    .setting_text =
-        [] { return link_text(static_cast<NetLink>(settings_get(SETTINGS_PARAM_NETWORK))); },
-    .diag_stats =
-        [](int64_t *last_us, int32_t *rate_tenths_hz) {
-          const RtpsDiagStats stats = rtps_comms_diag_stats();
-          *last_us = stats.last_us;
-          *rate_tenths_hz = stats.rate_tenths_hz;
-        },
-    .publish_drive = rtps_comms_publish_drive,
-    .drive_writer_matched = rtps_comms_drive_writer_matched,
-    // SEATFAIL (REQ-RUI-09) in a stick-injection build; the release ELF has none of it.
-    .publish_seat = BENCH_STICK_INJECT ? bench_verb_seat_publish : rtps_comms_publish_seat,
-};
-
-// The drive session's inputs: the one DriveAdapter below (CS-SAF-08: these are its only
-// targets).
-static constexpr hmi::ui::DriveInputs kDriveInputs{
-    .input = drive_session_input,
-    .tick = drive_wait_poll,
-    .unlock_hold_done = drive_unlock_hold_done,
-    .exit_hold_done = drive_exit_hold_done,
-    .refresh_notice = drive_refresh_notice,
-};
-
-static constexpr hmi::ui::SelfTestPort kSelfTestPort{
-    .overlay_visible = selftest_ui_visible,
-    .dismiss = selftest_ui_dismiss,
-    .run = [] { (void)selftest_request(SelfTestTrigger::LOCAL, 0); },
-};
-
-static constexpr hmi::ui::BoardPort kBoardPort{
-    .backlight = hmi::board::backlight,
-    .present = hmi::board::present,
-    .restart = action_restart_hmi,
-};
-
-static constexpr hmi::ui::MainScreens kMainScreens{
-    .log_init = log_screen_init,
-    .log_group = log_view_group,
-    .log_on_load = log_view_on_load,
-    .internet_init = internet_screen_init,
-    .internet_on_load = internet_ui_on_load,
-    .about_init = about_ui_init,
-    .about_on_load = about_ui_on_load,
-    .update_init = update_screen_init,
-    .update_on_load = update_ui_on_load,
-    .calibration_init = calibration_screen_init,
-    .calibration_toggle = joystick_cal_toggle,
-    .calibrating = joystick_cal_running,
-    .calibration_note = joystick_cal_set_note,
-};
-
-// The quick POST's facts: ESP-IDF's from post_facts, the calibration's from joystick_cal.
-static hmi::post::Calibration post_calibration() {
-  const JoystickCal cal = joystick_cal_current();
-  const auto axis = [](const JoystickAxisCal &a) {
-    return hmi::post::AxisCal{.min_mv = static_cast<int32_t>(std::lround(a.min_mv)),
-                              .centre_mv = static_cast<int32_t>(std::lround(a.center_mv)),
-                              .max_mv = static_cast<int32_t>(std::lround(a.max_mv))};
-  };
-  return {.saved = joystick_cal_saved(),
-          .x = axis(cal[JOY_HORIZONTAL]),
-          .y = axis(cal[JOY_VERTICAL]),
-          .twist = axis(cal[JOY_TWIST])};
-}
-
-static constexpr hmi::ui::PostPort kPostPort{
-    .now_ms = hmi::post_facts::now_ms,
-    .reset_reason = hmi::post_facts::reset_reason,
-    .image = hmi::post_facts::image,
-    .calibration = post_calibration,
-    .memory = hmi::post_facts::memory,
-    .stacks = hmi::post_facts::stacks,
-    .calibration_saved_now = joystick_cal_saved,
-    .stick_task_running = hmi::post_facts::stick_task_running,
-};
 
 // The one UiApp: every view the UI task draws, wired (constinit: no global constructor).
 constinit hmi::ui::UiApp ui_app{{
@@ -296,31 +170,11 @@ static_assert(hmi::drive_adapter::DrivePort<hmi::ui::DrivePort<hmi::ui::DriveUi>
 // kDriveAnswer and kDriveWait (pinned to the RTPS spec in hmi_ui's ui_app.cpp).
 MainDriveAdapter drive_adapter{{.view = drive_port}};
 
-static bool drive_session_input(hmi::drive_session::Input input) {
-  return drive_adapter.input(input);
-}
-static void drive_wait_poll() { drive_adapter.tick(); }
-static void drive_unlock_hold_done() { drive_adapter.unlock_hold_done(); }
-// Ask only. The session's relock (TICK_FOLLOW) closes the screen once the MIB actually stops
-// driving.
-static void drive_exit_hold_done() { drive_adapter.exit_hold_done(); }
-// The hold poll: the stick's hold reason between two ticks, for the Drive notice (C1 §2.7).
-static void drive_refresh_notice(hmi::stick::HoldReason hold) {
-  drive_adapter.refresh_notice(hold);
-}
-
 // How long an updated image runs before it keeps itself (github_ota_boot_confirm).
 static constexpr uint32_t kOtaConfirmAfterMs = 30'000;
 
-// The Log screen: TextArea1 shows what log_capture has kept. Down at the newest line leaves the
-// log for the burger key.
-static void log_screen_init() {
-  log_view_init();
-  log_view_set_escape([] { ui_app.nav().to_key(); });
-}
-
 // InternetScreen: Ethernet or WiFi, the network list and the password page.
-static void internet_screen_init() {
+void internet_screen_init() {
   internet_ui_init({
       .lvgl_mutex = &lvgl_mutex,
       .connection = setting_subjects.value(SETTINGS_PARAM_NETWORK),
@@ -334,7 +188,7 @@ static void internet_screen_init() {
 
 // UpdateScreen: the GitHub releases, one release, and an install running; then the OTA
 // image's confirm.
-static void update_screen_init() {
+void update_screen_init() {
   update_ui_init({
       .lvgl_mutex = &lvgl_mutex,
       .use_group = [](lv_group_t *group) { ui_app.nav().use_group(group, ui_UpdateScreen); },
@@ -355,19 +209,6 @@ static void update_screen_init() {
   lv_timer_set_repeat_count(
       lv_timer_create([](lv_timer_t *) { github_ota_boot_confirm(); }, kOtaConfirmAfterMs, nullptr),
       1);
-}
-
-// The Joystick screen's calibration (joystick_cal): its prompts blink on the RTPS indicator's
-// phase, and each captured step clicks.
-static void calibration_screen_init() {
-  joystick_cal_init_ui({.screen = ui_JoystickScreen,
-                        .button_label = ui_CalibrateButtonLabel,
-                        .instructions = ui_JoystickHint,
-                        .blink = &rtps_blink_subject,
-                        .feedback = [] {
-                          haptic_play(espp::Drv2605::Waveform::STRONG_CLICK, 1);
-                          play_click(espp::M5StackTab5::get());
-                        }});
 }
 
 // AdcStickIo's bars (stick_io.hpp), on the stick task: the one place it touches LVGL.
