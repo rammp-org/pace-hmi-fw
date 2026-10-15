@@ -17,8 +17,9 @@
 //     (REQ-STK-17), and the keys are silent while the monitor says so (keys_silent(),
 //     REQ-STK-20); the replays expect that on the invalid rows (E1).
 //
-// No LVGL, no ESP-IDF, no allocation after construction. The mapping engine is
-// components/joystick (espp::Joystick), as today.
+// No LVGL, no ESP-IDF, no allocation after construction. The mapping engine is espp's 2-axis
+// espp::Joystick for the X/Y gimbal plus the twist's own espp::FloatRangeMapper (J1: what the
+// espp fork's third axis did, moved here).
 
 #include <algorithm>
 #include <cmath>
@@ -193,6 +194,7 @@ private:
 
   Config config_;
   espp::Joystick joystick_;
+  espp::FloatRangeMapper twist_mapper_; // the twist, apart from the X/Y gimbal (J1)
   bool key_engaged_ = false;
 };
 

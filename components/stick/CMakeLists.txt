@@ -2,6 +2,7 @@
 # no ESP-IDF drivers. Host tests: components/stick/test (tests/manifest.d/stick.yaml).
 idf_component_register(
   SRCS "src/stick_pipeline.cpp"
+       "src/mapping_selftest.cpp"
   INCLUDE_DIRS "include"
   REQUIRES fw_core
            joystick)

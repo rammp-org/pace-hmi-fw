@@ -123,28 +123,31 @@ StickPipeline::Config pipeline_config(const CalibrationMv &cal, const KeyCodes &
 // main.cpp:1441-1447 (the `static espp::Joystick stick`)
 StickPipeline::StickPipeline(const Config &config)
     : config_(config)
-    , joystick_(
-          {.x_calibration = horizontal_config(config.calibration.horizontal),
-           .y_calibration = vertical_config(config.calibration.vertical),
-           .z_calibration = twist_config(config.calibration.twist, config.twist_center_deadband_mv,
-                                         config.twist_range_deadband_mv),
-           .type = espp::Joystick::Type::CIRCULAR,
-           .center_deadzone_radius = config.center_deadzone_radius,
-           .range_deadzone = config.range_deadzone,
-           .log_level = espp::Logger::Verbosity::WARN}) {}
+    , joystick_({.x_calibration = horizontal_config(config.calibration.horizontal),
+                 .y_calibration = vertical_config(config.calibration.vertical),
+                 .type = espp::Joystick::Type::CIRCULAR,
+                 .center_deadzone_radius = config.center_deadzone_radius,
+                 .range_deadzone = config.range_deadzone,
+                 .log_level = espp::Logger::Verbosity::WARN}) {
+  // the fork's z_calibration (J1): the twist is mapped on its own, apart from the X/Y gimbal
+  twist_mapper_.configure(twist_config(config.calibration.twist, config.twist_center_deadband_mv,
+                                       config.twist_range_deadband_mv));
+}
 
 // frag_stick_config.inc:29-33 (stick_apply_cal)
 void StickPipeline::apply_calibration(const CalibrationMv &cal) {
   joystick_.set_calibration(horizontal_config(cal.horizontal), vertical_config(cal.vertical),
                             config_.center_deadzone_radius, config_.range_deadzone);
-  joystick_.set_z_calibration(
+  twist_mapper_.configure(
       twist_config(cal.twist, config_.twist_center_deadband_mv, config_.twist_range_deadband_mv));
 }
 
-// main.cpp:1500 (stick.update) and the reads of stick.x(), stick.y(), stick.z() after it
+// main.cpp:1500 (stick.update) and the reads of stick.x(), stick.y(), stick.z() after it. The
+// fork's update(x, y, z) mapped X/Y first and then z through its own mapper, untouched by the
+// X/Y result (J1): the same two steps, in the same order.
 Position StickPipeline::map(float horizontal_mv, float vertical_mv, float twist_mv) {
-  joystick_.update(horizontal_mv, vertical_mv, twist_mv);
-  return {.x = joystick_.x(), .y = joystick_.y(), .twist = joystick_.z()};
+  joystick_.update(horizontal_mv, vertical_mv);
+  return {.x = joystick_.x(), .y = joystick_.y(), .twist = twist_mapper_.map(twist_mv)};
 }
 
 } // namespace hmi::stick

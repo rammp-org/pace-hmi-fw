@@ -21,7 +21,9 @@
 //   3. calls out (joystick_cal_note_raw, lv_subject_set_int, rtps_comms_publish_adc) are fakes
 //      that record what they were given;
 //   4. the function-local `static bool engaged` and the app_main-local `static espp::Joystick
-//      stick` are harness state, so each scenario can start from power-on.
+//      stick` are harness state, so each scenario can start from power-on;
+//   5. `espp::Joystick` reads `espp_fork::Joystick` (legacy_joystick.hpp): the espp fork's 3-axis
+//      Joystick, rebuilt on espp's 2-axis one once the fork was dropped (J1). Type names only.
 // Keep it that way: this file is the "before" the extraction is measured against.
 
 #include "legacy_adc_cycle.hpp"
@@ -36,7 +38,7 @@
 #include <optional>
 #include <utility>
 
-#include "joystick.hpp"
+#include "legacy_joystick.hpp"
 
 namespace stick_test::legacy {
 namespace {
@@ -106,7 +108,7 @@ static espp::FloatRangeMapper::Config stick_twist_config(const JoystickCal &cal)
           .range_deadband = kTwistRangeDeadbandMv};
 }
 
-static void stick_apply_cal(espp::Joystick &stick, const JoystickCal &cal) {
+static void stick_apply_cal(espp_fork::Joystick &stick, const JoystickCal &cal) {
   stick.set_calibration(stick_horizontal_config(cal), stick_vertical_config(cal),
                         kStickCenterDeadzoneRadius, kStickRangeDeadzone);
   stick.set_z_calibration(stick_twist_config(cal));
@@ -134,7 +136,7 @@ std::optional<JoystickCal> cal_of(std::uint8_t id) {
 }
 
 // --- harness state: the statics of the original ------------------------------------------------
-std::optional<espp::Joystick> g_stick;
+std::optional<espp_fork::Joystick> g_stick;
 bool g_engaged = false; // was `static bool engaged = false;` in the key block
 
 std::atomic<bool> stick_swap{false};
@@ -197,7 +199,7 @@ bool adc_cycle_body(std::optional<float> vert_mv, std::optional<float> horiz_mv,
                     std::optional<float> twist_mv) {
   bool adc_published = false;
   if (vert_mv && horiz_mv && twist_mv) {
-    espp::Joystick &stick = *g_stick; // was app_main's `static espp::Joystick stick`
+    espp_fork::Joystick &stick = *g_stick; // was app_main's `static espp::Joystick stick`
     // A calibration run just finished: switch to it here, between two
     // samples, on the task that owns the stick.
     if (auto cal = joystick_cal_take_new()) {
@@ -292,13 +294,14 @@ void reset(CalId cal) {
   // main.cpp:1435-1447: the joystick is built on the calibration joystick_cal_load returned
   const JoystickCal joystick_cal = *cal_of(cal);
   g_stick.reset();
-  g_stick.emplace(espp::Joystick::Config{.x_calibration = stick_horizontal_config(joystick_cal),
-                                         .y_calibration = stick_vertical_config(joystick_cal),
-                                         .z_calibration = stick_twist_config(joystick_cal),
-                                         .type = espp::Joystick::Type::CIRCULAR,
-                                         .center_deadzone_radius = kStickCenterDeadzoneRadius,
-                                         .range_deadzone = kStickRangeDeadzone,
-                                         .log_level = espp::Logger::Verbosity::WARN});
+  g_stick.emplace(
+      espp_fork::Joystick::Config{.x_calibration = stick_horizontal_config(joystick_cal),
+                                  .y_calibration = stick_vertical_config(joystick_cal),
+                                  .z_calibration = stick_twist_config(joystick_cal),
+                                  .type = espp_fork::Joystick::Type::CIRCULAR,
+                                  .center_deadzone_radius = kStickCenterDeadzoneRadius,
+                                  .range_deadzone = kStickRangeDeadzone,
+                                  .log_level = espp::Logger::Verbosity::WARN});
   g_engaged = false;
   g_new_cal.reset();
   joy_key.store(0);

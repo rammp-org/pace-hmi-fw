@@ -29,7 +29,6 @@
 #include "ui.h"
 
 #include "button.hpp"
-#include "joystick.hpp"
 #include "keypad_input.hpp"
 
 #include "about_ui.hpp"
@@ -175,6 +174,7 @@ static void refusal_feedback();
 // stick injection in front of it.
 #include "control/stick_island.hpp"
 #include "post/rest_window.hpp"
+#include "stick/mapping_selftest.hpp"
 #include "stick/monitor_cycle.hpp"
 #include "stick/output_permit.hpp"
 #include "stick_inject.hpp"
@@ -1313,9 +1313,13 @@ extern "C" void app_main(void) {
   }
 
   // guards the joystick range-mapping math (center/range deadbands, circular
-  // clamp, and that twist stays independent of the X/Y gimbal). Asserts, so it
-  // aborts loudly on a regression; compiles to nothing under NDEBUG.
-  espp::joystick_selftest();
+  // clamp, and that twist stays independent of the X/Y gimbal). A regression
+  // aborts the boot loudly, as the espp fork's joystick_selftest() asserts did
+  // in every image (J2, components/stick; no image sets NDEBUG).
+  if (!hmi::stick::mapping_selftest()) {
+    logger.error("Stick mapping self test FAILED");
+    abort();
+  }
 
   logger.info("Starting continuous adc...");
 

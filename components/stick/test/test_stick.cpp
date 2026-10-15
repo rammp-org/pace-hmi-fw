@@ -31,6 +31,7 @@
 #include "legacy_adc_cycle.hpp"
 #include "stick/bench_inject.hpp"
 #include "stick/button_edges.hpp"
+#include "stick/mapping_selftest.hpp"
 #include "stick/output_permit.hpp"
 #include "stick/stick_pipeline.hpp"
 #include "stick_vectors.hpp"
@@ -1283,4 +1284,10 @@ TEST_CASE("STK-068 the stick button bit is sent released while the POST gate is 
   io.out = StickOutputs{};
   TEST_ASSERT_TRUE(pipeline.cycle(io, centred));
   TEST_ASSERT_EQUAL_UINT32(1U, io.out.buttons);
+}
+
+// J2: the boot's mapping self check (the espp fork's joystick_selftest(), moved to
+// components/stick) passes against the mapping engine the pipeline links.
+TEST_CASE("STK-106 the stick mapping self test passes", "[stick][selftest]") {
+  TEST_ASSERT_TRUE(hmi::stick::mapping_selftest());
 }
