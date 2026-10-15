@@ -17,8 +17,9 @@ the chair from moving.
   (hmi_ui `PostStage`; decision C6, a CS-SAF-04 deviation until the islands work). It is the
   POST gate's only writer (`stick/permit_hooks.hpp`); the stick's output permit and the drive
   table read the gate.
-- main's `kPostPort` gathers the IDF facts (reset reason, OTA state, calibration, heap, stacks)
-  with the enum `static_assert`s of POST-050; the boot I2C scan is handed over at start-up.
+- main's `kPostPort` hands over the IDF facts, which `components/post_facts` gathers (reset
+  reason, OTA state, heap, stacks, with the enum `static_assert`s of POST-050), and the
+  calibration's, from main's joystick_cal; the boot I2C scan is handed over at start-up.
 - `post_indicator` drives the TopBar's persistent indicator; its words are in hmi_rtps_spec.
 
 The extended self test (`main/selftest*`) is not touched and stays separate.

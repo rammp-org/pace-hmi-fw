@@ -22,6 +22,7 @@ idf_component_register(SRC_DIRS "."
                          net_link
                          stick
                          ota
+                         post_facts
                          remote_ui
                          settings
                          storage
