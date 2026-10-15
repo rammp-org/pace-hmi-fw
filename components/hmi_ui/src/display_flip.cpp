@@ -24,7 +24,7 @@
 //
 // Everything here is public API -- LVGL's buffer and read-callback calls,
 // ESP-IDF's PPA driver and DPI frame buffers, the board's present_frame() --
-// so neither LVGL nor the vendored board support is changed. The PPA driver
+// so neither LVGL nor espp's board support (m5stack-tab5) is changed. The PPA driver
 // writes the source back from the CPU cache and invalidates the target itself.
 // Not the panel's own scan direction (MADCTL): on this DSI video-mode panel
 // that garbles the picture.

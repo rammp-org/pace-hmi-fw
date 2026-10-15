@@ -33,7 +33,7 @@ no symbol of it (the Build workflow checks the release ELF and sdkconfig). The C
 
 `main/selftest_spec.hpp` names the watched tasks (`kAllocRows`) and their rows, `Need::BENCH`:
 reported only by a build with the guard, after every other row, so any other build's report
-is unchanged (same rows, same indices, `ready: 54 checks`).
+is unchanged (same rows, same indices, `ready: 60 checks` on the RC).
 
 | Row | Task | Limit |
 | --- | --- | --- |
@@ -43,17 +43,18 @@ is unchanged (same rows, same indices, `ready: 54 checks`).
 
 The detail of a non-zero row gives the first allocation's size. Read them with
 `python scripts/rtps_selftest.py` against an image built with the guard. Against the plain
-bench baseline (`tests/characterisation/baseline-e2047a4`) such an image differs by exactly
-these three rows: B2's `ready: 57 checks` and B3's check list.
+bench image such an image differs by exactly these three rows: B2's `ready: 63 checks`
+(60 without the guard) and B3's check list.
 
 **`mem.alloc_adc` is not 0 today, and is report-only until it is** (owner decision T12,
 2026-10-11; deviation row in `docs/project-profile.md`). The `Read ADC` task publishes XYTwist
-itself, and espp's `RtpsParticipant::publish` (managed component `espp/rtps`) looks the writer up
-with `writers_.find(std::string(topic))`: "rammp/joystick/xy_twist" is longer than the string's
-inline buffer, so every publish allocates 24 B, about 30 times a second while a peer is matched.
-Expected on the bench: the count grows with uptime, the detail reads `first 24 B`. The row's
+itself, and espp's RTPS publish path allocates on that task (heap trace, 2026-10-15,
+`~/Documents/ATDev/espp_pr_drafts/PR-3-rtps-publish-noalloc.md`): `SimpleHistoryCache::addChange`
+20 B per publish, the `ThreadPool` deque 504 B about every 21st publish, and the `Publisher`'s
+`buffer_` once. Expected on the bench: the count grows with uptime (491 in one run), the detail
+reads `first 20 B`. The row's
 limit is 0..kAnyHi so the self test does not fail on it, and the count stays in the report.
-When espp looks the topic up without a temporary string (a transparent comparator), set the
+When espp's publish path stops allocating (PR 3, to be reworked after the heap trace), set the
 limit back to 0..0 and drop the deviation row.
 
 TS-DET-08 also asks for the task and a backtrace of an offending allocation. The hook cannot

@@ -15,9 +15,9 @@ dependencies:
   #   # All dependencies of `main` are public by default.
   #   public: true
   # TEST ONLY (dev_ai_integ_espp_prs, never merged): every espp component comes from a local
-  # espp worktree, ../../espp-test from here (~/Documents/ATDev/w/espp-test, espp branch
-  # test-all-prs: upstream main 01aaa970 = v1.3.8 plus the seven PR branches drafted in
-  # ~/Documents/ATDev/espp_pr_drafts). Nothing espp is vendored: espp_adc, espp_rtps,
+  # espp worktree, ../../espp-738 from here (~/Documents/ATDev/w/espp-738, espp branch
+  # test-all-on-738: upstream main 01aaa970 = v1.3.8, espp PR #738, and the seven PR branches
+  # drafted in ~/Documents/ATDev/espp_pr_drafts). Nothing espp is vendored: espp_adc, espp_rtps,
   # m5stack-tab5 and joystick come from there as they are. Every espp component, the ones the
   # others pull in included, is listed so that one source serves them all (CS-LAY-06).
   # CI cannot resolve these paths.
