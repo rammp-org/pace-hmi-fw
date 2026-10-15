@@ -7,7 +7,10 @@
 
 Input: results/<run>/summary.json from `tests/run.py run --all --coverage` (default: the
 newest run in results/). Each test reports `COVERAGE <file> lines <pct> branches <pct>` per
-source under test (gcov, tests/host/gcov_summary.py). TS-COV-02 / CS-SAF-05 thresholds:
+source under test (gcov, tests/host/gcov_summary.py). Branch figures leave out gcov's exception
+edges (`"throw": true`, the rule of gcovr's --exclude-throw-branches; owner decision 2026-10-15):
+the firmware has no C++ exceptions (CS-LNG-03), so those edges exist only in the host build and
+no test can take them. TS-COV-02 / CS-SAF-05 thresholds:
 logic 80 % lines and 70 % branches; safety components 100 % branches. A component is a
 safety component when a manifest entry with `safety: true` reports coverage for it.
 

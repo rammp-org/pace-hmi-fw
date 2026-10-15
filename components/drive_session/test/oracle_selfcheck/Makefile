@@ -53,14 +53,17 @@ coverage: header
 	@mkdir -p $(BUILD_DIR)/cov
 	$(MAKE) -f $(HERE)/Makefile BUILD_DIR=$(BUILD_DIR)/cov EXTRA=--coverage $(BUILD_DIR)/cov/$(NAME)
 	cd $(BUILD_DIR)/cov && rm -f *.gcda && ./$(NAME)
-	cd $(BUILD_DIR)/cov && gcov -b -o . $(NAME)-test_table_selfcheck.gcda > gcov.txt 2>/dev/null || \
-	  gcov -b -o . $(SRC) > gcov.txt
-	@awk -v want="drive_session_table.hpp" ' \
-	  /^File / { f = $$0; gsub(/^File .|.$$/, "", f); keep = (index(f, want) > 0) } \
-	  keep && /^Lines executed:/ { split($$2, a, "%"); sub(/.*:/, "", a[1]); l = a[1] } \
-	  keep && /^Taken at least once:/ { split($$4, b, "%"); sub(/.*:/, "", b[1]); br = b[1]; \
-	    printf "COVERAGE %s lines %s branches %s\n", want, l, br; keep = 0 } \
-	  ' $(BUILD_DIR)/cov/gcov.txt
+	@# gcov_summary.py (exception edges excluded, as in every other app) reads the header's
+	@# counters from <obj dir>/<header>.o and the .gcno/.gcda beside it: link those names to the
+	@# test's (gcc 11+ names them <binary>-<source>, older gcc <source>). --root prints the
+	@# bare name the coverage baseline has.
+	@cd $(BUILD_DIR)/cov && base=$(NAME)-test_table_selfcheck && \
+	  { [ -f $$base.gcda ] || base=test_table_selfcheck; } && \
+	  obj=$(BUILD_DIR)/cov/obj$(HEADER) && mkdir -p $$(dirname $$obj) && \
+	  ln -sf $(BUILD_DIR)/cov/$(NAME) $$obj.o && \
+	  ln -sf $(BUILD_DIR)/cov/$$base.gcno $$obj.gcno && \
+	  ln -sf $(BUILD_DIR)/cov/$$base.gcda $$obj.gcda
+	@python3 $(HOST_DIR)/gcov_summary.py --root $(dir $(HEADER)) $(BUILD_DIR)/cov/obj $(HEADER)
 
 clean:
 	rm -rf $(BUILD_DIR)

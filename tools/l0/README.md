@@ -86,6 +86,23 @@ private `src/` files (CS-LAY-03); `selftest` runs its cases. Both run in the `L0
 `coverage_gate.py` (TS-COV-02, CS-SAF-05) reads `results/<run>/summary.json` from
 `tests/run.py run --all --coverage` and fails if a file's L1 line or branch coverage falls
 below `coverage_baseline.json`; the gap to the spec thresholds is reported, not failed.
-`update` raises the baseline. `doxygen_gate.py` (CS-DOC-01) runs `doxygen ci/Doxyfile` and
+`update` raises the baseline.
+
+Branch coverage leaves out exception edges (owner decision 2026-10-15), project-wide: a branch
+that gcov's JSON marks `"throw": true` (a call's edge into its exception landing pad) is not
+counted, the rule of gcovr's `--exclude-throw-branches`, applied in `tests/host/gcov_summary.py`
+(every app through `tests/host/common.mk`, and the drive_session table self-check), as
+`components/fw_core/test/coverage_report.py` already did. Why: the firmware is built without
+C++ exceptions (ESP-IDF's `CONFIG_COMPILER_CXX_EXCEPTIONS` is off; CS-LNG-03), so these edges
+exist only in the host build, and no test can take them without making the code under test
+throw. They held e.g. 14 of the 30 branches of `components/stick/src/mapping_selftest.cpp`,
+which has no source-level branch at all. `gcov_summary.py --include-throw-branches` prints the
+old figure. A branch counts as taken when its count is non-zero (gcov's own rule). The baseline
+was regenerated with the new rule on gcc 13 (the CI image's; every file rose or stayed). Not
+excluded: the landing pad's own branches (a cleanup flag tested while unwinding) are not marked
+`throw`, so a file whose objects need unwinding cleanup can stay short of 100 % (2 such
+branches in `mapping_selftest.cpp`, line 66).
+
+`doxygen_gate.py` (CS-DOC-01) runs `doxygen ci/Doxyfile` and
 fails if the warning count of any file rises above `doxygen_baseline.json`; `update` lowers
 it. Both have a `selftest`. Reduce the debt, run `update`, commit the new baseline.

@@ -1,8 +1,17 @@
 #!/usr/bin/env python3
 """Print `COVERAGE <file> lines <pct> branches <pct>` for each source under test.
 
-Used by tests/host/common.mk (`make coverage`). Parses the summary of `gcov -b -c` (no gcovr
-in WSL). The branch figure is gcov's "Taken at least once" (TS-COV-02).
+Used by tests/host/common.mk (`make coverage`). Lines: the summary of `gcov -b -c` (no gcovr
+in WSL). Branches: taken at least once, of gcov's branches less its exception edges (TS-COV-02).
+
+Exception edges are excluded (owner decision 2026-10-15), the rule of gcovr's
+`--exclude-throw-branches`: a branch gcov's JSON marks `"throw": true` (the edge from a call
+into its exception landing pad) is not counted, taken or not. The firmware is built without
+C++ exceptions (CONFIG_COMPILER_CXX_EXCEPTIONS is off, CS-LNG-03), so these edges exist only
+in the host build and no test can reach them: e.g. components/stick/src/mapping_selftest.cpp
+had 14 of its 30 branches (gcc 13) as such edges. `--include-throw-branches` gives the old
+figure, for comparison. Branches are counted from gcov's JSON, one per (function, line,
+index), the units of gcov's own summary.
 
 usage: gcov_summary.py [--root DIR] OBJ_DIR SRC...
 OBJ_DIR mirrors absolute source paths: SRC=/a/b.cpp has its object at OBJ_DIR/a/b.cpp.o.
@@ -27,10 +36,10 @@ import tempfile
 
 FILE_RE = re.compile(r"^File '(.*)'$")
 LINES_RE = re.compile(r"^Lines executed:\s*([0-9.]+)% of (\d+)")
-TAKEN_RE = re.compile(r"^Taken at least once:\s*([0-9.]+)% of (\d+)")
 
 
-def summarise(obj_dir: str, src: str) -> tuple[str, str]:
+def summarise_lines(obj_dir: str, src: str) -> str:
+    """gcov's own "Lines executed" figure for `src` from its one object."""
     obj = os.path.join(obj_dir, src.lstrip("/") + ".o")
     if not os.path.exists(obj):
         sys.exit(f"gcov_summary: no object for {src} at {obj}")
@@ -41,7 +50,7 @@ def summarise(obj_dir: str, src: str) -> tuple[str, str]:
         )
     if out.returncode != 0:
         sys.exit(f"gcov_summary: gcov failed for {src}: {out.stderr.strip()}")
-    lines, branches, current = "0.00", "n/a", None
+    lines, current = "0.00", None
     for line in out.stdout.splitlines():
         m = FILE_RE.match(line)
         if m:
@@ -52,10 +61,7 @@ def summarise(obj_dir: str, src: str) -> tuple[str, str]:
         m = LINES_RE.match(line)
         if m:
             lines = f"{float(m.group(1)):.2f}"
-        m = TAKEN_RE.match(line)
-        if m:
-            branches = f"{float(m.group(1)):.2f}"
-    return lines, branches
+    return lines
 
 
 def alternates(obj_dir: str, src: str) -> list[str]:
@@ -67,9 +73,11 @@ def alternates(obj_dir: str, src: str) -> list[str]:
 Line = tuple[str, int]  # (function, line): gcov lists a line once per function emitted there
 
 
-def counts(obj: str, src: str) -> tuple[dict[Line, int], dict[tuple[str, int, int], int]]:
+def counts(obj: str, src: str, exclude_throw: bool = True
+           ) -> tuple[dict[Line, int], dict[tuple[str, int, int], int]]:
     """{(function, line): count} and {(function, line, branch index): count} for `src` from one
-    object (gcov JSON), the units gcov's own summary counts."""
+    object (gcov JSON), the units gcov's own summary counts; without the exception edges
+    (`"throw": true`) when `exclude_throw`."""
     with tempfile.TemporaryDirectory() as tmp:
         out = subprocess.run(
             ["gcov", "-b", "-c", "-j", "-o", obj, src],
@@ -90,22 +98,26 @@ def counts(obj: str, src: str) -> tuple[dict[Line, int], dict[tuple[str, int, in
                     key = (ln.get("function_name", ""), ln["line_number"])
                     lines[key] = lines.get(key, 0) + ln["count"]
                     for i, br in enumerate(ln.get("branches", [])):
+                        if exclude_throw and br.get("throw"):
+                            continue
                         bkey = (*key, i)
                         branches[bkey] = branches.get(bkey, 0) + br["count"]
     return lines, branches
 
 
-def summarise_union(objs: list[str], src: str) -> tuple[str, str]:
+def summarise_union(objs: list[str], src: str, exclude_throw: bool = True) -> tuple[str, str]:
     lines: dict[Line, int] = {}
     branches: dict[tuple[str, int, int], int] = {}
     for obj in objs:
-        ln, br = counts(obj, src)
+        ln, br = counts(obj, src, exclude_throw)
         for k, v in ln.items():
             lines[k] = lines.get(k, 0) + v
         for k, v in br.items():
             branches[k] = branches.get(k, 0) + v
     lpct = f"{100.0 * sum(1 for v in lines.values() if v > 0) / len(lines):.2f}" if lines else "0.00"
-    bpct = (f"{100.0 * sum(1 for v in branches.values() if v > 0) / len(branches):.2f}"
+    # taken = a non-zero count, gcov's own rule: a test with threads can leave a counter
+    # negative (non-atomic updates), and gcov's summary counts that as taken
+    bpct = (f"{100.0 * sum(1 for v in branches.values() if v != 0) / len(branches):.2f}"
             if branches else "n/a")
     return lpct, bpct
 
@@ -114,16 +126,20 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=None, help="print paths relative to this folder")
     ap.add_argument("obj_dir")
+    ap.add_argument("--include-throw-branches", action="store_true",
+                    help="count the exception edges too (the figure before 2026-10-15)")
     ap.add_argument("srcs", nargs="+")
     args = ap.parse_args()
+    exclude_throw = not args.include_throw_branches
     for src in args.srcs:
         src = os.path.abspath(src)
+        primary = os.path.join(args.obj_dir, src.lstrip("/") + ".o")
         alts = alternates(args.obj_dir, src)
         if alts:
-            primary = os.path.join(args.obj_dir, src.lstrip("/") + ".o")
-            lines, branches = summarise_union([primary, *alts], src)
+            lines, branches = summarise_union([primary, *alts], src, exclude_throw)
         else:
-            lines, branches = summarise(args.obj_dir, src)
+            lines = summarise_lines(args.obj_dir, src)
+            _, branches = summarise_union([primary], src, exclude_throw)
         shown = os.path.relpath(src, args.root) if args.root else src
         print(f"COVERAGE {shown} lines {lines} branches {branches}")
     return 0
