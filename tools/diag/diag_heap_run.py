@@ -19,11 +19,20 @@ import subprocess
 import sys
 import time
 
-ADDR2LINE = r"C:\Espressif\tools\riscv32-esp-elf"
+import os
+import shutil
+
+# Windows: C:\Espressif\tools; Linux: ~/.espressif/tools (or the PATH of an activated IDF).
+ADDR2LINE = (r"C:\Espressif\tools\riscv32-esp-elf" if os.name == "nt"
+             else str(pathlib.Path.home() / ".espressif" / "tools" / "riscv32-esp-elf"))
+EXE = "riscv32-esp-elf-addr2line" + (".exe" if os.name == "nt" else "")
 
 
 def find_addr2line() -> str:
-    hits = sorted(pathlib.Path(ADDR2LINE).rglob("riscv32-esp-elf-addr2line.exe"))
+    on_path = shutil.which(EXE)
+    if on_path:
+        return on_path
+    hits = sorted(pathlib.Path(ADDR2LINE).rglob(EXE))
     if not hits:
         raise SystemExit("no riscv32-esp-elf-addr2line under " + ADDR2LINE)
     return str(hits[-1])
@@ -71,7 +80,9 @@ def main() -> int:
     ap.add_argument("--port")
     ap.add_argument("--elf", type=pathlib.Path, required=True)
     ap.add_argument("--seconds", type=float, default=120.0)
-    ap.add_argument("--out", type=pathlib.Path, default=pathlib.Path(r"C:\b\bench\diag_heap"))
+    ap.add_argument("--out", type=pathlib.Path,
+                    default=pathlib.Path(r"C:\b\bench\diag_heap") if os.name == "nt"
+                    else pathlib.Path.home() / "bench" / "diag_heap")
     ap.add_argument("--resolve-only", type=pathlib.Path)
     a = ap.parse_args()
     if a.resolve_only:
