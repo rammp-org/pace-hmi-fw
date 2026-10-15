@@ -30,8 +30,11 @@ import math
 import os
 import sys
 import time
-import tkinter as tk
-from tkinter import ttk
+try:
+    import tkinter as tk
+    from tkinter import ttk
+except ImportError:  # a headless python (Ubuntu without python3-tk, CI): CarModel works without it
+    tk = ttk = None
 from typing import Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -142,6 +145,8 @@ class DriveView:
         #: an unconnected window explains itself instead of just sitting still.
         self.status_fn = status_fn
         self.on_close = on_close
+        if tk is None:
+            raise RuntimeError("the drive view needs tkinter (Ubuntu: apt install python3-tk)")
         self.window = tk.Toplevel(parent)
         self.window.title("Drive view")
         self.window.protocol("WM_DELETE_WINDOW", self.close)

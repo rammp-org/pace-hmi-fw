@@ -21,6 +21,7 @@ bindings or a rebuilt host ``lib/`` tree.
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import ipaddress
 import select
@@ -850,6 +851,26 @@ class RtpsHostHarness:
         except OSError:
             return False
 
+    @staticmethod
+    def _send_or_drop(sock: socket.socket, payload: bytes, target: Tuple[str, int]) -> bool:
+        """sendto on a non-blocking socket; a full send buffer drops the datagram.
+
+        Linux holds each datagram to an address whose ARP is unresolved in the
+        socket's send buffer, so a subnet sweep (hundreds of silent addresses)
+        fills it and sendto raises EAGAIN (BlockingIOError) or ENOBUFS. That is
+        loss, as on the wire, and discovery repeats; raised, it killed the
+        receive thread (seen 2026-10-14 on Ubuntu). Other errors still raise.
+        """
+        try:
+            sock.sendto(payload, target)
+            return True
+        except BlockingIOError:
+            return False
+        except OSError as exc:
+            if exc.errno == errno.ENOBUFS:
+                return False
+            raise
+
     def _resolve_peers(self) -> List[str]:
         """Resolve --peer hostnames/IPs to addresses, skipping what won't resolve."""
         resolved: List[str] = []
@@ -928,7 +949,8 @@ class RtpsHostHarness:
         for participant in list(self.discovered_participants.values()):
             if not participant.address or participant.ports.metatraffic_unicast == 0:
                 continue
-            self.metatraffic_unicast_sock.sendto(
+            self._send_or_drop(
+                self.metatraffic_unicast_sock,
                 payload,
                 (participant.address, participant.ports.metatraffic_unicast),
             )
@@ -950,7 +972,7 @@ class RtpsHostHarness:
             return
         self.sedp_announce_counts[participant.participant_guid] = sent + 1
         for message in self._sedp_announcements():
-            self.metatraffic_unicast_sock.sendto(message, target)
+            self._send_or_drop(self.metatraffic_unicast_sock, message, target)
             time.sleep(self.SEDP_SEND_GAP_S)
 
     def send_discovery_now(self) -> None:
@@ -1065,7 +1087,7 @@ class RtpsHostHarness:
             acknack = build_acknack_message(
                 self.guid_prefix, local_reader, writer_id, first_sn, last_sn - first_sn + 1, count
             )
-            self.metatraffic_unicast_sock.sendto(acknack, (sender_ip, port))
+            self._send_or_drop(self.metatraffic_unicast_sock, acknack, (sender_ip, port))
 
     def handle_metatraffic_packet(self, packet: bytes, sender_ip: str) -> None:
         self.respond_to_heartbeats(packet, sender_ip)

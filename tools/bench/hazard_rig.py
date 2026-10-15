@@ -142,16 +142,24 @@ class HazardStep(scenario_hazards.Step):
 
 
 def rtps_sweep(tree: pathlib.Path) -> list[str]:
-    """RTPS responders on the bench subnet (as run_bench.Run.rtps_sweep, B0)."""
+    """RTPS responders on the bench subnet (B0's check and the sole-sim proof).
+
+    In chunks: one listener seeding all 252 addresses spends its window on ARP for empty
+    addresses and never reached the board (seen 02:05). Strict where the tree's rtps_net
+    has it: a listener thread that dies early raises (rtps_net.ListenerDied), so the sweep
+    is never taken as proof of "no other responder" on what it heard before it died."""
+    import inspect
     import ipaddress
     sys.path.insert(0, str(tree / "scripts"))
     rtps_net = importlib.import_module("rtps_net")
+    strict = ({"strict": True} if "strict" in inspect.signature(rtps_net._run_listener).parameters
+              else {})  # an older tree: as before
     hosts = [str(h) for h in ipaddress.IPv4Network(common.SUBNET).hosts()
              if str(h) not in (common.PC_IP, *common.SWEEP_SKIP)]
     found: set[str] = set()
     for i in range(0, len(hosts), 64):
         found |= set(rtps_net._run_listener(hosts[i:i + 64], 6.0, common.PC_IP,
-                                            stop_on_first=False))
+                                            stop_on_first=False, **strict))
     return sorted(found)
 
 
