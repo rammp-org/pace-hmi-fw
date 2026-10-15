@@ -40,13 +40,11 @@ HeaderFilterRegex: '.*/(main|components/[^/]+/(include|src))/.*'
 # Add vendored copies kept in components/ (CS-LAY-05), listed in the profile.
 # Added in this repo (the first two are the fw-standards defaults):
 #   components/ui/            SquareLine export, regenerated wholesale on every import (CS-LAY-04)
-#   components/m5stack-tab5/  vendored Tab5 BSP (CS-LAY-05)
-#   components/joystick/      vendored from espp (CS-LAY-05)
 #   external/                 the rammp-rtps submodule: shared spec, owned by its own repo
 #   main/boot_logo.[ch]       generated image data (a pixel array), not hand-written code.
 #                             This regex covers only the header; the clang-check run must
 #                             also skip main/boot_logo.c as a source.
-ExcludeHeaderFilterRegex: '.*/(generated|managed_components|external|components/(ui|m5stack-tab5|joystick))/.*|.*/main/boot_logo\.[ch]$'
+ExcludeHeaderFilterRegex: '.*/(generated|managed_components|external|components/(ui))/.*|.*/main/boot_logo\.[ch]$'
 CheckOptions:
   - { key: readability-identifier-naming.NamespaceCase,          value: lower_case }
   - { key: readability-identifier-naming.ClassCase,              value: CamelCase }

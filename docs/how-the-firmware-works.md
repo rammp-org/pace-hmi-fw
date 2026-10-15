@@ -85,11 +85,11 @@ is built but not wired.
 | `components/stick` | `StickPipeline`: raw mV in, the keypad key and the `XYTwist` command out; `ButtonEdges`; the bench injection's parser (`bench_inject.hpp`) | yes | host: golden vectors |
 | `components/control` | `StickIsland`: the "Read ADC" task, the continuous ADC (X/Y) and the twist's oneshot ADC; runs one `StickPipeline` cycle per period | yes | none of its own |
 | `components/joystick_cal` | The calibration record, its file format and check, and the calibration run as a pure model | yes | host |
-| `components/joystick` | espp's joystick, vendored, plus a twist (Z) axis | yes | host |
+| `espp/joystick` | espp's 2-axis joystick (third party); the twist is mapped in `components/stick` | yes | host (L1-JOY) |
 | `components/hmi_rtps_spec` | What only this HMI adds to the RTPS spec: HMI topics, timeouts, seat unit helpers, banner texts, self-test tags | in part | host (`rtps_spec`) |
 | `components/hmi_ui` | The UI island: `UiApp` and every view, `UiIsland` (the UI task), `UiPoll` (the 250 ms tick), `NavView`, `RefusalView`, `HoldEngine`, `DisplayFlip`, `app_state` (the shared atomics) | no | bench B4 |
 | `components/board` | `Board`: the Tab5 bring-up on the BSP in `app_main`'s order; the touch and side-button adapters; `backlight`, `present` | no | bench |
-| `components/m5stack-tab5` | espp's Tab5 BSP, vendored and changed (two frame buffers, vsync present) | no | none |
+| `espp/m5stack-tab5` | espp's Tab5 BSP (third party; two frame buffers and the vsync present from its Kconfig and API) | no | none |
 | `components/housekeeping` | `Housekeeping` (the "Data Display Task": IMU, battery, RTC every 20 ms) and `SystemClock` (keeps the clock and RTC to the MIB's time) | no | bench |
 | `components/feedback` | `Feedback`: the DRV2605 haptics and the click sound; the DA7280 bench test | no | bench |
 | `components/settings` | User settings from one typed table, `/storage/settings.txt`; `AppliedSettings` (the atomics other tasks read) | feeds the stick | host (`tests/host/settings`) |

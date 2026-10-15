@@ -13,7 +13,6 @@
 
 #include "continuous_adc.hpp"
 #include "control/cycle.hpp"
-#include "control/windowed_adc.hpp"
 #include "logger.hpp"
 #include "oneshot_adc.hpp"
 #include "simple_lowpass_filter.hpp"
@@ -176,14 +175,16 @@ private:
   // Both X/Y windows into @p out, from one snapshot (see the AXIS WIRING note at the
   // calibrations: CH1 is horizontal, CH0 vertical). Out of line (noinline): the snapshot's
   // arrays stay out of the task's own frame (hazard-c2-spec.md §10.3).
-  [[gnu::noinline]] void read_windows(hmi::stick::RawSample &out) const {
+  // espp's ContinuousAdc::get_windows() (espp PR 1) reads them under its own lock, the one
+  // its reader task publishes them under: both from the same window.
+  [[gnu::noinline]] void read_windows(hmi::stick::RawSample &out) {
     const auto xy = adc_.get_windows(xy_channels_);
     out.horizontal = window_of(xy[1]); // ADC1_CH1
     out.vertical = window_of(xy[0]);   // ADC1_CH0
   }
   // A window as the raw sample carries it; a missing read carries no max and no sequence.
   [[gnu::always_inline]] static hmi::stick::XyWindowMv
-  window_of(const std::optional<hmi::adc::AdcWindowReading> &w) {
+  window_of(const std::optional<espp::ContinuousAdc::Window> &w) {
     if (!w) {
       return {.mean_mv = std::nullopt, .max_mv = 0.0f, .sequence = 0};
     }
@@ -253,13 +254,16 @@ private:
   // Bench builds (C2 O14, STALL CADC): espp's ContinuousAdc task suspended by Read ADC from a
   // request until its time is up, so X/Y go stale as a starved producer's do (C2-16). Read ADC
   // only. A request while one is running is dropped.
+  static constexpr const char *kCadcTaskName = "ContinuousAdc T";
   struct CadcStall {
     TaskHandle_t task = nullptr; ///< suspended, while not null
     std::uint32_t until_ms = 0;
   };
   void step_cadc_stall(std::uint32_t request_ms, std::uint32_t now_ms) noexcept {
     if (request_ms != 0 && cadc_stall_.task == nullptr) {
-      if (TaskHandle_t task = adc_.task_handle(); task != nullptr) {
+      // the reader task by its FreeRTOS name ("ContinuousAdc Task", cut to
+      // configMAX_TASK_NAME_LEN); espp's ContinuousAdc keeps its handle to itself
+      if (TaskHandle_t task = xTaskGetHandle(kCadcTaskName); task != nullptr) {
         vTaskSuspend(task);
         cadc_stall_ = {.task = task, .until_ms = now_ms + request_ms};
       }
@@ -278,7 +282,7 @@ private:
   // task's own frame holds none of it (hazard-c2-spec.md §10.3). Read ADC only.
   hmi::stick::RawSample sample_{};
   espp::SimpleLowpassFilter::Config twist_lowpass_config_;
-  WindowedContinuousAdc adc_;
+  espp::ContinuousAdc adc_;
   std::optional<espp::OneshotAdc> twist_adc_;
   std::optional<Stick> stick_;
   typename Io::State *io_state_ = nullptr;

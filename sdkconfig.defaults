@@ -27,6 +27,10 @@ CONFIG_ESPP_FILE_SYSTEM_PARTITION_LABEL="storage"
 # BSP example's config)
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_SPEED_200M=y
+# Two DPI frame buffers (1.8 MB each, PSRAM): LVGL renders into them in DIRECT mode and a
+# flush switches buffers instead of copying (espp m5stack-tab5, PR A; main.cpp
+# start_direct_render, hmi_ui DisplayFlip)
+CONFIG_M5STACK_TAB5_DPI_NUM_FBS=2
 #
 # XIP-from-PSRAM is deliberately OFF (it is also the IDF default).
 #

@@ -14,6 +14,8 @@
 NAME := hmi_format
 HERE := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 REPO ?= $(abspath $(HERE)/../../..)
+# TEST ONLY (dev_ai_integ_espp_prs): espp from the local espp worktree beside this one (main/idf_component.yml)
+ESPP ?= $(abspath $(REPO)/../espp-test/components)
 
 COMP     := $(REPO)/components/hmi_format
 LVGL_DIR := $(REPO)/managed_components/lvgl__lvgl
@@ -31,8 +33,8 @@ TEST_SRCS       := $(HERE)/test_hmi_format.cpp \
                    $(HERE)/test_screens.cpp \
                    $(HERE)/legacy_screens.cpp
 INCLUDES        := $(HERE) $(COMP)/include
-SYS_INCLUDES    := $(REPO)/managed_components/espp__format/include \
-                   $(REPO)/managed_components/espp__format/detail/fmt/include
+SYS_INCLUDES    := $(ESPP)/format/include \
+                   $(ESPP)/format/detail/fmt/include
 COVER_SRCS      := $(SRCS_UNDER_TEST)
 
 include $(REPO)/tests/host/common.mk

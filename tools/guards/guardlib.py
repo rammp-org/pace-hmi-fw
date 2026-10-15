@@ -112,10 +112,9 @@ class Obj:
 
 
 # Vendored upstream code compiled from the project tree (CS-LAY-05): its objects are not
-# first-party, as they were under managed_components/ before (owner decision T1 vendored espp
-# rtps; components/espp_rtps/README.md). Our own sources in such a folder stay first-party.
-VENDORED_UPSTREAM_DIRS = ("components/espp_rtps/",)
-VENDORED_OURS = ("components/espp_rtps/pace/",)
+# first-party. None today: every espp component comes from the component manager.
+VENDORED_UPSTREAM_DIRS: tuple[str, ...] = ()
+VENDORED_OURS: tuple[str, ...] = ()
 
 
 @dataclass

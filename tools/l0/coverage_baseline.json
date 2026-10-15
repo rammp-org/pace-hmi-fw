@@ -61,10 +61,6 @@
       "lines": 100.0,
       "branches": 100.0
     },
-    "components/joystick/src/joystick.cpp": {
-      "lines": 58.57,
-      "branches": 41.67
-    },
     "components/joystick_cal/src/cal_record.cpp": {
       "lines": 95.0,
       "branches": 80.95

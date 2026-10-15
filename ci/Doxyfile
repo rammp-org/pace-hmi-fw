@@ -9,9 +9,6 @@ RECURSIVE              = YES
 FILE_PATTERNS          = *.h *.hpp
 # Vendored, generated and test code is not ours to document (CS-LAY-04, CS-LAY-05).
 EXCLUDE                = components/ui \
-                         components/m5stack-tab5 \
-                         components/espp_rtps/include \
-                         components/espp_rtps/upstream \
                          main/boot_logo.h \
                          managed_components \
                          external

@@ -46,8 +46,8 @@ public:
   /// @return Whether the expanders came up.
   bool start_io_expanders();
 
-  /// @brief The LCD, its controller's name, then the LVGL display with full-screen draw
-  /// buffers (the vendored BSP allocates them in PSRAM).
+  /// @brief The LCD, its controller's name, then the LVGL display in DIRECT mode on the
+  /// panel's two frame buffers (espp's Tab5 BSP, render_to_frame_buffers; no draw buffers).
   /// @return Whether the LCD and the display came up.
   bool start_display();
 

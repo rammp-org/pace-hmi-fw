@@ -74,11 +74,9 @@ yet measured or decided, and "none" means checked and absent.
 | `components/hmi_rtps_spec` | what only this HMI adds to the shared RTPS spec: names, seat helpers and units, the MIB timeouts, display limits, the bench self-test topics, the HMI's own warning texts (header-only, moved from `main/` 2026-10-08) | yes, in part (`seat_units` scales every SeatCommand target; the drive session's windows are held to its MIB timeouts) | host L1 (L1-RTPS) | README |
 | `components/hmi_ui` | the UI island: every LVGL view the UI task draws (so far the TopBar clock, link and RTPS label, the DriveBand status cells, the backlight, the bench PIN, seat, settings rows, Skunk Works tiles and diagnostics, the display flip, FPS and overdraw, and the About, Internet, Firmware update and Log screens) | no (shows the chair's state and faults, commands no driving: that is drive_ui's; the seat command path is still here, parked for the owner) | no (LVGL-bound; bench B4) | README |
 | `components/housekeeping` | the housekeeping island: reads the IMU, battery monitor and RTC on one slow task and keeps the system clock and RTC to the MCB's time | no (topology: not safety) | no (board drivers; no host test) | none |
-| `components/joystick` | espp joystick plus a twist axis (vendored espp 1.2.0, sha 615b8df; README + upstream.diff) | yes | host L1 (L1-JOY) | none |
 | `components/joystick_cal` | the joystick calibration: the record and its text file, the plausibility check, and the calibration run as a plain C++ model | yes (the record sets the stick's travel) | host L1 (L1-CAL) | README |
 | `components/ota_parse` | pure parsers for what an update reads: GitHub's release list, an image's first block, `fwinfo.txt`, the confirms-its-boot marker | no (never commands motion) | host L1 (L1-OTA) | none |
 | `components/post` | the quick POST evaluator: boot facts in, a verdict per check and an overall state out (not wired yet; hazard-fixes C3) | yes (gates motion once C3 wires it) | host L1 (L1-POST) | README |
-| `components/m5stack-tab5` | vendored espp Tab5 BSP 1.2.0 (sha 615b8df), modified (VENDORED.md + upstream.diff) | no | no | none |
 | `components/ota` | the firmware image: identity and release match, the GitHub release list, download, install and rollback confirm | no (never commands motion; the restart after an install is main's, gated on the chair not driving) | no (HTTPS, flash) | README |
 | `components/remote_ui` | the bench debug channel: a TCP server on port 3333 for screenshots, taps, keys and (with stick injection) the stick; a no-op unless `CONFIG_HMI_REMOTE_UI` | no in release builds (absent); in bench builds it can move the stick, on the simulated MCB only | no (LVGL and sockets; bench) | none |
 | `components/seat` | the seat gate and the seat reading: whether a seat press may become a SeatCommand, and whether a reported seat value is known (hazard-seat-spec.md; header-only, constexpr) | yes (decides every seat request the HMI sends) | host L1 (L1-SEAT) | README |
@@ -122,8 +120,9 @@ yet measured or decided, and "none" means checked and absent.
 
 - Non-espp dependencies: LVGL 9.5.0, espressif/w5500, esp_wifi_remote, esp_hosted ~2.12, cjson,
   esp-dsp, littlefs (via espp file_system). The espp alternatives considered: not recorded.
-- Vendored copies in `components/`: `m5stack-tab5` (README.md, VENDORED.md, upstream.diff) and
-  `joystick` (README.md, upstream.diff). Each lists its upstream version and changes (CS-LAY-05).
+- Vendored copies in `components/`: none. Every espp component (the Tab5 BSP, joystick, adc
+  and rtps included) comes from the component manager (CS-LAY-05). TEST ONLY on
+  dev_ai_integ_espp_prs: from a local espp worktree with the drafted espp PRs.
 
 ## Bench
 - PC: Windows 11 laptop. ESP-IDF via `C:\Espressif\tools\Microsoft.v6.0.PowerShell_profile.ps1`;

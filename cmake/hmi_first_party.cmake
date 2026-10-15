@@ -10,12 +10,10 @@
 # fw_component_options(${COMPONENT_LIB}) themselves.
 #
 #   ui            SquareLine export, generated (CS-LAY-04)
-#   m5stack-tab5  vendored Tab5 BSP (CS-LAY-05)
-#   joystick      vendored from espp (CS-LAY-05)
-#   espp_rtps     vendored espp rtps (CS-LAY-05; owner decision T1,
-#                 components/espp_rtps/README.md): upstream's engine does not build under the
-#                 full warning set; our one source file there gets it per file
-set(HMI_NOT_FIRST_PARTY ui m5stack-tab5 joystick espp_rtps)
+#
+# Nothing espp is vendored (the espp components come from the component manager), so no
+# vendored component is listed.
+set(HMI_NOT_FIRST_PARTY ui)
 
 # hmi_is_first_party(<out-var> <component-dir> <source-dir>)
 # Pure (no IDF calls), so `cmake -P` can test it.

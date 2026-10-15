@@ -703,8 +703,9 @@ bool rtps_comms_publish_drive(rammp::DriveRequest request, MIB::DriveProfile pro
   return publish(drive_pub, rammp::DriveCommand{request, profile});
 }
 
-// Under the endpoints lock: the writers are added under it and endpoints_ready drops under it
-// before the participant goes, so matched_readers never races add_writer or stop.
+// espp's RtpsParticipant::matched_readers() (espp PR 2) takes the participant's own lock. Asked
+// under the endpoints lock as well: endpoints_ready drops under it before the participant goes,
+// so the participant is never asked once stop() is on its way.
 bool rtps_comms_drive_writer_matched() {
   return under_endpoints([] {
     return endpoints_ready && participant != nullptr &&

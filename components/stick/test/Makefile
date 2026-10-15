@@ -11,6 +11,8 @@ HERE := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 REPO ?= $(abspath $(HERE)/../../..)
 
 MC := $(REPO)/managed_components
+# TEST ONLY (dev_ai_integ_espp_prs): espp from the local espp worktree beside this one (main/idf_component.yml)
+ESPP ?= $(abspath $(REPO)/../espp-test/components)
 
 SRCS_UNDER_TEST := $(wildcard $(REPO)/components/stick/src/*.cpp)
 TEST_SRCS       := $(HERE)/test_stick.cpp $(HERE)/test_stick_monitor.cpp $(HERE)/legacy_adc_cycle.cpp
@@ -18,14 +20,14 @@ TEST_SRCS       := $(HERE)/test_stick.cpp $(HERE)/test_stick_monitor.cpp $(HERE)
 ALLOC_GUARD     := 1
 # components/joystick is the mapping engine today; it is linked as it is (vendored legacy,
 # tested by its own app), and espp's logger is third party.
-THIRD_PARTY_SRCS := $(REPO)/components/joystick/src/joystick.cpp $(MC)/espp__logger/src/logger.cpp
+THIRD_PARTY_SRCS := $(ESPP)/joystick/src/joystick.cpp $(ESPP)/logger/src/logger.cpp
 INCLUDES        := $(REPO)/components/stick/include $(HERE)
-SYS_INCLUDES    := $(REPO)/components/joystick/include \
-                   $(MC)/espp__base_component/include \
-                   $(MC)/espp__logger/include \
-                   $(MC)/espp__format/include \
-                   $(MC)/espp__format/detail/fmt/include \
-                   $(MC)/espp__math/include
+SYS_INCLUDES    := $(ESPP)/joystick/include \
+                   $(ESPP)/base_component/include \
+                   $(ESPP)/logger/include \
+                   $(ESPP)/format/include \
+                   $(ESPP)/format/detail/fmt/include \
+                   $(ESPP)/math/include
 HEADER          := $(REPO)/components/stick/include/stick/stick_pipeline.hpp
 INJECT_HEADER   := $(REPO)/components/stick/include/stick/bench_inject.hpp
 PERMIT_HEADER   := $(REPO)/components/stick/include/stick/output_permit.hpp

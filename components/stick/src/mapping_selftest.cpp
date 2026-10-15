@@ -29,6 +29,10 @@ constexpr espp::FloatRangeMapper::Config kDeadbanded{.center = 1650.0f,
 
 bool close(float a, float b) { return std::abs(a - b) < kEps; }
 
+// 1 for a check that failed, else 0 (no branch: the self test always passes, so a branch on
+// the result would leave its failure side uncovered)
+int miss(bool ok) { return static_cast<int>(!ok); }
+
 // The fork's "circular, 3 axes" joystick: the X/Y gimbal plus the twist mapped on its own.
 struct Stick3 {
   espp::Joystick xy{{.x_calibration = kLinear,
@@ -53,11 +57,11 @@ int rectangular_failures() {
                        .type = espp::Joystick::Type::RECTANGULAR});
   int failures = 0;
   rect.update(1650.0f, 1650.0f);
-  failures += (close(rect.x(), 0.0f) && close(rect.y(), 0.0f)) ? 0 : 1;
+  failures += miss(close(rect.x(), 0.0f)) + miss(close(rect.y(), 0.0f));
   rect.update(3300.0f, 0.0f);
-  failures += (close(rect.x(), 1.0f) && close(rect.y(), -1.0f)) ? 0 : 1;
+  failures += miss(close(rect.x(), 1.0f)) + miss(close(rect.y(), -1.0f));
   rect.update(2475.0f, 1650.0f);
-  failures += close(rect.x(), 0.5f) ? 0 : 1;
+  failures += miss(close(rect.x(), 0.5f));
   return failures;
 }
 
@@ -66,26 +70,26 @@ int circular_failures(Stick3 &stick) {
   int failures = 0;
   // full diagonal deflection is clamped to the unit circle
   stick.update(3300.0f, 3300.0f, 1650.0f);
-  failures += close(stick.xy.position().magnitude(), 1.0f) ? 0 : 1;
-  failures += close(stick.xy.x(), stick.xy.y()) ? 0 : 1;
+  failures += miss(close(stick.xy.position().magnitude(), 1.0f));
+  failures += miss(close(stick.xy.x(), stick.xy.y()));
   // inside the circular centre dead zone: exactly zero (x maps to 0.05 < 0.1)
   stick.update(1650.0f + 82.5f, 1650.0f, 1650.0f);
-  failures += (close(stick.xy.x(), 0.0f) && close(stick.xy.y(), 0.0f)) ? 0 : 1;
+  failures += miss(close(stick.xy.x(), 0.0f)) + miss(close(stick.xy.y(), 0.0f));
   // outside it the magnitude is rescaled across the live band (x maps to 0.2)
   stick.update(1650.0f + 330.0f, 1650.0f, 1650.0f);
-  failures += close(stick.xy.x(), (0.2f - 0.1f) / (1.0f - 0.1f - 0.05f)) ? 0 : 1;
+  failures += miss(close(stick.xy.x(), (0.2f - 0.1f) / (1.0f - 0.1f - 0.05f)));
   return failures;
 }
 
 // the twist's own dead bands: centre 0, full 1, saturating just short of the rail
 int twist_failures(Stick3 &stick) {
-  int failures = close(stick.twist, 0.0f) ? 0 : 1;
+  int failures = miss(close(stick.twist, 0.0f));
   stick.update(1650.0f, 1650.0f, 1700.0f); // within the 60 mV centre dead band
-  failures += close(stick.twist, 0.0f) ? 0 : 1;
+  failures += miss(close(stick.twist, 0.0f));
   stick.update(1650.0f, 1650.0f, 3270.0f); // within the 40 mV range dead band
-  failures += close(stick.twist, 1.0f) ? 0 : 1;
+  failures += miss(close(stick.twist, 1.0f));
   stick.update(1650.0f, 1650.0f, 0.0f);
-  failures += close(stick.twist, -1.0f) ? 0 : 1;
+  failures += miss(close(stick.twist, -1.0f));
   return failures;
 }
 
@@ -93,13 +97,13 @@ int twist_failures(Stick3 &stick) {
 // centred twist survives the magnitude clamp, and an X/Y-only update leaves the twist alone
 int independence_failures(Stick3 &stick) {
   stick.update(1650.0f, 1650.0f, 3300.0f);
-  int failures =
-      (close(stick.xy.x(), 0.0f) && close(stick.xy.y(), 0.0f) && close(stick.twist, 1.0f)) ? 0 : 1;
+  int failures = miss(close(stick.xy.x(), 0.0f)) + miss(close(stick.xy.y(), 0.0f)) +
+                 miss(close(stick.twist, 1.0f));
   stick.update(3300.0f, 3300.0f, 1650.0f);
-  failures += (close(stick.xy.position().magnitude(), 1.0f) && close(stick.twist, 0.0f)) ? 0 : 1;
+  failures += miss(close(stick.xy.position().magnitude(), 1.0f)) + miss(close(stick.twist, 0.0f));
   stick.update(1650.0f, 1650.0f, 3300.0f);
   stick.xy.update(3300.0f, 1650.0f);
-  failures += close(stick.twist, 1.0f) ? 0 : 1;
+  failures += miss(close(stick.twist, 1.0f));
   return failures;
 }
 

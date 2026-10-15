@@ -160,19 +160,16 @@ flowchart LR
 
 ## D3 Components
 <!-- BEGIN GENERATED D3 (tools/gen_diagrams): do not edit -->
-First-party components (`main` and `components/*` except `espp_adc`, `espp_rtps`, `joystick`, `m5stack-tab5`, `ui`) and their direct `REQUIRES`/`PRIV_REQUIRES`. Vendored, generated and submodule components appear only as targets. Third-party dependencies are folded into one node per source; the number is how many of its components are used directly.
+First-party components (`main` and `components/*` except `joystick`, `m5stack-tab5`, `ui`) and their direct `REQUIRES`/`PRIV_REQUIRES`. Vendored, generated and submodule components appear only as targets. Third-party dependencies are folded into one node per source; the number is how many of its components are used directly.
 
 ```mermaid
 flowchart LR
-  c_adc_window["adc_window"]
   c_alloc_guard["alloc_guard"]
   c_board["board"]
   c_control["control"]:::safety
   c_drive_adapter["drive_adapter"]:::safety
   c_drive_session["drive_session"]:::safety
   c_drive_ui["drive_ui"]:::safety
-  c_espp_adc["espp_adc (vendored)"]
-  c_espp_rtps["espp_rtps (vendored)"]
   c_feedback["feedback"]
   c_fw_core["fw_core"]
   c_hmi_format["hmi_format"]
@@ -180,9 +177,7 @@ flowchart LR
   c_hmi_rtps_spec["hmi_rtps_spec"]:::safety
   c_hmi_ui["hmi_ui"]
   c_housekeeping["housekeeping"]
-  c_joystick["joystick (vendored)"]:::safety
   c_joystick_cal["joystick_cal"]:::safety
-  c_m5stack_tab5["m5stack-tab5 (vendored)"]
   c_main["main"]:::safety
   c_ota["ota"]
   c_ota_parse["ota_parse"]
@@ -194,21 +189,19 @@ flowchart LR
   c_stick["stick"]:::safety
   c_storage["storage"]
   c_ui["ui"]:::gen
-  g_ESP_IDF["ESP-IDF · 18"]
-  g_espp["espp · 31"]
-  g_Espressif_registry["Espressif registry · 7"]
+  g_ESP_IDF["ESP-IDF · 54"]
+  g_Espressif_registry["Espressif registry · 8"]
   g_joltwallet["joltwallet · 1"]
   g_LVGL["LVGL · 1"]
   c_board -.-> c_hmi_format
   c_board -.-> c_housekeeping
-  c_board -.-> c_m5stack_tab5
-  c_board -.-> g_espp
+  c_board -.-> g_ESP_IDF
   c_control -.-> c_hmi_rtps_spec
   c_control -.-> c_stick
-  c_control -.-> g_espp
+  c_control -.-> g_ESP_IDF
   c_drive_adapter -.-> c_drive_session
   c_drive_adapter -.-> c_stick
-  c_drive_adapter -.-> g_espp
+  c_drive_adapter -.-> g_ESP_IDF
   c_drive_ui -.-> c_drive_adapter
   c_drive_ui -.-> c_drive_session
   c_drive_ui -.-> c_rammp_rtps_messages
@@ -217,9 +210,7 @@ flowchart LR
   c_drive_ui -.-> g_ESP_IDF
   c_drive_ui -.-> g_LVGL
   c_feedback -.-> g_ESP_IDF
-  c_feedback -.-> g_espp
   c_fw_core -.-> g_ESP_IDF
-  c_fw_core -.-> g_espp
   c_hmi_rtps_spec -.-> c_rammp_rtps_messages
   c_hmi_ui -.-> c_control
   c_hmi_ui -.-> c_drive_adapter
@@ -236,23 +227,18 @@ flowchart LR
   c_hmi_ui -.-> c_stick
   c_hmi_ui -.-> c_ui
   c_hmi_ui -.-> g_ESP_IDF
-  c_hmi_ui -.-> g_espp
   c_hmi_ui -.-> g_LVGL
   c_housekeeping -.-> c_hmi_format
-  c_housekeeping -.-> c_m5stack_tab5
   c_housekeeping -.-> c_rammp_rtps_messages
   c_housekeeping -.-> g_ESP_IDF
-  c_housekeeping -.-> g_espp
   c_joystick_cal -.-> c_stick
-  c_joystick_cal -.-> g_espp
+  c_joystick_cal -.-> g_ESP_IDF
   c_main -.-> c_alloc_guard
   c_main -.-> c_board
   c_main -.-> c_control
   c_main -.-> c_drive_adapter
   c_main -.-> c_drive_session
   c_main -.-> c_drive_ui
-  c_main -.-> c_espp_adc
-  c_main -.-> c_espp_rtps
   c_main -.-> c_feedback
   c_main -.-> c_fw_core
   c_main -.-> c_hmi_format
@@ -260,9 +246,7 @@ flowchart LR
   c_main -.-> c_hmi_rtps_spec
   c_main -.-> c_hmi_ui
   c_main -.-> c_housekeeping
-  c_main -.-> c_joystick
   c_main -.-> c_joystick_cal
-  c_main -.-> c_m5stack_tab5
   c_main -.-> c_ota
   c_main -.-> c_ota_parse
   c_main -.-> c_rammp_rtps_messages
@@ -272,13 +256,11 @@ flowchart LR
   c_main -.-> c_storage
   c_main -.-> c_ui
   c_main -.-> g_ESP_IDF
-  c_main -.-> g_espp
   c_main -.-> g_Espressif_registry
   c_main -.-> g_LVGL
   c_ota -.-> c_ota_parse
   c_ota -.-> c_storage
   c_ota -.-> g_ESP_IDF
-  c_ota -.-> g_espp
   c_ota -.-> g_Espressif_registry
   c_ota_parse -.-> g_Espressif_registry
   c_post -.-> c_stick
@@ -291,11 +273,10 @@ flowchart LR
   c_seat -.-> c_hmi_rtps_spec
   c_seat -.-> c_stick
   c_settings -.-> c_storage
-  c_settings -.-> g_espp
+  c_settings -.-> g_ESP_IDF
   c_stick -.-> c_fw_core
-  c_stick -.-> c_joystick
+  c_stick -.-> g_ESP_IDF
   c_storage -.-> g_ESP_IDF
-  c_storage -.-> g_espp
   c_storage -.-> g_joltwallet
   classDef hw fill:#d9dde3,stroke:#7a8590,color:#111
   classDef safety stroke:#c0392b,stroke-width:3px
@@ -304,9 +285,8 @@ flowchart LR
 
 <details><summary>Folded dependencies</summary>
 
-- **ESP-IDF**: `app_update`, `bootloader_support`, `esp_app_format`, `esp_driver_ppa`, `esp_eth`, `esp_event`, `esp_http_client`, `esp_mm`, `esp_netif`, `esp_partition`, `esp_timer`, `esp_wifi`, `freertos`, `log`, `lwip`, `mbedtls`, `pthread`, `spi_flash`
-- **espp**: `espp__base_component`, `espp__base_peripheral`, `espp__bmi270`, `espp__button`, `espp__cdr`, `espp__cli`, `espp__codec`, `espp__display`, `espp__display_drivers`, `espp__drv2605`, `espp__file_system`, `espp__filters`, `espp__format`, `espp__gt911`, `espp__i2c`, `espp__ina226`, `espp__input_drivers`, `espp__interrupt`, `espp__led`, `espp__logger`, `espp__math`, `espp__pi4ioe5v`, `espp__reflect_cpp`, `espp__rx8130ce`, `espp__socket`, `espp__spi`, `espp__st7123touch`, `espp__task`, `espp__thread_pool`, `espp__timer`, `espp__touch`
-- **Espressif registry**: `espressif__cjson`, `espressif__esp-dsp`, `espressif__esp_hosted`, `espressif__esp_sccb_intf`, `espressif__esp_wifi_remote`, `espressif__usb`, `espressif__w5500`
+- **ESP-IDF**: `adc`, `app_update`, `base_component`, `base_peripheral`, `bmi270`, `bootloader_support`, `button`, `cdr`, `cli`, `codec`, `display`, `display_drivers`, `drv2605`, `esp_app_format`, `esp_driver_ppa`, `esp_eth`, `esp_event`, `esp_http_client`, `esp_mm`, `esp_netif`, `esp_partition`, `esp_timer`, `esp_wifi`, `file_system`, `filters`, `format`, `freertos`, `gt911`, `i2c`, `ina226`, `input_drivers`, `interrupt`, `joystick`, `led`, `log`, `logger`, `lwip`, `m5stack-tab5`, `math`, `mbedtls`, `pi4ioe5v`, `pthread`, `reflect_cpp`, `rtps`, `rx8130ce`, `sdcard`, `socket`, `spi`, `spi_flash`, `st7123touch`, `task`, `thread_pool`, `timer`, `touch`
+- **Espressif registry**: `espressif__cjson`, `espressif__esp-dsp`, `espressif__esp_hosted`, `espressif__esp_sccb_intf`, `espressif__esp_wifi_remote`, `espressif__usb`, `espressif__usb_host_uvc`, `espressif__w5500`
 - **joltwallet**: `joltwallet__littlefs`
 - **LVGL**: `lvgl__lvgl`
 

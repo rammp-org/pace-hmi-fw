@@ -52,7 +52,7 @@ does is dropped and logged, see REQ-DAD-03).
 | --- | --- | --- |
 | `sample()` | every input | the link live (`rtps_comms_link_state`, REQ-UI-18), `mib_state_subject`, `lv_screen_active()`, `nav_menu_open`, `joystick_cal_running()`, the stick's hold reason, the POST gate (PASS: `post_ok`, C3), stick health (FAULT: `stick_fault`, C2b), in that order |
 | `now_us()` | every input; SEND_ENABLE; ARM_EXIT_DEADLINE | `esp_timer_get_time()` |
-| `drive_writer_matched()` | row 50's SEND_DISABLE, and each tick while it is held (T1) | `rtps_comms_drive_writer_matched()`: the DriveCommand writer has a matched reader (`components/espp_rtps`'s `matched_readers`) |
+| `drive_writer_matched()` | row 50's SEND_DISABLE, and each tick while it is held (T1) | `rtps_comms_drive_writer_matched()`: the DriveCommand writer has a matched reader (espp rtps's `RtpsParticipant::matched_readers`) |
 | `publish(enable)` | SEND_ENABLE, SEND_DISABLE, PUBLISH_DRIVE | `rtps_comms_publish_drive(request, drive_profile_published)`; returns its result, which the adapter does not use yet (H6) |
 | `ring_wait()`, `ring_rest()` | RING_WAIT, RING_REST | `lock_visual_wait()`, `lock_visual_rest()` |
 | `lock_open_visual()` | LOCK_OPEN_VISUAL | ring full, shackle up, STRONG_CLICK |

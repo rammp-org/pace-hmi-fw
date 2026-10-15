@@ -3,7 +3,7 @@
 The HMI's Tab5 board: its bring-up on the BSP in the order the HMI needs, and the adapters the
 BSP's own tasks call (CS-LAY-02). Namespace `hmi::board`.
 
-Built on the vendored BSP (`components/m5stack-tab5`, `espp::M5StackTab5`): every driver, bus
+Built on espp's Tab5 BSP (`espp/m5stack-tab5`, `espp::M5StackTab5`): every driver, bus
 and LVGL display is the BSP's. This component only calls it, in `app_main`'s order, with
 `app_main`'s log lines and failure policy, and adapts its callbacks to the rest of the firmware.
 Moved out of `main.cpp`'s `app_main` (owner, 2026-10-08), clean then move (app-main-shrink V2).

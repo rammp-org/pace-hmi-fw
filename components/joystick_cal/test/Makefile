@@ -17,6 +17,8 @@ HERE := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 REPO ?= $(abspath $(HERE)/../../..)
 
 MC  := $(REPO)/managed_components
+# TEST ONLY (dev_ai_integ_espp_prs): espp from the local espp worktree beside this one (main/idf_component.yml)
+ESPP ?= $(abspath $(REPO)/../espp-test/components)
 CMP := $(REPO)/components/joystick_cal
 
 SRCS_UNDER_TEST  := $(CMP)/src/cal_record.cpp \
@@ -27,12 +29,12 @@ TEST_SRCS        := $(HERE)/test_joystick_cal.cpp \
                     $(HERE)/test_cal_run.cpp \
                     $(HERE)/fakes/fake_lvgl.cpp \
                     $(HERE)/fakes/fake_storage.cpp
-THIRD_PARTY_SRCS := $(MC)/espp__logger/src/logger.cpp
+THIRD_PARTY_SRCS := $(ESPP)/logger/src/logger.cpp
 # valid() takes the rail limits from the stick monitor's header (header-only constants).
 INCLUDES         := $(HERE)/fakes $(CMP)/include $(REPO)/main $(REPO)/components/storage/include                     $(REPO)/components/stick/include
-SYS_INCLUDES     := $(MC)/espp__base_component/include \
-                    $(MC)/espp__logger/include \
-                    $(MC)/espp__format/include \
-                    $(MC)/espp__format/detail/fmt/include
+SYS_INCLUDES     := $(ESPP)/base_component/include \
+                    $(ESPP)/logger/include \
+                    $(ESPP)/format/include \
+                    $(ESPP)/format/detail/fmt/include
 
 include $(REPO)/tests/host/common.mk

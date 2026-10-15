@@ -11,10 +11,12 @@
 NAME := ota_parse
 HERE := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 REPO ?= $(abspath $(HERE)/../../..)
+# TEST ONLY (dev_ai_integ_espp_prs): espp from the local espp worktree beside this one (main/idf_component.yml)
+ESPP ?= $(abspath $(REPO)/../espp-test/components)
 
 COMP      := $(REPO)/components/ota_parse
 CJSON_DIR := $(REPO)/managed_components/espressif__cjson/cJSON
-FMT_DIR   := $(REPO)/managed_components/espp__format
+FMT_DIR   := $(ESPP)/format
 
 SRCS_UNDER_TEST := $(COMP)/src/fw_record.cpp \
                    $(COMP)/src/image_header.cpp \

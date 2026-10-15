@@ -56,7 +56,6 @@
 #include "update_ui.hpp"
 
 #include "esp_heap_caps.h"
-#include "esp_lcd_mipi_dsi.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
 #include "esp_task_wdt.h"
@@ -1032,24 +1031,22 @@ static_assert(static_cast<int>(hmi::bench_verbs::PostGateName::NOT_RUN) ==
 // app_main: LVGL in DIRECT render mode over the DSI panel's two frame buffers (see the
 // comment at the call). @return whether it came up; if not, the BSP's flush stays.
 static bool start_direct_render(espp::M5StackTab5 &tab5, espp::Logger &logger) {
-  void *fb0 = nullptr;
-  void *fb1 = nullptr;
-  esp_err_t fb_err = esp_lcd_dpi_panel_get_frame_buffer(tab5.lcd_panel_handle(), 2, &fb0, &fb1);
-  const size_t fb_bytes = tab5.display_width() * tab5.display_height() * sizeof(uint16_t);
+  // the panel's frame buffers (CONFIG_M5STACK_TAB5_DPI_NUM_FBS=2; espp PR A)
+  const auto fbs = tab5.frame_buffers();
+  const size_t fb_bytes = espp::M5StackTab5::frame_buffer_size();
   // DIRECT mode renders into screen-sized frame buffers and direct_flush_cb
   // assumes the panel's native orientation, so it is incompatible with LVGL
   // software rotation. Assert here rather than depend on the
   // lv_display_set_rotation(ROTATION_0) call much further down.
   assert(lv_display_get_rotation(lv_display_get_default()) == LV_DISPLAY_ROTATION_0 &&
          "DIRECT render mode requires rotation 0");
-  if (fb_err == ESP_OK && fb0 && fb1) {
-    ui_app.display_flip().use_panel_buffers(lv_display_get_default(), fb0, fb1, fb_bytes,
+  if (fbs.size() >= 2 && fbs[0] != nullptr && fbs[1] != nullptr) {
+    ui_app.display_flip().use_panel_buffers(lv_display_get_default(), fbs[0], fbs[1], fb_bytes,
                                             tab5.display_width(), tab5.display_height());
     logger.info("LVGL rendering directly into the DSI frame buffers (DIRECT mode)");
     return true;
   }
-  logger.error("Could not get DPI frame buffers ({}); leaving BSP flush in place",
-               esp_err_to_name(fb_err));
+  logger.error("Could not get DPI frame buffers ({} of 2); leaving BSP flush in place", fbs.size());
   return false;
 }
 

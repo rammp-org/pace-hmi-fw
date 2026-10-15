@@ -11,6 +11,8 @@ HERE := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 REPO ?= $(abspath $(HERE)/../../..)
 
 MC := $(REPO)/managed_components
+# TEST ONLY (dev_ai_integ_espp_prs): espp from the local espp worktree beside this one (main/idf_component.yml)
+ESPP ?= $(abspath $(REPO)/../espp-test/components)
 
 ALLOC_GUARD := 1
 
@@ -20,16 +22,16 @@ ALLOC_GUARD := 1
 TEST_SRCS        := $(HERE)/test_motion_guard.cpp $(HERE)/test_cycle.cpp \
                     $(HERE)/test_guard_permit.cpp \
                     $(REPO)/components/stick/src/stick_pipeline.cpp
-THIRD_PARTY_SRCS := $(REPO)/components/joystick/src/joystick.cpp $(MC)/espp__logger/src/logger.cpp
+THIRD_PARTY_SRCS := $(ESPP)/joystick/src/joystick.cpp $(ESPP)/logger/src/logger.cpp
 INCLUDES         := $(REPO)/components/control/include $(REPO)/components/stick/include \
                     $(REPO)/components/hmi_rtps_spec/include $(HERE)
 SYS_INCLUDES     := $(REPO)/external/rammp-rtps/components/rammp_rtps_messages/include \
-                    $(REPO)/components/joystick/include \
-                    $(MC)/espp__base_component/include \
-                    $(MC)/espp__logger/include \
-                    $(MC)/espp__format/include \
-                    $(MC)/espp__format/detail/fmt/include \
-                    $(MC)/espp__math/include
+                    $(ESPP)/joystick/include \
+                    $(ESPP)/base_component/include \
+                    $(ESPP)/logger/include \
+                    $(ESPP)/format/include \
+                    $(ESPP)/format/detail/fmt/include \
+                    $(ESPP)/math/include
 GUARD_HEADER     := $(REPO)/components/control/include/control/motion_guard.hpp
 CYCLE_HEADER     := $(REPO)/components/control/include/control/cycle.hpp
 COVER_SRCS       := $(GUARD_HEADER) $(CYCLE_HEADER)

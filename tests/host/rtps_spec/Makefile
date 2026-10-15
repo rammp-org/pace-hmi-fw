@@ -10,6 +10,8 @@
 NAME := rtps_spec
 HERE := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 REPO ?= $(abspath $(HERE)/../../..)
+# TEST ONLY (dev_ai_integ_espp_prs): espp from the local espp worktree beside this one (main/idf_component.yml)
+ESPP ?= $(abspath $(REPO)/../espp-test/components)
 
 SPEC_INC := $(REPO)/components/hmi_rtps_spec/include
 SPEC_HDR := $(SPEC_INC)/hmi_rtps_spec.hpp
@@ -19,9 +21,9 @@ TEST_SRCS := $(HERE)/test_rtps_spec.cpp $(HERE)/test_rtps_cdr.cpp $(HERE)/test_r
 # object of the one test file that exercises it (see rtps-cov-links)
 COVER_SRCS := $(SPEC_HDR)
 INCLUDES = $(SPEC_INC) $(MSG_INC) $(HERE) $(OUT)/gen
-SYS_INCLUDES = $(REPO)/managed_components/espp__cdr/detail/cdr/include \
-               $(REPO)/managed_components/espp__cdr/include \
-               $(REPO)/managed_components/espp__reflect_cpp/detail/reflect-cpp/include
+SYS_INCLUDES = $(ESPP)/cdr/detail/cdr/include \
+               $(ESPP)/cdr/include \
+               $(ESPP)/reflect_cpp/detail/reflect-cpp/include
 
 include $(REPO)/tests/host/common.mk
 

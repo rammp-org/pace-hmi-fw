@@ -57,8 +57,10 @@ bench by C2-3 (a rail on the horizontal channel reads HIGH horizontal).
 | REQ-CTL-12 | The ADC task subscribes to the TWDT at its first cycle and resets it at the end of every cycle, valid or not. | CTL-019, B5j |
 | REQ-CTL-13 | `Read ADC` runs at priority 21, pinned to core 0, with a 6144 B stack. | G10, B3 |
 | REQ-CTL-14 | After any non-OK verdict, output resumes only through C1's neutral latch: the non-OK verdict clears it, and it sets again only after `kNeutralHold` of neutral cycles (REQ-STK-12). | CTL-020, CTL-021 |
-| REQ-CTL-15 | RETIRED 2026-10-13, parked until espp releases the window read (see below). Each cycle the island reads both X/Y windows (mean, max, sequence) in one call, the twist's reads (mean, max, count), samples `calibrating` once, steps the monitor once, then runs the pipeline with the same `calibrating`. On valid and invalid cycles alike. (Hazard fix C2; C2 commit 4.) | – |
-| REQ-CTL-16 | RETIRED 2026-10-13, parked until espp releases the window read (see below). The vendored `ContinuousAdc` keeps espp's mean per window and adds, per channel, the window's largest conversion in mV and a `uint32` sequence that advances only for a window holding at least one conversion of that channel. Its `README.md` lists every change from espp. (Hazard fix C2.) | – |
+| REQ-CTL-15 | RETIRED 2026-10-13, superseded by REQ-CTL-17 (see below). Each cycle the island reads both X/Y windows (mean, max, sequence) in one call, the twist's reads (mean, max, count), samples `calibrating` once, steps the monitor once, then runs the pipeline with the same `calibrating`. On valid and invalid cycles alike. (Hazard fix C2; C2 commit 4.) | – |
+| REQ-CTL-16 | RETIRED 2026-10-13, superseded by REQ-CTL-18 (see below). The vendored `ContinuousAdc` keeps espp's mean per window and adds, per channel, the window's largest conversion in mV and a `uint32` sequence that advances only for a window holding at least one conversion of that channel. Its `README.md` lists every change from espp. (Hazard fix C2.) | – |
+| REQ-CTL-17 | Each cycle the island reads both X/Y windows (mean, max, sequence) in one `ContinuousAdc::get_windows()` call, the twist's reads (mean, max, count), samples `calibrating` once, steps the monitor once, then runs the pipeline with the same `calibrating`. On valid and invalid cycles alike. (Hazard fix C2, on espp's window read; was REQ-CTL-15.) | review; bench C2-1..16 (CTL-022 not written: the island is not host-built) |
+| REQ-CTL-18 | espp's `ContinuousAdc` (espp PR 1, `get_windows()`) gives, per channel and window, espp's mean, the window's largest conversion in mV and a `uint32` sequence that advances only for a window holding at least one conversion of that channel, all channels asked for from one window. (Hazard fix C2; was REQ-CTL-16, then on a vendored copy.) | espp's own tests and example; bench C2-3, C2-14, C2-16 |
 
 How the guard reads the spec where it leaves a choice (C4 §2, §3):
 
@@ -74,7 +76,13 @@ How the guard reads the spec where it leaves a choice (C4 §2, §3):
 
 The owner accepted these choices on 2026-10-08.
 
-### The ADC window read (hazard fix C2), parked
+### The ADC window read (hazard fix C2)
+
+TEST ONLY (dev_ai_integ_espp_prs): the island reads espp's own `ContinuousAdc::get_windows()`
+(espp PR 1, from the local espp worktree; REQ-CTL-17, REQ-CTL-18). espp takes its data lock for
+the read (the one its reader task publishes under), where the vendored copy read lock-free: a
+lock inside espp on the stick task's path, not in our code (owner decision pending, see the
+espp PR drafts' README). The history below is the parked state this branch replaces.
 
 C2 needs each X/Y channel's window max and a per-channel sequence from espp's `ContinuousAdc`
 (REQ-CTL-16), read by the island each cycle (REQ-CTL-15). It was built on a vendored copy of

@@ -14,55 +14,91 @@ dependencies:
   #   # `public` flag doesn't have an effect dependencies of the `main` component.
   #   # All dependencies of `main` are public by default.
   #   public: true
-  espp/task: '==1.3.2'
-  # espp/m5stack-tab5 is vendored into components/m5stack-tab5 so the DPI panel
-  # config (num_fbs) and the LVGL draw-buffer allocation can be modified for
-  # performance. Removed from the manifest so the component manager does not
-  # also fetch it into managed_components/ and collide with the local copy.
-  # espp/rtps is vendored into components/espp_rtps (owner decision T1: a writer's matched
-  # readers, for the boot DISABLE), removed here for the same reason.
-  espp/adc: '==1.3.2'
-  espp/base_component: '==1.3.2'
-  espp/button: '==1.3.2'
-  espp/base_peripheral: '==1.3.2'
-  espp/bmi270: '==1.3.2'
-  espp/format: '==1.3.2'
-  espp/logger: '==1.3.2'
-  espp/cli: '==1.3.2'
-  espp/codec: '==1.3.2'
-  espp/display: '==1.3.2'
-  espp/display_drivers: '==1.3.2'
-  # DRV2605 haptic motor driver (the motor on the PCB's JST connector)
-  espp/drv2605: '==1.3.2'
+  # TEST ONLY (dev_ai_integ_espp_prs, never merged): every espp component comes from a local
+  # espp worktree, ../../espp-test from here (~/Documents/ATDev/w/espp-test, espp branch
+  # test-all-prs: upstream main 01aaa970 = v1.3.8 plus the seven PR branches drafted in
+  # ~/Documents/ATDev/espp_pr_drafts). Nothing espp is vendored: espp_adc, espp_rtps,
+  # m5stack-tab5 and joystick come from there as they are. Every espp component, the ones the
+  # others pull in included, is listed so that one source serves them all (CS-LAY-06).
+  # CI cannot resolve these paths.
+  espp/adc:
+    override_path: '../../espp-test/components/adc'
+  espp/base_component:
+    override_path: '../../espp-test/components/base_component'
+  espp/base_peripheral:
+    override_path: '../../espp-test/components/base_peripheral'
+  espp/bmi270:
+    override_path: '../../espp-test/components/bmi270'
+  espp/button:
+    override_path: '../../espp-test/components/button'
+  espp/cdr:
+    override_path: '../../espp-test/components/cdr'
+  espp/cli:
+    override_path: '../../espp-test/components/cli'
+  espp/codec:
+    override_path: '../../espp-test/components/codec'
+  espp/display:
+    override_path: '../../espp-test/components/display'
+  espp/display_drivers:
+    override_path: '../../espp-test/components/display_drivers'
+  espp/drv2605:
+    override_path: '../../espp-test/components/drv2605'
+  espp/file_system:
+    override_path: '../../espp-test/components/file_system'
+  espp/filters:
+    override_path: '../../espp-test/components/filters'
+  espp/format:
+    override_path: '../../espp-test/components/format'
+  espp/gt911:
+    override_path: '../../espp-test/components/gt911'
+  espp/i2c:
+    override_path: '../../espp-test/components/i2c'
+  espp/ina226:
+    override_path: '../../espp-test/components/ina226'
+  espp/input_drivers:
+    override_path: '../../espp-test/components/input_drivers'
+  espp/interrupt:
+    override_path: '../../espp-test/components/interrupt'
+  espp/joystick:
+    override_path: '../../espp-test/components/joystick'
+  espp/led:
+    override_path: '../../espp-test/components/led'
+  espp/logger:
+    override_path: '../../espp-test/components/logger'
+  espp/m5stack-tab5:
+    override_path: '../../espp-test/components/m5stack-tab5'
+  espp/math:
+    override_path: '../../espp-test/components/math'
+  espp/pi4ioe5v:
+    override_path: '../../espp-test/components/pi4ioe5v'
+  espp/reflect_cpp:
+    override_path: '../../espp-test/components/reflect_cpp'
+  espp/rtps:
+    override_path: '../../espp-test/components/rtps'
+  espp/rx8130ce:
+    override_path: '../../espp-test/components/rx8130ce'
+  espp/sdcard:
+    override_path: '../../espp-test/components/sdcard'
+  espp/socket:
+    override_path: '../../espp-test/components/socket'
+  espp/spi:
+    override_path: '../../espp-test/components/spi'
+  espp/st7123touch:
+    override_path: '../../espp-test/components/st7123touch'
+  espp/task:
+    override_path: '../../espp-test/components/task'
+  espp/thread_pool:
+    override_path: '../../espp-test/components/thread_pool'
+  espp/timer:
+    override_path: '../../espp-test/components/timer'
+  espp/touch:
+    override_path: '../../espp-test/components/touch'
   espressif/esp-dsp: ^1.8.2
-  espp/filters: '==1.3.2'
-  # LittleFS on the `storage` partition: joystick calibration now, more later
-  espp/file_system: '==1.3.2'
-  espp/gt911: '==1.3.2'
-  espp/i2c: '==1.3.2'
-  espp/ina226: '==1.3.2'
-  espp/input_drivers: '==1.3.2'
-  espp/interrupt: '==1.3.2'
-  espp/led: '==1.3.2'
   lvgl/lvgl: ^9.5.0
-  espp/math: '==1.3.2'
-  espp/rx8130ce: '==1.3.2'
-  espp/pi4ioe5v: '==1.3.2'
-  espp/spi: '==1.3.2'
-  espp/touch: '==1.3.2'
-  espp/st7123touch: '==1.3.2'
-  # RTPS comms — these components first shipped in espp 1.1.6 (components/espp_rtps pulls
-  # in espp/socket transitively; cdr is used directly for sample serialization)
-  espp/cdr: '==1.3.2'
-  # Every espp component moves together, pinned: a re-solve (any manifest change)
-  # otherwise pulls some of them to the newest and leaves a mixed set.
-  espp/reflect_cpp: '==1.3.2'
-  espp/socket: '==1.3.2'
-  espp/thread_pool: '==1.3.2'
-  espp/timer: '==1.3.2'
-  # Pulled in by the Tab5 BSP; pinned for the same reason.
+  # Pulled in by the Tab5 BSP; pinned, so a re-solve does not move them.
   espressif/usb: '==1.4.1'
   espressif/esp_sccb_intf: '==0.0.8'
+  espressif/usb_host_uvc: '==2.5.1'
   # W5500 SPI Ethernet MAC driver (split out of esp_eth in IDF 6.0)
   espressif/w5500: ^2.0.0
   # WiFi: the P4 has no radio; the Tab5's ESP32-C6 does it over SDIO (esp_hosted),

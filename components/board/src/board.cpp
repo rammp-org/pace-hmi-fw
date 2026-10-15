@@ -53,11 +53,11 @@ bool Board::start_display() {
   const char *controller_name = tab5_.get_display_controller_name();
   logger_.info(controller_name);
 
-  // initialize the display with full-screen draw buffers (the vendored BSP in
-  // components/m5stack-tab5 allocates them in PSRAM)
+  // LVGL in DIRECT mode on the panel's own frame buffers
+  // (CONFIG_M5STACK_TAB5_DPI_NUM_FBS=2, espp PR A): no draw buffers and no
+  // rotation scratch buffer are allocated, and a flush is a buffer switch
   logger_.info("Initializing display...");
-  auto pixel_buffer_size = tab5_.display_width() * tab5_.display_height();
-  if (!tab5_.initialize_display(pixel_buffer_size)) {
+  if (!tab5_.initialize_display({.render_to_frame_buffers = true})) {
     logger_.error("Failed to initialize display!");
     return false;
   }

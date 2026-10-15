@@ -358,8 +358,12 @@ def preflight() -> tuple[bool, list[dict[str, Any]], dict[str, str]]:
         if tool != "os":
             checks.append({"check": f"{tool} present", "ok": rc == 0, "detail": first})
     for what, path in [("Unity sources", f"{UNITY_DIR}/unity.c"),
+                       # TEST ONLY (dev_ai_integ_espp_prs): espp comes from the local espp
+                       # worktree beside this one (main/idf_component.yml override_path)
+                       ("espp worktree beside the repo (../espp-test)",
+                        f"{to_unix(REPO)}/../espp-test/components/logger/include/logger.hpp"),
                        ("managed_components copied into the worktree",
-                        f"{to_unix(REPO)}/managed_components/espp__logger/include/logger.hpp")]:
+                        f"{to_unix(REPO)}/managed_components/lvgl__lvgl/lvgl.h")]:
         rc, out = bash(f"test -f {shlex.quote(path)}", timeout=60)
         checks.append({"check": what, "ok": rc == 0, "detail": path})
     rc, out = bash('mkdir -p "$HOME/hmi-build" && test -w "$HOME/hmi-build" && echo "$HOME"',

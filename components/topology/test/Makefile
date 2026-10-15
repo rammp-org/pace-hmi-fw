@@ -11,6 +11,8 @@ HERE := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 REPO ?= $(abspath $(HERE)/../../..)
 
 MC   := $(REPO)/managed_components
+# TEST ONLY (dev_ai_integ_espp_prs): espp from the local espp worktree beside this one (main/idf_component.yml)
+ESPP ?= $(abspath $(REPO)/../espp-test/components)
 TOPO := $(REPO)/components/topology
 FWC  := $(REPO)/components/fw_core
 
@@ -19,11 +21,11 @@ TEST_SRCS       := $(HERE)/test_topology.cpp
 SRCS_UNDER_TEST := $(FWC)/src/check.cpp $(FWC)/src/error.cpp $(FWC)/src/queue.cpp \
                    $(FWC)/src/thread_checker.cpp $(FWC)/src/port_host.cpp
 INCLUDES        := $(TOPO)/include $(FWC)/include $(FWC)/src
-SYS_INCLUDES    := $(MC)/espp__task/include \
-                   $(MC)/espp__base_component/include \
-                   $(MC)/espp__logger/include \
-                   $(MC)/espp__format/include \
-                   $(MC)/espp__format/detail/fmt/include
+SYS_INCLUDES    := $(ESPP)/task/include \
+                   $(ESPP)/base_component/include \
+                   $(ESPP)/logger/include \
+                   $(ESPP)/format/include \
+                   $(ESPP)/format/detail/fmt/include
 
 # The headers under test. They have no object of their own: their coverage comes from the
 # test's object, which gcov_summary.py reads through links named after each header.
