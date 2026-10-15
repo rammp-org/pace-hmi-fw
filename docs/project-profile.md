@@ -7,7 +7,10 @@ yet measured or decided, and "none" means checked and absent.
 
 ## Identity and toolchain
 - Project: `rammp-hmi-p4` (repo rammp-org/pace-hmi-fw), the joystick HMI of a powered wheelchair.
-  It talks RTPS to the MIB/MCB.
+  It talks RTPS (Real-Time Publish-Subscribe) to the MIB/MCB (Meebot interface board / main
+  control board, the chair's motor controller). POST = the power-on self test; C1-C4 = the
+  hazard-fix groups ([plans/hazard-fixes.md](plans/hazard-fixes.md)); T-numbers = the owner's
+  numbered decisions ([plans/hazard-decisions.md](plans/hazard-decisions.md)).
 - Namespace: first-party components use `hmi::<component>` (`hmi::control`, `hmi::drive_session`, `hmi::stick`, `hmi::topo`, `hmi::cal`, ...; the UI and format code `hmi::ui` and `hmi::format`; the channel helpers `hmi::fw`). `main/` and its `frag_*.inc` are still in the global namespace (CS-NAM-02: they join `hmi::` as they move into components). The shared RTPS spec uses `rammp::`.
 - Target: ESP32-P4, chip rev v1.3 (board 2 boot log), on the M5Stack Tab5. Wi-Fi comes from the
   Tab5's ESP32-C6 over SDIO (esp_hosted 2.12; the C6 reports esp_hosted 1.4.1). Ethernet is an
@@ -20,8 +23,12 @@ yet measured or decided, and "none" means checked and absent.
   | 2 | 80:F1:B2:D1:51:A6 | `board:joystick`, `board:drv2605` | DA7280 not fitted. Verified 2026-10-06 on COM9 |
   | 3 | 80:F1:B2:D1:42:DB | `board:joystick` | |
 
-- ESP-IDF v6.0 (`C:\esp\v6.0\esp-idf`; CI `IDF_VERSION: v6.0`) · espp 1.3.2, every `espp/*` pinned
-  `==1.3.2` in `main/idf_component.yml` · LVGL 9.5.0 · clang-format 14.0.6 (not installed locally;
+- ESP-IDF v6.0.0 (Windows `C:\esp\v6.0\esp-idf`; Ubuntu `~/.espressif`, installed with the EIM
+  (ESP-IDF Installation Manager) CLI; CI `IDF_VERSION: v6.0`; later 6.0.x and 6.1 do not build) ·
+  espp: on `dev_refactor` 1.3.2, every `espp/*` pinned `==1.3.2`; on the release candidate
+  `dev_ai_rc` (TEST ONLY) every `espp/*` is an `override_path` to the local espp worktree
+  `~/Documents/ATDev/w/espp-738` (espp `main` 01aaa970 = v1.3.8, plus espp PR #738 and the seven
+  drafted PRs 1-4, A, B, C), so CI cannot build it · LVGL 9.5.0 · clang-format 14.0.6 (not installed locally;
   pre-commit fetches it) · esp-clang 20.1.1 (from ESP-IDF 6.0) · cppcheck from
   `esp-cpp/StaticAnalysis@master` in CI (version unknown; not installed locally).
 - C++ standard: all first-party C++ builds at `-std=gnu++23` (owner decision, 2026-10-07).
@@ -61,7 +68,7 @@ yet measured or decided, and "none" means checked and absent.
 ## Components
 | Component | Concern (one sentence) | Safety-relevant | Builds for linux | D4 diagram |
 | --- | --- | --- | --- | --- |
-| `main` | everything not listed below: `main.cpp` (app_main and the wiring of the components), `rtps_comms`, `selftest`, `log_capture` and the `*_ui` adapters (CS-LAY-01 rows); no `frag_*.inc` remain | yes | no | none |
+| `main` | the composition: `main.cpp` (app_main, the LVGL lock and the entry points that take it, the one UiApp and drive adapter), its wiring files (`ui_ports`, `cues`, `stick_io`, `task_configs`, `bench_hooks`, `selftest_platform`), the extended self test and the `*_ui` adapters (CS-LAY-01 rows); no `frag_*.inc` remain | yes | no | none |
 | `components/board` | the HMI's Tab5 board: its bring-up on the BSP (`espp::M5StackTab5`) in `app_main`'s order and log lines, and the adapters the BSP's touch and button tasks call (`TouchClick`, `SideButton`) | no (brings the board up and clicks; drives nothing, and a failed step stops `app_main` as before) | no (BSP; bench B2) | README |
 | `components/control` | the control island: the "Read ADC" task that reads the joystick's three pots and runs the stick pipeline each cycle (`StickIsland`) | yes (topology marks the `control` task safety; it feeds the motion command) | host L1 (L1-CTL: the motion guard and the cycle); the ADC drivers on the bench | README |
 | `components/drive_adapter` | the drive session's adapter on the UI task: samples the inputs, hands the session one input, performs the actions it returns through a port | yes (sends the DriveCommand requests and performs the relocks) | host L1 (DAD-L1, GLD-L1) | none |
@@ -73,10 +80,13 @@ yet measured or decided, and "none" means checked and absent.
 | `components/hmi_models` | pure UI models: the button-grid cursor walk and the bench PIN entry | no | host L1 (L1-MOD) | README |
 | `components/hmi_rtps_spec` | what only this HMI adds to the shared RTPS spec: names, seat helpers and units, the MIB timeouts, display limits, the bench self-test topics, the HMI's own warning texts (header-only, moved from `main/` 2026-10-08) | yes, in part (`seat_units` scales every SeatCommand target; the drive session's windows are held to its MIB timeouts) | host L1 (L1-RTPS) | README |
 | `components/hmi_ui` | the UI island: every LVGL view the UI task draws (so far the TopBar clock, link and RTPS label, the DriveBand status cells, the backlight, the bench PIN, seat, settings rows, Skunk Works tiles and diagnostics, the display flip, FPS and overdraw, and the About, Internet, Firmware update and Log screens) | no (shows the chair's state and faults, commands no driving: that is drive_ui's; the seat command path is still here, parked for the owner) | no (LVGL-bound; bench B4) | README |
+| `components/log_capture` | stdout and stderr teed into a 500-line PSRAM ring for the Log screen (moved from `main/` 2026-10-15) | no | no (stdout, PSRAM; self test `log.capture`) | README |
 | `components/housekeeping` | the housekeeping island: reads the IMU, battery monitor and RTC on one slow task and keeps the system clock and RTC to the MCB's time | no (topology: not safety) | no (board drivers; no host test) | none |
 | `components/joystick_cal` | the joystick calibration: the record and its text file, the plausibility check, and the calibration run as a plain C++ model | yes (the record sets the stick's travel) | host L1 (L1-CAL) | README |
+| `components/net_link` | the network link (W5500 Ethernet or Wi-Fi through the C6) and the one RTPS participant: every publisher and subscriber, the link state and flags (`rtps_comms.hpp`; moved from `main/` 2026-10-15) | yes (XYTwist, DriveCommand and SeatCommand leave through it; MibStatus arrives through it; its link flags feed the motion guard) | no (network; self test `net.*`, `rtps.*`, bench) | README |
 | `components/ota_parse` | pure parsers for what an update reads: GitHub's release list, an image's first block, `fwinfo.txt`, the confirms-its-boot marker | no (never commands motion) | host L1 (L1-OTA) | none |
 | `components/post` | the quick POST: boot facts in, a verdict per check and an overall state out; the rest window (on Read ADC) and the runner (on the UI task), wired by hazard fix C3 | yes (gates motion: the POST gate in the stick's output permit and the drive table) | host L1 (L1-POST) | README |
+| `components/post_facts` | the POST's facts from ESP-IDF and FreeRTOS: reset reason, image state, heap and stack headroom, the stick task alive, the ms clock (moved from `main.cpp` 2026-10-15) | yes (POST facts gate motion) | no (ESP-IDF; bench POST checks) | README |
 | `components/ota` | the firmware image: identity and release match, the GitHub release list, download, install and rollback confirm | no (never commands motion; the restart after an install is main's, gated on the chair not driving) | no (HTTPS, flash) | README |
 | `components/remote_ui` | the bench debug channel: a TCP server on port 3333 for screenshots, taps, keys and (with stick injection) the stick; a no-op unless `CONFIG_HMI_REMOTE_UI` | no in release builds (absent); in bench builds it can move the stick, on the simulated MCB only | no (LVGL and sockets; bench) | none |
 | `components/seat` | the seat gate and the seat reading: whether a seat press may become a SeatCommand, and whether a reported seat value is known (hazard-seat-spec.md; header-only, constexpr) | yes (decides every seat request the HMI sends) | host L1 (L1-SEAT) | README |
@@ -104,9 +114,10 @@ yet measured or decided, and "none" means checked and absent.
 
 ## Budgets and interfaces
 - Flash: two 6 MiB OTA slots (`partitions.csv`). App binary at e2047a4: 4,398,912 B (measured from
-  `build/rammp-hmi-p4.bin`), about 70% of a slot.
+  `build/rammp-hmi-p4.bin`), about 70% of a slot. The RC's bench build of `ba2c7b3`
+  (2026-10-15): 4,732,624 B, about 75% of a slot.
 - RAM: PSRAM free at the end of a self test is 28,146 KB (board 2). Internal and DMA budgets:
-  unknown; POST does not exist yet.
+  unknown; the POST checks heap headroom against placeholder limits ([plans/post-limits-proposal.md](plans/post-limits-proposal.md)).
 - External interfaces (CS-CFG-03; none is versioned yet unless stated):
 
   | Interface | Where documented |
@@ -121,12 +132,17 @@ yet measured or decided, and "none" means checked and absent.
 - Non-espp dependencies: LVGL 9.5.0, espressif/w5500, esp_wifi_remote, esp_hosted ~2.12, cjson,
   esp-dsp, littlefs (via espp file_system). The espp alternatives considered: not recorded.
 - Vendored copies in `components/`: none. Every espp component (the Tab5 BSP, joystick, adc
-  and rtps included) comes from the component manager (CS-LAY-05). TEST ONLY on
-  dev_ai_integ_espp_prs: from a local espp worktree with the drafted espp PRs.
+  and rtps included) comes from espp as it is (CS-LAY-05). TEST ONLY on `dev_ai_integ_espp_prs`
+  and the release candidate `dev_ai_rc`: from a local espp worktree with the drafted espp PRs
+  (`override_path` in `main/idf_component.yml`), until espp merges them.
 
 ## Bench
 - PC: Windows 11 laptop. ESP-IDF via `C:\Espressif\tools\Microsoft.v6.0.PowerShell_profile.ps1`;
   pyserial only in `C:\Espressif\tools\python\v6.0\venv\Scripts\python.exe`.
+  Since 2026-10-14 also an Ubuntu laptop: the same bench tools run there (`tools/bench/common.py`
+  switches per platform; `tools/bench/README.md`), with ESP-IDF 6.0.0 from `~/.espressif` and the
+  board lease at `~/Documents/ATDev/rammp/.board-lease`. B3 (the self test) accepts a SKIP of
+  `net.wifi_rssi` on an Ethernet bench (owner, 2026-10-15).
 - Serial: the board's USB CDC port (board 2 was COM9). Opening it resets the board unless `dtr` and
   `rts` are set False before `open()`.
 - Network: the Windows Mobile Hotspot on 192.168.137.0/24, PC = 192.168.137.2. VMware VMnet8 also
@@ -180,7 +196,7 @@ yet measured or decided, and "none" means checked and absent.
 | --- | --- | --- | --- | --- |
 | TS-UNIT-01, CS-HAL-04 | `tests/` (all L1 apps) | L1 runs as host-native g++ 13 in WSL with IDF's Unity sources, not the IDF `linux` target (not installed; no sudo in WSL) | owner | approved 2026-10-06 (Q6) |
 | CS-LAY (layout) | `main/frag_*.inc` | one-TU fragments of `main.cpp`, so the split cannot change static-init order, linkage or inlining; they dissolve into components grouped by concern (CS-LAY-02; app-main-shrink.md V15), not one component per fragment | owner | temporary |
-| CS-LAY-01 (main/ holds main.cpp only) | `main/rtps_comms.cpp`, `main/log_capture.cpp`, `main/selftest.cpp`, `main/selftest.hpp`, `main/selftest_spec.hpp`, `main/about_ui.cpp`, `main/internet_ui.cpp`, `main/update_ui.cpp`, `main/log_view.cpp` | rtps_comms is safety-relevant (it publishes XYTwist, DriveCommand, SeatCommand): a safety component may not hold transferred legacy grants (ratchet V2) and its locks and globals can only be cleaned by the islands/channels rework (CS-OWN), so it stays in main until then rather than move unmarked. log_capture is being rewritten (the heapfix branch). The self test stays with them: every one of its dependencies is parked in main (rtps_comms' link, MCB stats and self-test topics, log_capture's counters, the wire spec `hmi_rtps_spec.hpp`), and the port a move would need is what the islands/channels rework replaces. The four `*_ui.cpp` files are main's side of the hmi_ui views (adapters, worker threads, the LVGL hand-back, the restart after an update) until the islands work | owner | until the islands/channels rework |
+| CS-LAY-01 (main/ holds main.cpp only) | (on the RC, 2026-10-15: `rtps_comms` moved to `components/net_link` and `log_capture` to `components/log_capture`, so those two names no longer apply) `main/rtps_comms.cpp`, `main/log_capture.cpp`, `main/selftest.cpp`, `main/selftest.hpp`, `main/selftest_spec.hpp`, `main/about_ui.cpp`, `main/internet_ui.cpp`, `main/update_ui.cpp`, `main/log_view.cpp` | rtps_comms is safety-relevant (it publishes XYTwist, DriveCommand, SeatCommand): a safety component may not hold transferred legacy grants (ratchet V2) and its locks and globals can only be cleaned by the islands/channels rework (CS-OWN), so it stays in main until then rather than move unmarked. log_capture is being rewritten (the heapfix branch). The self test stays with them: every one of its dependencies is parked in main (rtps_comms' link, MCB stats and self-test topics, log_capture's counters, the wire spec `hmi_rtps_spec.hpp`), and the port a move would need is what the islands/channels rework replaces. The four `*_ui.cpp` files are main's side of the hmi_ui views (adapters, worker threads, the LVGL hand-back, the restart after an update) until the islands work | owner | until the islands/channels rework |
 | AI-UNA-02 "never merge" | `dev_refactor` | the owner authorised merges into `dev_refactor` for the 2026-10-06 run (AI-DIS-01) | owner | per run |
 | CS-SAF-05 (two approvals) | safety-relevant changes | one human approver (the owner) until a second reviewer exists; nothing safety-relevant merges to `dev` meanwhile | owner | until a second reviewer is named |
 | CS-SAF-03 (open circuit) | joystick low rail | firmware cannot tell an open pot (0 mV) from full travel (calibrated min 6-11 mV on board 2); firmware-only for now, residual hazard documented in `docs/plans/hazard-fixes.md` | owner | revisit with an EE change |
@@ -202,7 +218,7 @@ until they move.
 
 | Rule ID | Location | Reason | Owner | Review date |
 | --- | --- | --- | --- | --- |
-| CS-LAY-01 (main/ holds main.cpp only) | `main/selftest_platform.cpp`, `main/selftest_platform.hpp`, `main/joystick_cal.cpp`, `main/joystick_cal.hpp`, `main/rtps_comms.hpp`, `main/log_capture.hpp`, `main/actions_spec.h`, `main/lv_mem_psram.c`, `main/boot_logo.c`, `main/boot_logo.h`, `main/click.wav` | files that sit in `main/` beside the files the CS-LAY-01 row above already lists, and that the row does not name. The reasons would be those of their partners: `selftest_platform.*` goes with `selftest.*`; `rtps_comms.hpp`, `log_capture.hpp` with `rtps_comms` and `log_capture`; `joystick_cal.*` is the view of the `joystick_cal` component (LVGL subjects, timer, button, file I/O). `actions_spec.h`, `lv_mem_psram.c`, `boot_logo.*` and `click.wav` have no stated reason yet: the owner decides a deviation or a move | owner (approved 2026-10-08) | until the islands/channels rework |
+| CS-LAY-01 (main/ holds main.cpp only) | (on the RC: `rtps_comms.hpp`, `log_capture.hpp` moved with their components; main's new wiring files `ui_ports`, `cues`, `stick_io`, `task_configs`, `bench_hooks`, `app_instances.hpp` are not named here yet) `main/selftest_platform.cpp`, `main/selftest_platform.hpp`, `main/joystick_cal.cpp`, `main/joystick_cal.hpp`, `main/rtps_comms.hpp`, `main/log_capture.hpp`, `main/actions_spec.h`, `main/lv_mem_psram.c`, `main/boot_logo.c`, `main/boot_logo.h`, `main/click.wav` | files that sit in `main/` beside the files the CS-LAY-01 row above already lists, and that the row does not name. The reasons would be those of their partners: `selftest_platform.*` goes with `selftest.*`; `rtps_comms.hpp`, `log_capture.hpp` with `rtps_comms` and `log_capture`; `joystick_cal.*` is the view of the `joystick_cal` component (LVGL subjects, timer, button, file I/O). `actions_spec.h`, `lv_mem_psram.c`, `boot_logo.*` and `click.wav` have no stated reason yet: the owner decides a deviation or a move | owner (approved 2026-10-08) | until the islands/channels rework |
 | CS-FIL-01, CS-UI-02, CS-CON-01, CS-MEM-01 (and the other selftest legacy) | `main/selftest.cpp` | the CS-LAY-01 row above covers only the folder rule. `selftest.cpp` is 1030 lines with 136 `lv_*` calls, 30 locks, 11 raw allocations, 6 `vTaskDelay` and 1 `xTaskCreate` (counts at the audit, 4d82b9f). Either a deviation until the table-driven rework, or the rework (audit decision 3) | owner (approved 2026-10-08) | until the selftest rework |
 | CS-FLW-02 (loops bounded) | `components/ota_parse/src/fw_record.cpp:11` (`find_fw_record`) | one pass per line of `fwinfo.txt`, bounded by the file's length only (no line or line-count limit). Pinned as-is by test OTA-087; the bound is a behaviour change, parked (component README "Hazards"). The code already carries a `spec-deviation(CS-FLW-02)` comment | owner (approved 2026-10-08) | until the bound is approved as a behaviour change |
 | CS-FLW-02 (loops bounded) | `components/ota_parse/src/release_list.cpp:68` (`parse_releases`) | the release and asset counts are not checked against a maximum; they are bounded by the JSON's length only. Pinned as-is by tests OTA-017 and OTA-018; the cap is a parked behaviour change (component README "Hazards"). The code already carries a `spec-deviation(CS-FLW-02)` comment | owner (approved 2026-10-08) | until the cap is approved as a behaviour change |

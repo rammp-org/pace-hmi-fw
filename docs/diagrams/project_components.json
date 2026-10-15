@@ -133,6 +133,10 @@
       ],
       "priv_reqs": []
     },
+    "log_capture": {
+      "reqs": [],
+      "priv_reqs": []
+    },
     "main": {
       "reqs": [],
       "priv_reqs": [
@@ -189,15 +193,18 @@
         "joystick",
         "joystick_cal",
         "led",
+        "log_capture",
         "logger",
         "lvgl__lvgl",
         "lwip",
         "m5stack-tab5",
         "math",
         "mbedtls",
+        "net_link",
         "ota",
         "ota_parse",
         "pi4ioe5v",
+        "post_facts",
         "rammp_rtps_messages",
         "reflect_cpp",
         "remote_ui",
@@ -215,6 +222,28 @@
         "timer",
         "touch",
         "ui"
+      ]
+    },
+    "net_link": {
+      "reqs": [
+        "hmi_rtps_spec"
+      ],
+      "priv_reqs": [
+        "cdr",
+        "esp_driver_gpio",
+        "esp_driver_spi",
+        "esp_eth",
+        "esp_event",
+        "esp_netif",
+        "esp_timer",
+        "esp_wifi",
+        "espressif__esp_hosted",
+        "espressif__w5500",
+        "logger",
+        "lwip",
+        "rtps",
+        "storage",
+        "task"
       ]
     },
     "ota": {
@@ -247,6 +276,16 @@
         "stick"
       ],
       "priv_reqs": []
+    },
+    "post_facts": {
+      "reqs": [
+        "post"
+      ],
+      "priv_reqs": [
+        "app_update",
+        "esp_partition",
+        "esp_timer"
+      ]
     },
     "remote_ui": {
       "reqs": [
@@ -310,7 +349,9 @@
     "display_drivers": "other",
     "drv2605": "other",
     "esp_app_format": "idf",
+    "esp_driver_gpio": "idf",
     "esp_driver_ppa": "idf",
+    "esp_driver_spi": "idf",
     "esp_eth": "idf",
     "esp_event": "idf",
     "esp_http_client": "idf",

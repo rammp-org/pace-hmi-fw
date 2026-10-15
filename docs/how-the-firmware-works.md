@@ -1,17 +1,46 @@
 # How the firmware works
 
-A walk through the code as it is on `dev_ai_hazard_candidate` at `46f5719` (2026-10-11):
-`dev_refactor` plus the hazard fixes C1, C3, C4, C2 and C2b and the two priority changes (the
-RTPS workers and the ContinuousAdc task at priority 20). What runs, in which order, on which
-task, and how the pieces talk. It is a map for reading the code, not a design.
+A walk through the code as it is on `dev_ai_rc`, the release candidate (2026-10-15):
+`dev_refactor` plus the hazard fixes C1, C3, C4, C2, C2b and the seat path, the two priority
+changes (the RTPS workers and the ContinuousAdc task at priority 20), and `main.cpp` split into
+small wiring files. What runs, in which order, on which task, and how the pieces talk. It is a
+map for reading the code, not a design.
+
+**TEST ONLY build.** Nothing from espp (the third-party ESP32 C++ component library) is
+vendored any more. Every espp component comes from a local espp worktree through
+`override_path` in `main/idf_component.yml`: espp v1.3.8 plus PR #738 (the Tab5 display
+rotation) and seven local PR branches (PR 1 ADC window summary, PR 2 RTPS `matched_readers`,
+PR 3 RTPS publish without allocation, PR 4 RTPS worker priority, PR A Tab5 frame buffers, PR B
+Tab5 vsync `present_frame`, PR C SD card host sharing). CI cannot resolve those paths, so CI
+cannot build this code; it runs only from a PC with that worktree, until espp merges the PRs.
+
+Terms used throughout:
+
+| Term | Means |
+| --- | --- |
+| HMI | this Tab5 human-machine interface |
+| MCB, MIB | main control board (the motor driver); Meebot interface board, which is the MCB on Meebot, so both names mean the same peer ([plans/hazard-fixes.md §9](plans/hazard-fixes.md)) |
+| RTPS | Real-Time Publish-Subscribe, the DDS wire protocol the HMI and the MIB talk over |
+| POST | power-on self test (the quick one that gates motion; the "self test" is the extended one) |
+| LVGL | the graphics library |
+| H1..H16 | the hazard IDs of [plans/refactor.md §1](plans/refactor.md) |
+| C1-C4, C2b | the hazard fix groups, one spec each ([§16](#16-the-hazard-fixes-in-this-code)) |
+| M1, G1-G5 | the owner's driving decision (the MCB decides) and its five guards ([hazard-fixes.md §9](plans/hazard-fixes.md)) |
+| T-, E-numbers | owner decisions in [hazard-decisions.md](plans/hazard-decisions.md) (e.g. T1 boot DISABLE, T4 silent boot, T11 RTPS priority, T12 publish allocation, E5 ADC priority) |
+| J1, J2 | the two items of the vendored-joystick review: J1 the twist mapping, now in our code; J2 the mapping self test |
+| CS-\*, TS-\*, REQ-\* | rules of the fw-standards coding and testing standards; requirements in each component's README |
+| L0, L1 | the static checks; the host unit-test apps |
+| B0-B5e, B5''-\*, B5s-\*, C2-\* | bench steps on the board (`tools/bench`) |
+| G2, G4, G10, G11 | the `tools/guards` checks (not the driving guards G1-G5) |
+| D2, D3 | the generated diagrams in architecture.md |
 
 **Start with the two one-page overviews:** [fw-overview.md](fw-overview.md) (every task and
 every channel in one diagram) and [testing-overview.md](testing-overview.md) (every test and
 gate in one diagram). This page is the detail behind them. The user's view of the screens is in
 [ui-architecture.md](ui-architecture.md), the generated diagrams (D2 target islands, D3
 component dependencies) are in [architecture.md](architecture.md), and the target design is in
-[plans/refactor.md](plans/refactor.md). Line numbers are for `46f5719`. They drift, but the
-function names don't, so search for the name if a line has moved.
+[plans/refactor.md](plans/refactor.md). Code is named by file and function, not line: search
+for the name.
 
 Where the code does not say something clearly, this page says "unclear from the code" rather
 than guess.
@@ -43,20 +72,22 @@ is built but not wired.
 
 ## 1. The short version
 
-- **`main` wires, components do the work.** `main/main.cpp` (1426 lines, `app_main` about 220
-  code lines) builds each component from a `Config`, fills the ports the components call out
-  through, and starts the tasks. The logic lives in `components/*`.
+- **`main` wires, components do the work.** `main/main.cpp` (491 lines, `app_main` about 230
+  of them) builds each component from a `Config` and starts the tasks; small files beside it
+  hold the ports, the stick task's I/O and the task configs ([§2.3](#23-what-stays-in-main)).
+  The logic lives in `components/*`.
 - **Three tasks matter for the user:**
   - **Read ADC** (`control`'s `StickIsland`, priority 21, core 0, 6 KB, waits 33 ms after each
     cycle): reads the stick, runs C4's **motion guard** (UI heartbeat, link, MibStatus age, MCB
-    state, watchdog subscriptions), C2's **stick monitor**, C3's POST rest window, the
+    state, task watchdog (TWDT) subscriptions), C2's **stick monitor**, C3's POST rest window, the
     `StickPipeline`, then C1's **output permit**, publishes `XYTwist` every cycle (the stick, or
     a literal 0), and resets the task watchdog.
   - **UI task** (`lv_task`, priority 20, core 1, every 8 ms): `hmi_ui`'s `UiIsland` runs
     `lv_task_handler()` under the one global `lvgl_mutex`. Every screen, timer and button press,
     the **POST runner** and the **drive session** run here. It stamps a heartbeat after every
     cycle.
-  - **RTPS workers** (espp's `rtps_worker_0/1`, raised to priority 20): send every publish and
+  - **RTPS workers** (espp's `rtps_worker_0/1`, created at priority 20 through
+    `RtpsParticipant::Config`, espp PR 4): send every publish and
     run every subscriber callback. The MibStatus handler stores the MCB state and its stamp for
     the motion guard first, then writes LVGL subjects under `lvgl_mutex`.
 - **One output permit decides whether the stick drives.** Every cycle the ADC task checks eight
@@ -94,21 +125,23 @@ Safety column of [project-profile.md](project-profile.md)). "Host" means a host 
 
 | Path | What it is | Safety | Tests |
 | --- | --- | --- | --- |
-| `main/` | `app_main` and the wiring; the network and RTPS (`rtps_comms`); the self test; the log capture; main's side of four screens; the calibration adapter (see [§2.3](#23-what-stays-in-main)) | yes | bench B0-B5e, hazard steps |
+| `main/` | `app_main` and the wiring: the ports, the stick task's I/O, the task configs, the cues, the bench hooks; the extended self test; main's side of four screens; the calibration adapter (see [§2.3](#23-what-stays-in-main)) | yes | bench B0-B5e, hazard steps |
 | `components/drive_session` | The drive session: the 59-row table (`drive_session_table.hpp`, read as `TABLE.md`) and `DriveSession`, the hand-written transition function checked against it; `TABLE_FINGERPRINT` pins the data | yes | host: DSO table self-check, oracle, oracle by input (CI), full oracle (on demand), mutants, equivalence |
 | `components/drive_adapter` | `DriveAdapter<Port>`: samples link, MIB state, screen, menu, calibration, hold reason, POST gate and stick fault; keeps the deadlines and the stop re-send; performs the session's actions through a port; publishes its phase and notice for other tasks | yes | host: DAD-L1; `tests/host/drive_golden` (GLD) |
 | `components/drive_ui` | `DrivePort<DriveUi>` (the LVGL and DriveCommand calls), `DriveUi` (padlock, unlock advance, the stick gate's writer), `StickButton` (GPIO48 edges); also the vocabulary hmi_ui shares (`Fn`, `LinkState`, `Refused`, `SharedSubjects`) | yes | drive goldens; bench B4, B5, B5'' |
-| `components/stick` | `StickPipeline`: raw mV in, the keypad key and the `XYTwist` command out; `StickMonitor`/`MonitorCycle` (C2's stick fault state machine); `OutputPermit` (C1); `PermitHooks` (the permit's three channels); `ButtonEdges`; the bench injection's parser (`bench_inject.hpp`) | yes | host: L1-STK |
-| `components/control` | `StickIsland`: the "Read ADC" task, the continuous ADC's windows (X/Y) and the twist's oneshot ADC; `ControlCycle` (one cycle: guard, stick, note, watchdog reset); `MotionGuard` (C4); `BenchStall` | yes | host: L1-CTL |
-| `components/espp_adc`, `components/adc_window` | espp's ADC component, vendored, with hook lines; the lock-free window snapshot (mean, max, sequence) C2 reads | not in the profile (both feed the stick) | through L1-STK, L1-CTL |
+| `components/stick` | `StickPipeline`: raw mV in, the keypad key and the `XYTwist` command out; X/Y mapped by espp's 2-axis `espp::Joystick`, the twist by its own `espp::FloatRangeMapper` (`twist_mapper_`, J1); `mapping_selftest()` (J2, the boot check of that mapping); `StickMonitor`/`MonitorCycle` (C2's stick fault state machine); `OutputPermit` (C1); `PermitHooks` (the permit's three channels); `ButtonEdges`; the bench injection's parser (`bench_inject.hpp`) | yes | host: L1-STK, L1-JOY (`tests/host/joystick`: espp's Joystick and the twist mapper) |
+| `components/control` | `StickIsland`: the "Read ADC" task, the continuous ADC's X/Y windows (espp's `ContinuousAdc::get_windows()`, PR 1) and the twist's oneshot ADC; `ControlCycle` (one cycle: guard, stick, note, watchdog reset); `MotionGuard` (C4); `BenchStall` | yes | host: L1-CTL |
 | `components/post` | The quick POST: the check table (19 checks, latched or live), the evaluator, the rest window (fed by Read ADC) and `PostRunner` (run by `hmi_ui`'s `PostStage` on the UI task) | yes | host: L1-POST |
+| `components/post_facts` | The POST's facts from ESP-IDF and FreeRTOS for `PostPort`: `hmi::post_facts::now_ms`, `reset_reason`, `image`, `memory`, `stacks`, `stick_task_running` (was `main.cpp`'s `kPostPort` helpers) | yes | bench (POST checks) |
+| `components/seat` | The seat path's pure core (header-only): `seat_reading` (a MibStatus seat field known or unknown) and the seat gate (`ready`, `gate`, `decide`, the step and preset targets) | yes | host: L1-SEAT |
 | `components/joystick_cal` | The calibration record, its file format and `check()`, and the calibration run as a pure model | yes | host: L1-CAL |
-| `components/joystick` | espp's joystick, vendored, plus a twist (Z) axis | yes | host: L1-JOY |
 | `components/hmi_rtps_spec` | What only this HMI adds to the RTPS spec: HMI topics, timeouts, seat unit helpers, banner and notice texts, self-test tags | in part | host: L1-RTPS |
-| `components/hmi_ui` | The UI island: `UiApp` and every view, `UiIsland` (the UI task), `UiPoll` (the 250 ms tick), `PostStage` (the POST runner), `NavView`, `RefusalView`, `DriveNoticeView`, `HoldEngine`, `DisplayFlip`, `app_state` (the shared atomics) | no | bench B4 |
-| `components/board` | `Board`: the Tab5 bring-up on the BSP in `app_main`'s order; the touch and side-button adapters; `backlight`, `present` | no | bench |
-| `espp/m5stack-tab5` | espp's Tab5 BSP (third party; two frame buffers and the vsync present from its Kconfig and API) | no | none |
+| `components/net_link` | The network link (W5500 Ethernet, or Wi-Fi via the ESP32-C6) and the one RTPS participant: `src/rtps_comms.cpp` (every publisher and subscriber, the link state and flags, the workers' priority) and `src/link_log.cpp` (`rtps_comms_log_link_change`). Header `rtps_comms.hpp`; was `main/rtps_comms.*` | yes | self test `net.*`, `rtps.*`; bench B1, B2 |
+| `components/hmi_ui` | The UI island: `UiApp` and every view, `UiIsland` (the UI task), `UiPoll` (the 250 ms tick), `PostStage` (the POST runner), `NavView`, `RefusalView`, `DriveNoticeView`, `HoldEngine`, `DisplayFlip` (incl. `start_direct_render`), `app_state` (the shared atomics) | no | bench B4 |
+| `components/board` | `Board`: the Tab5 bring-up on the board support package (BSP) in `app_main`'s order; the touch and side-button adapters; `backlight`, `present` | no | bench |
 | `components/housekeeping` | `Housekeeping` (the "Data Display Task": IMU, battery, RTC every 20 ms) and `SystemClock` (keeps the clock and RTC to the MIB's time) | no | bench |
+| `components/log_capture` | Tees stdout and stderr into a 500-line PSRAM ring for the Log screen; `log_capture_start` runs first in `app_main` (was `main/log_capture.*`) | no | self test `log.capture` |
+| `components/alloc_guard` | Bench only (`CONFIG_HMI_BENCH_ALLOC_GUARD`): counts heap allocations per watched task after start-up, for the self test's `mem.alloc_*` rows; compiles to nothing otherwise | bench only | host: L1-AGC; bench |
 | `components/feedback` | `Feedback`: the DRV2605 haptics and the click sound; the DA7280 bench test | no | bench |
 | `components/settings` | User settings from one typed table, `/storage/settings.txt`; `AppliedSettings` (the atomics other tasks read) | feeds the stick | host: L1-SET |
 | `components/storage` | LittleFS at `/storage`, atomic write, one-time legacy migration | no | bench B2 |
@@ -121,6 +154,10 @@ Safety column of [project-profile.md](project-profile.md)). "Host" means a host 
 | `components/topology` | The target task and channel map (feeds D2). **Not wired** | n/a | host: TOP-L1 |
 | `components/ui` | The SquareLine Studio export. **Generated**; never edit it | no | `scripts/ui_contract.py` |
 | `external/rammp-rtps` | Submodule: the RTPS topics and messages shared with the MIB/MCB | yes (wire format) | header-only |
+| `espp/adc` (third party) | `ContinuousAdc` (X/Y by DMA at 1 kHz, its own task) and the oneshot ADC (twist). PR 1 adds the window summary: per channel the mean, the max and a sequence, for several channels in one `get_windows()` call under espp's data mutex | not in the profile (feeds the stick) | espp's own; bench C2 |
+| `espp/joystick` (third party) | espp's 2-axis `Joystick` (X/Y only, no z axis), as released; the twist's `FloatRangeMapper` is espp `math`'s | not in the profile (feeds the stick) | through L1-STK, L1-JOY |
+| `espp/m5stack-tab5` (third party) | The Tab5 BSP. PR A: `CONFIG_M5STACK_TAB5_DPI_NUM_FBS=2`, `render_to_frame_buffers`, `frame_buffers()`; PR B: `present_frame()`, the vsync-gated swap; #738: the ST7121 rotation and the flush contract (a custom flush calls `lv_display_flush_ready` itself) | no | none |
+| `espp/rtps` (third party) | The RTPS participant, its reactor and worker tasks. PR 2: `RtpsParticipant::matched_readers(topic)` (the boot DISABLE waits for it, T1); PR 4: `Config::transport_worker_priority` (the workers at 20) | not in the profile (carries every message) | espp's own; bench |
 
 ### 2.2 Component map
 
@@ -129,11 +166,12 @@ graph is D3 in [architecture.md](architecture.md#d3-components).
 
 ```mermaid
 flowchart LR
-  main["main · app_main, ports, rtps_comms, selftest"]:::safety
+  main["main · app_main, ui_ports, stick_io, task_configs, cues, bench_hooks, selftest"]:::safety
   subgraph ui["UI island · lv_task"]
-    hmi_ui["hmi_ui · UiApp, views, PostStage"]
+    hmi_ui["hmi_ui · UiApp, views, PostStage, DisplayFlip"]
     drive_ui["drive_ui · DrivePort, DriveUi, StickButton"]:::safety
     gen["ui · SquareLine export"]:::gen
+    seat["seat · gate, reading"]:::safety
   end
   subgraph drive["drive decision"]
     adapter["drive_adapter"]:::safety
@@ -141,14 +179,13 @@ flowchart LR
   end
   subgraph ctl["control island · Read ADC"]
     control["control · StickIsland, MotionGuard"]:::safety
-    stick["stick · pipeline, monitor, permit"]:::safety
-    adcw["espp_adc, adc_window"]
-    joystick["joystick · espp vendored"]:::safety
+    stick["stick · pipeline, twist mapper, monitor, permit"]:::safety
   end
   post["post · checks, rest window, runner"]:::safety
+  pf["post_facts · IDF facts"]:::safety
+  net["net_link · rtps_comms, link log"]:::safety
   subgraph svc["board and services"]
     board["board"]
-    bsp["m5stack-tab5 · BSP"]:::hw
     hk["housekeeping"]
     fb["feedback"]
     settings["settings"]
@@ -156,6 +193,8 @@ flowchart LR
     ota["ota"]
     rui["remote_ui · bench"]
     cal["joystick_cal"]:::safety
+    logc["log_capture"]
+    ag["alloc_guard · bench"]
   end
   subgraph pure["pure libraries"]
     fmt["hmi_format"]
@@ -163,6 +202,12 @@ flowchart LR
     spec["hmi_rtps_spec"]:::safety
     otap["ota_parse"]
     fwc["fw_core"]
+  end
+  subgraph espp["espp · third party, local PR branches"]
+    eadc["adc · PR 1 windows"]
+    ejoy["joystick · 2-axis"]
+    bsp["m5stack-tab5 · BSP, PR A/B"]:::hw
+    ertps["rtps · PR 2/4"]
   end
   topo["topology · not wired"]:::gen
   main --> hmi_ui
@@ -174,17 +219,25 @@ flowchart LR
   main --> rui
   main --> ota
   main --> cal
+  main --> net
+  main --> pf
+  main --> logc
+  main --> ag
   hmi_ui --> drive_ui
   hmi_ui --> post
+  hmi_ui --> seat
   hmi_ui --> gen
   drive_ui --> adapter
   adapter --> session
   adapter --> stick
-  control --> stick --> joystick
-  control --> adcw
+  control --> stick --> ejoy
+  control --> eadc
   stick --> fwc
   post --> stick
+  pf --> post
   cal --> stick
+  net --> spec
+  net --> ertps
   board --> bsp
   board --> hk
   hk --> bsp
@@ -206,8 +259,11 @@ What this means in practice:
   gives it, and its private `src/` is closed to others (an L0 check).
 - **Templates keep the hot paths in one unit.** `StickIsland`, `ControlCycle`,
   `StickPipeline::cycle`, `OutputPermit`, `MotionGuard`, `DriveAdapter` and `DrivePort` are
-  templates or header-only, instantiated in `main.cpp`. So the ADC path and the drive path are
-  direct calls, and the ADC task's stack is measured (POST `stk.adc`, self test `mem.stk_adc`).
+  templates or header-only, instantiated in `main.cpp` (the types are named in
+  `main/stick_io.hpp` `MainStickIsland` and `main/app_instances.hpp` `MainDriveAdapter`). So
+  the ADC path and the drive path are direct calls, and the ADC task's stack is measured (POST
+  `stk.adc`, self test `mem.stk_adc`). `AdcStickIo`'s out-of-line steps are defined in
+  `stick_io.hpp` on purpose, so `main.cpp`'s unit compiles the cycle as before the split.
 - **Shared state is partly global.** `hmi_ui/app_state.cpp` holds the atomics and subjects the
   old `frag_state.inc` held (`stick_drives`, `joy_key`, `joy_button_pressed`, ...), waiting for
   their owners (app-main-shrink S7, T-H4a). The hazard fixes' channels are owned:
@@ -216,77 +272,96 @@ What this means in practice:
 
 ### 2.3 What stays in `main/`
 
-These are approved deviations from "main only wires" (CS-LAY-01).
+"Main only wires" is rule CS-LAY-01. Everything below is wiring (composition), or an approved
+deviation from that rule ([project-profile.md](project-profile.md), deviations).
 
 | File | Job |
 | --- | --- |
-| `main.cpp` | `app_main`; the port tables (`kLinkPort`, `kDriveInputs`, `kCuesPort`, `kSelfTestPort`, `kBoardPort`, `kMainScreens`, `kPostPort`); the one `UiApp`, `DrivePort` and `DriveAdapter`; `AdcStickIo` (what one stick cycle reads and writes: the permit, the monitor step, the rest window, the publish) and `StickPorts` (the ADC clock, the watchdog, the bench STALL); the bench verb hooks; the entry points other tasks call under `lvgl_mutex` (`brightness_set`, `brightness_step`, `stick_button_edge`, `lvgl_cycle`) |
-| `rtps_comms.cpp/.hpp` | The network link (W5500 Ethernet, or Wi-Fi via the C6) and the one RTPS participant: every publisher and subscriber, the link state and flags, the RTPS workers' priority |
-| `selftest.cpp/.hpp`, `selftest_spec.hpp`, `selftest_platform.cpp/.hpp`, `selftest_names.cpp/.hpp` | The extended self test: 60 checks, an overlay, a report over RTPS and serial; the board probes it reads |
+| `main.cpp` (491 lines) | `app_main`; `lvgl_mutex`; the one `UiApp` (`ui_app`, `constinit`), `drive_port` and `drive_adapter`; the UI's three loggers; `clock_valid`; `click_sound_config`; `internet_screen_init`, `update_screen_init` (both hand the screen the lock; Update also its 30 s OTA confirm timer); `AdcStickIo::show` (the bars, try-lock); the entry points other tasks call under `lvgl_mutex` (`brightness_set`, `brightness_step`, `stick_button_edge`, `gpio48_button_callback`, `lvgl_cycle`); `remote_ui_config`; `park_main_task` |
+| `ui_ports.hpp/.cpp` | The `UiApp`'s port tables (`inline constexpr`): `kLinkPort`, `kDriveInputs`, `kSelfTestPort`, `kBoardPort`, `kMainScreens`, `kPostPort`; what they point at: `link_text`, `action_restart_hmi`, `post_calibration`, the drive-session thunks (`drive_session_input`, `drive_wait_poll`, `drive_unlock_hold_done`, `drive_exit_hold_done`, `drive_refresh_notice`), `log_screen_init`, `calibration_screen_init`, `joystick_keypad_read` |
+| `cues.hpp/.cpp` | `kCuesPort`; `cues_attach` (points the cues at `app_main`'s `Feedback`), `haptic_play`, `play_click`, `play_refusal`, `refusal_feedback`, `load_audio` (click.wav) |
+| `stick_io.hpp/.cpp` | The stick task's wiring: `AdcStickIo` (what one Read ADC cycle reads and writes outside the pipeline: the permit, the monitor step, the rest window, the publish, the self-test note), `StickPorts`/`BenchStickPorts` (the ADC clock, the watchdog, the bench STALL), `kStickCycle` (33 ms, the twist channel), `MainStickIsland`, `stick_island_config`, `stick_calibration_at_boot` |
+| `task_configs.hpp/.cpp` | The task configs as literals: `housekeeping_config` (Data Display Task), `gpio48_button_config` (Button), `ui_island_config` (`lv_task`, with the heartbeat and watchdog hooks) |
+| `bench_hooks.hpp/.cpp` | `bench_verb_hooks` (the hazard bench verbs' hooks) and `bench_verb_seat_publish` (SEATFAIL); bench inject builds only |
+| `app_instances.hpp` | `extern` declarations of `ui_app` and `drive_adapter`, and the `MainDriveAdapter` type, for main's other files |
+| `selftest.cpp/.hpp`, `selftest_spec.hpp`, `selftest_platform.cpp/.hpp`, `selftest_names.cpp/.hpp` | The extended self test: 60 checks (63 in an alloc-guard build), an overlay, a report over RTPS and serial; `selftest_platform()` fills the board probes it reads, incl. the motion guard and stick monitor probes |
 | `joystick_cal.cpp/.hpp` | The calibration's adapter: the file I/O, the LVGL view of the run, the hand-off to the ADC task |
 | `about_ui`, `internet_ui`, `update_ui`, `log_view` | Main's side of four screens whose views are in `hmi_ui`: worker threads, network and OTA calls, the hand-back to the UI task, the restarts |
-| `log_capture.cpp/.hpp` | Tees stdout and stderr into a 500-line PSRAM ring for the Log screen |
 | `lv_mem_psram.c` | LVGL's allocator: every LVGL allocation goes to PSRAM, leaving internal DMA RAM for the W5500 |
 | `boot_logo.c/.h`, `click.wav` | The boot logo mask and the click sound, embedded |
-| `Kconfig.projbuild` | Build options: `HMI_REMOTE_UI`, `HMI_BENCH_STICK_INJECT`, `HMI_WIFI_SSID/PASSWORD`, `HMI_OTA_TEST_URL`, `HMI_BENCH_DA7280_TEST`, `HMI_DEBUG_FPS(_STRESS)`, and the hidden `_AS_INT` mirrors (`HMI_BOOTLOADER_SKIPS_VALIDATE_AS_INT` among them) |
+| `Kconfig.projbuild` | Build options: `HMI_REMOTE_UI`, `HMI_BENCH_STICK_INJECT`, `HMI_BENCH_ALLOC_GUARD`, `HMI_WIFI_SSID/PASSWORD`, `HMI_OTA_TEST_URL`, `HMI_BENCH_DA7280_TEST`, `HMI_DEBUG_FPS(_STRESS)`, and the hidden `_AS_INT` mirrors (`HMI_BOOTLOADER_SKIPS_VALIDATE_AS_INT` among them) |
+| `idf_component.yml` | The managed components; every espp one by `override_path` to the local espp worktree (TEST ONLY, see the top of this page) |
+
+**Why `main.cpp` keeps what it keeps.** `main.cpp` owns the LVGL lock (`lvgl_mutex`): views
+take no lock, and callers on other tasks take main's (CS-OWN-08). The L0 ratchet
+(`tools/l0/ratchet.py`) counts every `lv_*` use outside the UI files (`lv_outside_ui`; `main.cpp`
+and `hmi_ui` are UI files, the new wiring files are not) and every lock outside `fw_core`'s
+channel helpers (`locks`; `main.cpp`'s are baselined) as debt that may only fall. So anything
+that calls LVGL or takes the lock stayed in `main.cpp`: the entry points, `lvgl_cycle`,
+`AdcStickIo::show`, `click_sound_config` (an LVGL timer), the Internet and Update screen inits,
+the RTPS handlers in `app_main`. The split files hold none of either.
 
 ## 3. Boot: `app_main` step by step
 
-`app_main` (`main.cpp:1030-1406`) runs on IDF's `main` task (priority 1, core 0). The board
-steps are `hmi::board::Board` methods; the UI steps are `UiApp` methods.
+`app_main` (`main/main.cpp`) runs on IDF's `main` task (priority 1, core 0). The board steps
+are `hmi::board::Board` methods; the UI steps are `UiApp` methods (`ui_app`); the configs come
+from main's wiring files.
 
 ```mermaid
 flowchart TD
   p0["0 · log capture, storage migration, OTA boot report"]
-  p1["1 · Board: I2C probe, Feedback with DRV2605, DA7280 bench test, IO expanders, LCD and LVGL display"]:::hw
-  p2["2 · DIRECT render into the panel frame buffers, refresh 16 ms"]:::hw
+  p1["1 · Board: I2C probe, Feedback with DRV2605, DA7280 bench test, IO expanders, LCD and LVGL display on two frame buffers"]:::hw
+  p2["2 · DisplayFlip::start_direct_render into the panel frame buffers, refresh 16 ms"]:::hw
   p3["3 · Housekeeping object, IMU, uSD, SystemClock, RTC, battery, audio, side button"]:::hw
   p4["4 · build_screens, then UiApp::build: settings, subjects, chrome, banners, 250 ms poll"]:::gen
   p5["5 · GPIO48 Button task, keypad, UiApp::build_input: holds, screens, boot to Locked timer"]:::safety
-  p6["6 · selftest_init with the guard and monitor hooks, UiApp::build_on_demand_parts"]
-  p7["7 · touch; rest window mailbox and Read ADC state; PostStage::attach; UiIsland starts lv_task"]:::safety
-  p8["8 · click sound (a failure only logs), speaker, housekeeping task, joystick self-check"]
+  p6["6 · selftest_platform + selftest_init, UiApp::build_on_demand_parts"]
+  p7["7 · touch; rest window mailbox and Read ADC state; loggers; POST attach; UiIsland starts lv_task"]:::safety
+  p8["8 · click sound (a failure only logs), speaker, housekeeping task, mapping self test J2 (abort on failure)"]:::safety
   p9["9 · StickIsland: ADCs up, motion guard wired, calibration loaded, Read ADC task starts"]:::safety
   p10["10 · RTPS handlers (MibStatus stamps the guard first), rtps_comms_start, TopBar link label, firmware hash"]:::safety
-  p11["11 · bench verbs if built in, remote UI if built in, then sleep forever"]
+  p11["11 · bench verbs and remote UI if built in, alloc guard if built in, then sleep forever"]
   p0 --> p1 --> p2 --> p3 --> p4 --> p5 --> p6 --> p7 --> p8 --> p9 --> p10 --> p11
   classDef hw fill:#d9dde3,stroke:#7a8590,color:#111
   classDef safety stroke:#c0392b,stroke-width:3px
   classDef gen stroke-dasharray:5 4
 ```
 
-| Phase | Lines | What happens | Notes |
+| Phase | Calls (where) | What happens | Notes |
 | --- | --- | --- | --- |
-| 0 | `main.cpp:1033-1039` | `log_capture_start` first, so the Log screen sees everything. `storage_migrate_legacy`, `github_ota_boot_report` | |
-| 1 | `:1041-1069` | `Board` built. `probe_internal_i2c` (0x08..0x77; the found set later goes to POST's I2C check). `Feedback` built: its constructor brings up the DRV2605; `feedback` points at it. `run_da7280_bench` (no-op unless `HMI_BENCH_DA7280_TEST`). `start_io_expanders`, `start_display` (LCD, full-screen PSRAM draw buffers) | either failure stops the boot (`park_main_task`): no UI ever |
-| 2 | `:1078-1089` | `start_direct_render`: LVGL renders straight into the two DSI frame buffers (`DisplayFlip::use_panel_buffers`); a flush is a vsync swap. Refresh timer 16 ms. FPS meter only with `HMI_DEBUG_FPS` | if the buffers are missing, the BSP's flush stays; the self test reports it |
-| 3 | `:1093-1118` | `Housekeeping` built (the Kalman filter the IMU needs). `start_imu`, `start_sdcard` (only warns), `SystemClock` built, `start_rtc` (sets the clock if the RTC time is plausible), `start_battery`, `start_audio`, `start_side_button` | IMU, RTC, battery or audio failure stops the boot (`park_main_task`). **The side-button task is live from here** and its press takes `lvgl_mutex` |
-| 4 | `:1125-1129` | `build_screens`: rotation 0, `ui_init()` builds all 14 screens, BenchMotors, Settings, SkunkWorks and Diagnostics are destroyed again, the boot logo is swapped for an A8 mask. `UiApp::build`: settings load and theme, brightness, every Settings subject, the Joystick bars, the MCB/link/band subjects, every resident screen's chrome, the banners, **the 250 ms poll timer**, the calibration view | subjects are initialised before anything binds to them |
-| 5 | `:1136-1157` | **GPIO48 `Button` task starts** (its callback takes `lvgl_mutex`). `KeypadInput` for the stick. `UiApp::build_input`: nav groups and the 500 ms backstop, the padlock and the three holds (**33 ms hold poll**, which also refreshes the Drive notice), Log/Seat/Internet/About, Update (its **30 s OTA confirm** one-shot), seat values and screen-loaded hooks, `finish_build` (perf overlay hidden, overdraw pass, **1.2 s boot→Locked** one-shot) | the Button task is live while `app_main` keeps building the UI without the lock (H15) |
-| 6 | `:1164-1186` | `selftest_platform` with two C4/C2 hooks (`motion_guard`: both watchdog subscriptions, the largest UI heartbeat age, UI stalls while driving; `stick_monitor`: stick health, implausible samples, the largest X/Y age), then `selftest_init` (registers the self test's RTPS handlers, so before RTPS starts). `build_on_demand_parts` (PIN pad, Settings, Skunk Works, Diagnostics parts that outlive their screens) | |
-| 7 | `:1188-1254` | `start_touch` (BSP touch task; each press clicks). The touch input is wrapped for the flip, under the lock. The **POST rest window mailbox** and the ADC task's state (`AdcStickIo::State`: the permit, the rest window, the mailbox's write end, the monitor) are made; `ui_app.attach_stick_log`; `PostStage::attach` takes the mailbox's read end, the I2C scan and the `post` logger. **`UiIsland::start`: `lv_task` runs**, with the heartbeat and the watchdog subscription on its first cycle | from here every LVGL call must hold `lvgl_mutex`. The POST runner starts with the 250 ms poll: its 3 s budget runs from its first tick |
-| 8 | `:1259-1279` | `load_audio` (click.wav): on success `start_speaker`; on failure an error line and the boot goes on silent (owner, 2026-10-11). `housekeeping.start()` (the 20 ms task). `espp::joystick_selftest()` (asserts; nothing under `NDEBUG`) | a housekeeping task that fails to start is logged (error) and the boot goes on |
-| 9 | `:1291-1358` | `StickIsland` built: the continuous ADC (ADC1 CH0/CH1, 1 kHz, **its task at priority 20**) starts, then the twist's oneshot ADC (ADC2 CH3). The motion guard gets `GuardSources`, rtps_comms' link flags, `stick_drives` and `GuardTelemetry`. `joystick_cal_load` (ideal 0/1650/3300 mV if no valid file; then `joystick_cal_measured()` is false and the permit holds the stick). The monitor takes the calibration's limits. `stick_island.start`: the `StickPipeline` (or `StickInjectBench`) on that calibration, **the `Read ADC` task** | a failed start is logged (error) and the boot goes on with no `XYTwist` (no motion); POST's budget then fails with "Read ADC not running" |
-| 10 | `:1366-1394` | RTPS handlers: brightness, MibStatus (**first** `note_mib_status` for the guard, then the clock outside the lock, then the subjects under it), diagnostics. `rtps_comms_start` with the network setting. TopBar link label, under the lock. `fw_info_start` (hashes the image on a low-priority thread, after the W5500 is up) | a network failure only warns |
-| 11 | `:1400-1405` | In stick-inject builds `remote_ui_attach_bench_verbs` (the hazard verbs' hooks), then `remote_ui_start` (no-op unless `HMI_REMOTE_UI`), then `park_main_task()`: `sleep(1s)` for good | `app_main` never returns, so every local stays alive |
+| 0 | `log_capture_start` (`components/log_capture`), `storage_migrate_legacy` (`components/storage`), `github_ota_boot_report` (`components/ota`) | the log capture first, so the Log screen sees everything; the one-time storage migration; the OTA image's boot report | |
+| 1 | `Board` (`components/board`), `Feedback` (`components/feedback`), `cues_attach` (`main/cues.cpp`) | `Board` built with `brightness_step` and `kCuesPort.click`. `probe_internal_i2c` (0x08..0x77; the found set later goes to POST's I2C check). `Feedback` built with `click_sound_config()`: its constructor brings up the DRV2605; `cues_attach` points main's cues at it. `run_da7280_bench` (no-op unless `HMI_BENCH_DA7280_TEST`). `start_io_expanders`, `start_display` (LCD, then the BSP's LVGL display with `render_to_frame_buffers`: LVGL draws into the panel's two frame buffers, espp PR A) | either failure stops the boot (`park_main_task`): no UI ever |
+| 2 | `ui_app.display_flip().start_direct_render(...)` (`components/hmi_ui` `DisplayFlip`) | passed `tab5.frame_buffers()`, `frame_buffer_size()` and the panel size: LVGL renders in DIRECT mode straight into the two DSI (MIPI display serial interface) frame buffers (`use_panel_buffers`); a flush is a vsync-gated swap (`present_frame`, espp PR B). Refresh timer 16 ms. FPS meter only with `HMI_DEBUG_FPS` | if the buffers are missing, the BSP's flush stays; the self test reports it (`direct_render` goes to `selftest_platform`) |
+| 3 | `Housekeeping(housekeeping_config())` (`main/task_configs.cpp`), `SystemClock` (`components/housekeeping`) | `Housekeeping` built (the Kalman filter the IMU needs). `start_imu`, `start_sdcard` (only warns), `SystemClock` built, `start_rtc` (sets the clock if the RTC time is plausible), `start_battery`, `start_audio`, `start_side_button` | IMU, RTC, battery or audio failure stops the boot (`park_main_task`). **The side-button task is live from here** and its press takes `lvgl_mutex` (`brightness_step`) |
+| 4 | `hmi::ui::build_screens`, `ui_app.build()` (`components/hmi_ui`) | `build_screens`: rotation 0, `ui_init()` builds all 14 screens, BenchMotors, Settings, SkunkWorks and Diagnostics are destroyed again, the boot logo is swapped for an A8 mask. `UiApp::build`: settings load and theme, brightness, every Settings subject, the Joystick bars, the MCB/link/band subjects, every resident screen's chrome, the banners, **the 250 ms poll timer**, the calibration view | subjects are initialised before anything binds to them |
+| 5 | `static espp::Button gpio48_button(gpio48_button_config(gpio48_button_callback))` (`main/task_configs.cpp`, `main/main.cpp`); `espp::KeypadInput` with `joystick_keypad_read` (`main/ui_ports.cpp`); `ui_app.build_input` | **GPIO48 `Button` task starts** (its callback, `stick_button_edge`, takes `lvgl_mutex`). `UiApp::build_input`: nav groups and the 500 ms backstop, the padlock and the three holds (**33 ms hold poll**, which also refreshes the Drive notice), Log/Seat/Internet/About, Update (its **30 s OTA confirm** one-shot, `update_screen_init`), seat values and screen-loaded hooks, `finish_build` (perf overlay hidden, overdraw pass, **1.2 s boot→Locked** one-shot) | the Button task is live while `app_main` keeps building the UI without the lock (H15) |
+| 6 | `selftest_platform` (`main/selftest_platform.cpp`), `selftest_init` (`main/selftest.cpp`), `ui_app.build_on_demand_parts` | `selftest_platform(&cues, found_addresses, direct_render)` fills the board probes, incl. the C4/C2 ones (`motion_guard`: both watchdog subscriptions, the largest UI heartbeat age, UI stalls while driving; `stick_monitor`: stick health, implausible samples, the largest X/Y age); `app_main` adds `lvgl_mutex`. `selftest_init` registers the self test's RTPS handlers, so before RTPS starts. `build_on_demand_parts` (PIN pad, Settings, Skunk Works, Diagnostics parts that outlive their screens) | |
+| 7 | `board.start_touch`, `DisplayFlip::wrap_touch`; `RestWindowMailbox`, `AdcStickIo::State` (`main/stick_io.hpp`); `ui_app.attach_stick_log`, `attach_seat_log`, `ui_app.post().attach`; `UiIsland(ui_island_config(lvgl_cycle, ...))` (`main/task_configs.cpp`) | `start_touch` (BSP touch task; each press clicks). The touch input is wrapped for the flip, under the lock. The **POST rest window mailbox** and the ADC task's state (the permit, the rest window, the mailbox's write end, the monitor) are made. The `stick` and `seat` loggers go to the `UiApp`; `PostStage::attach` takes the mailbox's read end, the I2C scan and the `post` logger. **`UiIsland::start`: `lv_task` runs**, with the heartbeat and the watchdog subscription on its first cycle | from here every LVGL call must hold `lvgl_mutex`. The POST runner starts with the 250 ms poll: its 3 s budget runs from its first tick |
+| 8 | `load_audio` (`main/cues.cpp`), `board.start_speaker`, `housekeeping.start()`, `hmi::stick::mapping_selftest()` (`components/stick`) | `load_audio` (click.wav): on success `start_speaker`; on failure an error line and the boot goes on silent (owner, T4). `housekeeping.start()` (the 20 ms task). **The mapping self test (J2)** checks the stick's mapping math (dead bands, the circular clamp, the twist independent of X/Y) | a housekeeping task that fails to start is logged (error) and the boot goes on. **A mapping self test failure logs "Stick mapping self test FAILED" and calls `abort()`** (a reset), in every build |
+| 9 | `MainStickIsland stick_island(stick_island_config())`, `stick_calibration_at_boot` (`main/stick_io.cpp`); `stick_island.start(stick_pipeline_config(cal), adc_state)` | `StickIsland` built: the continuous ADC (ADC1 CH0/CH1, 1 kHz, **its task at priority 20**) starts, then the twist's oneshot ADC (ADC2 CH3). The motion guard gets `GuardSources`, net_link's link flags (`rtps_comms_link_flags`), `stick_drives` and `GuardTelemetry`. `stick_calibration_at_boot`: `joystick_cal_load` (ideal 0/1650/3300 mV if no valid file; then `joystick_cal_measured()` is false and the permit holds the stick), and the monitor takes the calibration's limits. `stick_island.start`: the `StickPipeline` (or `StickInjectBench`) on that calibration, **the `Read ADC` task** | a failed start is logged (error) and the boot goes on with no `XYTwist` (no motion); POST's budget then fails with "Read ADC not running" |
+| 10 | `rtps_comms_on_brightness`, `rtps_comms_on_mib_status`, `rtps_comms_on_diagnostics`, `rtps_comms_start` (`components/net_link`); `link_text` (`main/ui_ports.cpp`); `fw_info_start` (`components/ota`) | RTPS handlers: brightness (`brightness_set`), MibStatus (**first** `note_mib_status` for the guard, then the clock outside the lock, then the subjects under it), diagnostics. `rtps_comms_start` with the network setting. TopBar link label, under the lock. `fw_info_start` (hashes the image on a low-priority thread, after the W5500 is up) | a network failure only warns |
+| 11 | `remote_ui_attach_bench_verbs(bench_verb_hooks())` (`main/bench_hooks.cpp`), `remote_ui_start(remote_ui_config())`, `hmi::alloc_guard::start`, `park_main_task` | In stick-inject builds the hazard bench verbs' hooks, then `remote_ui_start` (no-op unless `HMI_REMOTE_UI`); in alloc-guard builds the allocation counter is armed for the self test's watched tasks; then `park_main_task()`: `sleep(1s)` for good | `app_main` never returns, so every local stays alive |
 
 Things to keep in mind:
 
 - **A failed step stops the boot, and `app_main` never returns.** A failure in phases 1-3, at
   touch or at the UI task's start ends in `park_main_task()`, which sleeps for good, so no UI
-  ever starts. After phase 7 nothing stops the boot: a failed click sound, housekeeping task or
-  Read ADC task is logged and the boot goes on.
+  ever starts. After phase 7 a failed click sound, housekeeping task or Read ADC task is logged
+  and the boot goes on. The one exception is the mapping self test (phase 8): its failure
+  aborts, which resets the board.
 - **Why it parks instead of returning.** From phase 3 on, the BSP's side-button task holds a
   `SideButton` that refers to `app_main`'s logger; from phase 7 the touch task calls the
-  `Board`'s `TouchClick` and, through it, `feedback`; the ADC task's state and the rest window
+  `Board`'s `TouchClick` and, through it, `cues`; the ADC task's state and the rest window
   mailbox are `app_main` locals. The BSP has no call that stops its tasks, so a `return` would
   leave them calling destroyed locals. Parked, every local lives.
 - **No motion until POST passes.** The POST gate starts NOT_RUN; the permit holds the stick and
   sends the button bit released until the runner on the UI task writes PASS (C3). A Read ADC
   task that failed to start means no `XYTwist` at all, and POST fails at its budget with the
-  cause "Read ADC not running" (`stick_task_running()` reads FreeRTOS's task list).
+  cause "Read ADC not running" (`hmi::post_facts::stick_task_running()` reads FreeRTOS's task
+  list).
 - **The first fresh link sends one DISABLE** (rows 50-51, C3), so an MCB left ENABLED by a
-  previous HMI life is asked to stop before anything else.
+  previous HMI life is asked to stop before anything else. Since T1 it waits until the
+  DriveCommand writer has matched a reader (`rtps_comms_drive_writer_matched`, espp PR 2).
 - **Timers count from creation.** The 250 ms poll, the 1.2 s boot→Locked and the 30 s OTA
   confirm are created in phases 4-5, before `lv_task` runs them. If phases 5-7 took more than
   1.2 s, the boot screen would leave on the first handler pass. Unclear from the code how long
@@ -303,19 +378,19 @@ at its first FPU use, so it can differ from boot to boot. Priority 0 given to an
 
 | Task | Prio | Core | Stack | Created | Runs |
 | --- | --- | --- | --- | --- | --- |
-| `Read ADC` | 21 | 0 | 6144 | `main.cpp:1305-1338` (`hmi::control::StickIsland`) | one `ControlCycle`: the reads, the motion guard, the monitor, the rest window, one `StickPipeline` cycle with the output permit, `XYTwist`, the task-watchdog reset; then waits 33 ms |
-| `lv_task` | 20 | 1 | 16384 | `main.cpp:1217-1250` (`hmi::ui::UiIsland`) | `lvgl_cycle`: `lv_task_handler()` under `lvgl_mutex`, then the heartbeat stamp and the watchdog reset, then sleep to 8 ms after the start (at least 1 ms). All UI, all LVGL timers, the POST runner, the drive session |
-| `ContinuousAdc T` | 20 | fpu | 4096 | espp (vendored `espp_adc`), built by `StickIsland`; `task_priority = 20` in main's config | ADC1 DMA at 1 kHz, X and Y; publishes each 128 ms window lock-free |
-| `rtps_worker_0/1` | 20 | fpu | 6144 | espp RTPS thread pool; raised from 5 by `raise_rtps_workers` (`rtps_comms.cpp:563`) when the participant starts | every publish's send (XYTwist included) and every subscriber callback |
-| `Button` | 5 | any | 4096 | `main.cpp:1136-1147` (`espp::Button`) | GPIO48 edges → `stick_button_edge` |
-| `tab5 interrupts` | 5 | any | 4096 | BSP | touch reports (`TouchClick`) and the side button (`SideButton`) |
-| `Data Display Task` | 10 | 1 | 6144 | `main.cpp:1093-1104` (`hmi::housekeeping::Housekeeping`) | RTC, battery and IMU every 20 ms; no LVGL, publishes nothing |
-| `tab5_audio`, `… microphone` | 20 | 1 | 8192 | BSP | I2S speaker and microphone |
-| `rtps_start` | 5 | fpu | 8192 | `rtps_comms.cpp:980-1015` | one-shot: Wi-Fi up if chosen, wait for an IP, ping the gateway, start the participant |
-| `rtps_pub` | 5 | any | 8192 | `rtps_comms.cpp:1008-1011` | heartbeat every 2 s; rebinds RTPS when the IP changes |
-| `rtps_reactor`, `rtps_protocol` | 5 | any, fpu | 6144, 4096 | espp RTPS | socket reactor; SPDP discovery |
-| `remote_ui` | 5 | any | 16384 | `components/remote_ui/src/remote_ui.cpp:662` | TCP 3333 server, bench builds only |
-| `selftest` | 3 | 0 | 12288 (PSRAM) | `main/selftest.cpp:1217` | on demand: one self-test run |
+| `Read ADC` | 21 | 0 | 6144 | `main/stick_io.cpp` `stick_island_config` (`hmi::control::StickIsland`; period `kStickCycle`, `main/stick_io.hpp`) | one `ControlCycle`: the reads, the motion guard, the monitor, the rest window, one `StickPipeline` cycle with the output permit, `XYTwist`, the task-watchdog reset; then waits 33 ms |
+| `lv_task` | 20 | 1 | 16384 | `main/task_configs.cpp` `ui_island_config` (`hmi::ui::UiIsland`) | `lvgl_cycle`: `lv_task_handler()` under `lvgl_mutex`, then the heartbeat stamp and the watchdog reset, then sleep to 8 ms after the start (at least 1 ms). All UI, all LVGL timers, the POST runner, the drive session |
+| `ContinuousAdc T` | 20 | fpu | 4096 | espp `adc` (`espp::ContinuousAdc`), built by `StickIsland`; `task_priority = 20` in `main/stick_io.cpp` `stick_island_config` | ADC1 DMA at 1 kHz, X and Y; publishes each 128 ms window's summary (mean, max, sequence; espp PR 1) under espp's data mutex |
+| `rtps_worker_0/1` | 20 | fpu | 6144 | espp RTPS thread pool; created at 20 through `RtpsParticipant::Config::transport_worker_priority` (espp PR 4), `kRtpsWorkerPriority` in `components/net_link/src/rtps_comms.cpp` `start_participant` (espp's default is 5) | every publish's send (XYTwist included) and every subscriber callback |
+| `Button` | 5 | any | 4096 | `main/task_configs.cpp` `gpio48_button_config` (`espp::Button`, made in `app_main`) | GPIO48 edges → `stick_button_edge` |
+| `tab5 interrupts` | 5 | any | 4096 | espp BSP | touch reports (`TouchClick`) and the side button (`SideButton`) |
+| `Data Display Task` | 10 | 1 | 6144 | `main/task_configs.cpp` `housekeeping_config` (`hmi::housekeeping::Housekeeping`) | RTC, battery and IMU every 20 ms; no LVGL, publishes nothing |
+| `tab5_audio`, `… microphone` | 20 | 1 | 8192 | espp BSP (`m5stack-tab5`) | I2S speaker and microphone |
+| `rtps_start` | 5 | fpu | 8192 | `components/net_link/src/rtps_comms.cpp` `rtps_comms_start` | one-shot: Wi-Fi up if chosen, wait for an IP, ping the gateway, start the participant |
+| `rtps_pub` | 5 | any | 8192 | same file, started by `rtps_start` (`heartbeat_tick`) | heartbeat every 2 s; rebinds RTPS when the IP changes |
+| `rtps_reactor`, `rtps_protocol` | 5 | any, fpu | 6144, 4096 | espp RTPS | socket reactor; SPDP (Simple Participant Discovery Protocol) |
+| `remote_ui` | 5 | any | 16384 | `components/remote_ui/src/remote_ui.cpp` `remote_ui_start` | TCP 3333 server, bench builds only |
+| `selftest` | 3 | 0 | 12288 (PSRAM) | `main/selftest.cpp` `selftest_request` | on demand: one self-test run |
 | `fw_hash` | 2 | any | 6144 | `components/ota/src/fw_info.cpp` | once at boot: SHA-256 of the image |
 | `github_ota` | 3 | any | 12288 | `components/ota/src/github_ota.cpp` | on demand: download and install |
 | `internet_ui`, `update_ui` | 5 | any | 8192, 12288 | `main/internet_ui.cpp`, `main/update_ui.cpp` (`spawn`) | on demand: Wi-Fi scan/join, release list |
@@ -335,9 +410,11 @@ What this table shows:
 - **The two priority-20 changes keep the stick's data flowing past a busy UI task.** The
   ContinuousAdc task (X/Y producer) and the RTPS workers (which send XYTwist) were at 5; a
   stuck `lv_task` on their core starved them (C2's STALE fault from UI work; no XYTwist during
-  a UI stall, bench B5i). At 20 they share time with `lv_task` instead. The code comments and
-  `tasks.json` still say "PROPOSAL" (`hazard-c2-cadc-priority.md`, `hazard-c4-rtps-priority.md`).
-- **Both safety tasks are on the task watchdog** (2 s). Phase 1: a trip only reports
+  a UI stall, bench B5i). At 20 they share time with `lv_task` instead. Both are owner-approved
+  (E5 for the ContinuousAdc task, T11 for the workers; `hazard-c2-cadc-priority.md`,
+  `hazard-c4-rtps-priority.md`). The workers' 20 is now set when espp creates them (PR 4), not
+  raised after the participant starts.
+- **Both safety tasks are on the task watchdog** (TWDT, 2 s). Phase 1: a trip only reports
   (`CONFIG_ESP_TASK_WDT_PANIC` is off; the idle-task checks are off). A task that fails to
   subscribe holds the stick (`WDT_MISSING`).
 - **Core 1 is busy:** `lv_task`, the housekeeping task and the audio tasks are pinned there;
@@ -365,7 +442,7 @@ flowchart LR
     rui["remote_ui · 5 · bench only"]:::gen
   end
   mib[["MIB / MCB"]]
-  cadc -->|"X/Y windows · seqlock"| adc
+  cadc -->|"X/Y windows · get_windows under espp's mutex"| adc
   adc -->|"XYTwist · every cycle"| rx
   lv -->|"DriveCommand, SeatCommand · on events"| rx
   rx <-->|"RTPS"| mib
@@ -384,6 +461,14 @@ flowchart LR
   classDef gen stroke-dasharray:5 4
 ```
 
+**The X/Y windows** are the one channel not in our code. `StickIsland::read_windows`
+(`control/stick_island.hpp`) calls espp's `ContinuousAdc::get_windows()` (espp PR 1) once a
+cycle: both channels' mean, max and sequence from the same window, under espp's own data mutex
+(the one its `ContinuousAdc T` task publishes under). It was a lock-free seqlock in a vendored
+copy (`adc_window`) until the owner chose espp as released (2026-10-13); that code is deleted.
+So a lock inside espp sits on the stick task's path; the owner's decision on it is pending
+([components/control/README.md](../components/control/README.md), "The ADC window read").
+
 **Atomics and `fw_core` channels** (declared in `hmi_ui/app_state.hpp` unless named):
 
 | Value | Kind | Written by | Read by | Meaning |
@@ -394,7 +479,7 @@ flowchart LR
 | `PermitHooks::hold_reason` | `fw::AtomicValue<HoldReason>` | Read ADC (the permit) | UI task (Drive notice, every 33 ms; drive sample) | why the stick is held |
 | `RestWindowMailbox` (`hmi_ui/post_stage.hpp`, an `app_main` local) | `fw::Mailbox<RestWindowMsg>` | Read ADC, once per 30 cycles until the gate is PASS or FAIL | UI task (POST runner) | POST's stick-at-rest window |
 | `GuardSources` (`control/motion_guard.hpp`, a `UiApp` member) | `StampCell` (u32 ms, release/acquire), `std::atomic` | UI task: `ui_heartbeat` after every cycle, `ui_wdt_ok` once; RTPS worker: `mcb_state` then `mcb_rx` for each MibStatus | Read ADC (motion guard) | C4's freshness inputs |
-| link flags `net_failed`, `link_up`, `got_ip`; `last_status_us` (`rtps_comms.cpp`) | `std::atomic` | sys_evt (event handlers), `rtps_start`, `app_main`; RTPS worker | Read ADC (guard `LINK_DOWN`); UI task (`rtps_comms_link_state`) | the link |
+| link flags `net_failed`, `link_up`, `got_ip`; `last_status_us` (`components/net_link/src/rtps_comms.cpp`) | `std::atomic` | sys_evt (event handlers), `rtps_start`, `app_main`; RTPS worker | Read ADC (guard `LINK_DOWN`); UI task (`rtps_comms_link_state`) | the link |
 | `GuardTelemetry`, `MonitorTelemetry` (`UiApp` members) | relaxed atomics | Read ADC | UI task (the stick log), self test, remote UI STATE | observability only |
 | `applied_settings` (`settings_applied.hpp`): sensitivity, drive speed, invert X/Y, swap, sounds | atomics | UI task (`UiApp::store_setting` → `AppliedSettings::apply`) | Read ADC, the click sound | settings other tasks need without the lock |
 | `joy_key`, `joy_flick` | `std::atomic<uint32_t>` | Read ADC; remote UI (`joy_key`) | UI keypad read (`UiApp::keypad_read`) | the stick as arrow keys |
@@ -402,12 +487,12 @@ flowchart LR
 | `remote_key` | `std::atomic<uint32_t>` | remote UI | Read ADC | overrides the stick's key |
 | `joy_button_pressed` | `std::atomic<bool>` | `StickButton::edge` (Button task, remote UI) | Read ADC (the `XYTwist` button bit, the rest window), the holds | raw button level |
 | `drive_profile_published` | `std::atomic` | UI task (profile tap) and the profile subject's observer (so also the RTPS worker) | `DrivePort::publish` | profile sent with each DriveCommand |
-| `clock_valid` (`main.cpp:398`) | `std::atomic<bool>` | `SystemClock` (boot, RTPS worker) | TopBar | the clock holds a real time |
+| `clock_valid` (`main/main.cpp`) | `std::atomic<bool>` | `SystemClock` (boot, RTPS worker) | TopBar | the clock holds a real time |
 | drive mirrors: `DriveAdapter::phase_pub_`, `notice_pub_`, `stop_pub_`; `DriveUi::menu_open_pub_`; `UiApp::refused_pub_` | `std::atomic` | UI task | remote UI STATE | the drive session for other tasks |
 | `BenchStall` (`control/bench_stall.hpp`, a `UiApp` member) | `std::atomic<uint32_t>` ×3 | remote UI (STALL) | UI task, Read ADC (each takes its own) | bench builds only |
 | `StickInjectMailbox`, `StickInjectActive` (`remote_ui/include/stick_inject.hpp`) | `fw::Mailbox<StickInjectMsg>`, `fw::AtomicValue<bool>` | remote UI (STICK); Read ADC | Read ADC; the remote UI's marker on the UI task | stick-inject builds only |
 
-**`lvgl_mutex`** (`main.cpp:77`) is one `std::recursive_mutex`. It exists because
+**`lvgl_mutex`** (`main/main.cpp`) is one `std::recursive_mutex`. It exists because
 `lv_subject_set_*` runs every observer at once, on the caller's task, and observers touch
 widgets. No view takes it: `hmi_ui`'s rule is that main's entry points take it for them
 (CS-OWN-08). Who takes it:
@@ -415,11 +500,13 @@ widgets. No view takes it: `hmi_ui`'s rule is that main's entry points take it f
 - **UI task:** around every `lv_task_handler()` (`lvgl_cycle`). That covers every timer,
   event, observer, input read and flush, the POST runner and the drive session. A flush can
   wait for vsync, about 17 ms.
-- **RTPS worker:** the MibStatus and diagnostics handlers (`main.cpp:1371-1382`) and
+- **RTPS worker:** the MibStatus and diagnostics handlers (`app_main`'s lambdas given to
+  `rtps_comms_on_mib_status` and `rtps_comms_on_diagnostics`) and
   `brightness_set`, blocking. The MibStatus handler writes the guard's state and stamp *before*
   it takes the lock, so the stick task sees a stopped MCB even while the UI task holds the lock.
 - **Read ADC:** `AdcStickIo::show` uses **try-lock** for the three bar subjects. It skips the
-  update when the lock is busy and never blocks. Nothing else on the stick path takes it.
+  update when the lock is busy and never blocks. Nothing else on the stick path takes it
+  (the X/Y read takes espp's ADC data mutex, not this one).
 - **Button task, side button, remote UI, self test, the Internet and Update workers (for
   `lv_async_call`):** blocking.
 - **`app_main`:** only around `wrap_touch` and the TopBar link label. It builds the UI without
@@ -439,7 +526,7 @@ this task, with the lock held.
 
 | What | Period | Created in | Does |
 | --- | --- | --- | --- |
-| Display refresh + flush | 16 ms | `main.cpp:1084` | renders dirty areas; `DisplayFlip`'s flush presents on vsync (or turns the frame 180° with the PPA when flipped) |
+| Display refresh + flush | 16 ms | `main/main.cpp` `app_main` (phase 2) | renders dirty areas; `DisplayFlip`'s flush presents on vsync (or turns the frame 180° with the PPA, the P4's pixel-processing accelerator, when flipped) |
 | Hold poll | 33 ms | `UiApp::init_lock_screen` | `RefusalView::poll` (the ENTRY_PUSH check), then the three holds, then the Drive notice from the stick's hold reason (`DriveInputs::refresh_notice`) |
 | `UiPoll::poll` | 250 ms | `UiApp::bind_banners` | link state → `rtps_link` subject, blink, `DiagnosticsView::poll`, **the POST tick** (`PostStage::tick`: a bench request, the runner on a new rest window, the indicator state), **the drive tick** (`DriveAdapter::tick`), the POST indicator (TopBar), theme check |
 | Nav backstop | 500 ms | `NavView::start_input` | re-enters the screen if the stick's group lost focus twice in a row |
@@ -448,7 +535,7 @@ this task, with the lock held.
 | Refusal dwell | 2–3 s, set per raise | `RefusalView::start_timer` | takes a banner down |
 | Unlock advance | one-shot 1 s | `DriveUi::unlock_timer_start` | hands the session UNLOCK_TIMER (fade to Drive) |
 | Row press | one-shot 300 ms | `NavView::row_picked` | the picked row's flash, then `NavView::go` |
-| OTA confirm | one-shot 30 s | `main.cpp:729` (`update_screen_init`) | `github_ota_boot_confirm` |
+| OTA confirm | one-shot 30 s | `main/main.cpp` `update_screen_init` | `github_ota_boot_confirm` |
 | Boot → Locked | one-shot 1.2 s | `hmi_ui/src/ui_build.cpp:78` | fades from the boot logo to Locked |
 | Calibration run | 33 ms, paused when idle | `main/joystick_cal.cpp:295` | steps the calibration model |
 | Drive notice refresh | 250 ms | `DriveNoticeView` | re-reads the POST reason while the notice shows it (the gate is an atomic, not a subject) |
@@ -466,17 +553,20 @@ PENDING or NOT_RUN, which holds the stick; the motion guard's heartbeat check ho
 
 ### 5.2 How the UI is wired: `UiApp` and its ports
 
-`UiApp` (`hmi_ui/ui_app.hpp`) is one `constinit` object at `main.cpp:586`. Its members are
-every view, in dependency order, each with a `Config` of pointers and `Fn` callables
+`UiApp` (`hmi_ui/ui_app.hpp`) is one `constinit` object, `ui_app` in `main/main.cpp`. Its
+members are every view, in dependency order, each with a `Config` of pointers and `Fn` callables
 (`drive_ui/fn.hpp`: a function pointer or a member function bound to its object, with no
 allocation). What the UI needs from outside comes through seven ports that `main` fills once as
-`constexpr` tables. It also owns the hazard fixes' cross-task channels (`PermitHooks`,
+`inline constexpr` tables in `main/ui_ports.hpp` and `main/cues.hpp` (headers, because
+`ui_app`'s `constexpr` constructor reads them); the functions they point at are in
+`ui_ports.cpp`, `cues.cpp`, the components, or `main.cpp` for the two screens that take the
+lock. It also owns the hazard fixes' cross-task channels (`PermitHooks`,
 `GuardSources`, `GuardTelemetry`, `MonitorTelemetry`, `BenchStall`) and the POST runner
 (`PostStage`), so other tasks reach them through `ui_app` without the lock.
 
 ```mermaid
 flowchart LR
-  subgraph mainbox["main.cpp"]
+  subgraph mainbox["main/ · main.cpp, ui_ports, cues"]
     lp["kLinkPort"]
     di["kDriveInputs"]
     cp["kCuesPort"]
@@ -531,15 +621,15 @@ flowchart LR
   classDef gen stroke-dasharray:5 4
 ```
 
-| Port | Filled in `main.cpp` with | Used for |
+| Port (table, file in `main/`) | Filled with | Used for |
 | --- | --- | --- |
-| `LinkPort` `:422` | `rtps_comms_link_state`, `log_link_change`, `rtps_comms_net_link`, the network setting's text, `rtps_comms_diag_stats`, `rtps_comms_publish_drive`, `rtps_comms_publish_seat` | the link subject, the TopBar, diagnostics staleness, both commands |
-| `DriveInputs` `:440` | `drive_adapter.input`, `.tick`, `.unlock_hold_done`, `.exit_hold_done`, `.refresh_notice` | every drive session input; the Drive notice between ticks |
-| `CuesPort` `:448` | `play_click`, `play_refusal`, `refusal_feedback`, two DRV2605 waveforms | clicks, refusals, the haptic test |
-| `SelfTestPort` `:457` | `selftest_ui_visible`, `selftest_ui_dismiss`, `selftest_request(LOCAL)` | the overlay owning the stick; the tile |
-| `BoardPort` `:463` | `hmi::board::backlight`, `hmi::board::present`, `action_restart_hmi` | backlight, the flush's swap, the Restart tile |
-| `MainScreens` `:469` | `log_*`, `internet_*`, `about_*`, `update_*`, `calibration_*` | the screens whose adapters stay in `main` |
-| `PostPort` `:574` | the ms clock, `esp_reset_reason`, the OTA image state, the calibration, heap and stack headroom (`Read ADC`, `lv_task`), calibration saved, `stick_task_running` | the POST runner's facts (`static_assert`s pin the IDF enums, POST-050) |
+| `LinkPort` (`kLinkPort`, `ui_ports.hpp`) | `rtps_comms_link_state`, `rtps_comms_log_link_change`, `rtps_comms_net_link`, the network setting's text (`link_text`), `rtps_comms_diag_stats`, `rtps_comms_publish_drive`, `rtps_comms_drive_writer_matched`, `rtps_comms_publish_seat` (`bench_verb_seat_publish` in stick-inject builds) | the link subject, the TopBar, diagnostics staleness, both commands, the boot DISABLE's wait (T1) |
+| `DriveInputs` (`kDriveInputs`, `ui_ports.hpp`) | `drive_session_input`, `drive_wait_poll`, `drive_unlock_hold_done`, `drive_exit_hold_done`, `drive_refresh_notice` (`ui_ports.cpp`), each one call on `drive_adapter` | every drive session input; the Drive notice between ticks |
+| `CuesPort` (`kCuesPort`, `cues.hpp`) | `play_click`, `play_refusal`, `refusal_feedback`, two DRV2605 waveforms | clicks, refusals, the haptic test |
+| `SelfTestPort` (`kSelfTestPort`, `ui_ports.hpp`) | `selftest_ui_visible`, `selftest_ui_dismiss`, `selftest_request(LOCAL)` | the overlay owning the stick; the tile |
+| `BoardPort` (`kBoardPort`, `ui_ports.hpp`) | `hmi::board::backlight`, `hmi::board::present`, `action_restart_hmi` | backlight, the flush's swap, the Restart tile |
+| `MainScreens` (`kMainScreens`, `ui_ports.hpp`) | `log_*`, `internet_*`, `about_*`, `update_*`, `calibration_*` | the screens whose adapters stay in `main` |
+| `PostPort` (`kPostPort`, `ui_ports.hpp`) | `components/post_facts`: `now_ms`, `reset_reason`, `image` (the OTA image state), `memory`, `stacks` (`Read ADC`, `lv_task`), `stick_task_running`; main: `post_calibration`, `joystick_cal_saved` | the POST runner's facts (`static_assert`s in `post_facts.cpp` pin the IDF enums, POST-050) |
 
 There is one loop in this wiring, on purpose: `UiApp` owns the `DriveUi`; `main` makes the
 `DrivePort` and the `DriveAdapter` over `ui_app.drive_ui()`; and `UiApp` calls the adapter
@@ -591,12 +681,13 @@ flowchart LR
 Five files carry this path: `components/control/include/control/stick_island.hpp` (the task
 and the reads), `control/cycle.hpp` (`ControlCycle`: guard, stick, note, watchdog, in that
 order), `control/motion_guard.hpp`, `components/stick/include/stick/stick_pipeline.hpp` (one
-cycle, `cycle<Io>`) with `output_permit.hpp` and `monitor_cycle.hpp`, and `main.cpp:233-355`
-plus `:618-671` (`AdcStickIo`, everything the cycle reads and writes outside itself).
+cycle, `cycle<Io>`) with `output_permit.hpp` and `monitor_cycle.hpp`, and `main/stick_io.hpp`
+(`AdcStickIo`, everything the cycle reads and writes outside itself; its `show` is in
+`main.cpp`, which owns the LVGL lock).
 
 | Step | Code | Detail |
 | --- | --- | --- |
-| Read | `StickIsland::read_windows`, `read_twist` | X = ADC1 CH1 (GPIO17) and Y = ADC1 CH0 (GPIO16): both windows from one lock-free snapshot of ContinuousAdc's last 128 ms window (mean, max, a sequence that advances per window); twist = ADC2 CH3 (GPIO52), 8 oneshot reads: mean, max, how many succeeded |
+| Read | `StickIsland::read_windows`, `read_twist` | X = ADC1 CH1 (GPIO17) and Y = ADC1 CH0 (GPIO16): both windows from one `ContinuousAdc::get_windows()` call (espp PR 1, under espp's data mutex) on its last 128 ms window (mean, max, a sequence that advances per window); twist = ADC2 CH3 (GPIO52), 8 oneshot reads: mean, max, how many succeeded |
 | Guard | `ControlCycle::run` → `MotionGuard::evaluate` | from atomics only: `WDT_MISSING` (either task failed to subscribe), `UI_STALE` (heartbeat ≥ 200 ms or never), `LINK_DOWN` (net failed, no link or no IP), `MIB_STALE` (newest MibStatus ≥ 2000 ms or none), `MCB_NOT_ENABLED`; first that holds wins, OK otherwise. A stale stamp stays stale until it changes. The verdict goes to the Io before the stick runs |
 | Inject | `StickInjectBench::inject` (bench inject builds only) | drains the STICK mailbox; while an injection holds (300 ms after the last STICK) the sample is replaced, `fail_mask` can fail a read, make a value NaN or freeze the X/Y sequences. Everything after it is the real code |
 | Monitor | `AdcStickIo::note_sample` → `MonitorCycle::step` | judges the raw sample: P1 a mean missing, P2 NaN/inf, P3 negative, P4 a max above the axis's limit (calibrated max + 100 mV, at most 3150 mV), P5 X/Y sequence unchanged 300 ms, P6 fewer than 8 good twist reads. States INIT, OK, SUSPECT, RECOVERING, FAULT, CALIBRATING: 3 implausible samples in 30 cycles latch FAULT (until a recalibration or a reboot); 3 clean cycles end RECOVERING. Writes `stick_health` |
@@ -649,7 +740,8 @@ through the permit) and a navigation key (`joy_key`, silent only while calibrati
 monitor not OK). On the Drive screen the focus group holds only the burger key, so the arrows
 do nothing there.
 
-**The stick button** (`main.cpp:766-776` → `StickButton::edge`, on the `Button` task):
+**The stick button** (`main/main.cpp` `gpio48_button_callback` → `stick_button_edge` →
+`StickButton::edge`, on the `Button` task):
 
 1. `stick_button_edge` takes `lvgl_mutex`, blocking. So the `XYTwist` button bit waits up to
    one render (H14).
@@ -664,7 +756,7 @@ The holds read the raw level. Their 500 ms grace equals the tap limit (`static_a
 **Calibration** (`components/joystick_cal` + `main/joystick_cal.cpp`):
 
 - **File:** `/storage/joystick_cal.txt`, `version 1`, then min, centre and max in mV per axis.
-- **Load:** once at boot (`main.cpp:1348`). A record is used only if `hmi::cal::check()` finds
+- **Load:** once at boot (`main/stick_io.cpp` `stick_calibration_at_boot`). A record is used only if `hmi::cal::check()` finds
   nothing: every number finite, min ≥ 0, at least 1000 mV each way from rest, and max ≤ 3050 mV
   (C2's upper bound). Otherwise the ideal 0/1650/3300 is used, which is not a measured
   calibration: the permit holds the stick (NOT_CALIBRATED) and POST's `joy.cal_saved` fails.
@@ -840,12 +932,14 @@ STICK_FAULT, STICK_CHECK, CENTRE_FIRST); GATE_SHUT and CALIBRATING show nothing 
 ## 9. The seat
 
 The seat-path hazard fix ([plans/hazard-seat-spec.md](plans/hazard-seat-spec.md), H8, H10
-seat, H6 seat) is on `dev_ai_hazard_seat`. The MCB decides seat motion; the HMI only asks,
-through one gate, and never stops, re-sends or asks on its own (Q1).
+seat, H6 seat) is in this code: its pure core is `components/seat`, the rest is in `hmi_ui`'s
+`UiApp`; bench B5s-1..17 PASS. The MCB decides seat motion; the HMI only asks, through one
+gate, and never stops, re-sends or asks on its own (Q1; Q1-Q15 are the spec's questions, answered
+by the owner).
 
 - **One gate.** Every SeatCommand (the Seat screen's "−"/"+" and presets, Bench → Actuators,
   Skunk Works "Seat up") goes through `UiApp::seat_request`, the only caller of
-  `LinkPort::publish_seat` (SEAT-011). It asks components/seat's `decide` on inputs read at
+  `LinkPort::publish_seat` (SEAT-011). It asks `components/seat`'s `decide` on inputs read at
   the press: the link live, the MCB state (IDLE only), the POST gate, stick health (not FAULT),
   the axis value (known). Then the target: a step is one step from the reported value and must
   move in the press' direction (`AT_LIMIT`), a preset is clamped. A refused press sends nothing,
@@ -967,10 +1061,12 @@ anything binds to it.
 | in | `rammp/hmi/command` | `UInt32` tagged RUN/PING/PONG | self-test control | `rtps_worker` |
 | in | `rammp/hmi/brightness` | `UInt32` percent | on demand | `rtps_worker` |
 
-Endpoints: 5 writers and 4 readers (`start_participant`, `rtps_comms.cpp:578-617`). Every
-publish is handed to espp's worker pool (`rtps_worker_0/1`), which sends it; the same two
-threads run every subscriber callback. `raise_rtps_workers` lifts them from 5 to 20 right after
-the participant starts.
+All of it is `components/net_link` (`rtps_comms.hpp`, `src/rtps_comms.cpp`, `src/link_log.cpp`;
+it was `main/rtps_comms.*`, and the function names did not change). Endpoints: 5 writers and
+4 readers (`start_participant`). Every publish is handed to espp's worker pool
+(`rtps_worker_0/1`), which sends it; the same two threads run every subscriber callback.
+`start_participant` has espp create them at priority 20
+(`RtpsParticipant::Config::transport_worker_priority = kRtpsWorkerPriority`, espp PR 4).
 
 **How a MibStatus reaches the screen:**
 
@@ -998,7 +1094,7 @@ sequenceDiagram
   L->>L: DriveAdapter tick follows the new state
 ```
 
-**Link state** (`rtps_comms_link_state`, `rtps_comms.cpp:901-914`), worked out when asked, in
+**Link state** (`rtps_comms_link_state`, `components/net_link/src/rtps_comms.cpp`), worked out when asked, in
 this order: NET_FAILED → LINK_DOWN → NO_IP → CONNECTED if a MibStatus arrived in the last
 2000 ms, otherwise NO_PEER. Only CONNECTED lets anything drive.
 
@@ -1033,13 +1129,13 @@ this order: NET_FAILED → LINK_DOWN → NO_IP → CONNECTED if a MibStatus arri
 | Settings | `SETTINGS_PARAMS`: 11 values with min, max, default (brightness, theme, flip, menu slide, sounds, stick sensitivity, drive speed, invert X/Y, swap, network). Loaded once in `UiApp::init_settings`. A row change sets its subject; `UiApp::store_setting` saves it and updates `AppliedSettings`. Invert, swap and drive speed are refused while unlocked | `components/settings`, `SettingsView` |
 | Files | `settings.txt`, `joystick_cal.txt` (versioned), `wifi.txt` (password in plain text), `fwinfo.txt` | |
 | OTA | Update screen → GitHub release list (`update_ui` worker) → `github_ota_start` thread: streams 64 KB blocks to the other slot, checks the first block (project, chip) before writing, lets IDF check the image, compares the SHA-256 with GitHub's digest **only if one exists**, then sets the boot partition. Restarts 3 s after "Installed", and only when the MIB is not ENABLED (`may_restart`). Rollback is on: an image with the confirm marker keeps itself 30 s after the UI build (`github_ota_boot_confirm`) | `components/ota`, `components/ota_parse`, `main/update_ui.cpp` |
-| POST | The quick power-on self test (C3), separate from the extended self test below: 19 checks (`post/checks.hpp`). 12 are LATCHED (ADC valid, calibration saved and its span, every expected I2C device, a clean last reset, a verified bootable image, heap headroom ×4, stack headroom of Read ADC and `lv_task`): a FAIL holds until the next reset. 7 are LIVE (each axis at rest and still, the button released, over a 30-cycle rest window): they only delay. Runs on the UI task in the 250 ms poll, budget 3 s; writes the POST gate; the TopBar shows its indicator and the Drive notice its reason | `components/post`, `hmi_ui/post_stage.*`, `main.cpp` `kPostPort` |
-| Self test | 60 checks in `selftest_spec.hpp` (system, network, RTPS, memory, I2C, IMU, RTC, power, haptics, display, timing, joystick, log, and C4's and C2's motion-guard and stick-monitor rows). Started from the Skunk Works tile or by a RUN on `rammp/hmi/command` from any peer (H7). Runs on its own task; draws an overlay that takes over the stick's keys and holds. Reports over RTPS and as a `[SELFTEST]` table on serial | `main/selftest*.cpp` |
-| Remote UI | Bench builds only (`CONFIG_HMI_REMOTE_UI`), TCP 3333, one client, no authentication (H13). Verbs: PING, TASKS, SHOT, FOCUS, SCREEN, TAP, PRESS, RELEASE, SWIPE, KEY, BTN, THEME, STICK. Input goes through the same latches as the real stick and button (`remote_ui_config`, `main.cpp:806`). With `CONFIG_HMI_BENCH_STICK_INJECT`, STICK writes an `fw_core` mailbox the ADC task drains (`StickInjectBench`): the raw sample is replaced (a read failed, a value NaN or the X/Y sequences frozen on request) until 300 ms after the last STICK, and a red "STICK INJECTED" label shows. This one reaches `XYTwist`, through the real monitor and permit. The same builds add the hazard bench verbs (`bench_verbs.hpp`, hooks in `main.cpp:825-993`): STATE (one JSON line: drive phase, notice, menu, banner, hold reason, POST gate and check, indicator, the stick monitor block, reset reason), PERMIT POST, CAL UNSAVED, POST RERUN, CRASH, STALL UI/ADC/CADC | `components/remote_ui`, `components/stick/include/stick/bench_inject.hpp`, `scripts/hmi_ui.py` |
-| Log | stdout and stderr are teed into a 500-line PSRAM ring; the Log screen rebuilds from it every 250 ms while up | `main/log_capture.cpp`, `main/log_view.cpp`, `LogView` |
-| Cues | `Feedback`: DRV2605 waveforms (`Haptics::play`, no lock of its own) and the click through `M5StackTab5::play_audio`. A refusal is a double click, the second from a one-shot LVGL timer. Callers: the UI task, the touch task (each press clicks, no lock), RTPS handlers via banner sounds (H16) | `components/feedback`, `main.cpp:1408-1426` |
+| POST | The quick power-on self test (C3), separate from the extended self test below: 19 checks (`post/checks.hpp`). 12 are LATCHED (ADC valid, calibration saved and its span, every expected I2C device, a clean last reset, a verified bootable image, heap headroom ×4, stack headroom of Read ADC and `lv_task`): a FAIL holds until the next reset. 7 are LIVE (each axis at rest and still, the button released, over a 30-cycle rest window): they only delay. Runs on the UI task in the 250 ms poll, budget 3 s; writes the POST gate; the TopBar shows its indicator and the Drive notice its reason | `components/post`, `hmi_ui/post_stage.*`, `components/post_facts` (the IDF facts), `main/ui_ports.hpp` `kPostPort` (the port, with main's calibration facts) |
+| Self test | 60 checks in `selftest_spec.hpp` (63 with the alloc guard's `mem.alloc_*` rows) (system, network, RTPS, memory, I2C, IMU, RTC, power, haptics, display, timing, joystick, log, and C4's and C2's motion-guard and stick-monitor rows). Started from the Skunk Works tile or by a RUN on `rammp/hmi/command` from any peer (H7). Runs on its own task; draws an overlay that takes over the stick's keys and holds. Reports over RTPS and as a `[SELFTEST]` table on serial | `main/selftest*.cpp` |
+| Remote UI | Bench builds only (`CONFIG_HMI_REMOTE_UI`), TCP 3333, one client, no authentication (H13). Verbs: PING, TASKS, SHOT, FOCUS, SCREEN, TAP, PRESS, RELEASE, SWIPE, KEY, BTN, THEME, STICK. Input goes through the same latches as the real stick and button (`main/main.cpp` `remote_ui_config`). With `CONFIG_HMI_BENCH_STICK_INJECT`, STICK writes an `fw_core` mailbox the ADC task drains (`StickInjectBench`): the raw sample is replaced (a read failed, a value NaN or the X/Y sequences frozen on request) until 300 ms after the last STICK, and a red "STICK INJECTED" label shows. This one reaches `XYTwist`, through the real monitor and permit. The same builds add the hazard bench verbs (`bench_verbs.hpp`, hooks in `main/bench_hooks.cpp` `bench_verb_hooks`): STATE (one JSON line: drive phase, notice, menu, banner, hold reason, POST gate and check, indicator, the stick monitor block, reset reason, the seat keys), PERMIT POST, CAL UNSAVED, POST RERUN, CRASH, STALL UI/ADC/CADC, SEATFAIL (`bench_verb_seat_publish`) | `components/remote_ui`, `components/stick/include/stick/bench_inject.hpp`, `main/bench_hooks.cpp`, `scripts/hmi_ui.py` |
+| Log | stdout and stderr are teed into a 500-line PSRAM ring; the Log screen rebuilds from it every 250 ms while up | `components/log_capture`, `main/log_view.cpp`, `LogView` |
+| Cues | `Feedback`: DRV2605 waveforms (`Haptics::play`, no lock of its own) and the click through `M5StackTab5::play_audio`. A refusal is a double click, the second from a one-shot LVGL timer. Callers: the UI task, the touch task (each press clicks, no lock), RTPS handlers via banner sounds (H16) | `components/feedback`, `main/cues.cpp` |
 | Clock | `SystemClock`: the RTC seeds it at boot if plausible; each MibStatus sets it (and the RTC) when ours is unset or more than 2 s off | `components/housekeeping` |
-| Brightness | One level, 5–100 %, from the Settings row, the side button (`brightness_step`: next of 25/50/75/100) and RTPS (`brightness_set`). Saved 1 s after it settles | `BrightnessView`, `main.cpp:753-762` |
+| Brightness | One level, 5–100 %, from the Settings row, the side button (`brightness_step`: next of 25/50/75/100) and RTPS (`brightness_set`). Saved 1 s after it settles | `BrightnessView`, `main/main.cpp` `brightness_set`, `brightness_step` |
 
 ## 13. Where the old fragments went
 
@@ -1050,7 +1146,7 @@ the one visible change is that the hidden demo screen the IMU task used to updat
 | --- | --- |
 | `frag_state` | `hmi_ui/app_state.*` (atomics, shared subjects); the lock and MIB subjects are `UiApp` members |
 | `frag_fps` | `hmi_ui/fps_meter.*` |
-| `frag_haptics`, `frag_da7280`, `frag_audio` | `components/feedback`; `main.cpp` keeps thin `play_click`, `play_refusal`, `refusal_feedback`, `load_audio` |
+| `frag_haptics`, `frag_da7280`, `frag_audio` | `components/feedback`; `main/cues.cpp` keeps thin `play_click`, `play_refusal`, `refusal_feedback`, `load_audio` |
 | `frag_status_band`, `frag_rtps_label`, `frag_drive_band`, `frag_brightness`, `frag_clock` | `StatusBandView`, `RtpsLabelView`, `DriveBandView`, `BrightnessView`, `TopBarView`; the MIB time sync → `housekeeping::SystemClock` |
 | `frag_stick_config` | `components/stick` (`pipeline_config`, axis configs) |
 | `frag_rtps_poll` | `hmi_ui/ui_poll.*` |
@@ -1062,10 +1158,14 @@ the one visible change is that the hidden demo screen the IMU task used to updat
 | `frag_seat`, `frag_bench_pin`, `frag_settings_ui`, `frag_actions`, `frag_diag` | `SeatView`, `BenchPinView`, `SettingsView`, `ActionsView`, `DiagnosticsView`; the glue in `UiApp` |
 | `frag_nav` | `hmi_ui/nav_view.*`; the gate's write → `DriveUi::update_stick_gate` |
 | `frag_overdraw`, `frag_screens_on_demand`, `frag_display_flip` | `hmi_ui/overdraw.*`, `on_demand_screens.*`, `display_flip.*` |
-| `app_main`'s Read ADC lambda | `control::StickIsland` + `stick::StickPipeline` + `main.cpp`'s `AdcStickIo` |
+| `app_main`'s Read ADC lambda | `control::StickIsland` + `stick::StickPipeline` + `main/stick_io.hpp`'s `AdcStickIo` |
 | `app_main`'s IMU task | `housekeeping::Housekeeping` |
 | `app_main`'s board bring-up | `board::Board` |
 | `main/storage`, `settings`, `fw_info`, `github_ota`, `remote_ui` | `components/storage`, `settings`, `ota`, `remote_ui` |
+| `main/rtps_comms.*`, `main/log_capture.*` | `components/net_link`, `components/log_capture`; main's `log_link_change` → `rtps_comms_log_link_change` |
+| `main.cpp`'s `kPostPort` helpers, `start_direct_render` | `components/post_facts`; `hmi_ui`'s `DisplayFlip::start_direct_render` |
+| the rest of `main.cpp`'s wiring | `main/ui_ports.*`, `cues.*`, `stick_io.*`, `task_configs.*`, `bench_hooks.*`, `selftest_platform.*` ([§2.3](#23-what-stays-in-main)) |
+| vendored `components/joystick`, `espp_adc`, `adc_window`, `espp_rtps`, `m5stack-tab5` | espp's own components (TEST ONLY, local PR branches); the twist axis → `StickPipeline`'s `twist_mapper_` (J1), `espp::joystick_selftest` → `hmi::stick::mapping_selftest` (J2) |
 
 ## 14. Tools and tests
 
@@ -1077,16 +1177,16 @@ All of it, with what each gate proves and how a merge is decided, is on one page
 | `tools/l0/ratchet.py`, `include_boundary.py` | per-file debt counts that may only fall; no include of another component's `src/` | CI L0 |
 | `tools/gen_diagrams` | generates D2/D3 in `architecture.md` | CI L0 |
 | `tools/guards` | static-init order (G4), exports (G2), the task table (G10, `baselines/tasks.json`), the observer census (G11) | selftests in CI L0; G2/G4 after each CI build; G10 on the bench |
-| `tests/run.py` + `tests/manifest.d` | one entry point for the host L1 apps (21 manifests; DRV-L1-FULL on demand) | CI host-l1 + WSL |
+| `tests/run.py` + `tests/manifest.d` | one entry point for the host L1 apps (22 manifests in `tests/manifest.d`; DRV-L1-FULL on demand) | CI host-l1 + WSL |
 | `components/drive_session/test/*` | table self-check, oracle, oracle by input, full oracle, `make equivalence`, `make mutants`, `make mnc` | CI (the first three); on demand (the rest) |
 | `tests/host/drive_golden` | the firmware's drive code (DrivePort, DriveAdapter) against hand-written goldens (C1, C3, C2b) | CI host-l1 |
-| `tools/bench` | board runner: B0-B5e, and with `--hazard c1,c3,c4,c2` the hazard steps B5''-1..22b, B5f-B5j, C2-1..16 | bench PC, board 2 |
+| `tools/bench` | board runner: B0-B5e, and with `--hazard c1,c3,c4,c2,seat` (or `all`) the hazard steps B5''-1..22b, B5f-B5j, C2-1..16, B5s-1..17 | bench PC, board 2 |
 | `scripts/` | MCB simulator (`rtps_mcb_sim.py`, fault modes), self-test peer (`rtps_selftest.py`), remote UI client (`hmi_ui.py`), UI contract check | bench PC; the sim's and the contract's checks in CI L0 |
 
 ## 15. Where the hazards live
 
 The hazard IDs come from [plans/refactor.md §1](plans/refactor.md). Status and locations are
-for `46f5719`; the fixes are in [§16](#16-the-hazard-fixes-in-this-code).
+for `dev_ai_rc`; the fixes are in [§16](#16-the-hazard-fixes-in-this-code).
 
 | ID | What | Status here | Where |
 | --- | --- | --- | --- |
@@ -1095,16 +1195,16 @@ for `46f5719`; the fixes are in [§16](#16-the-hazard-fixes-in-this-code).
 | H3 | An out-of-calibration raw value is clamped to ±1: an open or shorted pot reads as full deflection | **closed for the high side** (C2): the monitor latches FAULT on a max above the calibrated end + 100 mV (≤ 3150 mV), and `check()` rejects a calibration with max > 3050 mV. The 0 mV low rail stays a residual (decision D2, an EE fix) | `stick_monitor.hpp` P4, `cal_record.hpp` |
 | H4 | The gate is written only by the UI task; the ADC task checked no link age, MIB state or UI liveness | **closed** (C4): the motion guard on the ADC task (UI heartbeat 200 ms, link flags, MibStatus 2 s, MCB ENABLED, watchdogs) | `control/motion_guard.hpp`, permit condition 2 |
 | H5 | A relock sent no DISABLE; a profile tap re-sent a stale ENABLE | **closed** (C1): every relock sends one DISABLE (rows 3-9); a profile tap sends ENABLE only while unlocked, DOK and POST PASS (rows 31-32) | rows 3-9, 29-34 |
-| H6 | DriveCommand and SeatCommand one-shot, result ignored; a refused exit not re-sent | **closed for DriveCommand** (C1): DISABLE re-sent every 250 ms, "MCB did not stop" at 5 s, then 1 Hz (rows 44-49); failed publishes counted. **SeatCommand still one-shot** (seat path not merged) | `DriveAdapter`, rows 44-49; `UiApp::seat_request` |
-| H7 | Any RTPS peer can start a self test; its overlay blocks the exit hold and the keys while `XYTwist` keeps flowing | **open** | `rtps_comms.cpp` `on_command`; `HoldEngine::poll_all`; `UiApp::keypad_read` |
-| H8 | A NaN or huge seat value is UB in `seat_raw`; an unknown value steps from the axis minimum | **open** (seat path) | `hmi_rtps_spec.hpp:92-97`; `UiApp::seat_step` |
+| H6 | DriveCommand and SeatCommand one-shot, result ignored; a refused exit not re-sent | **closed for DriveCommand** (C1): DISABLE re-sent every 250 ms, "MCB did not stop" at 5 s, then 1 Hz (rows 44-49); failed publishes counted. **SeatCommand: closed** (seat path): every publish result is checked, a failure counted, logged and shown (`REFUSED_SEAT_NOT_SENT`); never re-sent by design (Q7) | `DriveAdapter`, rows 44-49; `UiApp::seat_request` |
+| H7 | Any RTPS peer can start a self test; its overlay blocks the exit hold and the keys while `XYTwist` keeps flowing | **open** | `components/net_link/src/rtps_comms.cpp` `on_command`; `HoldEngine::poll_all`; `UiApp::keypad_read` |
+| H8 | A NaN or huge seat value is undefined behaviour (UB) in `seat_raw`; an unknown value steps from the axis minimum | **closed** (seat path): `seat_reading` turns a NaN, an infinity or an out-of-range value into unknown ("--") before `seat_raw`; a step or preset needs a known value | `components/seat` `seat_reading`, `step_target`; `UiApp::seat_apply_state`, `UiApp::seat_request` |
 | H9 | A failed ADC read published nothing instead of neutral | **closed** (C2): an invalid cycle publishes a literal 0, the button bit only after POST PASS | `StickPipeline::publish_neutral` |
-| H10 | No neutral-stick check before driving; seat presses not gated on `seat_ready` | **closed for the stick** (C1, G1: centred 300 ms before every change from held to allowed). Seat presses: **open** (seat path) | permit condition 8; `SeatView` |
-| H11 | No task watchdog on the app tasks; the ADC task below the UI with a boot-dependent core and a 4 KB stack | **closed** (C4): Read ADC at 21 on core 0 with 6 KB; both safety tasks on the task watchdog (phase 1: report only) | `main.cpp:1305-1338`; [§4.1](#41-the-tasks) |
+| H10 | No neutral-stick check before driving; seat presses not gated on `seat_ready` | **closed for the stick** (C1, G1: centred 300 ms before every change from held to allowed). **Seat presses: closed** (seat path): every press goes through the seat gate (link CONNECTED, MCB IDLE, POST PASS, stick not FAULT, value known) | permit condition 8; `components/seat` `gate`, `decide`; `UiApp::seat_request` |
+| H11 | No task watchdog on the app tasks; the ADC task below the UI with a boot-dependent core and a 4 KB stack | **closed** (C4): Read ADC at 21 on core 0 with 6 KB; both safety tasks on the task watchdog (phase 1: report only) | `main/stick_io.cpp` `stick_island_config`; `main/task_configs.cpp` `ui_island_config`; [§4.1](#41-the-tasks) |
 | H12 | A reset or panic was never shown; the battery and range on the TopBar are placeholders | **reset: closed** (C3's `sys.clean_reset` fails POST, named on the indicator). TopBar battery and range: **open** | `post/checks.hpp`; the export's TopBar |
 | H13 | The remote UI has no authentication and can press the stick button | **open, bench builds only** (CI proves the release ELF has no injection or bench verb) | `components/remote_ui` |
-| H14 | The button bit reaches `XYTwist` only after the Button task gets `lvgl_mutex` | **open** | `main.cpp:766-776` |
-| H15 | `app_main` builds the UI without the lock while the side-button and GPIO48 tasks are live | **open** | `main.cpp:1118, 1136` vs `1125-1186` |
+| H14 | The button bit reaches `XYTwist` only after the Button task gets `lvgl_mutex` | **open** | `main/main.cpp` `stick_button_edge` (from `gpio48_button_callback`) |
+| H15 | `app_main` builds the UI without the lock while the side-button and GPIO48 tasks are live | **open** | `main/main.cpp` `app_main`: `board.start_side_button()` (phase 3) and `gpio48_button` (phase 5) start before `build_screens`, `ui_app.build`, `ui_app.build_input` and `build_on_demand_parts`, which run without the lock |
 | H16 | The audio path has several callers (touch task, UI task, RTPS task via banner sounds) and no lock of its own | **open** | `board::TouchClick`, `RefusalView::show`, `feedback::ClickSound` |
 
 ## 16. The hazard fixes in this code
@@ -1112,19 +1212,21 @@ for `46f5719`; the fixes are in [§16](#16-the-hazard-fixes-in-this-code).
 The owner's decisions are [plans/hazard-fixes.md](plans/hazard-fixes.md) §9-10: the MCB
 decides whether the chair drives (M1) under guards G1-G5. Each fix has its spec; the code
 follows them on this branch, and the bench results are in
-[plans/hazard-candidate-results.md](plans/hazard-candidate-results.md).
+[plans/hazard-candidate-results.md](plans/hazard-candidate-results.md) (the seat path's in
+hazard-seat-spec.md's header).
 
 | Fix | Spec | What it put in the code |
 | --- | --- | --- |
 | C1 | [hazard-c1-spec.md](plans/hazard-c1-spec.md) (H1, H5, H6, H10) | the output permit and its neutral latch (`stick/output_permit.hpp`); table rows 1-9, 21-22, 25-26, 31-32 changed and 42-49 added (one DISABLE per relock, the stop re-sent, "MCB did not stop"); the Drive notice; bench verbs STATE, PERMIT, CAL UNSAVED |
 | C3 | [hazard-c3-spec.md](plans/hazard-c3-spec.md) (H2) | `components/post` wired: the rest window on Read ADC, the runner on the UI task (`PostStage`), the POST gate; rows 1-2, 18, 31-32 changed and 50-54 added; the TopBar indicator; bench verbs POST RERUN, CRASH |
 | C4 | [hazard-c4-spec.md](plans/hazard-c4-spec.md) (H4, H11) | the motion guard on the ADC task (`control/motion_guard.hpp`, `cycle.hpp`), the UI heartbeat, the MibStatus stamp, the task watchdog on both tasks, Read ADC at 21 / core 0 / 6 KB; bench verb STALL UI/ADC |
-| C2 | [hazard-c2-spec.md](plans/hazard-c2-spec.md) (H3, H9) | the stick monitor (`stick/stick_monitor.hpp`, `monitor_cycle.hpp`) on the lock-free X/Y windows (`adc_window`), neutral on an invalid cycle, `check()`'s upper bound; bench verb STALL CADC |
+| C2 | [hazard-c2-spec.md](plans/hazard-c2-spec.md) (H3, H9) | the stick monitor (`stick/stick_monitor.hpp`, `monitor_cycle.hpp`) on the X/Y windows from espp's `ContinuousAdc::get_windows()` (espp PR 1, under espp's mutex), neutral on an invalid cycle, `check()`'s upper bound; bench verb STALL CADC |
 | C2b | hazard-c2-spec.md §5.3 | rows 18 changed and 55-59 added: a stick FAULT while unlocked stops as the exit hold does; with a FAULT nothing asks for ENABLE |
-| priorities | [hazard-c4-rtps-priority.md](plans/hazard-c4-rtps-priority.md), [hazard-c2-cadc-priority.md](plans/hazard-c2-cadc-priority.md) | the RTPS workers and the ContinuousAdc task at priority 20 |
+| seat | [hazard-seat-spec.md](plans/hazard-seat-spec.md) (H6 seat, H8, H10 seat) | `components/seat` (`seat_reading`, the seat gate); `UiApp::seat_request` the one SeatCommand path; publish results counted, logged and shown; the menu row and Seat screen refusals (rows 10-11); bench verb SEATFAIL; bench B5s-1..17 PASS |
+| priorities | [hazard-c4-rtps-priority.md](plans/hazard-c4-rtps-priority.md), [hazard-c2-cadc-priority.md](plans/hazard-c2-cadc-priority.md) | the RTPS workers (T11, through espp PR 4) and the ContinuousAdc task (E5) at priority 20 |
 
-Not in this code: the seat path (H6 for SeatCommand, H8, H10 for seat presses; branch
-`dev_ai_hazard_seat`), the watchdog's phase 2 (panic on a trip), and the open questions in
+Not in this code: the watchdog's phase 2 (panic on a trip), the seat sign-off (waits for the
+MCB team's answers S1-S3, hazard-seat-spec.md §8), and the open questions in
 [hazard-decisions.md](plans/hazard-decisions.md) and the candidate results' §3.
 
 ## 17. Known oddities
@@ -1136,14 +1238,13 @@ Found while writing this; none is a hazard on its own.
 - `docs/plans/hazard-c1-spec.md` points at `components/hmi_ui/include/hmi_ui/drive_port.hpp`;
   it moved to `components/drive_ui/include/drive_ui/drive_port.hpp`.
 
-- The priority-20 changes for the RTPS workers and the ContinuousAdc task are still called
-  "PROPOSAL" in their code comments (`rtps_comms.cpp` `raise_rtps_workers`, `main.cpp`'s
-  StickIsland config) and in `tools/guards/baselines/tasks.json`; that file's `about` line still
-  says it was taken at `dev_refactor cb9226e`, though its rows were updated since.
-- `components/post/include/post/post.hpp`'s header comment still says "Not wired into the
-  firmware yet"; C3 wired it.
-- `components/control/include/control/windowed_adc.hpp`'s comment says "Not used by the
-  firmware yet"; `StickIsland` reads both X/Y windows through it.
+- `tools/guards/baselines/tasks.json`: its `about` line says it was taken at
+  `dev_ai_hazard_candidate`, and the `tab5_audio` and `tab5 interrupts` rows still cite
+  `components/m5stack-tab5/...`, the vendored BSP that is gone (now espp's `m5stack-tab5`).
+- `main/idf_component.yml`'s comment names the espp worktree `../../espp-test` on branch
+  `test-all-prs`; the `override_path`s point at `../../espp-738` (branch `test-all-on-738`).
+- `components/hmi_ui/src/display_flip.cpp`'s header comment still says "the vendored board
+  support"; the BSP is espp's own now.
 
 (The other stale comments found earlier were fixed in `dev_ai_stale_text`.)
 
@@ -1169,17 +1270,19 @@ Found while writing this; none is a hazard on its own.
 ## 18. Where to start reading
 
 1. [fw-overview.md](fw-overview.md): every task and channel on one page.
-2. `main/main.cpp` from line 403 to the end: the ports, the one `UiApp`, the drive adapter,
-   `AdcStickIo`'s permit and monitor step, the bench hooks and `app_main`. That is the whole
-   wiring.
+2. `main/main.cpp`: the one `UiApp`, the drive adapter, the lock's entry points and
+   `app_main` (its header comment lists the other wiring files). Then `main/ui_ports.hpp`
+   (the ports), `main/stick_io.hpp` (`AdcStickIo`'s permit and monitor step) and
+   `main/task_configs.cpp`. That is the whole wiring.
 3. `components/hmi_ui/include/hmi_ui/app_ports.hpp`, `post_stage.hpp` and `ui_app.hpp`: what
    the UI needs, and how its views and the cross-task channels are tied together.
 4. The stick path: `control/stick_island.hpp`, `control/cycle.hpp`, `control/motion_guard.hpp`,
    then `stick/stick_pipeline.hpp` (`cycle`), `stick/output_permit.hpp`,
-   `stick/monitor_cycle.hpp`, then `main.cpp`'s `AdcStickIo`.
+   `stick/monitor_cycle.hpp`, then `main/stick_io.hpp`'s `AdcStickIo`.
 5. The safety core: `drive_session/TABLE.md`, then `drive_adapter.hpp` (`tick`, `input`), then
    `drive_ui/drive_port.hpp` and `drive_ui.cpp` (`update_stick_gate`).
-6. `main/rtps_comms.cpp` `on_mib_status` and `rtps_comms_link_state`: what the MIB tells us.
+6. `components/net_link/src/rtps_comms.cpp` `on_mib_status` and `rtps_comms_link_state`: what
+   the MIB tells us.
 7. `components/post/include/post/checks.hpp` and `runner.hpp`: the POST.
 8. `hmi_ui/src/nav_view.cpp` `go` / `arrive`, and `UiApp::enter_screen`: how screens change.
 9. [testing-overview.md](testing-overview.md): how all of it is tested.

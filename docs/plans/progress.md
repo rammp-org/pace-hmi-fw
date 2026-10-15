@@ -1,5 +1,96 @@
 # Refactor progress (living report)
 
+## Release candidate `dev_ai_rc` (2026-10-15)
+
+**Status:** built, partly benched, **TEST-ONLY and held**. Not merged into `dev_refactor` (the
+owner's "hold the candidate" decision stands); nothing went to `dev` or `main`; no PR.
+**Why test-only:** every espp component comes from the local espp worktree
+`~/Documents/ATDev/w/espp-738` through `override_path` (`main/idf_component.yml`): espp `main`
+v1.3.8 + espp PR #738 + our seven PR branches (1-4, A, B, C, drafts in
+`~/Documents/ATDev/espp_pr_drafts`). CI's runners do not have that folder, so CI cannot build
+the RC until espp merges the PRs and the RC moves to released espp.
+
+Terms: MCB = main control board (the chair's motor controller); RTPS = Real-Time
+Publish-Subscribe (the wire protocol to it); POST = power-on self test; C1-C4, C2b = the
+hazard-fix groups; B0..B5e, B5'', B5f-j, C2-n, B5s-n = bench steps
+([testing-overview.md](../testing-overview.md)); J1/J2 = the joystick items of the
+vendored-joystick review; T-numbers = owner decisions (hazard-decisions.md).
+
+### What the RC contains
+
+| Layer | From |
+| --- | --- |
+| `dev_refactor` (de6ad14): structural refactor, C1 + C3 hazard fixes, coverage and Doxygen ratchets, on-chip allocation guard | merged in |
+| Hazard candidate: C4 motion guard and watchdogs, C2 stick monitor, C2b stop on a stick FAULT, RTPS workers and the ContinuousAdc task at priority 20 (T11, E5), T1 boot DISABLE after the writer matches | `dev_ai_hazard_candidate` |
+| Seat path: one seat gate, seat values validated, publish checked, never re-sent (H6 seat, H8, H10 seat) | `dev_ai_hazard_seat` 440665b |
+| No vendored espp: `espp_adc`, `adc_window`, `espp_rtps`, `m5stack-tab5`, `joystick` deleted; J1 (twist mapper) and J2 (`hmi::stick::mapping_selftest`) in `components/stick` | `dev_ai_integ_espp_prs` |
+| espp PR #738 base; the flush callbacks signal LVGL themselves (#738's contract) | 65d3c51, 8b365c6 |
+| `main.cpp` shrink, no behaviour change: new components `log_capture`, `net_link`, `post_facts`; main's wiring into `ui_ports`, `cues`, `stick_io`, `task_configs`, `bench_hooks`, `selftest_platform`; `DisplayFlip::start_direct_render` | dc88fae..ba2c7b3 |
+| Bench tools on Linux; B3 accepts a SKIP of `net.wifi_rssi` on Ethernet (owner, 2026-10-15) | `dev_ai_bench_linux`, `dev_ai_bench_b3` 71c0990 |
+| Docs: [fw-overview.md](../fw-overview.md), [testing-overview.md](../testing-overview.md), every doc and diagram brought to the RC | `dev_ai_docs_final` 1fb0ba1 + this update |
+
+### What was benched (board 2, `~/bench/results`)
+
+| Run | Image | Result |
+| --- | --- | --- |
+| `integ-0eba858-20261014-221329` (+ `-retry1`) | the RC's code on espp `test-all-prs` (before #738), wired LAN | 77 PASS, 2 FAIL, 2 NOT_RUN, 1 RECORD, 2 SKIP; after one retry 78 PASS, 1 FAIL: B3 `net.wifi_rssi` SKIP on Ethernet (now accepted by the B3 rule). C2-15 (30-min soak) and C2-16 PASS for the first time |
+| `integ-0eba858-allocguard-…` | same, allocation-guard build | `mem.alloc_adc` 491 (first 20 B), `mem.alloc_rtps` 0: PR 3 is not the fix |
+| `integ738-8b365c6-20261015-012759` | on espp `test-all-on-738` (with #738) | 73 PASS, 1 FAIL (B3 `net.wifi_rssi`, as above), 7 NOT_RUN (stick-injection lapses B5''-1b, -18c, C2-6, -11, -15; a network stall B5''-20; C2-13 by design), 1 RECORD, 2 SKIP. Owner's hand test: OK, POST 19/19 |
+| `ctl-0eba858-lan-20261015-030101` | control: the same network without #738 | 74 PASS, 2 FAIL (B3, C2-8), 5 NOT_RUN: the lapses are the network, not #738 |
+| `heapdiag-integ738-20261015-041528` | heap-trace build | Read ADC's allocations attributed (PR 3 item below) |
+
+The RC's own commits after 8b365c6 are refactors with no behaviour change: each was built in
+all four variants with 0 warnings, G4 init_order, G2 exports and the release-ELF checks PASS,
+and the stick task's cycle compared with 8b365c6's by objdump: identical, except
+`StickIsland::read_twist`'s register allocation (76e4137). No
+board run of `ba2c7b3` itself is in `~/bench/results` at the time of writing. The B3 Ethernet
+rule is proven by its selftests (CMP-010..013), not yet on a board.
+
+### Open items for the owner
+
+1. **J2 coverage decision.** `components/stick/src/mapping_selftest.cpp` is a new safety file
+   below the 100 % branch rule: every gcov branch in it is a compiler-made exception edge. The
+   options are in `docs/plans/j2-coverage-review.md` on branch `dev_ai_stick_j2` (not merged).
+2. **PR 3 rework after the heap trace.** The Read ADC allocations are in espp's RTPS publish
+   path, not where PR 3 looked: `SimpleHistoryCache::addChange` 20 B per publish, the
+   `ThreadPool` deque 504 B every 21st publish, `Publisher` `buffer_` once (the guard's "first
+   20 B"). See `~/Documents/ATDev/espp_pr_drafts/PR-3-rtps-publish-noalloc.md`. PR 3 stays on
+   hold until it is reworked.
+3. **PR A/B: NOT READY.** Rebase onto #738's head, then a wired re-run to confirm that the
+   stick-injection lapses on the 192.168.1.x LAN were the network.
+4. **`main.cpp` is 491 lines.** What is left is `lv_*` and lock code. The ratchet allows
+   `lv_*` only in the main unit and the UI paths (`lv_outside_ui`) and a lock only where its
+   legacy count is (`locks`: `main.cpp` 19, new files 0), so it can live only in `main.cpp` or
+   `hmi_ui`. Getting to ~250 lines needs a ratchet-rule decision (for example, a UI-path and
+   lock allowance for one more main file).
+5. **C2-11: the slow Settings screen.** While the Settings screen loads (~1 s) the remote UI
+   task (priority 5) waits behind `lv_task`, so C2-11 is NOT_RUN every time (injection lapse).
+   Bench-only path; needs a faster Settings load or a decision on the step.
+
+Also found while writing this (not in the list above):
+- CI's cppcheck fails the RC on one style finding: `main/cues.cpp:20` `cues_attach`'s parameter
+  is `cues` in the definition and `feedback` in the declaration (`funcArgNamesDifferent`). A
+  one-word code fix for the code lane.
+- With espp's `get_windows()` (PR 1) the stick task's window read takes a lock inside espp,
+  where the vendored copy was lock-free (owner decision pending, `components/control/README.md`).
+- Stale text outside the docs (code comments and declarations, left for the code lane):
+  `main/idf_component.yml`'s comment names `../../espp-test` / `test-all-prs` where the paths
+  are `../../espp-738` / `test-all-on-738`; `tools/guards/baselines/tasks.json`'s `tab5_audio`,
+  `tab5_audio microphone` and `tab5 interrupts` rows cite the deleted `components/m5stack-tab5`;
+  `components/hmi_ui/src/display_flip.cpp`'s header says "the vendored board support";
+  `components/alloc_guard/README.md` still says 24 B per publish and 54/57 checks (the self
+  test has 60, 63 with the alloc rows).
+- Diagram D3 folds espp into the ESP-IDF node on the RC (the `override_path` folders sit
+  outside the project); architecture.md lists which ones are espp.
+
+### Checks on this RC commit
+
+L0 as in `l0.yml` (ratchet, include_boundary, pre-commit, ui_contract, gen_diagrams, guard
+selftests, sim and bench selftests, `tests/run.py` selftest and check): PASS. Doxygen gate
+(doxygen 1.9.8): PASS. Host L1 and the builds: not run for this docs-only commit.
+
+---
+
 Last update: 2026-10-12 (end of the weekend run), `dev_refactor` at 82880cc. Nothing went to
 `dev` or `main`; no PR.
 

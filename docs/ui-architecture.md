@@ -5,9 +5,15 @@ the screens come from, how the burger menu is built and wired, how touch and the
 move around it, and how the chair's state reaches the screen. It is written for someone who
 knows the spec and wants to know where each part of it lives in the code.
 
+Terms: HMI = this Tab5 human-machine interface; MIB = Meebot interface board, the chair's main
+control board (MCB) on the other end of the link; RTPS = Real-Time Publish-Subscribe, the
+protocol they talk over; LVGL = the graphics library; POST = power-on self test; ADC =
+analog-to-digital converter (the stick task is "Read ADC"); GT911 = the touch controller; GPIO =
+a general-purpose pin.
+
 The behaviour lives in `components/hmi_ui` (`UiApp`, `NavView` and the views) and
-`components/drive_ui`, wired by `main/main.cpp`; the names below are those classes' members
-unless a file is named. How it all runs (tasks, locks, the drive session) is in
+`components/drive_ui`, wired by `main/` (`main.cpp` and `ui_ports`); the names below are
+those classes' members unless a file is named. How it all runs (tasks, locks, the drive session) is in
 [how-the-firmware-works.md](how-the-firmware-works.md) and, on one page,
 [fw-overview.md](fw-overview.md).
 
@@ -23,7 +29,7 @@ flowchart LR
   build -->|writes| spj["pace-hmi-ui.spj<br/>SquareLine project"]
   spj -->|SquareLine CLI export| cfiles["ui_c_files/<br/>generated C"]
   cfiles -->|import_ui.ps1| ui["components/ui/<br/>(this repo, never edited)"]
-  ui -->|ui_* widgets, bound by name| fw["components/hmi_ui, drive_ui<br/>behaviour, wired by main.cpp"]
+  ui -->|ui_* widgets, bound by name| fw["components/hmi_ui, drive_ui<br/>behaviour, wired by main/"]
 ```
 
 - **`tools/build_ui.py`** is the design. Every screen, component, size, font and colour is a
@@ -246,7 +252,7 @@ is LVGL *subjects* (observable values) and *observers* (callbacks bound to widge
 
 ```mermaid
 flowchart LR
-  mib["MIB / MCB"] -- "MibStatus, Diagnostics<br/>(RTPS)" --> rtps["main/rtps_comms.cpp"]
+  mib["MIB / MCB"] -- "MibStatus, Diagnostics<br/>(RTPS)" --> rtps["components/net_link/src/rtps_comms.cpp"]
   rtps --> subj["subjects:<br/>mib_state, rtps_link, drive_profile,<br/>seat_axis_value, error_text, ..."]
   subj --> obs["observers"]
   obs --> w["labels, bands, banners,<br/>greyed rows, mode buttons"]
@@ -293,15 +299,22 @@ flowchart LR
   and join block for seconds, so they run on a worker thread (`run_on_worker`) and post their
   result back to the LVGL task; a result for a page that was left meanwhile is dropped. The
   scan and join themselves are `rtps_comms_wifi_scan` / `rtps_comms_wifi_join` in
-  `main/rtps_comms.cpp`, which saves a network to `/storage/wifi.txt` only once it has joined.
+  `components/net_link/src/rtps_comms.cpp`, which saves a network to `/storage/wifi.txt` only
+  once it has joined.
 - **Sounds**: `play_click` for a tap, a stick select or a completed hold, and
   `play_refusal` (two quick clicks) for a greyed press or an arriving warning. The
   **Sounds** setting silences all of them except warnings.
 - **Themes**: every colour in the design is bound to the theme (Dark, Day), so a theme
   switch recolours every screen at once.
 - **Rendering**: LVGL draws straight into the panel's two frame buffers (DIRECT mode) and
-  swaps them at vsync. **Flip screen** renders into a PSRAM frame instead and has the PPA
-  turn it 180 degrees into the panel buffer.
+  swaps them at vsync. `hmi_ui`'s `DisplayFlip::start_direct_render` starts it in `app_main`,
+  on the two frame buffers the board support package (BSP) hands over (`frame_buffers()`,
+  espp PR A); each flush presents through the BSP's vsync-gated `present_frame` (espp PR B).
+  The flush callbacks signal LVGL themselves (`lv_display_flush_ready`), as espp #738's
+  contract asks of a custom flush. **Flip screen** renders into a PSRAM (external RAM) frame
+  instead and has the PPA (the P4's pixel-processing accelerator) turn it 180 degrees into the
+  panel buffer. The espp PRs come from a local espp worktree: a TEST ONLY build
+  ([how-the-firmware-works.md](how-the-firmware-works.md)).
 
 ## 7. Seeing it without looking at the panel
 

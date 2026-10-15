@@ -13,10 +13,15 @@ The firmware as it runs today, every task and every channel between them, is one
 tasks, the motion path, the drive state machine, where each part of the old `main.cpp` went),
 read [how-the-firmware-works.md](how-the-firmware-works.md).
 
-- **Today:** `main` wires and the work lives in `components/*` (no `frag_*.inc` fragments any
-  more). `main.cpp` builds the UI, stick and housekeeping islands from their `Config`s and
-  fills the UI's ports; the network link and RTPS, the self test and the calibration stay in
-  `main/` as approved deviations. Tasks share state through atomics, `fw_core` channels (the
+- **Today** (the release candidate `dev_ai_rc`, 2026-10-15): `main` wires and the work lives
+  in `components/*` (no `frag_*.inc` fragments any more). `main.cpp` builds the UI, stick and
+  housekeeping islands from their `Config`s; its wiring files fill the UI's ports (`ui_ports`,
+  `cues`), the stick task's I/O (`stick_io`), the task configs (`task_configs`), the bench verbs'
+  hooks (`bench_hooks`) and the self test's probes (`selftest_platform`). The network link and
+  RTPS are `net_link`, the log ring `log_capture`, the POST's (power-on self test's) ESP-IDF facts `post_facts`; the
+  extended self test and the calibration adapter stay in `main/` as approved deviations. No espp
+  component is vendored: espp comes as it is, on the RC from a local espp worktree with the
+  drafted espp PRs (TEST ONLY, see [plans/progress.md](plans/progress.md)). Tasks share state through atomics, `fw_core` channels (the
   output permit's `AtomicValue`s, the POST rest-window `Mailbox`, the bench stick injection's
   `Mailbox`), LVGL subjects and a global recursive `lvgl_mutex`. The quick POST (`post`) is
   wired; `topology` is built and tested but not wired, so **D2 below is the target, not
@@ -56,8 +61,9 @@ classDef gen stroke-dasharray:5 4
 
 ## D1 Context (hand-written)
 
-The HMI is the joystick and touch screen of a powered wheelchair. It sends motion and seat
-commands to the MIB/MCB over RTPS and shows the chair's state. The network is either Wi-Fi
+The HMI (human-machine interface) is the joystick and touch screen of a powered wheelchair. It
+sends motion and seat commands to the MIB/MCB (Meebot interface board / main control board, the
+chair's motor controller) over RTPS (Real-Time Publish-Subscribe) and shows the chair's state. The network is either Wi-Fi
 (the Tab5's ESP32-C6 over SDIO) or Ethernet (an optional W5500 on the M5-Bus SPI lines), one at a
 time, chosen on the Internet Settings screen. The bench PC tools stand in for the MCB and drive the
 screen in test builds.
@@ -91,7 +97,7 @@ flowchart LR
   classDef gen stroke-dasharray:5 4
 ```
 
-Sources for D1: `main/rtps_comms.cpp` (Wi-Fi or W5500, one link), `components/hmi_rtps_spec/include/hmi_rtps_spec.hpp`
+Sources for D1: `components/net_link/src/rtps_comms.cpp` (Wi-Fi or W5500, one link), `components/hmi_rtps_spec/include/hmi_rtps_spec.hpp`
 (`kMibStatusPeriod` 500 ms, bench topics), the stick task's 33 ms ADC period, `components/ota/src/github_ota.cpp`,
 `components/remote_ui/src/remote_ui.cpp` (`CONFIG_HMI_REMOTE_UI`), `components/storage`, and the Bench section of
 [project-profile.md](project-profile.md).
@@ -186,10 +192,13 @@ flowchart LR
   c_hmi_ui["hmi_ui"]
   c_housekeeping["housekeeping"]
   c_joystick_cal["joystick_cal"]:::safety
+  c_log_capture["log_capture"]
   c_main["main"]:::safety
+  c_net_link["net_link"]:::safety
   c_ota["ota"]
   c_ota_parse["ota_parse"]
   c_post["post"]:::safety
+  c_post_facts["post_facts"]:::safety
   c_rammp_rtps_messages["rammp_rtps_messages (submodule)"]:::safety
   c_remote_ui["remote_ui"]
   c_seat["seat"]:::safety
@@ -197,7 +206,7 @@ flowchart LR
   c_stick["stick"]:::safety
   c_storage["storage"]
   c_ui["ui"]:::gen
-  g_ESP_IDF["ESP-IDF · 54"]
+  g_ESP_IDF["ESP-IDF · 56"]
   g_Espressif_registry["Espressif registry · 8"]
   g_joltwallet["joltwallet · 1"]
   g_LVGL["LVGL · 1"]
@@ -255,8 +264,11 @@ flowchart LR
   c_main -.-> c_hmi_ui
   c_main -.-> c_housekeeping
   c_main -.-> c_joystick_cal
+  c_main -.-> c_log_capture
+  c_main -.-> c_net_link
   c_main -.-> c_ota
   c_main -.-> c_ota_parse
+  c_main -.-> c_post_facts
   c_main -.-> c_rammp_rtps_messages
   c_main -.-> c_remote_ui
   c_main -.-> c_settings
@@ -266,12 +278,18 @@ flowchart LR
   c_main -.-> g_ESP_IDF
   c_main -.-> g_Espressif_registry
   c_main -.-> g_LVGL
+  c_net_link -.-> c_hmi_rtps_spec
+  c_net_link -.-> c_storage
+  c_net_link -.-> g_ESP_IDF
+  c_net_link -.-> g_Espressif_registry
   c_ota -.-> c_ota_parse
   c_ota -.-> c_storage
   c_ota -.-> g_ESP_IDF
   c_ota -.-> g_Espressif_registry
   c_ota_parse -.-> g_Espressif_registry
   c_post -.-> c_stick
+  c_post_facts -.-> c_post
+  c_post_facts -.-> g_ESP_IDF
   c_remote_ui -.-> c_fw_core
   c_remote_ui -.-> c_stick
   c_remote_ui -.-> c_ui
@@ -293,7 +311,7 @@ flowchart LR
 
 <details><summary>Folded dependencies</summary>
 
-- **ESP-IDF**: `adc`, `app_update`, `base_component`, `base_peripheral`, `bmi270`, `bootloader_support`, `button`, `cdr`, `cli`, `codec`, `display`, `display_drivers`, `drv2605`, `esp_app_format`, `esp_driver_ppa`, `esp_eth`, `esp_event`, `esp_http_client`, `esp_mm`, `esp_netif`, `esp_partition`, `esp_timer`, `esp_wifi`, `file_system`, `filters`, `format`, `freertos`, `gt911`, `i2c`, `ina226`, `input_drivers`, `interrupt`, `joystick`, `led`, `log`, `logger`, `lwip`, `m5stack-tab5`, `math`, `mbedtls`, `pi4ioe5v`, `pthread`, `reflect_cpp`, `rtps`, `rx8130ce`, `sdcard`, `socket`, `spi`, `spi_flash`, `st7123touch`, `task`, `thread_pool`, `timer`, `touch`
+- **ESP-IDF**: `adc`, `app_update`, `base_component`, `base_peripheral`, `bmi270`, `bootloader_support`, `button`, `cdr`, `cli`, `codec`, `display`, `display_drivers`, `drv2605`, `esp_app_format`, `esp_driver_gpio`, `esp_driver_ppa`, `esp_driver_spi`, `esp_eth`, `esp_event`, `esp_http_client`, `esp_mm`, `esp_netif`, `esp_partition`, `esp_timer`, `esp_wifi`, `file_system`, `filters`, `format`, `freertos`, `gt911`, `i2c`, `ina226`, `input_drivers`, `interrupt`, `joystick`, `led`, `log`, `logger`, `lwip`, `m5stack-tab5`, `math`, `mbedtls`, `pi4ioe5v`, `pthread`, `reflect_cpp`, `rtps`, `rx8130ce`, `sdcard`, `socket`, `spi`, `spi_flash`, `st7123touch`, `task`, `thread_pool`, `timer`, `touch`
 - **Espressif registry**: `espressif__cjson`, `espressif__esp-dsp`, `espressif__esp_hosted`, `espressif__esp_sccb_intf`, `espressif__esp_wifi_remote`, `espressif__usb`, `espressif__usb_host_uvc`, `espressif__w5500`
 - **joltwallet**: `joltwallet__littlefs`
 - **LVGL**: `lvgl__lvgl`
@@ -302,3 +320,13 @@ flowchart LR
 
 Source: `docs/diagrams/project_components.json`, a path-free snapshot of an ESP-IDF build's `project_description.json`. Regenerate after a build with `python tools/gen_diagrams/gen_diagrams.py write --build-dir <idf build dir>`.
 <!-- END GENERATED D3 -->
+
+Snapshot taken from the RC's bench build of `ba2c7b3` (2026-10-15). On the RC every espp
+component is an `override_path` to a folder outside the project, so the generator cannot tell
+it from ESP-IDF and folds it into the **ESP-IDF** node. The espp ones in that list are `adc`,
+`base_component`, `base_peripheral`, `bmi270`, `button`, `cdr`, `cli`, `codec`, `display`,
+`display_drivers`, `drv2605`, `file_system`, `filters`, `format`, `gt911`, `i2c`, `ina226`,
+`input_drivers`, `interrupt`, `joystick`, `led`, `logger`, `m5stack-tab5`, `math`, `pi4ioe5v`,
+`reflect_cpp`, `rtps`, `rx8130ce`, `sdcard`, `socket`, `spi`, `st7123touch`, `task`,
+`thread_pool`, `timer` and `touch`. With espp from the component manager they fold into an
+**espp** node again.
