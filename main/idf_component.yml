@@ -22,77 +22,77 @@ dependencies:
   # others pull in included, is listed so that one source serves them all (CS-LAY-06).
   # CI cannot resolve these paths.
   espp/adc:
-    override_path: '../../espp-test/components/adc'
+    override_path: '../../espp-738/components/adc'
   espp/base_component:
-    override_path: '../../espp-test/components/base_component'
+    override_path: '../../espp-738/components/base_component'
   espp/base_peripheral:
-    override_path: '../../espp-test/components/base_peripheral'
+    override_path: '../../espp-738/components/base_peripheral'
   espp/bmi270:
-    override_path: '../../espp-test/components/bmi270'
+    override_path: '../../espp-738/components/bmi270'
   espp/button:
-    override_path: '../../espp-test/components/button'
+    override_path: '../../espp-738/components/button'
   espp/cdr:
-    override_path: '../../espp-test/components/cdr'
+    override_path: '../../espp-738/components/cdr'
   espp/cli:
-    override_path: '../../espp-test/components/cli'
+    override_path: '../../espp-738/components/cli'
   espp/codec:
-    override_path: '../../espp-test/components/codec'
+    override_path: '../../espp-738/components/codec'
   espp/display:
-    override_path: '../../espp-test/components/display'
+    override_path: '../../espp-738/components/display'
   espp/display_drivers:
-    override_path: '../../espp-test/components/display_drivers'
+    override_path: '../../espp-738/components/display_drivers'
   espp/drv2605:
-    override_path: '../../espp-test/components/drv2605'
+    override_path: '../../espp-738/components/drv2605'
   espp/file_system:
-    override_path: '../../espp-test/components/file_system'
+    override_path: '../../espp-738/components/file_system'
   espp/filters:
-    override_path: '../../espp-test/components/filters'
+    override_path: '../../espp-738/components/filters'
   espp/format:
-    override_path: '../../espp-test/components/format'
+    override_path: '../../espp-738/components/format'
   espp/gt911:
-    override_path: '../../espp-test/components/gt911'
+    override_path: '../../espp-738/components/gt911'
   espp/i2c:
-    override_path: '../../espp-test/components/i2c'
+    override_path: '../../espp-738/components/i2c'
   espp/ina226:
-    override_path: '../../espp-test/components/ina226'
+    override_path: '../../espp-738/components/ina226'
   espp/input_drivers:
-    override_path: '../../espp-test/components/input_drivers'
+    override_path: '../../espp-738/components/input_drivers'
   espp/interrupt:
-    override_path: '../../espp-test/components/interrupt'
+    override_path: '../../espp-738/components/interrupt'
   espp/joystick:
-    override_path: '../../espp-test/components/joystick'
+    override_path: '../../espp-738/components/joystick'
   espp/led:
-    override_path: '../../espp-test/components/led'
+    override_path: '../../espp-738/components/led'
   espp/logger:
-    override_path: '../../espp-test/components/logger'
+    override_path: '../../espp-738/components/logger'
   espp/m5stack-tab5:
-    override_path: '../../espp-test/components/m5stack-tab5'
+    override_path: '../../espp-738/components/m5stack-tab5'
   espp/math:
-    override_path: '../../espp-test/components/math'
+    override_path: '../../espp-738/components/math'
   espp/pi4ioe5v:
-    override_path: '../../espp-test/components/pi4ioe5v'
+    override_path: '../../espp-738/components/pi4ioe5v'
   espp/reflect_cpp:
-    override_path: '../../espp-test/components/reflect_cpp'
+    override_path: '../../espp-738/components/reflect_cpp'
   espp/rtps:
-    override_path: '../../espp-test/components/rtps'
+    override_path: '../../espp-738/components/rtps'
   espp/rx8130ce:
-    override_path: '../../espp-test/components/rx8130ce'
+    override_path: '../../espp-738/components/rx8130ce'
   espp/sdcard:
-    override_path: '../../espp-test/components/sdcard'
+    override_path: '../../espp-738/components/sdcard'
   espp/socket:
-    override_path: '../../espp-test/components/socket'
+    override_path: '../../espp-738/components/socket'
   espp/spi:
-    override_path: '../../espp-test/components/spi'
+    override_path: '../../espp-738/components/spi'
   espp/st7123touch:
-    override_path: '../../espp-test/components/st7123touch'
+    override_path: '../../espp-738/components/st7123touch'
   espp/task:
-    override_path: '../../espp-test/components/task'
+    override_path: '../../espp-738/components/task'
   espp/thread_pool:
-    override_path: '../../espp-test/components/thread_pool'
+    override_path: '../../espp-738/components/thread_pool'
   espp/timer:
-    override_path: '../../espp-test/components/timer'
+    override_path: '../../espp-738/components/timer'
   espp/touch:
-    override_path: '../../espp-test/components/touch'
+    override_path: '../../espp-738/components/touch'
   espressif/esp-dsp: ^1.8.2
   lvgl/lvgl: ^9.5.0
   # Pulled in by the Tab5 BSP; pinned, so a re-solve does not move them.

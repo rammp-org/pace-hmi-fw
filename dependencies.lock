@@ -8,7 +8,7 @@ dependencies:
     - name: espp/task
       version: '>=1.0'
     source:
-      path: ../espp-test/components/adc
+      path: ../espp-738/components/adc
       type: local
     version: '*'
   espp/base_component:
@@ -18,7 +18,7 @@ dependencies:
     - name: espp/logger
       version: '>=1.0'
     source:
-      path: ../espp-test/components/base_component
+      path: ../espp-738/components/base_component
       type: local
     version: '*'
   espp/base_peripheral:
@@ -28,7 +28,7 @@ dependencies:
     - name: espp/base_component
       version: '>=1.0'
     source:
-      path: ../espp-test/components/base_peripheral
+      path: ../espp-738/components/base_peripheral
       type: local
     version: '*'
   espp/bmi270:
@@ -40,7 +40,7 @@ dependencies:
     - name: espp/math
       version: '>=1.0'
     source:
-      path: ../espp-test/components/bmi270
+      path: ../espp-738/components/bmi270
       type: local
     version: '*'
   espp/button:
@@ -50,7 +50,7 @@ dependencies:
     - name: espp/interrupt
       version: '>=1.0'
     source:
-      path: ../espp-test/components/button
+      path: ../espp-738/components/button
       type: local
     version: '*'
   espp/cdr:
@@ -60,7 +60,7 @@ dependencies:
     - name: espp/reflect_cpp
       version: '>=1.0'
     source:
-      path: ../espp-test/components/cdr
+      path: ../espp-738/components/cdr
       type: local
     version: '*'
   espp/cli:
@@ -70,7 +70,7 @@ dependencies:
     - name: espp/logger
       version: '>=1.0'
     source:
-      path: ../espp-test/components/cli
+      path: ../espp-738/components/cli
       type: local
     version: '*'
   espp/codec:
@@ -78,7 +78,7 @@ dependencies:
     - name: idf
       version: '>=5.0'
     source:
-      path: ../espp-test/components/codec
+      path: ../espp-738/components/codec
       type: local
     version: '*'
   espp/display:
@@ -94,7 +94,7 @@ dependencies:
     - name: espp/task
       version: '>=1.0'
     source:
-      path: ../espp-test/components/display
+      path: ../espp-738/components/display
       type: local
     version: '*'
   espp/display_drivers:
@@ -108,7 +108,7 @@ dependencies:
     - name: espp/spi
       version: '>=1.0'
     source:
-      path: ../espp-test/components/display_drivers
+      path: ../espp-738/components/display_drivers
       type: local
     version: '*'
   espp/drv2605:
@@ -120,7 +120,7 @@ dependencies:
     - name: espp/cli
       version: '>=1.0'
     source:
-      path: ../espp-test/components/drv2605
+      path: ../espp-738/components/drv2605
       type: local
     version: '*'
   espp/file_system:
@@ -132,7 +132,7 @@ dependencies:
     - name: espp/base_component
       version: '>=1.0'
     source:
-      path: ../espp-test/components/file_system
+      path: ../espp-738/components/file_system
       type: local
     version: '*'
   espp/filters:
@@ -146,7 +146,7 @@ dependencies:
     - name: espp/math
       version: '>=1.0'
     source:
-      path: ../espp-test/components/filters
+      path: ../espp-738/components/filters
       type: local
     version: '*'
   espp/format:
@@ -154,7 +154,7 @@ dependencies:
     - name: idf
       version: '>=5.0'
     source:
-      path: ../espp-test/components/format
+      path: ../espp-738/components/format
       type: local
     version: '*'
   espp/gt911:
@@ -166,7 +166,7 @@ dependencies:
     - name: espp/touch
       version: '>=1.0'
     source:
-      path: ../espp-test/components/gt911
+      path: ../espp-738/components/gt911
       type: local
     version: '*'
   espp/i2c:
@@ -180,7 +180,7 @@ dependencies:
     - name: espp/task
       version: '>=1.0'
     source:
-      path: ../espp-test/components/i2c
+      path: ../espp-738/components/i2c
       type: local
     version: '*'
   espp/ina226:
@@ -190,7 +190,7 @@ dependencies:
     - name: espp/base_peripheral
       version: '>=1.0'
     source:
-      path: ../espp-test/components/ina226
+      path: ../espp-738/components/ina226
       type: local
     version: '*'
   espp/input_drivers:
@@ -204,7 +204,7 @@ dependencies:
     - name: espp/touch
       version: '>=1.0'
     source:
-      path: ../espp-test/components/input_drivers
+      path: ../espp-738/components/input_drivers
       type: local
     version: '*'
   espp/interrupt:
@@ -216,7 +216,7 @@ dependencies:
     - name: espp/task
       version: '>=1.0'
     source:
-      path: ../espp-test/components/interrupt
+      path: ../espp-738/components/interrupt
       type: local
     version: '*'
   espp/joystick:
@@ -228,7 +228,7 @@ dependencies:
     - name: espp/math
       version: '>=1.0'
     source:
-      path: ../espp-test/components/joystick
+      path: ../espp-738/components/joystick
       type: local
     version: '*'
   espp/led:
@@ -240,7 +240,7 @@ dependencies:
     - name: espp/task
       version: '>=1.0'
     source:
-      path: ../espp-test/components/led
+      path: ../espp-738/components/led
       type: local
     version: '*'
   espp/logger:
@@ -250,7 +250,7 @@ dependencies:
     - name: espp/format
       version: '>=1.0'
     source:
-      path: ../espp-test/components/logger
+      path: ../espp-738/components/logger
       type: local
     version: '*'
   espp/m5stack-tab5:
@@ -294,7 +294,7 @@ dependencies:
     - name: espressif/esp_cam_sensor
       version: '>=2.0,<2.4'
     source:
-      path: ../espp-test/components/m5stack-tab5
+      path: ../espp-738/components/m5stack-tab5
       type: local
     targets:
     - esp32p4
@@ -306,7 +306,7 @@ dependencies:
     - name: espp/format
       version: '>=1.0'
     source:
-      path: ../espp-test/components/math
+      path: ../espp-738/components/math
       type: local
     version: '*'
   espp/pi4ioe5v:
@@ -316,7 +316,7 @@ dependencies:
     - name: espp/base_peripheral
       version: '>=1.0'
     source:
-      path: ../espp-test/components/pi4ioe5v
+      path: ../espp-738/components/pi4ioe5v
       type: local
     version: '*'
   espp/reflect_cpp:
@@ -324,7 +324,7 @@ dependencies:
     - name: idf
       version: '>=5.2'
     source:
-      path: ../espp-test/components/reflect_cpp
+      path: ../espp-738/components/reflect_cpp
       type: local
     version: '*'
   espp/rtps:
@@ -344,7 +344,7 @@ dependencies:
     - name: espp/socket
       version: '>=1.0'
     source:
-      path: ../espp-test/components/rtps
+      path: ../espp-738/components/rtps
       type: local
     version: '*'
   espp/rx8130ce:
@@ -354,7 +354,7 @@ dependencies:
     - name: espp/base_peripheral
       version: '>=1.0'
     source:
-      path: ../espp-test/components/rx8130ce
+      path: ../espp-738/components/rx8130ce
       type: local
     version: '*'
   espp/sdcard:
@@ -364,7 +364,7 @@ dependencies:
     - name: espp/base_component
       version: '>=1.0'
     source:
-      path: ../espp-test/components/sdcard
+      path: ../espp-738/components/sdcard
       type: local
     version: '*'
   espp/socket:
@@ -378,7 +378,7 @@ dependencies:
     - name: espp/thread_pool
       version: '>=1.0'
     source:
-      path: ../espp-test/components/socket
+      path: ../espp-738/components/socket
       type: local
     version: '*'
   espp/spi:
@@ -390,7 +390,7 @@ dependencies:
     - name: espp/task
       version: '>=1.0'
     source:
-      path: ../espp-test/components/spi
+      path: ../espp-738/components/spi
       type: local
     version: '*'
   espp/st7123touch:
@@ -402,7 +402,7 @@ dependencies:
     - name: espp/touch
       version: '>=1.0'
     source:
-      path: ../espp-test/components/st7123touch
+      path: ../espp-738/components/st7123touch
       type: local
     version: '*'
   espp/task:
@@ -412,7 +412,7 @@ dependencies:
     - name: espp/base_component
       version: '>=1.0'
     source:
-      path: ../espp-test/components/task
+      path: ../espp-738/components/task
       type: local
     version: '*'
   espp/thread_pool:
@@ -424,7 +424,7 @@ dependencies:
     - name: espp/task
       version: '>=1.0'
     source:
-      path: ../espp-test/components/thread_pool
+      path: ../espp-738/components/thread_pool
       type: local
     version: '*'
   espp/timer:
@@ -434,7 +434,7 @@ dependencies:
     - name: espp/task
       version: '>=1.0'
     source:
-      path: ../espp-test/components/timer
+      path: ../espp-738/components/timer
       type: local
     version: '*'
   espp/touch:
@@ -442,7 +442,7 @@ dependencies:
     - name: idf
       version: '>=5.0'
     source:
-      path: ../espp-test/components/touch
+      path: ../espp-738/components/touch
       type: local
     version: '*'
   espressif/cjson:
@@ -785,6 +785,6 @@ direct_dependencies:
 - espressif/w5500
 - idf
 - lvgl/lvgl
-manifest_hash: f1cc22bcd648f6fa5554819227491ef0fd0dbf35568ce3c86b08bb213418a931
+manifest_hash: 093cca3918cd41778e60459b4f9f62438e22330cb7af4e0d8bb6e2467e1ea93d
 target: esp32p4
 version: 3.0.0
