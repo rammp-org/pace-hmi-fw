@@ -1,10 +1,10 @@
 """One command for the board tests of plan §6 (B0..B5).
 
-    python run_bench.py --build-dir C:\\b\\main_bench --label baseline-bench --flash
+    python run_bench.py --build-dir <build dir> --label baseline-bench --flash
     python run_bench.py --build-dir <dir> --label dry --steps B0,B1,B2,B3,B4,B5   # no flash
 
 Takes the board lease, runs the steps in order, writes
-C:\\b\\bench\\results\\<label>-<time>\\summary.json, releases the lease.
+<BENCH_HOME>/results/<label>-<time>/summary.json, releases the lease.
 Exit 0 when every step that ran is PASS (or SKIP), 1 on any FAIL, 2 on INVALID.
 
 Verdicts per step: PASS, FAIL, INVALID (only from the B0 preflight, and from
@@ -18,7 +18,7 @@ B0  port by MAC; tethering On (BENCH_NET=lan: not applicable); the PC holds
     board); the board's partition table == the build's; with --flash, the build
     is a bench build (CONFIG_HMI_REMOTE_UI 1) with all images. Any false: INVALID,
     and nothing else runs.
-B1  back up /storage once (C:\\b\\bench\\storage-*.bin, never overwritten); with
+B1  back up /storage once (<BENCH_HOME>/storage-*.bin, never overwritten); with
     --flash, write-flash @flash_args (no erase; the table is compared again just
     before writing). Exit 0 = PASS.
 B2  deliberate reset, 90 s capture, boot_check.py. "WiFi joined" without "Got
@@ -70,7 +70,6 @@ Last-good (with --flash, without --no-save): saved when every step recorded is
 from __future__ import annotations
 
 import argparse
-import ipaddress
 import json
 import os
 import pathlib
@@ -147,6 +146,12 @@ class Run:
     # --- tethering ---------------------------------------------------------
 
     def hotspot(self, action: str) -> tuple[int, str]:
+        """hotspot.ps1 (Windows Mobile Hotspot). Elsewhere there is no hotspot to check or
+        restart: exit 2 and why, so BENCH_NET=hotspot's tethering check is INVALID there
+        (run with BENCH_NET=lan:<pc ip>/<prefix> or routed:..., which never call this)."""
+        if not common.WINDOWS:
+            return 2, (f"STATE Unknown: hotspot.ps1 needs Windows; on {sys.platform} set "
+                       "BENCH_NET=lan:<pc ip>/<prefix> (the board on Ethernet)")
         r = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
                             str(common.HERE / "hotspot.ps1"), action],
                            capture_output=True, text=True, timeout=120)
@@ -211,17 +216,7 @@ class Run:
         return self.record("B0", "PASS" if ok else "INVALID", checks=checks)
 
     def rtps_sweep(self) -> list[str]:
-        sys.path.insert(0, str(self.a.tree / "scripts"))
-        import rtps_net
-        hosts = [str(h) for h in ipaddress.IPv4Network(common.SUBNET).hosts()
-                 if str(h) not in (common.PC_IP, *common.SWEEP_SKIP)]
-        # In chunks: one listener seeding all 252 addresses spends its window on
-        # ARP for empty addresses and never reached the board (seen 02:05).
-        found: set[str] = set()
-        for i in range(0, len(hosts), 64):
-            found |= set(rtps_net._run_listener(hosts[i:i + 64], 6.0, common.PC_IP,
-                                                stop_on_first=False))
-        return sorted(found)
+        return hazard_rig.rtps_sweep(self.a.tree)
 
     # --- B1 ----------------------------------------------------------------
 

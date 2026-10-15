@@ -26,8 +26,48 @@ set PY=C:\Espressif\tools\python\v6.0\venv\Scripts\python.exe
 %PY% tools\bench\run_bench.py --build-dir <build> --label x --steps B0,B5,B5a,B5b    # no B2: --ip optional
 ```
 
-Results: `C:\b\bench\results\<label>-<time>\summary.json` (one verdict per step, the board IP),
-plus the boot capture, self-test JSON, walk PNGs and the sim logs beside it.
+Results: `<BENCH_HOME>/results/<label>-<time>/summary.json` (one verdict per step, the board IP),
+plus the boot capture, self-test JSON, walk PNGs and the sim logs beside it. `BENCH_HOME` is
+`C:\b\bench` on Windows and `~/bench` on Linux unless set in the environment.
+
+## Linux (Ubuntu)
+The same tools run on Linux; the platform switches are in `common.py` (selftest
+BENCH-073..079). Differences from Windows:
+- **Port access**: the Tab5 is `/dev/ttyACM0` (found by its serial number, as on Windows).
+  The device is `root:dialout`; a desktop session usually gets an ACL for the logged-in user,
+  otherwise `sudo usermod -aG dialout $USER` and log in again (`getfacl /dev/ttyACM0` shows
+  which applies).
+- **Python**: the IDF v6.0 venv, `~/.espressif/tools/python/v6.0/venv/bin/python`
+  (`BENCH_VENV_PY` overrides); the system `python3` runs the selftests (stdlib only).
+- **Network**: there is no Windows Mobile Hotspot, so set `BENCH_NET`: the board on
+  Ethernet in the PC's LAN (its Connection setting = Ethernet, `network 0`). With the default
+  `hotspot`, B0's tethering check is INVALID (hotspot.ps1 needs Windows). Example:
+  ```
+  export BENCH_NET=lan:192.168.1.193/24      # this PC's address/prefix on the board's LAN
+  PY=~/.espressif/tools/python/v6.0/venv/bin/python
+  $PY tools/bench/lease.py status
+  $PY tools/bench/run_bench.py --build-dir ~/b/bench --label x --steps B0,B2 --no-save
+  ```
+  The PC may be on Wi-Fi in the same subnet; its firewall (if any) must let UDP 7400-7500
+  (RTPS) in.
+- **Paths**: `BENCH_HOME` = `~/bench`, the lease = `~/Documents/ATDev/rammp/.board-lease`
+  (`BENCH_LEASE` overrides); results, `/storage` backups and last-good images live there.
+- **Opening the port**: Linux's cdc_acm raises DTR and RTS at open, and the chip resets on
+  RTS high with DTR low, so `board._open` sets DTR high and RTS low before open() and DTR low
+  right after (`board.open_lines`); a plain open (e.g. `miniterm`) resets the board.
+- **tkinter**: Ubuntu's python (and so the venv) may lack it (`python3-tk`). The sim and
+  the self test import `rtps_drive_game` headless (CarModel only); only the GUI tools
+  (`rtps_mcb_gui.py`, the drive view) need `sudo apt install python3-tk`.
+- **RTPS sends**: Linux queues datagrams to addresses whose ARP is unresolved in the socket's
+  send buffer, so the subnet sweep fills it and `sendto` raises EAGAIN. `rtps_host` drops such
+  a datagram (`_send_or_drop`, BENCH-078) instead of losing its receive thread, and the bench
+  sweep is strict: a listener that dies early raises, so B0 is INVALID and there is no
+  sole-sim proof (`rtps_net.ListenerDied`, BENCH-079).
+- **Processes**: the stray-peer scan reads `/proc` (or `ps -eo pid,ppid,args`); a Linux
+  venv's python is one process (no launcher), and `kill_tree` sends SIGKILL to the whole tree.
+- **Build**: `. ~/.espressif/tools/activate_idf_v6.0.sh` (IDF 6.0.0 only), then
+  `idf.py -B ~/b/bench -D SDKCONFIG=$HOME/b/bench/sdkconfig
+  -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;ci/sdkconfig.bench" build`.
 
 | Step | Script | PASS |
 | --- | --- | --- |
@@ -90,8 +130,8 @@ sim's seat modes `seatval`, `seatdrop`, `seatslow`, the HMI's `SEATFAIL` and STA
   marks), every XYTwist sample with its time (`sim_child.py jsave`), STATE polled every
   100 ms, and the serial log for B5''-16, -18b, -21, B5i, B5j (the port from B0, or
   `--port`). One clock: time.monotonic(), system-wide on Windows (15.6 ms resolution on the
-  venv's Python 3.11). "Within X" runs from the mark before the command to the first STATE
-  poll that shows the result (C3 §7).
+  venv's Python 3.11) and on Linux (CLOCK_MONOTONIC). "Within X" runs from the mark before
+  the command to the first STATE poll that shows the result (C3 §7).
 - **Verdicts:** PASS / FAIL on the graded checks; NOT_RUN when the image lacks a verb or a
   STATE field the step needs (the hook another change wires has not landed: "not wired"), or
   the rig could not do its part. Banners are STATE's `banner` (owner, 2026-10-08). B5''-18b
@@ -111,16 +151,18 @@ sim's seat modes `seatval`, `seatdrop`, `seatslow`, the HMI's `SEATFAIL` and STA
 - Never flashes when the board's table (`read-flash 0x8000 0xc00`) differs from the build's
   `partition_table/partition-table.bin` (compared in B0 and again right before each write).
 - Only bench builds: `config/sdkconfig.h` must have `#define CONFIG_HMI_REMOTE_UI 1`.
-- `/storage` (0xC20000, 0x3E0000) is read to `C:\b\bench\storage-<time>.bin` once; an existing
+- `/storage` (0xC20000, 0x3E0000) is read to `<BENCH_HOME>/storage-<time>.bin` once; an existing
   backup is never replaced.
-- Opening the port: DTR and RTS False before `open()` (else the board resets). The deliberate
+- Opening the port: DTR and RTS False before `open()` (else the board resets); on Linux DTR
+  True and RTS False, then DTR False (`board.open_lines`). The deliberate
   reset is RTS high 200 ms with DTR low (esptool's USB hard reset).
 - The self test never runs beside a sim (both publish MibStatus): a process scan refuses it.
-- One hotspot restart per run (`hotspot.ps1 restart`), only for "WiFi joined" without "Got IP"
-  for 60 s.
-- The board lease (`C:\Users\halai\Offline_Documents\ATDev\rammp\.board-lease`, JSON
-  `{owner, since, pid}`) is held for the whole run; `lease.py status|acquire|release`. A lease
-  whose pid is dead is taken over and the takeover is logged.
+- One hotspot restart per run (`hotspot.ps1 restart`, Windows only), only for "WiFi joined"
+  without "Got IP" for 60 s.
+- The board lease (`C:\Users\halai\Offline_Documents\ATDev\rammp\.board-lease` on Windows,
+  `~/Documents/ATDev/rammp/.board-lease` on Linux, JSON `{owner, since, pid}`) is held for
+  the whole run; `lease.py status|acquire|release`. A lease whose pid is dead is taken over
+  and the takeover is logged.
 - Every esptool call ends with `--after hard-reset`, so B0's table read and B1's backup and
   flash reboot the board. When B2 does not boot it before the next app step (B3 onwards), the
   runner waits first: a serial capture without a reset until `Got IP` (90 s, saved as
@@ -155,10 +197,16 @@ python tools\bench\run_bench.py selftest     # BENCH-001.., step sequencing on a
 %PY% tools\bench\hazard_steps.py --ip A --hazard c1,c3 [--steps B5pp-6] [--port COM7]
 %PY% tools\bench\hazard_steps.py --list
 ```
+On Linux the same commands with `$PY` and forward slashes; `hotspot.ps1` does not apply.
 `--tree` (default: this worktree) is where `scripts/` is run from: run the tree that built the
 image. Children run with `PYTHONDONTWRITEBYTECODE=1`.
 
 ## Decisions to revisit
+- **B3 on Ethernet** (found 2026-10-14, first BENCH_NET=lan run, Ubuntu): the firmware
+  SKIPs `net.wifi_rssi` with no WiFi link, and B3 grades that against the WiFi baseline's
+  PASS, so B3 FAILs on that one row (every other row passed). B2 has its Ethernet rule
+  (BENCH-014); B3 has none yet. Needs the owner's call (a link-dependent expectation, not a
+  silent edit of the baseline).
 - **The sim does not follow an HMI reboot** (found 2026-10-09): after the HMI restarts, the
   sim's RTPS discovery never re-matches the new participant, so it hears no XYTwist or
   DriveCommand again. Until rtps_host and the sim rediscover a restarted peer (the proper
@@ -186,7 +234,7 @@ image. Children run with `PYTHONDONTWRITEBYTECODE=1`.
 - **Task watchdog at ~8 s** (IDLE0 starved, `main` on CPU 0) is in the baseline. The same trip is
   a known finding; a trip with other tasks, or more trips, is a FAIL.
 - **Walk names**: the baseline PNGs were saved without names. The first walk records them in
-  `C:\b\bench\baseline\walk-names.json` (names not graded that run); later runs compare.
+  `<BENCH_HOME>/baseline/walk-names.json` (names not graded that run); later runs compare.
 - **B5 banners** (DRIVE_STOPPED, NOT_GRANTED) are not graded: the remote UI reports only the
   screen name. Screenshots are saved. After `e`, the refusal check first sends `ok` (ERROR
   would refuse anyway), then `x`.

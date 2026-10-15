@@ -23,8 +23,9 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common  # noqa: E402
 
-LEASE = pathlib.Path(os.environ.get(
-    "BENCH_LEASE", r"C:\Users\halai\Offline_Documents\ATDev\rammp\.board-lease"))
+# Windows: C:\Users\halai\Offline_Documents\ATDev\rammp\.board-lease; Linux:
+# ~/Documents/ATDev/rammp/.board-lease (common.default_lease); BENCH_LEASE overrides.
+LEASE = pathlib.Path(os.environ.get("BENCH_LEASE") or common.default_lease())
 
 
 class LeaseHeld(RuntimeError):
@@ -38,6 +39,8 @@ def pid_alive(pid: int) -> bool:
         try:
             os.kill(pid, 0)
             return True
+        except PermissionError:
+            return True  # EPERM: it exists, it is another user's
         except OSError:
             return False
     kernel32 = ctypes.windll.kernel32

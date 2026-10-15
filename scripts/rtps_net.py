@@ -280,22 +280,35 @@ def _listener_args(targets: List[str], advertised: Optional[str],
     )
 
 
+class ListenerDied(RuntimeError):
+    """The probe's receive thread ended before its window: what it found is partial."""
+
+
 def _run_listener(targets: List[str], timeout: float, advertised: Optional[str],
-                  stop_on_first: bool) -> List[str]:
+                  stop_on_first: bool, strict: bool = False) -> List[str]:
+    """Addresses among `targets` that answered within `timeout`. With `strict`, a receive
+    thread that ends early (an exception in it) raises ListenerDied: a sweep that is proof
+    of "no other responder" (the bench's) must not pass on a listener that stopped."""
     if not targets:
         return []
     listener = _Listener(_listener_args(targets, advertised, PROBE_PARTICIPANT_ID), targets)
     thread = threading.Thread(target=listener.run, daemon=True)
     thread.start()
     deadline = time.monotonic() + timeout
+    died = False
     try:
         while time.monotonic() < deadline:
             if stop_on_first and listener.first_response.wait(0.1):
+                break
+            if not thread.is_alive():
+                died = True
                 break
             time.sleep(0.05)
     finally:
         listener.stop()
         thread.join(timeout=2.0)
+    if died and strict:
+        raise ListenerDied(f"the RTPS listener stopped early (found {listener.responders})")
     return list(listener.responders)
 
 

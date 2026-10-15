@@ -1,6 +1,6 @@
 """B5a..B5e: the drive path against the simulated MCB's fault modes. No motors.
 
-    python scenario_hazards.py --ip 192.168.137.218 --out C:\\b\\bench\\results\\x\\hazards
+    python scenario_hazards.py --ip 192.168.137.218 --out <BENCH_HOME>/results/x/hazards
     python scenario_hazards.py --ip ... --steps B5c,B5e
     run_bench.py ...                             (they run after B5 by default)
 

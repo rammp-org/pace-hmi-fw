@@ -1,8 +1,14 @@
 """Shared constants and helpers for the bench runner (tools/bench).
 
 Runtime data never goes in the repo: everything this runner writes lives under
-BENCH_HOME (C:\\b\\bench by default, BENCH_HOME in the environment overrides).
-Run every script with the IDF venv python, the only one with pyserial/esptool.
+BENCH_HOME (C:\\b\\bench on Windows, ~/bench on Linux; BENCH_HOME in the environment
+overrides). Run every script with the IDF venv python, the only one with pyserial/esptool
+(VENV_PY below; BENCH_VENV_PY in the environment overrides).
+
+Platform switches (one place, each a pure function of the platform so the selftest covers
+both: BENCH-073..): the defaults of BENCH_HOME, VENV_PY and the lease file, the python
+process table (CIM on Windows, /proc or `ps` elsewhere), kill_tree (taskkill /T, or
+SIGKILL to each process of the tree) and the hotspot (Windows Mobile Hotspot only).
 """
 
 from __future__ import annotations
@@ -12,12 +18,37 @@ import ipaddress
 import json
 import os
 import pathlib
+import shlex
+import signal
 import subprocess
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parent.parent  # the worktree these tools live in
-BENCH_HOME = pathlib.Path(os.environ.get("BENCH_HOME", r"C:\b\bench"))
+WINDOWS = sys.platform == "win32"
+
+
+def default_bench_home(windows: bool = WINDOWS) -> str:
+    """Where the runner writes when BENCH_HOME is unset."""
+    return r"C:\b\bench" if windows else str(pathlib.Path.home() / "bench")
+
+
+def default_venv_py(windows: bool = WINDOWS) -> str:
+    """The ESP-IDF v6.0 venv's python (the one with pyserial and esptool)."""
+    if windows:
+        return r"C:\Espressif\tools\python\v6.0\venv\Scripts\python.exe"
+    return str(pathlib.Path.home() / ".espressif" / "tools" / "python" / "v6.0" / "venv" / "bin"
+               / "python")
+
+
+def default_lease(windows: bool = WINDOWS) -> str:
+    """The board lease file (TS-PAR-02), beside the workspace; BENCH_LEASE overrides."""
+    if windows:
+        return r"C:\Users\halai\Offline_Documents\ATDev\rammp\.board-lease"
+    return str(pathlib.Path.home() / "Documents" / "ATDev" / "rammp" / ".board-lease")
+
+
+BENCH_HOME = pathlib.Path(os.environ.get("BENCH_HOME") or default_bench_home())
 GOOD_DIR = BENCH_HOME / "good"
 RESULTS_DIR = BENCH_HOME / "results"
 BASELINE_DIR = REPO / "tests" / "characterisation" / "baseline-e2047a4"
@@ -67,16 +98,25 @@ BAUD = 460800
 PT_OFFSET, PT_SIZE = 0x8000, 0xC00
 STORAGE_OFFSET, STORAGE_SIZE = 0xC20000, 0x3E0000
 
-VENV_PY = r"C:\Espressif\tools\python\v6.0\venv\Scripts\python.exe"
+VENV_PY = os.environ.get("BENCH_VENV_PY") or default_venv_py()
+
+
+def _has(module: str) -> bool:
+    import importlib.util
+    try:
+        return importlib.util.find_spec(module) is not None
+    except (ImportError, ValueError):
+        return False
 
 
 def python() -> str:
     """The interpreter for child scripts: this one if it has pyserial, else the venv."""
-    try:
-        import serial  # noqa: F401
-        return sys.executable
-    except ImportError:
-        return VENV_PY
+    return sys.executable if _has("serial") else VENV_PY
+
+
+def esptool_python() -> str:
+    """The interpreter that runs esptool: this one if it has esptool, else the venv."""
+    return sys.executable if _has("esptool") else VENV_PY
 
 
 # The bench times everything with time.monotonic(): the sim stamps each XYTwist with it, the
@@ -127,10 +167,21 @@ def child_env(**extra: str) -> dict:
 
 def kill_tree(pid: int) -> str:
     """Kill a process and everything below it (taskkill /T): killing only a venv launcher
-    leaves its base-interpreter child running, holding its sockets."""
-    r = subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True,
-                       text=True, timeout=30)
-    return (r.stdout + r.stderr).strip()
+    leaves its base-interpreter child running, holding its sockets. Elsewhere SIGKILL to
+    each process of the tree (from the whole process table), children first."""
+    if WINDOWS:
+        r = subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True,
+                           text=True, timeout=30)
+        return (r.stdout + r.stderr).strip()
+    tree = descendants({pid}, process_table(only_python=False))
+    done = []
+    for victim in sorted(tree - {pid}) + [pid]:
+        try:
+            os.kill(victim, signal.SIGKILL)
+            done.append(str(victim))
+        except OSError as e:
+            done.append(f"{victim}: {e.strerror}")
+    return "SIGKILL " + ", ".join(done)
 
 
 def stamp() -> str:
@@ -157,29 +208,92 @@ def esptool(args: list[str], timeout: float = 600.0, cwd: str | None = None) -> 
                 "--erase-all", "-e"):
         if bad in args:
             raise SystemExit(f"refusing esptool call with {bad!r}: the bench never erases")
-    cmd = [VENV_PY, "-m", "esptool", *args]
+    cmd = [esptool_python(), "-m", "esptool", *args]
     log("esptool " + " ".join(args))
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=cwd,
                           env=child_env())
 
 
-def python_process_table() -> list[tuple[int, int, str]]:
-    """(pid, parent pid, command line) of every python process, from CIM."""
-    ps = ("Get-CimInstance Win32_Process | Where-Object { $_.Name -like 'python*' } | "
-          "ForEach-Object { \"$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.CommandLine)\" }")
+def is_python(name: str, argv0: str) -> bool:
+    """A python interpreter process: by its name (CIM's Name, /proc's comm) or argv[0]."""
+    return any(t.replace("\\", "/").rsplit("/", 1)[-1].lower().startswith("python")
+               for t in (name, argv0))
+
+
+def parse_proc_stat(stat: str) -> tuple[str, int]:
+    """(comm, parent pid) from /proc/<pid>/stat: `pid (comm) state ppid ...`; the comm may
+    hold spaces and parentheses, so the fields after it start at the last ')'."""
+    comm = stat[stat.index("(") + 1:stat.rindex(")")]
+    return comm, int(stat[stat.rindex(")") + 2:].split()[1])
+
+
+def parse_ps(text: str) -> list[tuple[int, int, str, str]]:
+    """(pid, parent pid, name, args) from `ps -eo pid=,ppid=,args=`; the name is argv[0]
+    (a comm column beside args would be ambiguous: either may hold spaces)."""
+    rows = []
+    for line in text.splitlines():
+        parts = line.split(None, 2)
+        if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+            args = parts[2] if len(parts) == 3 else ""
+            first = args.split(None, 1)[0] if args.strip() else ""
+            rows.append((int(parts[0]), int(parts[1]), first, args))
+    return rows
+
+
+def _table_proc(root: pathlib.Path) -> list[tuple[int, int, str, str]]:
+    """(pid, parent pid, comm, command line) of every process in a /proc tree."""
+    rows = []
+    for entry in root.iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            comm, ppid = parse_proc_stat((entry / "stat").read_text(encoding="utf-8",
+                                                                    errors="replace"))
+            raw = (entry / "cmdline").read_bytes()
+        except (OSError, ValueError):
+            continue  # gone since the listing, or not ours to read
+        argv = [a.decode("utf-8", "replace") for a in raw.split(b"\0") if a]
+        rows.append((int(entry.name), ppid, comm, shlex.join(argv) if argv else ""))
+    return rows
+
+
+def _table_windows() -> list[tuple[int, int, str, str]]:
+    ps = ("Get-CimInstance Win32_Process | ForEach-Object { "
+          "\"$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.Name)`t$($_.CommandLine)\" }")
     out = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
                          capture_output=True, text=True, timeout=60)
     rows = []
     for line in out.stdout.splitlines():
-        pid, _, rest = line.partition("\t")
-        ppid, _, cmd = rest.partition("\t")
-        if pid.strip().isdigit() and ppid.strip().isdigit():
-            rows.append((int(pid), int(ppid), cmd))
+        fields = line.split("\t", 3)
+        if len(fields) == 4 and fields[0].strip().isdigit() and fields[1].strip().isdigit():
+            rows.append((int(fields[0]), int(fields[1]), fields[2], fields[3]))
     return rows
 
 
+def process_table(only_python: bool = True) -> list[tuple[int, int, str]]:
+    """(pid, parent pid, command line) of every process (or every python process): CIM on
+    Windows, /proc on Linux, `ps -eo pid=,ppid=,args=` where there is no /proc."""
+    if WINDOWS:
+        rows = _table_windows()
+    elif pathlib.Path("/proc/self/stat").is_file():
+        rows = _table_proc(pathlib.Path("/proc"))
+    else:
+        out = subprocess.run(["ps", "-eo", "pid=,ppid=,args="], capture_output=True,
+                             text=True, timeout=60)
+        rows = parse_ps(out.stdout)
+    # Windows: by CIM's Name alone, as before (a quoted argv[0] may hold spaces).
+    return [(pid, ppid, cmd) for pid, ppid, name, cmd in rows
+            if not only_python
+            or is_python(name, "" if WINDOWS or not cmd else cmd.split(None, 1)[0])]
+
+
+def python_process_table() -> list[tuple[int, int, str]]:
+    """(pid, parent pid, command line) of every python process."""
+    return process_table(only_python=True)
+
+
 def python_processes() -> list[tuple[int, str]]:
-    """(pid, command line) of every python process, from CIM."""
+    """(pid, command line) of every python process."""
     return [(pid, cmd) for pid, _, cmd in python_process_table()]
 
 
@@ -187,7 +301,7 @@ def descendants(roots: set[int], table: list[tuple[int, int, str]]) -> set[int]:
     """`roots` and every process below them in `table` ((pid, parent pid, cmd) rows).
     A venv's python.exe on Windows is a launcher that runs the base interpreter as its
     child, and the child is the process doing the work: a child started from a venv is a
-    tree of two."""
+    tree of two. (A Linux venv's python is a symlink: one process, a tree of one.)"""
     found = set(roots)
     grew = True
     while grew:
