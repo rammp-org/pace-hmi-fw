@@ -270,18 +270,6 @@ static void lvgl_cycle() {
 }
 
 // ---------------------------------------------------------------------------
-// Adapters: the callbacks the board's own tasks run (app-main-shrink §3). Each
-// stays on the task that calls it today; app_main builds and registers them. The
-// touch click and the side button are components/board's (hmi::board).
-// ---------------------------------------------------------------------------
-
-// The joystick's LVGL keypad read, on the LVGL task (espp's KeypadInput calls it): UiApp's.
-static void joystick_keypad_read(bool *up, bool *down, bool *left, bool *right, bool *enter,
-                                 bool *escape) {
-  ui_app.keypad_read(up, down, left, right, enter, escape);
-}
-
-// ---------------------------------------------------------------------------
 // Board and service wiring: app_main's Configs and bring-up steps, by concern.
 // ---------------------------------------------------------------------------
 

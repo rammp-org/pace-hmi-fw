@@ -67,6 +67,14 @@ void log_screen_init();
 /// @brief The Joystick screen's calibration (joystick_cal): its prompts blink on the RTPS
 /// indicator's phase, and each captured step clicks. The UI build.
 void calibration_screen_init();
+/// @brief The joystick's LVGL keypad read: UiApp's. The LVGL task (espp's KeypadInput calls it).
+/// @param up Set while the key is down; likewise the rest.
+/// @param down See up.
+/// @param left See up.
+/// @param right See up.
+/// @param enter See up.
+/// @param escape See up.
+void joystick_keypad_read(bool *up, bool *down, bool *left, bool *right, bool *enter, bool *escape);
 /// @brief The InternetScreen: Ethernet or WiFi, the network list and the password page.
 /// Defined in main.cpp (it hands the screen the LVGL lock). The UI build.
 void internet_screen_init();

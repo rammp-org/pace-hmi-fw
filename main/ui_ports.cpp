@@ -84,3 +84,9 @@ void calibration_screen_init() {
                           play_click(espp::M5StackTab5::get());
                         }});
 }
+
+// The joystick's LVGL keypad read, on the LVGL task (espp's KeypadInput calls it): UiApp's.
+void joystick_keypad_read(bool *up, bool *down, bool *left, bool *right, bool *enter,
+                          bool *escape) {
+  ui_app.keypad_read(up, down, left, right, enter, escape);
+}
