@@ -31,9 +31,9 @@ const char *rtps_comms_hostname();
 
 /// One network a scan heard.
 struct WifiNetworkFound {
-  std::string ssid;
-  int rssi;     ///< dBm
-  bool secured; ///< needs a password
+  std::string ssid; ///< the network's name
+  int rssi;         ///< dBm
+  bool secured;     ///< needs a password
 };
 /// Scans for networks: blocking, a few seconds, and the first call in Ethernet mode
 /// also starts the ESP32-C6. Strongest first, one entry per name. nullopt = the WiFi

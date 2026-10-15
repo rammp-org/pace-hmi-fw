@@ -134,7 +134,8 @@ TEST_CASE("SEAT-011 seat_raw is called only in components/seat, the LinkPort's p
                                        "publish_seat outside UiApp::seat_request");
     }
     if (count(s.code, impl_name) != 0) {
-      TEST_ASSERT_TRUE_MESSAGE(s.rel == "main/rtps_comms.cpp" || s.rel == "main/rtps_comms.hpp" ||
+      TEST_ASSERT_TRUE_MESSAGE(s.rel == "components/net_link/src/rtps_comms.cpp" ||
+                                   s.rel == "components/net_link/include/rtps_comms.hpp" ||
                                    s.rel == "main/main.cpp",
                                ("rtps_comms_publish_seat named in " + s.rel).c_str());
     }

@@ -19,6 +19,7 @@ idf_component_register(SRC_DIRS "."
                          joystick
                          joystick_cal
                          log_capture
+                         net_link
                          stick
                          ota
                          remote_ui

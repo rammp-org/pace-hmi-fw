@@ -323,7 +323,48 @@
         "guard variable for fmt::v12::format_facet<std::locale>::id"
       ]
     },
-    "main/rtps_comms.cpp.obj": {
+    "main/selftest.cpp.obj": {
+      "init_functions": 1,
+      "objects": [
+        "(anonymous namespace)::adc_mutex",
+        "(anonymous namespace)::logger",
+        "(anonymous namespace)::ping_log",
+        "(anonymous namespace)::ping_mutex",
+        "(anonymous namespace)::platform"
+      ],
+      "reads_external": [],
+      "lazy_statics": [],
+      "calls": [
+        "SelfTestPlatform::~SelfTestPlatform()",
+        "__cxa_atexit",
+        "espp::Logger::~Logger()",
+        "pthread_mutex_init",
+        "std::mutex::~mutex()",
+        "std::unique_ptr<(anonymous namespace)::PingLog, std::default_delete<(anonymous namespace)::PingLog> >::~unique_ptr()"
+      ],
+      "shared": [
+        "guard variable for fmt::v12::format_facet<std::locale>::id"
+      ]
+    },
+    "main/update_ui.cpp.obj": {
+      "init_functions": 1,
+      "objects": [
+        "(anonymous namespace)::logger",
+        "(anonymous namespace)::releases"
+      ],
+      "reads_external": [],
+      "lazy_statics": [],
+      "calls": [
+        "__cxa_atexit",
+        "espp::Logger::~Logger()",
+        "pthread_mutex_init",
+        "std::vector<hmi::ota::Release, std::allocator<hmi::ota::Release> >::~vector()"
+      ],
+      "shared": [
+        "guard variable for fmt::v12::format_facet<std::locale>::id"
+      ]
+    },
+    "net_link/src/rtps_comms.cpp.obj": {
       "init_functions": 1,
       "objects": [
         "(anonymous namespace)::brightness_handler",
@@ -369,47 +410,6 @@
         "std::unique_ptr<espp::Publisher<rammp::XYTwist>, std::default_delete<espp::Publisher<rammp::XYTwist> > >::~unique_ptr()",
         "std::unique_ptr<espp::RtpsParticipant, std::default_delete<espp::RtpsParticipant> >::~unique_ptr()",
         "std::unique_ptr<espp::Task, std::default_delete<espp::Task> >::~unique_ptr()"
-      ],
-      "shared": [
-        "guard variable for fmt::v12::format_facet<std::locale>::id"
-      ]
-    },
-    "main/selftest.cpp.obj": {
-      "init_functions": 1,
-      "objects": [
-        "(anonymous namespace)::adc_mutex",
-        "(anonymous namespace)::logger",
-        "(anonymous namespace)::ping_log",
-        "(anonymous namespace)::ping_mutex",
-        "(anonymous namespace)::platform"
-      ],
-      "reads_external": [],
-      "lazy_statics": [],
-      "calls": [
-        "SelfTestPlatform::~SelfTestPlatform()",
-        "__cxa_atexit",
-        "espp::Logger::~Logger()",
-        "pthread_mutex_init",
-        "std::mutex::~mutex()",
-        "std::unique_ptr<(anonymous namespace)::PingLog, std::default_delete<(anonymous namespace)::PingLog> >::~unique_ptr()"
-      ],
-      "shared": [
-        "guard variable for fmt::v12::format_facet<std::locale>::id"
-      ]
-    },
-    "main/update_ui.cpp.obj": {
-      "init_functions": 1,
-      "objects": [
-        "(anonymous namespace)::logger",
-        "(anonymous namespace)::releases"
-      ],
-      "reads_external": [],
-      "lazy_statics": [],
-      "calls": [
-        "__cxa_atexit",
-        "espp::Logger::~Logger()",
-        "pthread_mutex_init",
-        "std::vector<hmi::ota::Release, std::allocator<hmi::ota::Release> >::~vector()"
       ],
       "shared": [
         "guard variable for fmt::v12::format_facet<std::locale>::id"
