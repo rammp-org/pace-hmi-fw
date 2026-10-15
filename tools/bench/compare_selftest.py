@@ -1,6 +1,6 @@
 """B3: run the board's extended self test and compare it with the baseline, in bands.
 
-    python compare_selftest.py --ip 192.168.137.180 --out run.json [--tree C:\\w\\bench]
+    python compare_selftest.py --ip 192.168.137.180 --out run.json [--tree <tree>]
     python compare_selftest.py --compare-only run.json
     python compare_selftest.py selftest      # cases CMP-001.., inline samples, no board
 

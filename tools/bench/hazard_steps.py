@@ -2,7 +2,7 @@
 plan for a firmware image, and the runner run_bench.py and the command line use.
 
     python hazard_steps.py --ip 192.168.137.218 --hazard c1,c3 [--steps B5''-1,B5pp-6]
-                           [--port COM7] [--out DIR] [--tree DIR] [--soak-s 1800]
+                           [--port COM7|/dev/ttyACM0] [--out DIR] [--tree DIR] [--soak-s 1800]
     python hazard_steps.py --list
     run_bench.py ... --hazard c1,c3          (the same steps, after B5..B5e)
 

@@ -1,14 +1,15 @@
 """Shared helpers for the app_main-shrink guards (docs/plans/app-main-shrink.md, §5 and V6/V7/V11).
 
-Stdlib only, Python 3.12+. Runs on Windows or in WSL: Windows paths from the build
-(C:/...) are turned into /mnt/c/... when running on Linux.
+Stdlib only, Python 3.12+. Runs on Windows, in WSL or on native Linux: Windows paths from
+the build (C:/...) are turned into /mnt/c/... when running on Linux; a Linux build's paths
+are used as they are.
 
 What lives here:
 - `Build`: an ESP-IDF build folder. Its first-party objects come from compile_commands.json
   (the sources under the project folder, not managed_components), keyed `<component>/<object>`
   (e.g. `main/main.cpp.obj`), so keys are the same in every build folder.
 - the binutils of the build's toolchain (CMakeCache.txt names them; else the newest
-  C:/Espressif/tools/riscv32-esp-elf/*), and parsers for their text output. The parsers take
+  C:/Espressif/tools/riscv32-esp-elf/* or ~/.espressif/tools/riscv32-esp-elf/*), and parsers for their text output. The parsers take
   text, so each tool's `selftest` feeds them inline samples without a toolchain.
 - `demangle()`, `api_leaf()` (the identifier a demangled symbol must be declared as), and a
   Unity-style case runner for the `selftest` modes (the host L1 app contract's output format).
@@ -71,7 +72,8 @@ def run(argv: list[str], cwd: Path | None = None, stdin: str | None = None) -> s
 
 def find_tool(name: str, build_dir: Path | None = None, prefix: str | None = None) -> str:
     """Path of riscv32-esp-elf-<name>: --toolchain-prefix, else the build's CMakeCache.txt,
-    else the newest toolchain under C:/Espressif/tools/riscv32-esp-elf."""
+    else the newest toolchain under C:/Espressif/tools/riscv32-esp-elf (or, on Linux,
+    ~/.espressif/tools/riscv32-esp-elf)."""
     def existing(stem: str) -> str | None:
         for c in (stem, stem + ".exe"):  # Linux toolchains have no .exe; Windows ones (and WSL) do
             if Path(c).is_file():
@@ -91,8 +93,12 @@ def find_tool(name: str, build_dir: Path | None = None, prefix: str | None = Non
             found = existing(re.sub(rf"{TOOL_PREFIX}nm(\.exe)?$", f"{TOOL_PREFIX}{name}", nm))
             if found:
                 return found
-    root = local_path(TOOLCHAIN_GLOB_ROOT)
-    if root.is_dir():
+    roots = [local_path(TOOLCHAIN_GLOB_ROOT)]
+    if IN_WSL:
+        roots.append(Path.home() / ".espressif" / "tools" / "riscv32-esp-elf")
+    for root in roots:
+        if not root.is_dir():
+            continue
         for ver in sorted(root.iterdir(), reverse=True):
             found = existing(str(ver / "riscv32-esp-elf" / "bin" / f"{TOOL_PREFIX}{name}"))
             if found:

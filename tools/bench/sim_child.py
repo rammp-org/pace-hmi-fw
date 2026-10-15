@@ -1,6 +1,6 @@
 """scripts/rtps_mcb_sim.py, unchanged, plus a record of the XYTwist it receives.
 
-    python sim_child.py --tree C:\\w\\bench -- --peer 192.168.137.180 --bind-address 192.168.137.2
+    python sim_child.py --tree <tree> -- --peer 192.168.137.180 --bind-address 192.168.137.2
 
 Everything after `--` goes to rtps_mcb_sim.py (its --event-log and fault-mode
 flags included), and every stdin command it knows (ok, e, x, s, p, r, ign, drop,

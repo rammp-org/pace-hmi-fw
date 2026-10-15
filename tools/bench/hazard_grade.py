@@ -6,9 +6,10 @@ are tested on hand-written traces (hazard_selftest.py, cases BENCH-0xx) built fr
 specs' pass criteria.
 
 One clock. Samples (`t`), event-log records (`mono`), marks and STATE polls are all
-time.monotonic() seconds, which on Windows is one system-wide clock: the sim child stamps
-what it receives, the runner stamps what it sends and what it reads back. A mark is the
-sim's own stamp of a line the runner wrote just before an action (hazard_rig.Rig.mark).
+time.monotonic() seconds, one system-wide clock on Windows and on Linux (CLOCK_MONOTONIC):
+the sim child stamps what it receives, the runner stamps what it sends and what it reads
+back. A mark is the sim's own stamp of a line the runner wrote just before an action
+(hazard_rig.Rig.mark).
 """
 
 from __future__ import annotations

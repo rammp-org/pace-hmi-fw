@@ -1,13 +1,14 @@
 """Board access: the port by MAC, serial captures, partition table, /storage backup.
 
-    python board.py port                          # COM port of board 2
+    python board.py port                          # board 2's port (COMn, /dev/ttyACMn)
     python board.py watch 20 [--out f.log]        # capture WITHOUT resetting the board
     python board.py boot 90 [--out f.log]         # deliberate reset, then capture
-    python board.py pt --build-dir C:\\b\\main_bench # board table == build table?
+    python board.py pt --build-dir <build dir> # board table == build table?
     python board.py backup-storage                # read /storage once, never twice
 
-Opening the USB-Serial/JTAG port resets the chip unless DTR and RTS are False
-*before* open(), so every open here sets both first. The deliberate reset is
+Opening the USB-Serial/JTAG port resets the chip unless the lines are set *before*
+open(): both False on Windows, DTR True and RTS False on Linux (then DTR False right
+after; open_lines says why), so every open here sets them first. The deliberate reset is
 esptool's USB hard reset: RTS (EN) high for 200 ms, then low, DTR kept low so
 the chip boots the app, not the ROM downloader.
 Only reads touch the flash here; nothing in this module writes or erases it.
@@ -47,12 +48,22 @@ def find_port(mac: str = common.BOARD_MAC) -> str:
     raise NoBoard(f"no USB serial port with serial number {mac}")
 
 
+def open_lines(windows: bool = common.WINDOWS) -> tuple[bool, bool]:
+    """(DTR, RTS) to set before open(). The USB-Serial/JTAG resets the chip while RTS is
+    high and DTR low. Windows: both low, nothing changes at open. Linux's cdc_acm raises
+    both lines at open, and pyserial then writes DTR before RTS: with DTR low it passes
+    through RTS high, DTR low (a reset, seen 2026-10-14 on Ubuntu). So DTR high at open
+    (RTS goes low first) and low right after: high-high, DTR high only, low-low."""
+    return (False, False) if windows else (True, False)
+
+
 def _open(port: str, timeout: float = 0.2) -> "serial.Serial":
     s = serial.Serial()
     s.port, s.baudrate, s.timeout = port, 115200, timeout
-    s.dtr = False  # both before open(): an open with either asserted resets the chip
-    s.rts = False
+    s.dtr, s.rts = open_lines()  # before open(): see open_lines
     s.open()
+    if s.dtr:
+        s.dtr = False  # RTS is already low: DTR high only, then both low
     return s
 
 

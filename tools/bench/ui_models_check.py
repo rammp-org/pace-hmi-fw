@@ -1,6 +1,6 @@
 """B4b: the bench PIN pad and the Seat Functions cursor walk on the board, navigation only.
 
-    python ui_models_check.py --ip 192.168.137.180 --out C:\\b\\bench\\results\\x\\b4b
+    python ui_models_check.py --ip 192.168.137.180 --out <BENCH_HOME>/results/x/b4b
 
 Runs with the simulated MCB (Seat Functions needs a live, IDLE MCB) and drives
 the board over ONE remote-UI connection (hmi_ui.Hmi). Exit 0 PASS, 1 FAIL.

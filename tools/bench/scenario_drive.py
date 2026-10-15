@@ -1,6 +1,6 @@
 """B5: the as-is drive scenario, against the simulated MCB. No motors exist.
 
-    python scenario_drive.py --ip 192.168.137.180 --out C:\\b\\bench\\results\\x\\drive
+    python scenario_drive.py --ip 192.168.137.180 --out <BENCH_HOME>/results/x/drive
 
 Steps, each graded by this script (exit 0 PASS, 1 FAIL):
  1. sim `ok` (IDLE); `home`; hold the stick button 2 s on ONE remote-UI

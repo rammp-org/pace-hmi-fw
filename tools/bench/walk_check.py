@@ -1,6 +1,6 @@
 """B4: the screen walk, with the simulated MCB, graded against the baseline.
 
-    python walk_check.py --ip 192.168.137.180 --out C:\\b\\bench\\results\\x\\walk
+    python walk_check.py --ip 192.168.137.180 --out <BENCH_HOME>/results/x/walk
 
 Runs rtps_mcb_sim.py (through sim_child.py) as a child, waits until the board
 streams XYTwist to it, then `hmi_ui.py --host <ip> walk <out>`.

@@ -1,8 +1,8 @@
 """Flash a bench build, keep last-good images, restore one.
 
-    python flash.py preflight --build-dir C:\\b\\main_bench
-    python flash.py flash     --build-dir C:\\b\\main_bench [--save-as LABEL]
-    python flash.py save      --build-dir C:\\b\\main_bench --label LABEL
+    python flash.py preflight --build-dir <build dir>
+    python flash.py flash     --build-dir <build dir> [--save-as LABEL]
+    python flash.py save      --build-dir <build dir> --label LABEL
     python flash.py restore   LABEL
     python flash.py list
 
@@ -12,7 +12,7 @@ Rules (plan §6 B1, profile "Reset to known state"):
   build's: a different table reformats /storage and loses the joystick calibration;
 - only bench builds: config/sdkconfig.h must have `#define CONFIG_HMI_REMOTE_UI 1`.
 The table is compared again immediately before every write, restore included.
-Last-good images live in C:\\b\\bench\\good\\<label>\\ (bootloader, partition table,
+Last-good images live in <BENCH_HOME>/good/<label>/ (bootloader, partition table,
 ota_data_initial, app, flash_args), outside the repo.
 """
 
