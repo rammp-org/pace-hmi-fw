@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
 #include "driver/ppa.h"
 #include "logger.hpp"
@@ -41,6 +42,21 @@ public:
   /// app_main, before lv_task starts.
   void use_panel_buffers(lv_display_t *disp, void *fb0, void *fb1, size_t bytes, int32_t w,
                          int32_t h);
+
+  /// @brief LVGL in DIRECT render mode over the panel's two frame buffers (use_panel_buffers),
+  /// if the board has both. The BSP already handed those buffers to lv_display_set_buffers, but
+  /// espp's Display hardcodes RENDER_MODE_PARTIAL; DIRECT is what lets LVGL treat them as real
+  /// frame buffers (tracking dirty areas across both), so a flush is a vsync-gated flip
+  /// (direct_flush_cb) rather than a copy. Requires rotation 0, which is asserted. Logs the
+  /// outcome on `logger`. app_main, before lv_task starts (moved from main.cpp).
+  /// @param fbs The panel's frame buffers (CONFIG_M5STACK_TAB5_DPI_NUM_FBS=2).
+  /// @param fb_bytes The size of one frame buffer.
+  /// @param w The panel's width, in pixels.
+  /// @param h The panel's height, in pixels.
+  /// @param logger app_main's logger, for the outcome.
+  /// @return Whether DIRECT mode came up; if not, the BSP's flush stays.
+  bool start_direct_render(std::span<void *const> fbs, size_t fb_bytes, int32_t w, int32_t h,
+                           espp::Logger &logger);
 
   /// @brief Turns the picture over, or back.
   /// @param on true for 180 degrees, false for upright.

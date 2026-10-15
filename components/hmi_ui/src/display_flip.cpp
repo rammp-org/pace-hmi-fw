@@ -1,6 +1,8 @@
 // The screen flip. Moved from main.cpp's frag_display_flip.inc.
 #include "hmi_ui/display_flip.hpp"
 
+#include <cassert>
+
 #include "esp_cache.h"
 #include "esp_heap_caps.h"
 
@@ -32,6 +34,26 @@
 /////////////////////////////////////////////////////////////////////////////
 
 namespace hmi::ui {
+
+// LVGL in DIRECT render mode over the DSI panel's two frame buffers. Moved from main.cpp's
+// start_direct_render; the BSP's reads (the buffers, their size, the panel's size) stay the
+// caller's.
+bool DisplayFlip::start_direct_render(std::span<void *const> fbs, size_t fb_bytes, int32_t w,
+                                      int32_t h, espp::Logger &logger) {
+  // DIRECT mode renders into screen-sized frame buffers and direct_flush_cb
+  // assumes the panel's native orientation, so it is incompatible with LVGL
+  // software rotation. Assert here rather than depend on the
+  // lv_display_set_rotation(ROTATION_0) call much further down.
+  assert(lv_display_get_rotation(lv_display_get_default()) == LV_DISPLAY_ROTATION_0 &&
+         "DIRECT render mode requires rotation 0");
+  if (fbs.size() >= 2 && fbs[0] != nullptr && fbs[1] != nullptr) {
+    use_panel_buffers(lv_display_get_default(), fbs[0], fbs[1], fb_bytes, w, h);
+    logger.info("LVGL rendering directly into the DSI frame buffers (DIRECT mode)");
+    return true;
+  }
+  logger.error("Could not get DPI frame buffers ({} of 2); leaving BSP flush in place", fbs.size());
+  return false;
+}
 
 void DisplayFlip::use_panel_buffers(lv_display_t *disp, void *fb0, void *fb1, size_t bytes,
                                     int32_t w, int32_t h) {

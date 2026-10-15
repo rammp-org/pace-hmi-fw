@@ -301,28 +301,6 @@ static RemoteUiConfig remote_ui_config() {
   };
 }
 
-// app_main: LVGL in DIRECT render mode over the DSI panel's two frame buffers (see the
-// comment at the call). @return whether it came up; if not, the BSP's flush stays.
-static bool start_direct_render(espp::M5StackTab5 &tab5, espp::Logger &logger) {
-  // the panel's frame buffers (CONFIG_M5STACK_TAB5_DPI_NUM_FBS=2; espp PR A)
-  const auto fbs = tab5.frame_buffers();
-  const size_t fb_bytes = espp::M5StackTab5::frame_buffer_size();
-  // DIRECT mode renders into screen-sized frame buffers and direct_flush_cb
-  // assumes the panel's native orientation, so it is incompatible with LVGL
-  // software rotation. Assert here rather than depend on the
-  // lv_display_set_rotation(ROTATION_0) call much further down.
-  assert(lv_display_get_rotation(lv_display_get_default()) == LV_DISPLAY_ROTATION_0 &&
-         "DIRECT render mode requires rotation 0");
-  if (fbs.size() >= 2 && fbs[0] != nullptr && fbs[1] != nullptr) {
-    ui_app.display_flip().use_panel_buffers(lv_display_get_default(), fbs[0], fbs[1], fb_bytes,
-                                            tab5.display_width(), tab5.display_height());
-    logger.info("LVGL rendering directly into the DSI frame buffers (DIRECT mode)");
-    return true;
-  }
-  logger.error("Could not get DPI frame buffers ({} of 2); leaving BSP flush in place", fbs.size());
-  return false;
-}
-
 // app_main's end, and where a boot that stops early ends: app_main never returns. Its task
 // sleeps here for good, which keeps every app_main local alive for the tasks that use them.
 // From the side button on (phase 3), the BSP's tasks call into them: the side button
@@ -382,7 +360,10 @@ extern "C" void app_main(void) {
   // vsync-gated flip (see direct_flush_cb) rather than a copy. DIRECT requires
   // rotation 0, which is what this panel runs at. The self test reports whether it
   // came up.
-  const bool direct_render = start_direct_render(tab5, logger);
+  // the panel's frame buffers (CONFIG_M5STACK_TAB5_DPI_NUM_FBS=2; espp PR A)
+  const bool direct_render = ui_app.display_flip().start_direct_render(
+      tab5.frame_buffers(), espp::M5StackTab5::frame_buffer_size(), tab5.display_width(),
+      tab5.display_height(), logger);
 
   // run the LVGL refresh timer at 60 fps — the espp lv_conf.h compiles in a
   // 33 ms (30 fps) default period; the lv_task loop below already calls
