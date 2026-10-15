@@ -93,6 +93,12 @@ D9b's rows 58-59 (the push and the DRIVE row refused with the stick in FAULT); 5
 | Way out of a latched fault: recalibration, reachable by touch; detection is suspended (output 0) while calibrating; the cal is validated at load (min < centre < max, minimum span) |
 | H10: the gate opens, and ENABLE is sent, only after ≥300 ms in the dead band |
 
+Window read, parked (owner, 2026-10-13: espp components as released, none vendored). The
+vendored `components/espp_adc` and the code that only fed it (`components/adc_window`,
+`control/windowed_adc.hpp`, CTL-024/027) are removed, and REQ-CTL-15/16 retired; the firmware
+uses the managed `espp/adc` 1.3.2 again. The window max and per-channel sequence are proposed
+upstream (an espp PR) and return once espp releases them (`components/control/README.md`).
+
 ### C4 = H4 interim and H11
 
 | Rule |

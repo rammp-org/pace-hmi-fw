@@ -1,10 +1,6 @@
 {
   "comment": "L1 coverage floor per file, percent (tools/l0/coverage_gate.py). Raised by `update`, never lowered; branches null = gcov n/a.",
   "files": {
-    "components/adc_window/include/adc_window/adc_window.hpp": {
-      "lines": 100.0,
-      "branches": 100.0
-    },
     "components/control/include/control/cycle.hpp": {
       "lines": 100.0,
       "branches": 78.57

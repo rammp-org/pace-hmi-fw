@@ -203,8 +203,6 @@ flowchart LR
   c_board -.-> c_housekeeping
   c_board -.-> c_m5stack_tab5
   c_board -.-> g_espp
-  c_control -.-> c_adc_window
-  c_control -.-> c_espp_adc
   c_control -.-> c_hmi_rtps_spec
   c_control -.-> c_stick
   c_control -.-> g_espp

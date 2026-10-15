@@ -53,7 +53,7 @@ inline constexpr std::uint32_t START_MAX_MS = 1000;
 /// Twist oneshot reads per cycle; all must succeed (D7). main static_asserts it equals the
 /// island's twist_oversample.
 inline constexpr std::uint8_t TWIST_OVERSAMPLE = 8;
-/// The sequence a channel shows before its first window (the vendored ContinuousAdc's start).
+/// The sequence a channel shows before its first window (the ContinuousAdc window read's start).
 inline constexpr std::uint32_t kSequenceStart = 0;
 
 static_assert(FAULT_COUNT >= 2, "row 5 (INIT, +S !P +F) would fire: C2 §3.5 notes");
@@ -71,8 +71,9 @@ static_assert(RECOVER_CLEAN_CYCLES >= 1);
 // The raw sample and its classification (C2 §2)
 // ---------------------------------------------------------------------------------------------
 
-/// One X/Y channel's window from the vendored ContinuousAdc. When the mean is empty (the read
-/// failed) the max and the sequence carry no information and are not looked at.
+/// One X/Y channel's window from the ContinuousAdc window read (parked, components/control
+/// README). When the mean is empty (the read failed) the max and the sequence carry no
+/// information and are not looked at.
 struct XyWindowMv {
   std::optional<float> mean_mv; ///< espp's mean of the window, mV
   float max_mv;                 ///< the window's largest conversion, mV

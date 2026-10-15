@@ -15,10 +15,6 @@
 #   espp_rtps     vendored espp rtps (CS-LAY-05; owner decision T1,
 #                 components/espp_rtps/README.md): upstream's engine does not build under the
 #                 full warning set; our one source file there gets it per file
-#
-# components/espp_adc (vendored espp adc, CS-LAY-05) is first-party on purpose: our hook lines
-# in its continuous_adc.hpp get the full warning set, and its upstream headers build clean
-# under it (checked 2026-10-08; owner: only upstream files may be exempt, never our code).
 set(HMI_NOT_FIRST_PARTY ui m5stack-tab5 joystick espp_rtps)
 
 # hmi_is_first_party(<out-var> <component-dir> <source-dir>)

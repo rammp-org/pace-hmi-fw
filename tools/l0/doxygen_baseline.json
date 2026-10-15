@@ -1,14 +1,12 @@
 {
   "comment": "Doxygen warnings per file (tools/l0/doxygen_gate.py, ci/Doxyfile). Lowered by `update`, never raised.",
-  "total": 1249,
+  "total": 1173,
   "files": {
-    "components/adc_window/include/adc_window/adc_window.hpp": 5,
     "components/board/include/board/adapters.hpp": 4,
     "components/board/include/board/board.hpp": 13,
     "components/control/include/control/cycle.hpp": 5,
     "components/control/include/control/motion_guard.hpp": 19,
     "components/control/include/control/stick_island.hpp": 4,
-    "components/control/include/control/windowed_adc.hpp": 2,
     "components/drive_adapter/include/drive_adapter.hpp": 17,
     "components/drive_adapter/include/drive_notice.hpp": 4,
     "components/drive_session/include/drive_session.hpp": 8,
@@ -20,7 +18,6 @@
     "components/drive_ui/include/drive_ui/drive_ui.hpp": 30,
     "components/drive_ui/include/drive_ui/fn.hpp": 6,
     "components/drive_ui/include/drive_ui/stick_button.hpp": 4,
-    "components/espp_adc/include/continuous_adc.hpp": 69,
     "components/feedback/include/feedback/click_sound.hpp": 4,
     "components/feedback/include/feedback/da7280.hpp": 47,
     "components/feedback/include/feedback/feedback.hpp": 3,

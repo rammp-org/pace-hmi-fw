@@ -14,9 +14,8 @@ CS-MEM-01, CS-NAM-01, CS-TYP-04/05, CS-CMP-03, CS-ERR-04).
                                         (see "transfer" below and tools/l0/README.md)
 
 Scope: main/** and components/** except components/ui (generated),
-components/m5stack-tab5 (vendored), the vendored upstream files of components/espp_adc (by
-name; see VENDORED_FILES: our code in that component is measured), any test/ or generated/
-folder, and main/boot_logo.[ch] (generated pixel data). components/joystick and
+components/m5stack-tab5 (vendored), any test/ or generated/ folder, and
+main/boot_logo.[ch] (generated pixel data). components/joystick and
 main/sample_ui_* are in scope as legacy.
 
 main/main.cpp and every main/frag_*.inc are ONE unit named main/main.cpp: each
@@ -85,94 +84,6 @@ LIMIT_APP_MAIN = 300  # CS-LAY-01
 APP_MAIN = "app_main"
 
 EXCLUDED_COMPONENTS = {"ui", "m5stack-tab5"}
-
-# Vendored upstream code (CS-LAY-05). Only the upstream files are exempt, never a whole
-# component (owner, 2026-10-08): our own code beside them is measured like any other.
-#   VENDORED_FILES     upstream files as they are: out of scope, by name.
-#   VENDORED_PRISTINE  folders of pristine upstream copies, kept to measure against: out of scope.
-#   VENDORED_MODIFIED  upstream files that carry our hook lines, mapped to their pristine copy:
-#                      in scope, and no metric may exceed the pristine copy's count (our lines
-#                      add no debt), except `lines`, which keeps its usual limit.
-VENDORED_FILES = frozenset({
-    "components/espp_adc/include/adc_types.hpp",
-    "components/espp_adc/include/oneshot_adc.hpp",
-    # espp rtps 1.3.2, vendored unchanged (owner decision T1; components/espp_rtps/README.md)
-    "components/espp_rtps/include/rtps/common/Locator.hpp",
-    "components/espp_rtps/include/rtps/common/types.hpp",
-    "components/espp_rtps/include/rtps/communication/EsppTransport.hpp",
-    "components/espp_rtps/include/rtps/communication/PacketInfo.hpp",
-    "components/espp_rtps/include/rtps/config.hpp",
-    "components/espp_rtps/include/rtps/config_desktop.hpp",
-    "components/espp_rtps/include/rtps/config_esp32.hpp",
-    "components/espp_rtps/include/rtps/config_host_large.hpp",
-    "components/espp_rtps/include/rtps/discovery/BuiltInEndpoints.hpp",
-    "components/espp_rtps/include/rtps/discovery/ParticipantProxyData.hpp",
-    "components/espp_rtps/include/rtps/discovery/SEDPAgent.hpp",
-    "components/espp_rtps/include/rtps/discovery/SPDPAgent.hpp",
-    "components/espp_rtps/include/rtps/discovery/TopicData.hpp",
-    "components/espp_rtps/include/rtps/entities/Domain.hpp",
-    "components/espp_rtps/include/rtps/entities/Participant.hpp",
-    "components/espp_rtps/include/rtps/entities/Reader.hpp",
-    "components/espp_rtps/include/rtps/entities/ReaderProxy.hpp",
-    "components/espp_rtps/include/rtps/entities/StatefulReader.hpp",
-    "components/espp_rtps/include/rtps/entities/StatefulWriter.hpp",
-    "components/espp_rtps/include/rtps/entities/StatelessReader.hpp",
-    "components/espp_rtps/include/rtps/entities/StatelessWriter.hpp",
-    "components/espp_rtps/include/rtps/entities/Writer.hpp",
-    "components/espp_rtps/include/rtps/entities/WriterProxy.hpp",
-    "components/espp_rtps/include/rtps/messages/MessageFactory.hpp",
-    "components/espp_rtps/include/rtps/messages/MessageReceiver.hpp",
-    "components/espp_rtps/include/rtps/messages/MessageTypes.hpp",
-    "components/espp_rtps/include/rtps/rpc/action_naming.hpp",
-    "components/espp_rtps/include/rtps/rpc/action_types.hpp",
-    "components/espp_rtps/include/rtps/rpc/native_protocol.hpp",
-    "components/espp_rtps/include/rtps/rpc/sample_identity.hpp",
-    "components/espp_rtps/include/rtps/rpc/service_naming.hpp",
-    "components/espp_rtps/include/rtps/rtps.hpp",
-    "components/espp_rtps/include/rtps/storages/CacheChange.hpp",
-    "components/espp_rtps/include/rtps/storages/HistoryCacheWithDeletion.hpp",
-    "components/espp_rtps/include/rtps/storages/MemoryPool.hpp",
-    "components/espp_rtps/include/rtps/storages/PayloadBuffer.hpp",
-    "components/espp_rtps/include/rtps/storages/SimpleHistoryCache.hpp",
-    "components/espp_rtps/include/rtps/storages/StorageArray.hpp",
-    "components/espp_rtps/include/rtps/storages/ThreadSafeCircularBuffer.hpp",
-    "components/espp_rtps/include/rtps/storages/ThreadSafeCircularBuffer.tpp",
-    "components/espp_rtps/include/rtps/utils/CdrBuffer.hpp",
-    "components/espp_rtps/include/rtps/utils/Diagnostics.hpp",
-    "components/espp_rtps/include/rtps/utils/Log.hpp",
-    "components/espp_rtps/include/rtps/utils/constants.hpp",
-    "components/espp_rtps/include/rtps/utils/hash.hpp",
-    "components/espp_rtps/include/rtps/utils/printutils.hpp",
-    "components/espp_rtps/include/rtps/utils/sysFunctions.hpp",
-    "components/espp_rtps/include/rtps/utils/udpUtils.hpp",
-    "components/espp_rtps/include/rtps_action.hpp",
-    "components/espp_rtps/include/rtps_message.hpp",
-    "components/espp_rtps/include/rtps_pubsub.hpp",
-    "components/espp_rtps/include/rtps_service.hpp",
-    "components/espp_rtps/src/communication/EsppTransport.cpp",
-    "components/espp_rtps/src/discovery/ParticipantProxyData.cpp",
-    "components/espp_rtps/src/discovery/SEDPAgent.cpp",
-    "components/espp_rtps/src/discovery/SPDPAgent.cpp",
-    "components/espp_rtps/src/discovery/TopicData.cpp",
-    "components/espp_rtps/src/entities/Domain.cpp",
-    "components/espp_rtps/src/entities/Participant.cpp",
-    "components/espp_rtps/src/entities/Reader.cpp",
-    "components/espp_rtps/src/entities/StatefulReader.cpp",
-    "components/espp_rtps/src/entities/StatefulWriter.cpp",
-    "components/espp_rtps/src/entities/StatelessReader.cpp",
-    "components/espp_rtps/src/entities/StatelessWriter.cpp",
-    "components/espp_rtps/src/entities/Writer.cpp",
-    "components/espp_rtps/src/messages/MessageReceiver.cpp",
-    "components/espp_rtps/src/messages/MessageTypes.cpp",
-    "components/espp_rtps/src/rtps_participant.cpp",
-    "components/espp_rtps/src/utils/Diagnostics.cpp",
-})
-VENDORED_PRISTINE = ("components/espp_adc/upstream/", "components/espp_rtps/upstream/")
-VENDORED_MODIFIED = {
-    "components/espp_adc/include/continuous_adc.hpp": "components/espp_adc/upstream/continuous_adc.hpp",
-    "components/espp_rtps/include/rtps_participant.hpp":
-        "components/espp_rtps/upstream/include/rtps_participant.hpp",
-}
 EXCLUDED_DIRS = {"test", "generated"}
 EXCLUDED_FILES = {"main/boot_logo.c", "main/boot_logo.h"}
 UNIT = "main/main.cpp"
@@ -695,8 +606,6 @@ def in_scope(rel: str) -> bool:
     parts = rel.split("/")
     if pathlib.PurePosixPath(rel).suffix not in SOURCE_EXT or rel in EXCLUDED_FILES:
         return False
-    if rel in VENDORED_FILES or rel.startswith(VENDORED_PRISTINE):
-        return False
     if parts[0] == "main":
         return not (set(parts[1:-1]) & EXCLUDED_DIRS)
     if parts[0] == "components" and len(parts) >= 3:
@@ -769,22 +678,9 @@ def hard_limit(name: str, path: str) -> int | None:
     return None
 
 
-def upstream_allowance(root: pathlib.Path,
-                       modified: dict[str, str] | None = None) -> dict[str, dict[str, int] | None]:
-    """Each VENDORED_MODIFIED file present: its pristine copy's counts (None if the copy is missing)."""
-    out: dict[str, dict[str, int] | None] = {}
-    for path, pristine in (VENDORED_MODIFIED if modified is None else modified).items():
-        if (root / path).is_file():
-            src = root / pristine
-            out[path] = measure(path, read_text(src)) if src.is_file() else None
-    return out
-
-
 def make_baseline(current: dict[str, dict[str, int]]) -> dict[str, dict[str, int]]:
     out: dict[str, dict[str, int]] = {name: {} for name in METRICS}
     for path, m in current.items():
-        if path in VENDORED_MODIFIED:
-            continue  # measured against its pristine copy, never baselined
         for name in METRICS:
             n = m[name]
             limit = hard_limit(name, path)
@@ -902,25 +798,18 @@ Grants = dict[str, dict[str, "collections.Counter[str]"]]  # dest -> metric -> m
 def violations(base: dict[str, dict[str, int]], current: dict[str, dict[str, int]],
                strict: frozenset[str] = frozenset(), grants: Grants | None = None,
                keys: LineKeys | None = None,
-               upstream: dict[str, dict[str, int] | None] | None = None,
                hooks: dict[str, int | str] | None = None) -> list[str]:
     """FAIL lines. `strict`: components where fn_over_60 is a hard limit (strict_components).
 
     `grants` (from transfers) and `keys` (line_keys of each path that holds grants): on a
     path outside the baseline, a forbidden metric's violations must each match a grant 1:1.
-    `upstream` (upstream_allowance): a vendored file with our hook lines may hold no more of
-    any metric than its pristine copy, `lines` aside.
     `hooks` (c_hook_allowance): a C_HOOK_STATE file may hold that many mutable globals or, with a
     reason in place of a count, none.
     """
     bad: list[str] = []
     grants = grants or {}
-    upstream = upstream or {}
     hooks = hooks or {}
     for path in sorted(current):
-        if path in upstream:
-            bad += _upstream_violations(path, current[path], upstream[path])
-            continue
         for name in METRICS:
             n = current[path][name]
             have = base.get(name, {})
@@ -956,21 +845,6 @@ def violations(base: dict[str, dict[str, int]], current: dict[str, dict[str, int
                                f"grant (edited or new): {' | '.join(texts[:3])}")
             elif n > 0:
                 bad.append(f"{name} {path}: {n} > 0 (not in baseline: must be clean)")
-    return bad
-
-
-def _upstream_violations(path: str, counts: dict[str, int], pristine: dict[str, int] | None) -> list[str]:
-    if pristine is None:
-        return [f"vendored {path}: its pristine upstream copy is missing (VENDORED_MODIFIED)"]
-    bad: list[str] = []
-    for name in METRICS:
-        n = counts[name]
-        if name == "lines":
-            if n > line_limit(path):
-                bad.append(f"lines {path}: {n} > hard limit {line_limit(path)} (CS-FIL-01)")
-        elif n > pristine[name]:
-            bad.append(f"{name} {path}: {n} > {pristine[name]} in the pristine upstream copy "
-                       f"(our hook lines in a vendored file may add no debt)")
     return bad
 
 
@@ -1301,7 +1175,7 @@ def cmd_check(root: pathlib.Path, baseline: pathlib.Path, git: Git | None = None
     current = {path: measure(path, text) for path, text in units.items()}
     keys = _grant_keys(transfers, units)
     bad = violations(base, current, strict_components(root), merged_grants(transfers), keys,
-                     upstream_allowance(root), c_hook_allowance(root))
+                     c_hook_allowance(root))
     if transfers:
         bad += transfer_problems(root, baseline, base, transfers, units, git or Git(root))
     for line in bad:
@@ -1329,7 +1203,7 @@ def cmd_update(root: pathlib.Path, baseline: pathlib.Path, init: bool, git: Git 
         base, transfers = load_doc(baseline)
         keys = _grant_keys(transfers, units)
         bad = violations(base, current, strict_components(root), merged_grants(transfers), keys,
-                         upstream_allowance(root), c_hook_allowance(root))
+                         c_hook_allowance(root))
         if transfers:
             bad += transfer_problems(root, baseline, base, transfers, units, git or Git(root))
         if bad:
@@ -1608,36 +1482,6 @@ def _selftest_task_idiom(expect: Expect) -> None:
            violations({}, {path: measure(path, allowed["named function, wait_for"] + "std::mutex extra;\n")}),
            [f"locks {path}: 1 > 0 (not in baseline: must be clean)", f"mutable_globals {path}: 1 > 0 (not in "
             "baseline: must be clean)"])
-
-
-def _selftest_vendored(expect: Expect) -> None:
-    """Vendored upstream files: only those named are exempt; a vendored file with our hook lines
-    may hold no more of any metric than its pristine copy (lines aside); its copy must exist."""
-    path = "components/espp_adc/include/continuous_adc.hpp"
-    pristine = "class A {\n  std::mutex m_;\n  void f() { std::lock_guard<std::mutex> l(m_); }\n};\n"
-    hooked = pristine.replace("};\n", "  void g() { h(); }\n  int h();\n};\n")
-    extra_lock = pristine.replace("};\n", "  void g() { std::lock_guard<std::mutex> l(m_); }\n};\n")
-    allow = {path: measure(path, pristine)}
-    expect("vendored: upstream debt as it was passes",
-           violations({}, {path: measure(path, pristine)}, upstream=allow), [])
-    expect("vendored: hook lines that add no debt pass",
-           violations({}, {path: measure(path, hooked)}, upstream=allow), [])
-    expect("vendored: a hook line that adds a lock fails",
-           [v.split(":")[0] for v in violations({}, {path: measure(path, extra_lock)}, upstream=allow)],
-           [f"locks {path}"])
-    expect("vendored: a missing pristine copy fails",
-           len(violations({}, {path: measure(path, pristine)}, upstream={path: None})), 1)
-    expect("vendored: without the allowance the same file must be clean",
-           len(violations({}, {path: measure(path, pristine)})) > 0, True)
-    expect("vendored: never baselined", make_baseline({path: measure(path, pristine)})["locks"], {})
-    with tempfile.TemporaryDirectory() as tmp:
-        root = pathlib.Path(tmp)
-        (root / "components/espp_adc/include").mkdir(parents=True)
-        (root / "components/espp_adc/include/continuous_adc.hpp").write_text(hooked, encoding="utf-8")
-        expect("vendored: allowance without the copy", upstream_allowance(root), {path: None})
-        (root / "components/espp_adc/upstream").mkdir(parents=True)
-        (root / "components/espp_adc/upstream/continuous_adc.hpp").write_text(pristine, encoding="utf-8")
-        expect("vendored: allowance from the copy", upstream_allowance(root), allow)
 
 
 def _selftest_ui_paths(expect: Expect) -> None:
@@ -1922,15 +1766,10 @@ def selftest() -> int:
         expect("split invariant", after[UNIT], before[UNIT])
 
         # Scope: excluded components, test/ and generated/ folders, boot_logo.
-        for rel in ("components/ui/x.c", "components/m5stack-tab5/src/x.cpp",
-                    "components/espp_adc/include/adc_types.hpp",
-                    "components/espp_adc/include/oneshot_adc.hpp",
-                    "components/espp_adc/upstream/continuous_adc.hpp", "components/c/test/t.cpp",
+        for rel in ("components/ui/x.c", "components/m5stack-tab5/src/x.cpp", "components/c/test/t.cpp",
                     "components/c/generated/g.cpp", "main/boot_logo.c"):
             expect(f"out of scope {rel}", in_scope(rel), False)
-        for rel in ("components/joystick/src/joystick.cpp", "main/sample_ui_home.c", "components/c/include/c.hpp",
-                    "components/espp_adc/include/continuous_adc.hpp",
-                    "components/espp_adc/include/ours.hpp", "components/adc_window/include/a/a.hpp"):
+        for rel in ("components/joystick/src/joystick.cpp", "main/sample_ui_home.c", "components/c/include/c.hpp"):
             expect(f"in scope {rel}", in_scope(rel), True)
 
         # Verdicts.
@@ -2020,7 +1859,6 @@ def selftest() -> int:
     _selftest_heap_queries(expect)
     _selftest_task_idiom(expect)
     _selftest_ui_paths(expect)
-    _selftest_vendored(expect)
     _selftest_c_hook_state(expect)
     _selftest_transfer(expect)
 

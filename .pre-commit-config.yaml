@@ -7,8 +7,6 @@ repos:
         # vendored or third-party code (CS-LAY-05), formatted by its upstream.
         #   components/ui/            SquareLine export, regenerated on every import
         #   components/m5stack-tab5/  vendored Tab5 BSP
-        #   components/espp_adc/      the vendored espp adc upstream files, by name (our hook
-        #                             lines in continuous_adc.hpp are formatted)
         #   components/espp_rtps/     the vendored espp rtps upstream files (owner decision
         #                             T1); our pace/ folder is formatted, our marked lines in
         #                             include/rtps_participant.hpp keep upstream's format
@@ -19,8 +17,6 @@ repos:
           (?x)(
           ^components/ui/|
           ^components/m5stack-tab5/|
-          ^components/espp_adc/include/(adc_types|oneshot_adc)\.hpp$|
-          ^components/espp_adc/upstream/|
           ^components/espp_rtps/(include|src|upstream)/|
           ^managed_components/|
           ^external/|
