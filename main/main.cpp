@@ -74,6 +74,8 @@
 #include "hmi_ui/ui_build.hpp"
 #include "hmi_ui/ui_island.hpp"
 #include "post_facts/post_facts.hpp"
+#include "stick/mapping_selftest.hpp"
+#include "stick_io.hpp"
 
 using namespace std::chrono_literals;
 
@@ -156,207 +158,6 @@ static void play_click(espp::M5StackTab5 &tab5);
 // defined with play_click. A warning or error sounds even with Sounds off.
 static void play_refusal(bool warning = false);
 static void refusal_feedback();
-
-// --
-// AXIS WIRING: the gimbal pots are cross-wired relative to the channel names.
-// ADC1_CH1 (GPIO17) is the HORIZONTAL axis and reads higher to the right, so
-// it feeds the joystick's X with no inversion. ADC1_CH0 (GPIO16) is the
-// VERTICAL axis and reads *lower* moving up, so it feeds Y with invert_output
-// — after which +Y is up, as the rest of the code assumes. Twist reads higher
-// clockwise. Fixed in hmi::stick (components/stick: horizontal_config,
-// vertical_config, twist_config) so every consumer (UI bars, the keypad, RTPS)
-// sees correct axes without compensating itself; joystick_cal.cpp's step
-// prompts rely on the same directions.
-//
-// The stick math itself (mapping, mount, keys, gate, speed scale) is
-// hmi::stick::StickPipeline. The ADC task runs one cycle of it per sample and
-// AdcStickIo below is everything that cycle reads and writes here, in the order
-// the code ran inline before it was extracted. stick_inject.hpp includes it, and
-// adds StickSlot: the pipeline, or with CONFIG_HMI_BENCH_STICK_INJECT the bench
-// stick injection in front of it.
-#include "control/stick_island.hpp"
-#include "post/rest_window.hpp"
-#include "stick/mapping_selftest.hpp"
-#include "stick/monitor_cycle.hpp"
-#include "stick/output_permit.hpp"
-#include "stick_inject.hpp"
-
-static_assert(hmi::stick::SENSITIVITY_MIN == SETTINGS_STICK_SENSITIVITY_MIN &&
-                  hmi::stick::SENSITIVITY_MAX == SETTINGS_STICK_SENSITIVITY_MAX,
-              "hmi::stick clamps the stick sensitivity to the Settings range");
-static_assert(hmi::stick::DRIVE_SPEED_MIN == SETTINGS_DRIVE_SPEED_MIN &&
-                  hmi::stick::DRIVE_SPEED_MAX == SETTINGS_DRIVE_SPEED_MAX,
-              "hmi::stick clamps the drive speed to the Settings range");
-
-static hmi::stick::CalibrationMv stick_cal_mv(const JoystickCal &cal) {
-  const auto axis = [](const JoystickAxisCal &a) {
-    return hmi::stick::AxisCalMv{.min_mv = a.min_mv, .center_mv = a.center_mv, .max_mv = a.max_mv};
-  };
-  return {.horizontal = axis(cal[JOY_HORIZONTAL]),
-          .vertical = axis(cal[JOY_VERTICAL]),
-          .twist = axis(cal[JOY_TWIST])};
-}
-
-// How far each axis travels is measured per unit (joystick_cal.cpp, the CALIBRATE button on
-// the JoystickTest screen); the dead zones are the stick's (hmi::stick::pipeline_config).
-static hmi::stick::StickPipeline::Config stick_pipeline_config(const JoystickCal &cal) {
-  return hmi::stick::pipeline_config(
-      stick_cal_mv(cal),
-      {.up = LV_KEY_UP, .down = LV_KEY_DOWN, .right = LV_KEY_RIGHT, .left = LV_KEY_LEFT});
-}
-
-// The ADC side's clock (hazard-fixes.md §10 item 22): one uint32 ms count, from this one
-// function, for the output permit, C4's motion guard and its writers (the UI heartbeat, the
-// MibStatus stamp), and later C2's monitor. Durations on it are taken modulo 2^32.
-static uint32_t adc_clock_ms() { return static_cast<uint32_t>(esp_timer_get_time() / 1000); }
-
-// The calling task on the task watchdog (hazard-c4-spec.md §4.3; phase 1: a trip reports
-// only). Subscribe at the task's first cycle; reset at the end of every cycle. A reset's error
-// (the task was never subscribed) changes nothing: the guard already holds WDT_MISSING.
-static bool task_watchdog_subscribe() { return esp_task_wdt_add(nullptr) == ESP_OK; }
-static void task_watchdog_reset() { static_cast<void>(esp_task_wdt_reset()); }
-
-// The stick task's side of the board (StickIsland's Ports, hazard fix C4): its clock and the
-// task watchdog.
-struct StickPorts {
-  static uint32_t now_ms() { return adc_clock_ms(); }
-  static bool watchdog_subscribe() { return task_watchdog_subscribe(); }
-  static void watchdog_reset() { task_watchdog_reset(); }
-  static void after_cycle();
-};
-// Bench inject builds add STALL CADC's request (C2 O14): the island suspends espp's
-// ContinuousAdc task for its time. A release build's Ports has none, so the island compiles no
-// suspend.
-struct BenchStickPorts : StickPorts {
-  static uint32_t cadc_stall_ms();
-};
-using StickPortsSlot = std::conditional_t<BENCH_STICK_INJECT, BenchStickPorts, StickPorts>;
-
-// The ADC task's side of StickPipeline::cycle. Runs on the ADC task only; every
-// member is what the stick block of adc_task_fn did inline before.
-struct AdcStickIo {
-  // What the ADC task keeps across cycles beside the pipeline: app_main's, handed to the
-  // island at start.
-  struct State {
-    hmi::stick::OutputPermit permit; // the output permit and its neutral latch (C1 §3)
-    hmi::post::RestWindow rest;      // the POST's rest window (C3 §2.2)
-    hmi::fw::Writer<hmi::ui::RestWindowMailbox> windows; // to the POST runner (UI task)
-    hmi::post::RestWindowMsg window{}; // the window being sent: here, not on the task's stack
-    hmi::stick::PostGate post_seen = hmi::stick::PostGate::NOT_RUN; // the gate, last cycle
-    // C4's motion guard: this cycle's verdict (ControlCycle hands it over before the pipeline)
-    hmi::control::GuardReason guard = hmi::control::GuardReason::WDT_MISSING;
-    // joystick_cal_running(), sampled once per cycle (note_sample) for every reader of it in
-    // that cycle (hazard fix C2, REQ-CTL-15)
-    bool calibrating = false;
-    // C2's stick monitor (hazard-c2-spec.md §3): stepped once per cycle in note_sample, on the
-    // limits of the calibration in use (set at start and by take_new_calibration)
-    hmi::stick::MonitorCycle monitor{};
-  };
-
-  espp::SimpleLowpassFilter &twist_lowpass;
-  State &state;
-
-  // The motion guard's verdict for this cycle (hazard-c4-spec.md §2.1): the output permit's
-  // condition 2. Every cycle, valid or not, before the pipeline.
-  void set_motion_verdict(hmi::control::GuardReason verdict) { state.guard = verdict; }
-
-  // Every cycle, valid or not, first: the raw sample (after the bench injection), the one
-  // `calibrating` of the cycle, and C2's monitor stepped on them (REQ-CTL-15): its stick health
-  // to the permit's channel, its telemetry to the UiApp. Defined after the UiApp.
-  [[gnu::noinline]] void note_sample(const hmi::stick::RawSample &sample);
-
-  // Every cycle, valid or not, before the pipeline: the reads it gets (after the bench
-  // injection). An invalid cycle restarts the permit's neutral wait (REQ-STK-12).
-  void note_reads(const hmi::stick::RawReadsMv &reads) {
-    if (!(reads.horizontal_mv && reads.vertical_mv && reads.twist_mv)) {
-      state.permit.invalid_cycle();
-    }
-    // A failed read goes over as NaN, which the rest window counts as a failed read: three
-    // floats in registers, so the task's frame holds no copy of the reads.
-    constexpr float FAILED = std::numeric_limits<float>::quiet_NaN();
-    feed_rest_window(state, reads.horizontal_mv.value_or(FAILED),
-                     reads.vertical_mv.value_or(FAILED), reads.twist_mv.value_or(FAILED),
-                     joy_button_pressed.load());
-  }
-  // Defined after the UiApp, which owns the POST gate.
-  [[gnu::noinline]] static inline void feed_rest_window(State &state, float horizontal_mv,
-                                                        float vertical_mv, float twist_mv,
-                                                        bool button);
-
-  // A calibration run just finished: the pipeline switches to it between two
-  // samples, on the task that owns the stick.
-  std::optional<hmi::stick::CalibrationMv> take_new_calibration() {
-    if (auto cal = joystick_cal_take_new()) {
-      const hmi::stick::CalibrationMv mv = stick_cal_mv(*cal);
-      state.monitor.use_calibration(mv); // the monitor's limits follow the calibration in use
-      return mv;
-    }
-    return std::nullopt;
-  }
-  float smooth_twist_mv(float twist_mv) { return twist_lowpass(twist_mv); }
-  void note_raw_mv(float horizontal_mv, float vertical_mv, float twist_mv) {
-    joystick_cal_note_raw(horizontal_mv, vertical_mv, twist_mv);
-  }
-  // The stick's keys are silent while a calibration run owns the stick (the user is being
-  // told to push it to every end in turn), and while C2's monitor is outside OK and
-  // RECOVERING (hazard-c2-spec.md §3.1, REQ-STK-20).
-  bool keys_silent() { return state.calibrating || !state.monitor.keys_live(); }
-  bool swap() { return applied_settings.stick_swap(); }
-  bool invert_x() { return applied_settings.stick_invert_x(); }
-  bool invert_y() { return applied_settings.stick_invert_y(); }
-  int sensitivity() { return applied_settings.stick_sensitivity(); }
-  uint32_t joy_key() { return ::joy_key.load(); }
-  uint32_t remote_key() { return ::remote_key.load(); }
-  void set_joy_key(uint32_t key) { ::joy_key.store(key); }
-  void set_joy_flick(uint32_t key) { joy_flick.store(key); }
-  void show(const hmi::stick::Position &mounted) {
-    // lv_subject_set_int runs the bar's observer callback synchronously,
-    // which touches the widget, so it needs the LVGL lock. Tried, not
-    // waited for: the UI holds it for a whole frame (a full redraw is
-    // ~100 ms, more with Flip screen), and the stick's path to the MCB
-    // must not queue behind a render. A busy UI just gets the bars
-    // one cycle later.
-    std::unique_lock<std::recursive_mutex> lock(lvgl_mutex, std::try_to_lock);
-    if (lock.owns_lock()) {
-      lv_subject_set_int(joystick_view.x(), static_cast<int32_t>(mounted.x * 100.0f));
-      lv_subject_set_int(joystick_view.y(), static_cast<int32_t>(mounted.y * 100.0f));
-      lv_subject_set_int(joystick_view.twist(), static_cast<int32_t>(mounted.twist * 100.0f));
-    }
-  }
-  int drive_speed() { return applied_settings.drive_speed(); }
-  // The output permit (hazard-c1-spec.md §3): the stick drives only with every condition
-  // met, in the hold-reason order, else the MCB gets a literal 0 and XYTwist keeps flowing.
-  // 1 the gate: the stick may drive only from Drive with the menu shut (`stick_drives`); a
-  //   push meant for the next row must never move the chair. The bars keep moving.
-  // 2 C4's motion guard (hazard-c4-spec.md §2): the UI heartbeat, the link, the MibStatus age
-  //   and the MCB state, judged by the ADC task itself this cycle (set_motion_verdict).
-  // 3 no calibration run (the user is pushing it to every end in turn); 4 a measured
-  //   calibration (G5); 5 POST passed (G3, C3); 6, 7 stick health OK (C2's monitor, stepped
-  //   this cycle in note_sample); 8 the stick centred for kNeutralHold since the last hold (G1).
-  // The first failing one goes to the Drive notice (hold_reason). Lock-free reads only.
-  // Defined after the UiApp, which owns the permit's channels.
-  hmi::stick::Permit output_permit(const hmi::stick::Position &mounted);
-  // An invalid cycle's button bit (H9 fixed, REQ-STK-17): released until POST passes
-  // (REQ-STK-15), as the permit gives it on a valid cycle. Defined after the UiApp.
-  inline bool button_passes();
-  bool button_pressed() { return joy_button_pressed.load(); }
-  // The MCB gets the same calibrated -1..+1 values the bars show (+Y forward,
-  // deadzones applied), scaled by Settings "Speed sensitivity" (0 when held), so
-  // it needs no calibration of its own. Quiet no-op until RTPS is up and a
-  // subscriber is discovered.
-  bool publish(const hmi::stick::Command &command, bool button) {
-    return rtps_comms_publish_adc(command.x, command.y, command.twist,
-                                  button ? rammp::Buttons::JOYSTICK : rammp::Buttons::NONE);
-  }
-  // After every cycle, valid or not: the self test measures the loop's cadence and
-  // how often a read fails, as well as the values. A no-op unless a run is
-  // capturing.
-  void note_cycle(bool valid, float horizontal_mv, float vertical_mv, float twist_mv,
-                  bool published) {
-    selftest_note_adc(valid, horizontal_mv, vertical_mv, twist_mv, published,
-                      joy_button_pressed.load());
-  }
-};
 
 // The TopBar's link label: what RTPS runs over. The design's "BT · WI-FI" is only
 // a placeholder; it is set from the setting before rtps_comms_start, then from the
@@ -526,61 +327,6 @@ static_assert(hmi::drive_adapter::DrivePort<hmi::ui::DrivePort<hmi::ui::DriveUi>
 // kDriveAnswer and kDriveWait (pinned to the RTPS spec in hmi_ui's ui_app.cpp).
 MainDriveAdapter drive_adapter{{.view = drive_port}};
 
-// AdcStickIo's monitor step (its comment above, hazard-c2-spec.md §3.2, §3.7): ADC task, every
-// cycle, before the pipeline. The stick health goes to the permit's channel (release), so the
-// permit reads this cycle's value; the telemetry to the UiApp (relaxed, diagnostics).
-[[gnu::noinline]] void AdcStickIo::note_sample(const hmi::stick::RawSample &sample) {
-  state.calibrating = joystick_cal_running();
-  const hmi::stick::StickHealth health =
-      state.monitor.step(state.calibrating, sample, joystick_cal_generation(), adc_clock_ms(),
-                         ui_app.stick_telemetry());
-  ui_app.permit_hooks().stick_health.write(health);
-}
-
-inline bool AdcStickIo::button_passes() {
-  return hmi::stick::post_passed(ui_app.permit_hooks().post_gate.read());
-}
-
-// AdcStickIo's output permit (its comment above): ADC task, lock-free reads of the UiApp's
-// permit channels only.
-inline hmi::stick::Permit AdcStickIo::output_permit(const hmi::stick::Position &mounted) {
-  hmi::stick::PermitHooks &hooks = ui_app.permit_hooks();
-  const hmi::stick::PermitInputs in{
-      .gate_open = ::stick_drives.load(),
-      .motion_guard_ok = state.guard == hmi::control::GuardReason::OK,
-      .calibrating = state.calibrating,
-      .calibration_measured = joystick_cal_measured(),
-      .post = hooks.post_gate.read(),
-      .health = hooks.stick_health.read(),
-  };
-  const hmi::stick::Permit permit = state.permit.cycle(in, mounted, adc_clock_ms());
-  hooks.hold_reason.write(permit.reason);
-  return permit;
-}
-
-// The POST's rest window on the ADC task (hazard-c3-spec.md §2.2, §2.4, REQ-POST-20): every
-// cycle, valid or not, the reads the pipeline gets (a failed one as NaN); a window to the runner
-// once per WINDOW_MIN_SAMPLES cycles, never waiting (a one-slot mailbox). It stops once the gate is
-// PASS or FAIL; a gate that leaves PASS or FAIL, or comes back to NOT_RUN (bench builds:
-// POST RERUN), drops any partial window and waits again for a first all-valid cycle. Allocates
-// nothing, logs nothing, no lock.
-void AdcStickIo::feed_rest_window(State &state, float horizontal_mv, float vertical_mv,
-                                  float twist_mv, bool button) {
-  using hmi::stick::PostGate;
-  const PostGate gate = ui_app.permit_hooks().post_gate.read();
-  const bool rerun = hmi::post::rest_window_restarts(state.post_seen, gate);
-  state.post_seen = gate;
-  if (rerun) {
-    state.rest.reset();
-  }
-  if (!hmi::post::rest_window_feeds(gate)) {
-    return;
-  }
-  if (state.rest.add_into(horizontal_mv, vertical_mv, twist_mv, button, state.window.window)) {
-    state.windows.write(state.window);
-  }
-}
-
 static bool drive_session_input(hmi::drive_session::Input input) {
   return drive_adapter.input(input);
 }
@@ -655,6 +401,22 @@ static void calibration_screen_init() {
                         }});
 }
 
+// AdcStickIo's bars (stick_io.hpp), on the stick task: the one place it touches LVGL.
+inline void AdcStickIo::show(const hmi::stick::Position &mounted) {
+  // lv_subject_set_int runs the bar's observer callback synchronously,
+  // which touches the widget, so it needs the LVGL lock. Tried, not
+  // waited for: the UI holds it for a whole frame (a full redraw is
+  // ~100 ms, more with Flip screen), and the stick's path to the MCB
+  // must not queue behind a render. A busy UI just gets the bars
+  // one cycle later.
+  std::unique_lock<std::recursive_mutex> lock(lvgl_mutex, std::try_to_lock);
+  if (lock.owns_lock()) {
+    lv_subject_set_int(joystick_view.x(), static_cast<int32_t>(mounted.x * 100.0f));
+    lv_subject_set_int(joystick_view.y(), static_cast<int32_t>(mounted.y * 100.0f));
+    lv_subject_set_int(joystick_view.twist(), static_cast<int32_t>(mounted.twist * 100.0f));
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Entry points from other tasks: each takes the LVGL lock around the view it
 // reaches (the views take none, CS-OWN-08).
@@ -726,19 +488,6 @@ static RemoteUiConfig remote_ui_config() {
       .set_button = [](bool down) { stick_button_edge(down); },
       .screen_name = [] { return hmi::ui::NavView::screen_name(lv_screen_active()); },
   };
-}
-
-// Bench builds: STALL ADC, at the end of a stick cycle (after the watchdog reset): the task
-// neither cycles nor resets its watchdog for the stall's length (C4 §8 B5j).
-void StickPorts::after_cycle() {
-  if constexpr (BENCH_STICK_INJECT) {
-    hmi::control::spin_for_ms(ui_app.bench_stall().take(hmi::control::StallTask::ADC),
-                              adc_clock_ms);
-  }
-}
-
-uint32_t BenchStickPorts::cadc_stall_ms() {
-  return ui_app.bench_stall().take(hmi::control::StallTask::CADC);
 }
 
 // app_main: LVGL in DIRECT render mode over the DSI panel's two frame buffers (see the
@@ -1033,79 +782,18 @@ extern "C" void app_main(void) {
 
   logger.info("Starting continuous adc...");
 
-  // X/Y: ADC1_CH0/CH1 = GPIO16/GPIO17 on the M5-Bus header.
-  // Twist: ADC2_CH3 = GPIO52 on the M5-Bus (the W5500 INT moved to GPIO4 to
-  // free it — analog inputs can't be re-routed through the GPIO matrix).
-  // The twist channel is sampled oneshot rather than through the continuous
-  // driver: mixing both units via ADC_CONV_BOTH_UNIT produced a stream of
-  // invalid DMA frames on the P4 (log spam that starved LVGL's first frame).
-  // The control island ("Read ADC"): the ADC drivers come up here, the task starts
-  // once the calibration is loaded, below.
-  static constexpr hmi::control::Cycle kStickCycle{
-      // 30 Hz: ADC read, LVGL bars, RTPS publish
-      .period_ms = 33,
-      .twist_channel = {.unit = ADC_UNIT_2,
-                        .channel = ADC_CHANNEL_3,
-                        .attenuation = ADC_ATTEN_DB_12},
-      // Twist is the noisy axis (~50 mV peak-to-peak at rest, where X/Y read ~1
-      // mV): each cycle averages this many oneshot reads of it, which costs no
-      // lag, then lowpasses the result to iron out what is left. 80 ms is short
-      // enough that the chair does not feel late to turn.
-      .twist_oversample = 8,
-  };
-  // The motion guard's link flags (C4-b): rtps_comms' atomics, alive as long as the firmware.
-  const RtpsLinkFlags link_flags = rtps_comms_link_flags();
-  hmi::control::StickIsland<StickSlot, AdcStickIo, kStickCycle, StickPortsSlot> stick_island({
-      .task =
-          {
-              .name = "Read ADC",
-              // Hazard fix C4 (H11, hazard-c4-spec.md §5, REQ-CTL-13): above every
-              // application task and sys_evt/tcpip on core 0, below IDF's timing services
-              // (esp_timer 22, esp_hosted 23, ipc0 24); pinned to core 0, away from lv_task
-              // and tab5_audio (20, core 1); 6144 B = room over 1.5x the stress high-water
-              // mark (2908 B used of 4096, CS-MEM-04) for the guard and C2.
-              .stack_size_bytes = 6144,
-              .priority = 21,
-              .core_id = 0,
-          },
-      .task_log_level = espp::Logger::Verbosity::INFO,
-      // this initailizes the DMA and filter task for the continuous adc
-      .adc = {.sample_rate_hz = 1 * 1000,
-              .channels =
-                  {{.unit = ADC_UNIT_1, .channel = ADC_CHANNEL_0, .attenuation = ADC_ATTEN_DB_12},
-                   {.unit = ADC_UNIT_1, .channel = ADC_CHANNEL_1, .attenuation = ADC_ATTEN_DB_12}},
-              .convert_mode = ADC_CONV_SINGLE_UNIT_1,
-              // Approved by the owner (E5, 2026-10-11; docs/plans/hazard-c2-cadc-priority.md):
-              // the X/Y producer at lv_task's priority, so a busy UI task on its core cannot
-              // starve it into C2's STALE fault. espp's default is 5.
-              .task_priority = 20,
-              .window_size_bytes = 1024,
-              .log_level = espp::Logger::Verbosity::WARN},
-      .twist_lowpass = {.time_constant = 0.08f},
-      .guard = {.sources = &ui_app.guard_sources(),
-                .flags = {.net_failed = link_flags.net_failed,
-                          .link_up = link_flags.link_up,
-                          .got_ip = link_flags.got_ip,
-                          .stick_drives = stick_drives},
-                .telemetry = &ui_app.guard_telemetry()},
-  });
+  // The control island ("Read ADC"): the ADC drivers come up here (stick_io.cpp has the
+  // channels and the task); the task starts once the calibration is loaded, below.
+  MainStickIsland stick_island(stick_island_config());
 
-  // Joystick calibration: where each axis rests and the two ends of its travel,
-  // in raw mV. Measured per unit by CALIBRATE on the JoystickTest screen and
-  // kept in flash (joystick_cal.cpp); these ideal-divider values are only what
-  // a unit that was never calibrated runs on, and WILL be off on real hardware.
-  // How the travel is mapped (deadzones, axis wiring) is under "AXIS WIRING"
-  // above AdcStickIo.
-  static constexpr JoystickAxisCal kIdealAxis{
-      .min_mv = 0.0f, .center_mv = 1650.0f, .max_mv = 3300.0f};
-  const JoystickCal joystick_cal = joystick_cal_load({kIdealAxis, kIdealAxis, kIdealAxis});
-  // The stick pipeline (components/stick): the joystick mapping on this
-  // calibration, the key trigger and the gate, owned by the island's task. A
-  // StickSlot is the StickPipeline itself, or with CONFIG_HMI_BENCH_STICK_INJECT
-  // the bench stick injection in front of its reads (stick_inject.hpp).
-  // Without the task the stick sends nothing, which is the safe direction: no XYTwist, no
-  // motion. The boot goes on so the failure is seen: this line, and stick_task_running().
-  adc_state.monitor.use_calibration(stick_cal_mv(joystick_cal)); // before the task starts
+  // The calibration in use (stick_io.cpp): the saved one, or the ideal divider's; the monitor's
+  // limits follow it before the task starts. Without the task the stick sends nothing, which is
+  // the safe direction: no XYTwist, no motion. The boot goes on so the failure is seen: this
+  // line, and post_facts' stick_task_running().
+  const JoystickCal joystick_cal = stick_calibration_at_boot(adc_state);
+  // The stick pipeline (components/stick): the joystick mapping on this calibration, the key
+  // trigger and the gate, owned by the island's task. A StickSlot is the StickPipeline itself, or
+  // with CONFIG_HMI_BENCH_STICK_INJECT the bench stick injection in front of its reads.
   if (!stick_island.start(stick_pipeline_config(joystick_cal), adc_state)) {
     logger.error("Failed to start the Read ADC task: no stick output (XYTwist) until reset!");
   }
