@@ -1,7 +1,6 @@
 #include "rtps_comms.hpp"
 
 #include <algorithm>
-#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -556,28 +555,13 @@ bool initialize_wifi() {
 
 // Approved by the owner (T11, 2026-10-11; docs/plans/hazard-c4-rtps-priority.md, option 1):
 // espp RTPS sends every publish, XYTwist included, from its worker pool, two
-// tasks at priority 5, each pinned to the core of its first FPU use. On core 1 a stuck
+// tasks at priority 5 by default, each pinned to the core of its first FPU use. On core 1 a stuck
 // lv_task (priority 20) starves them, and XYTwist stops for the whole UI stall (C4 B5i:
-// hazard-c4-spec.md wants it to keep flowing, neutral). Raised to lv_task's 20 they share
-// core 1 with a stuck UI task instead; they stay below Read ADC (21) on core 0. espp names the
-// pool's workers "rtps_worker_<n>" (worker_count 2, EsppTransport.cpp); a worker not found is
-// logged and left as it is.
-constexpr UBaseType_t kRtpsWorkerPriority = 20;
-constexpr std::array<const char *, 2> kRtpsWorkers{"rtps_worker_0", "rtps_worker_1"};
-
-void raise_rtps_workers() {
-  for (const char *name : kRtpsWorkers) {
-    TaskHandle_t task = xTaskGetHandle(name);
-    if (task == nullptr) {
-      logger.warn("{} not found: its priority is left as espp set it", name);
-      continue;
-    }
-    const UBaseType_t was = uxTaskPriorityGet(task);
-    vTaskPrioritySet(task, kRtpsWorkerPriority);
-    logger.info("{}: priority {} -> {} (sends XYTwist; shares core time with a stuck UI task)",
-                name, was, kRtpsWorkerPriority);
-  }
-}
+// hazard-c4-spec.md wants it to keep flowing, neutral). At lv_task's 20 they share
+// core 1 with a stuck UI task instead; they stay below Read ADC (21) on core 0. Set through
+// espp's RtpsParticipant::Config (espp PR 4), so the pool's workers ("rtps_worker_<n>") are
+// created at it; core and the reactor task keep espp's defaults (any core, priority 5).
+constexpr std::size_t kRtpsWorkerPriority = 20;
 
 // On the current lease.
 bool start_participant() {
@@ -590,13 +574,13 @@ bool start_participant() {
       .on_publisher_matched = [] { peer_matched = true; },
       .on_subscriber_matched = [] { peer_matched = true; },
       .log_level = espp::Logger::Verbosity::INFO, // DEBUG traces discovery
+      .transport_worker_priority = kRtpsWorkerPriority,
   });
   if (!participant->start()) {
     logger.error("Failed to start RTPS participant");
     participant.reset();
     return false;
   }
-  raise_rtps_workers(); // the participant's transport made its worker pool
 
   // 5 writers + 4 readers, plus SPDP's pair: the budget set in sdkconfig.defaults
   bool ok = false;
