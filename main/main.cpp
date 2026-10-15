@@ -469,24 +469,6 @@ extern "C" void app_main(void) {
   // handlers.
   SelfTestPlatform selftest_board = selftest_platform(&cues, found_addresses, direct_render);
   selftest_board.lvgl_mutex = &lvgl_mutex;
-  selftest_board.motion_guard = [] {
-    const hmi::control::GuardTelemetry &t = ui_app.guard_telemetry();
-    const bool watched = t.adc_wdt_ok.load(std::memory_order_relaxed) &&
-                         ui_app.guard_sources().ui_wdt_ok.load(std::memory_order_acquire);
-    return std::array<int32_t, 3>{
-        watched ? 1 : 0, static_cast<int32_t>(t.ui_age_max_ms.load(std::memory_order_relaxed)),
-        static_cast<int32_t>(t.ui_stalls_drive.load(std::memory_order_relaxed))};
-  };
-  selftest_board.stick_monitor = [] {
-    constexpr auto relaxed = std::memory_order_relaxed;
-    const hmi::stick::MonitorTelemetry &t = ui_app.stick_telemetry();
-    const uint32_t bad =
-        std::accumulate(t.implausible.begin(), t.implausible.end(), uint32_t{0},
-                        [](uint32_t sum, const auto &n) { return sum + n.load(relaxed); });
-    return std::array<int32_t, 3>{static_cast<int32_t>(ui_app.permit_hooks().stick_health.read()),
-                                  static_cast<int32_t>(bad),
-                                  static_cast<int32_t>(t.xy_age_max_ms.load(relaxed))};
-  };
   selftest_init(selftest_board);
 
   ui_app.build_on_demand_parts();

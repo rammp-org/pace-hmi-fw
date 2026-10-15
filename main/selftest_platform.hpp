@@ -1,7 +1,8 @@
 #pragma once
 /// @file selftest_platform.hpp
 /// @brief The board probes the self test reads (SelfTestPlatform), filled from the Tab5 BSP,
-///        the haptics and the joystick calibration. Moved from main.cpp's app_main wiring.
+///        the haptics, the joystick calibration and the UiApp (the motion guard and the stick
+///        monitor). Moved from main.cpp's app_main wiring.
 
 #include <cstdint>
 #include <vector>

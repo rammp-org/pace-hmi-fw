@@ -7,10 +7,12 @@
 #include <array>
 #include <cmath>
 #include <ctime>
+#include <numeric>
 #include <optional>
 #include <string>
 
 #include "alloc_guard/alloc_guard.hpp"
+#include "app_instances.hpp"
 #include "feedback/da7280_bench.hpp"
 #include "format.hpp"
 #include "joystick_cal.hpp"
@@ -95,8 +97,29 @@ SelfTestPlatform selftest_platform(hmi::feedback::Feedback *feedback,
         return std::array<float, 3>{cal[JOY_HORIZONTAL].center_mv, cal[JOY_VERTICAL].center_mv,
                                     cal[JOY_TWIST].center_mv};
       },
-      .motion_guard = {},  // app_main's, from the UiApp's motion guard channels
-      .stick_monitor = {}, // app_main's, from the UiApp's stick monitor telemetry
+      // The motion guard's channels and C2's stick monitor telemetry, from the UiApp (any task,
+      // atomics only).
+      .motion_guard =
+          [] {
+            const hmi::control::GuardTelemetry &t = ui_app.guard_telemetry();
+            const bool watched = t.adc_wdt_ok.load(std::memory_order_relaxed) &&
+                                 ui_app.guard_sources().ui_wdt_ok.load(std::memory_order_acquire);
+            return std::array<int32_t, 3>{
+                watched ? 1 : 0,
+                static_cast<int32_t>(t.ui_age_max_ms.load(std::memory_order_relaxed)),
+                static_cast<int32_t>(t.ui_stalls_drive.load(std::memory_order_relaxed))};
+          },
+      .stick_monitor =
+          [] {
+            constexpr auto relaxed = std::memory_order_relaxed;
+            const hmi::stick::MonitorTelemetry &t = ui_app.stick_telemetry();
+            const uint32_t bad =
+                std::accumulate(t.implausible.begin(), t.implausible.end(), uint32_t{0},
+                                [](uint32_t sum, const auto &n) { return sum + n.load(relaxed); });
+            return std::array<int32_t, 3>{
+                static_cast<int32_t>(ui_app.permit_hooks().stick_health.read()),
+                static_cast<int32_t>(bad), static_cast<int32_t>(t.xy_age_max_ms.load(relaxed))};
+          },
       .allocs_after_boot = alloc_guard_probe(),
   };
 }
