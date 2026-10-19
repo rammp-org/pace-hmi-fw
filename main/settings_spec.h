@@ -28,7 +28,9 @@
   X(UI, STICK_INVERT_X, "S6", "Stick left/right", 0, 1, 1, 0, "", 0)                               \
   X(UI, STICK_INVERT_Y, "S7", "Stick fwd/back", 0, 1, 1, 0, "", 0)                                 \
   X(UI, STICK_SWAP, "S8", "Stick axes", 0, 1, 1, 0, "", 0)                                         \
-  X(UI, SOUNDS, "S9", "Sounds", 0, 1, 1, 0, "", 1)
+  X(UI, SOUNDS, "S9", "Sounds", 0, 1, 1, 0, "", 1)                                                 \
+  X(UI, ESTOP_PIN, "S10", "E-stop pin", 0, 1, 1, 0, "", 0)                                         \
+  X(UI, ESTOP_TYPE, "S11", "E-stop contact", 0, 1, 1, 0, "", 0)
 
 /* SETTINGS_PAGE_SCREEN_BRIGHTNESS, ..., SETTINGS_PAGE_COUNT */
 enum {
