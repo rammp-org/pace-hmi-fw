@@ -294,11 +294,9 @@ bool estop_start(EStopPin pin, EStopContact contact) {
   if (task != nullptr) {
     return true;
   }
-  // Normally installed already (the GPIO48 button, the W5500): started after them,
-  // so espp's Interrupt does not log a failed install of a service someone beat it to.
-  if (esp_err_t err = gpio_install_isr_service(0); err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-    return false; // estop_active() stays true: no switch, no driving
-  }
+  // The GPIO ISR service is not installed here: the GPIO48 button installs it first,
+  // and a second install only logs an error. Without it gpio_isr_handler_add fails,
+  // the task retries every period, and estop_active() holds until it works.
   rx_queue = xQueueCreateStatic(kRxQueueDepth, sizeof(Rx), rx_queue_storage, &rx_queue_buf);
   view_queue = xQueueCreateStatic(1, sizeof(EStopView), view_queue_storage, &view_queue_buf);
   if (rx_queue == nullptr || view_queue == nullptr) {
