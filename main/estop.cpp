@@ -245,7 +245,6 @@ void publish_view(Island &s, int64_t now) {
   s.view.remote = s.view.mib_fresh && s.mib_engaged;
   s.view.presses = s.presses_seen;
   s.view.rx_errors = rx_dropped.load(std::memory_order_relaxed);
-  // cppcheck-suppress knownConditionTrueFalse ; kEStopNeedsMib is a build-time switch
   const bool link_missing = rammp::kEStopNeedsMib && !s.view.mib_fresh;
   active.store(s.view.local || s.view.remote || !s.view.armed || link_missing);
   (void)xQueueOverwrite(view_queue, &s.view);

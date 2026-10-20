@@ -690,7 +690,6 @@ static void estop_poll() {
     cause = kEStopRemote;
   } else if (!v.armed) {
     cause = kEStopFault;
-    // cppcheck-suppress knownConditionTrueFalse ; kEStopNeedsMib is a build-time switch
   } else if (rammp::kEStopNeedsMib && !v.mib_fresh) {
     cause = kEStopNoLink;
   }
