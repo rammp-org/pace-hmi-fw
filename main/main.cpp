@@ -207,11 +207,13 @@ static std::atomic<uint32_t> joy_flick{0};
 // every route between the screens.
 // "This object covers what is behind it" -- see strip_redundant_backgrounds.
 // LVGL leaves the USER flags for exactly this; nothing in the export uses them.
+// LVGL 9.6 deprecates lv_obj_set_flag/has_flag but has no setter for USER flags yet:
+// both still work, and with LV_USE_LOG off their deprecation notice compiles away.
 static constexpr lv_obj_flag_t kOverlayFlag = LV_OBJ_FLAG_USER_1;
 
 // Kept out of the overdraw pass, and kept opaque whatever the theme says.
 static void keep_overlay_fill(lv_obj_t *obj) {
-  lv_obj_add_flag(obj, kOverlayFlag);
+  lv_obj_set_flag(obj, kOverlayFlag, true);
   lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, LV_PART_MAIN);
 }
 
@@ -1412,8 +1414,8 @@ static void bind_to_drive_blocked_cause(lv_obj_t *panel, lv_observer_cb_t cb) {
 // screen in front: a warning or an error arriving is heard as well as read.
 // Only on the rise, because every cause subject re-runs the observers.
 static void banner_show(lv_obj_t *panel, bool up) {
-  const bool was_up = !lv_obj_has_flag(panel, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_set_flag(panel, LV_OBJ_FLAG_HIDDEN, !up);
+  const bool was_up = !lv_obj_is_hidden(panel);
+  lv_obj_set_hidden(panel, !up);
   if (up && !was_up && lv_obj_get_screen(panel) == lv_screen_active()) {
     play_refusal(true);
   }
@@ -1432,7 +1434,7 @@ static void entry_refused_panel_observer(lv_observer_t *observer, lv_subject_t *
     banner_show(panel, up);
     if (panel == ui_ErrorBanner2) {
       for (lv_obj_t *art : {ui_LockRing, ui_Shackle, ui_LockBody, ui_LockKeyhole}) {
-        lv_obj_set_flag(art, LV_OBJ_FLAG_HIDDEN, up);
+        lv_obj_set_hidden(art, up);
       }
     }
   };
@@ -2096,7 +2098,7 @@ static void seat_click_cb(lv_event_t *e) {
   // Spec 04b: the motion's own page, over the function buttons. The joystick
   // moves across with it -- its own group -- onto "-" rather than the back
   // button above, since adjusting is what the page is for.
-  lv_obj_remove_flag(ui_SeatAdjustmentPanel, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(ui_SeatAdjustmentPanel, false);
   nav_use_group(seat_adjust_group, ui_SeatScreen);
   seat_adjust_grid.row = 1;
   seat_adjust_grid.col = 0;
@@ -2109,7 +2111,7 @@ static void seat_click_cb(lv_event_t *e) {
 // not greet the next one, or the stick's cursor sits on the function buttons
 // hidden underneath it.
 static void seat_show_buttons_page() {
-  lv_obj_add_flag(ui_SeatAdjustmentPanel, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(ui_SeatAdjustmentPanel, true);
   seat_page = 0;
   nav_use_group(seat_group, ui_SeatScreen);
   // Back to the button the user selected rather than the top-left one: the
@@ -2732,7 +2734,7 @@ static void setting_row_click_cb(lv_event_t *e) {
 static void clear_click_focusable_recursive(lv_obj_t *obj) {
   for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
     lv_obj_t *child = lv_obj_get_child(obj, i);
-    lv_obj_remove_flag(child, LV_OBJ_FLAG_CLICK_FOCUSABLE);
+    lv_obj_set_click_focusable(child, false);
     clear_click_focusable_recursive(child);
   }
 }
@@ -3238,7 +3240,7 @@ static void diagnostics_open() {
                       specs[i].label);
     for (uint8_t f = 0; f < rammp::kDiagFields; f++) {
       if (specs[i].unit[f][0] == '\0') { // a reading this item does not have
-        lv_obj_add_flag(ui_comp_get_child(row, kDiagFieldIds[f].container), LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(ui_comp_get_child(row, kDiagFieldIds[f].container), true);
         continue;
       }
       lv_label_set_text(ui_comp_get_child(row, kDiagFieldIds[f].units), specs[i].unit[f]);
@@ -3481,7 +3483,7 @@ static void nav_menu_anim_cb(void *obj, int32_t y) {
 
 static void nav_menu_hide_cb(lv_anim_t *a) {
   auto *overlay = static_cast<lv_obj_t *>(a->var);
-  lv_obj_add_flag(overlay, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(overlay, true);
   // A row replayed on arrival (nav_drop_row) goes back to resting once it is
   // out of sight, ready for the next time this overlay opens.
   for (uint32_t id : kNavRowIds) {
@@ -3550,7 +3552,7 @@ static void nav_open_menu(lv_obj_t *overlay) {
     return;
   }
   nav_menu_open = overlay;
-  lv_obj_remove_flag(overlay, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(overlay, false);
   nav_menu_slide(overlay, kMenuHiddenY, kMenuShownY, false);
   nav_key_open_look(lv_screen_active(), true);
 
@@ -3594,7 +3596,7 @@ static void nav_home() {
 static void nav_go(NavDest dest) {
   const lv_obj_t *const before = lv_screen_active();
   if (nav_menu_open != nullptr) {
-    lv_obj_add_flag(nav_menu_open, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(nav_menu_open, true);
     for (uint32_t id : kNavRowIds) {
       lv_obj_remove_state(ui_comp_get_child(nav_menu_open, id), LV_STATE_CHECKED);
     }
@@ -3787,7 +3789,7 @@ static void nav_band_cb(lv_event_t *) { nav_home(); }
 static void nav_clear_clickable(lv_obj_t *obj) {
   for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
     lv_obj_t *child = lv_obj_get_child(obj, i);
-    lv_obj_remove_flag(child, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_clickable(child, false);
     nav_clear_clickable(child);
   }
 }
@@ -3795,7 +3797,7 @@ static void nav_clear_clickable(lv_obj_t *obj) {
 static void nav_claim_clicks(lv_obj_t *obj) {
   clear_click_focusable_recursive(obj);
   nav_clear_clickable(obj);
-  lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(obj, true);
 }
 
 // One screen's chrome. `band` is the DriveBand whose DRIVE cell goes home.
@@ -3897,7 +3899,7 @@ static void nav_drop_menu(const lv_obj_t *screen) {
   if (row < 0 || c == nullptr) {
     return;
   }
-  lv_obj_remove_flag(c->overlay, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(c->overlay, false);
   lv_obj_add_state(ui_comp_get_child(c->overlay, kNavRowIds[row]), LV_STATE_CHECKED);
   nav_menu_slide(c->overlay, kMenuShownY, kMenuHiddenY, true);
 }
@@ -4146,7 +4148,7 @@ static void actions_screen_ensure() {
   nav_attach_chrome(ui_MenuKey8, ui_MenuOverlay8, ui_DriveBand8);
   // Its ErrorBanner stays down: an action that needs the MCB greys out
   // instead (action_ready_observer), which keeps the local ones reachable.
-  lv_obj_add_flag(ui_ErrorBanner7, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(ui_ErrorBanner7, true);
   lv_obj_add_event_cb(ui_SkunkWorksScreen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, nullptr);
   lv_obj_add_event_cb(ui_SkunkWorksScreen, actions_screen_unloaded_cb, LV_EVENT_SCREEN_UNLOADED,
                       nullptr);
@@ -4181,7 +4183,7 @@ static void diagnostics_screen_ensure() {
   nav_attach_chrome(ui_MenuKey9, ui_MenuOverlay9, ui_DriveBand9);
   // The red, blinking readings are this screen's warning: the ErrorBanner
   // would cover exactly what someone opened the screen to look at.
-  lv_obj_add_flag(ui_ErrorBanner8, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(ui_ErrorBanner8, true);
   for (lv_subject_t *subject : {&diag_rate_subject, &diag_stale_subject, &rtps_blink_subject}) {
     lv_subject_add_observer_obj(subject, diag_freq_observer, ui_DiagnosticsFreqLabel, nullptr);
   }
@@ -5024,7 +5026,7 @@ extern "C" void app_main(void) {
   // disable scrolling on the screen (so that it doesn't behave weirdly when
   // rotated and drawing with your finger)
   lv_obj_set_scrollbar_mode(lv_screen_active(), LV_SCROLLBAR_MODE_OFF);
-  lv_obj_clear_flag(lv_screen_active(), LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollable(lv_screen_active(), false);
 
   // Load the SquareLine Studio UI. This creates every screen and makes
   // ui_BootScreen the active one; the demo widgets above stay on the (now
@@ -5378,7 +5380,7 @@ extern "C" void app_main(void) {
   shackle_rest_y = lv_obj_get_y(ui_Shackle);
   shackle_rest_h = lv_obj_get_height(ui_Shackle);
   lv_arc_set_range(ui_LockRing, 0, kHoldMax);
-  lv_obj_remove_flag(ui_LockRing, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(ui_LockRing, false);
 
   // The three push-and-hold gestures, polled by one shared timer — only the
   // gesture whose applies() is true on the current screen can be filling at any
@@ -5395,7 +5397,7 @@ extern "C" void app_main(void) {
   lv_bar_set_range(ui_CalibrateFill, 0, kHoldMax);
   lv_bar_bind_value(ui_CalibrateFill, &calibrate_gesture.progress);
   lv_obj_bind_flag_if_eq(ui_CalibrateFill, &calibrate_gesture.progress, LV_OBJ_FLAG_HIDDEN, 0);
-  lv_obj_remove_flag(ui_CalibrateFill, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(ui_CalibrateFill, false);
   lv_timer_create(hold_poll_cb, kHoldPollMs, nullptr);
 
   // LogScreen: TextArea1 shows the serial output log_capture has kept. Its

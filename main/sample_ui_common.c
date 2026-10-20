@@ -12,7 +12,7 @@ static void back_button_event_cb(lv_event_t *e) {
 
 lv_obj_t *sample_ui_create_screen_base(void) {
   lv_obj_t *screen = lv_obj_create(NULL);
-  lv_obj_remove_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollable(screen, false);
   lv_obj_set_style_bg_color(screen, lv_color_hex(SAMPLE_UI_COLOR_BG), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_flex_flow(screen, LV_FLEX_FLOW_COLUMN);
@@ -34,7 +34,7 @@ lv_obj_t *sample_ui_create_bar(lv_obj_t *parent, const char *title, bool with_ba
   lv_obj_set_style_border_width(bar, 0, LV_PART_MAIN);
   lv_obj_set_style_radius(bar, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_hor(bar, 16, LV_PART_MAIN);
-  lv_obj_remove_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollable(bar, false);
   lv_obj_set_flex_flow(bar, LV_FLEX_FLOW_ROW);
   // left_cluster below uses flex_grow to consume the remaining width instead
   // of relying on SPACE_BETWEEN, which is an edge case with a single child
@@ -48,7 +48,7 @@ lv_obj_t *sample_ui_create_bar(lv_obj_t *parent, const char *title, bool with_ba
   lv_obj_set_style_border_width(left_cluster, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(left_cluster, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_column(left_cluster, 16, LV_PART_MAIN);
-  lv_obj_remove_flag(left_cluster, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollable(left_cluster, false);
   lv_obj_set_flex_flow(left_cluster, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(left_cluster, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
                         LV_FLEX_ALIGN_CENTER);

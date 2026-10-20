@@ -21,7 +21,7 @@ static void create_slider_row(lv_obj_t *parent, const char *name, int32_t initia
   lv_obj_set_style_border_width(row, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(row, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_column(row, 20, LV_PART_MAIN);
-  lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollable(row, false);
   lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
@@ -60,7 +60,7 @@ void sample_ui_seat_adjustment_init(void) {
   lv_obj_set_style_border_width(content, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(content, 60, LV_PART_MAIN);
   lv_obj_set_style_pad_row(content, 40, LV_PART_MAIN);
-  lv_obj_remove_flag(content, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollable(content, false);
   lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
   lv_obj_set_flex_align(content, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
