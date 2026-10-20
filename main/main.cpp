@@ -49,7 +49,7 @@
 
 #include "actions_spec.h"
 #include "boot_logo.h"
-#include "estop.hpp"
+#include "hmi_estop.hpp"
 #include "joystick_cal.hpp"
 #include "log_capture.hpp"
 #include "log_view.hpp"
@@ -153,7 +153,7 @@ static void drive_publish();
 static lv_subject_t rtps_link_subject;
 // 0/1 blink phase for the indicator, flipped by the same poll timer
 static lv_subject_t rtps_blink_subject;
-// The e-stop, as the screens read it (estop.hpp), set by the same poll timer:
+// The e-stop, as the screens read it (hmi_estop.hpp), set by the same poll timer:
 // kEStopNone unless something stops driving. mcb_ready() and every warning banner
 // read it first, so an engaged stop refuses drive and seat and says why.
 enum : int32_t {
@@ -682,44 +682,46 @@ static void drive_wait_poll(); // DriveScreen entry, further down
 // itself never logs (it must not allocate), so this is where its history is kept.
 static void estop_poll() {
   static espp::Logger estop_logger({.tag = "estop", .level = espp::Logger::Verbosity::INFO});
-  const EStopView v = estop_view();
+  const estop::NodeStatus s = hmi_estop.status();
   int32_t cause = kEStopNone;
-  if (v.local) {
+  if (s.engaged) {
     cause = kEStopLocal;
-  } else if (v.remote) {
+  } else if (s.latch_engaged) {
     cause = kEStopRemote;
-  } else if (!v.armed) {
+  } else if (!s.armed) {
     cause = kEStopFault;
-  } else if (rammp::kEStopNeedsMib && !v.mib_fresh) {
+  } else if (rammp::kEStopNeedsMib && !s.latch_fresh) {
     cause = kEStopNoLink;
   }
 
-  static std::optional<EStopView> last;
-  auto shown = [](const EStopView &e) {
-    return std::tie(e.local, e.remote, e.armed, e.mib_fresh, e.pin, e.contact, e.presses,
-                    e.clear_attempts_accepted, e.clear_attempts_refused, e.rx_errors, e.tx_errors);
+  static std::optional<estop::NodeStatus> last;
+  auto shown = [](const estop::NodeStatus &e) {
+    return std::tie(e.engaged, e.latch_engaged, e.armed, e.latch_fresh, e.gpio, e.contact,
+                    e.presses, e.clear_attempts_accepted, e.clear_attempts_refused, e.rx_errors,
+                    e.tx_errors);
   };
-  if (!last || shown(*last) != shown(v)) {
-    const bool engaged = v.local || v.remote || !v.armed;
+  if (!last || shown(*last) != shown(s)) {
+    const bool engaged = s.engaged || s.latch_engaged || !s.armed;
     const std::string line =
-        fmt::format("local={} remote={} ('{}: {}') armed={} pin=GPIO{} {} mib={} presses={} "
-                    "clear_attempts={}/{} (accepted/refused) rx_err={} tx_err={} pub_seq={}",
-                    v.local, v.remote, v.remote_source, v.remote_reason, v.armed,
-                    v.pin == EStopPin::GPIO2 ? 2 : 47, v.contact == EStopContact::NO ? "NO" : "NC",
-                    v.mib_fresh ? "fresh" : "silent", v.presses, v.clear_attempts_accepted,
-                    v.clear_attempts_refused, v.rx_errors, v.tx_errors, v.pub_seq);
+        fmt::format("engaged={} latch={} ('{}: {}') armed={} pin=GPIO{} {} latch_link={} "
+                    "presses={} clear_attempts={}/{} (accepted/refused) rx_err={} tx_err={} "
+                    "pub_seq={}",
+                    s.engaged, s.latch_engaged ? "ENGAGED" : "NOT_ENGAGED", s.latch_source,
+                    s.latch_reason, s.armed, s.gpio, s.contact == estop::Contact::NO ? "NO" : "NC",
+                    s.latch_fresh ? "fresh" : "silent", s.presses, s.clear_attempts_accepted,
+                    s.clear_attempts_refused, s.rx_errors, s.tx_errors, s.pub_seq);
     if (engaged) {
       estop_logger.warn("{}", line);
     } else {
       estop_logger.info("{}", line);
     }
-    last = v;
+    last = s;
   }
 
   bool changed = cause != lv_subject_get_int(&estop_subject);
   if (cause == kEStopRemote) {
     char text[sizeof(estop_remote_text)];
-    lv_snprintf(text, sizeof(text), rammp::kHmiEStopRemoteFmt, v.remote_source, v.remote_reason);
+    lv_snprintf(text, sizeof(text), rammp::kHmiEStopRemoteFmt, s.latch_source, s.latch_reason);
     if (std::strcmp(text, estop_remote_text) != 0) {
       std::memcpy(estop_remote_text, text, sizeof(text));
       changed = true;
@@ -2319,10 +2321,10 @@ static constexpr const char *kOnOffNames[] = {"Off", "On"};
 static constexpr const char *kMirrorNames[] = {"Normal", "Mirror"};
 static constexpr const char *kSwapNames[] = {"Normal", "Swap"};
 static constexpr const char *kEStopPinNames[] = {"GPIO2", "GPIO47"}; // EStopPin order
-static constexpr const char *kEStopTypeNames[] = {"NO", "NC"};       // EStopContact order
+static constexpr const char *kEStopTypeNames[] = {"NO", "NC"};       // estop::Contact order
 static_assert(static_cast<int>(EStopPin::GPIO47) == SETTINGS_ESTOP_PIN_MAX &&
-                  static_cast<int>(EStopContact::NC) == SETTINGS_ESTOP_TYPE_MAX,
-              "the E-stop rows' range must match estop.hpp's enums");
+                  static_cast<int>(estop::Contact::NC) == SETTINGS_ESTOP_TYPE_MAX,
+              "the E-stop rows' range must match EStopPin and estop::Contact");
 static const char *const *const kSettingParamNames[] = {
     nullptr,         // SETTINGS_PARAM_BRIGHTNESS
     kThemeNames,     // SETTINGS_PARAM_THEME
@@ -2436,8 +2438,8 @@ static void setting_store_observer(lv_observer_t *observer, lv_subject_t *subjec
     break;
   case SETTINGS_PARAM_ESTOP_PIN:
   case SETTINGS_PARAM_ESTOP_TYPE:
-    estop_configure(static_cast<EStopPin>(settings_get(SETTINGS_PARAM_ESTOP_PIN)),
-                    static_cast<EStopContact>(settings_get(SETTINGS_PARAM_ESTOP_TYPE)));
+    hmi_estop.set_input(estop_gpio(static_cast<EStopPin>(settings_get(SETTINGS_PARAM_ESTOP_PIN))),
+                        static_cast<estop::Contact>(settings_get(SETTINGS_PARAM_ESTOP_TYPE)));
     break;
   default:
     break; // MENU_SLIDE: read where it is used, nothing to apply
@@ -5286,12 +5288,13 @@ extern "C" void app_main(void) {
       .task_config = {.name = "Button", .stack_size_bytes = 4 * 1024, .priority = 5},
   });
 
-  // The e-stop switch (estop.hpp): after the GPIO48 button, so the GPIO interrupt
+  // The e-stop switch (hmi_estop.hpp): after the GPIO48 button, so the GPIO interrupt
   // service is espp's to install, and before RTPS, so it is watching before anything
-  // can drive. A failure leaves estop_active() true, which refuses driving.
+  // can drive. A failure leaves hmi_estop.active() true, which refuses driving.
   logger.info("Starting the e-stop...");
-  if (!estop_start(static_cast<EStopPin>(settings_get(SETTINGS_PARAM_ESTOP_PIN)),
-                   static_cast<EStopContact>(settings_get(SETTINGS_PARAM_ESTOP_TYPE)))) {
+  hmi_estop.set_input(estop_gpio(static_cast<EStopPin>(settings_get(SETTINGS_PARAM_ESTOP_PIN))),
+                      static_cast<estop::Contact>(settings_get(SETTINGS_PARAM_ESTOP_TYPE)));
+  if (!hmi_estop.start()) {
     logger.error("E-stop failed to start: driving stays refused");
   }
 

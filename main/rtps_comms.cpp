@@ -26,7 +26,7 @@
 #include "lwip/ip_addr.h"
 #include "ping/ping_sock.h"
 
-#include "estop.hpp"
+#include "hmi_estop.hpp"
 #include "logger.hpp"
 #include "rtps_participant.hpp"
 #include "rtps_pubsub.hpp"
@@ -61,7 +61,6 @@ std::atomic<bool> link_up{false};
 std::atomic<bool> got_ip{false};
 std::atomic<bool> peer_matched{false};    // a latch: espp only reports "matched"
 std::atomic<bool> endpoints_ready{false}; // every publisher below exists
-std::atomic<bool> estop_ready{false};     // the EStop writer exists
 std::atomic<MIB::DriveProfile> last_profile{MIB::DriveProfile::NORMAL}; // for the e-stop DISABLE
 std::atomic<int64_t> last_status_us{0}; // last MibStatus, esp_timer time; 0 = never
 std::string ip_address;
@@ -358,21 +357,13 @@ bool start_participant() {
     return false;
   }
 
-  // The e-stop first, so a short endpoint pool fails anything but it. Raw bytes both
-  // ways: estop.cpp encodes into a static buffer and decodes without allocating.
-  // Best-effort, like every RAMMP topic: the period resend is the reliability.
+  // The e-stop first, so a short endpoint pool fails anything but it (estop-core adds
+  // its writer and reader; best-effort, the period resend is the reliability).
   // espp copies the topic into a std::string per publish: in-place, at this length.
   static_assert(sizeof(RAMMP_TOPIC_ESTOP) <= 16, "EStop topic must fit std::string's SSO buffer");
-  if (!participant->add_writer({.topic = rammp::kEStop.name, .type_name = rammp::kEStop.type})) {
-    logger.error("Could not add writer '{}' (CONFIG_RTPS_LIMIT_* in sdkconfig.defaults)",
-                 rammp::kEStop.name);
-    return false;
-  }
-  estop_ready = true;
-  if (!participant->add_reader({.topic = rammp::kEStop.name,
-                                .type_name = rammp::kEStop.type,
-                                .on_sample = estop_on_sample})) {
-    logger.error("Could not add reader '{}' (CONFIG_RTPS_LIMIT_* in sdkconfig.defaults)",
+  if (!hmi_estop.attach(*participant)) {
+    logger.error("Could not add the e-stop writer and reader '{}' (CONFIG_RTPS_LIMIT_* in "
+                 "sdkconfig.defaults)",
                  rammp::kEStop.name);
     return false;
   }
@@ -432,7 +423,7 @@ void rtps_comms_on_selftest_pong(std::function<void(uint16_t, int)> handler) {
 
 // Called only from the stick's task, which is why the edge latch can be a plain static.
 bool rtps_comms_publish_adc(float x, float y, float twist, rammp::Buttons buttons) {
-  const bool stopped = estop_active();
+  const bool stopped = hmi_estop.active();
   static bool was_stopped = false;
   if (stopped && !was_stopped) {
     // The stop just engaged: ask the MIB to stop driving now, not at the UI's next
@@ -448,23 +439,17 @@ bool rtps_comms_publish_adc(float x, float y, float twist, rammp::Buttons button
 
 bool rtps_comms_publish_drive(rammp::DriveRequest request, MIB::DriveProfile profile) {
   last_profile = profile;
-  if (estop_active()) {
+  if (hmi_estop.active()) {
     request = rammp::DriveRequest::DISABLE;
   }
   return publish(drive_pub, rammp::DriveCommand{request, profile});
 }
 
 bool rtps_comms_publish_seat(rammp::SeatAxis axis, float target) {
-  if (estop_active()) {
+  if (hmi_estop.active()) {
     return false;
   }
   return publish(seat_pub, rammp::SeatCommand{axis, target});
-}
-
-bool rtps_comms_estop_ready() { return estop_ready; }
-
-bool rtps_comms_publish_estop(std::span<const uint8_t> cdr_payload) {
-  return estop_ready && participant->publish(rammp::kEStop.name, cdr_payload);
 }
 
 bool rtps_comms_publish_selftest_ping(uint16_t seq) {

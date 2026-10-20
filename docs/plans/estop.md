@@ -277,3 +277,27 @@ Found while testing:
 - **Lab network:** the LAN proxy-ARPs for hosts, so an old neighbour entry can point at the
   gateway. The board also gets a new DHCP address on every reconnect. The bench script
   re-targets the MIB on each new IP.
+
+## 11. Moved to estop-core
+
+The e-stop now lives in [estop-core](https://github.com/Alaining/estop-core), one ESP-IDF
+component that every RAMMP firmware uses: the HMI runs `estop::Node`, the MIB
+`estop::Latch`. pace-hmi-fw takes it through the component manager at tag `v0.1.0`, and
+overrides its `rammp_rtps_messages` with the `external/rammp-rtps` submodule
+(`override_path` in `main/idf_component.yml`), so the submodule stays the one source of
+the spec. The rules, codec and task are the ones described above, ported unchanged:
+
+| Was (this repo) | Now (estop-core) |
+|---|---|
+| `main/estop.cpp` rules | `estop::core::NodeLogic` (pure; no I/O, no clock) |
+| `main/estop.cpp` task, ISR, queues | `estop::Node` (`src/esp/node.cpp`, `edge_input.cpp`) |
+| `main/estop_codec.hpp` | `estop/core/codec.hpp` |
+| `rtps_comms` EStop writer and reader | `estop::Node::attach(participant)` |
+| `test/estop_codec_test.cpp` | `test/test_codec.cpp`, plus `test_node`, `test_latch` and `test_race` (the C++ race suite: the real node against the real latch through the codec) |
+
+What stays here: `main/hmi_estop.hpp` (the node, `"hmi"`, and the GPIO2/GPIO47 setting
+map), the banners and the drive gates in `main.cpp` and `rtps_comms`, and the Python bench
+tools (`scripts/estop_latch.py` for the MIB simulator, `test/estop_latch_test.py`).
+
+One behaviour change: before the task has run once, the banner says "E-STOP INPUT NOT
+ARMED" (it said "E-STOP ENGAGED"). Driving is refused either way.

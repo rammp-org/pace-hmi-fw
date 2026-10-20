@@ -57,5 +57,14 @@ dependencies:
   espp/reflect_cpp: '>=1.3.8'
   espp/socket: '>=1.3.8'
   espp/thread_pool: '>=1.3.8'
+  # The robot-wide e-stop (estop::Node).
+  estop_core:
+    git: https://github.com/Alaining/estop-core.git
+    version: v0.1.0
+  # estop_core fetches the RTPS spec's messages from git; this makes every user of it
+  # take the rammp-rtps submodule's copy instead (a managed component would otherwise
+  # win over EXTRA_COMPONENT_DIRS).
+  rammp_rtps_messages:
+    override_path: "../external/rammp-rtps/components/rammp_rtps_messages"
   # W5500 SPI Ethernet MAC driver (split out of esp_eth in IDF 6.0)
   espressif/w5500: ^2.0.0

@@ -751,6 +751,24 @@ dependencies:
       registry_url: https://components.espressif.com
       type: service
     version: 1.0.0
+  estop_core:
+    component_hash: 1b5a3aac4b000076719c7d1cd01e1ce99e47d74ad37ff4d36a473591694dc221
+    dependencies:
+    - name: idf
+      version: '>=5.5'
+    - name: espp/cdr
+      version: '>=1.3.2'
+    - name: espp/rtps
+      version: '>=1.3.2'
+    - git: https://github.com/rammp-org/rammp-rtps.git
+      name: rammp_rtps_messages
+      path: components/rammp_rtps_messages
+      version: 3390723cbad6f7a00bd7d5f0ca65fe69635e2122
+    source:
+      git: https://github.com/Alaining/estop-core.git
+      path: .
+      type: git
+    version: 6f434e660074a116487828cec6e72ab09e875e27
   idf:
     source:
       type: idf
@@ -796,6 +814,12 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 9.6.0~1
+  rammp_rtps_messages:
+    dependencies: []
+    source:
+      path: external/rammp-rtps/components/rammp_rtps_messages
+      type: local
+    version: '*'
 direct_dependencies:
 - espp/adc
 - espp/base_component
@@ -834,8 +858,10 @@ direct_dependencies:
 - espressif/esp_ipa
 - espressif/esp_video
 - espressif/w5500
+- estop_core
 - idf
 - lvgl/lvgl
-manifest_hash: d6bb68739502f22a398b2505512faacf526dc039032cf1f541df99cc3cf19dfd
+- rammp_rtps_messages
+manifest_hash: a941af0b9d4d5633fbac67b768256978536834d97865228b65e651190e5eaa6e
 target: esp32p4
 version: 3.0.0

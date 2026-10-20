@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The e-stop protocol, end to end without a network: scripts/estop_latch.py (the MIB's
-side) against a model of the HMI's rules in main/estop.cpp, through every race in
+side) against a model of the HMI's rules (estop-core NodeLogic), through every race in
 docs/plans/estop.md section 4. Messages go through the real codec (pack/unpack), and
 the test controls delivery order, so in-flight and reordered messages can be forced.
 
@@ -22,7 +22,7 @@ P = spec.ESTOP_PERIOD_MS / 1000
 
 
 class HmiModel:
-    """main/estop.cpp's rules: send every period; a press engages and sets a new
+    """estop-core NodeLogic's rules: send every period; a press engages and sets a new
     engaged_pub_seq at its first send; a clear attempt is accepted only if it is fresh,
     from the clearer, addressed to us, covers engaged_pub_seq, and the switch is up."""
 
