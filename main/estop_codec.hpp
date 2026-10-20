@@ -17,6 +17,8 @@
 #include <span>
 #include <string_view>
 
+#include "messages/estop_message.hpp"
+
 namespace estop_codec {
 
 /// Copies `in` into `out`, truncated and always NUL-terminated.
@@ -32,7 +34,7 @@ template <std::size_t N> constexpr void copy_text(char (&out)[N], std::string_vi
 struct Decoded {
   uint32_t pub_seq = 0;
   uint32_t clear_pub_seq = 0;
-  bool engaged = false;
+  bool engaged = false;        ///< state is anything but NOT_ENGAGED
   bool from_self = false;      ///< source is this HMI: our own sample, ignored
   bool from_clearer = false;   ///< source is rammp::kEStopClearer
   bool clear_for_self = false; ///< clear_target is this HMI: a clear attempt for us
@@ -109,15 +111,16 @@ inline bool decode(std::span<const uint8_t> payload, std::string_view self,
   uint32_t sec = 0;
   uint32_t nanosec = 0;
   std::string_view frame_id;
-  uint8_t engaged = 0;
+  uint8_t state = 0; // rammp::EStopState
   std::string_view source;
   std::string_view reason;
   // header.stamp and header.frame_id are read past: the stamp is for the log only.
-  if (!r.u32(sec) || !r.u32(nanosec) || !r.string(frame_id) || !r.u8(engaged) ||
-      !r.string(source) || !r.string(reason)) {
+  if (!r.u32(sec) || !r.u32(nanosec) || !r.string(frame_id) || !r.u8(state) || !r.string(source) ||
+      !r.string(reason)) {
     return false;
   }
-  out.engaged = engaged != 0; // any non-zero byte engages: the fail-safe reading
+  // Anything but NOT_ENGAGED (0) engages: the fail-safe reading of an unknown value.
+  out.engaged = state != static_cast<uint8_t>(rammp::EStopState::NOT_ENGAGED);
   out.from_self = source == self;
   out.from_clearer = source == clearer;
   copy_text(out.source, source);

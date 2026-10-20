@@ -277,8 +277,8 @@ class EStopProtocolTest(unittest.TestCase):
 
     def test_release_needs_a_false_sent_after_the_decision(self):
         # The HMI was never engaged (the MIB latched on its own), so its newest word is
-        # already engaged=false -- but at clear_pub_seq, from before the attempt. That must
-        # not release: only an engaged=false newer than clear_pub_seq proves the HMI answered.
+        # already NOT_ENGAGED -- but at clear_pub_seq, from before the attempt. That must
+        # not release: only a NOT_ENGAGED newer than clear_pub_seq proves the HMI answered.
         b = Bench()
         b.boot()
         b.latch.engage("bench")

@@ -68,7 +68,7 @@ def _enumerators(body: str):
 
 def _snake(name: str) -> str:
     """SystemState -> SYSTEM_STATE, XYTwist -> XY_TWIST, SelfTestKind -> SELFTEST_KIND."""
-    name = name.replace("SelfTest", "Selftest").replace("UInt", "Uint")
+    name = name.replace("SelfTest", "Selftest").replace("UInt", "Uint").replace("EStop", "Estop")
     return re.sub(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", "_", name).upper()
 
 
@@ -269,7 +269,13 @@ MSG_ESTOP_ROS = [
     ("sec", "i"), ("nanosec", "I"), ("frame_id", "str"),
     ("engaged", "B"), ("source", "str"), ("reason", "str"),
 ]
-MSG_ESTOP = MSG_ESTOP_ROS + [("pub_seq", "I"), ("clear_target", "str"), ("clear_pub_seq", "I")]
+# Ours: the ROS bool `engaged` is rammp::EStopState `state` (same octet: 0 NOT_ENGAGED,
+# 1 ENGAGED), then the appended fields.
+MSG_ESTOP = [
+    ("sec", "i"), ("nanosec", "I"), ("frame_id", "str"),
+    ("state", "B"), ("source", "str"), ("reason", "str"),
+    ("pub_seq", "I"), ("clear_target", "str"), ("clear_pub_seq", "I"),
+]
 MSG_SELFTEST_REPORT = [
     ("run_id", "B"), ("kind", "B"), ("index", "B"), ("count", "B"), ("result", "B"),
     ("value", "i"), ("lo", "i"), ("hi", "i"), ("name", "str"), ("unit", "str"), ("detail", "str"),
@@ -417,7 +423,7 @@ def unpack_diagnostics(payload: bytes) -> tuple[int, list[list[int]]] | None:
 
 class EStop(NamedTuple):
     """One rammp::EStop. pub_seq/clear_* read 0/"" from a sender of the 4-field ROS layout."""
-    engaged: bool
+    state: int  # ESTOP_STATE_NOT_ENGAGED or ESTOP_STATE_ENGAGED
     source: str
     reason: str
     pub_seq: int
@@ -427,8 +433,13 @@ class EStop(NamedTuple):
     nanosec: int = 0
 
     @property
+    def engaged(self) -> bool:
+        """Anything but NOT_ENGAGED engages: the fail-safe reading of an unknown value."""
+        return self.state != ESTOP_STATE_NOT_ENGAGED  # noqa: F821  (parsed from the header)
+
+    @property
     def is_clear_attempt(self) -> bool:
-        """A clear attempt: engaged=false and addressed to a source. A plain false is a
+        """A clear attempt: NOT_ENGAGED and addressed to a source. A plain NOT_ENGAGED is a
         heartbeat."""
         return not self.engaged and self.clear_target != ""
 
@@ -437,7 +448,8 @@ def pack_estop(engaged: bool, source: str, reason: str, pub_seq: int, clear_targ
                clear_pub_seq: int = 0, stamp: float | None = None) -> bytes:
     """`stamp` is Unix seconds; None sends the all-zero "unstamped" header."""
     sec, nanosec = (0, 0) if stamp is None else (int(stamp), int((stamp % 1) * 1e9))
-    return encode(MSG_ESTOP, sec, nanosec, "", 1 if engaged else 0, source, reason,
+    state = ESTOP_STATE_ENGAGED if engaged else ESTOP_STATE_NOT_ENGAGED  # noqa: F821
+    return encode(MSG_ESTOP, sec, nanosec, "", state, source, reason,
                   pub_seq & 0xFFFFFFFF, clear_target, clear_pub_seq & 0xFFFFFFFF)
 
 
@@ -445,13 +457,13 @@ def unpack_estop(payload: bytes) -> EStop | None:
     """The full layout, or failing that the 4-field ROS one (never a clear attempt)."""
     full = decode(MSG_ESTOP, payload)
     if full is not None:
-        sec, nanosec, _frame, engaged, source, reason, pub_seq, clear_target, clear_pub_seq = full
-        return EStop(engaged != 0, source, reason, pub_seq, clear_target, clear_pub_seq, sec, nanosec)
+        sec, nanosec, _frame, state, source, reason, pub_seq, clear_target, clear_pub_seq = full
+        return EStop(state, source, reason, pub_seq, clear_target, clear_pub_seq, sec, nanosec)
     ros = decode(MSG_ESTOP_ROS, payload)
     if ros is None:
         return None
-    sec, nanosec, _frame, engaged, source, reason = ros
-    return EStop(engaged != 0, source, reason, 0, "", 0, sec, nanosec)
+    sec, nanosec, _frame, engaged, source, reason = ros  # the ROS bool: same octet values
+    return EStop(engaged, source, reason, 0, "", 0, sec, nanosec)
 
 
 def estop_seq_newer(a: int, b: int) -> bool:

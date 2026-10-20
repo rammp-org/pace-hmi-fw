@@ -6,8 +6,8 @@
  *        (messages/estop_message.hpp; the design is docs/plans/estop.md).
  *
  * A press engages the robot-wide stop at once. From then on this HMI sends
- * engaged=true every kEStopPolicy.period, released switch or not, until it accepts
- * a clear attempt from the MIB (rammp::kEStopClearer); otherwise it sends engaged=false as
+ * state=ENGAGED every kEStopPolicy.period, released switch or not, until it accepts
+ * a clear attempt from the MIB (rammp::kEStopClearer); otherwise it sends state=NOT_ENGAGED as
  * the heartbeat the MIB's deadman watches.
  *
  * One task owns all of it. The switch reaches it through an edge interrupt (no

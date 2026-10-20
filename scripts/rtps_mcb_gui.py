@@ -308,8 +308,9 @@ class McbPanel:
             frame,
             text=f"Period {spec.ESTOP_PERIOD_MS} ms, deadman {spec.ESTOP_TIMEOUT_MS} ms, "
                  f"clear window {spec.ESTOP_CLEAR_WINDOW_MS} ms (kEStopPolicy). A press on "
-                 "the HMI latches it; Clear starts the handshake, and the latch releases only "
-                 "once the HMI answers with a newer false. Latched refuses drive ENABLE.",
+                 "the HMI latches it; Clear attempt asks to end the stop, which is released "
+                 "only once the HMI answers with a newer NOT_ENGAGED. Latched refuses drive "
+                 "ENABLE.",
             foreground="#666666", wraplength=560, justify="left",
         ).grid(row=2, column=0, columnspan=5, sticky="w", pady=(6, 0))
 

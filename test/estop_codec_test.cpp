@@ -62,7 +62,8 @@ bool decode(const std::vector<uint8_t> &bytes, estop_codec::Decoded &out) {
 rammp::EStop full(bool engaged, std::string source, std::string reason, uint32_t pub_seq,
                   std::string clear_target, uint32_t clear_pub_seq) {
   return rammp::EStop{.header = {.stamp = {1'760'000'000, 123}, .frame_id = ""},
-                      .engaged = engaged,
+                      .state =
+                          engaged ? rammp::EStopState::ENGAGED : rammp::EStopState::NOT_ENGAGED,
                       .source = std::move(source),
                       .reason = std::move(reason),
                       .pub_seq = pub_seq,
@@ -155,6 +156,18 @@ void test_rejects() {
   CHECK(!decode(no_nul, d));
 }
 
+void test_unknown_state_engages() {
+  // EStopState is one octet: 0 NOT_ENGAGED, 1 ENGAGED. Any other value must read as
+  // engaged. Body offsets: sec 0, nanosec 4, frame_id length 8 and its NUL 12, state 13.
+  auto bytes = encode(full(false, "mib", "x", 1, "", 0));
+  CHECK(bytes[4 + 13] == 0);
+  for (int v : {2, 0x7F, 0xFF}) {
+    bytes[4 + 13] = static_cast<uint8_t>(v);
+    estop_codec::Decoded d;
+    CHECK(decode(bytes, d) && d.engaged);
+  }
+}
+
 void test_long_text_truncates() {
   estop_codec::Decoded d;
   const std::string long_reason(200, 'L');
@@ -196,6 +209,7 @@ int main() {
   test_clear();
   test_ros_layout();
   test_rejects();
+  test_unknown_state_engages();
   test_long_text_truncates();
   test_hmi_message_fits();
   test_fuzz();

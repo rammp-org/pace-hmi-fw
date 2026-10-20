@@ -51,8 +51,8 @@ constexpr UBaseType_t kRxQueueDepth = 8;
 constexpr TickType_t kSettleTicks = pdMS_TO_TICKS(2);
 
 enum class Mode : uint8_t {
-  NORMAL,  // sending engaged=false: the heartbeat
-  ENGAGED, // sending engaged=true until a clear attempt from the MIB is accepted
+  NOT_ENGAGED, // sending state=NOT_ENGAGED: the heartbeat
+  ENGAGED,     // sending state=ENGAGED until a clear attempt from the MIB is accepted
 };
 
 // A received EStop, as the task needs it, with when it arrived (steady clock).
@@ -81,10 +81,10 @@ QueueHandle_t view_queue = nullptr;
 // ---- Owned by the task alone ----
 
 struct Island {
-  Mode mode = Mode::NORMAL;
+  Mode mode = Mode::NOT_ENGAGED;
   uint32_t pub_seq = 0;         // this HMI's message number: +1 per e-stop message sent
-  uint32_t engaged_pub_seq = 0; // pub_seq of the first engaged=true after the latest press
-  bool press_unsent = false;    // a press whose first engaged=true has not gone out yet
+  uint32_t engaged_pub_seq = 0; // pub_seq of the first ENGAGED after the latest press
+  bool press_unsent = false;    // a press whose first ENGAGED has not gone out yet
   uint32_t presses_seen = 0;    // press_edges, as last handled
   int64_t next_send_us = 0;
   int64_t mib_last_us = 0; // last EStop from the MIB; 0 = never
@@ -188,7 +188,7 @@ void send(Island &s, int64_t now) {
     s.press_unsent = false;
   }
   tx_msg.header.stamp = stamp_now();
-  tx_msg.engaged = engaged;
+  tx_msg.state = engaged ? rammp::EStopState::ENGAGED : rammp::EStopState::NOT_ENGAGED;
   tx_msg.reason = engaged ? kReasons[static_cast<size_t>(s.view.pin)] : "";
   tx_msg.pub_seq = s.pub_seq;
   s.next_send_us = now + kPeriodUs;
@@ -208,10 +208,10 @@ void send(Island &s, int64_t now) {
 
 // A clear attempt for this HMI, from the MIB. Accepted only if it covers the latest
 // press (clear_pub_seq >= engaged_pub_seq), is fresh, and the switch is not still
-// held -- otherwise engaged=true keeps going out and the MIB has to try again.
+// held -- otherwise ENGAGED keeps going out and the MIB has to try again.
 void on_clear_attempt(Island &s, const Rx &rx, int64_t now) {
   if (s.mode != Mode::ENGAGED) {
-    return; // the MIB resends its attempt until it sees our engaged=false: nothing to do
+    return; // the MIB resends its attempt until it sees our NOT_ENGAGED: nothing to do
   }
   const bool fresh = now - rx.rx_us <= kPeriodUs;
   const bool covers =
@@ -220,9 +220,9 @@ void on_clear_attempt(Island &s, const Rx &rx, int64_t now) {
     s.view.clear_attempts_refused++;
     return;
   }
-  s.mode = Mode::NORMAL;
+  s.mode = Mode::NOT_ENGAGED;
   s.view.clear_attempts_accepted++;
-  send(s, now); // engaged=false at once: it is what lets the MIB release the stop
+  send(s, now); // NOT_ENGAGED at once: it is what lets the MIB release the stop
 }
 
 void on_rx(Island &s, const Rx &rx, int64_t now) {

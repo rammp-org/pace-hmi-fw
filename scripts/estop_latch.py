@@ -80,7 +80,7 @@ class EStopLatch:
         if self._silent(src, now):
             src.last_pub_seq = None  # silent past the timeout: a rebooted node restarts at 0
         src.last_rx = now
-        # Engaging is never age- or pub_seq-checked: any engaged=true latches.
+        # Engaging is never age- or pub_seq-checked: any ENGAGED latches.
         if msg.engaged:
             self._latch(f"{msg.source}: {msg.reason}" if msg.reason else msg.source)
         # The source's word moves only on a newer message, so a reordered or
@@ -122,7 +122,7 @@ class EStopLatch:
                     self._latch(f"{name} silent (deadman)")
         if self.clear_attempt is None:
             return
-        # Release: every target's newest message is engaged=false, sent after the
+        # Release: every target's newest message is NOT_ENGAGED, sent after the
         # attempt started (pub_seq > clear_pub_seq), and received recently.
         released = all(
             (src := self.sources.get(name)) is not None and src.last_pub_seq is not None

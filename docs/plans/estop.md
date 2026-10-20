@@ -9,7 +9,8 @@ runs a deadman: if a node goes silent, that engages the stop too.
 
 ## 1. Message
 
-The ROS EStop format (`std_msgs/Header`, `engaged`, `source`, `reason`) with three
+The ROS EStop format (`std_msgs/Header`, `engaged`, `source`, `reason`; the bool `engaged` is
+the `EStopState state` enum here, same octet values) with three
 fields appended. Because they are appended, a node that only knows the 4-field ROS
 layout still decodes the start of the message correctly. Being ROS 2 compatible is
 not a goal: the topic and type names follow the rammp convention.
@@ -24,7 +25,7 @@ struct Header { Time stamp; std::string frame_id; }; // std_msgs/Header
 
 struct EStop {
   Header header;          // stamp: for the log only, never for decisions; all-zero = unstamped
-  bool engaged;           // see the table below
+  EStopState state;       // ENGAGED or NOT_ENGAGED (one octet, the ROS bool's values)
   std::string source;     // who published it ("hmi", "mib", ...)
   std::string reason;     // free text, for the log
   // appended to the ROS layout
@@ -37,16 +38,16 @@ inline constexpr Topic<EStop> kEStop{RAMMP_TOPIC_ESTOP, RAMMP_TYPE_ESTOP};
 inline constexpr char kEStopClearer[] = "mib"; // the only source whose clear attempts count
 ```
 
-| engaged | clear_target | Meaning | Who sends it |
+| state | clear_target | Meaning | Who sends it |
 |---|---|---|---|
-| true | (any) | Engage. Always acted on, with no age or `pub_seq` check. | Any node |
-| false | `""` | Heartbeat: "alive, not engaging". It never ends the stop. | Any node, every period |
-| false | `"<src>"` | Clears `<src>`'s engagement | `kEStopClearer` only |
+| ENGAGED | (any) | Engage. Always acted on, with no age or `pub_seq` check. | Any node |
+| NOT_ENGAGED | `""` | Heartbeat: "alive, not engaging". It never ends the stop. | Any node, every period |
+| NOT_ENGAGED | `"<src>"` | Clear attempt for `<src>`'s engagement | `kEStopClearer` only |
 
 Terms: a **clear attempt** is the clearer's request to end the stop; the stop is
 **released** only when the attempt succeeds. Between the two the stop stays in effect.
 
-This differs from the ROS comment, where `false` means "clear it". Here a plain `false`
+This differs from the ROS comment, where `false` means "clear it". Here a plain `NOT_ENGAGED`
 is only a heartbeat, so one node can't release another node's stop by sending its
 normal heartbeat. A node that only knows the 4-field layout decodes `pub_seq = 0` and
 `clear_target = ""`, so its messages read as heartbeats or engages, never as clear attempts.
@@ -61,7 +62,7 @@ uses no heap.
 struct EStopPolicy {
   milliseconds period{100};        // every node sends at least this often
   milliseconds timeout{300};       // receiver: a source silent this long counts as engaged (if deadman)
-  bool deadman{true};              // false: only engaged=true stops; silence is just logged
+  bool deadman{true};              // false: only ENGAGED stops; silence is just logged
   milliseconds clear_window{1000}; // MCB: a clear attempt not completed within this expires; still latched
 };
 inline constexpr EStopPolicy kEStopPolicy{};
@@ -72,12 +73,12 @@ values. The sim takes flags to override them (`--estop-timeout`, `--no-deadman`)
 
 ## 3. Staleness: receive time on the steady clock, never the stamp
 
-- **Engaging is never age-checked.** Any `true` engages, however late it arrives.
+- **Engaging is never age-checked.** Any `ENGAGED` engages, however late it arrives.
   RTPS readers already drop samples older than the last one delivered from the same
-  writer, so a late `true` can't follow a newer `false` from that writer. If one
+  writer, so a late `ENGAGED` can't follow a newer `NOT_ENGAGED` from that writer. If one
   somehow did, it would cause an extra stop, which is safe.
 - **Clearing is age-checked, by receive time:**
-  - MCB: a release needs the source's `false` with `pub_seq > clear_pub_seq`, received within
+  - MCB: a release needs the source's `NOT_ENGAGED` with `pub_seq > clear_pub_seq`, received within
     `timeout` of the moment it releases.
   - HMI: a clear attempt counts only if the e-stop task takes it from the queue within
     one `period` of receiving it. A task held up by a flash write can't act on an old one.
@@ -89,19 +90,19 @@ values. The sim takes flags to override them (`--estop-timeout`, `--no-deadman`)
 ## 4. Clear attempt
 
 Roles: each node publishes its own demand. The MCB owns the latch and publishes it
-every period: `engaged=true` with the cause in `reason` while latched, a clear-attempt message
-(`false` plus `clear_target` and `clear_pub_seq`) during a clear attempt, and a plain `false` after
+every period: `ENGAGED` with the cause in `reason` while latched, a clear-attempt message
+(`NOT_ENGAGED` plus `clear_target` and `clear_pub_seq`) during a clear attempt, and a plain `NOT_ENGAGED` after
 releasing.
 
 HMI states:
 
-- **NORMAL:** sends `false` every period.
-- **ENGAGED:** sends `true` every period, including after the switch is released.
+- **NOT_ENGAGED:** sends `NOT_ENGAGED` every period (the heartbeat).
+- **ENGAGED:** sends `ENGAGED` every period, including after the switch is released.
 
 HMI rules:
 
 - A press edge enters ENGAGED and sends at once, without waiting for the tick.
-- `engaged_pub_seq` is the `pub_seq` of the first `true` sent after the latest press.
+- `engaged_pub_seq` is the `pub_seq` of the first `ENGAGED` sent after the latest press.
   Pressing again while engaged sets a new `engaged_pub_seq`.
 - The HMI accepts a clear attempt only if all of these hold:
   - `source == kEStopClearer`
@@ -109,16 +110,16 @@ HMI rules:
   - `clear_pub_seq >= engaged_pub_seq`
   - the switch isn't held (the pin is read once, at that moment)
   - the clear attempt is fresh, by the rule in section 3
-- Then it goes to NORMAL and sends `false` at once.
+- Then it goes to NOT_ENGAGED and sends `NOT_ENGAGED` at once.
 
 MCB rules (MCB code; the bench sim does the same):
 
-- Latched while any source's newest message is `true`, or (with `deadman`) any
+- Latched while any source's newest message is `ENGAGED`, or (with `deadman`) any
   watched source has been silent longer than `timeout`.
 - To start a clear attempt: fix `clear_pub_seq` to the newest `pub_seq` received from
   each source (`last_pub_seq`), and send the clear attempt every period. Never update
   `clear_pub_seq` during the attempt.
-- Release once that source's newest message is a `false` with `pub_seq > clear_pub_seq`.
+- Release once that source's newest message is a `NOT_ENGAGED` with `pub_seq > clear_pub_seq`.
   If that hasn't happened within `clear_window`, drop the attempt and stay latched.
 - Several engaged sources: one clear-attempt message per source, taking turns each period.
 - After a silence longer than `timeout`, forget that source's `last_pub_seq`, because a node
@@ -126,21 +127,21 @@ MCB rules (MCB code; the bench sim does the same):
 
 ```
 HMI                                           MCB
-press -> true  pub_seq=40 (engaged_pub_seq=40) --> latch
-         true  pub_seq=41, 42 ------------------> latched
-                       <------------------------- clear attempt: false clear_target=hmi clear_pub_seq=42
-         true  pub_seq=43 (already in flight) --> still latched: waiting for an hmi false > 42
-accepted: 42 >= 40, switch up, fresh -> NORMAL
-         false pub_seq=44 ----------------------> 44 > 42, fresh -> RELEASED
+press -> ENGAGED  pub_seq=40 (engaged_pub_seq=40) --> latch
+         ENGAGED  pub_seq=41, 42 ------------------> latched
+                       <------------------------- clear attempt: NOT_ENGAGED clear_target=hmi clear_pub_seq=42
+         ENGAGED  pub_seq=43 (already in flight) --> still latched: waiting for an hmi NOT_ENGAGED > 42
+accepted: 42 >= 40, switch up, fresh -> NOT_ENGAGED
+         NOT_ENGAGED pub_seq=44 ----------------------> 44 > 42, fresh -> RELEASED
 ```
 
 | Race | Why it can't release a stop |
 |---|---|
-| A `true` already in flight arrives after the MCB's clear attempt | The MCB is still latched until it gets a `false` newer than `clear_pub_seq`. |
-| Pressed again while the clear attempt is in flight | `engaged_pub_seq` (43) > `clear_pub_seq` (42): the HMI refuses the attempt and keeps sending `true`, and the attempt expires. |
+| A `ENGAGED` already in flight arrives after the MCB's clear attempt | The MCB is still latched until it gets a `NOT_ENGAGED` newer than `clear_pub_seq`. |
+| Pressed again while the clear attempt is in flight | `engaged_pub_seq` (43) > `clear_pub_seq` (42): the HMI refuses the attempt and keeps sending `ENGAGED`, and the attempt expires. |
 | An old or duplicated clear attempt arrives later | Its `clear_pub_seq` is below `engaged_pub_seq`, or it fails the freshness check. |
-| Another node's heartbeat `false` | It has no `clear_target`, so it is not a clear attempt. |
-| A lost clear-attempt message or a lost `false` | Both are resent every period; the attempt only expires at `clear_window`. |
+| Another node's heartbeat `NOT_ENGAGED` | It has no `clear_target`, so it is not a clear attempt. |
+| A lost clear-attempt message or a lost `NOT_ENGAGED` | Both are resent every period; the attempt only expires at `clear_window`. |
 | HMI reboots and `pub_seq` restarts | Boot takes much longer than `timeout`: the deadman latches and the MCB forgets the old `last_pub_seq`. |
 | A link drop or crash | No messages arrive, so the deadman latches. Nothing can be released until messages flow again. |
 | The MCB crashes while latched | The HMI stays ENGAGED (it only leaves on an accepted clear attempt) and shows "E-STOP LINK LOST". |
@@ -157,7 +158,7 @@ accepted: 42 >= 40, switch up, fresh -> NORMAL
 | Receive | A raw reader callback on the RTPS task, BEST_EFFORT. A hand-written decoder walks the received bytes and creates no `std::string`. It posts `{rx_time, pub_seq, engaged, is_clearer, clear_for_hmi, clear_pub_seq}` to a static FreeRTOS queue (`xQueueCreateStatic`) and wakes the e-stop task. |
 | Outputs | One atomic snapshot: state, MCB link, and who engaged it. The UI timer reads it to show the ErrorBanner and leave the Drive and Seat screens. `rtps_comms` reads it to send DriveCommand DISABLE, zero the stick, and refuse to enable driving. |
 | Logging | Nothing is logged inside the e-stop path; it counts events and keeps the last cause. The UI task logs changes from the snapshot. |
-| Boot | Seq starts at 0. The pin is read once after the interrupt is set up: if it is active, the stop engages; otherwise the HMI starts NORMAL. |
+| Boot | Seq starts at 0. The pin is read once after the interrupt is set up: if it is active, the stop engages; otherwise the HMI starts NOT_ENGAGED. |
 | Known delay | During a flash write (saving settings, OTA) the press is still caught, but the send waits until the flash operation finishes. |
 
 Settings (`settings_spec.h`, so the rows are generated with no SquareLine change):
@@ -214,7 +215,7 @@ We don't own that repo, so its side ships as a PR proposal or pseudocode at the 
   - Its readers are BEST_EFFORT, like the HMI's e-stop writer.
 - Open question for the MIB: what starts a clear attempt? The MIB has no operator input
   today. Options: a button on the MIB, an automatic clear attempt once every source is
-  `false` and fresh, or a bench command. Until that is decided, `rtps_mcb_sim.py`
+  `NOT_ENGAGED` and fresh, or a bench command. Until that is decided, `rtps_mcb_sim.py`
   provides a "clear attempt" action.
 
 ## 9. As built: where it differs from the plan
@@ -253,7 +254,7 @@ Setup:
 | Press is caught | Real presses | Every touch. A jumper gives 1 edge; bare wires bounce (11–171 edges), which is harmless because each one re-engages. |
 | Banner | Remote-UI screenshot | "E-STOP ENGAGED / HMI E-STOP SWITCH PRESSED / Only the MIB can clear it" on Locked and Drive. |
 | Drive cutoff | Bench MIB in ENABLED, then a press | The HMI's DriveCommand DISABLE reached the MIB 4–31 ms after the latch. The screen goes Drive → Locked. |
-| Keeps sending after release | Harness | ~10 `true` per second after a 1 µs press, until it is cleared. |
+| Keeps sending after release | Harness | ~10 `ENGAGED` per second after a 1 µs press, until it is cleared. |
 | Clear attempt while held | Jumper held 22 s | Refused 20 times. Both clear attempts expired; the stop held. |
 | Clear attempt after release | Real presses | Accepted; the MIB released the stop 120–200 ms after starting the attempt. |
 | Old `clear_pub_seq` / foreign clear attempt / plain false / ROS 4-field / garbage | Harness injection | Refused, ignored, ignored, never a clear attempt, `rx_err` +1. |
