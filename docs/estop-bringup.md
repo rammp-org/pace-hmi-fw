@@ -6,8 +6,9 @@ and the protocol are in [plans/estop.md](plans/estop.md).
 - **HMI:** `pace-hmi-fw`, branch `dev-estop`
 - **MIB:** add `estop-core` `v0.2.0`
 
-Both use rammp-rtps branch `feat/estop`. None of the three is merged into `main` yet:
-we test this combination on the HMI and the MIB first, and merge the PRs once it works.
+Both use rammp-rtps branch `feat/estop`. `dev-estop` and `feat/estop` aren't merged into
+`main` yet: we test this combination on the HMI and the MIB first, and merge the PRs once it
+works.
 The HMI and estop-core already point at `feat/estop`, so there is nothing to set up for it.
 
 ## 1. Flash the HMI (Tab5, ESP-IDF 6.0.0)
