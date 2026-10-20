@@ -175,7 +175,7 @@ buffer on every send, and espp's receive transport builds a `std::vector` per pa
 
 ## 6. Commits
 
-1. **rammp-rtps `dev-estop`:** `messages/estop_message.hpp`, added to `messages.hpp`.
+1. **rammp-rtps `feat/estop`:** `messages/estop_message.hpp`, added to `messages.hpp`.
 2. **pace-hmi-fw `dev-estop`:** the submodule bump, `main/estop.{hpp,cpp}`, the
    `rtps_comms` hooks, the settings rows, the banner text in `hmi_rtps_spec.hpp`,
    and the drive cutoff.
