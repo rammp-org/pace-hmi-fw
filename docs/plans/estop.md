@@ -1,7 +1,7 @@
 # E-stop plan (branch `dev-estop`)
 
-Status: implemented on `dev-estop` (firmware, shared message, bench sim); not yet bench-tested on
-the Tab5. Section 9 lists where the build differs from this plan.
+Status: implemented on `dev-estop` (firmware, shared message, bench sim) and bench-tested on
+the Tab5 (section 10). Section 9 lists where the build differs from this plan.
 
 Scope: an e-stop switch on the HMI (GPIO2 or GPIO47, NO or NC, chosen in Settings)
 that engages a robot-wide stop over RTPS. Only the MCB can clear it. The MCB also
@@ -230,4 +230,43 @@ Verification so far:
   `test/estop_latch_test.py` (18 protocol cases, including every race in section 4)
   pass. Mutation checks show both catch the bugs they target.
 - The Python encoder is byte-identical to espp/cdr.
-- Not run yet: cppcheck (not installed here), and the bench checks in section 7.
+- Not run yet: cppcheck (not installed here).
+
+## 10. Bench results (2026-10-19, board 2, `e52381d`)
+
+Setup:
+- Tab5 board 2, Ethernet on the lab LAN (10.111.20.0/22).
+- The switch: bare wires, then a jumper, from GPIO2 to GND, set as NO.
+- The MIB: `rtps_mcb_sim.py`'s latch, driven by a bench script on the PC. No real MIB or
+  chair was on the network.
+- Logs, screenshots and the full flash backup are in `~/bench/estop/` on the bench laptop.
+- The on-target harness is on `dev_ai_estop_bench` and is never merged.
+
+| Check | How | Result |
+|---|---|---|
+| Press is caught | Real presses | Every touch. A jumper gives 1 edge; bare wires bounce (11–171 edges), which is harmless because each one re-engages. |
+| Banner | Remote-UI screenshot | "E-STOP ENGAGED / HMI E-STOP SWITCH PRESSED / Only the MIB can clear it" on Locked and Drive. |
+| Drive cutoff | Bench MIB in ENABLED, then a press | The HMI's DriveCommand DISABLE reached the MIB 4–31 ms after the latch. The screen goes Drive → Locked. |
+| Keeps sending after release | Harness | ~10 `true` per second after a 1 µs press, until it is cleared. |
+| Clear while held | Jumper held 22 s | Refused 20 times. Both clear attempts expired; the stop held. |
+| Clear after release | Real presses | Accepted; the MIB released 120–200 ms after its clear. |
+| Old ack / foreign clear / plain false / ROS 4-field / garbage | Harness injection | Refused, ignored, ignored, never a clear, `rx_err` +1. |
+| MIB latch shown, then stale | Harness injection | Remote banner up; stale after exactly the 300 ms timeout (receive time). |
+| Re-arm GPIO47; NC with nothing wired | Harness | Moves pins with no spurious press. NC with nothing wired reads as pressed (fail-safe). |
+| MIB deadman | Ethernet unplugged for ~3 s | MIB latched "hmi silent" 0.55 s *before* the W5500 even reported link down. It released after the replug, once the HMI was heard again. |
+| No heap in the e-stop task | Heap hook, RTPS down, 5 real presses | **0 allocations**: 77 edges, 5 clears, 565 sends. With RTPS up, espp's publish path allocates about 5 times per send (the known exception). |
+| Endpoint pools | Boot log | All 11 RTPS endpoints added (7 writers, 6 readers). |
+
+Found while testing:
+
+- **Fixed (`e52381d`):** `estop_start` installed the GPIO ISR service again and logged an
+  E-level line on every boot.
+- **Bench-only, not chased:** the harness's open-drain pulses register on the first pulse
+  and then read back HIGH on both pins. Real presses don't do this (the level log read
+  GPIO2 = 0 for all 22 s the jumper was in), so it is a harness artifact. Still, don't
+  trust that harness's GPIO results without a real press.
+- **UI wording:** the Locked screen still says "Hold the joystick button to drive" under
+  the e-stop banner. The hold is refused, but the prompt shouldn't offer it.
+- **Lab network:** the LAN proxy-ARPs for hosts, so an old neighbour entry can point at the
+  gateway. The board also gets a new DHCP address on every reconnect. The bench script
+  re-targets the MIB on each new IP.
