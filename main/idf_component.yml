@@ -60,7 +60,7 @@ dependencies:
   # The robot-wide e-stop (estop::Node).
   estop_core:
     git: https://github.com/Alaining/estop-core.git
-    version: v0.1.0
+    version: v0.2.0
   # estop_core fetches the RTPS spec's messages from git; this makes every user of it
   # take the rammp-rtps submodule's copy instead (a managed component would otherwise
   # win over EXTRA_COMPONENT_DIRS).

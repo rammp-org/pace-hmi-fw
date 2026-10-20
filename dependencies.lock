@@ -752,7 +752,7 @@ dependencies:
       type: service
     version: 1.0.0
   estop_core:
-    component_hash: 1b5a3aac4b000076719c7d1cd01e1ce99e47d74ad37ff4d36a473591694dc221
+    component_hash: 439ef47bd93e30cbb60730d2c1a62b903b04129249cfa8b53e9d5f7b7c72601d
     dependencies:
     - name: idf
       version: '>=5.5'
@@ -768,7 +768,7 @@ dependencies:
       git: https://github.com/Alaining/estop-core.git
       path: .
       type: git
-    version: 6f434e660074a116487828cec6e72ab09e875e27
+    version: 142ec47df77287b96370b775b470d8ab5f61f243
   idf:
     source:
       type: idf
@@ -862,6 +862,6 @@ direct_dependencies:
 - idf
 - lvgl/lvgl
 - rammp_rtps_messages
-manifest_hash: a941af0b9d4d5633fbac67b768256978536834d97865228b65e651190e5eaa6e
+manifest_hash: b2a84683b5eda08758dd4572a6bea890704e81dff8c1c54b12d1efa86f199635
 target: esp32p4
 version: 3.0.0

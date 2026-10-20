@@ -282,7 +282,7 @@ Found while testing:
 
 The e-stop now lives in [estop-core](https://github.com/Alaining/estop-core), one ESP-IDF
 component that every RAMMP firmware uses: the HMI runs `estop::Node`, the MIB
-`estop::Latch`. pace-hmi-fw takes it through the component manager at tag `v0.1.0`, and
+`estop::Latch`. pace-hmi-fw takes it through the component manager at tag `v0.2.0`, and
 overrides its `rammp_rtps_messages` with the `external/rammp-rtps` submodule
 (`override_path` in `main/idf_component.yml`), so the submodule stays the one source of
 the spec. The rules, codec and task are the ones described above, ported unchanged:

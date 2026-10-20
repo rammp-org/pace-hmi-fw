@@ -698,9 +698,9 @@ static void estop_poll() {
 
   static std::optional<estop::NodeStatus> last;
   auto shown = [](const estop::NodeStatus &e) {
-    return std::tie(e.engaged, e.latch_engaged, e.armed, e.latch_fresh, e.gpio, e.contact,
-                    e.presses, e.clear_attempts_accepted, e.clear_attempts_refused, e.rx_errors,
-                    e.tx_errors);
+    return std::tie(e.engaged, e.latch_engaged, e.armed, e.latch_fresh, e.input.gpio_num,
+                    e.input.active_level, e.presses, e.clear_attempts_accepted,
+                    e.clear_attempts_refused, e.rx_errors, e.tx_errors);
   };
   if (!last || shown(*last) != shown(s)) {
     const bool engaged = s.engaged || s.latch_engaged || !s.armed;
@@ -709,7 +709,8 @@ static void estop_poll() {
                     "presses={} clear_attempts={}/{} (accepted/refused) rx_err={} tx_err={} "
                     "pub_seq={}",
                     s.engaged, s.latch_engaged ? "ENGAGED" : "NOT_ENGAGED", s.latch_source,
-                    s.latch_reason, s.armed, s.gpio, s.contact == estop::Contact::NO ? "NO" : "NC",
+                    s.latch_reason, s.armed, static_cast<int>(s.input.gpio_num),
+                    s.input.active_level == estop::ActiveLevel::LOW ? "NO" : "NC",
                     s.latch_fresh ? "fresh" : "silent", s.presses, s.clear_attempts_accepted,
                     s.clear_attempts_refused, s.rx_errors, s.tx_errors, s.pub_seq);
     if (engaged) {
@@ -2323,10 +2324,10 @@ static constexpr const char *kOnOffNames[] = {"Off", "On"};
 static constexpr const char *kMirrorNames[] = {"Normal", "Mirror"};
 static constexpr const char *kSwapNames[] = {"Normal", "Swap"};
 static constexpr const char *kEStopPinNames[] = {"GPIO2", "GPIO47"}; // EStopPin order
-static constexpr const char *kEStopTypeNames[] = {"NO", "NC"};       // estop::Contact order
+static constexpr const char *kEStopTypeNames[] = {"NO", "NC"};       // EStopType order
 static_assert(static_cast<int>(EStopPin::GPIO47) == SETTINGS_ESTOP_PIN_MAX &&
-                  static_cast<int>(estop::Contact::NC) == SETTINGS_ESTOP_TYPE_MAX,
-              "the E-stop rows' range must match EStopPin and estop::Contact");
+                  static_cast<int>(EStopType::NC) == SETTINGS_ESTOP_TYPE_MAX,
+              "the E-stop rows' range must match EStopPin and EStopType");
 static const char *const *const kSettingParamNames[] = {
     nullptr,         // SETTINGS_PARAM_BRIGHTNESS
     kThemeNames,     // SETTINGS_PARAM_THEME
@@ -2440,8 +2441,9 @@ static void setting_store_observer(lv_observer_t *observer, lv_subject_t *subjec
     break;
   case SETTINGS_PARAM_ESTOP_PIN:
   case SETTINGS_PARAM_ESTOP_TYPE:
-    hmi_estop.set_input(estop_gpio(static_cast<EStopPin>(settings_get(SETTINGS_PARAM_ESTOP_PIN))),
-                        static_cast<estop::Contact>(settings_get(SETTINGS_PARAM_ESTOP_TYPE)));
+    hmi_estop.set_input(
+        estop_input(static_cast<EStopPin>(settings_get(SETTINGS_PARAM_ESTOP_PIN)),
+                    static_cast<EStopType>(settings_get(SETTINGS_PARAM_ESTOP_TYPE))));
     break;
   default:
     break; // MENU_SLIDE: read where it is used, nothing to apply
@@ -5294,8 +5296,8 @@ extern "C" void app_main(void) {
   // service is espp's to install, and before RTPS, so it is watching before anything
   // can drive. A failure leaves hmi_estop.active() true, which refuses driving.
   logger.info("Starting the e-stop...");
-  hmi_estop.set_input(estop_gpio(static_cast<EStopPin>(settings_get(SETTINGS_PARAM_ESTOP_PIN))),
-                      static_cast<estop::Contact>(settings_get(SETTINGS_PARAM_ESTOP_TYPE)));
+  hmi_estop.set_input(estop_input(static_cast<EStopPin>(settings_get(SETTINGS_PARAM_ESTOP_PIN)),
+                                  static_cast<EStopType>(settings_get(SETTINGS_PARAM_ESTOP_TYPE))));
   if (!hmi_estop.start()) {
     logger.error("E-stop failed to start: driving stays refused");
   }
