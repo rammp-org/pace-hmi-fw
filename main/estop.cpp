@@ -51,8 +51,8 @@ constexpr UBaseType_t kRxQueueDepth = 8;
 constexpr TickType_t kSettleTicks = pdMS_TO_TICKS(2);
 
 enum class Mode : uint8_t {
-  NORMAL,  // sending false: the heartbeat
-  ENGAGED, // sending true until the MIB's clear is accepted
+  NORMAL,  // sending engaged=false: the heartbeat
+  ENGAGED, // sending engaged=true until a clear attempt from the MIB is accepted
 };
 
 // A received EStop, as the task needs it, with when it arrived (steady clock).
@@ -82,10 +82,10 @@ QueueHandle_t view_queue = nullptr;
 
 struct Island {
   Mode mode = Mode::NORMAL;
-  uint32_t seq = 0;
-  uint32_t press_seq = 0;    // seq of the first true sent after the latest press
-  bool press_unsent = false; // a press whose first true has not gone out yet
-  uint32_t presses_seen = 0; // press_edges, as last handled
+  uint32_t pub_seq = 0;         // this HMI's message number: +1 per e-stop message sent
+  uint32_t engaged_pub_seq = 0; // pub_seq of the first engaged=true after the latest press
+  bool press_unsent = false;    // a press whose first engaged=true has not gone out yet
+  uint32_t presses_seen = 0;    // press_edges, as last handled
   int64_t next_send_us = 0;
   int64_t mib_last_us = 0; // last EStop from the MIB; 0 = never
   bool mib_engaged = false;
@@ -167,7 +167,7 @@ bool arm(Island &s, uint8_t config) {
 
 void press(Island &s) {
   s.mode = Mode::ENGAGED;
-  s.press_unsent = true; // a new press_seq, so a clear already in flight is refused
+  s.press_unsent = true; // a new engaged_pub_seq, so a clear attempt already in flight is refused
 }
 
 rammp::Time stamp_now() {
@@ -182,17 +182,17 @@ rammp::Time stamp_now() {
 
 void send(Island &s, int64_t now) {
   const bool engaged = s.mode == Mode::ENGAGED;
-  s.seq++;
+  s.pub_seq++;
   if (engaged && s.press_unsent) {
-    s.press_seq = s.seq;
+    s.engaged_pub_seq = s.pub_seq;
     s.press_unsent = false;
   }
   tx_msg.header.stamp = stamp_now();
   tx_msg.engaged = engaged;
   tx_msg.reason = engaged ? kReasons[static_cast<size_t>(s.view.pin)] : "";
-  tx_msg.seq = s.seq;
+  tx_msg.pub_seq = s.pub_seq;
   s.next_send_us = now + kPeriodUs;
-  s.view.seq = s.seq;
+  s.view.pub_seq = s.pub_seq;
   const auto size =
       cdr::serialize_into<cdr::xcdr1>(tx_msg, std::as_writable_bytes(std::span(tx_buf)));
   if (!size) {
@@ -206,22 +206,23 @@ void send(Island &s, int64_t now) {
   }
 }
 
-// A clear for this HMI, from the MIB. Accepted only if it covers the latest press,
-// is fresh, and the switch is not still held -- otherwise the true keeps going out
-// and the MIB has to clear again.
-void on_clear(Island &s, const Rx &rx, int64_t now) {
+// A clear attempt for this HMI, from the MIB. Accepted only if it covers the latest
+// press (clear_pub_seq >= engaged_pub_seq), is fresh, and the switch is not still
+// held -- otherwise engaged=true keeps going out and the MIB has to try again.
+void on_clear_attempt(Island &s, const Rx &rx, int64_t now) {
   if (s.mode != Mode::ENGAGED) {
-    return; // the MIB resends its clear until it sees our false: nothing left to do
+    return; // the MIB resends its attempt until it sees our engaged=false: nothing to do
   }
   const bool fresh = now - rx.rx_us <= kPeriodUs;
-  const bool covers = !s.press_unsent && rammp::estop_seq_at_least(rx.msg.ack_seq, s.press_seq);
+  const bool covers =
+      !s.press_unsent && rammp::estop_seq_at_least(rx.msg.clear_pub_seq, s.engaged_pub_seq);
   if (!fresh || !covers || switch_pressed(s)) {
-    s.view.clears_refused++;
+    s.view.clear_attempts_refused++;
     return;
   }
   s.mode = Mode::NORMAL;
-  s.view.clears++;
-  send(s, now); // the false at once: it is what lets the MIB release
+  s.view.clear_attempts_accepted++;
+  send(s, now); // engaged=false at once: it is what lets the MIB release the stop
 }
 
 void on_rx(Island &s, const Rx &rx, int64_t now) {
@@ -233,8 +234,8 @@ void on_rx(Island &s, const Rx &rx, int64_t now) {
   if (rx.msg.engaged) {
     estop_codec::copy_text(s.view.remote_source, rx.msg.source);
     estop_codec::copy_text(s.view.remote_reason, rx.msg.reason);
-  } else if (rx.msg.ack_for_self) {
-    on_clear(s, rx, now);
+  } else if (rx.msg.clear_for_self) {
+    on_clear_attempt(s, rx, now);
   }
 }
 
@@ -307,8 +308,8 @@ bool estop_start(EStopPin pin, EStopContact contact) {
   tx_msg.header.frame_id = "";
   tx_msg.source = rammp::kEStopSelf;
   tx_msg.reason = kReasons[1];
-  tx_msg.ack_source = "";
-  tx_msg.ack_seq = 0;
+  tx_msg.clear_target = "";
+  tx_msg.clear_pub_seq = 0;
   island.view.pin = pin;
   island.view.contact = contact;
   (void)xQueueOverwrite(view_queue, &island.view);

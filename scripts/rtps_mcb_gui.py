@@ -286,12 +286,12 @@ class McbPanel:
 
     def _build_estop(self, parent: tk.Widget) -> None:
         """The MIB's e-stop latch (estop_latch.py): it starts latched, as the MIB does,
-        so nothing drives until Clear -- which only releases once the HMI takes it."""
+        so nothing drives until a clear attempt succeeds, once the HMI accepts it."""
         frame = ttk.LabelFrame(parent, text="E-stop (rammp/estop, the MIB's latch)", padding=8)
         frame.pack(fill="x", padx=8, pady=(8, 4))
         self.estop_label = ttk.Label(frame, text="not connected")
         self.estop_label.grid(row=0, column=0, columnspan=5, sticky="w")
-        ttk.Button(frame, text="Clear", command=self._estop_clear).grid(
+        ttk.Button(frame, text="Clear attempt", command=self._estop_clear).grid(
             row=1, column=0, sticky="w", pady=(6, 0))
         ttk.Button(frame, text="Engage", command=self._estop_engage).grid(
             row=1, column=1, sticky="w", padx=(6, 0), pady=(6, 0))
@@ -317,7 +317,7 @@ class McbPanel:
         if self.harness is None:
             self._append_log("[gui] not connected")
         elif not self.harness.estop_clear():
-            self._append_log("[estop] nothing to clear, or the HMI was never heard")
+            self._append_log("[estop] no clear attempt: not latched, or the HMI was never heard")
 
     def _estop_engage(self) -> None:
         if self.harness is None:

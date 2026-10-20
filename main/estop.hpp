@@ -7,7 +7,7 @@
  *
  * A press engages the robot-wide stop at once. From then on this HMI sends
  * engaged=true every kEStopPolicy.period, released switch or not, until it accepts
- * a clear from the MIB (rammp::kEStopClearer); otherwise it sends engaged=false as
+ * a clear attempt from the MIB (rammp::kEStopClearer); otherwise it sends engaged=false as
  * the heartbeat the MIB's deadman watches.
  *
  * One task owns all of it. The switch reaches it through an edge interrupt (no
@@ -34,12 +34,12 @@ struct EStopView {
   bool armed = false;     ///< the interrupt is set up on the configured pin
   EStopPin pin = EStopPin::GPIO2;
   EStopContact contact = EStopContact::NO;
-  uint32_t presses = 0;        ///< press edges counted since boot
-  uint32_t clears = 0;         ///< clears accepted
-  uint32_t clears_refused = 0; ///< clears turned down (stale, not ours, switch held, old ack)
+  uint32_t presses = 0;                 ///< press edges counted since boot
+  uint32_t clear_attempts_accepted = 0; ///< MIB clear attempts this HMI accepted
+  uint32_t clear_attempts_refused = 0;  ///< turned down: stale, switch held, or a newer press
   uint32_t rx_errors = 0;      ///< received messages that did not decode, or did not fit the queue
   uint32_t tx_errors = 0;      ///< sends refused once the RTPS endpoint existed
-  uint32_t seq = 0;            ///< the last seq sent
+  uint32_t pub_seq = 0;        ///< the last pub_seq sent
   char remote_source[16] = {}; ///< the MIB's source field, when remote
   char remote_reason[48] = {}; ///< and its reason
 };

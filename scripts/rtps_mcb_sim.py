@@ -259,9 +259,9 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
             time.sleep(self.estop.period)
 
     def estop_clear(self) -> bool:
-        """The operator's clear: starts the handshake (see estop_latch.py)."""
+        """The operator's clear attempt (see estop_latch.py)."""
         with self.estop_lock:
-            return self.estop.request_clear(time.monotonic())
+            return self.estop.start_clear_attempt(time.monotonic())
 
     def estop_engage(self, reason: str = "bench") -> None:
         with self.estop_lock:
@@ -616,7 +616,7 @@ HELP_TEXT = """commands:
   et <text>       error banner body ('et' alone clears it)
   ef <text>       error banner footer ('ef' alone clears it)
   st <text>       override the STATE label text ('st' alone clears it)
-  ec              e-stop: clear (the handshake; releases once the HMI takes it)
+  ec              e-stop: start a clear attempt (releases once the HMI accepts it)
   ee              e-stop: engage from the MIB (the HMI shows the MIB's reason)
   ed              e-stop: toggle the deadman
   eq              e-stop: toggle sending (quiet = the HMI's E-STOP LINK LOST case)
@@ -655,7 +655,7 @@ def run_interactive(harness: SystemStatePublisher) -> None:
             harness.system_state = spec.MIB_SYSTEM_STATE_IDLE
         elif command in ("ec", "ee", "ed", "eq", "es"):
             if command == "ec" and not harness.estop_clear():
-                print("  nothing to clear, or a watched source never heard (see the log)")
+                print("  no clear attempt: not latched, or a watched source never heard (see the log)")
             elif command == "ee":
                 harness.estop_engage()
             elif command == "ed":

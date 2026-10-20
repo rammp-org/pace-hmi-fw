@@ -23,14 +23,14 @@ P = spec.ESTOP_PERIOD_MS / 1000
 
 class HmiModel:
     """main/estop.cpp's rules: send every period; a press engages and sets a new
-    press_seq at its first send; a clear is taken only if it is fresh, from the
-    clearer, addressed to us, covers press_seq, and the switch is up."""
+    engaged_pub_seq at its first send; a clear attempt is accepted only if it is fresh,
+    from the clearer, addressed to us, covers engaged_pub_seq, and the switch is up."""
 
-    def __init__(self, name: str = spec.ESTOP_SELF, seq: int = 0) -> None:
+    def __init__(self, name: str = spec.ESTOP_SELF, pub_seq: int = 0) -> None:
         self.name = name
-        self.seq = seq
+        self.pub_seq = pub_seq
         self.engaged = False
-        self.press_seq = 0
+        self.engaged_pub_seq = 0
         self.press_unsent = False
         self.held = False
 
@@ -39,20 +39,20 @@ class HmiModel:
         self.press_unsent = True
 
     def send(self) -> bytes:
-        self.seq = (self.seq + 1) & 0xFFFFFFFF
+        self.pub_seq = (self.pub_seq + 1) & 0xFFFFFFFF
         if self.engaged and self.press_unsent:
-            self.press_seq = self.seq
+            self.engaged_pub_seq = self.pub_seq
             self.press_unsent = False
         return spec.pack_estop(self.engaged, self.name, "switch gpio2" if self.engaged else "",
-                               self.seq)
+                               self.pub_seq)
 
     def receive(self, payload: bytes, age: float = 0.0) -> bool:
         """True if this took a clear."""
         m = spec.unpack_estop(payload)
-        if (m is None or m.source != spec.ESTOP_CLEARER or not m.is_clear
-                or m.ack_source != self.name or not self.engaged):
+        if (m is None or m.source != spec.ESTOP_CLEARER or not m.is_clear_attempt
+                or m.clear_target != self.name or not self.engaged):
             return False
-        covers = not self.press_unsent and not spec.estop_seq_newer(self.press_seq, m.ack_seq)
+        covers = not self.press_unsent and not spec.estop_seq_newer(self.engaged_pub_seq, m.clear_pub_seq)
         if age > P or not covers or self.held:
             return False
         self.engaged = False
@@ -91,7 +91,7 @@ class Bench:
             self.step(**kw)
 
     def clear(self) -> None:
-        assert self.latch.request_clear(self.now)
+        assert self.latch.start_clear_attempt(self.now)
 
     def boot(self) -> None:
         """Heard from, cleared, released: the starting point of most tests."""
@@ -105,7 +105,7 @@ class EStopProtocolTest(unittest.TestCase):
 
     def test_boot_is_latched_until_cleared(self):
         b = Bench()
-        self.assertFalse(b.latch.request_clear(b.now))  # never heard from the HMI
+        self.assertFalse(b.latch.start_clear_attempt(b.now))  # never heard from the HMI
         b.run(5)
         self.assertTrue(b.latch.latched)  # nothing releases by itself
         b.clear()
@@ -162,10 +162,10 @@ class EStopProtocolTest(unittest.TestCase):
         b.hmi.press()                       # pressed again before the clear arrives
         deliver(b.latch, b.hmi.send(), b.now)
         self.assertFalse(b.hmi.receive(clear))
-        # The MIB keeps clearing with the old ack; the HMI keeps refusing; the window runs out.
+        # The MIB keeps resending its attempt (old clear_pub_seq); the HMI keeps refusing; it expires.
         b.run(int(b.latch.clear_window / P) + 3)
         self.assertTrue(b.hmi.engaged and b.latch.latched)
-        self.assertIn("clear dropped: not taken up within the clear window", b.latch.events)
+        self.assertIn("clear attempt expired: not completed within the clear window", b.latch.events)
         b.clear()                           # a fresh decision covers the new press
         b.run(3)
         self.assertFalse(b.latch.latched)
@@ -181,7 +181,7 @@ class EStopProtocolTest(unittest.TestCase):
         self.assertFalse(b.latch.latched)
         b.hmi.press()
         b.run(2)
-        self.assertFalse(b.hmi.receive(old_clear))   # ack below the new press_seq
+        self.assertFalse(b.hmi.receive(old_clear))   # clear_pub_seq below the new engaged_pub_seq
         self.assertFalse(b.hmi.receive(old_clear, age=0.0))
         self.assertTrue(b.hmi.engaged)
 
@@ -189,7 +189,7 @@ class EStopProtocolTest(unittest.TestCase):
         hmi = HmiModel()
         hmi.press()
         hmi.send()
-        clear = spec.pack_estop(False, spec.ESTOP_CLEARER, "clear", 9, spec.ESTOP_SELF, hmi.seq)
+        clear = spec.pack_estop(False, spec.ESTOP_CLEARER, "clear", 9, spec.ESTOP_SELF, hmi.pub_seq)
         self.assertFalse(hmi.receive(clear, age=2 * P))
         self.assertTrue(hmi.receive(clear, age=0.0))
 
@@ -198,7 +198,7 @@ class EStopProtocolTest(unittest.TestCase):
         hmi.press()
         hmi.send()
         hmi.held = True
-        clear = spec.pack_estop(False, spec.ESTOP_CLEARER, "clear", 9, spec.ESTOP_SELF, hmi.seq)
+        clear = spec.pack_estop(False, spec.ESTOP_CLEARER, "clear", 9, spec.ESTOP_SELF, hmi.pub_seq)
         self.assertFalse(hmi.receive(clear))
 
     def test_another_nodes_heartbeat_is_not_a_clear(self):
@@ -217,7 +217,7 @@ class EStopProtocolTest(unittest.TestCase):
         hmi = HmiModel()
         hmi.press()
         hmi.send()
-        rogue = spec.pack_estop(False, "rogue", "clear", 1, spec.ESTOP_SELF, hmi.seq)
+        rogue = spec.pack_estop(False, "rogue", "clear", 1, spec.ESTOP_SELF, hmi.pub_seq)
         self.assertFalse(hmi.receive(rogue))
 
     def test_lost_clears_and_falses_are_resent(self):
@@ -238,20 +238,20 @@ class EStopProtocolTest(unittest.TestCase):
         b.run(int(b.latch.timeout / P) + 2, hmi_to_mib=False)
         self.assertTrue(b.latch.latched)
         self.assertIn("silent", b.latch.cause)
-        b.latch.request_clear(b.now)  # may start...
+        b.latch.start_clear_attempt(b.now)  # may start...
         b.run(int(b.latch.clear_window / P) + 2, hmi_to_mib=False)
         self.assertTrue(b.latch.latched)  # ...but cannot finish while silent
 
     def test_hmi_reboot_restarts_seq_and_still_clears(self):
         b = Bench()
-        b.hmi.seq = 5000
+        b.hmi.pub_seq = 5000
         b.boot()
         b.now += 3.0                 # rebooting: silence far beyond the timeout
         b.latch.tick(b.now)
         self.assertTrue(b.latch.latched)
         b.hmi = HmiModel()           # seq from 0 again
         b.run(3)
-        self.assertEqual(b.latch.sources[spec.ESTOP_SELF].seq, b.hmi.seq)  # forgot 5000
+        self.assertEqual(b.latch.sources[spec.ESTOP_SELF].last_pub_seq, b.hmi.pub_seq)  # forgot 5000
         b.clear()
         b.run(3)
         self.assertFalse(b.latch.latched)
@@ -271,14 +271,14 @@ class EStopProtocolTest(unittest.TestCase):
         ros_true = spec.encode(spec.MSG_ESTOP_ROS, 0, 0, "", 1, "ros_node", "panic")
         deliver(b.latch, ros_true, b.now)
         self.assertTrue(b.latch.latched)
-        self.assertEqual(spec.unpack_estop(ros_true).seq, 0)
+        self.assertEqual(spec.unpack_estop(ros_true).pub_seq, 0)
         ros_false = spec.encode(spec.MSG_ESTOP_ROS, 0, 0, "", 0, spec.ESTOP_CLEARER, "x")
-        self.assertFalse(spec.unpack_estop(ros_false).is_clear)
+        self.assertFalse(spec.unpack_estop(ros_false).is_clear_attempt)
 
     def test_release_needs_a_false_sent_after_the_decision(self):
         # The HMI was never engaged (the MIB latched on its own), so its newest word is
-        # already false -- but at ack_seq, from before the decision. That must not
-        # release: only a false newer than ack_seq proves the HMI is past the clear.
+        # already engaged=false -- but at clear_pub_seq, from before the attempt. That must
+        # not release: only an engaged=false newer than clear_pub_seq proves the HMI answered.
         b = Bench()
         b.boot()
         b.latch.engage("bench")
@@ -306,7 +306,7 @@ class EStopProtocolTest(unittest.TestCase):
 
     def test_seq_wraps(self):
         b = Bench()
-        b.hmi.seq = 0xFFFFFFFF - 3
+        b.hmi.pub_seq = 0xFFFFFFFF - 3
         b.boot()
         b.hmi.press()
         b.run(4)                     # crosses the wrap while engaged

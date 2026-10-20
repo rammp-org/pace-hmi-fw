@@ -263,13 +263,13 @@ MSG_SEAT_COMMAND = [("axis", "B"), ("target", "f")]
 MSG_DIAGNOSTICS = [("seq", "B"), ("items", ("seq", [("values", ("seq", "i"))]))]
 MSG_UINT32 = [("data", "I")]
 # rammp::EStop: the ROS layout (std_msgs/Header, engaged, source, reason), then the
-# appended seq, ack_source, ack_seq. Header is written inline: stamp.sec, stamp.nanosec,
+# appended pub_seq, clear_target, clear_pub_seq. Header is written inline: stamp.sec, stamp.nanosec,
 # frame_id.
 MSG_ESTOP_ROS = [
     ("sec", "i"), ("nanosec", "I"), ("frame_id", "str"),
     ("engaged", "B"), ("source", "str"), ("reason", "str"),
 ]
-MSG_ESTOP = MSG_ESTOP_ROS + [("seq", "I"), ("ack_source", "str"), ("ack_seq", "I")]
+MSG_ESTOP = MSG_ESTOP_ROS + [("pub_seq", "I"), ("clear_target", "str"), ("clear_pub_seq", "I")]
 MSG_SELFTEST_REPORT = [
     ("run_id", "B"), ("kind", "B"), ("index", "B"), ("count", "B"), ("result", "B"),
     ("value", "i"), ("lo", "i"), ("hi", "i"), ("name", "str"), ("unit", "str"), ("detail", "str"),
@@ -416,36 +416,37 @@ def unpack_diagnostics(payload: bytes) -> tuple[int, list[list[int]]] | None:
 
 
 class EStop(NamedTuple):
-    """One rammp::EStop. seq/ack_* read 0/"" from a sender of the 4-field ROS layout."""
+    """One rammp::EStop. pub_seq/clear_* read 0/"" from a sender of the 4-field ROS layout."""
     engaged: bool
     source: str
     reason: str
-    seq: int
-    ack_source: str = ""
-    ack_seq: int = 0
+    pub_seq: int
+    clear_target: str = ""
+    clear_pub_seq: int = 0
     sec: int = 0
     nanosec: int = 0
 
     @property
-    def is_clear(self) -> bool:
-        """A clear: engaged false and addressed to a source. A plain false is a heartbeat."""
-        return not self.engaged and self.ack_source != ""
+    def is_clear_attempt(self) -> bool:
+        """A clear attempt: engaged=false and addressed to a source. A plain false is a
+        heartbeat."""
+        return not self.engaged and self.clear_target != ""
 
 
-def pack_estop(engaged: bool, source: str, reason: str, seq: int, ack_source: str = "",
-               ack_seq: int = 0, stamp: float | None = None) -> bytes:
+def pack_estop(engaged: bool, source: str, reason: str, pub_seq: int, clear_target: str = "",
+               clear_pub_seq: int = 0, stamp: float | None = None) -> bytes:
     """`stamp` is Unix seconds; None sends the all-zero "unstamped" header."""
     sec, nanosec = (0, 0) if stamp is None else (int(stamp), int((stamp % 1) * 1e9))
     return encode(MSG_ESTOP, sec, nanosec, "", 1 if engaged else 0, source, reason,
-                  seq & 0xFFFFFFFF, ack_source, ack_seq & 0xFFFFFFFF)
+                  pub_seq & 0xFFFFFFFF, clear_target, clear_pub_seq & 0xFFFFFFFF)
 
 
 def unpack_estop(payload: bytes) -> EStop | None:
-    """The full layout, or failing that the 4-field ROS one (which can never be a clear)."""
+    """The full layout, or failing that the 4-field ROS one (never a clear attempt)."""
     full = decode(MSG_ESTOP, payload)
     if full is not None:
-        sec, nanosec, _frame, engaged, source, reason, seq, ack_source, ack_seq = full
-        return EStop(engaged != 0, source, reason, seq, ack_source, ack_seq, sec, nanosec)
+        sec, nanosec, _frame, engaged, source, reason, pub_seq, clear_target, clear_pub_seq = full
+        return EStop(engaged != 0, source, reason, pub_seq, clear_target, clear_pub_seq, sec, nanosec)
     ros = decode(MSG_ESTOP_ROS, payload)
     if ros is None:
         return None
@@ -454,7 +455,7 @@ def unpack_estop(payload: bytes) -> EStop | None:
 
 
 def estop_seq_newer(a: int, b: int) -> bool:
-    """rammp::estop_seq_newer: wrap-safe a > b on 32-bit sequence numbers."""
+    """rammp::estop_seq_newer: wrap-safe a > b on 32-bit pub_seq numbers."""
     return a != b and ((a - b) & 0xFFFFFFFF) < 0x80000000
 
 

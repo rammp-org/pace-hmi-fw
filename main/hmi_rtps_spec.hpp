@@ -237,7 +237,7 @@ inline constexpr char kHmiMcbNoTextFmt[] = "systemState=%u (%s), error_message e
 
 /* ==== E-stop (messages/estop_message.hpp; docs/plans/estop.md) ========== */
 
-/* This HMI's EStop.source, and what the MIB names in ack_source to clear it. Short
+/* This HMI's EStop.source, and what the MIB names in clear_target to end its stop. Short
    enough for std::string's in-place buffer (15 chars in libstdc++), so filling the
    message never allocates. */
 inline constexpr char kEStopSelf[] = "hmi";

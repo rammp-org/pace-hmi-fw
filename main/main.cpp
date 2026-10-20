@@ -697,18 +697,18 @@ static void estop_poll() {
 
   static std::optional<EStopView> last;
   auto shown = [](const EStopView &e) {
-    return std::tie(e.local, e.remote, e.armed, e.mib_fresh, e.pin, e.contact, e.presses, e.clears,
-                    e.clears_refused, e.rx_errors, e.tx_errors);
+    return std::tie(e.local, e.remote, e.armed, e.mib_fresh, e.pin, e.contact, e.presses,
+                    e.clear_attempts_accepted, e.clear_attempts_refused, e.rx_errors, e.tx_errors);
   };
   if (!last || shown(*last) != shown(v)) {
     const bool engaged = v.local || v.remote || !v.armed;
-    const std::string line = fmt::format(
-        "local={} remote={} ('{}: {}') armed={} pin=GPIO{} {} mib={} presses={} clears={} "
-        "refused={} rx_err={} tx_err={} seq={}",
-        v.local, v.remote, v.remote_source, v.remote_reason, v.armed,
-        v.pin == EStopPin::GPIO2 ? 2 : 47, v.contact == EStopContact::NO ? "NO" : "NC",
-        v.mib_fresh ? "fresh" : "silent", v.presses, v.clears, v.clears_refused, v.rx_errors,
-        v.tx_errors, v.seq);
+    const std::string line =
+        fmt::format("local={} remote={} ('{}: {}') armed={} pin=GPIO{} {} mib={} presses={} "
+                    "clear_attempts={}/{} (accepted/refused) rx_err={} tx_err={} pub_seq={}",
+                    v.local, v.remote, v.remote_source, v.remote_reason, v.armed,
+                    v.pin == EStopPin::GPIO2 ? 2 : 47, v.contact == EStopContact::NO ? "NO" : "NC",
+                    v.mib_fresh ? "fresh" : "silent", v.presses, v.clear_attempts_accepted,
+                    v.clear_attempts_refused, v.rx_errors, v.tx_errors, v.pub_seq);
     if (engaged) {
       estop_logger.warn("{}", line);
     } else {

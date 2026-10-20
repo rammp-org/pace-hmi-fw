@@ -8,8 +8,8 @@
  *
  * Accepts XCDR1 little-endian (encapsulation 0x00 0x01), which every RAMMP node
  * sends, and the 4-field ROS layout as well as the full one: the appended fields
- * read as seq 0, no ack, so such a message is a heartbeat or an engage, never a
- * clear. Anything else is refused.
+ * read as pub_seq 0, no clear_target, so such a message is a heartbeat or an engage,
+ * never a clear attempt. Anything else is refused.
  */
 
 #include <cstddef>
@@ -30,13 +30,13 @@ template <std::size_t N> constexpr void copy_text(char (&out)[N], std::string_vi
 
 /// What the HMI needs from one EStop: plain values, so it fits a queue.
 struct Decoded {
-  uint32_t seq = 0;
-  uint32_t ack_seq = 0;
+  uint32_t pub_seq = 0;
+  uint32_t clear_pub_seq = 0;
   bool engaged = false;
-  bool from_self = false;    ///< source is this HMI: our own sample, ignored
-  bool from_clearer = false; ///< source is rammp::kEStopClearer
-  bool ack_for_self = false; ///< ack_source is this HMI: a clear addressed to us
-  char source[16] = {};      ///< truncated, for the banner and the log
+  bool from_self = false;      ///< source is this HMI: our own sample, ignored
+  bool from_clearer = false;   ///< source is rammp::kEStopClearer
+  bool clear_for_self = false; ///< clear_target is this HMI: a clear attempt for us
+  char source[16] = {};        ///< truncated, for the banner and the log
   char reason[48] = {};
 };
 
@@ -122,21 +122,21 @@ inline bool decode(std::span<const uint8_t> payload, std::string_view self,
   out.from_clearer = source == clearer;
   copy_text(out.source, source);
   copy_text(out.reason, reason);
-  // The appended fields. Absent = the 4-field ROS layout: seq 0, no ack.
+  // The appended fields. Absent = the 4-field ROS layout: pub_seq 0, no clear_target.
   if (!r.has(4)) {
     return true;
   }
-  if (!r.u32(out.seq)) {
+  if (!r.u32(out.pub_seq)) {
     return false;
   }
   if (!r.has(4)) {
     return true;
   }
-  std::string_view ack_source;
-  if (!r.string(ack_source) || !r.u32(out.ack_seq)) {
+  std::string_view clear_target;
+  if (!r.string(clear_target) || !r.u32(out.clear_pub_seq)) {
     return false;
   }
-  out.ack_for_self = !ack_source.empty() && ack_source == self;
+  out.clear_for_self = !clear_target.empty() && clear_target == self;
   return true;
 }
 

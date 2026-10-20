@@ -59,15 +59,15 @@ bool decode(const std::vector<uint8_t> &bytes, estop_codec::Decoded &out) {
   return estop_codec::decode(bytes, "hmi", rammp::kEStopClearer, out);
 }
 
-rammp::EStop full(bool engaged, std::string source, std::string reason, uint32_t seq,
-                  std::string ack_source, uint32_t ack_seq) {
+rammp::EStop full(bool engaged, std::string source, std::string reason, uint32_t pub_seq,
+                  std::string clear_target, uint32_t clear_pub_seq) {
   return rammp::EStop{.header = {.stamp = {1'760'000'000, 123}, .frame_id = ""},
                       .engaged = engaged,
                       .source = std::move(source),
                       .reason = std::move(reason),
-                      .seq = seq,
-                      .ack_source = std::move(ack_source),
-                      .ack_seq = ack_seq};
+                      .pub_seq = pub_seq,
+                      .clear_target = std::move(clear_target),
+                      .clear_pub_seq = clear_pub_seq};
 }
 
 void test_round_trip() {
@@ -78,7 +78,7 @@ void test_round_trip() {
       const std::string why(why_len, 'r');
       estop_codec::Decoded d;
       CHECK(decode(encode(full(true, src, why, 0xDEADBEEF, "", 0)), d));
-      CHECK(d.engaged && d.seq == 0xDEADBEEF && !d.ack_for_self && d.ack_seq == 0);
+      CHECK(d.engaged && d.pub_seq == 0xDEADBEEF && !d.clear_for_self && d.clear_pub_seq == 0);
       CHECK(std::string(d.source) == src && std::string(d.reason) == why);
     }
   }
@@ -87,16 +87,16 @@ void test_round_trip() {
 void test_clear() {
   estop_codec::Decoded d;
   CHECK(decode(encode(full(false, "mib", "operator clear", 7, "hmi", 42)), d));
-  CHECK(!d.engaged && d.from_clearer && !d.from_self && d.ack_for_self);
-  CHECK(d.seq == 7 && d.ack_seq == 42);
+  CHECK(!d.engaged && d.from_clearer && !d.from_self && d.clear_for_self);
+  CHECK(d.pub_seq == 7 && d.clear_pub_seq == 42);
 
-  // A clear for someone else is not ours.
+  // A clear attempt for someone else is not ours.
   CHECK(decode(encode(full(false, "mib", "", 8, "other", 42)), d));
-  CHECK(d.from_clearer && !d.ack_for_self);
+  CHECK(d.from_clearer && !d.clear_for_self);
 
-  // A clear from anyone but the MIB is decoded, and flagged as not the clearer.
+  // A clear attempt from anyone but the MIB is decoded, and flagged as not the clearer.
   CHECK(decode(encode(full(false, "rogue", "", 9, "hmi", 42)), d));
-  CHECK(!d.from_clearer && d.ack_for_self);
+  CHECK(!d.from_clearer && d.clear_for_self);
 
   // Our own sample.
   CHECK(decode(encode(full(true, "hmi", "switch gpio2", 3, "", 0)), d));
@@ -104,8 +104,8 @@ void test_clear() {
 }
 
 void test_ros_layout() {
-  // The 4-field layout reads as seq 0 with no ack: a heartbeat or an engage, never a
-  // clear. Lengths vary so the message ends with and without trailing padding.
+  // The 4-field layout reads as pub_seq 0 with no clear_target: a heartbeat or an engage, never a
+  // clear attempt. Lengths vary so the message ends with and without trailing padding.
   for (size_t why_len = 0; why_len < 8; why_len++) {
     const RosEStop ros{.header = {.stamp = {0, 0}, .frame_id = "base"},
                        .engaged = why_len % 2 == 0,
@@ -114,12 +114,12 @@ void test_ros_layout() {
     auto bytes = encode(ros);
     estop_codec::Decoded d;
     CHECK(decode(bytes, d));
-    CHECK(d.engaged == ros.engaged && d.seq == 0 && !d.ack_for_self && d.from_clearer);
+    CHECK(d.engaged == ros.engaged && d.pub_seq == 0 && !d.clear_for_self && d.from_clearer);
     // And with up to 3 padding bytes after it, as an RTPS writer may add.
     for (int pad = 1; pad <= 3; pad++) {
       bytes.push_back(0);
       CHECK(decode(bytes, d));
-      CHECK(d.seq == 0 && !d.ack_for_self);
+      CHECK(d.pub_seq == 0 && !d.clear_for_self);
     }
   }
 }
@@ -137,12 +137,12 @@ void test_rejects() {
   CHECK(!decode({}, d));
 
   // Every truncation: refused, or (cut inside the appended fields) read as the
-  // shorter layout -- never a clear, never out of bounds (ASan watches).
+  // shorter layout -- never a clear attempt, never out of bounds (ASan watches).
   auto clear = encode(full(false, "mib", "why", 5, "hmi", 4));
   for (size_t n = 0; n < clear.size(); n++) {
     const std::vector<uint8_t> cut(clear.begin(), clear.begin() + static_cast<long>(n));
     if (decode(cut, d)) {
-      CHECK(!d.ack_for_self);
+      CHECK(!d.clear_for_self);
     }
   }
 
