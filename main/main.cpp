@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <mutex>
 #include <numeric>
 #include <optional>
 #include <stdlib.h>
@@ -2367,8 +2368,8 @@ static uint8_t seat_axis_count; // actuators in the table
 
 // Motor debug rows: the motors come from the MIB's Motors message at run time, not
 // from a table compiled in here, so a motor added to or removed from the MIB's axis
-// table appears or goes without rebuilding the HMI. Written by the Motors handler
-// under lvgl_mutex; the rows on screen are rebuilt when motor_list_version moves.
+// table appears or goes without rebuilding the HMI. LVGL task only (motor_jog_poll_cb
+// applies each sample); the rows on screen are rebuilt when motor_list_version moves.
 struct MotorRowInfo {
   uint8_t axis_id;
   char state[8];  // the row's short name: "OFF", "ARM", "F2"...
@@ -2933,8 +2934,22 @@ static void motor_state_name(const rammp::MotorSummary &m, char *out, size_t out
   lv_snprintf(out, out_size, "?%u", static_cast<unsigned>(m.state));
 }
 
-// A Motors sample. RTPS task, under lvgl_mutex: data and subjects only, the rows
-// themselves are rebuilt by the poll.
+// The latest Motors sample, handed from the RTPS task to the LVGL task. Its own lock,
+// held only for the copy: an RTPS worker must never wait on lvgl_mutex. A screen build
+// holds that for up to a second, and with only two reader workers, two handlers stuck
+// behind it starve the e-stop's reader until the MIB's deadman latches.
+static std::mutex motors_rx_mutex;
+static rammp::Motors motors_rx;
+static bool motors_rx_new = false;
+
+static void motors_receive(const rammp::Motors &m) { // RTPS task
+  std::lock_guard<std::mutex> lock(motors_rx_mutex);
+  motors_rx = m;
+  motors_rx_new = true;
+}
+
+// A Motors sample. LVGL task: data and subjects only, the rows themselves are
+// rebuilt by the poll.
 static void motors_apply(const rammp::Motors &m) {
   const int count = std::min<int>(static_cast<int>(m.motors.size()), kMotorRowsMax);
   bool changed = count != motor_info_count;
@@ -2963,6 +2978,17 @@ static void motors_apply(const rammp::Motors &m) {
 // one held, or a single stop when the hold ends.
 static void motor_jog_poll_cb(lv_timer_t *) {
   static int held_axis = -1; // the axis being jogged; -1 = none
+  std::optional<rammp::Motors> sample;
+  {
+    std::lock_guard<std::mutex> lock(motors_rx_mutex);
+    if (motors_rx_new) {
+      sample = std::move(motors_rx);
+      motors_rx_new = false;
+    }
+  }
+  if (sample) {
+    motors_apply(*sample);
+  }
   const bool up = lv_screen_active() == ui_SettingsScreen &&
                   lv_subject_get_int(&setting_page_subject) == kActuatorsPage;
   if (up && motor_rows_version != motor_list_version) {
@@ -6341,10 +6367,7 @@ extern "C" void app_main(void) {
       }
     }
   });
-  rtps_comms_on_motors([](const rammp::Motors &motors) {
-    std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
-    motors_apply(motors);
-  });
+  rtps_comms_on_motors(motors_receive); // no lvgl_mutex: see motors_receive
   if (!rtps_comms_start()) {
     logger.warn("RTPS comms not started (Ethernet bring-up failed)");
   }
