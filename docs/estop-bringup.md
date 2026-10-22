@@ -4,7 +4,7 @@ How to test the robot-wide e-stop on the HMI and the MIB before the PRs merge. T
 and the protocol are in [plans/estop.md](plans/estop.md).
 
 - **HMI:** [pace-hmi-fw, branch `dev-estop`](https://github.com/rammp-org/pace-hmi-fw/tree/dev-estop)
-- **MIB:** add [estop-core `v0.2.0`](https://github.com/Alaining/estop-core/tree/v0.2.0)
+- **MIB:** add [estop-core `v0.3.0`](https://github.com/rammp-org/rammp-estop-core/tree/v0.3.0)
 
 Both use [rammp-rtps, branch `feat/estop`](https://github.com/rammp-org/rammp-rtps/tree/feat/estop). `dev-estop` and `feat/estop` aren't merged into
 `main` yet: we test this combination on the HMI and the MIB first, and merge the PRs once it
@@ -28,8 +28,8 @@ E-stop switch: GPIO2, normally open to GND. You can change the pin and the switc
 
 ```yaml
   estop_core:
-    git: https://github.com/Alaining/estop-core.git
-    version: v0.2.0
+    git: https://github.com/rammp-org/rammp-estop-core.git
+    version: v0.3.0
 ```
 
 **b)** In code:
@@ -50,7 +50,14 @@ if (latch.active()) { /* stop the motors */ }
 ```
 
 There's a full commented example in
-[`examples/latch/main/main.cpp`](https://github.com/Alaining/estop-core/blob/main/examples/latch/main/main.cpp).
+[`examples/latch/main/main.cpp`](https://github.com/rammp-org/rammp-estop-core/blob/main/examples/latch/main/main.cpp).
+
+**c)** In `sdkconfig.defaults`, put espp's RTPS tasks at or above your busiest task, so the
+deadman doesn't trip on a busy board:
+
+```
+CONFIG_RTPS_THREAD_POOL_READER_PRIO=20
+```
 
 ## 3. Test
 
@@ -60,10 +67,12 @@ There's a full commented example in
   for 2 s to release.
 - [ ] **Clear while held:** with the HMI switch still pressed, a clear is refused.
 - [ ] **Deadman:** unplug the HMI's Ethernet. The MIB logs `LATCHED: hmi: silent (deadman)`.
+- [ ] **No false deadman:** clear the stop, then open Bench (PIN 1234) on the HMI. The MIB stays
+  `RELEASED`, and the HMI logs no `History overflow on topic 'rammp/estop'`.
 
 ## Notes
 
-- Needs ESP-IDF ≥ 5.5 and espp ≥ 1.3.2.
+- Needs ESP-IDF ≥ 5.5 and espp ≥ 1.3.10.
 - Test on a MIB branch whose rammp-rtps submodule is at `c7db102`, the same as MIB main. If yours
   has a newer rammp-rtps, ask before building.
 - This is the first run on real MIB hardware. If anything looks off, please send the log.

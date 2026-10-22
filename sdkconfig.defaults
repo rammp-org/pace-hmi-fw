@@ -289,3 +289,8 @@ CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 CONFIG_RTPS_LIMIT_NUM_STATELESS_WRITERS=7
 CONFIG_RTPS_LIMIT_NUM_STATELESS_READERS=6
 CONFIG_RTPS_LIMIT_MAX_NUM_READER_CALLBACKS=6
+
+# espp's RTPS tasks (rtps_worker_*, rtps_reactor) at lv_task's priority. At the
+# default 5, a screen build at 20 held the e-stop heartbeat back past the MIB's
+# 300 ms deadman, and the robot stopped for nothing (estop-core README, step 4).
+CONFIG_RTPS_THREAD_POOL_READER_PRIO=20
