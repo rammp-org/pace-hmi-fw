@@ -128,11 +128,30 @@ Not verified:
 - GitHub CI. The branches are local. The firmware pins rammp-rtps `00773f8`, which exists
   only locally, so push rammp-rtps first or CI's submodule checkout fails.
 
+Hand test (2026-10-21, attended, no PACE RACER board connected):
+
+- With DEBUG ACTUATORS open, the e-stop cleared and stayed clear. The four motor rows came
+  from the MIB's list. Holding + on Drive L was refused: the motor is offline, so -/+ are
+  greyed. No `MotorJog` was sent and the MIB logged no jog.
+- **Found: entering the PIN re-latches the e-stop, and this predates the change.** Building
+  the Settings screen holds the LVGL task (priority 20) for about 1 s. That starves the RTPS
+  writer threads (priority 5): `History overflow` on `xy_twist` and `estop`, then the MIB's
+  300 ms deadman latches. The original image (`880d815`, flashed back from the backup) does
+  the same. Workaround for testing: open the page first, then clear the e-stop. The fix
+  under way on `dev_ai_rc` (RTPS workers at priority 20, which needs an espp change) is not
+  on `dev-estop`.
+- Fixed while testing (`eb63c62`): the Motors handler no longer waits on `lvgl_mutex`.
+  There are only two RTPS reader workers, so with it and the MibStatus handler both waiting
+  behind a screen build, the e-stop reader was starved too.
+
 ## 6. Open items
 
 1. **MIB and LVGL 9.4 vs 9.6 (not from this change).** If MIB CI resolves 9.4.0, its build
    fails on `CONFIG_LV_MEM_SIZE_KILOBYTES=0`. Two ways out: pin `lvgl/lvgl: '>=9.6.0'` in the
    MIB's `main/idf_component.yml`, or go back to `678b71a`. Not done here, because `aa157f5`
    reverted the second on purpose.
-2. Hand test of the jog and the DEBUG ACTUATORS page (section 5).
-3. Coast versus hold at the end of a jog (section 4).
+2. A jog with a PACE RACER board online: the motor turns at 1 rad/s while + is held.
+3. **The e-stop deadman trips on a screen build (predates this change).** It blocks this
+   page, and any other screen that builds slowly, from being opened with the e-stop clear.
+   The RTPS worker priority fix on `dev_ai_rc` needs bringing to `dev-estop`.
+4. Coast versus hold at the end of a jog (section 4).
