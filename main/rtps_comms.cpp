@@ -423,7 +423,7 @@ void rtps_comms_on_selftest_pong(std::function<void(uint16_t, int)> handler) {
 
 // Called only from the stick's task, which is why the edge latch can be a plain static.
 bool rtps_comms_publish_adc(float x, float y, float twist, rammp::Buttons buttons) {
-  const bool stopped = hmi_estop.active();
+  const bool stopped = hmi_estop.is_active();
   static bool was_stopped = false;
   if (stopped && !was_stopped) {
     // The stop just engaged: ask the MIB to stop driving now, not at the UI's next
@@ -439,14 +439,14 @@ bool rtps_comms_publish_adc(float x, float y, float twist, rammp::Buttons button
 
 bool rtps_comms_publish_drive(rammp::DriveRequest request, MIB::DriveProfile profile) {
   last_profile = profile;
-  if (hmi_estop.active()) {
+  if (hmi_estop.is_active()) {
     request = rammp::DriveRequest::DISABLE;
   }
   return publish(drive_pub, rammp::DriveCommand{request, profile});
 }
 
 bool rtps_comms_publish_seat(rammp::SeatAxis axis, float target) {
-  if (hmi_estop.active()) {
+  if (hmi_estop.is_active()) {
     return false;
   }
   return publish(seat_pub, rammp::SeatCommand{axis, target});

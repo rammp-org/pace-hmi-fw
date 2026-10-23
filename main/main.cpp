@@ -5294,7 +5294,7 @@ extern "C" void app_main(void) {
 
   // The e-stop switch (hmi_estop.hpp): after the GPIO48 button, so the GPIO interrupt
   // service is espp's to install, and before RTPS, so it is watching before anything
-  // can drive. A failure leaves hmi_estop.active() true, which refuses driving.
+  // can drive. A failure leaves hmi_estop.is_active() true, which refuses driving.
   logger.info("Starting the e-stop...");
   hmi_estop.set_input(estop_input(static_cast<EStopPin>(settings_get(SETTINGS_PARAM_ESTOP_PIN)),
                                   static_cast<EStopType>(settings_get(SETTINGS_PARAM_ESTOP_TYPE))));
