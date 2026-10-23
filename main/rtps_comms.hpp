@@ -33,7 +33,7 @@ void rtps_comms_on_selftest_run(std::function<void(uint8_t run_id)> handler);
 void rtps_comms_on_selftest_pong(std::function<void(uint16_t seq, int peer_rx)> handler);
 
 // Publishers: any task. They return false, quietly, until the participant is up
-// and a peer has matched. While hmi_estop.active(): the stick goes out centred, a drive
+// and a peer has matched. While hmi_estop.is_active(): the stick goes out centred, a drive
 // ENABLE goes out as DISABLE (and one DISABLE goes out the moment the stop engages,
 // from the stick's task), and seat requests are not sent.
 bool rtps_comms_publish_adc(float x, float y, float twist, rammp::Buttons buttons);
