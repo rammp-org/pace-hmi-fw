@@ -19,6 +19,7 @@
 #include <optional>
 #include <stdlib.h>
 #include <sys/time.h>
+#include <tuple>
 #include <vector>
 
 #include "m5stack-tab5.hpp"
@@ -48,6 +49,7 @@
 
 #include "actions_spec.h"
 #include "boot_logo.h"
+#include "hmi_estop.hpp"
 #include "joystick_cal.hpp"
 #include "log_capture.hpp"
 #include "log_view.hpp"
@@ -151,6 +153,18 @@ static void drive_publish();
 static lv_subject_t rtps_link_subject;
 // 0/1 blink phase for the indicator, flipped by the same poll timer
 static lv_subject_t rtps_blink_subject;
+// The e-stop, as the screens read it (hmi_estop.hpp), set by the same poll timer:
+// kEStopNone unless something stops driving. mcb_ready() and every warning banner
+// read it first, so an engaged stop refuses drive and seat and says why.
+enum : int32_t {
+  kEStopNone = 0,
+  kEStopLocal = 1,  // this HMI's switch; held until the MIB clears it
+  kEStopRemote = 2, // the MIB says the stop is latched
+  kEStopFault = 3,  // the switch input is not armed: no switch, no driving
+  kEStopNoLink = 4, // rammp::kEStopNeedsMib and no EStop from the MIB
+};
+static lv_subject_t estop_subject;
+static char estop_remote_text[rammp::kErrorTextLen]; // the MIB's "source: reason"
 
 // GPIO48 test button: press count (bound to the ButtonCounter label) and
 // current pressed state (drives the ButtonPanel background via an observer)
@@ -193,11 +207,13 @@ static std::atomic<uint32_t> joy_flick{0};
 // every route between the screens.
 // "This object covers what is behind it" -- see strip_redundant_backgrounds.
 // LVGL leaves the USER flags for exactly this; nothing in the export uses them.
+// LVGL 9.6 deprecates lv_obj_set_flag/has_flag but has no setter for USER flags yet:
+// both still work, and with LV_USE_LOG off their deprecation notice compiles away.
 static constexpr lv_obj_flag_t kOverlayFlag = LV_OBJ_FLAG_USER_1;
 
 // Kept out of the overdraw pass, and kept opaque whatever the theme says.
 static void keep_overlay_fill(lv_obj_t *obj) {
-  lv_obj_add_flag(obj, kOverlayFlag);
+  lv_obj_set_flag(obj, kOverlayFlag, true);
   lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, LV_PART_MAIN);
 }
 
@@ -219,6 +235,8 @@ static lv_subject_t stick_invert_x_subject;    // 1 = left and right swap over
 static lv_subject_t stick_invert_y_subject;    // 1 = forward and back swap over
 static lv_subject_t stick_swap_subject;        // 1 = the stick's X and Y trade places
 static lv_subject_t sounds_subject;            // 0 = the clicks and refusals are silent
+static lv_subject_t estop_pin_subject;         // EStopPin: which header pin the switch is on
+static lv_subject_t estop_type_subject;        // EStopContact: NO or NC
 
 // What the ADC task needs of those, as plain atomics it can read without the
 // LVGL lock. Written by setting_store_observer.
@@ -662,6 +680,61 @@ static void log_link_change(RtpsLinkState state) {
 static void diag_poll();       // DiagnosticsScreen, further down
 static void drive_wait_poll(); // DriveScreen entry, further down
 
+// The e-stop into estop_subject, and every change into the log: the e-stop task
+// itself never logs (it must not allocate), so this is where its history is kept.
+static void estop_poll() {
+  static espp::Logger estop_logger({.tag = "estop", .level = espp::Logger::Verbosity::INFO});
+  const estop::NodeStatus s = hmi_estop.status();
+  int32_t cause = kEStopNone;
+  if (s.engaged) {
+    cause = kEStopLocal;
+  } else if (s.latch_engaged) {
+    cause = kEStopRemote;
+  } else if (!s.armed) {
+    cause = kEStopFault;
+  } else if (rammp::kEStopNeedsMib && !s.latch_fresh) {
+    cause = kEStopNoLink;
+  }
+
+  static std::optional<estop::NodeStatus> last;
+  auto shown = [](const estop::NodeStatus &e) {
+    return std::tie(e.engaged, e.latch_engaged, e.armed, e.latch_fresh, e.input.gpio_num,
+                    e.input.active_level, e.presses, e.clear_attempts_accepted,
+                    e.clear_attempts_refused, e.rx_errors, e.tx_errors);
+  };
+  if (!last || shown(*last) != shown(s)) {
+    const bool engaged = s.engaged || s.latch_engaged || !s.armed;
+    const std::string line =
+        fmt::format("engaged={} latch={} ('{}: {}') armed={} pin=GPIO{} {} latch_link={} "
+                    "presses={} clear_attempts={}/{} (accepted/refused) rx_err={} tx_err={} "
+                    "pub_seq={}",
+                    s.engaged, s.latch_engaged ? "ENGAGED" : "NOT_ENGAGED", s.latch_source,
+                    s.latch_reason, s.armed, static_cast<int>(s.input.gpio_num),
+                    s.input.active_level == estop::ActiveLevel::LOW ? "NO" : "NC",
+                    s.latch_fresh ? "fresh" : "silent", s.presses, s.clear_attempts_accepted,
+                    s.clear_attempts_refused, s.rx_errors, s.tx_errors, s.pub_seq);
+    if (engaged) {
+      estop_logger.warn("{}", line);
+    } else {
+      estop_logger.info("{}", line);
+    }
+    last = s;
+  }
+
+  bool changed = cause != lv_subject_get_int(&estop_subject);
+  if (cause == kEStopRemote) {
+    char text[sizeof(estop_remote_text)];
+    lv_snprintf(text, sizeof(text), rammp::kHmiEStopRemoteFmt, s.latch_source, s.latch_reason);
+    if (std::strcmp(text, estop_remote_text) != 0) {
+      std::memcpy(estop_remote_text, text, sizeof(text));
+      changed = true;
+    }
+  }
+  if (changed) {
+    lv_subject_set_int(&estop_subject, cause);
+  }
+}
+
 static void rtps_poll_cb(lv_timer_t *) {
   const RtpsLinkState state = rtps_comms_link_state();
   log_link_change(state);
@@ -669,6 +742,7 @@ static void rtps_poll_cb(lv_timer_t *) {
   static uint32_t ticks = 0;
   // flip every other tick: a 500 ms half-period, i.e. a 1 Hz blink
   lv_subject_set_int(&rtps_blink_subject, static_cast<int32_t>((++ticks / 2) & 1u));
+  estop_poll();      // first: everything below reads estop_subject
   diag_poll();       // diagnostics staleness rides the same 250 ms tick
   drive_wait_poll(); // and so does the wait for the MCB to enable driving
 
@@ -1175,7 +1249,8 @@ static void diagnostics_open();
 // and "unknown" is not "known good" on a device that moves someone.
 static bool mcb_ready() {
   const auto state = static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject));
-  return static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) ==
+  return lv_subject_get_int(&estop_subject) == kEStopNone &&
+         static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) ==
              RtpsLinkState::CONNECTED &&
          (state == MIB::MibSystemState::IDLE || state == MIB::MibSystemState::ENABLED);
 }
@@ -1183,7 +1258,8 @@ static bool mcb_ready() {
 // The MIB disables manual seat control while it is driving, so the seat screen asks for
 // more than mcb_ready(): IDLE exactly. INITIALIZING and ERROR are barred by both.
 static bool seat_ready() {
-  return static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) ==
+  return lv_subject_get_int(&estop_subject) == kEStopNone &&
+         static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) ==
              RtpsLinkState::CONNECTED &&
          static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject)) ==
              MIB::MibSystemState::IDLE;
@@ -1269,6 +1345,22 @@ static void fill_drive_blocked_panel(lv_obj_t *panel, const char *link_title,
   lv_obj_t *body = ui_comp_get_child(panel, UI_COMP_ERRORBANNER_BANNERBOX_BANNERMESSAGE);
   lv_obj_t *footer = ui_comp_get_child(panel, UI_COMP_ERRORBANNER_BANNERBOX_BANNERFOOTER);
 
+  // The e-stop outranks everything, as in mcb_ready(): whatever else is wrong,
+  // that is what stops the chair, and it needs the MIB to clear.
+  if (const int32_t estop = lv_subject_get_int(&estop_subject); estop != kEStopNone) {
+    const char *text = estop == kEStopLocal    ? rammp::kHmiEStopLocalText
+                       : estop == kEStopRemote ? estop_remote_text
+                       : estop == kEStopFault  ? rammp::kHmiEStopFaultText
+                                               : rammp::kHmiEStopLinkText;
+    lv_label_set_text(title,
+                      estop == kEStopNoLink ? rammp::kHmiEStopLinkTitle : rammp::kHmiEStopTitle);
+    lv_label_set_text(body, text);
+    lv_label_set_text(footer, estop == kEStopFault    ? rammp::kHmiEStopFaultFooter
+                              : estop == kEStopNoLink ? rammp::kHmiEStopLinkFooter
+                                                      : rammp::kHmiEStopFooter);
+    return;
+  }
+
   // The link comes first, as in mcb_ready(): with no live link the state
   // subject is only the last thing the MCB said, not what it is saying now.
   const auto link = static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject));
@@ -1313,8 +1405,8 @@ static void fill_mib_reason_panel(lv_obj_t *panel, const char *title, const char
 // on all of them.
 static void bind_to_drive_blocked_cause(lv_obj_t *panel, lv_observer_cb_t cb) {
   keep_overlay_fill(panel);
-  for (lv_subject_t *subject :
-       {&rtps_link_subject, &mib_state_subject, &error_text_subject, &error_footer_subject}) {
+  for (lv_subject_t *subject : {&estop_subject, &rtps_link_subject, &mib_state_subject,
+                                &error_text_subject, &error_footer_subject}) {
     lv_subject_add_observer_obj(subject, cb, panel, nullptr);
   }
 }
@@ -1323,8 +1415,8 @@ static void bind_to_drive_blocked_cause(lv_obj_t *panel, lv_observer_cb_t cb) {
 // screen in front: a warning or an error arriving is heard as well as read.
 // Only on the rise, because every cause subject re-runs the observers.
 static void banner_show(lv_obj_t *panel, bool up) {
-  const bool was_up = !lv_obj_has_flag(panel, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_set_flag(panel, LV_OBJ_FLAG_HIDDEN, !up);
+  const bool was_up = !lv_obj_is_hidden(panel);
+  lv_obj_set_hidden(panel, !up);
   if (up && !was_up && lv_obj_get_screen(panel) == lv_screen_active()) {
     play_refusal(true);
   }
@@ -1343,10 +1435,17 @@ static void entry_refused_panel_observer(lv_observer_t *observer, lv_subject_t *
     banner_show(panel, up);
     if (panel == ui_ErrorBanner2) {
       for (lv_obj_t *art : {ui_LockRing, ui_Shackle, ui_LockBody, ui_LockKeyhole}) {
-        lv_obj_set_flag(art, LV_OBJ_FLAG_HIDDEN, up);
+        lv_obj_set_hidden(art, up);
       }
     }
   };
+  // An engaged e-stop is up for as long as it holds, asked or not: it is the one
+  // warning that must never wait for a push to be seen.
+  if (lv_subject_get_int(&estop_subject) != kEStopNone) {
+    fill_drive_blocked_panel(panel, rammp::kHmiLinkRefusedTitle, rammp::kHmiMcbRefusedTitle);
+    shown(true);
+    return;
+  }
   const int32_t refused = lv_subject_get_int(&entry_refused_subject);
   if (refused == kRefusedNone || refused == kRefusedExit) {
     // kRefusedExit belongs to the DriveScreen's own panel, not this one.
@@ -1395,6 +1494,12 @@ static void bind_entry_refused_panel(lv_obj_t *panel) {
 // banner rather than silently hiding it.
 static void drive_screen_warning_observer(lv_observer_t *observer, lv_subject_t *) {
   lv_obj_t *panel = lv_observer_get_target_obj(observer);
+  // The e-stop before a refused exit: it is the reason the chair is stopping.
+  if (lv_subject_get_int(&estop_subject) != kEStopNone) {
+    fill_drive_blocked_panel(panel, rammp::kHmiLinkLostTitle, rammp::kHmiMcbFaultTitle);
+    banner_show(panel, true);
+    return;
+  }
   // A refused exit: the MIB is still driving, so the screen stays and says why.
   if (lv_subject_get_int(&entry_refused_subject) == kRefusedExit &&
       lv_screen_active() == ui_DriveScreen) {
@@ -1994,7 +2099,7 @@ static void seat_click_cb(lv_event_t *e) {
   // Spec 04b: the motion's own page, over the function buttons. The joystick
   // moves across with it -- its own group -- onto "-" rather than the back
   // button above, since adjusting is what the page is for.
-  lv_obj_remove_flag(ui_SeatAdjustmentPanel, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(ui_SeatAdjustmentPanel, false);
   nav_use_group(seat_adjust_group, ui_SeatScreen);
   seat_adjust_grid.row = 1;
   seat_adjust_grid.col = 0;
@@ -2007,7 +2112,7 @@ static void seat_click_cb(lv_event_t *e) {
 // not greet the next one, or the stick's cursor sits on the function buttons
 // hidden underneath it.
 static void seat_show_buttons_page() {
-  lv_obj_add_flag(ui_SeatAdjustmentPanel, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(ui_SeatAdjustmentPanel, true);
   seat_page = 0;
   nav_use_group(seat_group, ui_SeatScreen);
   // Back to the button the user selected rather than the top-left one: the
@@ -2209,6 +2314,8 @@ static lv_subject_t *const kSettingParamValue[] = {
     &stick_invert_y_subject,    // SETTINGS_PARAM_STICK_INVERT_Y
     &stick_swap_subject,        // SETTINGS_PARAM_STICK_SWAP
     &sounds_subject,            // SETTINGS_PARAM_SOUNDS
+    &estop_pin_subject,         // SETTINGS_PARAM_ESTOP_PIN
+    &estop_type_subject,        // SETTINGS_PARAM_ESTOP_TYPE
 };
 
 // What the named rows read, in SETTINGS_PARAM_* order; nullptr = a number.
@@ -2216,16 +2323,23 @@ static constexpr const char *kThemeNames[] = {"Dark", "Day"};
 static constexpr const char *kOnOffNames[] = {"Off", "On"};
 static constexpr const char *kMirrorNames[] = {"Normal", "Mirror"};
 static constexpr const char *kSwapNames[] = {"Normal", "Swap"};
+static constexpr const char *kEStopPinNames[] = {"GPIO2", "GPIO47"}; // EStopPin order
+static constexpr const char *kEStopTypeNames[] = {"NO", "NC"};       // EStopType order
+static_assert(static_cast<int>(EStopPin::GPIO47) == SETTINGS_ESTOP_PIN_MAX &&
+                  static_cast<int>(EStopType::NC) == SETTINGS_ESTOP_TYPE_MAX,
+              "the E-stop rows' range must match EStopPin and EStopType");
 static const char *const *const kSettingParamNames[] = {
-    nullptr,      // SETTINGS_PARAM_BRIGHTNESS
-    kThemeNames,  // SETTINGS_PARAM_THEME
-    kOnOffNames,  // SETTINGS_PARAM_MENU_SLIDE
-    kOnOffNames,  // SETTINGS_PARAM_FLIP
-    nullptr,      // SETTINGS_PARAM_STICK_SENSITIVITY
-    kMirrorNames, // SETTINGS_PARAM_STICK_INVERT_X
-    kMirrorNames, // SETTINGS_PARAM_STICK_INVERT_Y
-    kSwapNames,   // SETTINGS_PARAM_STICK_SWAP
-    kOnOffNames,  // SETTINGS_PARAM_SOUNDS
+    nullptr,         // SETTINGS_PARAM_BRIGHTNESS
+    kThemeNames,     // SETTINGS_PARAM_THEME
+    kOnOffNames,     // SETTINGS_PARAM_MENU_SLIDE
+    kOnOffNames,     // SETTINGS_PARAM_FLIP
+    nullptr,         // SETTINGS_PARAM_STICK_SENSITIVITY
+    kMirrorNames,    // SETTINGS_PARAM_STICK_INVERT_X
+    kMirrorNames,    // SETTINGS_PARAM_STICK_INVERT_Y
+    kSwapNames,      // SETTINGS_PARAM_STICK_SWAP
+    kOnOffNames,     // SETTINGS_PARAM_SOUNDS
+    kEStopPinNames,  // SETTINGS_PARAM_ESTOP_PIN
+    kEStopTypeNames, // SETTINGS_PARAM_ESTOP_TYPE
 };
 static_assert(std::size(kSettingParamNames) == SETTINGS_PARAM_COUNT,
               "every settings_spec.h parameter needs its names (or nullptr) here");
@@ -2324,6 +2438,12 @@ static void setting_store_observer(lv_observer_t *observer, lv_subject_t *subjec
     break;
   case SETTINGS_PARAM_SOUNDS:
     sounds_on.store(value != 0);
+    break;
+  case SETTINGS_PARAM_ESTOP_PIN:
+  case SETTINGS_PARAM_ESTOP_TYPE:
+    hmi_estop.set_input(
+        estop_input(static_cast<EStopPin>(settings_get(SETTINGS_PARAM_ESTOP_PIN)),
+                    static_cast<EStopType>(settings_get(SETTINGS_PARAM_ESTOP_TYPE))));
     break;
   default:
     break; // MENU_SLIDE: read where it is used, nothing to apply
@@ -2616,7 +2736,7 @@ static void setting_row_click_cb(lv_event_t *e) {
 static void clear_click_focusable_recursive(lv_obj_t *obj) {
   for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
     lv_obj_t *child = lv_obj_get_child(obj, i);
-    lv_obj_remove_flag(child, LV_OBJ_FLAG_CLICK_FOCUSABLE);
+    lv_obj_set_click_focusable(child, false);
     clear_click_focusable_recursive(child);
   }
 }
@@ -2730,8 +2850,10 @@ static void setting_page_open(int32_t page) {
         spec.names = kSettingParamNames[i];
         // Remapping the stick changes which way a push drives the chair, so
         // it is not done mid-drive.
+        // So is moving the e-stop: for a moment it is not watching either pin.
         spec.locked_only = i == SETTINGS_PARAM_STICK_INVERT_X ||
-                           i == SETTINGS_PARAM_STICK_INVERT_Y || i == SETTINGS_PARAM_STICK_SWAP;
+                           i == SETTINGS_PARAM_STICK_INVERT_Y || i == SETTINGS_PARAM_STICK_SWAP ||
+                           i == SETTINGS_PARAM_ESTOP_PIN || i == SETTINGS_PARAM_ESTOP_TYPE;
         setting_row_add(spec, kSettingParamValue[i], false);
       }
     }
@@ -3120,7 +3242,7 @@ static void diagnostics_open() {
                       specs[i].label);
     for (uint8_t f = 0; f < rammp::kDiagFields; f++) {
       if (specs[i].unit[f][0] == '\0') { // a reading this item does not have
-        lv_obj_add_flag(ui_comp_get_child(row, kDiagFieldIds[f].container), LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(ui_comp_get_child(row, kDiagFieldIds[f].container), true);
         continue;
       }
       lv_label_set_text(ui_comp_get_child(row, kDiagFieldIds[f].units), specs[i].unit[f]);
@@ -3363,7 +3485,7 @@ static void nav_menu_anim_cb(void *obj, int32_t y) {
 
 static void nav_menu_hide_cb(lv_anim_t *a) {
   auto *overlay = static_cast<lv_obj_t *>(a->var);
-  lv_obj_add_flag(overlay, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(overlay, true);
   // A row replayed on arrival (nav_drop_row) goes back to resting once it is
   // out of sight, ready for the next time this overlay opens.
   for (uint32_t id : kNavRowIds) {
@@ -3432,7 +3554,7 @@ static void nav_open_menu(lv_obj_t *overlay) {
     return;
   }
   nav_menu_open = overlay;
-  lv_obj_remove_flag(overlay, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(overlay, false);
   nav_menu_slide(overlay, kMenuHiddenY, kMenuShownY, false);
   nav_key_open_look(lv_screen_active(), true);
 
@@ -3476,7 +3598,7 @@ static void nav_home() {
 static void nav_go(NavDest dest) {
   const lv_obj_t *const before = lv_screen_active();
   if (nav_menu_open != nullptr) {
-    lv_obj_add_flag(nav_menu_open, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(nav_menu_open, true);
     for (uint32_t id : kNavRowIds) {
       lv_obj_remove_state(ui_comp_get_child(nav_menu_open, id), LV_STATE_CHECKED);
     }
@@ -3669,7 +3791,7 @@ static void nav_band_cb(lv_event_t *) { nav_home(); }
 static void nav_clear_clickable(lv_obj_t *obj) {
   for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
     lv_obj_t *child = lv_obj_get_child(obj, i);
-    lv_obj_remove_flag(child, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_clickable(child, false);
     nav_clear_clickable(child);
   }
 }
@@ -3677,7 +3799,7 @@ static void nav_clear_clickable(lv_obj_t *obj) {
 static void nav_claim_clicks(lv_obj_t *obj) {
   clear_click_focusable_recursive(obj);
   nav_clear_clickable(obj);
-  lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(obj, true);
 }
 
 // One screen's chrome. `band` is the DriveBand whose DRIVE cell goes home.
@@ -3725,7 +3847,7 @@ static void nav_attach_chrome(lv_obj_t *key, lv_obj_t *overlay, lv_obj_t *band) 
   for (NavDest gated : {NAV_DRIVE, NAV_SEAT}) {
     lv_obj_t *row = ui_comp_get_child(overlay, kNavRowIds[gated]);
     lv_obj_set_style_opa(row, LV_OPA_40, kActionUnavailableStyle);
-    for (lv_subject_t *subject : {&rtps_link_subject, &mib_state_subject}) {
+    for (lv_subject_t *subject : {&estop_subject, &rtps_link_subject, &mib_state_subject}) {
       lv_subject_add_observer_obj(subject, action_ready_observer, row, nullptr);
     }
   }
@@ -3779,7 +3901,7 @@ static void nav_drop_menu(const lv_obj_t *screen) {
   if (row < 0 || c == nullptr) {
     return;
   }
-  lv_obj_remove_flag(c->overlay, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(c->overlay, false);
   lv_obj_add_state(ui_comp_get_child(c->overlay, kNavRowIds[row]), LV_STATE_CHECKED);
   nav_menu_slide(c->overlay, kMenuShownY, kMenuHiddenY, true);
 }
@@ -4028,7 +4150,7 @@ static void actions_screen_ensure() {
   nav_attach_chrome(ui_MenuKey8, ui_MenuOverlay8, ui_DriveBand8);
   // Its ErrorBanner stays down: an action that needs the MCB greys out
   // instead (action_ready_observer), which keeps the local ones reachable.
-  lv_obj_add_flag(ui_ErrorBanner7, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(ui_ErrorBanner7, true);
   lv_obj_add_event_cb(ui_SkunkWorksScreen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, nullptr);
   lv_obj_add_event_cb(ui_SkunkWorksScreen, actions_screen_unloaded_cb, LV_EVENT_SCREEN_UNLOADED,
                       nullptr);
@@ -4063,7 +4185,7 @@ static void diagnostics_screen_ensure() {
   nav_attach_chrome(ui_MenuKey9, ui_MenuOverlay9, ui_DriveBand9);
   // The red, blinking readings are this screen's warning: the ErrorBanner
   // would cover exactly what someone opened the screen to look at.
-  lv_obj_add_flag(ui_ErrorBanner8, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(ui_ErrorBanner8, true);
   for (lv_subject_t *subject : {&diag_rate_subject, &diag_stale_subject, &rtps_blink_subject}) {
     lv_subject_add_observer_obj(subject, diag_freq_observer, ui_DiagnosticsFreqLabel, nullptr);
   }
@@ -4906,7 +5028,7 @@ extern "C" void app_main(void) {
   // disable scrolling on the screen (so that it doesn't behave weirdly when
   // rotated and drawing with your finger)
   lv_obj_set_scrollbar_mode(lv_screen_active(), LV_SCROLLBAR_MODE_OFF);
-  lv_obj_clear_flag(lv_screen_active(), LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollable(lv_screen_active(), false);
 
   // Load the SquareLine Studio UI. This creates every screen and makes
   // ui_BootScreen the active one; the demo widgets above stay on the (now
@@ -5001,6 +5123,8 @@ extern "C" void app_main(void) {
            {&stick_invert_y_subject, SETTINGS_PARAM_STICK_INVERT_Y},
            {&stick_swap_subject, SETTINGS_PARAM_STICK_SWAP},
            {&sounds_subject, SETTINGS_PARAM_SOUNDS},
+           {&estop_pin_subject, SETTINGS_PARAM_ESTOP_PIN},
+           {&estop_type_subject, SETTINGS_PARAM_ESTOP_TYPE},
        }) {
     lv_subject_init_int(subject, settings_get(param));
     lv_subject_add_observer(subject, setting_store_observer,
@@ -5037,6 +5161,8 @@ extern "C" void app_main(void) {
   // has the real answer a quarter second later.
   lv_subject_init_int(&rtps_link_subject, static_cast<int32_t>(RtpsLinkState::LINK_DOWN));
   lv_subject_init_int(&rtps_blink_subject, 1);
+  // Engaged until the first poll says otherwise: not knowing is not "clear".
+  lv_subject_init_int(&estop_subject, kEStopFault);
   // empty = no override, so the labels start on the enum names
   lv_subject_init_string(&drive_text_subject, drive_text_buf, drive_text_prev_buf,
                          sizeof(drive_text_buf), "");
@@ -5166,6 +5292,16 @@ extern "C" void app_main(void) {
       .task_config = {.name = "Button", .stack_size_bytes = 4 * 1024, .priority = 5},
   });
 
+  // The e-stop switch (hmi_estop.hpp): after the GPIO48 button, so the GPIO interrupt
+  // service is espp's to install, and before RTPS, so it is watching before anything
+  // can drive. A failure leaves hmi_estop.is_active() true, which refuses driving.
+  logger.info("Starting the e-stop...");
+  hmi_estop.set_input(estop_input(static_cast<EStopPin>(settings_get(SETTINGS_PARAM_ESTOP_PIN)),
+                                  static_cast<EStopType>(settings_get(SETTINGS_PARAM_ESTOP_TYPE))));
+  if (!hmi_estop.start()) {
+    logger.error("E-stop failed to start: driving stays refused");
+  }
+
   // Joystick as an LVGL keypad input device, moving the cursor through each
   // screen's focus group. The read function runs on the LVGL task and drains the
   // latch the ADC task fills, so one flick of the stick = one PRESSED cycle =
@@ -5246,7 +5382,7 @@ extern "C" void app_main(void) {
   shackle_rest_y = lv_obj_get_y(ui_Shackle);
   shackle_rest_h = lv_obj_get_height(ui_Shackle);
   lv_arc_set_range(ui_LockRing, 0, kHoldMax);
-  lv_obj_remove_flag(ui_LockRing, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(ui_LockRing, false);
 
   // The three push-and-hold gestures, polled by one shared timer — only the
   // gesture whose applies() is true on the current screen can be filling at any
@@ -5263,7 +5399,7 @@ extern "C" void app_main(void) {
   lv_bar_set_range(ui_CalibrateFill, 0, kHoldMax);
   lv_bar_bind_value(ui_CalibrateFill, &calibrate_gesture.progress);
   lv_obj_bind_flag_if_eq(ui_CalibrateFill, &calibrate_gesture.progress, LV_OBJ_FLAG_HIDDEN, 0);
-  lv_obj_remove_flag(ui_CalibrateFill, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(ui_CalibrateFill, false);
   lv_timer_create(hold_poll_cb, kHoldPollMs, nullptr);
 
   // LogScreen: TextArea1 shows the serial output log_capture has kept. Its

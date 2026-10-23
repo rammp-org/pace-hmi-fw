@@ -17,6 +17,7 @@
 #include <string>
 #include <string_view>
 
+#include "messages/estop_message.hpp"
 #include "messages/joystick_message.hpp"
 #include "messages/mib_message.hpp"
 
@@ -233,6 +234,38 @@ static_assert(std::string_view(kHmiNoPeerFooter).ends_with(MIB::kMibStatus.name)
 
 /* ERROR with an empty error_message: printf(state number, to_string(state)) */
 inline constexpr char kHmiMcbNoTextFmt[] = "systemState=%u (%s), error_message empty";
+
+/* ==== E-stop (messages/estop_message.hpp; docs/plans/estop.md) ========== */
+
+/* This HMI's EStop.source, and what the MIB names in clear_target to end its stop. Short
+   enough for std::string's in-place buffer (15 chars in libstdc++), so filling the
+   message never allocates. */
+inline constexpr char kEStopSelf[] = "hmi";
+static_assert(sizeof(kEStopSelf) <= 16, "EStop.source must fit std::string's SSO buffer");
+
+/* Whether the MIB's own e-stop messages are needed to drive. true: without one from
+   the MIB within kEStopPolicy.timeout the HMI treats the stop as engaged. Off until
+   the MIB publishes rammp/estop (RAMMP-mib-fw does not yet): on, nothing would drive. */
+inline constexpr bool kEStopNeedsMib = false;
+
+/* The banner while the stop is engaged, on every screen that can show one. */
+inline constexpr char kHmiEStopTitle[] = "E-STOP ENGAGED";
+inline constexpr char kHmiEStopLocalText[] = "HMI E-STOP SWITCH PRESSED";
+inline constexpr char kHmiEStopRemoteFmt[] = "%s: %s"; // the MIB's source and reason
+inline constexpr char kHmiEStopFooter[] = "Only the MIB can clear it";
+inline constexpr char kHmiEStopFaultText[] = "E-STOP INPUT NOT ARMED";
+inline constexpr char kHmiEStopFaultFooter[] = "Check the E-stop settings";
+inline constexpr char kHmiEStopLinkTitle[] = "E-STOP LINK LOST";
+inline constexpr char kHmiEStopLinkText[] = "NO rammp/estop FROM THE MIB";
+inline constexpr char kHmiEStopLinkFooter[] = "MIB e-stop heartbeat missing";
+static_assert(sizeof(kHmiEStopLocalText) <= kErrorTextLen &&
+                  sizeof(kHmiEStopFaultText) <= kErrorTextLen &&
+                  sizeof(kHmiEStopLinkText) <= kErrorTextLen,
+              "e-stop body outgrows the banner it shares with MIB faults");
+static_assert(sizeof(kHmiEStopFooter) <= kErrorFooterLen &&
+                  sizeof(kHmiEStopFaultFooter) <= kErrorFooterLen &&
+                  sizeof(kHmiEStopLinkFooter) <= kErrorFooterLen,
+              "e-stop footer outgrows the banner it shares with MIB faults");
 
 } // namespace rammp
 

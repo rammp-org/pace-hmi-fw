@@ -170,11 +170,11 @@ void log_view_init() {
   // reach the log.
   lv_textarea_set_text(ui_TextArea1, "");
   lv_textarea_set_placeholder_text(ui_TextArea1, "");
-  lv_obj_add_flag(lv_textarea_get_label(ui_TextArea1), LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(lv_textarea_get_label(ui_TextArea1), true);
   lv_obj_set_style_opa(ui_TextArea1, LV_OPA_TRANSP, LV_PART_CURSOR);
   lv_textarea_set_cursor_click_pos(ui_TextArea1, false);
-  lv_obj_remove_flag(ui_TextArea1, LV_OBJ_FLAG_CLICK_FOCUSABLE);
-  lv_obj_remove_flag(ui_TextArea1, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_click_focusable(ui_TextArea1, false);
+  lv_obj_set_scrollable(ui_TextArea1, false);
 
   // The view keeps the theme's scrollbars but none of its box: the frame
   // already draws the background and border.
@@ -186,7 +186,7 @@ void log_view_init() {
   lv_obj_set_style_pad_all(view, 0, LV_PART_MAIN);
   lv_obj_set_scroll_dir(view, LV_DIR_ALL);
   lv_obj_set_scrollbar_mode(view, LV_SCROLLBAR_MODE_AUTO);
-  lv_obj_remove_flag(view, LV_OBJ_FLAG_SCROLL_CHAIN);
+  lv_obj_set_scroll_chain(view, false);
 
   // Content-sized, so a line is never wrapped: a long one runs off to the
   // right and the view scrolls sideways to it.

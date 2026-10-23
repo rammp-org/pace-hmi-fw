@@ -47,6 +47,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import rammp_rtps as spec  # noqa: E402  (path setup must run first)
+from estop_latch import EStopLatch  # noqa: E402
 import rtps_host  # noqa: E402
 import rtps_drive_game  # noqa: E402
 import rtps_net  # noqa: E402
@@ -209,6 +210,68 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
                 entity_index=len(self.local_readers),
             ))
 
+        # ---- e-stop: the MIB's side (estop_latch.py) --------------------
+        # The latch, its deadman and the clear handshake, on rammp/estop. Timing from
+        # the spec's kEStopPolicy unless overridden (--estop-*). It starts latched,
+        # as the MIB does: 'ec' (or the GUI's Clear) once the HMI is heard.
+        self.estop = EStopLatch(
+            period=getattr(args, "estop_period_ms", spec.ESTOP_PERIOD_MS) / 1000,
+            timeout=getattr(args, "estop_timeout_ms", spec.ESTOP_TIMEOUT_MS) / 1000,
+            clear_window=getattr(args, "estop_clear_window_ms", spec.ESTOP_CLEAR_WINDOW_MS) / 1000,
+            deadman=not getattr(args, "no_deadman", not spec.ESTOP_DEADMAN),
+        )
+        self.estop_lock = threading.Lock()
+        #: stop sending e-stop messages, MIB alive otherwise: the HMI's LINK LOST case
+        self.estop_silent = False
+        self._estop_thread: threading.Thread | None = None
+        self._estop_writer = rtps_host.WriterConfig(
+            topic_name=spec.TOPIC_ESTOP,
+            type_name=spec.TYPE_ESTOP,
+            reliable=False,
+            entity_index=len(self.local_writers),
+        )
+        self.local_writers.append(self._estop_writer)
+        self.local_readers.append(rtps_host.ReaderConfig(
+            topic_name=spec.TOPIC_ESTOP,
+            type_name=spec.TYPE_ESTOP,
+            reliable=False,
+            entity_index=len(self.local_readers),
+        ))
+
+    def _estop_loop(self) -> None:
+        """Every e-stop period: deadman and clear progress, then this MIB's own message.
+        Its own thread, because the status tick is five times slower."""
+        while True:
+            now = time.monotonic()
+            with self.estop_lock:
+                self.estop.tick(now)
+                quiet = self.paused or self.estop_silent
+                messages = [] if quiet else self.estop.outgoing(now)
+                events, self.estop.events = self.estop.events, []
+                latched = self.estop.latched
+            for event in events:
+                rtps_host.log(f"[estop] {event}")
+            if latched and self.system_state == spec.MIB_SYSTEM_STATE_ENABLED:
+                self.system_state = spec.MIB_SYSTEM_STATE_IDLE
+                rtps_host.log("[estop] driving stopped")
+            for message in messages:
+                self._send_on(self._estop_writer, spec.pack_estop(*message, stamp=time.time()))
+            time.sleep(self.estop.period)
+
+    def estop_clear(self) -> bool:
+        """The operator's clear attempt (see estop_latch.py)."""
+        with self.estop_lock:
+            return self.estop.start_clear_attempt(time.monotonic())
+
+    def estop_engage(self, reason: str = "bench") -> None:
+        with self.estop_lock:
+            self.estop.engage(reason)
+
+    def estop_describe(self) -> str:
+        with self.estop_lock:
+            return self.estop.describe(time.monotonic()) + (" [silent]" if self.estop_silent
+                                                            else "")
+
     def _send_on(self, writer: rtps_host.WriterConfig, cdr_payload: bytes) -> int:
         """Publish one sample on `writer`; returns how many targets it went to."""
         payload = self.build_data_message(writer, cdr_payload)
@@ -277,6 +340,9 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
             self.profile = profile
         if request == spec.DRIVE_REQUEST_ENABLE and self.refuse_drive:
             return
+        if request == spec.DRIVE_REQUEST_ENABLE and self.estop.latched:
+            rtps_host.log("[drive] ENABLE refused: e-stop latched")
+            return
         if request == spec.DRIVE_REQUEST_DISABLE and self.refuse_stop:
             return
         # ERROR and INITIALIZING are not ours to leave: a drive request neither clears a
@@ -332,6 +398,11 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
                 if sample is not None:
                     self.joystick = sample
                     self.adc_rx_count += 1
+            elif topic == spec.TOPIC_ESTOP:
+                message = spec.unpack_estop(payload)
+                if message is not None:
+                    with self.estop_lock:
+                        self.estop.on_message(message, time.monotonic())
             elif topic == spec.TOPIC_HMI_COUNTER:
                 self._answer_selftest_ping(payload)
             elif topic == spec.TOPIC_SELFTEST_REPORT:
@@ -427,6 +498,9 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
 
     def publish_now(self) -> None:
         """Called by the harness run loop every --period seconds."""
+        if self._estop_thread is None:  # first tick: the network is up
+            self._estop_thread = threading.Thread(target=self._estop_loop, daemon=True)
+            self._estop_thread.start()
         if self.paused:
             return
         self.publish_diagnostics()
@@ -521,6 +595,11 @@ def build_harness_args(cli: argparse.Namespace) -> argparse.Namespace:
         announce_period=1.0,
         duration=0.0,
         trace_packets=cli.trace_packets,
+        # The GUI builds its own cli namespace without these: kEStopPolicy, then.
+        estop_period_ms=getattr(cli, "estop_period_ms", spec.ESTOP_PERIOD_MS),
+        estop_timeout_ms=getattr(cli, "estop_timeout_ms", spec.ESTOP_TIMEOUT_MS),
+        estop_clear_window_ms=getattr(cli, "estop_clear_window_ms", spec.ESTOP_CLEAR_WINDOW_MS),
+        no_deadman=getattr(cli, "no_deadman", not spec.ESTOP_DEADMAN),
         peer=cli.peer,
         peer_participant_ids=cli.peer_participant_ids,
     )
@@ -537,6 +616,11 @@ HELP_TEXT = """commands:
   et <text>       error banner body ('et' alone clears it)
   ef <text>       error banner footer ('ef' alone clears it)
   st <text>       override the STATE label text ('st' alone clears it)
+  ec              e-stop: start a clear attempt (releases once the HMI accepts it)
+  ee              e-stop: engage from the MIB (the HMI shows the MIB's reason)
+  ed              e-stop: toggle the deadman
+  eq              e-stop: toggle sending (quiet = the HMI's E-STOP LINK LOST case)
+  es              e-stop: show the latch
   p               pause publishing (HMI should go stale after
                   MIB_STATUS_TIMEOUT_MS: blinking orange RTPS, '---')
   r               resume publishing (HMI should go straight back to green)
@@ -569,6 +653,17 @@ def run_interactive(harness: SystemStatePublisher) -> None:
             continue
         elif command == "ok":
             harness.system_state = spec.MIB_SYSTEM_STATE_IDLE
+        elif command in ("ec", "ee", "ed", "eq", "es"):
+            if command == "ec" and not harness.estop_clear():
+                print("  no clear attempt: not latched, or a watched source never heard (see the log)")
+            elif command == "ee":
+                harness.estop_engage()
+            elif command == "ed":
+                harness.estop.deadman = not harness.estop.deadman
+            elif command == "eq":
+                harness.estop_silent = not harness.estop_silent
+            print(f"  {harness.estop_describe()}")
+            continue
         elif command in ("e", "err", "error"):
             harness.system_state = spec.MIB_SYSTEM_STATE_ERROR
         elif command == "et" or command.startswith("et "):
@@ -666,6 +761,16 @@ def main() -> int:
         "--peer-participant-ids", type=rtps_host.parse_participant_id_range, default="0-3",
         metavar="IDS",
         help="Participant ids to try on each --peer, as '0-3' or '0,1,2' (default 0-3)")
+    parser.add_argument("--estop-period-ms", type=int, default=spec.ESTOP_PERIOD_MS,
+                        help=f"E-stop send period (default kEStopPolicy: {spec.ESTOP_PERIOD_MS})")
+    parser.add_argument("--estop-timeout-ms", type=int, default=spec.ESTOP_TIMEOUT_MS,
+                        help="E-stop deadman timeout (default kEStopPolicy: "
+                             f"{spec.ESTOP_TIMEOUT_MS})")
+    parser.add_argument("--estop-clear-window-ms", type=int, default=spec.ESTOP_CLEAR_WINDOW_MS,
+                        help="How long a clear may take before it is dropped (default "
+                             f"kEStopPolicy: {spec.ESTOP_CLEAR_WINDOW_MS})")
+    parser.add_argument("--no-deadman", action="store_true", default=not spec.ESTOP_DEADMAN,
+                        help="Silence from the HMI does not latch the e-stop")
     parser.add_argument("--trace-packets", action="store_true",
                         help="Log every received UDP packet and its RTPS submessage headers")
     cli = parser.parse_args()

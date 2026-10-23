@@ -26,6 +26,7 @@
 #include "lwip/ip_addr.h"
 #include "ping/ping_sock.h"
 
+#include "hmi_estop.hpp"
 #include "logger.hpp"
 #include "rtps_participant.hpp"
 #include "rtps_pubsub.hpp"
@@ -60,7 +61,8 @@ std::atomic<bool> link_up{false};
 std::atomic<bool> got_ip{false};
 std::atomic<bool> peer_matched{false};    // a latch: espp only reports "matched"
 std::atomic<bool> endpoints_ready{false}; // every publisher below exists
-std::atomic<int64_t> last_status_us{0};   // last MibStatus, esp_timer time; 0 = never
+std::atomic<MIB::DriveProfile> last_profile{MIB::DriveProfile::NORMAL}; // for the e-stop DISABLE
+std::atomic<int64_t> last_status_us{0}; // last MibStatus, esp_timer time; 0 = never
 std::string ip_address;
 esp_netif_ip_info_t ip_info{};
 
@@ -355,7 +357,18 @@ bool start_participant() {
     return false;
   }
 
-  // 5 writers + 5 readers, plus SPDP's pair: the budget set in sdkconfig.defaults
+  // The e-stop first, so a short endpoint pool fails anything but it (estop-core adds
+  // its writer and reader; best-effort, the period resend is the reliability).
+  // espp copies the topic into a std::string per publish: in-place, at this length.
+  static_assert(sizeof(RAMMP_TOPIC_ESTOP) <= 16, "EStop topic must fit std::string's SSO buffer");
+  if (!hmi_estop.attach(*participant)) {
+    logger.error("Could not add the e-stop writer and reader '{}' (CONFIG_RTPS_LIMIT_* in "
+                 "sdkconfig.defaults)",
+                 rammp::kEStop.name);
+    return false;
+  }
+
+  // 6 writers + 5 readers, plus SPDP's pair: the budget set in sdkconfig.defaults
   counter_pub = make_publisher(rammp::kHmiCounter);
   joystick_pub = make_publisher(rammp::kJoystickXYTwist);
   seat_pub = make_publisher(rammp::kJoystickSeatCommand);
@@ -408,15 +421,34 @@ void rtps_comms_on_selftest_pong(std::function<void(uint16_t, int)> handler) {
   selftest_pong_handler = std::move(handler);
 }
 
+// Called only from the stick's task, which is why the edge latch can be a plain static.
 bool rtps_comms_publish_adc(float x, float y, float twist, rammp::Buttons buttons) {
+  const bool stopped = hmi_estop.is_active();
+  static bool was_stopped = false;
+  if (stopped && !was_stopped) {
+    // The stop just engaged: ask the MIB to stop driving now, not at the UI's next
+    // tick. A MIB that knows the e-stop stops anyway; one that does not still obeys this.
+    publish(drive_pub, rammp::DriveCommand{rammp::DriveRequest::DISABLE, last_profile.load()});
+  }
+  was_stopped = stopped;
+  if (stopped) {
+    x = y = twist = 0.0f;
+  }
   return publish(joystick_pub, rammp::XYTwist{x, y, twist, buttons});
 }
 
 bool rtps_comms_publish_drive(rammp::DriveRequest request, MIB::DriveProfile profile) {
+  last_profile = profile;
+  if (hmi_estop.is_active()) {
+    request = rammp::DriveRequest::DISABLE;
+  }
   return publish(drive_pub, rammp::DriveCommand{request, profile});
 }
 
 bool rtps_comms_publish_seat(rammp::SeatAxis axis, float target) {
+  if (hmi_estop.is_active()) {
+    return false;
+  }
   return publish(seat_pub, rammp::SeatCommand{axis, target});
 }
 
