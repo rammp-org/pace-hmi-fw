@@ -172,13 +172,30 @@ MIB, no PACE RACER board):
 - Not covered: the HMI keeps the last Motors list if the MIB stops sending it (the rows stay
   enabled and a jog goes nowhere). A staleness timeout would grey them; not done.
 
+With the real MIB (2026-10-26): RAMMP-mib-fw `dev_ai_motor_debug` rebased onto `feat/estop-recovery`
+(#39), rammp-rtps at `cc85a40`, LVGL pinned `>=9.6.0` (`4df9bac`), espp 1.3.10, IDF v6.0.1. A
+fake PACE RACER board on the PC (MotorState out on `rammp/drive_left/motor_state`, MotorCommand in)
+stood in for a wheel.
+
+- The HMI got its rows from the MIB: `Motors arriving: 4 motors`, all OFF; Drive L went to DIS
+  with -/+ enabled once the fake board's MotorState reached the MIB.
+- E-stop latched: a held + sent nothing; the board stayed DISARMED.
+- E-stop cleared (the MIB's GPIO3 button): + held 2.0 s gave one ARMED +1.000 rad/s segment and
+  +2.00 rad at the board, then DISARMED on release; - held 1.0 s gave -1.000 rad/s, -1.02 rad. The
+  HMI showed ARM while held and the board's position afterwards.
+- A remote-UI screenshot during a hold stalls the LVGL task past the MIB's 300 ms jog timeout,
+  so the MIB stops the motor and restarts it when MotorJog resumes. Any LVGL stall that long does
+  the same; it fails safe.
+- Bench network: the MIB serves DHCP on 192.168.4.1. Both boards on a home router left the Tab5
+  with the router's lease and no route to the MIB; a Tab5 reset that won the MIB's offer fixed it.
+
 ## 6. Open items
 
-1. **MIB and LVGL 9.4 vs 9.6 (not from this change).** If MIB CI resolves 9.4.0, its build
+1. **MIB and LVGL 9.4 vs 9.6 (not from this change; `4df9bac` pins `>=9.6.0` on the MIB branch).** If MIB CI resolves 9.4.0, its build
    fails on `CONFIG_LV_MEM_SIZE_KILOBYTES=0`. Two ways out: pin `lvgl/lvgl: '>=9.6.0'` in the
    MIB's `main/idf_component.yml`, or go back to `678b71a`. Not done here, because `aa157f5`
    reverted the second on purpose.
-2. A jog with a PACE RACER board online: the motor turns at 1 rad/s while + is held.
+2. A jog with a real PACE RACER board online (done with the real MIB and a fake board).
 3. ~~The e-stop deadman trips on a screen build.~~ Fixed by `dev-estop`'s RTPS tasks at priority
    20 (PR #18); checked on the bench 2026-10-26.
 4. Coast versus hold at the end of a jog (section 4).
