@@ -471,7 +471,7 @@ bool rtps_comms_publish_seat(rammp::SeatAxis axis, float target) {
 }
 
 bool rtps_comms_publish_motor_jog(uint8_t axis_id, int8_t direction) {
-  if (hmi_estop.active()) {
+  if (hmi_estop.is_active()) {
     return false;
   }
   return publish(motor_jog_pub, rammp::MotorJog{axis_id, direction});

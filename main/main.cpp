@@ -2379,7 +2379,7 @@ static MotorRowInfo motor_info[kMotorRowsMax];
 static int motor_info_count;
 static uint32_t motor_list_version; // +1 when the ids or labels change
 static uint32_t motor_rows_version; // what the rows on screen were built from
-// Each motor's position in centiradians; kValueUnknown while it is offline.
+// Each motor's position in tenths of a radian; kValueUnknown while it is offline.
 static lv_subject_t motor_position[kMotorRowsMax];
 
 // What a value reads before it is known - only ever an actuator the MCB has
@@ -2869,10 +2869,11 @@ static void setting_page_open(int32_t page) {
                        specs[i].step, specs[i].decimals, nullptr},
                       &seat_axis_value[i], true);
     }
-    // No range: a motor turns as far as it is jogged. Position in hundredths of a rad.
+    // No range: a motor turns as far as it is jogged. Position in tenths of a rad, with no
+    // unit, like the seat rows: "0.00 rad" overflowed the value column and scrolled.
     for (int i = 0; i < motor_info_count; i++) {
       setting_row_add(
-          {motor_info[i].state, motor_info[i].label, INT32_MIN + 1, INT32_MAX, 1, 2, " rad"},
+          {motor_info[i].state, motor_info[i].label, INT32_MIN + 1, INT32_MAX, 1, 1, nullptr},
           &motor_position[i], false);
     }
     motor_rows_version = motor_list_version;
@@ -2964,9 +2965,8 @@ static void motors_apply(const rammp::Motors &m) {
     }
     motor_state_name(motor, info.state, sizeof(info.state));
     lv_subject_set_int(&motor_position[i],
-                       motor.online != 0
-                           ? static_cast<int32_t>(std::lround(motor.position * 100.0f))
-                           : kValueUnknown);
+                       motor.online != 0 ? static_cast<int32_t>(std::lround(motor.position * 10.0f))
+                                         : kValueUnknown);
   }
   motor_info_count = count;
   if (changed) {
