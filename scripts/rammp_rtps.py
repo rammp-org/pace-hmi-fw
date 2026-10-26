@@ -35,6 +35,9 @@ MIB_HEADER_RELATIVE_PATH = os.path.join(
 ESTOP_HEADER_RELATIVE_PATH = os.path.join(
     "external", "rammp-rtps", "components", "rammp_rtps_messages", "include", "messages",
     "estop_message.hpp")
+MOTOR_HEADER_RELATIVE_PATH = os.path.join(
+    "external", "rammp-rtps", "components", "rammp_rtps_messages", "include", "messages",
+    "motor_message.hpp")
 
 # #define RAMMP_TOPIC_MIB_STATUS "rammp/mib/status" / #define RAMMP_TYPE_MIB_STATUS "..."
 _DEFINE_RE = re.compile(r'^\s*#define\s+RAMMP_((?:TOPIC|TYPE)_[A-Z0-9_]+)\s+"([^"]*)"', re.M)
@@ -96,6 +99,8 @@ SHARED_HEADER_PATH = find_header(SHARED_HEADER_RELATIVE_PATH)
 MIB_HEADER_PATH = find_header(MIB_HEADER_RELATIVE_PATH)
 #: the robot-wide e-stop, in the same submodule
 ESTOP_HEADER_PATH = find_header(ESTOP_HEADER_RELATIVE_PATH)
+#: the PACE RACER motor boards (BoardState, FaultCode, RAMMP_AXIS_TABLE), same submodule
+MOTOR_HEADER_PATH = find_header(MOTOR_HEADER_RELATIVE_PATH)
 
 
 def _read_spec(path: str) -> str:
@@ -104,7 +109,8 @@ def _read_spec(path: str) -> str:
 
 
 _HEADER_TEXT = ("\n".join(_read_spec(path) for path in
-               (SHARED_HEADER_PATH, MIB_HEADER_PATH, ESTOP_HEADER_PATH, HEADER_PATH)))
+               (SHARED_HEADER_PATH, MIB_HEADER_PATH, ESTOP_HEADER_PATH, MOTOR_HEADER_PATH,
+                HEADER_PATH)))
 
 #: TOPIC_* (topic names) and TYPE_* (DDS type names)
 STRINGS: Dict[str, str] = dict(_DEFINE_RE.findall(_HEADER_TEXT))
@@ -160,6 +166,10 @@ MIB_SYSTEM_STATE_NAMES = _group("MIB_SYSTEM_STATE_")
 DRIVE_REQUEST_NAMES = _group("DRIVE_REQUEST_")
 #: {0: 'LOW', 1: 'NORMAL', 2: 'HIGH'} — MIB::DriveProfile, the HMI's profile buttons
 DRIVE_PROFILE_NAMES = _group("DRIVE_PROFILE_")
+#: {0: 'DISARMED', 1: 'ARMED', ...} — rammp::BoardState, what a motor board is doing
+BOARD_STATE_NAMES = _group("BOARD_STATE_")
+#: {0: 'NONE', 1: 'WATCHDOG', ...} — rammp::FaultCode, why a board is in FAULT
+FAULT_CODE_NAMES = _group("FAULT_CODE_")
 
 
 class SeatAxis(NamedTuple):
@@ -238,6 +248,27 @@ if not DIAGNOSTICS:
 if [d.id for d in DIAGNOSTICS] != list(range(len(DIAGNOSTICS))):
     raise RuntimeError(f"{SHARED_HEADER_PATH}: diagnostics ids must be 0..N-1 in table order")
 
+
+class Axis(NamedTuple):
+    """One row of RAMMP_AXIS_TABLE: a PACE RACER motor board the MIB commands."""
+
+    id: int
+    name: str
+    segment: str
+    label: str
+
+
+# X(2, DRIVE_LEFT, "drive_left", "Drive L")
+_AXIS_RE = re.compile(
+    r"""^\s*X\(\s*(\d+)\s*,\s*([A-Z0-9_]+)\s*,\s*"([^"]*)"\s*,\s*"([^"]*)"\s*\)""", re.M)
+
+#: every motor axis in the shared table, in AxisId order: what a real MIB lists in Motors
+AXES: List[Axis] = [Axis(int(i), name, segment, label)
+                    for i, name, segment, label in _AXIS_RE.findall(_HEADER_TEXT)]
+
+if not AXES:
+    raise RuntimeError(f"{MOTOR_HEADER_PATH}: RAMMP_AXIS_TABLE parsed to nothing")
+
 # ------------------------------------------------------------------ CDR (XCDR1)
 # What espp/cdr puts on the wire for the spec's C++ structs: header 00 01 00 00,
 # little-endian, each primitive aligned to its size from the first payload byte,
@@ -262,6 +293,12 @@ MSG_DRIVE_COMMAND = [("request", "B"), ("profile", "B")]
 MSG_SEAT_COMMAND = [("axis", "B"), ("target", "f")]
 MSG_DIAGNOSTICS = [("seq", "B"), ("items", ("seq", [("values", ("seq", "i"))]))]
 MSG_UINT32 = [("data", "I")]
+MSG_MOTOR_JOG = [("axis_id", "B"), ("direction", "b")]
+# rammp::Motors: seq, then one MotorSummary per axis (BoardState and FaultCode are uint8).
+MSG_MOTORS = [("seq", "B"), ("motors", ("seq", [
+    ("axis_id", "B"), ("online", "B"), ("state", "B"), ("fault_code", "B"),
+    ("position", "f"), ("velocity", "f"), ("label", "str"),
+]))]
 # rammp::EStop: the ROS layout (std_msgs/Header, engaged, source, reason), then the
 # appended pub_seq, clear_target, clear_pub_seq. Header is written inline: stamp.sec, stamp.nanosec,
 # frame_id.
@@ -419,6 +456,43 @@ def unpack_diagnostics(payload: bytes) -> tuple[int, list[list[int]]] | None:
     """(seq, readings per item), or None."""
     message = decode(MSG_DIAGNOSTICS, payload)
     return None if message is None else (message[0], [item[0] for item in message[1]])
+
+
+class MotorSummary(NamedTuple):
+    """One rammp::MotorSummary: a motor board as the MIB last heard from it."""
+    axis_id: int
+    online: bool
+    state: int  # BOARD_STATE_*
+    fault_code: int  # FAULT_CODE_*
+    position: float  # rad
+    velocity: float  # rad/s
+    label: str
+
+
+def pack_motors(motors, seq: int = 0) -> bytes:
+    """A rammp::Motors (MIB -> joystick): `motors` is a list of MotorSummary."""
+    return encode(MSG_MOTORS, seq & 0xFF, [
+        (m.axis_id & 0xFF, 1 if m.online else 0, m.state & 0xFF, m.fault_code & 0xFF,
+         float(m.position), float(m.velocity), m.label) for m in motors])
+
+
+def unpack_motors(payload: bytes) -> tuple[int, list[MotorSummary]] | None:
+    """(seq, motors), or None."""
+    message = decode(MSG_MOTORS, payload)
+    if message is None:
+        return None
+    return message[0], [MotorSummary(a, bool(o), s, f, p, v, lbl)
+                        for a, o, s, f, p, v, lbl in message[1]]
+
+
+def pack_motor_jog(axis_id: int, direction: int) -> bytes:
+    """A rammp::MotorJog (joystick -> MIB); for tests of the tools."""
+    return encode(MSG_MOTOR_JOG, axis_id & 0xFF, max(-128, min(127, direction)))
+
+
+def unpack_motor_jog(payload: bytes) -> tuple[int, int] | None:
+    """(axis_id, direction): -1 / +1 while held, 0 = stop now. None if it does not decode."""
+    return decode(MSG_MOTOR_JOG, payload)
 
 
 class EStop(NamedTuple):

@@ -76,6 +76,10 @@ AUTOCONNECT_RETRY_MS = 1500
 DEFAULT_ERROR_TEXT = "MOTOR CONTROLLER OVERTEMPERATURE"
 DEFAULT_ERROR_FOOTER = "REDUCE SPEED AND PULL OVER"
 
+#: The HMI draws at most this many motor rows (main.cpp kMotorRowsMax); the bench
+#: sends every row anyway, so a longer list shows where the HMI cuts it.
+HMI_MOTOR_ROWS_MAX = 16
+
 #: "Via" entry meaning "work it out from whichever adapter reaches the peer".
 AUTO_ADAPTER = "Auto (follow the route to the board)"
 
@@ -102,6 +106,9 @@ class McbPanel:
         # opened before connecting and survive a disconnect; the harness borrows
         # it and reads the speed off it.
         self.car = rtps_drive_game.CarModel()
+        # The motor list, likewise: rows added before connecting, or kept across a
+        # reconnect, are what the next harness sends.
+        self.motor_bench = rtps_mcb_sim.MotorBench()
         self.drive_view = None
         # Auto-connect bookkeeping. _auto_active is cleared by success or by any
         # manual Connect/Detect/Scan: once the user takes over, the retries must
@@ -134,6 +141,8 @@ class McbPanel:
         self.notebook.add(seat_tab, text="Seat")
         diagnostics_tab = ttk.Frame(self.notebook)
         self.notebook.add(diagnostics_tab, text="Diagnostics")
+        motors_tab = ttk.Frame(self.notebook)
+        self.notebook.add(motors_tab, text="Motors")
 
         self._build_connection(status_tab)
         self._build_status_controls(status_tab)
@@ -144,6 +153,7 @@ class McbPanel:
         self._build_cycle(status_tab)
         self._build_seat(seat_tab)
         self._build_diagnostics(diagnostics_tab)
+        self._build_motors(motors_tab)
         self._build_log()
         root.after(TICK_MS, self._tick)
         root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -662,6 +672,211 @@ class McbPanel:
             lines.append(f"{item.short} {item.label}: " + ", ".join(parts))
         self.diagnostics_label.configure(text="\n".join(lines))
 
+    def _build_motors(self, parent: tk.Widget) -> None:
+        """The MIB's motor debug list: one row per Motors entry, sent every 200 ms.
+
+        The HMI's DEBUG ACTUATORS page builds its motor rows from this list, so adding,
+        removing or renaming a row here is a motor added to the MIB's axis table, seen
+        without reflashing the HMI. Online, state and fault are what the HMI shows for
+        each row (OFF, DIS, ARM, F<code>); a jog from the HMI moves the row's position.
+        """
+        frame = ttk.LabelFrame(parent, text="Motors (rammp/mib/motors, the MIB's motor list)",
+                               padding=8)
+        frame.pack(fill="both", expand=True, padx=8, pady=4)
+
+        bar = ttk.Frame(frame)
+        bar.pack(fill="x")
+        self.motors_send_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(bar, text="Send Motors", variable=self.motors_send_var,
+                        command=self._motors_apply_send).pack(side="left")
+        ttk.Button(bar, text="Add", command=self._motors_add).pack(side="left", padx=(12, 0))
+        self.motors_add_count_var = tk.StringVar(value="4")
+        ttk.Spinbox(bar, from_=1, to=32, width=3, textvariable=self.motors_add_count_var).pack(
+            side="left", padx=(4, 0))
+        ttk.Button(bar, text="Axis table", command=self._motors_reset).pack(side="left",
+                                                                            padx=(12, 0))
+        ttk.Button(bar, text="All online", command=lambda: self._motors_set_online(True)).pack(
+            side="left", padx=(12, 0))
+        ttk.Button(bar, text="All offline", command=lambda: self._motors_set_online(False)).pack(
+            side="left", padx=(4, 0))
+        ttk.Button(bar, text="Remove all", command=self._motors_clear).pack(side="left",
+                                                                            padx=(12, 0))
+        self.motors_count_label = ttk.Label(bar, text="", foreground="#666666")
+        self.motors_count_label.pack(side="left", padx=(12, 0))
+
+        # A list longer than the window scrolls: the bench is for "many motors".
+        holder = ttk.Frame(frame)
+        holder.pack(fill="both", expand=True, pady=(6, 0))
+        canvas = tk.Canvas(holder, highlightthickness=0, height=320)
+        scroll = ttk.Scrollbar(holder, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        self.motors_rows_frame = ttk.Frame(canvas)
+        canvas.create_window((0, 0), window=self.motors_rows_frame, anchor="nw")
+        self.motors_rows_frame.bind(
+            "<Configure>", lambda _e: canvas.configure(scrollregion=canvas.bbox("all")))
+        self.motors_canvas = canvas
+
+        self.motors_jog_label = ttk.Label(frame, text="no jog yet")
+        self.motors_jog_label.pack(anchor="w", pady=(6, 0))
+        ttk.Label(
+            frame,
+            text=f"The HMI draws the first {HMI_MOTOR_ROWS_MAX} rows. A jog runs only while the "
+                 "MIB is IDLE with the e-stop clear (Drive tab), on a row that is online and not "
+                 f"faulted, at {rtps_mcb_sim.MOTOR_JOG_SPEED:g} rad/s; it stops "
+                 f"{rtps_mcb_sim.MOTOR_JOG_TIMEOUT_S * 1000:.0f} ms after the last MotorJog. "
+                 "Label: Enter applies.",
+            foreground="#666666", wraplength=560, justify="left",
+        ).pack(anchor="w", pady=(6, 0))
+
+        self._motor_widgets: list[dict] = []
+        self._motors_built_for: list[int] = []  # axis ids the rows were built for
+        self._state_names = [spec.BOARD_STATE_NAMES[v] for v in sorted(spec.BOARD_STATE_NAMES)]
+        self._fault_names = [spec.FAULT_CODE_NAMES[v] for v in sorted(spec.FAULT_CODE_NAMES)]
+        self._rebuild_motor_rows()
+
+    def _rebuild_motor_rows(self) -> None:
+        """One widget row per bench motor. Rebuilt only when the rows come or go."""
+        for child in self.motors_rows_frame.winfo_children():
+            child.destroy()
+        self._motor_widgets = []
+        for column, heading in enumerate(("#", "Id", "Label", "Online", "State", "Fault",
+                                          "Position", "Jog", "")):
+            ttk.Label(self.motors_rows_frame, text=heading, foreground="#666666").grid(
+                row=0, column=column, sticky="w", padx=3, pady=(0, 2))
+        with self.motor_bench.lock:
+            motors = list(self.motor_bench.motors)
+        for index, motor in enumerate(motors):
+            row = index + 1
+            hidden = index >= HMI_MOTOR_ROWS_MAX
+            ttk.Label(self.motors_rows_frame, text=str(index),
+                      foreground="#aa0000" if hidden else "").grid(row=row, column=0, padx=3)
+            ttk.Label(self.motors_rows_frame, text=str(motor.axis_id)).grid(row=row, column=1,
+                                                                            padx=3)
+            label_var = tk.StringVar(value=motor.label)
+            entry = ttk.Entry(self.motors_rows_frame, textvariable=label_var, width=16)
+            entry.grid(row=row, column=2, padx=3, pady=1)
+            entry.bind("<Return>", lambda _e, m=motor, v=label_var: self._motor_set_label(m, v))
+            online_var = tk.BooleanVar(value=motor.online)
+            ttk.Checkbutton(self.motors_rows_frame, variable=online_var,
+                            command=lambda m=motor, v=online_var: self._motor_set(
+                                m, online=v.get())).grid(row=row, column=3)
+            state_var = tk.StringVar(value=spec.BOARD_STATE_NAMES.get(motor.state, "?"))
+            state_box = ttk.Combobox(self.motors_rows_frame, textvariable=state_var, width=13,
+                                     values=self._state_names, state="readonly")
+            state_box.grid(row=row, column=4, padx=3)
+            state_box.bind("<<ComboboxSelected>>",
+                           lambda _e, m=motor, v=state_var: self._motor_set_state(m, v.get()))
+            fault_var = tk.StringVar(value=spec.FAULT_CODE_NAMES.get(motor.fault_code, "?"))
+            fault_box = ttk.Combobox(self.motors_rows_frame, textvariable=fault_var, width=15,
+                                     values=self._fault_names, state="readonly")
+            fault_box.grid(row=row, column=5, padx=3)
+            fault_box.bind("<<ComboboxSelected>>",
+                           lambda _e, m=motor, v=fault_var: self._motor_set_fault(m, v.get()))
+            position_label = ttk.Label(self.motors_rows_frame, text="", width=10, anchor="e",
+                                       font=("Consolas", 10))
+            position_label.grid(row=row, column=6, padx=3)
+            jog_label = ttk.Label(self.motors_rows_frame, text="", width=4)
+            jog_label.grid(row=row, column=7, padx=3)
+            ttk.Button(self.motors_rows_frame, text="\u2715", width=2,
+                       command=lambda i=index: self._motors_remove(i)).grid(row=row, column=8,
+                                                                            padx=3)
+            self._motor_widgets.append({
+                "motor": motor, "entry": entry, "label": label_var, "online": online_var,
+                "state": state_var, "fault": fault_var, "position": position_label,
+                "jog": jog_label,
+            })
+        self._motors_built_for = [id(m) for m in motors]
+
+    def _motor_set(self, motor, **fields) -> None:
+        with self.motor_bench.lock:
+            for name, value in fields.items():
+                setattr(motor, name, value)
+
+    def _motor_set_label(self, motor, var: tk.StringVar) -> None:
+        text = var.get().strip() or f"Motor {motor.axis_id}"
+        var.set(text)
+        self._motor_set(motor, label=text)
+        self.root.focus_set()  # drop focus so the tick resumes refreshing the box
+
+    def _motor_set_state(self, motor, name: str) -> None:
+        value = next(v for v, n in spec.BOARD_STATE_NAMES.items() if n == name)
+        fault = motor.fault_code if value == spec.BOARD_STATE_FAULT else spec.FAULT_CODE_NONE
+        if value == spec.BOARD_STATE_FAULT and fault == spec.FAULT_CODE_NONE:
+            fault = spec.FAULT_CODE_WATCHDOG  # FAULT always says why
+        self._motor_set(motor, state=value, fault_code=fault, jog_direction=0, velocity=0.0)
+
+    def _motor_set_fault(self, motor, name: str) -> None:
+        value = next(v for v, n in spec.FAULT_CODE_NAMES.items() if n == name)
+        if value == spec.FAULT_CODE_NONE:
+            state = (spec.BOARD_STATE_DISARMED if motor.state == spec.BOARD_STATE_FAULT
+                     else motor.state)
+        else:
+            state = spec.BOARD_STATE_FAULT  # a fault code means the board is in FAULT
+        self._motor_set(motor, state=state, fault_code=value)
+
+    def _motors_apply_send(self) -> None:
+        self.motor_bench.enabled = self.motors_send_var.get()
+
+    def _motors_add(self) -> None:
+        try:
+            count = max(1, min(32, int(self.motors_add_count_var.get())))
+        except ValueError:
+            count = 1
+        for _ in range(count):
+            self.motor_bench.add()
+
+    def _motors_remove(self, index: int) -> None:
+        self.motor_bench.remove(index)
+
+    def _motors_reset(self) -> None:
+        self.motor_bench.reset()
+
+    def _motors_clear(self) -> None:
+        with self.motor_bench.lock:
+            self.motor_bench.motors = []
+
+    def _motors_set_online(self, online: bool) -> None:
+        with self.motor_bench.lock:
+            for motor in self.motor_bench.motors:
+                motor.online = online
+
+    def _update_motors(self) -> None:
+        """Called from _tick: bench -> widgets. Rows are rebuilt only when they change."""
+        bench = self.motor_bench
+        with bench.lock:
+            motors = list(bench.motors)
+            last_jog = bench.last_jog
+        if [id(m) for m in motors] != self._motors_built_for:
+            self._rebuild_motor_rows()
+        focused = self.root.focus_get()
+        for widgets in self._motor_widgets:
+            motor = widgets["motor"]
+            if widgets["entry"] is not focused and widgets["label"].get() != motor.label:
+                widgets["label"].set(motor.label)
+            if widgets["online"].get() != motor.online:
+                widgets["online"].set(motor.online)
+            state = spec.BOARD_STATE_NAMES.get(motor.state, "?")
+            if widgets["state"].get() != state:
+                widgets["state"].set(state)
+            fault = spec.FAULT_CODE_NAMES.get(motor.fault_code, "?")
+            if widgets["fault"].get() != fault:
+                widgets["fault"].set(fault)
+            widgets["position"].configure(text=f"{motor.position:+.2f} rad")
+            widgets["jog"].configure(text={1: "+", -1: "-"}.get(motor.jog_direction, ""))
+        shown = min(len(motors), HMI_MOTOR_ROWS_MAX)
+        self.motors_count_label.configure(
+            text=f"{len(motors)} motor(s); the HMI shows {shown}"
+                 + ("" if bench.enabled else " - NOT SENDING"))
+        if last_jog is None:
+            self.motors_jog_label.configure(text="no jog yet")
+        else:
+            axis_id, direction, verdict = last_jog
+            label = next((m.label for m in motors if m.axis_id == axis_id), f"axis {axis_id}")
+            self.motors_jog_label.configure(
+                text=f"last MotorJog: {label} {direction:+d} : {verdict}")
+
     def _build_cycle(self, parent: tk.Widget) -> None:
         frame = ttk.Frame(parent, padding=(8, 4))
         frame.pack(fill="x")
@@ -886,7 +1101,8 @@ class McbPanel:
             )
         )
         try:
-            self.harness = rtps_mcb_sim.SystemStatePublisher(args, car=self.car)
+            self.harness = rtps_mcb_sim.SystemStatePublisher(args, car=self.car,
+                                                             motors=self.motor_bench)
             self._estop_apply()  # the checkboxes outlive a reconnect
         except OSError as exc:
             # a bad address or a port already taken by another script
@@ -1077,6 +1293,7 @@ class McbPanel:
             self.status_label.configure(
                 text=f"seq {self.harness.seq} - {self._rate:.1f} Hz - {targets} target(s){paused}"
             )
+        self._update_motors()
         self.root.after(TICK_MS, self._tick)
 
     def _update_joystick(self) -> None:
