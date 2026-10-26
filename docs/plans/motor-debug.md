@@ -1,8 +1,18 @@
 # Motor debug list plan (branches `dev_ai_motor_debug`)
 
-Status: implemented on local `dev_ai_motor_debug` branches in rammp-rtps, RAMMP-mib-fw and
-pace-hmi-fw, flashed on the bench MIB and Tab5. Nothing has been pushed. The jog itself has not
-been tested on hardware (section 5). Written during an unattended session.
+Status (2026-10-26): implemented on `dev_ai_motor_debug` branches in rammp-rtps, RAMMP-mib-fw and
+pace-hmi-fw. The HMI side is tested on a Tab5 against the MCB simulator, jog included (section 5);
+a jog with a PACE RACER board on the network is still open. First written during an unattended
+session on 2026-10-21.
+
+Branches:
+
+- pace-hmi-fw: on `dev-estop` (PR #17, with #18's estop-core v0.3.0, espp 1.3.10 and RTPS tasks at
+  priority 20). Components are the newest published: espp 1.3.10, LVGL 9.6.0~1, w5500 2.0.1,
+  esp-dsp 1.8.2.
+- rammp-rtps: rammp-rtps `main`, then `feat/estop` merged (PR #10; a merge, so `3390723`, which
+  estop-core pins, stays reachable), then the motor commit. Once #10 is in `main`, this branch's
+  diff is the motor commit alone.
 
 Scope: the HMI builds its motor debug list from RTPS messages at run time, so adding a motor
 to or removing one from the shared axis table (`RAMMP_AXIS_TABLE` in rammp-rtps
@@ -64,7 +74,8 @@ changing them means rebuilding both firmwares.
   the seat axes:
   - the short name is the state (`OFF`, `DIS`, `ARM`, `STP`, `HLD`, `F<code>`);
   - the label is the MIB's;
-  - the value is the position in rad;
+  - the value is the position in rad, one decimal and no unit, like the seat rows ("0.00 rad"
+    overflowed the column and scrolled);
   - -/+ are greyed while the board is offline.
 - No SquareLine change: the rows reuse the existing SettingRow component.
 - Hold-to-run: `motor_jog_poll_cb` (100 ms) looks for a pressed -/+ button, or the stick
@@ -144,6 +155,23 @@ Hand test (2026-10-21, attended, no PACE RACER board connected):
   There are only two RTPS reader workers, so with it and the MibStatus handler both waiting
   behind a screen build, the e-stop reader was starved too.
 
+Bench (2026-10-26, Tab5 board 2 on `0d0a450`, MCB simulator and GUI on a PC on the same LAN, no
+MIB, no PACE RACER board):
+
+- Rows follow the list with no HMI rebuild: 4 (the axis table), then 22 (the page draws the first
+  16, ending at "Motor 15"), then 5; the page rebuilt itself each time with the page open.
+- OFF greys -/+ and no MotorJog is sent. A faulted row (F10, F5) sends; the MIB side refuses it.
+- Hold-to-run: a 1.0 s touch hold moved a row +1.00 rad, 0.6 s on - moved -0.60 rad; the row read
+  ARM while held, and one stop (direction 0) followed the release. The stick held right on the
+  focused row did the same.
+- With the e-stop latched by the MIB, a held + sent nothing.
+- Entering the PIN with the e-stop clear no longer re-latches it: the RTPS priority-20 change from
+  `dev-estop` fixed open item 3 below.
+- Remote-UI trap: a held `PRESS` is released when the hmi_ui.py connection closes, so a hold must
+  be sent on one `hmi_ui.Hmi` connection (one `hmi_ui.py raw` call per command never holds).
+- Not covered: the HMI keeps the last Motors list if the MIB stops sending it (the rows stay
+  enabled and a jog goes nowhere). A staleness timeout would grey them; not done.
+
 ## 6. Open items
 
 1. **MIB and LVGL 9.4 vs 9.6 (not from this change).** If MIB CI resolves 9.4.0, its build
@@ -151,7 +179,6 @@ Hand test (2026-10-21, attended, no PACE RACER board connected):
    MIB's `main/idf_component.yml`, or go back to `678b71a`. Not done here, because `aa157f5`
    reverted the second on purpose.
 2. A jog with a PACE RACER board online: the motor turns at 1 rad/s while + is held.
-3. **The e-stop deadman trips on a screen build (predates this change).** It blocks this
-   page, and any other screen that builds slowly, from being opened with the e-stop clear.
-   The RTPS worker priority fix on `dev_ai_rc` needs bringing to `dev-estop`.
+3. ~~The e-stop deadman trips on a screen build.~~ Fixed by `dev-estop`'s RTPS tasks at priority
+   20 (PR #18); checked on the bench 2026-10-26.
 4. Coast versus hold at the end of a jog (section 4).
