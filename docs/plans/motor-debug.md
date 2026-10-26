@@ -10,9 +10,9 @@ Branches:
 - pace-hmi-fw: on `dev-estop` (PR #17, with #18's estop-core v0.3.0, espp 1.3.10 and RTPS tasks at
   priority 20). Components are the newest published: espp 1.3.10, LVGL 9.6.0~1, w5500 2.0.1,
   esp-dsp 1.8.2.
-- rammp-rtps: rammp-rtps `main`, then `feat/estop` merged (PR #10; a merge, so `3390723`, which
-  estop-core pins, stays reachable), then the motor commit. Once #10 is in `main`, this branch's
-  diff is the motor commit alone.
+- rammp-rtps: rammp-rtps `main` (with #9, #10 and #14), then the motor commit alone.
+- RAMMP-mib-fw: on `main` (with #44, the e-stop recovery from #39), then the motor
+  commits and an LVGL `>=9.6.0` pin.
 
 Scope: the HMI builds its motor debug list from RTPS messages at run time, so adding a motor
 to or removing one from the shared axis table (`RAMMP_AXIS_TABLE` in rammp-rtps
@@ -188,6 +188,28 @@ stood in for a wheel.
   the same; it fails safe.
 - Bench network: the MIB serves DHCP on 192.168.4.1. Both boards on a home router left the Tab5
   with the router's lease and no route to the MIB; a Tab5 reset that won the MIB's offer fixed it.
+
+Adding and removing motors (2026-10-26, after the rebase onto rammp-rtps `main` and the MIB's
+`feat/estop-core`): one HMI image throughout, with DEBUG ACTUATORS open and the serial log held
+open (one boot banner for the whole run). The MIB was rebuilt and flashed with three axis tables:
+
+| MIB axis table | HMI log | Rows on the open page |
+|---|---|---|
+| the shipped 4 | `Motors arriving: 4 motors` (14.7 s) | Front caster L, Front caster R, Drive L, Drive R |
+| + Seat lift (4), Leg rest (5) | `6 motors` (303.8 s) | the 4, Seat lift, Leg rest |
+| Front caster L, Drive L, Drive R (renumbered 0-2) | `3 motors` (421.0 s) | those 3 |
+| the shipped 4 again | `4 motors` (510.9 s) | the first 4 |
+
+- A fake board on the new `rammp/seat_lift/motor_state` brought Seat lift from OFF to DIS 0.0
+  with -/+ enabled: an axis added on the MIB alone gets commands and a working row.
+- Re-run 2026-10-28 on the rebased branches (HMI `dev-estop`, MIB and rammp-rtps `main`): the
+  same 4 -> 6 -> 3 -> 4 (HMI log at 16, 281, 440 and 529 s, one boot); with the e-stop latched, a
+  held + on the new Seat lift row sent nothing (the board saw only DISARMED).
+- 6 axes need the MIB's RTPS pool raised by 2 per limit (the static_asserts in `mib_system.cpp`
+  say so at build time); the test used a scratch sdkconfig, not a committed one.
+- The MIB's `main` now has no e-stop clear input (`estop_clear_gpio = GPIO_NUM_NC`) and nothing
+  calls `start_clear_attempt()`, so its latch never clears and no jog can run; the jog was not
+  repeated after the rebase.
 
 ## 6. Open items
 
