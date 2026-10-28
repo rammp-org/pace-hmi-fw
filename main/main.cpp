@@ -257,6 +257,12 @@ static lv_obj_t *nav_menu_open = nullptr;
 // stick whenever it is false.
 static std::atomic<bool> stick_drives{false};
 
+// Whether the MIB is in AUTONOMOUS, where touching the stick hands control back
+// (rammp-rtps#14). The HMI is locked then, so without this the stick goes out
+// centred and only the button would reach the MIB. Written by the MibStatus
+// handler, read by the ADC task.
+static std::atomic<bool> stick_takes_over{false};
+
 // Defined with the burger menu (see "The burger menu, and moving around with
 // the joystick"); declared here for the screens and gestures above it.
 static void nav_use_group(lv_group_t *g, const lv_obj_t *screen);
@@ -404,11 +410,20 @@ static void mcb_status_label_observer(lv_observer_t *observer, lv_subject_t *) {
   // the MIB simply not enabled. It is the one thing the user has to act on
   // before anything moves, and the spec gives it the alert colour for that.
   // Locked outranks everything: the chair does not drive until it is asked to,
-  // whatever the MIB says.
+  // whatever the MIB says. SHARED drives from the Drive screen like ENABLED, and
+  // in AUTONOMOUS another node drives while the HMI stays locked. The full word,
+  // not "AUTO", which is a drive mode (446 of the cell's 468 px).
   if (kind == StatusKind::kDriveStatus) {
-    const bool active = lv_subject_get_int(&locked_subject) == 0 && connected &&
-                        state == MIB::MibSystemState::ENABLED;
-    show(active ? "ACTIVE" : "LOCKED", active ? ok : alert);
+    const bool unlocked = lv_subject_get_int(&locked_subject) == 0 && connected;
+    if (connected && state == MIB::MibSystemState::AUTONOMOUS) {
+      show("AUTONOMOUS", ok);
+    } else if (unlocked && state == MIB::MibSystemState::SHARED) {
+      show("SHARED", ok);
+    } else if (unlocked && state == MIB::MibSystemState::ENABLED) {
+      show("ACTIVE", ok);
+    } else {
+      show("LOCKED", alert);
+    }
     return;
   }
 
@@ -424,6 +439,8 @@ static void mcb_status_label_observer(lv_observer_t *observer, lv_subject_t *) {
   switch (state) {
   case MIB::MibSystemState::IDLE:
   case MIB::MibSystemState::ENABLED:
+  case MIB::MibSystemState::AUTONOMOUS:
+  case MIB::MibSystemState::SHARED:
     show(overridden ? override_text : "OK", ok);
     return;
   case MIB::MibSystemState::INITIALIZING:
@@ -431,10 +448,16 @@ static void mcb_status_label_observer(lv_observer_t *observer, lv_subject_t *) {
     // does not fit the cell.
     show(overridden ? override_text : "STARTING", muted);
     return;
-  default:
-    // ERROR, and any value this firmware does not know -- what a MIB running
-    // ahead of it sends.
+  case MIB::MibSystemState::ERROR:
     show(overridden ? override_text : "ERROR", alert);
+    return;
+  case MIB::MibSystemState::ESTOP:
+    show(overridden ? override_text : "E-STOP", alert);
+    return;
+  default:
+    // A value this firmware does not know -- what a MIB running ahead of it
+    // sends. Neutral, per rammp-rtps#14; mcb_ready() still refuses it.
+    show(overridden ? override_text : kStatusUnknownText, muted);
     return;
   }
 }
@@ -1246,13 +1269,15 @@ static void diagnostics_open();
 // Is the MCB currently telling us the chair is fit to drive, or to move the
 // seat? Requires a live
 // link as well as an OK state: if the status is stale we do not KNOW the state,
-// and "unknown" is not "known good" on a device that moves someone.
+// and "unknown" is not "known good" on a device that moves someone. SHARED is
+// driving from the Drive screen, with another node blending in.
 static bool mcb_ready() {
   const auto state = static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject));
   return lv_subject_get_int(&estop_subject) == kEStopNone &&
          static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) ==
              RtpsLinkState::CONNECTED &&
-         (state == MIB::MibSystemState::IDLE || state == MIB::MibSystemState::ENABLED);
+         (state == MIB::MibSystemState::IDLE || state == MIB::MibSystemState::ENABLED ||
+          state == MIB::MibSystemState::SHARED);
 }
 
 // The MIB disables manual seat control while it is driving, so the seat screen asks for
@@ -1263,6 +1288,19 @@ static bool seat_ready() {
              RtpsLinkState::CONNECTED &&
          static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject)) ==
              MIB::MibSystemState::IDLE;
+}
+
+// AUTONOMOUS or ESTOP, live: the MIB modes that stop the user driving and are not
+// faults, so they get their own banner. Empty for anything else, or with the link down.
+static std::optional<MIB::MibSystemState> mib_mode() {
+  const auto state = static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject));
+  const bool connected = static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) ==
+                         RtpsLinkState::CONNECTED;
+  if (connected &&
+      (state == MIB::MibSystemState::AUTONOMOUS || state == MIB::MibSystemState::ESTOP)) {
+    return state;
+  }
+  return std::nullopt;
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -1400,6 +1438,20 @@ static void fill_mib_reason_panel(lv_obj_t *panel, const char *title, const char
   lv_label_set_text(footer, error_footer[0] != '\0' ? error_footer : fallback_footer);
 }
 
+// Fills a panel with the MIB mode in force (mib_mode), if any. Returns whether
+// there was one, so the caller shows the panel.
+static bool fill_mib_mode_panel(lv_obj_t *panel) {
+  const auto mode = mib_mode();
+  if (!mode) {
+    return false;
+  }
+  const bool estop = *mode == MIB::MibSystemState::ESTOP;
+  fill_mib_reason_panel(panel, estop ? rammp::kHmiEStopTitle : rammp::kHmiAutonomousTitle,
+                        estop ? rammp::kHmiMibEStopText : rammp::kHmiAutonomousText,
+                        estop ? rammp::kHmiEStopFooter : rammp::kHmiAutonomousFooter);
+  return true;
+}
+
 // Binds `cb` on `panel` to every subject the cause depends on, so the subject
 // argument each observer gets is ignored: whichever fired, the answer depends
 // on all of them.
@@ -1443,6 +1495,12 @@ static void entry_refused_panel_observer(lv_observer_t *observer, lv_subject_t *
   // warning that must never wait for a push to be seen.
   if (lv_subject_get_int(&estop_subject) != kEStopNone) {
     fill_drive_blocked_panel(panel, rammp::kHmiLinkRefusedTitle, rammp::kHmiMcbRefusedTitle);
+    shown(true);
+    return;
+  }
+  // The MIB's own modes, the same way: up while the MIB reports them, and they
+  // say why any refusal behind them happened.
+  if (fill_mib_mode_panel(panel)) {
     shown(true);
     return;
   }
@@ -1497,6 +1555,11 @@ static void drive_screen_warning_observer(lv_observer_t *observer, lv_subject_t 
   // The e-stop before a refused exit: it is the reason the chair is stopping.
   if (lv_subject_get_int(&estop_subject) != kEStopNone) {
     fill_drive_blocked_panel(panel, rammp::kHmiLinkLostTitle, rammp::kHmiMcbFaultTitle);
+    banner_show(panel, true);
+    return;
+  }
+  // A MIB mode is not a fault: say which, for the moment before Locked takes over.
+  if (fill_mib_mode_panel(panel)) {
     banner_show(panel, true);
     return;
   }
@@ -1633,7 +1696,7 @@ static void entry_refused_show(int32_t which, uint32_t show_ms) {
 }
 
 // The DriveScreen is a view of one fact: the MIB is driving. It opens whenever
-// MibStatus says ENABLED and closes as soon as it stops saying so, whoever asked --
+// MibStatus says ENABLED or SHARED and closes as soon as it stops saying so, whoever asked --
 // this firmware's own DriveCommand is only how it asks the MIB to get there, and the
 // MIB can enter or leave driving without being asked. Anything else lets the screen
 // disagree with the chair, which is the one thing it must never do.
@@ -1645,7 +1708,8 @@ static void drive_screen_follow_state() {
   const bool connected = static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) ==
                          RtpsLinkState::CONNECTED;
   const auto state = static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject));
-  const bool driving = connected && state == MIB::MibSystemState::ENABLED;
+  const bool driving =
+      connected && (state == MIB::MibSystemState::ENABLED || state == MIB::MibSystemState::SHARED);
   const bool locked = lv_subject_get_int(&locked_subject) != 0;
 
   if (driving && locked) {
@@ -1674,10 +1738,11 @@ static void drive_screen_follow_state() {
     // runs nav_arrive, inside it.
     nav_menu_on_arrival = then_menu;
     set_locked(true);
-    if (!asked) {
+    if (!asked && !mib_mode()) {
       // The link going is not the MIB deciding anything: say which it was.
       // kRefusedDriveLost reads the cause live ("RTPS LINK") and clears when
-      // the MCB is back; kRefusedDriveStopped is the MIB's own decision.
+      // the MCB is back; kRefusedDriveStopped is the MIB's own decision. A MIB
+      // mode needs neither: its own banner says why.
       entry_refused_show(connected ? kRefusedDriveStopped : kRefusedDriveLost, kDriveRefusedShowMs);
     }
     return;
@@ -6139,8 +6204,9 @@ extern "C" void app_main(void) {
       // screens, as the spec draws it, so this is what keeps a push meant for
       // the next row from moving the chair. The bars keep moving, to show the
       // stick is being read. Quiet no-op until RTPS is up and a subscriber is
-      // discovered.
-      const bool neutral = calibrating || !stick_drives.load();
+      // discovered. In AUTONOMOUS the stick goes out whatever the screen, even
+      // mid-calibration: there it only ever stops the chair (stick_takes_over).
+      const bool neutral = !stick_takes_over.load() && (calibrating || !stick_drives.load());
       adc_published = rtps_comms_publish_adc(
           neutral ? 0.0f : stick_x, neutral ? 0.0f : stick_y, neutral ? 0.0f : stick.z(),
           joy_button_pressed.load() ? rammp::Buttons::JOYSTICK : rammp::Buttons::NONE);
@@ -6181,6 +6247,9 @@ extern "C" void app_main(void) {
   // RTPS handlers run on the RTPS task: subjects only, under the LVGL lock.
   rtps_comms_on_mib_status([](const MIB::MibStatus &status) {
     clock_note_mcb_time(status); // no LVGL: sets the system clock and the RTC
+    // Before the state subject, whose observers may ask the MIB to drive: by then a
+    // MIB that has left AUTONOMOUS no longer gets the stick.
+    stick_takes_over.store(status.systemState == MIB::MibSystemState::AUTONOMOUS);
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
     lv_subject_set_int(&mib_state_subject, static_cast<int32_t>(status.systemState));
     // What the MIB is actually driving with: the three profile buttons highlight from
