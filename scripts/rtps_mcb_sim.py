@@ -351,6 +351,10 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
             self.system_state = (spec.MIB_SYSTEM_STATE_ENABLED
                                  if request == spec.DRIVE_REQUEST_ENABLE
                                  else spec.MIB_SYSTEM_STATE_IDLE)
+        # As the MIB (RAMMP-mib-fw#43): DISABLE ends either autonomy mode.
+        elif (request == spec.DRIVE_REQUEST_DISABLE and self.system_state in (
+                spec.MIB_SYSTEM_STATE_AUTONOMOUS, spec.MIB_SYSTEM_STATE_SHARED)):
+            self.system_state = spec.MIB_SYSTEM_STATE_IDLE
 
     def apply_seat_command(self, axis_id: int, target: float) -> int:
         """Judge one seat request from the HMI, return the SEAT_RESULT_* verdict.
@@ -398,6 +402,10 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
                 if sample is not None:
                     self.joystick = sample
                     self.adc_rx_count += 1
+                    # As the MIB (RAMMP-mib-fw#43): any stick or button ends AUTONOMOUS.
+                    if self.system_state == spec.MIB_SYSTEM_STATE_AUTONOMOUS and any(sample):
+                        rtps_host.log("[drive] joystick touched: AUTONOMOUS -> IDLE")
+                        self.system_state = spec.MIB_SYSTEM_STATE_IDLE
             elif topic == spec.TOPIC_ESTOP:
                 message = spec.unpack_estop(payload)
                 if message is not None:
