@@ -263,6 +263,11 @@ static std::atomic<bool> stick_drives{false};
 // handler, read by the ADC task.
 static std::atomic<bool> stick_takes_over{false};
 
+// Whether the stick button's current press began in AUTONOMOUS. That press is spent
+// on taking over: it still reaches the MIB, but it neither selects nor counts as a
+// hold, even once the MIB is back in IDLE, until it is let go. LVGL lock.
+static bool button_takes_over = false;
+
 // Defined with the burger menu (see "The burger menu, and moving around with
 // the joystick"); declared here for the screens and gestures above it.
 static void nav_use_group(lv_group_t *g, const lv_obj_t *screen);
@@ -942,7 +947,8 @@ static void stick_button_edge(bool active) {
   static int64_t pressed_at_us = 0;
   if (active) {
     pressed_at_us = now;
-  } else if (now - pressed_at_us < kSelectMaxUs) {
+    button_takes_over = stick_takes_over.load();
+  } else if (!button_takes_over && now - pressed_at_us < kSelectMaxUs) {
     select_key.store(true);
   }
 
@@ -1115,7 +1121,7 @@ static void hold_poll(HoldGesture *g) {
 // The stick's own button. Reads the level the button callback mirrors out, not
 // the edge-latched select_key: a hold gesture needs to know the button is still
 // down, and select_key is consumed by the first indev read after the press.
-static bool joy_button_held() { return joy_button_pressed.load(); }
+static bool joy_button_held() { return joy_button_pressed.load() && !button_takes_over; }
 
 /////////////////////////////////////////////////////////////////////////////
 // Lock / unlock, and the LockedScreen gesture
@@ -6154,6 +6160,8 @@ extern "C" void app_main(void) {
       const float kKeyRelease = kKeyEngage * 0.5f;
       {
         static bool engaged = false;
+        static bool takes_over = false;
+        const bool was_engaged = engaged;
         const float x = stick_x;
         const float y = stick_y;
         const float mag = std::max(std::abs(x), std::abs(y));
@@ -6164,10 +6172,17 @@ extern "C" void app_main(void) {
         } else if (mag < kKeyRelease) {
           engaged = false;
         }
+        // Like the button: a push that began in AUTONOMOUS is spent on taking over
+        // and moves no focus until the stick is let go.
+        if (!engaged) {
+          takes_over = false;
+        } else if (!was_engaged && stick_takes_over.load()) {
+          takes_over = true;
+        }
         const uint32_t was = joy_key.load();
         if (remote_key.load() != 0) {
           joy_key.store(remote_key.load());
-        } else if (!engaged) {
+        } else if (!engaged || takes_over) {
           joy_key.store(0);
         } else if (std::abs(x) >= std::abs(y)) {
           joy_key.store(x > 0 ? LV_KEY_RIGHT : LV_KEY_LEFT);
