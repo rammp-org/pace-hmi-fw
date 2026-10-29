@@ -48,6 +48,9 @@ constexpr const char *to_string(MIB::MibSystemState v) {
          : v == MIB::MibSystemState::IDLE       ? "IDLE"
          : v == MIB::MibSystemState::ENABLED    ? "ENABLED"
          : v == MIB::MibSystemState::ERROR      ? "ERROR"
+         : v == MIB::MibSystemState::AUTONOMOUS ? "AUTONOMOUS"
+         : v == MIB::MibSystemState::SHARED     ? "SHARED"
+         : v == MIB::MibSystemState::ESTOP      ? "ESTOP"
                                                 : "?";
 }
 
@@ -266,6 +269,18 @@ static_assert(sizeof(kHmiEStopFooter) <= kErrorFooterLen &&
                   sizeof(kHmiEStopFaultFooter) <= kErrorFooterLen &&
                   sizeof(kHmiEStopLinkFooter) <= kErrorFooterLen,
               "e-stop footer outgrows the banner it shares with MIB faults");
+
+/* The MIB's own modes (rammp-rtps#14): up for as long as the MIB reports them. ESTOP uses
+   the e-stop title and footer above. The body is the MIB's error_message when it sent one. */
+inline constexpr char kHmiAutonomousTitle[] = "AUTONOMOUS DRIVING";
+inline constexpr char kHmiAutonomousText[] = "ANOTHER NODE IS DRIVING";
+inline constexpr char kHmiAutonomousFooter[] = "Touch the joystick to take over";
+inline constexpr char kHmiMibEStopText[] = "MIB IS IN EMERGENCY STOP";
+static_assert(sizeof(kHmiAutonomousText) <= kErrorTextLen &&
+                  sizeof(kHmiMibEStopText) <= kErrorTextLen,
+              "mode body outgrows the banner it shares with MIB faults");
+static_assert(sizeof(kHmiAutonomousFooter) <= kErrorFooterLen,
+              "mode footer outgrows the banner it shares with MIB faults");
 
 } // namespace rammp
 
