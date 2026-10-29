@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <mutex>
 #include <numeric>
 #include <optional>
 #include <stdlib.h>
@@ -2320,6 +2321,8 @@ static void rd_keypad_cb(lv_event_t *e) {
 //              SeatCommand, and a row's number changes only when MibStatus says
 //              so. That keeps a limit or an interlock one decision made in one
 //              place, instead of two boards disagreeing about where the seat is.
+//              Below the seat axes, one row per motor in the MIB's Motors list
+//              (see "Motor debug rows").
 //
 // Memory: the screen and its rows exist only while it is up - see "Screens
 // built on demand".
@@ -2422,7 +2425,10 @@ static_assert(std::size(kSettingParamNames) == SETTINGS_PARAM_COUNT,
 static_assert(std::size(kSettingParamValue) == SETTINGS_PARAM_COUNT,
               "every settings_spec.h parameter needs its subject here");
 
-static constexpr int kSettingRowsMax = std::max<int>(rammp::kSeatAxisCount, SETTINGS_PARAM_COUNT);
+// The most motor rows the actuators page shows; a longer Motors list is cut here.
+static constexpr int kMotorRowsMax = 16;
+static constexpr int kSettingRowsMax =
+    std::max<int>(rammp::kSeatAxisCount + kMotorRowsMax, SETTINGS_PARAM_COUNT);
 static SettingRow setting_rows[kSettingRowsMax];
 static int setting_row_count; // rows on the page that is up; 0 while the screen is not
 static int setting_cursor;    // which row the joystick is on
@@ -2435,6 +2441,22 @@ static lv_subject_t setting_page_subject;
 // point at them, and the MCB keeps them current with no page up.
 static lv_subject_t seat_axis_value[rammp::kSeatAxisCount];
 static uint8_t seat_axis_count; // actuators in the table
+
+// Motor debug rows: the motors come from the MIB's Motors message at run time, not
+// from a table compiled in here, so a motor added to or removed from the MIB's axis
+// table appears or goes without rebuilding the HMI. LVGL task only (motor_jog_poll_cb
+// applies each sample); the rows on screen are rebuilt when motor_list_version moves.
+struct MotorRowInfo {
+  uint8_t axis_id;
+  char state[8];  // the row's short name: "OFF", "ARM", "F2"...
+  char label[24]; // the row's label: "Drive L"
+};
+static MotorRowInfo motor_info[kMotorRowsMax];
+static int motor_info_count;
+static uint32_t motor_list_version; // +1 when the ids or labels change
+static uint32_t motor_rows_version; // what the rows on screen were built from
+// Each motor's position in tenths of a radian; kValueUnknown while it is offline.
+static lv_subject_t motor_position[kMotorRowsMax];
 
 // What a value reads before it is known - only ever an actuator the MCB has
 // not reported yet. Not zero: zero is a position an actuator can genuinely be
@@ -2749,8 +2771,12 @@ static void setting_step(const SettingRow *row, int direction) {
     refusal_feedback(); // not while driving
     return;
   }
+  const bool actuators = lv_subject_get_int(&setting_page_subject) == kActuatorsPage;
+  if (actuators && row->index >= seat_axis_count) {
+    return; // a motor row is hold-to-run: motor_jog_poll_cb sends while it is held
+  }
   press_flash(button);
-  if (lv_subject_get_int(&setting_page_subject) == kActuatorsPage) {
+  if (actuators) {
     // A request: the value moves only when the MCB's state sample says so.
     seat_step(static_cast<size_t>(row->index), direction < 0 ? -1 : 1);
     return;
@@ -2919,6 +2945,14 @@ static void setting_page_open(int32_t page) {
                        specs[i].step, specs[i].decimals, nullptr},
                       &seat_axis_value[i], true);
     }
+    // No range: a motor turns as far as it is jogged. Position in tenths of a rad, with no
+    // unit, like the seat rows: "0.00 rad" overflowed the value column and scrolled.
+    for (int i = 0; i < motor_info_count; i++) {
+      setting_row_add(
+          {motor_info[i].state, motor_info[i].label, INT32_MIN + 1, INT32_MAX, 1, 1, nullptr},
+          &motor_position[i], false);
+    }
+    motor_rows_version = motor_list_version;
   } else {
     for (int i = 0; i < SETTINGS_PARAM_COUNT; i++) {
       if (kSettingParams[i].page == page) {
@@ -2937,6 +2971,130 @@ static void setting_page_open(int32_t page) {
   lv_subject_set_int(&setting_page_subject, page);
   _ui_screen_change(&ui_SettingsScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
                     &ui_SettingsScreen_screen_init);
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// Motor debug rows (the actuators page, below the seat axes)
+//
+// One row per entry of the MIB's Motors message, in its order: the short name is
+// the board's state, the label the MIB's, the number its position. -/+ (or the
+// stick left/right on the focused row) is hold-to-run: while one is held,
+// motor_jog_poll_cb resends MotorJog every kMotorJogResendMs, and the MIB stops
+// the motor when they stop coming. The MIB picks the speed and refuses a jog
+// unless it is IDLE with the e-stop clear.
+/////////////////////////////////////////////////////////////////////////////
+
+static constexpr uint32_t kMotorJogResendMs = 100; // the spec: at least every 100 ms
+
+static void motor_state_name(const rammp::MotorSummary &m, char *out, size_t out_size) {
+  if (m.online == 0) {
+    lv_snprintf(out, out_size, "OFF");
+    return;
+  }
+  switch (m.state) {
+  case rammp::BoardState::DISARMED:
+    lv_snprintf(out, out_size, "DIS");
+    return;
+  case rammp::BoardState::ARMED:
+    lv_snprintf(out, out_size, "ARM");
+    return;
+  case rammp::BoardState::SAFE_STOPPING:
+    lv_snprintf(out, out_size, "STP");
+    return;
+  case rammp::BoardState::HOLDING:
+    lv_snprintf(out, out_size, "HLD");
+    return;
+  case rammp::BoardState::FAULT:
+    lv_snprintf(out, out_size, "F%u", static_cast<unsigned>(m.fault_code));
+    return;
+  }
+  lv_snprintf(out, out_size, "?%u", static_cast<unsigned>(m.state));
+}
+
+// The latest Motors sample, handed from the RTPS task to the LVGL task. Its own lock,
+// held only for the copy: an RTPS worker must never wait on lvgl_mutex. A screen build
+// holds that for up to a second, and with only two reader workers, two handlers stuck
+// behind it starve the e-stop's reader until the MIB's deadman latches.
+static std::mutex motors_rx_mutex;
+static rammp::Motors motors_rx;
+static bool motors_rx_new = false;
+
+static void motors_receive(const rammp::Motors &m) { // RTPS task
+  std::lock_guard<std::mutex> lock(motors_rx_mutex);
+  motors_rx = m;
+  motors_rx_new = true;
+}
+
+// A Motors sample. LVGL task: data and subjects only, the rows themselves are
+// rebuilt by the poll.
+static void motors_apply(const rammp::Motors &m) {
+  const int count = std::min<int>(static_cast<int>(m.motors.size()), kMotorRowsMax);
+  bool changed = count != motor_info_count;
+  for (int i = 0; i < count; i++) {
+    const rammp::MotorSummary &motor = m.motors[i];
+    MotorRowInfo &info = motor_info[i];
+    if (info.axis_id != motor.axis_id ||
+        strncmp(info.label, motor.label.c_str(), sizeof(info.label) - 1) != 0) {
+      changed = true;
+      info.axis_id = motor.axis_id;
+      lv_snprintf(info.label, sizeof(info.label), "%s", motor.label.c_str());
+    }
+    motor_state_name(motor, info.state, sizeof(info.state));
+    lv_subject_set_int(&motor_position[i],
+                       motor.online != 0 ? static_cast<int32_t>(std::lround(motor.position * 10.0f))
+                                         : kValueUnknown);
+  }
+  motor_info_count = count;
+  if (changed) {
+    motor_list_version++;
+  }
+}
+
+// LVGL task. Keeps the motor rows in step with the list, and sends the jog for the
+// one held, or a single stop when the hold ends.
+static void motor_jog_poll_cb(lv_timer_t *) {
+  static int held_axis = -1; // the axis being jogged; -1 = none
+  std::optional<rammp::Motors> sample;
+  {
+    std::lock_guard<std::mutex> lock(motors_rx_mutex);
+    if (motors_rx_new) {
+      sample = std::move(motors_rx);
+      motors_rx_new = false;
+    }
+  }
+  if (sample) {
+    motors_apply(*sample);
+  }
+  const bool up = lv_screen_active() == ui_SettingsScreen &&
+                  lv_subject_get_int(&setting_page_subject) == kActuatorsPage;
+  if (up && motor_rows_version != motor_list_version) {
+    setting_page_open(kActuatorsPage); // a motor came or went: the rows follow the list
+  }
+  int axis = -1;
+  int8_t direction = 0;
+  for (int i = seat_axis_count; up && i < setting_row_count && direction == 0; i++) {
+    const SettingRow &row = setting_rows[i];
+    const MotorRowInfo &info = motor_info[i - seat_axis_count];
+    lv_obj_t *name = ui_comp_get_child(row.row, UI_COMP_SETTINGROW_HEAD_NAMES_SHORT);
+    if (strcmp(lv_label_get_text(name), info.state) != 0) {
+      lv_label_set_text(name, info.state); // only on a change: a set redraws the row
+    }
+    const uint32_t key = setting_cursor == i ? joy_key.load() : 0;
+    const bool minus = !lv_obj_has_state(row.minus, LV_STATE_DISABLED) &&
+                       (lv_obj_has_state(row.minus, LV_STATE_PRESSED) || key == LV_KEY_LEFT);
+    const bool plus = !lv_obj_has_state(row.plus, LV_STATE_DISABLED) &&
+                      (lv_obj_has_state(row.plus, LV_STATE_PRESSED) || key == LV_KEY_RIGHT);
+    if (minus != plus) {
+      axis = info.axis_id;
+      direction = plus ? 1 : -1;
+    }
+  }
+  if (direction != 0) {
+    rtps_comms_publish_motor_jog(static_cast<uint8_t>(axis), direction);
+  } else if (held_axis >= 0) {
+    rtps_comms_publish_motor_jog(static_cast<uint8_t>(held_axis), 0); // let go: stop now
+  }
+  held_axis = axis;
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -5771,6 +5929,10 @@ extern "C" void app_main(void) {
   press_flash_timer = lv_timer_create(press_flash_cb, kPressFlashMs, nullptr);
   lv_timer_pause(press_flash_timer);
   setting_group = lv_group_create();
+  for (lv_subject_t &position : motor_position) {
+    lv_subject_init_int(&position, kValueUnknown);
+  }
+  lv_timer_create(motor_jog_poll_cb, kMotorJogResendMs, nullptr);
 
   // Initialised before the screen's warning panel ever binds to it.
   lv_subject_init_int(&setting_page_subject, SETTINGS_PAGE_UI);
@@ -6298,6 +6460,7 @@ extern "C" void app_main(void) {
       }
     }
   });
+  rtps_comms_on_motors(motors_receive); // no lvgl_mutex: see motors_receive
   if (!rtps_comms_start()) {
     logger.warn("RTPS comms not started (Ethernet bring-up failed)");
   }

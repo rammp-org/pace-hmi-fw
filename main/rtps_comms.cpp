@@ -74,11 +74,13 @@ Publisher<rammp::UInt32> counter_pub;
 Publisher<rammp::XYTwist> joystick_pub;
 Publisher<rammp::SeatCommand> seat_pub;
 Publisher<rammp::DriveCommand> drive_pub;
+Publisher<rammp::MotorJog> motor_jog_pub;
 Publisher<rammp::SelfTestReport> report_pub;
 
 std::function<void(float)> brightness_handler;
 std::function<void(const MIB::MibStatus &)> mib_status_handler;
 std::function<void(const rammp::Diagnostics &)> diagnostics_handler;
+std::function<void(const rammp::Motors &)> motors_handler;
 std::function<void(uint8_t)> selftest_run_handler;
 std::function<void(uint16_t, int)> selftest_pong_handler;
 
@@ -199,6 +201,17 @@ void on_diagnostics(const rammp::Diagnostics &d) {
   }
   if (diagnostics_handler) {
     diagnostics_handler(d);
+  }
+}
+
+void on_motors(const rammp::Motors &m) {
+  static size_t last_count = SIZE_MAX; // log the first sample, then only a changed motor count
+  if (m.motors.size() != last_count) {
+    last_count = m.motors.size();
+    logger.info("Motors arriving: {} motors", last_count);
+  }
+  if (motors_handler) {
+    motors_handler(m);
   }
 }
 
@@ -368,17 +381,19 @@ bool start_participant() {
     return false;
   }
 
-  // 6 writers + 5 readers, plus SPDP's pair: the budget set in sdkconfig.defaults
+  // 7 writers + 6 readers, plus SPDP's pair: the budget set in sdkconfig.defaults
   counter_pub = make_publisher(rammp::kHmiCounter);
   joystick_pub = make_publisher(rammp::kJoystickXYTwist);
   seat_pub = make_publisher(rammp::kJoystickSeatCommand);
   drive_pub = make_publisher(rammp::kJoystickDriveCommand);
   report_pub = make_publisher(rammp::kSelfTestReport);
+  motor_jog_pub = make_publisher(rammp::kJoystickMotorJog);
   const bool ok = counter_pub && joystick_pub && seat_pub && drive_pub && report_pub &&
-                  subscribe(rammp::kHmiCommand, on_command) &&
+                  motor_jog_pub && subscribe(rammp::kHmiCommand, on_command) &&
                   subscribe(rammp::kHmiBrightness, on_brightness) &&
                   subscribe(MIB::kMibStatus, on_mib_status) &&
-                  subscribe(rammp::kMcbDiagnostics, on_diagnostics);
+                  subscribe(rammp::kMcbDiagnostics, on_diagnostics) &&
+                  subscribe(rammp::kMibMotors, on_motors);
   if (!ok) {
     return false;
   }
@@ -413,6 +428,9 @@ void rtps_comms_on_mib_status(std::function<void(const MIB::MibStatus &)> handle
 }
 void rtps_comms_on_diagnostics(std::function<void(const rammp::Diagnostics &)> handler) {
   diagnostics_handler = std::move(handler);
+}
+void rtps_comms_on_motors(std::function<void(const rammp::Motors &)> handler) {
+  motors_handler = std::move(handler);
 }
 void rtps_comms_on_selftest_run(std::function<void(uint8_t)> handler) {
   selftest_run_handler = std::move(handler);
@@ -450,6 +468,13 @@ bool rtps_comms_publish_seat(rammp::SeatAxis axis, float target) {
     return false;
   }
   return publish(seat_pub, rammp::SeatCommand{axis, target});
+}
+
+bool rtps_comms_publish_motor_jog(uint8_t axis_id, int8_t direction) {
+  if (hmi_estop.is_active()) {
+    return false;
+  }
+  return publish(motor_jog_pub, rammp::MotorJog{axis_id, direction});
 }
 
 bool rtps_comms_publish_selftest_ping(uint16_t seq) {

@@ -68,12 +68,160 @@ SPEED_FULL_TRAVEL_SECONDS = 3.0
 #: stick from drifting the number.
 SPEED_DEADZONE = 0.15
 
+#: How often the MIB sends its Motors list (RAMMP-mib-fw: every 200 ms).
+MOTORS_PERIOD_S = 0.2
+#: The MIB stops a jogged motor this long after the last MotorJog (the spec's contract).
+MOTOR_JOG_TIMEOUT_S = 0.3
+#: The speed the MIB jogs at, rad/s at the output shaft (motor_jog_velocity_radps).
+MOTOR_JOG_SPEED = 1.0
+
+
+class SimMotor:
+    """One motor board as the bench MIB reports it in Motors. The bench owns every field:
+    `online` is whether a MotorState is "arriving", `state` and `fault_code` what it says."""
+
+    def __init__(self, axis_id: int, label: str, online: bool = True) -> None:
+        self.axis_id = axis_id
+        self.label = label
+        self.online = online
+        self.state = spec.BOARD_STATE_DISARMED
+        self.fault_code = spec.FAULT_CODE_NONE
+        self.position = 0.0
+        self.velocity = 0.0
+        self.jog_direction = 0  # -1 / +1 while a jog runs
+        self.jog_until = 0.0  # time.monotonic() the jog lapses without another MotorJog
+        self.jog_count = 0  # MotorJog samples that moved it, for the bench to show
+
+    def summary(self) -> "spec.MotorSummary":
+        return spec.MotorSummary(self.axis_id, self.online, self.state, self.fault_code,
+                                 self.position, self.velocity, self.label)
+
+
+class MotorBench:
+    """The MIB's motor debug list: what goes out in Motors and what a MotorJog does.
+
+    Plays RAMMP-mib-fw's rules: a jog runs only while the MIB is IDLE with the e-stop
+    clear, on a board that is online and not faulted; it moves the motor at
+    MOTOR_JOG_SPEED, and stops MOTOR_JOG_TIMEOUT_S after the last MotorJog (or at once on
+    direction 0), leaving the board DISARMED. Owned by the caller so a GUI's rows outlive
+    a connection, like the car. Every method takes the lock: the network thread jogs,
+    the publisher thread steps, the GUI edits."""
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        #: one per Motors entry, in send order; seeded from the spec's RAMMP_AXIS_TABLE
+        self.motors: list[SimMotor] = [SimMotor(a.id, a.label) for a in spec.AXES]
+        self.enabled = True  # False = stop sending Motors (the MIB gone quiet)
+        self.seq = 0
+        self._last_step = time.monotonic()
+        #: (axis_id, direction, verdict) of the last MotorJog, for the bench to show
+        self.last_jog: tuple[int, int, str] | None = None
+
+    def next_axis_id(self) -> int:
+        with self.lock:
+            used = {m.axis_id for m in self.motors}
+        return next(i for i in range(256) if i not in used)
+
+    def add(self, label: str = "", axis_id: int | None = None, online: bool = True) -> SimMotor:
+        axis_id = self.next_axis_id() if axis_id is None else axis_id
+        motor = SimMotor(axis_id, label or f"Motor {axis_id}", online)
+        with self.lock:
+            self.motors.append(motor)
+        return motor
+
+    def remove(self, index: int) -> None:
+        with self.lock:
+            if 0 <= index < len(self.motors):
+                del self.motors[index]
+
+    def reset(self) -> None:
+        """Back to the spec's axis table, all online and DISARMED."""
+        with self.lock:
+            self.motors = [SimMotor(a.id, a.label) for a in spec.AXES]
+
+    def jog(self, axis_id: int, direction: int, may_move: bool, why_not: str) -> str:
+        """Take one MotorJog; returns the verdict, which the caller logs on a change."""
+        now = time.monotonic()
+        with self.lock:
+            motor = next((m for m in self.motors if m.axis_id == axis_id), None)
+            if motor is None:
+                verdict = "unknown axis"
+            elif direction == 0:
+                verdict = "stop"
+                self._stop(motor)
+            elif not may_move:
+                verdict = f"refused: {why_not}"
+                self._stop(motor)
+            elif not motor.online:
+                verdict = "refused: offline"
+            elif motor.state == spec.BOARD_STATE_FAULT:
+                verdict = "refused: fault"
+            else:
+                verdict = "moving"
+                motor.jog_direction = 1 if direction > 0 else -1
+                motor.jog_until = now + MOTOR_JOG_TIMEOUT_S
+                motor.jog_count += 1
+                motor.state = spec.BOARD_STATE_ARMED
+            self.last_jog = (axis_id, direction, verdict)
+        return verdict
+
+    @staticmethod
+    def _stop(motor: SimMotor) -> None:
+        if motor.jog_direction != 0:
+            motor.jog_direction = 0
+            motor.velocity = 0.0
+            if motor.state == spec.BOARD_STATE_ARMED:
+                motor.state = spec.BOARD_STATE_DISARMED
+
+    def step(self) -> list[str]:
+        """Move jogged motors on real elapsed time, lapse stale jogs; returns log lines."""
+        now = time.monotonic()
+        dt = min(now - self._last_step, 0.5)
+        self._last_step = now
+        events = []
+        with self.lock:
+            for motor in self.motors:
+                if motor.jog_direction == 0:
+                    continue
+                if now > motor.jog_until or not motor.online or \
+                        motor.state == spec.BOARD_STATE_FAULT:
+                    self._stop(motor)
+                    events.append(f"[motors] jog {motor.label} stopped (no MotorJog for "
+                                  f"{MOTOR_JOG_TIMEOUT_S * 1000:.0f} ms, or the board went away)")
+                    continue
+                motor.velocity = motor.jog_direction * MOTOR_JOG_SPEED
+                motor.position += motor.velocity * dt
+        return events
+
+    def stop_all(self) -> None:
+        with self.lock:
+            for motor in self.motors:
+                self._stop(motor)
+
+    def pack(self) -> bytes:
+        with self.lock:
+            payload = spec.pack_motors([m.summary() for m in self.motors], self.seq)
+            self.seq = (self.seq + 1) & 0xFF
+        return payload
+
+    def describe(self) -> str:
+        with self.lock:
+            rows = [f"  {i}: id {m.axis_id} '{m.label}' "
+                    + (f"{spec.BOARD_STATE_NAMES.get(m.state, '?')}"
+                       + (f" {spec.FAULT_CODE_NAMES.get(m.fault_code, '?')}"
+                          if m.state == spec.BOARD_STATE_FAULT else "")
+                       if m.online else "OFFLINE")
+                    + f" pos {m.position:+.2f} rad"
+                    for i, m in enumerate(self.motors)]
+        return "\n".join(rows) if rows else "  (no motors)"
+
 
 class SystemStatePublisher(rtps_host.RtpsHostHarness):
     """Plays the MCB: publishes SystemState, and answers the joystick's commands."""
 
     def __init__(self, args: argparse.Namespace,
-                 car: "rtps_drive_game.CarModel | None" = None) -> None:
+                 car: "rtps_drive_game.CarModel | None" = None,
+                 motors: MotorBench | None = None) -> None:
         super().__init__(args)
         # One field where there were two: MibSystemState says both whether the chair
         # drives (ENABLED) and whether it is faulted (ERROR).
@@ -237,6 +385,47 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
             reliable=False,
             entity_index=len(self.local_readers),
         ))
+
+        # ---- motor debug list: Motors out, MotorJog in -------------------
+        # The rows the HMI's DEBUG ACTUATORS page draws come from this list, not from a
+        # table in the HMI, so adding one here is how to see the HMI follow a new motor.
+        self.motors = motors if motors is not None else MotorBench()
+        self._motors_thread: threading.Thread | None = None
+        self._motors_writer = rtps_host.WriterConfig(
+            topic_name=spec.TOPIC_MIB_MOTORS,
+            type_name=spec.TYPE_MOTORS,
+            reliable=False,
+            entity_index=len(self.local_writers),
+        )
+        self.local_writers.append(self._motors_writer)
+        self.local_readers.append(rtps_host.ReaderConfig(
+            topic_name=spec.TOPIC_JOYSTICK_MOTOR_JOG,
+            type_name=spec.TYPE_MOTOR_JOG,
+            reliable=False,
+            entity_index=len(self.local_readers),
+        ))
+
+    def _motors_loop(self) -> None:
+        """Every MOTORS_PERIOD_S: move or lapse the jogs, then send the list. Its own
+        thread, like the e-stop's: the status tick is slower than the MIB's 200 ms."""
+        while True:
+            for event in self.motors.step():
+                rtps_host.log(event)
+            if not self.paused and self.motors.enabled:
+                self._send_on(self._motors_writer, self.motors.pack())
+            time.sleep(MOTORS_PERIOD_S)
+
+    def apply_motor_jog(self, axis_id: int, direction: int) -> str:
+        """One MotorJog from the HMI. The MIB jogs only while IDLE with the e-stop clear."""
+        with self.estop_lock:
+            latched = self.estop.latched
+        if latched:
+            why_not = "e-stop latched"
+        elif self.system_state != spec.MIB_SYSTEM_STATE_IDLE:
+            why_not = f"MIB {spec.MIB_SYSTEM_STATE_NAMES.get(self.system_state, '?')}, not IDLE"
+        else:
+            why_not = ""
+        return self.motors.jog(axis_id, direction, not why_not, why_not)
 
     def _estop_loop(self) -> None:
         """Every e-stop period: deadman and clear progress, then this MIB's own message.
@@ -411,6 +600,16 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
                 if message is not None:
                     with self.estop_lock:
                         self.estop.on_message(message, time.monotonic())
+            elif topic == spec.TOPIC_JOYSTICK_MOTOR_JOG:
+                command = spec.unpack_motor_jog(payload)
+                if command is None:
+                    continue
+                previous = self.motors.last_jog
+                verdict = self.apply_motor_jog(*command)
+                # Resent every 100 ms while held: log the changes, not each repeat.
+                if previous is None or previous != self.motors.last_jog:
+                    axis_id, direction = command
+                    rtps_host.log(f"[motors] jog axis {axis_id} {direction:+d}: {verdict}")
             elif topic == spec.TOPIC_HMI_COUNTER:
                 self._answer_selftest_ping(payload)
             elif topic == spec.TOPIC_SELFTEST_REPORT:
@@ -509,6 +708,8 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
         if self._estop_thread is None:  # first tick: the network is up
             self._estop_thread = threading.Thread(target=self._estop_loop, daemon=True)
             self._estop_thread.start()
+            self._motors_thread = threading.Thread(target=self._motors_loop, daemon=True)
+            self._motors_thread.start()
         if self.paused:
             return
         self.publish_diagnostics()
@@ -629,6 +830,12 @@ HELP_TEXT = """commands:
   ed              e-stop: toggle the deadman
   eq              e-stop: toggle sending (quiet = the HMI's E-STOP LINK LOST case)
   es              e-stop: show the latch
+  m               motors: list what Motors sends
+  m+ [label]      motors: add one (next free axis id)
+  m- <n>          motors: remove row n
+  mo <n>          motors: toggle row n online/offline
+  mf <n> [code]   motors: fault row n with FaultCode `code` (default 1); again clears it
+  mq              motors: toggle sending Motors at all
   p               pause publishing (HMI should go stale after
                   MIB_STATUS_TIMEOUT_MS: blinking orange RTPS, '---')
   r               resume publishing (HMI should go straight back to green)
@@ -636,11 +843,48 @@ HELP_TEXT = """commands:
   q               quit"""
 
 
+def run_motor_command(motors: MotorBench, command: str) -> None:
+    """One of the CLI's m commands (see HELP_TEXT)."""
+    verb, _, rest = command.partition(" ")
+    verb = verb.lower()
+    args = rest.split()
+
+    def row() -> SimMotor | None:
+        try:
+            return motors.motors[int(args[0])]
+        except (IndexError, ValueError):
+            print("  which row? (m lists them)")
+            return None
+
+    if verb == "m+":
+        motors.add(rest.strip())
+    elif verb == "m-":
+        if row() is not None:
+            motors.remove(int(args[0]))
+    elif verb == "mo":
+        motor = row()
+        if motor is not None:
+            with motors.lock:
+                motor.online = not motor.online
+    elif verb == "mf":
+        motor = row()
+        if motor is not None:
+            with motors.lock:
+                if motor.state == spec.BOARD_STATE_FAULT:
+                    motor.state, motor.fault_code = spec.BOARD_STATE_DISARMED, spec.FAULT_CODE_NONE
+                else:
+                    motor.state = spec.BOARD_STATE_FAULT
+                    motor.fault_code = int(args[1]) if len(args) > 1 else spec.FAULT_CODE_WATCHDOG
+    elif verb == "mq":
+        motors.enabled = not motors.enabled
+
+
 def run_interactive(harness: SystemStatePublisher) -> None:
     print(HELP_TEXT)
     while True:
         try:
-            command = input("mcb> ").strip().lower()
+            typed = input("mcb> ").strip()
+            command = typed.lower()
         except (EOFError, KeyboardInterrupt):
             return
         if command in ("q", "quit", "exit"):
@@ -671,6 +915,11 @@ def run_interactive(harness: SystemStatePublisher) -> None:
             elif command == "eq":
                 harness.estop_silent = not harness.estop_silent
             print(f"  {harness.estop_describe()}")
+            continue
+        elif command == "m" or command.startswith(("m+", "m-", "mo", "mf", "mq")):
+            run_motor_command(harness.motors, typed)  # as typed: m+ keeps the label's case
+            print(harness.motors.describe()
+                  + ("" if harness.motors.enabled else "\n  [not sending Motors]"))
             continue
         elif command in ("e", "err", "error"):
             harness.system_state = spec.MIB_SYSTEM_STATE_ERROR
