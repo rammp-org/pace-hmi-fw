@@ -28,7 +28,7 @@ The UI follows RAMMP UI spec V2. Every screen has the same frame: the status bar
 | | | |
 |:--:|:--:|:--:|
 | <img src="docs/screenshots/LockedScreen.png" width="200"> | <img src="docs/screenshots/MenuOverlay.png" width="200"> | <img src="docs/screenshots/DriveScreen.png" width="200"> |
-| Locked: hold the button to drive | The burger menu | Drive: speed, range, drive mode |
+| Locked: push and hold the stick to drive | The burger menu | Drive: speed, range, drive mode |
 | <img src="docs/screenshots/SeatScreen.png" width="200"> | <img src="docs/screenshots/SeatAxisScreen.png" width="200"> | <img src="docs/screenshots/SkunkWorksScreen.png" width="200"> |
 | Seat Functions | One motion: jog, presets, "<" back | Skunk Works: one-press actions |
 | <img src="docs/screenshots/SettingsScreen.png" width="200"> | <img src="docs/screenshots/DiagnosticsScreen.png" width="200"> | <img src="docs/screenshots/LogScreen.png" width="200"> |
@@ -63,6 +63,7 @@ The UI follows RAMMP UI spec V2. Every screen has the same frame: the status bar
 | Stick left/right, Stick fwd/back | mirror an axis |
 | Stick axes | swap X and Y |
 | Sounds | touch and joystick clicks; warnings sound either way |
+| Start driving | Stick (default): push and hold the stick forward on the Locked screen; Button: hold the stick button. The stick drives only once it has been let go |
 
 Every row is one line in `main/settings_spec.h`, and every value is saved in LittleFS (`/storage`), so it survives a reboot. The stick mapping rows are refused while driving.
 
