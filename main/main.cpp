@@ -6276,7 +6276,11 @@ extern "C" void app_main(void) {
     // copy_string cuts each text to its subject's buffer (RAMMP_*_LEN). drive_text_subject
     // stays empty: the MIB sends one wording, and the state label is where it belongs.
     lv_subject_copy_string(&state_text_subject, status.status_text.c_str());
-    lv_subject_copy_string(&error_text_subject, status.error_message.c_str());
+    // The message's default, "No error", is the MIB not saying why: the banners take
+    // an empty error_message as that and fall back to their own wording.
+    static const std::string kNoError = MIB::MibStatus{}.error_message;
+    lv_subject_copy_string(&error_text_subject,
+                           status.error_message == kNoError ? "" : status.error_message.c_str());
     lv_subject_copy_string(&error_footer_subject, status.error_footer.c_str());
     seat_apply_state(status.currentSeatState);
   });
