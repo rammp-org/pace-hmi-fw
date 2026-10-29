@@ -210,6 +210,11 @@ inline constexpr char kHmiDriveNotGrantedFooter[] = "Request timed out";
 inline constexpr char kHmiDriveStoppedTitle[] = "DRIVING STOPPED";
 inline constexpr char kHmiDriveStoppedText[] = "MIB DISABLED DRIVING";
 inline constexpr char kHmiDriveStoppedFooter[] = "Hold the stick button again";
+inline constexpr char kHmiDriveStoppedPushFooter[] = "Push and hold the stick again";
+/* The Locked screen's legend, per UI Settings "Start driving" (the export's own
+   text is the button one). */
+inline constexpr char kHmiDriveHintStick[] = "Push & hold joystick to drive";
+inline constexpr char kHmiDriveHintButton[] = "Hold the joystick button to drive";
 inline constexpr char kHmiExitRefusedTitle[] = "EXIT REFUSED";
 inline constexpr char kHmiExitRefusedText[] = "MIB IS STILL DRIVING";
 inline constexpr char kHmiExitRefusedFooter[] = "Try the menu or button again";
@@ -219,6 +224,7 @@ static_assert(sizeof(kHmiDriveNotGrantedText) <= kErrorTextLen &&
               "refusal body outgrows the banner it shares with MIB faults");
 static_assert(sizeof(kHmiDriveNotGrantedFooter) <= kErrorFooterLen &&
                   sizeof(kHmiDriveStoppedFooter) <= kErrorFooterLen &&
+                  sizeof(kHmiDriveStoppedPushFooter) <= kErrorFooterLen &&
                   sizeof(kHmiExitRefusedFooter) <= kErrorFooterLen,
               "refusal footer outgrows the banner it shares with MIB faults");
 
