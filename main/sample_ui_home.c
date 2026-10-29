@@ -72,7 +72,7 @@ void sample_ui_home_init(void) {
   lv_obj_set_style_border_width(status_cluster, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(status_cluster, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_column(status_cluster, 20, LV_PART_MAIN);
-  lv_obj_remove_flag(status_cluster, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollable(status_cluster, false);
   lv_obj_set_flex_flow(status_cluster, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(status_cluster, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
                         LV_FLEX_ALIGN_CENTER);
@@ -89,7 +89,7 @@ void sample_ui_home_init(void) {
   lv_obj_set_style_pad_all(content, 40, LV_PART_MAIN);
   lv_obj_set_style_pad_row(content, 30, LV_PART_MAIN);
   lv_obj_set_style_pad_column(content, 30, LV_PART_MAIN);
-  lv_obj_remove_flag(content, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollable(content, false);
   lv_obj_set_flex_flow(content, LV_FLEX_FLOW_ROW_WRAP);
   lv_obj_set_flex_align(content, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 

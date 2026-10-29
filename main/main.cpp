@@ -15,10 +15,12 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <mutex>
 #include <numeric>
 #include <optional>
 #include <stdlib.h>
 #include <sys/time.h>
+#include <tuple>
 #include <vector>
 
 #include "m5stack-tab5.hpp"
@@ -48,6 +50,7 @@
 
 #include "actions_spec.h"
 #include "boot_logo.h"
+#include "hmi_estop.hpp"
 #include "joystick_cal.hpp"
 #include "log_capture.hpp"
 #include "log_view.hpp"
@@ -151,6 +154,18 @@ static void drive_publish();
 static lv_subject_t rtps_link_subject;
 // 0/1 blink phase for the indicator, flipped by the same poll timer
 static lv_subject_t rtps_blink_subject;
+// The e-stop, as the screens read it (hmi_estop.hpp), set by the same poll timer:
+// kEStopNone unless something stops driving. mcb_ready() and every warning banner
+// read it first, so an engaged stop refuses drive and seat and says why.
+enum : int32_t {
+  kEStopNone = 0,
+  kEStopLocal = 1,  // this HMI's switch; held until the MIB clears it
+  kEStopRemote = 2, // the MIB says the stop is latched
+  kEStopFault = 3,  // the switch input is not armed: no switch, no driving
+  kEStopNoLink = 4, // rammp::kEStopNeedsMib and no EStop from the MIB
+};
+static lv_subject_t estop_subject;
+static char estop_remote_text[rammp::kErrorTextLen]; // the MIB's "source: reason"
 
 // GPIO48 test button: press count (bound to the ButtonCounter label) and
 // current pressed state (drives the ButtonPanel background via an observer)
@@ -193,11 +208,13 @@ static std::atomic<uint32_t> joy_flick{0};
 // every route between the screens.
 // "This object covers what is behind it" -- see strip_redundant_backgrounds.
 // LVGL leaves the USER flags for exactly this; nothing in the export uses them.
+// LVGL 9.6 deprecates lv_obj_set_flag/has_flag but has no setter for USER flags yet:
+// both still work, and with LV_USE_LOG off their deprecation notice compiles away.
 static constexpr lv_obj_flag_t kOverlayFlag = LV_OBJ_FLAG_USER_1;
 
 // Kept out of the overdraw pass, and kept opaque whatever the theme says.
 static void keep_overlay_fill(lv_obj_t *obj) {
-  lv_obj_add_flag(obj, kOverlayFlag);
+  lv_obj_set_flag(obj, kOverlayFlag, true);
   lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, LV_PART_MAIN);
 }
 
@@ -219,6 +236,8 @@ static lv_subject_t stick_invert_x_subject;    // 1 = left and right swap over
 static lv_subject_t stick_invert_y_subject;    // 1 = forward and back swap over
 static lv_subject_t stick_swap_subject;        // 1 = the stick's X and Y trade places
 static lv_subject_t sounds_subject;            // 0 = the clicks and refusals are silent
+static lv_subject_t estop_pin_subject;         // EStopPin: which header pin the switch is on
+static lv_subject_t estop_type_subject;        // EStopContact: NO or NC
 
 // What the ADC task needs of those, as plain atomics it can read without the
 // LVGL lock. Written by setting_store_observer.
@@ -238,6 +257,17 @@ static lv_obj_t *nav_menu_open = nullptr;
 // nav_update_stick_gate, read by the ADC task, which sends the MCB a centred
 // stick whenever it is false.
 static std::atomic<bool> stick_drives{false};
+
+// Whether the MIB is in AUTONOMOUS, where touching the stick hands control back
+// (rammp-rtps#14). The HMI is locked then, so without this the stick goes out
+// centred and only the button would reach the MIB. Written by the MibStatus
+// handler, read by the ADC task.
+static std::atomic<bool> stick_takes_over{false};
+
+// Whether the stick button's current press began in AUTONOMOUS. That press is spent
+// on taking over: it still reaches the MIB, but it neither selects nor counts as a
+// hold, even once the MIB is back in IDLE, until it is let go. LVGL lock.
+static bool button_takes_over = false;
 
 // Defined with the burger menu (see "The burger menu, and moving around with
 // the joystick"); declared here for the screens and gestures above it.
@@ -386,11 +416,20 @@ static void mcb_status_label_observer(lv_observer_t *observer, lv_subject_t *) {
   // the MIB simply not enabled. It is the one thing the user has to act on
   // before anything moves, and the spec gives it the alert colour for that.
   // Locked outranks everything: the chair does not drive until it is asked to,
-  // whatever the MIB says.
+  // whatever the MIB says. SHARED drives from the Drive screen like ENABLED, and
+  // in AUTONOMOUS another node drives while the HMI stays locked. The full word,
+  // not "AUTO", which is a drive mode (446 of the cell's 468 px).
   if (kind == StatusKind::kDriveStatus) {
-    const bool active = lv_subject_get_int(&locked_subject) == 0 && connected &&
-                        state == MIB::MibSystemState::ENABLED;
-    show(active ? "ACTIVE" : "LOCKED", active ? ok : alert);
+    const bool unlocked = lv_subject_get_int(&locked_subject) == 0 && connected;
+    if (connected && state == MIB::MibSystemState::AUTONOMOUS) {
+      show("AUTONOMOUS", ok);
+    } else if (unlocked && state == MIB::MibSystemState::SHARED) {
+      show("SHARED", ok);
+    } else if (unlocked && state == MIB::MibSystemState::ENABLED) {
+      show("ACTIVE", ok);
+    } else {
+      show("LOCKED", alert);
+    }
     return;
   }
 
@@ -406,6 +445,8 @@ static void mcb_status_label_observer(lv_observer_t *observer, lv_subject_t *) {
   switch (state) {
   case MIB::MibSystemState::IDLE:
   case MIB::MibSystemState::ENABLED:
+  case MIB::MibSystemState::AUTONOMOUS:
+  case MIB::MibSystemState::SHARED:
     show(overridden ? override_text : "OK", ok);
     return;
   case MIB::MibSystemState::INITIALIZING:
@@ -413,10 +454,16 @@ static void mcb_status_label_observer(lv_observer_t *observer, lv_subject_t *) {
     // does not fit the cell.
     show(overridden ? override_text : "STARTING", muted);
     return;
-  default:
-    // ERROR, and any value this firmware does not know -- what a MIB running
-    // ahead of it sends.
+  case MIB::MibSystemState::ERROR:
     show(overridden ? override_text : "ERROR", alert);
+    return;
+  case MIB::MibSystemState::ESTOP:
+    show(overridden ? override_text : "E-STOP", alert);
+    return;
+  default:
+    // A value this firmware does not know -- what a MIB running ahead of it
+    // sends. Neutral, per rammp-rtps#14; mcb_ready() still refuses it.
+    show(overridden ? override_text : kStatusUnknownText, muted);
     return;
   }
 }
@@ -662,13 +709,74 @@ static void log_link_change(RtpsLinkState state) {
 static void diag_poll();       // DiagnosticsScreen, further down
 static void drive_wait_poll(); // DriveScreen entry, further down
 
+// The e-stop into estop_subject, and every change into the log: the e-stop task
+// itself never logs (it must not allocate), so this is where its history is kept.
+static void estop_poll() {
+  static espp::Logger estop_logger({.tag = "estop", .level = espp::Logger::Verbosity::INFO});
+  const estop::NodeStatus s = hmi_estop.status();
+  int32_t cause = kEStopNone;
+  if (s.engaged) {
+    cause = kEStopLocal;
+  } else if (s.latch_engaged) {
+    cause = kEStopRemote;
+  } else if (!s.armed) {
+    cause = kEStopFault;
+  } else if (rammp::kEStopNeedsMib && !s.latch_fresh) {
+    cause = kEStopNoLink;
+  }
+
+  static std::optional<estop::NodeStatus> last;
+  auto shown = [](const estop::NodeStatus &e) {
+    return std::tie(e.engaged, e.latch_engaged, e.armed, e.latch_fresh, e.input.gpio_num,
+                    e.input.active_level, e.presses, e.clear_attempts_accepted,
+                    e.clear_attempts_refused, e.rx_errors, e.tx_errors);
+  };
+  if (!last || shown(*last) != shown(s)) {
+    const bool engaged = s.engaged || s.latch_engaged || !s.armed;
+    const std::string line =
+        fmt::format("engaged={} latch={} ('{}: {}') armed={} pin=GPIO{} {} latch_link={} "
+                    "presses={} clear_attempts={}/{} (accepted/refused) rx_err={} tx_err={} "
+                    "pub_seq={}",
+                    s.engaged, s.latch_engaged ? "ENGAGED" : "NOT_ENGAGED", s.latch_source,
+                    s.latch_reason, s.armed, static_cast<int>(s.input.gpio_num),
+                    s.input.active_level == estop::ActiveLevel::LOW ? "NO" : "NC",
+                    s.latch_fresh ? "fresh" : "silent", s.presses, s.clear_attempts_accepted,
+                    s.clear_attempts_refused, s.rx_errors, s.tx_errors, s.pub_seq);
+    if (engaged) {
+      estop_logger.warn("{}", line);
+    } else {
+      estop_logger.info("{}", line);
+    }
+    last = s;
+  }
+
+  bool changed = cause != lv_subject_get_int(&estop_subject);
+  if (cause == kEStopRemote) {
+    char text[sizeof(estop_remote_text)];
+    lv_snprintf(text, sizeof(text), rammp::kHmiEStopRemoteFmt, s.latch_source, s.latch_reason);
+    if (std::strcmp(text, estop_remote_text) != 0) {
+      std::memcpy(estop_remote_text, text, sizeof(text));
+      changed = true;
+    }
+  }
+  if (changed) {
+    lv_subject_set_int(&estop_subject, cause);
+  }
+}
+
 static void rtps_poll_cb(lv_timer_t *) {
   const RtpsLinkState state = rtps_comms_link_state();
   log_link_change(state);
   lv_subject_set_int(&rtps_link_subject, static_cast<int32_t>(state));
+  // A MIB that has gone quiet is not known to be in AUTONOMOUS any more (mib_mode
+  // drops its banner too), so the stick and the button go back to the HMI's own use.
+  if (state != RtpsLinkState::CONNECTED) {
+    stick_takes_over.store(false);
+  }
   static uint32_t ticks = 0;
   // flip every other tick: a 500 ms half-period, i.e. a 1 Hz blink
   lv_subject_set_int(&rtps_blink_subject, static_cast<int32_t>((++ticks / 2) & 1u));
+  estop_poll();      // first: everything below reads estop_subject
   diag_poll();       // diagnostics staleness rides the same 250 ms tick
   drive_wait_poll(); // and so does the wait for the MCB to enable driving
 
@@ -845,7 +953,8 @@ static void stick_button_edge(bool active) {
   static int64_t pressed_at_us = 0;
   if (active) {
     pressed_at_us = now;
-  } else if (now - pressed_at_us < kSelectMaxUs) {
+    button_takes_over = stick_takes_over.load();
+  } else if (!button_takes_over && now - pressed_at_us < kSelectMaxUs) {
     select_key.store(true);
   }
 
@@ -1018,7 +1127,7 @@ static void hold_poll(HoldGesture *g) {
 // The stick's own button. Reads the level the button callback mirrors out, not
 // the edge-latched select_key: a hold gesture needs to know the button is still
 // down, and select_key is consumed by the first indev read after the press.
-static bool joy_button_held() { return joy_button_pressed.load(); }
+static bool joy_button_held() { return joy_button_pressed.load() && !button_takes_over; }
 
 /////////////////////////////////////////////////////////////////////////////
 // Lock / unlock, and the LockedScreen gesture
@@ -1172,21 +1281,38 @@ static void diagnostics_open();
 // Is the MCB currently telling us the chair is fit to drive, or to move the
 // seat? Requires a live
 // link as well as an OK state: if the status is stale we do not KNOW the state,
-// and "unknown" is not "known good" on a device that moves someone.
+// and "unknown" is not "known good" on a device that moves someone. SHARED is
+// driving from the Drive screen, with another node blending in.
 static bool mcb_ready() {
   const auto state = static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject));
-  return static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) ==
+  return lv_subject_get_int(&estop_subject) == kEStopNone &&
+         static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) ==
              RtpsLinkState::CONNECTED &&
-         (state == MIB::MibSystemState::IDLE || state == MIB::MibSystemState::ENABLED);
+         (state == MIB::MibSystemState::IDLE || state == MIB::MibSystemState::ENABLED ||
+          state == MIB::MibSystemState::SHARED);
 }
 
 // The MIB disables manual seat control while it is driving, so the seat screen asks for
 // more than mcb_ready(): IDLE exactly. INITIALIZING and ERROR are barred by both.
 static bool seat_ready() {
-  return static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) ==
+  return lv_subject_get_int(&estop_subject) == kEStopNone &&
+         static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) ==
              RtpsLinkState::CONNECTED &&
          static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject)) ==
              MIB::MibSystemState::IDLE;
+}
+
+// AUTONOMOUS or ESTOP, live: the MIB modes that stop the user driving and are not
+// faults, so they get their own banner. Empty for anything else, or with the link down.
+static std::optional<MIB::MibSystemState> mib_mode() {
+  const auto state = static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject));
+  const bool connected = static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) ==
+                         RtpsLinkState::CONNECTED;
+  if (connected &&
+      (state == MIB::MibSystemState::AUTONOMOUS || state == MIB::MibSystemState::ESTOP)) {
+    return state;
+  }
+  return std::nullopt;
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -1269,6 +1395,22 @@ static void fill_drive_blocked_panel(lv_obj_t *panel, const char *link_title,
   lv_obj_t *body = ui_comp_get_child(panel, UI_COMP_ERRORBANNER_BANNERBOX_BANNERMESSAGE);
   lv_obj_t *footer = ui_comp_get_child(panel, UI_COMP_ERRORBANNER_BANNERBOX_BANNERFOOTER);
 
+  // The e-stop outranks everything, as in mcb_ready(): whatever else is wrong,
+  // that is what stops the chair, and it needs the MIB to clear.
+  if (const int32_t estop = lv_subject_get_int(&estop_subject); estop != kEStopNone) {
+    const char *text = estop == kEStopLocal    ? rammp::kHmiEStopLocalText
+                       : estop == kEStopRemote ? estop_remote_text
+                       : estop == kEStopFault  ? rammp::kHmiEStopFaultText
+                                               : rammp::kHmiEStopLinkText;
+    lv_label_set_text(title,
+                      estop == kEStopNoLink ? rammp::kHmiEStopLinkTitle : rammp::kHmiEStopTitle);
+    lv_label_set_text(body, text);
+    lv_label_set_text(footer, estop == kEStopFault    ? rammp::kHmiEStopFaultFooter
+                              : estop == kEStopNoLink ? rammp::kHmiEStopLinkFooter
+                                                      : rammp::kHmiEStopFooter);
+    return;
+  }
+
   // The link comes first, as in mcb_ready(): with no live link the state
   // subject is only the last thing the MCB said, not what it is saying now.
   const auto link = static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject));
@@ -1308,13 +1450,27 @@ static void fill_mib_reason_panel(lv_obj_t *panel, const char *title, const char
   lv_label_set_text(footer, error_footer[0] != '\0' ? error_footer : fallback_footer);
 }
 
+// Fills a panel with the MIB mode in force (mib_mode), if any. Returns whether
+// there was one, so the caller shows the panel.
+static bool fill_mib_mode_panel(lv_obj_t *panel) {
+  const auto mode = mib_mode();
+  if (!mode) {
+    return false;
+  }
+  const bool estop = *mode == MIB::MibSystemState::ESTOP;
+  fill_mib_reason_panel(panel, estop ? rammp::kHmiEStopTitle : rammp::kHmiAutonomousTitle,
+                        estop ? rammp::kHmiMibEStopText : rammp::kHmiAutonomousText,
+                        estop ? rammp::kHmiEStopFooter : rammp::kHmiAutonomousFooter);
+  return true;
+}
+
 // Binds `cb` on `panel` to every subject the cause depends on, so the subject
 // argument each observer gets is ignored: whichever fired, the answer depends
 // on all of them.
 static void bind_to_drive_blocked_cause(lv_obj_t *panel, lv_observer_cb_t cb) {
   keep_overlay_fill(panel);
-  for (lv_subject_t *subject :
-       {&rtps_link_subject, &mib_state_subject, &error_text_subject, &error_footer_subject}) {
+  for (lv_subject_t *subject : {&estop_subject, &rtps_link_subject, &mib_state_subject,
+                                &error_text_subject, &error_footer_subject}) {
     lv_subject_add_observer_obj(subject, cb, panel, nullptr);
   }
 }
@@ -1323,8 +1479,8 @@ static void bind_to_drive_blocked_cause(lv_obj_t *panel, lv_observer_cb_t cb) {
 // screen in front: a warning or an error arriving is heard as well as read.
 // Only on the rise, because every cause subject re-runs the observers.
 static void banner_show(lv_obj_t *panel, bool up) {
-  const bool was_up = !lv_obj_has_flag(panel, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_set_flag(panel, LV_OBJ_FLAG_HIDDEN, !up);
+  const bool was_up = !lv_obj_is_hidden(panel);
+  lv_obj_set_hidden(panel, !up);
   if (up && !was_up && lv_obj_get_screen(panel) == lv_screen_active()) {
     play_refusal(true);
   }
@@ -1343,10 +1499,23 @@ static void entry_refused_panel_observer(lv_observer_t *observer, lv_subject_t *
     banner_show(panel, up);
     if (panel == ui_ErrorBanner2) {
       for (lv_obj_t *art : {ui_LockRing, ui_Shackle, ui_LockBody, ui_LockKeyhole}) {
-        lv_obj_set_flag(art, LV_OBJ_FLAG_HIDDEN, up);
+        lv_obj_set_hidden(art, up);
       }
     }
   };
+  // An engaged e-stop is up for as long as it holds, asked or not: it is the one
+  // warning that must never wait for a push to be seen.
+  if (lv_subject_get_int(&estop_subject) != kEStopNone) {
+    fill_drive_blocked_panel(panel, rammp::kHmiLinkRefusedTitle, rammp::kHmiMcbRefusedTitle);
+    shown(true);
+    return;
+  }
+  // The MIB's own modes, the same way: up while the MIB reports them, and they
+  // say why any refusal behind them happened.
+  if (fill_mib_mode_panel(panel)) {
+    shown(true);
+    return;
+  }
   const int32_t refused = lv_subject_get_int(&entry_refused_subject);
   if (refused == kRefusedNone || refused == kRefusedExit) {
     // kRefusedExit belongs to the DriveScreen's own panel, not this one.
@@ -1395,6 +1564,17 @@ static void bind_entry_refused_panel(lv_obj_t *panel) {
 // banner rather than silently hiding it.
 static void drive_screen_warning_observer(lv_observer_t *observer, lv_subject_t *) {
   lv_obj_t *panel = lv_observer_get_target_obj(observer);
+  // The e-stop before a refused exit: it is the reason the chair is stopping.
+  if (lv_subject_get_int(&estop_subject) != kEStopNone) {
+    fill_drive_blocked_panel(panel, rammp::kHmiLinkLostTitle, rammp::kHmiMcbFaultTitle);
+    banner_show(panel, true);
+    return;
+  }
+  // A MIB mode is not a fault: say which, for the moment before Locked takes over.
+  if (fill_mib_mode_panel(panel)) {
+    banner_show(panel, true);
+    return;
+  }
   // A refused exit: the MIB is still driving, so the screen stays and says why.
   if (lv_subject_get_int(&entry_refused_subject) == kRefusedExit &&
       lv_screen_active() == ui_DriveScreen) {
@@ -1528,7 +1708,7 @@ static void entry_refused_show(int32_t which, uint32_t show_ms) {
 }
 
 // The DriveScreen is a view of one fact: the MIB is driving. It opens whenever
-// MibStatus says ENABLED and closes as soon as it stops saying so, whoever asked --
+// MibStatus says ENABLED or SHARED and closes as soon as it stops saying so, whoever asked --
 // this firmware's own DriveCommand is only how it asks the MIB to get there, and the
 // MIB can enter or leave driving without being asked. Anything else lets the screen
 // disagree with the chair, which is the one thing it must never do.
@@ -1540,7 +1720,8 @@ static void drive_screen_follow_state() {
   const bool connected = static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) ==
                          RtpsLinkState::CONNECTED;
   const auto state = static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject));
-  const bool driving = connected && state == MIB::MibSystemState::ENABLED;
+  const bool driving =
+      connected && (state == MIB::MibSystemState::ENABLED || state == MIB::MibSystemState::SHARED);
   const bool locked = lv_subject_get_int(&locked_subject) != 0;
 
   if (driving && locked) {
@@ -1569,10 +1750,11 @@ static void drive_screen_follow_state() {
     // runs nav_arrive, inside it.
     nav_menu_on_arrival = then_menu;
     set_locked(true);
-    if (!asked) {
+    if (!asked && !mib_mode()) {
       // The link going is not the MIB deciding anything: say which it was.
       // kRefusedDriveLost reads the cause live ("RTPS LINK") and clears when
-      // the MCB is back; kRefusedDriveStopped is the MIB's own decision.
+      // the MCB is back; kRefusedDriveStopped is the MIB's own decision. A MIB
+      // mode needs neither: its own banner says why.
       entry_refused_show(connected ? kRefusedDriveStopped : kRefusedDriveLost, kDriveRefusedShowMs);
     }
     return;
@@ -1994,7 +2176,7 @@ static void seat_click_cb(lv_event_t *e) {
   // Spec 04b: the motion's own page, over the function buttons. The joystick
   // moves across with it -- its own group -- onto "-" rather than the back
   // button above, since adjusting is what the page is for.
-  lv_obj_remove_flag(ui_SeatAdjustmentPanel, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(ui_SeatAdjustmentPanel, false);
   nav_use_group(seat_adjust_group, ui_SeatScreen);
   seat_adjust_grid.row = 1;
   seat_adjust_grid.col = 0;
@@ -2007,7 +2189,7 @@ static void seat_click_cb(lv_event_t *e) {
 // not greet the next one, or the stick's cursor sits on the function buttons
 // hidden underneath it.
 static void seat_show_buttons_page() {
-  lv_obj_add_flag(ui_SeatAdjustmentPanel, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(ui_SeatAdjustmentPanel, true);
   seat_page = 0;
   nav_use_group(seat_group, ui_SeatScreen);
   // Back to the button the user selected rather than the top-left one: the
@@ -2139,6 +2321,8 @@ static void rd_keypad_cb(lv_event_t *e) {
 //              SeatCommand, and a row's number changes only when MibStatus says
 //              so. That keeps a limit or an interlock one decision made in one
 //              place, instead of two boards disagreeing about where the seat is.
+//              Below the seat axes, one row per motor in the MIB's Motors list
+//              (see "Motor debug rows").
 //
 // Memory: the screen and its rows exist only while it is up - see "Screens
 // built on demand".
@@ -2209,6 +2393,8 @@ static lv_subject_t *const kSettingParamValue[] = {
     &stick_invert_y_subject,    // SETTINGS_PARAM_STICK_INVERT_Y
     &stick_swap_subject,        // SETTINGS_PARAM_STICK_SWAP
     &sounds_subject,            // SETTINGS_PARAM_SOUNDS
+    &estop_pin_subject,         // SETTINGS_PARAM_ESTOP_PIN
+    &estop_type_subject,        // SETTINGS_PARAM_ESTOP_TYPE
 };
 
 // What the named rows read, in SETTINGS_PARAM_* order; nullptr = a number.
@@ -2216,23 +2402,33 @@ static constexpr const char *kThemeNames[] = {"Dark", "Day"};
 static constexpr const char *kOnOffNames[] = {"Off", "On"};
 static constexpr const char *kMirrorNames[] = {"Normal", "Mirror"};
 static constexpr const char *kSwapNames[] = {"Normal", "Swap"};
+static constexpr const char *kEStopPinNames[] = {"GPIO2", "GPIO47"}; // EStopPin order
+static constexpr const char *kEStopTypeNames[] = {"NO", "NC"};       // EStopType order
+static_assert(static_cast<int>(EStopPin::GPIO47) == SETTINGS_ESTOP_PIN_MAX &&
+                  static_cast<int>(EStopType::NC) == SETTINGS_ESTOP_TYPE_MAX,
+              "the E-stop rows' range must match EStopPin and EStopType");
 static const char *const *const kSettingParamNames[] = {
-    nullptr,      // SETTINGS_PARAM_BRIGHTNESS
-    kThemeNames,  // SETTINGS_PARAM_THEME
-    kOnOffNames,  // SETTINGS_PARAM_MENU_SLIDE
-    kOnOffNames,  // SETTINGS_PARAM_FLIP
-    nullptr,      // SETTINGS_PARAM_STICK_SENSITIVITY
-    kMirrorNames, // SETTINGS_PARAM_STICK_INVERT_X
-    kMirrorNames, // SETTINGS_PARAM_STICK_INVERT_Y
-    kSwapNames,   // SETTINGS_PARAM_STICK_SWAP
-    kOnOffNames,  // SETTINGS_PARAM_SOUNDS
+    nullptr,         // SETTINGS_PARAM_BRIGHTNESS
+    kThemeNames,     // SETTINGS_PARAM_THEME
+    kOnOffNames,     // SETTINGS_PARAM_MENU_SLIDE
+    kOnOffNames,     // SETTINGS_PARAM_FLIP
+    nullptr,         // SETTINGS_PARAM_STICK_SENSITIVITY
+    kMirrorNames,    // SETTINGS_PARAM_STICK_INVERT_X
+    kMirrorNames,    // SETTINGS_PARAM_STICK_INVERT_Y
+    kSwapNames,      // SETTINGS_PARAM_STICK_SWAP
+    kOnOffNames,     // SETTINGS_PARAM_SOUNDS
+    kEStopPinNames,  // SETTINGS_PARAM_ESTOP_PIN
+    kEStopTypeNames, // SETTINGS_PARAM_ESTOP_TYPE
 };
 static_assert(std::size(kSettingParamNames) == SETTINGS_PARAM_COUNT,
               "every settings_spec.h parameter needs its names (or nullptr) here");
 static_assert(std::size(kSettingParamValue) == SETTINGS_PARAM_COUNT,
               "every settings_spec.h parameter needs its subject here");
 
-static constexpr int kSettingRowsMax = std::max<int>(rammp::kSeatAxisCount, SETTINGS_PARAM_COUNT);
+// The most motor rows the actuators page shows; a longer Motors list is cut here.
+static constexpr int kMotorRowsMax = 16;
+static constexpr int kSettingRowsMax =
+    std::max<int>(rammp::kSeatAxisCount + kMotorRowsMax, SETTINGS_PARAM_COUNT);
 static SettingRow setting_rows[kSettingRowsMax];
 static int setting_row_count; // rows on the page that is up; 0 while the screen is not
 static int setting_cursor;    // which row the joystick is on
@@ -2245,6 +2441,22 @@ static lv_subject_t setting_page_subject;
 // point at them, and the MCB keeps them current with no page up.
 static lv_subject_t seat_axis_value[rammp::kSeatAxisCount];
 static uint8_t seat_axis_count; // actuators in the table
+
+// Motor debug rows: the motors come from the MIB's Motors message at run time, not
+// from a table compiled in here, so a motor added to or removed from the MIB's axis
+// table appears or goes without rebuilding the HMI. LVGL task only (motor_jog_poll_cb
+// applies each sample); the rows on screen are rebuilt when motor_list_version moves.
+struct MotorRowInfo {
+  uint8_t axis_id;
+  char state[8];  // the row's short name: "OFF", "ARM", "F2"...
+  char label[24]; // the row's label: "Drive L"
+};
+static MotorRowInfo motor_info[kMotorRowsMax];
+static int motor_info_count;
+static uint32_t motor_list_version; // +1 when the ids or labels change
+static uint32_t motor_rows_version; // what the rows on screen were built from
+// Each motor's position in tenths of a radian; kValueUnknown while it is offline.
+static lv_subject_t motor_position[kMotorRowsMax];
 
 // What a value reads before it is known - only ever an actuator the MCB has
 // not reported yet. Not zero: zero is a position an actuator can genuinely be
@@ -2324,6 +2536,12 @@ static void setting_store_observer(lv_observer_t *observer, lv_subject_t *subjec
     break;
   case SETTINGS_PARAM_SOUNDS:
     sounds_on.store(value != 0);
+    break;
+  case SETTINGS_PARAM_ESTOP_PIN:
+  case SETTINGS_PARAM_ESTOP_TYPE:
+    hmi_estop.set_input(
+        estop_input(static_cast<EStopPin>(settings_get(SETTINGS_PARAM_ESTOP_PIN)),
+                    static_cast<EStopType>(settings_get(SETTINGS_PARAM_ESTOP_TYPE))));
     break;
   default:
     break; // MENU_SLIDE: read where it is used, nothing to apply
@@ -2553,8 +2771,12 @@ static void setting_step(const SettingRow *row, int direction) {
     refusal_feedback(); // not while driving
     return;
   }
+  const bool actuators = lv_subject_get_int(&setting_page_subject) == kActuatorsPage;
+  if (actuators && row->index >= seat_axis_count) {
+    return; // a motor row is hold-to-run: motor_jog_poll_cb sends while it is held
+  }
   press_flash(button);
-  if (lv_subject_get_int(&setting_page_subject) == kActuatorsPage) {
+  if (actuators) {
     // A request: the value moves only when the MCB's state sample says so.
     seat_step(static_cast<size_t>(row->index), direction < 0 ? -1 : 1);
     return;
@@ -2616,7 +2838,7 @@ static void setting_row_click_cb(lv_event_t *e) {
 static void clear_click_focusable_recursive(lv_obj_t *obj) {
   for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
     lv_obj_t *child = lv_obj_get_child(obj, i);
-    lv_obj_remove_flag(child, LV_OBJ_FLAG_CLICK_FOCUSABLE);
+    lv_obj_set_click_focusable(child, false);
     clear_click_focusable_recursive(child);
   }
 }
@@ -2723,6 +2945,14 @@ static void setting_page_open(int32_t page) {
                        specs[i].step, specs[i].decimals, nullptr},
                       &seat_axis_value[i], true);
     }
+    // No range: a motor turns as far as it is jogged. Position in tenths of a rad, with no
+    // unit, like the seat rows: "0.00 rad" overflowed the value column and scrolled.
+    for (int i = 0; i < motor_info_count; i++) {
+      setting_row_add(
+          {motor_info[i].state, motor_info[i].label, INT32_MIN + 1, INT32_MAX, 1, 1, nullptr},
+          &motor_position[i], false);
+    }
+    motor_rows_version = motor_list_version;
   } else {
     for (int i = 0; i < SETTINGS_PARAM_COUNT; i++) {
       if (kSettingParams[i].page == page) {
@@ -2730,8 +2960,10 @@ static void setting_page_open(int32_t page) {
         spec.names = kSettingParamNames[i];
         // Remapping the stick changes which way a push drives the chair, so
         // it is not done mid-drive.
+        // So is moving the e-stop: for a moment it is not watching either pin.
         spec.locked_only = i == SETTINGS_PARAM_STICK_INVERT_X ||
-                           i == SETTINGS_PARAM_STICK_INVERT_Y || i == SETTINGS_PARAM_STICK_SWAP;
+                           i == SETTINGS_PARAM_STICK_INVERT_Y || i == SETTINGS_PARAM_STICK_SWAP ||
+                           i == SETTINGS_PARAM_ESTOP_PIN || i == SETTINGS_PARAM_ESTOP_TYPE;
         setting_row_add(spec, kSettingParamValue[i], false);
       }
     }
@@ -2739,6 +2971,130 @@ static void setting_page_open(int32_t page) {
   lv_subject_set_int(&setting_page_subject, page);
   _ui_screen_change(&ui_SettingsScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
                     &ui_SettingsScreen_screen_init);
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// Motor debug rows (the actuators page, below the seat axes)
+//
+// One row per entry of the MIB's Motors message, in its order: the short name is
+// the board's state, the label the MIB's, the number its position. -/+ (or the
+// stick left/right on the focused row) is hold-to-run: while one is held,
+// motor_jog_poll_cb resends MotorJog every kMotorJogResendMs, and the MIB stops
+// the motor when they stop coming. The MIB picks the speed and refuses a jog
+// unless it is IDLE with the e-stop clear.
+/////////////////////////////////////////////////////////////////////////////
+
+static constexpr uint32_t kMotorJogResendMs = 100; // the spec: at least every 100 ms
+
+static void motor_state_name(const rammp::MotorSummary &m, char *out, size_t out_size) {
+  if (m.online == 0) {
+    lv_snprintf(out, out_size, "OFF");
+    return;
+  }
+  switch (m.state) {
+  case rammp::BoardState::DISARMED:
+    lv_snprintf(out, out_size, "DIS");
+    return;
+  case rammp::BoardState::ARMED:
+    lv_snprintf(out, out_size, "ARM");
+    return;
+  case rammp::BoardState::SAFE_STOPPING:
+    lv_snprintf(out, out_size, "STP");
+    return;
+  case rammp::BoardState::HOLDING:
+    lv_snprintf(out, out_size, "HLD");
+    return;
+  case rammp::BoardState::FAULT:
+    lv_snprintf(out, out_size, "F%u", static_cast<unsigned>(m.fault_code));
+    return;
+  }
+  lv_snprintf(out, out_size, "?%u", static_cast<unsigned>(m.state));
+}
+
+// The latest Motors sample, handed from the RTPS task to the LVGL task. Its own lock,
+// held only for the copy: an RTPS worker must never wait on lvgl_mutex. A screen build
+// holds that for up to a second, and with only two reader workers, two handlers stuck
+// behind it starve the e-stop's reader until the MIB's deadman latches.
+static std::mutex motors_rx_mutex;
+static rammp::Motors motors_rx;
+static bool motors_rx_new = false;
+
+static void motors_receive(const rammp::Motors &m) { // RTPS task
+  std::lock_guard<std::mutex> lock(motors_rx_mutex);
+  motors_rx = m;
+  motors_rx_new = true;
+}
+
+// A Motors sample. LVGL task: data and subjects only, the rows themselves are
+// rebuilt by the poll.
+static void motors_apply(const rammp::Motors &m) {
+  const int count = std::min<int>(static_cast<int>(m.motors.size()), kMotorRowsMax);
+  bool changed = count != motor_info_count;
+  for (int i = 0; i < count; i++) {
+    const rammp::MotorSummary &motor = m.motors[i];
+    MotorRowInfo &info = motor_info[i];
+    if (info.axis_id != motor.axis_id ||
+        strncmp(info.label, motor.label.c_str(), sizeof(info.label) - 1) != 0) {
+      changed = true;
+      info.axis_id = motor.axis_id;
+      lv_snprintf(info.label, sizeof(info.label), "%s", motor.label.c_str());
+    }
+    motor_state_name(motor, info.state, sizeof(info.state));
+    lv_subject_set_int(&motor_position[i],
+                       motor.online != 0 ? static_cast<int32_t>(std::lround(motor.position * 10.0f))
+                                         : kValueUnknown);
+  }
+  motor_info_count = count;
+  if (changed) {
+    motor_list_version++;
+  }
+}
+
+// LVGL task. Keeps the motor rows in step with the list, and sends the jog for the
+// one held, or a single stop when the hold ends.
+static void motor_jog_poll_cb(lv_timer_t *) {
+  static int held_axis = -1; // the axis being jogged; -1 = none
+  std::optional<rammp::Motors> sample;
+  {
+    std::lock_guard<std::mutex> lock(motors_rx_mutex);
+    if (motors_rx_new) {
+      sample = std::move(motors_rx);
+      motors_rx_new = false;
+    }
+  }
+  if (sample) {
+    motors_apply(*sample);
+  }
+  const bool up = lv_screen_active() == ui_SettingsScreen &&
+                  lv_subject_get_int(&setting_page_subject) == kActuatorsPage;
+  if (up && motor_rows_version != motor_list_version) {
+    setting_page_open(kActuatorsPage); // a motor came or went: the rows follow the list
+  }
+  int axis = -1;
+  int8_t direction = 0;
+  for (int i = seat_axis_count; up && i < setting_row_count && direction == 0; i++) {
+    const SettingRow &row = setting_rows[i];
+    const MotorRowInfo &info = motor_info[i - seat_axis_count];
+    lv_obj_t *name = ui_comp_get_child(row.row, UI_COMP_SETTINGROW_HEAD_NAMES_SHORT);
+    if (strcmp(lv_label_get_text(name), info.state) != 0) {
+      lv_label_set_text(name, info.state); // only on a change: a set redraws the row
+    }
+    const uint32_t key = setting_cursor == i ? joy_key.load() : 0;
+    const bool minus = !lv_obj_has_state(row.minus, LV_STATE_DISABLED) &&
+                       (lv_obj_has_state(row.minus, LV_STATE_PRESSED) || key == LV_KEY_LEFT);
+    const bool plus = !lv_obj_has_state(row.plus, LV_STATE_DISABLED) &&
+                      (lv_obj_has_state(row.plus, LV_STATE_PRESSED) || key == LV_KEY_RIGHT);
+    if (minus != plus) {
+      axis = info.axis_id;
+      direction = plus ? 1 : -1;
+    }
+  }
+  if (direction != 0) {
+    rtps_comms_publish_motor_jog(static_cast<uint8_t>(axis), direction);
+  } else if (held_axis >= 0) {
+    rtps_comms_publish_motor_jog(static_cast<uint8_t>(held_axis), 0); // let go: stop now
+  }
+  held_axis = axis;
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -3120,7 +3476,7 @@ static void diagnostics_open() {
                       specs[i].label);
     for (uint8_t f = 0; f < rammp::kDiagFields; f++) {
       if (specs[i].unit[f][0] == '\0') { // a reading this item does not have
-        lv_obj_add_flag(ui_comp_get_child(row, kDiagFieldIds[f].container), LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(ui_comp_get_child(row, kDiagFieldIds[f].container), true);
         continue;
       }
       lv_label_set_text(ui_comp_get_child(row, kDiagFieldIds[f].units), specs[i].unit[f]);
@@ -3363,7 +3719,7 @@ static void nav_menu_anim_cb(void *obj, int32_t y) {
 
 static void nav_menu_hide_cb(lv_anim_t *a) {
   auto *overlay = static_cast<lv_obj_t *>(a->var);
-  lv_obj_add_flag(overlay, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(overlay, true);
   // A row replayed on arrival (nav_drop_row) goes back to resting once it is
   // out of sight, ready for the next time this overlay opens.
   for (uint32_t id : kNavRowIds) {
@@ -3432,7 +3788,7 @@ static void nav_open_menu(lv_obj_t *overlay) {
     return;
   }
   nav_menu_open = overlay;
-  lv_obj_remove_flag(overlay, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(overlay, false);
   nav_menu_slide(overlay, kMenuHiddenY, kMenuShownY, false);
   nav_key_open_look(lv_screen_active(), true);
 
@@ -3476,7 +3832,7 @@ static void nav_home() {
 static void nav_go(NavDest dest) {
   const lv_obj_t *const before = lv_screen_active();
   if (nav_menu_open != nullptr) {
-    lv_obj_add_flag(nav_menu_open, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(nav_menu_open, true);
     for (uint32_t id : kNavRowIds) {
       lv_obj_remove_state(ui_comp_get_child(nav_menu_open, id), LV_STATE_CHECKED);
     }
@@ -3669,7 +4025,7 @@ static void nav_band_cb(lv_event_t *) { nav_home(); }
 static void nav_clear_clickable(lv_obj_t *obj) {
   for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
     lv_obj_t *child = lv_obj_get_child(obj, i);
-    lv_obj_remove_flag(child, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_clickable(child, false);
     nav_clear_clickable(child);
   }
 }
@@ -3677,7 +4033,7 @@ static void nav_clear_clickable(lv_obj_t *obj) {
 static void nav_claim_clicks(lv_obj_t *obj) {
   clear_click_focusable_recursive(obj);
   nav_clear_clickable(obj);
-  lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(obj, true);
 }
 
 // One screen's chrome. `band` is the DriveBand whose DRIVE cell goes home.
@@ -3725,7 +4081,7 @@ static void nav_attach_chrome(lv_obj_t *key, lv_obj_t *overlay, lv_obj_t *band) 
   for (NavDest gated : {NAV_DRIVE, NAV_SEAT}) {
     lv_obj_t *row = ui_comp_get_child(overlay, kNavRowIds[gated]);
     lv_obj_set_style_opa(row, LV_OPA_40, kActionUnavailableStyle);
-    for (lv_subject_t *subject : {&rtps_link_subject, &mib_state_subject}) {
+    for (lv_subject_t *subject : {&estop_subject, &rtps_link_subject, &mib_state_subject}) {
       lv_subject_add_observer_obj(subject, action_ready_observer, row, nullptr);
     }
   }
@@ -3779,7 +4135,7 @@ static void nav_drop_menu(const lv_obj_t *screen) {
   if (row < 0 || c == nullptr) {
     return;
   }
-  lv_obj_remove_flag(c->overlay, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(c->overlay, false);
   lv_obj_add_state(ui_comp_get_child(c->overlay, kNavRowIds[row]), LV_STATE_CHECKED);
   nav_menu_slide(c->overlay, kMenuShownY, kMenuHiddenY, true);
 }
@@ -4028,7 +4384,7 @@ static void actions_screen_ensure() {
   nav_attach_chrome(ui_MenuKey8, ui_MenuOverlay8, ui_DriveBand8);
   // Its ErrorBanner stays down: an action that needs the MCB greys out
   // instead (action_ready_observer), which keeps the local ones reachable.
-  lv_obj_add_flag(ui_ErrorBanner7, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(ui_ErrorBanner7, true);
   lv_obj_add_event_cb(ui_SkunkWorksScreen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, nullptr);
   lv_obj_add_event_cb(ui_SkunkWorksScreen, actions_screen_unloaded_cb, LV_EVENT_SCREEN_UNLOADED,
                       nullptr);
@@ -4063,7 +4419,7 @@ static void diagnostics_screen_ensure() {
   nav_attach_chrome(ui_MenuKey9, ui_MenuOverlay9, ui_DriveBand9);
   // The red, blinking readings are this screen's warning: the ErrorBanner
   // would cover exactly what someone opened the screen to look at.
-  lv_obj_add_flag(ui_ErrorBanner8, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(ui_ErrorBanner8, true);
   for (lv_subject_t *subject : {&diag_rate_subject, &diag_stale_subject, &rtps_blink_subject}) {
     lv_subject_add_observer_obj(subject, diag_freq_observer, ui_DiagnosticsFreqLabel, nullptr);
   }
@@ -4906,7 +5262,7 @@ extern "C" void app_main(void) {
   // disable scrolling on the screen (so that it doesn't behave weirdly when
   // rotated and drawing with your finger)
   lv_obj_set_scrollbar_mode(lv_screen_active(), LV_SCROLLBAR_MODE_OFF);
-  lv_obj_clear_flag(lv_screen_active(), LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollable(lv_screen_active(), false);
 
   // Load the SquareLine Studio UI. This creates every screen and makes
   // ui_BootScreen the active one; the demo widgets above stay on the (now
@@ -5001,6 +5357,8 @@ extern "C" void app_main(void) {
            {&stick_invert_y_subject, SETTINGS_PARAM_STICK_INVERT_Y},
            {&stick_swap_subject, SETTINGS_PARAM_STICK_SWAP},
            {&sounds_subject, SETTINGS_PARAM_SOUNDS},
+           {&estop_pin_subject, SETTINGS_PARAM_ESTOP_PIN},
+           {&estop_type_subject, SETTINGS_PARAM_ESTOP_TYPE},
        }) {
     lv_subject_init_int(subject, settings_get(param));
     lv_subject_add_observer(subject, setting_store_observer,
@@ -5037,6 +5395,8 @@ extern "C" void app_main(void) {
   // has the real answer a quarter second later.
   lv_subject_init_int(&rtps_link_subject, static_cast<int32_t>(RtpsLinkState::LINK_DOWN));
   lv_subject_init_int(&rtps_blink_subject, 1);
+  // Engaged until the first poll says otherwise: not knowing is not "clear".
+  lv_subject_init_int(&estop_subject, kEStopFault);
   // empty = no override, so the labels start on the enum names
   lv_subject_init_string(&drive_text_subject, drive_text_buf, drive_text_prev_buf,
                          sizeof(drive_text_buf), "");
@@ -5166,6 +5526,16 @@ extern "C" void app_main(void) {
       .task_config = {.name = "Button", .stack_size_bytes = 4 * 1024, .priority = 5},
   });
 
+  // The e-stop switch (hmi_estop.hpp): after the GPIO48 button, so the GPIO interrupt
+  // service is espp's to install, and before RTPS, so it is watching before anything
+  // can drive. A failure leaves hmi_estop.is_active() true, which refuses driving.
+  logger.info("Starting the e-stop...");
+  hmi_estop.set_input(estop_input(static_cast<EStopPin>(settings_get(SETTINGS_PARAM_ESTOP_PIN)),
+                                  static_cast<EStopType>(settings_get(SETTINGS_PARAM_ESTOP_TYPE))));
+  if (!hmi_estop.start()) {
+    logger.error("E-stop failed to start: driving stays refused");
+  }
+
   // Joystick as an LVGL keypad input device, moving the cursor through each
   // screen's focus group. The read function runs on the LVGL task and drains the
   // latch the ADC task fills, so one flick of the stick = one PRESSED cycle =
@@ -5246,7 +5616,7 @@ extern "C" void app_main(void) {
   shackle_rest_y = lv_obj_get_y(ui_Shackle);
   shackle_rest_h = lv_obj_get_height(ui_Shackle);
   lv_arc_set_range(ui_LockRing, 0, kHoldMax);
-  lv_obj_remove_flag(ui_LockRing, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(ui_LockRing, false);
 
   // The three push-and-hold gestures, polled by one shared timer — only the
   // gesture whose applies() is true on the current screen can be filling at any
@@ -5263,7 +5633,7 @@ extern "C" void app_main(void) {
   lv_bar_set_range(ui_CalibrateFill, 0, kHoldMax);
   lv_bar_bind_value(ui_CalibrateFill, &calibrate_gesture.progress);
   lv_obj_bind_flag_if_eq(ui_CalibrateFill, &calibrate_gesture.progress, LV_OBJ_FLAG_HIDDEN, 0);
-  lv_obj_remove_flag(ui_CalibrateFill, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(ui_CalibrateFill, false);
   lv_timer_create(hold_poll_cb, kHoldPollMs, nullptr);
 
   // LogScreen: TextArea1 shows the serial output log_capture has kept. Its
@@ -5559,6 +5929,10 @@ extern "C" void app_main(void) {
   press_flash_timer = lv_timer_create(press_flash_cb, kPressFlashMs, nullptr);
   lv_timer_pause(press_flash_timer);
   setting_group = lv_group_create();
+  for (lv_subject_t &position : motor_position) {
+    lv_subject_init_int(&position, kValueUnknown);
+  }
+  lv_timer_create(motor_jog_poll_cb, kMotorJogResendMs, nullptr);
 
   // Initialised before the screen's warning panel ever binds to it.
   lv_subject_init_int(&setting_page_subject, SETTINGS_PAGE_UI);
@@ -5953,6 +6327,8 @@ extern "C" void app_main(void) {
       const float kKeyRelease = kKeyEngage * 0.5f;
       {
         static bool engaged = false;
+        static bool takes_over = false;
+        const bool was_engaged = engaged;
         const float x = stick_x;
         const float y = stick_y;
         const float mag = std::max(std::abs(x), std::abs(y));
@@ -5963,10 +6339,17 @@ extern "C" void app_main(void) {
         } else if (mag < kKeyRelease) {
           engaged = false;
         }
+        // Like the button: a push that began in AUTONOMOUS is spent on taking over
+        // and moves no focus until the stick is let go.
+        if (!engaged) {
+          takes_over = false;
+        } else if (!was_engaged && stick_takes_over.load()) {
+          takes_over = true;
+        }
         const uint32_t was = joy_key.load();
         if (remote_key.load() != 0) {
           joy_key.store(remote_key.load());
-        } else if (!engaged) {
+        } else if (!engaged || takes_over) {
           joy_key.store(0);
         } else if (std::abs(x) >= std::abs(y)) {
           joy_key.store(x > 0 ? LV_KEY_RIGHT : LV_KEY_LEFT);
@@ -6003,8 +6386,9 @@ extern "C" void app_main(void) {
       // screens, as the spec draws it, so this is what keeps a push meant for
       // the next row from moving the chair. The bars keep moving, to show the
       // stick is being read. Quiet no-op until RTPS is up and a subscriber is
-      // discovered.
-      const bool neutral = calibrating || !stick_drives.load();
+      // discovered. In AUTONOMOUS the stick goes out whatever the screen, even
+      // mid-calibration: there it only ever stops the chair (stick_takes_over).
+      const bool neutral = !stick_takes_over.load() && (calibrating || !stick_drives.load());
       adc_published = rtps_comms_publish_adc(
           neutral ? 0.0f : stick_x, neutral ? 0.0f : stick_y, neutral ? 0.0f : stick.z(),
           joy_button_pressed.load() ? rammp::Buttons::JOYSTICK : rammp::Buttons::NONE);
@@ -6045,6 +6429,9 @@ extern "C" void app_main(void) {
   // RTPS handlers run on the RTPS task: subjects only, under the LVGL lock.
   rtps_comms_on_mib_status([](const MIB::MibStatus &status) {
     clock_note_mcb_time(status); // no LVGL: sets the system clock and the RTC
+    // Before the state subject, whose observers may ask the MIB to drive: by then a
+    // MIB that has left AUTONOMOUS no longer gets the stick.
+    stick_takes_over.store(status.systemState == MIB::MibSystemState::AUTONOMOUS);
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
     lv_subject_set_int(&mib_state_subject, static_cast<int32_t>(status.systemState));
     // What the MIB is actually driving with: the three profile buttons highlight from
@@ -6056,7 +6443,11 @@ extern "C" void app_main(void) {
     // copy_string cuts each text to its subject's buffer (RAMMP_*_LEN). drive_text_subject
     // stays empty: the MIB sends one wording, and the state label is where it belongs.
     lv_subject_copy_string(&state_text_subject, status.status_text.c_str());
-    lv_subject_copy_string(&error_text_subject, status.error_message.c_str());
+    // The message's default, "No error", is the MIB not saying why: the banners take
+    // an empty error_message as that and fall back to their own wording.
+    static const std::string kNoError = MIB::MibStatus{}.error_message;
+    lv_subject_copy_string(&error_text_subject,
+                           status.error_message == kNoError ? "" : status.error_message.c_str());
     lv_subject_copy_string(&error_footer_subject, status.error_footer.c_str());
     seat_apply_state(status.currentSeatState);
   });
@@ -6069,6 +6460,7 @@ extern "C" void app_main(void) {
       }
     }
   });
+  rtps_comms_on_motors(motors_receive); // no lvgl_mutex: see motors_receive
   if (!rtps_comms_start()) {
     logger.warn("RTPS comms not started (Ethernet bring-up failed)");
   }

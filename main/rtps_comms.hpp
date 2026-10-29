@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <span>
 #include <string>
 
 #include "hmi_rtps_spec.hpp"
@@ -27,18 +28,26 @@ void rtps_comms_on_brightness(std::function<void(float percent)> handler);
 /// The MIB's whole state: what the chair is doing, where the seat is, the clock.
 void rtps_comms_on_mib_status(std::function<void(const MIB::MibStatus &)> handler);
 void rtps_comms_on_diagnostics(std::function<void(const rammp::Diagnostics &)> handler);
+/// The motor debug list: every motor the MIB commands, with its latest state.
+void rtps_comms_on_motors(std::function<void(const rammp::Motors &)> handler);
 void rtps_comms_on_selftest_run(std::function<void(uint8_t run_id)> handler);
 /// `peer_rx`: the peer's count of pings received; -1 when the pong was a plain echo.
 void rtps_comms_on_selftest_pong(std::function<void(uint16_t seq, int peer_rx)> handler);
 
 // Publishers: any task. They return false, quietly, until the participant is up
-// and a peer has matched.
+// and a peer has matched. While hmi_estop.is_active(): the stick goes out centred, a drive
+// ENABLE goes out as DISABLE (and one DISABLE goes out the moment the stop engages,
+// from the stick's task), and seat requests are not sent.
 bool rtps_comms_publish_adc(float x, float y, float twist, rammp::Buttons buttons);
 /// Ask the MIB to enable or disable driving, with the profile to drive with.
 bool rtps_comms_publish_drive(rammp::DriveRequest request, MIB::DriveProfile profile);
 /// Ask the MIB to put one seat axis at `target` (absolute, in the axis' whole units).
 bool rtps_comms_publish_seat(rammp::SeatAxis axis, float target);
+/// Ask the MIB to jog one motor (hold-to-run: resend while held, 0 = stop). Not sent
+/// while the e-stop is active.
+bool rtps_comms_publish_motor_jog(uint8_t axis_id, int8_t direction);
 bool rtps_comms_publish_selftest_ping(uint16_t seq);
+
 bool rtps_comms_publish_selftest_report(const rammp::SelfTestReport &report);
 
 /// Diagnostics arrivals, for the DiagnosticsScreen. Any task.

@@ -14,48 +14,58 @@ dependencies:
   #   # `public` flag doesn't have an effect dependencies of the `main` component.
   #   # All dependencies of `main` are public by default.
   #   public: true
-  espp/task: '>=1.3.2'
+  espp/task: '>=1.3.10'
   # espp/m5stack-tab5 is vendored into components/m5stack-tab5 so the DPI panel
   # config (num_fbs) and the LVGL draw-buffer allocation can be modified for
   # performance. Removed from the manifest so the component manager does not
   # also fetch it into managed_components/ and collide with the local copy.
-  espp/adc: '>=1.3.2'
-  espp/base_component: '>=1.3.2'
-  espp/button: '>=1.3.2'
-  espp/base_peripheral: '>=1.3.2'
-  espp/bmi270: '>=1.3.2'
-  espp/format: '>=1.3.2'
-  espp/logger: '>=1.3.2'
-  espp/cli: '>=1.3.2'
-  espp/codec: '>=1.3.2'
-  espp/display: '>=1.3.2'
-  espp/display_drivers: '>=1.3.2'
+  espp/adc: '>=1.3.10'
+  espp/base_component: '>=1.3.10'
+  espp/button: '>=1.3.10'
+  espp/base_peripheral: '>=1.3.10'
+  espp/bmi270: '>=1.3.10'
+  espp/format: '>=1.3.10'
+  espp/logger: '>=1.3.10'
+  espp/cli: '>=1.3.10'
+  espp/codec: '>=1.3.10'
+  espp/display: '>=1.3.10'
+  espp/display_drivers: '>=1.3.10'
   # DRV2605 haptic motor driver (the motor on the PCB's JST connector)
-  espp/drv2605: '>=1.3.2'
+  espp/drv2605: '>=1.3.10'
   espressif/esp-dsp: ^1.8.2
-  espp/filters: '>=1.3.2'
+  espp/filters: '>=1.3.10'
   # LittleFS on the `storage` partition: joystick calibration now, more later
-  espp/file_system: '>=1.3.2'
-  espp/gt911: '>=1.3.2'
-  espp/i2c: '>=1.3.2'
-  espp/ina226: '>=1.3.2'
-  espp/input_drivers: '>=1.3.2'
-  espp/interrupt: '>=1.3.2'
-  espp/led: '>=1.3.2'
+  espp/file_system: '>=1.3.10'
+  espp/gt911: '>=1.3.10'
+  espp/i2c: '>=1.3.10'
+  espp/ina226: '>=1.3.10'
+  espp/input_drivers: '>=1.3.10'
+  espp/interrupt: '>=1.3.10'
+  espp/led: '>=1.3.10'
   lvgl/lvgl: ^9.5.0
-  espp/math: '>=1.3.2'
-  espp/rx8130ce: '>=1.3.2'
-  espp/pi4ioe5v: '>=1.3.2'
-  espp/spi: '>=1.3.2'
-  espp/touch: '>=1.3.2'
-  espp/st7123touch: '>=1.3.2'
+  espp/math: '>=1.3.10'
+  espp/rx8130ce: '>=1.3.10'
+  espp/pi4ioe5v: '>=1.3.10'
+  espp/spi: '>=1.3.10'
+  espp/touch: '>=1.3.10'
+  espp/st7123touch: '>=1.3.10'
   # RTPS comms — these components first shipped in espp 1.1.6 (espp/rtps pulls
   # in espp/socket transitively; cdr is used directly for sample serialization)
-  espp/rtps: '>=1.3.2'
-  espp/cdr: '>=1.3.2'
+  espp/rtps: '>=1.3.10'
+  espp/cdr: '>=1.3.10'
   # Every espp component moves together (dependencies.lock records the exact set).
-  espp/reflect_cpp: '>=1.3.2'
-  espp/socket: '>=1.3.2'
-  espp/thread_pool: '>=1.3.2'
+  espp/reflect_cpp: '>=1.3.10'
+  espp/socket: '>=1.3.10'
+  espp/thread_pool: '>=1.3.10'
+  # The robot-wide e-stop (estop::Node). v0.3.0 needs espp 1.3.10 for
+  # CONFIG_RTPS_THREAD_POOL_READER_PRIO (sdkconfig.defaults).
+  estop_core:
+    git: https://github.com/rammp-org/rammp-estop-core.git
+    version: v0.3.0
+  # estop_core fetches the RTPS spec's messages from git; this makes every user of it
+  # take the rammp-rtps submodule's copy instead (a managed component would otherwise
+  # win over EXTRA_COMPONENT_DIRS).
+  rammp_rtps_messages:
+    override_path: "../external/rammp-rtps/components/rammp_rtps_messages"
   # W5500 SPI Ethernet MAC driver (split out of esp_eth in IDF 6.0)
   espressif/w5500: ^2.0.0

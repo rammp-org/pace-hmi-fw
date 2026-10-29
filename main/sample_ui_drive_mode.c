@@ -33,8 +33,8 @@ static lv_obj_t *create_mode_card(lv_obj_t *parent, int index) {
   lv_obj_set_style_border_color(card, lv_color_hex(SAMPLE_UI_COLOR_PANEL), LV_PART_MAIN);
   lv_obj_set_style_border_color(card, lv_color_hex(SAMPLE_UI_COLOR_ACCENT),
                                 LV_PART_MAIN | LV_STATE_CHECKED);
-  lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_scrollable(card, false);
+  lv_obj_set_clickable(card, true);
   lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
   lv_obj_set_flex_align(card, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
@@ -65,7 +65,7 @@ void sample_ui_drive_mode_init(void) {
   lv_obj_set_style_bg_opa(content, LV_OPA_TRANSP, LV_PART_MAIN);
   lv_obj_set_style_border_width(content, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_column(content, 40, LV_PART_MAIN);
-  lv_obj_remove_flag(content, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollable(content, false);
   lv_obj_set_flex_flow(content, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(content, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 

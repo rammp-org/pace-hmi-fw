@@ -22,7 +22,7 @@ void sample_ui_navigation_init(void) {
   lv_obj_set_style_border_width(content, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(content, 30, LV_PART_MAIN);
   lv_obj_set_style_pad_row(content, 20, LV_PART_MAIN);
-  lv_obj_remove_flag(content, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollable(content, false);
   lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
   lv_obj_set_flex_align(content, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
@@ -38,7 +38,7 @@ void sample_ui_navigation_init(void) {
   lv_obj_set_style_bg_opa(map, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_border_width(map, 0, LV_PART_MAIN);
   lv_obj_set_style_radius(map, 16, LV_PART_MAIN);
-  lv_obj_remove_flag(map, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollable(map, false);
 
   static lv_style_t route_style;
   lv_style_init(&route_style);
@@ -65,7 +65,7 @@ void sample_ui_navigation_init(void) {
   lv_obj_set_style_border_width(stats_row, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(stats_row, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_column(stats_row, 40, LV_PART_MAIN);
-  lv_obj_remove_flag(stats_row, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollable(stats_row, false);
   lv_obj_set_flex_flow(stats_row, LV_FLEX_FLOW_ROW);
 
   lv_obj_t *eta_label = lv_label_create(stats_row);

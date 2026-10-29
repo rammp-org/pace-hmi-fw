@@ -1065,8 +1065,8 @@ lv_obj_t *make_box(lv_obj_t *parent, int32_t width) {
   lv_obj_t *box = lv_obj_create(parent);
   lv_obj_remove_style_all(box);
   lv_obj_set_size(box, width, LV_SIZE_CONTENT);
-  lv_obj_remove_flag(box, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_remove_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_clickable(box, false);
+  lv_obj_set_scrollable(box, false);
   return box;
 }
 
@@ -1137,8 +1137,8 @@ void create_overlay_locked() {
   lv_obj_set_size(panel, LV_PCT(100), LV_PCT(100));
   lv_obj_set_style_bg_color(panel, lv_color_hex(0x0B0F14), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, LV_PART_MAIN);
-  lv_obj_remove_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE); // also swallows touches meant for below
+  lv_obj_set_scrollable(panel, false);
+  lv_obj_set_clickable(panel, true); // also swallows touches meant for below
   lv_obj_add_event_cb(panel, overlay_clicked_cb, LV_EVENT_CLICKED, nullptr);
   lv_obj_bind_flag_if_eq(panel, &ui_visible_subject, LV_OBJ_FLAG_HIDDEN, 0);
 
@@ -1176,8 +1176,8 @@ void create_overlay_locked() {
   overlay_banner = guard;
   lv_obj_remove_style_all(guard);
   lv_obj_set_size(guard, LV_PCT(100), LV_PCT(100));
-  lv_obj_add_flag(guard, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_remove_flag(guard, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_clickable(guard, true);
+  lv_obj_set_scrollable(guard, false);
   lv_obj_bind_flag_if_eq(guard, &ui_banner_subject, LV_OBJ_FLAG_HIDDEN, 0);
   lv_obj_t *strip = make_box(guard, LV_PCT(100));
   lv_obj_set_style_bg_color(strip, lv_color_hex(0x0B0F14), LV_PART_MAIN);

@@ -32,6 +32,12 @@ SHARED_HEADER_RELATIVE_PATH = os.path.join(
 MIB_HEADER_RELATIVE_PATH = os.path.join(
     "external", "rammp-rtps", "components", "rammp_rtps_messages", "include", "messages",
     "mib_message.hpp")
+ESTOP_HEADER_RELATIVE_PATH = os.path.join(
+    "external", "rammp-rtps", "components", "rammp_rtps_messages", "include", "messages",
+    "estop_message.hpp")
+MOTOR_HEADER_RELATIVE_PATH = os.path.join(
+    "external", "rammp-rtps", "components", "rammp_rtps_messages", "include", "messages",
+    "motor_message.hpp")
 
 # #define RAMMP_TOPIC_MIB_STATUS "rammp/mib/status" / #define RAMMP_TYPE_MIB_STATUS "..."
 _DEFINE_RE = re.compile(r'^\s*#define\s+RAMMP_((?:TOPIC|TYPE)_[A-Z0-9_]+)\s+"([^"]*)"', re.M)
@@ -65,7 +71,7 @@ def _enumerators(body: str):
 
 def _snake(name: str) -> str:
     """SystemState -> SYSTEM_STATE, XYTwist -> XY_TWIST, SelfTestKind -> SELFTEST_KIND."""
-    name = name.replace("SelfTest", "Selftest").replace("UInt", "Uint")
+    name = name.replace("SelfTest", "Selftest").replace("UInt", "Uint").replace("EStop", "Estop")
     return re.sub(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", "_", name).upper()
 
 
@@ -91,6 +97,10 @@ HEADER_PATH = find_header()
 SHARED_HEADER_PATH = find_header(SHARED_HEADER_RELATIVE_PATH)
 #: the MIB's own state message, in the same submodule
 MIB_HEADER_PATH = find_header(MIB_HEADER_RELATIVE_PATH)
+#: the robot-wide e-stop, in the same submodule
+ESTOP_HEADER_PATH = find_header(ESTOP_HEADER_RELATIVE_PATH)
+#: the PACE RACER motor boards (BoardState, FaultCode, RAMMP_AXIS_TABLE), same submodule
+MOTOR_HEADER_PATH = find_header(MOTOR_HEADER_RELATIVE_PATH)
 
 
 def _read_spec(path: str) -> str:
@@ -99,7 +109,8 @@ def _read_spec(path: str) -> str:
 
 
 _HEADER_TEXT = ("\n".join(_read_spec(path) for path in
-               (SHARED_HEADER_PATH, MIB_HEADER_PATH, HEADER_PATH)))
+               (SHARED_HEADER_PATH, MIB_HEADER_PATH, ESTOP_HEADER_PATH, MOTOR_HEADER_PATH,
+                HEADER_PATH)))
 
 #: TOPIC_* (topic names) and TYPE_* (DDS type names)
 STRINGS: Dict[str, str] = dict(_DEFINE_RE.findall(_HEADER_TEXT))
@@ -122,6 +133,25 @@ globals().update(STRINGS)
 globals().update(ENUMS)
 globals().update(NUMBERS)
 
+# The e-stop's shared timing is one struct, rammp::kEStopPolicy, rather than a constant
+# each: ESTOP_PERIOD_MS, ESTOP_TIMEOUT_MS, ESTOP_CLEAR_WINDOW_MS and ESTOP_DEADMAN.
+_ESTOP_POLICY_RE = re.compile(r"kEStopPolicy\{(.*?)\};", re.S)
+_ESTOP_FIELD_RE = re.compile(r"\.(\w+)\s*=\s*(?:std::chrono::milliseconds\{(\d+)\}|(true|false))")
+_estop_policy = _ESTOP_POLICY_RE.search(_HEADER_TEXT)
+if _estop_policy is None:
+    raise RuntimeError(f"{ESTOP_HEADER_PATH}: no kEStopPolicy — has its C++ style changed?")
+for _field, _ms, _flag in _ESTOP_FIELD_RE.findall(_estop_policy.group(1)):
+    globals()[f"ESTOP_{_field.upper()}" + ("_MS" if _ms else "")] = (
+        int(_ms) if _ms else _flag == "true")
+# inline constexpr char kEStopClearer[] = "mib";  -> ESTOP_CLEARER, ESTOP_SELF
+for _name, _text_value in re.findall(r'inline constexpr char k(EStop\w+)\[\]\s*=\s*"([^"]*)";',
+                                     _HEADER_TEXT):
+    globals()[_snake(_name.replace("EStop", "Estop"))] = _text_value
+for _needed in ("ESTOP_PERIOD_MS", "ESTOP_TIMEOUT_MS", "ESTOP_CLEAR_WINDOW_MS", "ESTOP_DEADMAN",
+                "ESTOP_CLEARER", "ESTOP_SELF", "TOPIC_ESTOP", "TYPE_ESTOP"):
+    if _needed not in globals():
+        raise RuntimeError(f"e-stop spec: {_needed} not found — has the C++ style changed?")
+
 
 def _group(prefix: str) -> Dict[int, str]:
     """{value: SHORT_NAME} for one enum group, e.g. _group('MIB_SYSTEM_STATE_')."""
@@ -136,6 +166,10 @@ MIB_SYSTEM_STATE_NAMES = _group("MIB_SYSTEM_STATE_")
 DRIVE_REQUEST_NAMES = _group("DRIVE_REQUEST_")
 #: {0: 'LOW', 1: 'NORMAL', 2: 'HIGH'} — MIB::DriveProfile, the HMI's profile buttons
 DRIVE_PROFILE_NAMES = _group("DRIVE_PROFILE_")
+#: {0: 'DISARMED', 1: 'ARMED', ...} — rammp::BoardState, what a motor board is doing
+BOARD_STATE_NAMES = _group("BOARD_STATE_")
+#: {0: 'NONE', 1: 'WATCHDOG', ...} — rammp::FaultCode, why a board is in FAULT
+FAULT_CODE_NAMES = _group("FAULT_CODE_")
 
 
 class SeatAxis(NamedTuple):
@@ -214,6 +248,27 @@ if not DIAGNOSTICS:
 if [d.id for d in DIAGNOSTICS] != list(range(len(DIAGNOSTICS))):
     raise RuntimeError(f"{SHARED_HEADER_PATH}: diagnostics ids must be 0..N-1 in table order")
 
+
+class Axis(NamedTuple):
+    """One row of RAMMP_AXIS_TABLE: a PACE RACER motor board the MIB commands."""
+
+    id: int
+    name: str
+    segment: str
+    label: str
+
+
+# X(2, DRIVE_LEFT, "drive_left", "Drive L")
+_AXIS_RE = re.compile(
+    r"""^\s*X\(\s*(\d+)\s*,\s*([A-Z0-9_]+)\s*,\s*"([^"]*)"\s*,\s*"([^"]*)"\s*\)""", re.M)
+
+#: every motor axis in the shared table, in AxisId order: what a real MIB lists in Motors
+AXES: List[Axis] = [Axis(int(i), name, segment, label)
+                    for i, name, segment, label in _AXIS_RE.findall(_HEADER_TEXT)]
+
+if not AXES:
+    raise RuntimeError(f"{MOTOR_HEADER_PATH}: RAMMP_AXIS_TABLE parsed to nothing")
+
 # ------------------------------------------------------------------ CDR (XCDR1)
 # What espp/cdr puts on the wire for the spec's C++ structs: header 00 01 00 00,
 # little-endian, each primitive aligned to its size from the first payload byte,
@@ -238,6 +293,26 @@ MSG_DRIVE_COMMAND = [("request", "B"), ("profile", "B")]
 MSG_SEAT_COMMAND = [("axis", "B"), ("target", "f")]
 MSG_DIAGNOSTICS = [("seq", "B"), ("items", ("seq", [("values", ("seq", "i"))]))]
 MSG_UINT32 = [("data", "I")]
+MSG_MOTOR_JOG = [("axis_id", "B"), ("direction", "b")]
+# rammp::Motors: seq, then one MotorSummary per axis (BoardState and FaultCode are uint8).
+MSG_MOTORS = [("seq", "B"), ("motors", ("seq", [
+    ("axis_id", "B"), ("online", "B"), ("state", "B"), ("fault_code", "B"),
+    ("position", "f"), ("velocity", "f"), ("label", "str"),
+]))]
+# rammp::EStop: the ROS layout (std_msgs/Header, engaged, source, reason), then the
+# appended pub_seq, clear_target, clear_pub_seq. Header is written inline: stamp.sec, stamp.nanosec,
+# frame_id.
+MSG_ESTOP_ROS = [
+    ("sec", "i"), ("nanosec", "I"), ("frame_id", "str"),
+    ("engaged", "B"), ("source", "str"), ("reason", "str"),
+]
+# Ours: the ROS bool `engaged` is rammp::EStopState `state` (same octet: 0 NOT_ENGAGED,
+# 1 ENGAGED), then the appended fields.
+MSG_ESTOP = [
+    ("sec", "i"), ("nanosec", "I"), ("frame_id", "str"),
+    ("state", "B"), ("source", "str"), ("reason", "str"),
+    ("pub_seq", "I"), ("clear_target", "str"), ("clear_pub_seq", "I"),
+]
 MSG_SELFTEST_REPORT = [
     ("run_id", "B"), ("kind", "B"), ("index", "B"), ("count", "B"), ("result", "B"),
     ("value", "i"), ("lo", "i"), ("hi", "i"), ("name", "str"), ("unit", "str"), ("detail", "str"),
@@ -381,6 +456,93 @@ def unpack_diagnostics(payload: bytes) -> tuple[int, list[list[int]]] | None:
     """(seq, readings per item), or None."""
     message = decode(MSG_DIAGNOSTICS, payload)
     return None if message is None else (message[0], [item[0] for item in message[1]])
+
+
+class MotorSummary(NamedTuple):
+    """One rammp::MotorSummary: a motor board as the MIB last heard from it."""
+    axis_id: int
+    online: bool
+    state: int  # BOARD_STATE_*
+    fault_code: int  # FAULT_CODE_*
+    position: float  # rad
+    velocity: float  # rad/s
+    label: str
+
+
+def pack_motors(motors, seq: int = 0) -> bytes:
+    """A rammp::Motors (MIB -> joystick): `motors` is a list of MotorSummary."""
+    return encode(MSG_MOTORS, seq & 0xFF, [
+        (m.axis_id & 0xFF, 1 if m.online else 0, m.state & 0xFF, m.fault_code & 0xFF,
+         float(m.position), float(m.velocity), m.label) for m in motors])
+
+
+def unpack_motors(payload: bytes) -> tuple[int, list[MotorSummary]] | None:
+    """(seq, motors), or None."""
+    message = decode(MSG_MOTORS, payload)
+    if message is None:
+        return None
+    return message[0], [MotorSummary(a, bool(o), s, f, p, v, lbl)
+                        for a, o, s, f, p, v, lbl in message[1]]
+
+
+def pack_motor_jog(axis_id: int, direction: int) -> bytes:
+    """A rammp::MotorJog (joystick -> MIB); for tests of the tools."""
+    return encode(MSG_MOTOR_JOG, axis_id & 0xFF, max(-128, min(127, direction)))
+
+
+def unpack_motor_jog(payload: bytes) -> tuple[int, int] | None:
+    """(axis_id, direction): -1 / +1 while held, 0 = stop now. None if it does not decode."""
+    return decode(MSG_MOTOR_JOG, payload)
+
+
+class EStop(NamedTuple):
+    """One rammp::EStop. pub_seq/clear_* read 0/"" from a sender of the 4-field ROS layout."""
+    state: int  # ESTOP_STATE_NOT_ENGAGED or ESTOP_STATE_ENGAGED
+    source: str
+    reason: str
+    pub_seq: int
+    clear_target: str = ""
+    clear_pub_seq: int = 0
+    sec: int = 0
+    nanosec: int = 0
+
+    @property
+    def engaged(self) -> bool:
+        """Anything but NOT_ENGAGED engages: the fail-safe reading of an unknown value."""
+        return self.state != ESTOP_STATE_NOT_ENGAGED  # noqa: F821  (parsed from the header)
+
+    @property
+    def is_clear_attempt(self) -> bool:
+        """A clear attempt: NOT_ENGAGED and addressed to a source. A plain NOT_ENGAGED is a
+        heartbeat."""
+        return not self.engaged and self.clear_target != ""
+
+
+def pack_estop(engaged: bool, source: str, reason: str, pub_seq: int, clear_target: str = "",
+               clear_pub_seq: int = 0, stamp: float | None = None) -> bytes:
+    """`stamp` is Unix seconds; None sends the all-zero "unstamped" header."""
+    sec, nanosec = (0, 0) if stamp is None else (int(stamp), int((stamp % 1) * 1e9))
+    state = ESTOP_STATE_ENGAGED if engaged else ESTOP_STATE_NOT_ENGAGED  # noqa: F821
+    return encode(MSG_ESTOP, sec, nanosec, "", state, source, reason,
+                  pub_seq & 0xFFFFFFFF, clear_target, clear_pub_seq & 0xFFFFFFFF)
+
+
+def unpack_estop(payload: bytes) -> EStop | None:
+    """The full layout, or failing that the 4-field ROS one (never a clear attempt)."""
+    full = decode(MSG_ESTOP, payload)
+    if full is not None:
+        sec, nanosec, _frame, state, source, reason, pub_seq, clear_target, clear_pub_seq = full
+        return EStop(state, source, reason, pub_seq, clear_target, clear_pub_seq, sec, nanosec)
+    ros = decode(MSG_ESTOP_ROS, payload)
+    if ros is None:
+        return None
+    sec, nanosec, _frame, engaged, source, reason = ros  # the ROS bool: same octet values
+    return EStop(engaged, source, reason, 0, "", 0, sec, nanosec)
+
+
+def estop_seq_newer(a: int, b: int) -> bool:
+    """rammp::estop_seq_newer: wrap-safe a > b on 32-bit pub_seq numbers."""
+    return a != b and ((a - b) & 0xFFFFFFFF) < 0x80000000
 
 
 def unpack_xy_twist(payload: bytes) -> tuple[float, float, float, int] | None:
