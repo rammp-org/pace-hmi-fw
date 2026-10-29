@@ -767,6 +767,11 @@ static void rtps_poll_cb(lv_timer_t *) {
   const RtpsLinkState state = rtps_comms_link_state();
   log_link_change(state);
   lv_subject_set_int(&rtps_link_subject, static_cast<int32_t>(state));
+  // A MIB that has gone quiet is not known to be in AUTONOMOUS any more (mib_mode
+  // drops its banner too), so the stick and the button go back to the HMI's own use.
+  if (state != RtpsLinkState::CONNECTED) {
+    stick_takes_over.store(false);
+  }
   static uint32_t ticks = 0;
   // flip every other tick: a 500 ms half-period, i.e. a 1 Hz blink
   lv_subject_set_int(&rtps_blink_subject, static_cast<int32_t>((++ticks / 2) & 1u));
