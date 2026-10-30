@@ -76,6 +76,8 @@ Publisher<rammp::SeatCommand> seat_pub;
 Publisher<rammp::DriveCommand> drive_pub;
 Publisher<rammp::MotorJog> motor_jog_pub;
 Publisher<rammp::SelfTestReport> report_pub;
+Publisher<rammp::XYTwist> seat_stick_pub;   // SeatControlScreen, Seat; may be null
+Publisher<rammp::XYTwist> swivel_stick_pub; // SeatControlScreen, Swivel; may be null
 
 std::function<void(float)> brightness_handler;
 std::function<void(const MIB::MibStatus &)> mib_status_handler;
@@ -121,7 +123,7 @@ template <class T> bool subscribe(const rammp::Topic<T> &topic, void (*on_msg)(c
 
 // Quiet until the endpoints exist and a peer has matched: no one to send to yet.
 template <class T> bool publish(const Publisher<T> &pub, const T &msg) {
-  return endpoints_ready && peer_matched && pub->publish(msg);
+  return endpoints_ready && peer_matched && pub && pub->publish(msg);
 }
 
 // PC -> HMI bench command. The self test's run and pong ride it, tagged in the top nibble.
@@ -381,7 +383,7 @@ bool start_participant() {
     return false;
   }
 
-  // 7 writers + 6 readers, plus SPDP's pair: the budget set in sdkconfig.defaults
+  // 9 writers + 6 readers, plus SPDP's pair: the budget set in sdkconfig.defaults
   counter_pub = make_publisher(rammp::kHmiCounter);
   joystick_pub = make_publisher(rammp::kJoystickXYTwist);
   seat_pub = make_publisher(rammp::kJoystickSeatCommand);
@@ -397,6 +399,10 @@ bool start_participant() {
   if (!ok) {
     return false;
   }
+  // The seat and swivel sticks are not worth the link: without them (no room in the
+  // pool, logged by make_publisher) only SeatControlScreen goes quiet.
+  seat_stick_pub = make_publisher(rammp::kJoystickSeatXYTwist);
+  swivel_stick_pub = make_publisher(rammp::kJoystickSwivelXYTwist);
   endpoints_ready = true;
   logger.info("RTPS up on {}", ip_address);
 
@@ -453,6 +459,22 @@ bool rtps_comms_publish_adc(float x, float y, float twist, rammp::Buttons button
     x = y = twist = 0.0f;
   }
   return publish(joystick_pub, rammp::XYTwist{x, y, twist, buttons});
+}
+
+bool rtps_comms_publish_seat_stick(SeatStick target, float x, float y, float twist,
+                                   rammp::Buttons buttons) {
+  if (hmi_estop.is_active()) {
+    return false;
+  }
+  switch (target) {
+  case SeatStick::SEAT:
+    return publish(seat_stick_pub, rammp::XYTwist{x, y, twist, buttons});
+  case SeatStick::SWIVEL:
+    return publish(swivel_stick_pub, rammp::XYTwist{x, y, twist, buttons});
+  case SeatStick::NONE:
+    break;
+  }
+  return false;
 }
 
 bool rtps_comms_publish_drive(rammp::DriveRequest request, MIB::DriveProfile profile) {

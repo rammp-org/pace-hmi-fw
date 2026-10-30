@@ -448,7 +448,7 @@ void ui_SeatScreen_screen_init(void)
     lv_obj_set_width(ui_SeatButtonLabel5, 240);
     lv_obj_set_height(ui_SeatButtonLabel5, 50);
     lv_obj_set_align(ui_SeatButtonLabel5, LV_ALIGN_CENTER);
-    lv_label_set_text(ui_SeatButtonLabel5, "Static");
+    lv_label_set_text(ui_SeatButtonLabel5, "Seat");
     ui_object_set_themeable_style_property(ui_SeatButtonLabel5, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_text);
     ui_object_set_themeable_style_property(ui_SeatButtonLabel5, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
@@ -486,7 +486,7 @@ void ui_SeatScreen_screen_init(void)
     lv_obj_set_width(ui_SeatButtonLabel6, 240);
     lv_obj_set_height(ui_SeatButtonLabel6, 50);
     lv_obj_set_align(ui_SeatButtonLabel6, LV_ALIGN_CENTER);
-    lv_label_set_text(ui_SeatButtonLabel6, "Dynamic");
+    lv_label_set_text(ui_SeatButtonLabel6, "Swivel");
     ui_object_set_themeable_style_property(ui_SeatButtonLabel6, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_COLOR,
                                            _ui_theme_color_text);
     ui_object_set_themeable_style_property(ui_SeatButtonLabel6, LV_PART_MAIN | LV_STATE_DEFAULT, LV_STYLE_TEXT_OPA,
