@@ -55,14 +55,15 @@ constexpr size_t index_of(SeatAxis axis) { return static_cast<size_t>(axis); }
 // Names for the status labels, the fault banner (when the MIB sends no text) and the
 // logs. A value this firmware does not know reads "?".
 constexpr const char *to_string(MIB::MibSystemState v) {
-  return v == MIB::MibSystemState::INITIALIZING ? "INITIALIZING"
-         : v == MIB::MibSystemState::IDLE       ? "IDLE"
-         : v == MIB::MibSystemState::ENABLED    ? "ENABLED"
-         : v == MIB::MibSystemState::ERROR      ? "ERROR"
-         : v == MIB::MibSystemState::AUTONOMOUS ? "AUTONOMOUS"
-         : v == MIB::MibSystemState::SHARED     ? "SHARED"
-         : v == MIB::MibSystemState::ESTOP      ? "ESTOP"
-                                                : "?";
+  return v == MIB::MibSystemState::INITIALIZING  ? "INITIALIZING"
+         : v == MIB::MibSystemState::IDLE        ? "IDLE"
+         : v == MIB::MibSystemState::ENABLED     ? "ENABLED"
+         : v == MIB::MibSystemState::ERROR       ? "ERROR"
+         : v == MIB::MibSystemState::AUTONOMOUS  ? "AUTONOMOUS"
+         : v == MIB::MibSystemState::SHARED      ? "SHARED"
+         : v == MIB::MibSystemState::ESTOP       ? "ESTOP"
+         : v == MIB::MibSystemState::PUSH_ASSIST ? "PUSH_ASSIST"
+                                                 : "?";
 }
 
 constexpr const char *to_string(MIB::DriveProfile v) {
@@ -298,6 +299,21 @@ static_assert(sizeof(kHmiAutonomousText) <= kErrorTextLen &&
               "mode body outgrows the banner it shares with MIB faults");
 static_assert(sizeof(kHmiAutonomousFooter) <= kErrorFooterLen,
               "mode footer outgrows the banner it shares with MIB faults");
+
+/* PUSH_ASSIST (rammp-rtps#17): an assistant drives from the push handle. The footer names
+   the "Start driving" input, which ends it. Asked for from the Skunk Works tile. */
+inline constexpr char kHmiPushAssistTitle[] = "PUSH ASSIST";
+inline constexpr char kHmiPushAssistText[] = "AN ASSISTANT IS DRIVING";
+inline constexpr char kHmiPushAssistStickFooter[] = "Move the joystick to end it";
+inline constexpr char kHmiPushAssistButtonFooter[] = "Press the button to end it";
+inline constexpr char kHmiPushAssistRefusedTitle[] = "PUSH ASSIST REFUSED";
+inline constexpr char kHmiPushAssistRefusedText[] = "MIB DID NOT ENTER PUSH ASSIST";
+static_assert(sizeof(kHmiPushAssistText) <= kErrorTextLen &&
+                  sizeof(kHmiPushAssistRefusedText) <= kErrorTextLen,
+              "push assist body outgrows the banner it shares with MIB faults");
+static_assert(sizeof(kHmiPushAssistStickFooter) <= kErrorFooterLen &&
+                  sizeof(kHmiPushAssistButtonFooter) <= kErrorFooterLen,
+              "push assist footer outgrows the banner it shares with MIB faults");
 
 } // namespace rammp
 

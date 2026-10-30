@@ -549,6 +549,17 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
             return
         if request == spec.DRIVE_REQUEST_DISABLE and self.refuse_stop:
             return
+        # Push assist (rammp-rtps#17): entered from IDLE, left back to IDLE. Refused with
+        # the drive ("x"), as a MIB that cannot hand driving to the handle would.
+        if request == spec.DRIVE_REQUEST_PUSH_ASSIST_ENABLE:
+            if self.system_state == spec.MIB_SYSTEM_STATE_IDLE and not self.refuse_drive \
+                    and not self.estop.latched:
+                self.system_state = spec.MIB_SYSTEM_STATE_PUSH_ASSIST
+            return
+        if request == spec.DRIVE_REQUEST_PUSH_ASSIST_DISABLE:
+            if self.system_state == spec.MIB_SYSTEM_STATE_PUSH_ASSIST:
+                self.system_state = spec.MIB_SYSTEM_STATE_IDLE
+            return
         # ERROR and INITIALIZING are not ours to leave: a drive request neither clears a
         # fault nor finishes booting.
         if self.system_state in (spec.MIB_SYSTEM_STATE_IDLE, spec.MIB_SYSTEM_STATE_ENABLED):
