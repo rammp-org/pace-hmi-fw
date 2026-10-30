@@ -1,0 +1,11 @@
+# rammp-rtps follows its main: whenever main moves, Dependabot opens a PR that bumps the
+# submodule, and CI builds it. The submodule itself stays pinned, so a release always
+# builds the same.
+version: 2
+updates:
+  - package-ecosystem: gitsubmodule
+    directory: "/"
+    schedule:
+      interval: daily
+    commit-message:
+      prefix: "rammp-rtps"
