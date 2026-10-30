@@ -69,7 +69,7 @@ Every row is one line in `main/settings_spec.h`, and every value is saved in Lit
 
 ## RTPS
 
-- The shared spec is [rammp-rtps](https://github.com/rammp-org/rammp-rtps), the git submodule `external/rammp-rtps`.
+- The shared spec is [rammp-rtps](https://github.com/rammp-org/rammp-rtps), the git submodule `external/rammp-rtps`. It follows rtps `main`: Dependabot opens a PR whenever `main` moves, and CI builds it. Before a release, merge the open bump, or bump by hand with `git submodule update --remote external/rammp-rtps`.
 - `messages/joystick_message.hpp` there holds the joystick's commands, the shared tables and Diagnostics; `messages/mib_message.hpp` holds `MIB::MibStatus`, the chair's own state. Between them they are everything the MIB and the HMI share, and the first has an espp example at the top.
 - `main/hmi_rtps_spec.hpp` adds what only this HMI needs: timing, display limits, the bench self-test topics.
 - Messages are plain C++ structs serialized by espp/cdr as **XCDR1** (classic CDR), so any DDS / ROS 2 stack can talk to it.
