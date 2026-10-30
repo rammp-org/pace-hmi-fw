@@ -278,9 +278,27 @@ static std::atomic<bool> stick_wait_centre{false};
 // handler, read by the ADC task.
 static std::atomic<bool> stick_takes_over{false};
 
-// Whether the stick button's current press began in AUTONOMOUS. That press is spent
-// on taking over: it still reaches the MIB, but it neither selects nor counts as a
-// hold, even once the MIB is back in IDLE, until it is let go. LVGL lock.
+// Whether the MIB is in PUSH_ASSIST (rammp-rtps#17): an assistant drives from the push
+// handle, and the input "Start driving" names ends it -- any stick movement, or a press
+// of the button (push_assist_exit). Written by the MibStatus handler, read by the ADC
+// task; cleared with the link, like stick_takes_over.
+static std::atomic<bool> push_assist{false};
+// "Start driving" is Button, for the tasks that cannot read drive_start_subject.
+// Written by setting_store_observer.
+static std::atomic<bool> drive_start_button{false};
+
+// A push or a press spent on ending a MIB mode instead of on the UI: any input ends
+// AUTONOMOUS, the "Start driving" one ends PUSH_ASSIST. Any task.
+static bool stick_ends_mode() {
+  return stick_takes_over.load() || (push_assist.load() && !drive_start_button.load());
+}
+static bool button_ends_mode() {
+  return stick_takes_over.load() || (push_assist.load() && drive_start_button.load());
+}
+
+// Whether the stick button's current press began in a mode it ends (button_ends_mode).
+// That press is spent on ending it: it still reaches the MIB, but it neither selects
+// nor counts as a hold, even once the MIB is back in IDLE, until it is let go. LVGL lock.
 static bool button_takes_over = false;
 // Which topic the stick moves the seat on right now (SeatControlScreen).
 // SeatControlScreen up, the menu shut and the MIB idle; NONE otherwise. Written by
@@ -438,11 +456,14 @@ static void mcb_status_label_observer(lv_observer_t *observer, lv_subject_t *) {
   // Locked outranks everything: the chair does not drive until it is asked to,
   // whatever the MIB says. SHARED drives from the Drive screen like ENABLED, and
   // in AUTONOMOUS another node drives while the HMI stays locked. The full word,
-  // not "AUTO", which is a drive mode (446 of the cell's 468 px).
+  // not "AUTO", which is a drive mode (446 of the cell's 468 px). In PUSH_ASSIST an
+  // assistant drives from the handle, the HMI locked the same way.
   if (kind == StatusKind::kDriveStatus) {
     const bool unlocked = lv_subject_get_int(&locked_subject) == 0 && connected;
     if (connected && state == MIB::MibSystemState::AUTONOMOUS) {
       show("AUTONOMOUS", ok);
+    } else if (connected && state == MIB::MibSystemState::PUSH_ASSIST) {
+      show("PUSH ASSIST", ok);
     } else if (unlocked && state == MIB::MibSystemState::SHARED) {
       show("SHARED", ok);
     } else if (unlocked && state == MIB::MibSystemState::ENABLED) {
@@ -467,6 +488,7 @@ static void mcb_status_label_observer(lv_observer_t *observer, lv_subject_t *) {
   case MIB::MibSystemState::ENABLED:
   case MIB::MibSystemState::AUTONOMOUS:
   case MIB::MibSystemState::SHARED:
+  case MIB::MibSystemState::PUSH_ASSIST:
     show(overridden ? override_text : "OK", ok);
     return;
   case MIB::MibSystemState::INITIALIZING:
@@ -726,8 +748,9 @@ static void log_link_change(RtpsLinkState state) {
   last = state;
 }
 
-static void diag_poll();       // DiagnosticsScreen, further down
-static void drive_wait_poll(); // DriveScreen entry, further down
+static void diag_poll();             // DiagnosticsScreen, further down
+static void drive_wait_poll();       // DriveScreen entry, further down
+static void push_assist_wait_poll(); // the Skunk Works tile, with the drive requests
 
 // The e-stop into estop_subject, and every change into the log: the e-stop task
 // itself never logs (it must not allocate), so this is where its history is kept.
@@ -792,6 +815,7 @@ static void rtps_poll_cb(lv_timer_t *) {
   // drops its banner too), so the stick and the button go back to the HMI's own use.
   if (state != RtpsLinkState::CONNECTED) {
     stick_takes_over.store(false);
+    push_assist.store(false);
   }
   static uint32_t ticks = 0;
   // flip every other tick: a 500 ms half-period, i.e. a 1 Hz blink
@@ -799,6 +823,7 @@ static void rtps_poll_cb(lv_timer_t *) {
   estop_poll();      // first: everything below reads estop_subject
   diag_poll();       // diagnostics staleness rides the same 250 ms tick
   drive_wait_poll(); // and so does the wait for the MCB to enable driving
+  push_assist_wait_poll();
 
   // Defensive: if the RTPS label's text colour/opacity are registered as
   // themeable in the SquareLine project, ui_theme_set() re-applies the theme's
@@ -973,7 +998,7 @@ static void stick_button_edge(bool active) {
   static int64_t pressed_at_us = 0;
   if (active) {
     pressed_at_us = now;
-    button_takes_over = stick_takes_over.load();
+    button_takes_over = button_ends_mode();
   } else if (!button_takes_over && now - pressed_at_us < kSelectMaxUs) {
     select_key.store(true);
   }
@@ -1359,7 +1384,8 @@ static std::optional<MIB::MibSystemState> mib_mode() {
   const bool connected = static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) ==
                          RtpsLinkState::CONNECTED;
   if (connected &&
-      (state == MIB::MibSystemState::AUTONOMOUS || state == MIB::MibSystemState::ESTOP)) {
+      (state == MIB::MibSystemState::AUTONOMOUS || state == MIB::MibSystemState::ESTOP ||
+       state == MIB::MibSystemState::PUSH_ASSIST)) {
     return state;
   }
   return std::nullopt;
@@ -1398,6 +1424,9 @@ enum : int32_t {
   // Drive picked from the menu while the MCB could not drive. Like kRefusedSeat:
   // no push holds it up, so it stays its window unless the cause clears.
   kRefusedDriveMenu = 7,
+  // Asked for push assist (the Skunk Works tile), never got PUSH_ASSIST. The MIB's
+  // own doing, like kRefusedDriveNotGranted.
+  kRefusedPushAssist = 8,
 };
 static lv_subject_t entry_refused_subject; // kRefused*; panel up unless None
 // Created paused and re-armed by each refusal, like haptic_label_timer, so a
@@ -1507,10 +1536,22 @@ static bool fill_mib_mode_panel(lv_obj_t *panel) {
   if (!mode) {
     return false;
   }
-  const bool estop = *mode == MIB::MibSystemState::ESTOP;
-  fill_mib_reason_panel(panel, estop ? rammp::kHmiEStopTitle : rammp::kHmiAutonomousTitle,
-                        estop ? rammp::kHmiMibEStopText : rammp::kHmiAutonomousText,
-                        estop ? rammp::kHmiEStopFooter : rammp::kHmiAutonomousFooter);
+  switch (*mode) {
+  case MIB::MibSystemState::ESTOP:
+    fill_mib_reason_panel(panel, rammp::kHmiEStopTitle, rammp::kHmiMibEStopText,
+                          rammp::kHmiEStopFooter);
+    break;
+  case MIB::MibSystemState::PUSH_ASSIST:
+    // The footer names what ends it, which is whatever "Start driving" picks.
+    fill_mib_reason_panel(panel, rammp::kHmiPushAssistTitle, rammp::kHmiPushAssistText,
+                          drive_start_stick() ? rammp::kHmiPushAssistStickFooter
+                                              : rammp::kHmiPushAssistButtonFooter);
+    break;
+  default:
+    fill_mib_reason_panel(panel, rammp::kHmiAutonomousTitle, rammp::kHmiAutonomousText,
+                          rammp::kHmiAutonomousFooter);
+    break;
+  }
   return true;
 }
 
@@ -1583,6 +1624,12 @@ static void entry_refused_panel_observer(lv_observer_t *observer, lv_subject_t *
                           stopped ? rammp::kHmiDriveStoppedTitle : rammp::kHmiDriveNotGrantedTitle,
                           stopped ? rammp::kHmiDriveStoppedText : rammp::kHmiDriveNotGrantedText,
                           stopped ? stopped_footer : rammp::kHmiDriveNotGrantedFooter);
+    shown(true);
+    return;
+  }
+  if (refused == kRefusedPushAssist) {
+    fill_mib_reason_panel(panel, rammp::kHmiPushAssistRefusedTitle,
+                          rammp::kHmiPushAssistRefusedText, rammp::kHmiDriveNotGrantedFooter);
     shown(true);
     return;
   }
@@ -1759,6 +1806,47 @@ static void entry_refused_show(int32_t which, uint32_t show_ms) {
   lv_timer_set_period(entry_refused_timer, show_ms);
   lv_timer_reset(entry_refused_timer);
   lv_timer_resume(entry_refused_timer);
+}
+
+// Push assist (rammp-rtps#17) rides DriveCommand, but neither request is kept in
+// drive_request: each goes out on its own, so nothing that re-sends the drive request
+// (a drive profile pick, the e-stop) can repeat one.
+//
+// Entering: the Skunk Works tile asks, then waits like drive_request_enter does,
+// and the Locked screen says "PUSH ASSIST REFUSED" if the MIB never enters it.
+static int64_t push_assist_wait_until_us; // 0 = not waiting for an answer
+
+static void push_assist_ask() {
+  rtps_comms_publish_drive(rammp::DriveRequest::PUSH_ASSIST_ENABLE, drive_profile_published.load());
+  push_assist_wait_until_us = esp_timer_get_time() + kDriveAnswerUs;
+}
+
+static void push_assist_wait_poll() {
+  if (push_assist_wait_until_us == 0) {
+    return;
+  }
+  if (static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject)) ==
+      MIB::MibSystemState::PUSH_ASSIST) {
+    push_assist_wait_until_us = 0; // granted: the mode's own banner is up
+  } else if (esp_timer_get_time() >= push_assist_wait_until_us) {
+    push_assist_wait_until_us = 0;
+    entry_refused_show(kRefusedPushAssist, kDriveRefusedShowMs);
+  }
+}
+
+// Leaving: the "Start driving" input while in PUSH_ASSIST (the ADC task watches it).
+// Sent again every kPushAssistExitResendUs for as long as that input lasts, since the
+// MIB answers only with its next status. Any task.
+static constexpr int64_t kPushAssistExitResendUs = 500 * 1000;
+static void push_assist_exit() {
+  static std::atomic<int64_t> sent_us{0};
+  const int64_t now = esp_timer_get_time();
+  if (now - sent_us.load() < kPushAssistExitResendUs) {
+    return;
+  }
+  sent_us.store(now);
+  rtps_comms_publish_drive(rammp::DriveRequest::PUSH_ASSIST_DISABLE,
+                           drive_profile_published.load());
 }
 
 // The DriveScreen is a view of one fact: the MIB is driving. It opens whenever
@@ -2628,6 +2716,7 @@ static void setting_store_observer(lv_observer_t *observer, lv_subject_t *subjec
     // The Locked screen says which hold drives; the gestures read the subject.
     lv_label_set_text(ui_DriveHint, value == kDriveStartStick ? rammp::kHmiDriveHintStick
                                                               : rammp::kHmiDriveHintButton);
+    drive_start_button.store(value == kDriveStartButton);
     break;
   default:
     break; // MENU_SLIDE: read where it is used, nothing to apply
@@ -3210,6 +3299,13 @@ static void action_self_test() { selftest_request(SelfTestTrigger::LOCAL, 0); }
 // seat moves only if the MCB agrees, and a refusal flashes on that page.
 static void action_seat_up() { seat_step(rammp::index_of(rammp::SeatAxis::ELEVATION), +1); }
 
+// Push assist (rammp-rtps#17): asked for here until the menu has a row for it, then
+// home, where the Locked screen shows the mode or the refusal.
+static void action_push_assist() {
+  push_assist_ask();
+  nav_home();
+}
+
 static void action_restart_hmi() {
   static espp::Logger action_logger({.tag = "actions", .level = espp::Logger::Verbosity::INFO});
   action_logger.warn("restart requested from the actions screen");
@@ -3221,20 +3317,29 @@ static void (*const kActionRun[])() = {
     action_haptic_test, // ACTION_HAPTIC_TEST
     action_self_test,   // ACTION_SELF_TEST
     action_seat_up,     // ACTION_SEAT_UP
+    action_push_assist, // ACTION_PUSH_ASSIST
     fps_toggle,         // ACTION_FPS_COUNTER
     action_restart_hmi, // ACTION_RESTART_HMI
 };
 static_assert(std::size(kActionRun) == ACTION_COUNT,
               "every actions_spec.h entry needs its function here");
 
+// What a tile needs to be live (actions_spec.h's last column).
+enum class ActionNeeds : uint8_t {
+  kNothing = 0,
+  kMcb = 1,  // mcb_ready()
+  kIdle = 2, // the MIB idle (seat_ready() reads exactly that)
+};
+
 struct ActionSpec {
   const char *title;
   const char *subtitle;
-  bool needs_mcb;
+  ActionNeeds needs;
 };
 
 static constexpr ActionSpec kActionSpecs[] = {
-#define ACTIONS_ROW(name_, title_, subtitle_, mcb_) {title_, subtitle_, (mcb_) != 0},
+#define ACTIONS_ROW(name_, title_, subtitle_, needs_)                                              \
+  {title_, subtitle_, static_cast<ActionNeeds>(needs_)},
     ACTIONS_TABLE(ACTIONS_ROW)
 #undef ACTIONS_ROW
 };
@@ -3268,6 +3373,10 @@ static void action_focus(int index) {
 // subject mcb_ready() reads, so it follows the link and the state both.
 static void action_ready_observer(lv_observer_t *observer, lv_subject_t *) {
   lv_obj_set_state(lv_observer_get_target_obj(observer), kActionUnavailable, !mcb_ready());
+}
+// The same for a tile that needs the MIB idle.
+static void action_idle_observer(lv_observer_t *observer, lv_subject_t *) {
+  lv_obj_set_state(lv_observer_get_target_obj(observer), kActionUnavailable, !seat_ready());
 }
 
 // A tap, or the stick button on the focused one (the keypad indev turns ENTER
@@ -3355,8 +3464,10 @@ static void actions_open() {
     // The same cursor as every other button; greyed fades the whole tile.
     nav_focus_ring(button);
     lv_obj_set_style_opa(button, LV_OPA_40, kActionUnavailableStyle);
-    if (spec.needs_mcb) {
+    if (spec.needs == ActionNeeds::kMcb) {
       bind_to_drive_blocked_cause(button, action_ready_observer);
+    } else if (spec.needs == ActionNeeds::kIdle) {
+      bind_to_drive_blocked_cause(button, action_idle_observer);
     }
     lv_group_add_obj(actions_group, button);
     lv_obj_add_event_cb(button, action_key_cb, LV_EVENT_KEY, nullptr);
@@ -6525,11 +6636,11 @@ extern "C" void app_main(void) {
         } else if (mag < kKeyRelease) {
           engaged = false;
         }
-        // Like the button: a push that began in AUTONOMOUS is spent on taking over
-        // and moves no focus until the stick is let go.
+        // Like the button: a push that began in a mode it ends (stick_ends_mode) is
+        // spent on ending it and moves no focus until the stick is let go.
         if (!engaged) {
           takes_over = false;
-        } else if (!was_engaged && stick_takes_over.load()) {
+        } else if (!was_engaged && stick_ends_mode()) {
           takes_over = true;
         }
         const uint32_t was = joy_key.load();
@@ -6579,6 +6690,15 @@ extern "C" void app_main(void) {
       // never becomes a drive (stick_wait_centre).
       if (stick_x == 0.0f && stick_y == 0.0f) {
         stick_wait_centre.store(false);
+      }
+      // PUSH_ASSIST ends on the input "Start driving" names: any stick movement out of
+      // its dead zones (every axis reads exactly 0 inside them), or the button. The MIB
+      // does not read the stick in push assist, so the HMI asks it to leave.
+      if (push_assist.load()) {
+        const bool moved = stick_x != 0.0f || stick_y != 0.0f || stick.z() != 0.0f;
+        if (drive_start_button.load() ? joy_button_pressed.load() : moved) {
+          push_assist_exit();
+        }
       }
       const bool neutral = !stick_takes_over.load() &&
                            (calibrating || !stick_drives.load() || stick_wait_centre.load());
@@ -6649,6 +6769,7 @@ extern "C" void app_main(void) {
     // Before the state subject, whose observers may ask the MIB to drive: by then a
     // MIB that has left AUTONOMOUS no longer gets the stick.
     stick_takes_over.store(status.systemState == MIB::MibSystemState::AUTONOMOUS);
+    push_assist.store(status.systemState == MIB::MibSystemState::PUSH_ASSIST);
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
     lv_subject_set_int(&mib_state_subject, static_cast<int32_t>(status.systemState));
     // What the MIB is actually driving with: the three profile buttons highlight from
