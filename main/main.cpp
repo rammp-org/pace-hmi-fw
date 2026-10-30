@@ -287,14 +287,14 @@ static std::atomic<bool> push_assist{false};
 // Written by setting_store_observer.
 static std::atomic<bool> drive_start_button{false};
 
-// A push or a press spent on ending a MIB mode instead of on the UI: any input ends
-// AUTONOMOUS, the "Start driving" one ends PUSH_ASSIST. Any task.
-static bool stick_ends_mode() {
-  return stick_takes_over.load() || (push_assist.load() && !drive_start_button.load());
-}
-static bool button_ends_mode() {
-  return stick_takes_over.load() || (push_assist.load() && drive_start_button.load());
-}
+// A push or a press spent on a MIB mode instead of on the UI. Any input ends
+// AUTONOMOUS. PUSH_ASSIST is a screen of its own: the "Start driving" input asks to
+// leave it and the other one is refused, so neither reaches the UI. Any task.
+static bool stick_ends_mode() { return stick_takes_over.load() || push_assist.load(); }
+static bool button_ends_mode() { return stick_takes_over.load() || push_assist.load(); }
+// An input push assist does not take, from a task that cannot sound the refusal;
+// push_assist_poll does, on the LVGL task.
+static std::atomic<bool> push_assist_refused_input{false};
 
 // Whether the stick button's current press began in a mode it ends (button_ends_mode).
 // That press is spent on ending it: it still reaches the MIB, but it neither selects
@@ -748,9 +748,9 @@ static void log_link_change(RtpsLinkState state) {
   last = state;
 }
 
-static void diag_poll();             // DiagnosticsScreen, further down
-static void drive_wait_poll();       // DriveScreen entry, further down
-static void push_assist_wait_poll(); // the Skunk Works tile, with the drive requests
+static void diag_poll();        // DiagnosticsScreen, further down
+static void drive_wait_poll();  // DriveScreen entry, further down
+static void push_assist_poll(); // push assist requests, with the burger key
 
 // The e-stop into estop_subject, and every change into the log: the e-stop task
 // itself never logs (it must not allocate), so this is where its history is kept.
@@ -823,7 +823,7 @@ static void rtps_poll_cb(lv_timer_t *) {
   estop_poll();      // first: everything below reads estop_subject
   diag_poll();       // diagnostics staleness rides the same 250 ms tick
   drive_wait_poll(); // and so does the wait for the MCB to enable driving
-  push_assist_wait_poll();
+  push_assist_poll();
 
   // Defensive: if the RTPS label's text colour/opacity are registered as
   // themeable in the SquareLine project, ui_theme_set() re-applies the theme's
@@ -999,6 +999,9 @@ static void stick_button_edge(bool active) {
   if (active) {
     pressed_at_us = now;
     button_takes_over = button_ends_mode();
+    if (push_assist.load() && !drive_start_button.load()) {
+      push_assist_refused_input.store(true); // the stick ends it, not the button
+    }
   } else if (!button_takes_over && now - pressed_at_us < kSelectMaxUs) {
     select_key.store(true);
   }
@@ -1592,6 +1595,8 @@ static void entry_refused_panel_observer(lv_observer_t *observer, lv_subject_t *
       for (lv_obj_t *art : {ui_LockRing, ui_Shackle, ui_LockBody, ui_LockKeyhole}) {
         lv_obj_set_hidden(art, up);
       }
+      // Nothing drives from the push assist screen, so it does not say how to.
+      lv_obj_set_hidden(ui_DriveHint, up && mib_mode() == MIB::MibSystemState::PUSH_ASSIST);
     }
   };
   // An engaged e-stop is up for as long as it holds, asked or not: it is the one
@@ -1821,32 +1826,35 @@ static void push_assist_ask() {
   push_assist_wait_until_us = esp_timer_get_time() + kDriveAnswerUs;
 }
 
-static void push_assist_wait_poll() {
-  if (push_assist_wait_until_us == 0) {
-    return;
-  }
-  if (static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject)) ==
-      MIB::MibSystemState::PUSH_ASSIST) {
-    push_assist_wait_until_us = 0; // granted: the mode's own banner is up
-  } else if (esp_timer_get_time() >= push_assist_wait_until_us) {
-    push_assist_wait_until_us = 0;
-    entry_refused_show(kRefusedPushAssist, kDriveRefusedShowMs);
-  }
-}
-
-// Leaving: the "Start driving" input while in PUSH_ASSIST (the ADC task watches it).
-// Sent again every kPushAssistExitResendUs for as long as that input lasts, since the
-// MIB answers only with its next status. Any task.
+// Leaving: the "Start driving" input while in PUSH_ASSIST (the ADC task watches it),
+// or the burger key, as on the Drive screen. Sent again every kPushAssistExitResendUs
+// for as long as the input lasts, since the MIB answers only with its next status.
+// push_assist_poll sounds the refusal if the MIB is still in push assist
+// kDriveAnswerUs after the first request it has not answered. Any task.
 static constexpr int64_t kPushAssistExitResendUs = 500 * 1000;
+static std::atomic<int64_t> push_assist_exit_sent_us{0};
+static std::atomic<int64_t> push_assist_exit_since_us{0}; // 0 = nothing unanswered
+// The burger key asked: once the MIB has left, the menu opens over the Locked
+// screen, which is what the key was for. LVGL task.
+static bool push_assist_exit_then_menu = false;
+
 static void push_assist_exit() {
-  static std::atomic<int64_t> sent_us{0};
   const int64_t now = esp_timer_get_time();
-  if (now - sent_us.load() < kPushAssistExitResendUs) {
+  if (now - push_assist_exit_sent_us.load() < kPushAssistExitResendUs) {
     return;
   }
-  sent_us.store(now);
+  push_assist_exit_sent_us.store(now);
+  int64_t none = 0;
+  push_assist_exit_since_us.compare_exchange_strong(none, now);
   rtps_comms_publish_drive(rammp::DriveRequest::PUSH_ASSIST_DISABLE,
                            drive_profile_published.load());
+}
+
+// The burger key on the push assist screen. LVGL task.
+static void push_assist_exit_then_open_menu() {
+  push_assist_exit_then_menu = true;
+  push_assist_exit_sent_us.store(0); // a key press is always sent
+  push_assist_exit();
 }
 
 // The DriveScreen is a view of one fact: the MIB is driving. It opens whenever
@@ -1866,6 +1874,13 @@ static void drive_screen_follow_state() {
       connected && (state == MIB::MibSystemState::ENABLED || state == MIB::MibSystemState::SHARED);
   const bool locked = lv_subject_get_int(&locked_subject) != 0;
 
+  // Push assist is a screen of its own, the Locked one with the mode's banner, and it
+  // is left only through the MIB: whatever else was up goes, the menu with it.
+  if (connected && locked && state == MIB::MibSystemState::PUSH_ASSIST &&
+      (lv_screen_active() != ui_LockedScreen || nav_menu_open != nullptr)) {
+    nav_home();
+    return;
+  }
   if (driving && locked) {
     // The chair drives: the HMI has to say so, asked or not. The screen stays
     // where it is -- spec V2 keeps drive ACTIVE across the menu and the other
@@ -4155,7 +4170,53 @@ static void nav_key_cb(lv_event_t *e) {
     }
     return;
   }
+  // Push assist is the same: leaving its screen asks the MIB to end it, and the menu
+  // opens once it has (push_assist_poll). If the MIB keeps it, the screen stays.
+  if (mib_mode() == MIB::MibSystemState::PUSH_ASSIST) {
+    push_assist_exit_then_open_menu();
+    return;
+  }
   nav_open_menu(overlay);
+}
+
+// Push assist's requests, on the rtps poll's 250 ms tick: the Skunk Works tile's
+// answer window, the exit's, and the inputs push assist refused. Defined here, with
+// the menu it may open.
+static void push_assist_poll() {
+  const int64_t now = esp_timer_get_time();
+  const bool in_push_assist =
+      static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject)) ==
+      MIB::MibSystemState::PUSH_ASSIST;
+  if (push_assist_refused_input.exchange(false)) {
+    refusal_feedback();
+  }
+  if (push_assist_wait_until_us != 0) {
+    if (in_push_assist) {
+      push_assist_wait_until_us = 0; // granted: the mode's own banner is up
+    } else if (now >= push_assist_wait_until_us) {
+      push_assist_wait_until_us = 0;
+      entry_refused_show(kRefusedPushAssist, kDriveRefusedShowMs);
+    }
+  }
+  const int64_t since = push_assist_exit_since_us.load();
+  if (since == 0) {
+    return;
+  }
+  if (!in_push_assist) {
+    // Left. The burger key asked for the menu, over the Locked screen it is on.
+    push_assist_exit_since_us.store(0);
+    if (push_assist_exit_then_menu) {
+      if (NavChrome *c = nav_chrome_of(lv_screen_active())) {
+        nav_open_menu(c->overlay);
+      }
+    }
+    push_assist_exit_then_menu = false;
+  } else if (now - since >= kDriveAnswerUs) {
+    // Refused: the screen stays, and says so the way any refused press does.
+    push_assist_exit_since_us.store(0);
+    push_assist_exit_then_menu = false;
+    refusal_feedback();
+  }
 }
 
 // The stick on a menu row. The keypad indev hands arrows to the focused object
@@ -4215,7 +4276,14 @@ static void nav_focusable_button(lv_obj_t *button) {
   lv_obj_add_event_cb(button, nav_button_key_cb, LV_EVENT_KEY, nullptr);
 }
 
-static void nav_band_cb(lv_event_t *) { nav_home(); }
+static void nav_band_cb(lv_event_t *) {
+  // The push assist screen is left only through the MIB (nav_key_cb).
+  if (mib_mode() == MIB::MibSystemState::PUSH_ASSIST) {
+    refusal_feedback();
+    return;
+  }
+  nav_home();
+}
 
 // Only the outermost object of a composite stays clickable, so the whole of it
 // is the hit target rather than whichever child happens to be under the finger.
@@ -6642,6 +6710,9 @@ extern "C" void app_main(void) {
           takes_over = false;
         } else if (!was_engaged && stick_ends_mode()) {
           takes_over = true;
+          if (push_assist.load() && drive_start_button.load()) {
+            push_assist_refused_input.store(true); // the button ends it, not the stick
+          }
         }
         const uint32_t was = joy_key.load();
         if (remote_key.load() != 0) {
