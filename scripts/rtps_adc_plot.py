@@ -37,8 +37,8 @@ import rtps_host  # noqa: E402
 import rtps_net  # noqa: E402  (path setup must run first)
 import rammp_rtps as spec  # noqa: E402
 
-ADC_TOPIC = spec.TOPIC_JOYSTICK_XY_TWIST
-ADC_TYPE_NAME = spec.TYPE_XY_TWIST
+ADC_TOPIC = spec.ROS_TOPIC_JOYSTICK_XY_TWIST
+ADC_TYPE_NAME = spec.ROS_TYPE_XY_TWIST
 
 
 def deserialize_adc_cdr(payload: bytes) -> tuple[int, int, int] | None:

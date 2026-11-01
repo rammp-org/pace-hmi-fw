@@ -38,9 +38,9 @@
 namespace rammp {
 
 inline constexpr Topic<XYTwist> kJoystickSeatXYTwist{RAMMP_TOPIC_JOYSTICK_SEAT_XY_TWIST,
-                                                     RAMMP_TYPE_XY_TWIST};
+                                                     RAMMP_ROS_TYPE_XY_TWIST};
 inline constexpr Topic<XYTwist> kJoystickSwivelXYTwist{RAMMP_TOPIC_JOYSTICK_SWIVEL_XY_TWIST,
-                                                       RAMMP_TYPE_XY_TWIST};
+                                                       RAMMP_ROS_TYPE_XY_TWIST};
 
 using std::chrono::milliseconds;
 
@@ -54,31 +54,31 @@ constexpr size_t index_of(SeatAxis axis) { return static_cast<size_t>(axis); }
 // logs. A value this firmware does not know reads "?".
 // Names for the status labels, the fault banner (when the MIB sends no text) and the
 // logs. A value this firmware does not know reads "?".
-constexpr const char *to_string(MIB::MibSystemState v) {
-  return v == MIB::MibSystemState::INITIALIZING  ? "INITIALIZING"
-         : v == MIB::MibSystemState::IDLE        ? "IDLE"
-         : v == MIB::MibSystemState::ENABLED     ? "ENABLED"
-         : v == MIB::MibSystemState::ERROR       ? "ERROR"
-         : v == MIB::MibSystemState::AUTONOMOUS  ? "AUTONOMOUS"
-         : v == MIB::MibSystemState::SHARED      ? "SHARED"
-         : v == MIB::MibSystemState::ESTOP       ? "ESTOP"
-         : v == MIB::MibSystemState::PUSH_ASSIST ? "PUSH_ASSIST"
+constexpr const char *to_string(rammp::MibSystemState v) {
+  return v == rammp::MibSystemState::INITIALIZING  ? "INITIALIZING"
+         : v == rammp::MibSystemState::IDLE        ? "IDLE"
+         : v == rammp::MibSystemState::ENABLED     ? "ENABLED"
+         : v == rammp::MibSystemState::ERROR       ? "ERROR"
+         : v == rammp::MibSystemState::AUTONOMOUS  ? "AUTONOMOUS"
+         : v == rammp::MibSystemState::SHARED      ? "SHARED"
+         : v == rammp::MibSystemState::ESTOP       ? "ESTOP"
+         : v == rammp::MibSystemState::PUSH_ASSIST ? "PUSH_ASSIST"
                                                  : "?";
 }
 
-constexpr const char *to_string(MIB::DriveProfile v) {
-  return v == MIB::DriveProfile::LOW      ? "LOW"
-         : v == MIB::DriveProfile::NORMAL ? "NORMAL"
-         : v == MIB::DriveProfile::HIGH   ? "HIGH"
+constexpr const char *to_string(rammp::DriveProfile v) {
+  return v == rammp::DriveProfile::LOW      ? "LOW"
+         : v == rammp::DriveProfile::NORMAL ? "NORMAL"
+         : v == rammp::DriveProfile::HIGH   ? "HIGH"
                                           : "?";
 }
 
 /* ==== Seat: the MIB's fields, and its units ============================= */
 
-// One MIB::seatState field per RAMMP_SEAT_AXIS_TABLE row, in the table's order, so the
+// One rammp::SeatState field per RAMMP_SEAT_AXIS_TABLE row, in the table's order, so the
 // table's id is the index for both. The only place the two are tied together: everything
 // else works from the table.
-constexpr float seat_field(const MIB::seatState &seat, SeatAxis axis) {
+constexpr float seat_field(const rammp::SeatState &seat, SeatAxis axis) {
   switch (axis) {
   case SeatAxis::FRONT_BACK_TILT:
     return seat.front_back_tilt;
@@ -248,13 +248,13 @@ inline constexpr char kHmiLinkDownFooter[] = "Check cable/switch to MCB";
 inline constexpr char kHmiNoIpText[] = "LINK UP, NO DHCP LEASE";
 inline constexpr char kHmiNoIpFooter[] = "Check DHCP server";
 inline constexpr char kHmiNoPeerText[] = "NO MibStatus IN 2000 MS";
-inline constexpr char kHmiNoPeerFooter[] = "topic rammp/mib/status";
+inline constexpr char kHmiNoPeerFooter[] = "topic rt/rammp/mib/status";
 static_assert(kMibStatusTimeout == milliseconds{2000}, "update kHmiNoPeerText");
-static_assert(std::string_view(kHmiNoPeerFooter).ends_with(MIB::kMibStatus.name),
+static_assert(std::string_view(kHmiNoPeerFooter).ends_with(rammp::kMibStatus.name),
               "update kHmiNoPeerFooter");
 
 /* ERROR with an empty error_message: printf(state number, to_string(state)) */
-inline constexpr char kHmiMcbNoTextFmt[] = "systemState=%u (%s), error_message empty";
+inline constexpr char kHmiMcbNoTextFmt[] = "system_state=%u (%s), error_message empty";
 
 /* ==== E-stop (messages/estop_message.hpp; docs/plans/estop.md) ========== */
 

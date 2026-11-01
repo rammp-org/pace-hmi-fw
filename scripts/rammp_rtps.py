@@ -8,12 +8,12 @@ This module parses both headers at import time and mirrors its message structs,
 encoded the way espp/cdr encodes them (XCDR1).
 
     import rammp_rtps as spec
-    spec.TOPIC_MIB_STATUS        # 'rammp/mib/status'
+    spec.ROS_TOPIC_MIB_STATUS    # 'rt/rammp/mib/status'
     spec.MIB_SYSTEM_STATE_IDLE   # 1
     spec.pack_mib_status(spec.MIB_SYSTEM_STATE_IDLE)
 
-Names lose the RAMMP_ prefix or become UPPER_SNAKE: ``RAMMP_TOPIC_MIB_STATUS`` gives
-TOPIC_MIB_STATUS, ``MibSystemState::IDLE`` gives MIB_SYSTEM_STATE_IDLE, and
+Names lose the RAMMP_ prefix or become UPPER_SNAKE: ``RAMMP_ROS_TOPIC_MIB_STATUS`` gives
+ROS_TOPIC_MIB_STATUS (the ROS 2 facing topics; espp-only ones are TOPIC_*), ``MibSystemState::IDLE`` gives MIB_SYSTEM_STATE_IDLE, and
 ``milliseconds kMibStatusPeriod{500}`` gives MIB_STATUS_PERIOD_MS.
 """
 
@@ -39,8 +39,9 @@ MOTOR_HEADER_RELATIVE_PATH = os.path.join(
     "external", "rammp-rtps", "components", "rammp_rtps_messages", "include", "messages",
     "motor_message.hpp")
 
-# #define RAMMP_TOPIC_MIB_STATUS "rammp/mib/status" / #define RAMMP_TYPE_MIB_STATUS "..."
-_DEFINE_RE = re.compile(r'^\s*#define\s+RAMMP_((?:TOPIC|TYPE)_[A-Z0-9_]+)\s+"([^"]*)"', re.M)
+# #define RAMMP_TOPIC_JOYSTICK_SEAT_COMMAND "rammp/joystick/seat_command", and the ROS 2 facing
+# #define RAMMP_ROS_TOPIC_MIB_STATUS "rt/rammp/mib/status" / RAMMP_ROS_TYPE_MIB_STATUS "..."
+_DEFINE_RE = re.compile(r'^\s*#define\s+RAMMP_((?:ROS_)?(?:TOPIC|TYPE)_[A-Z0-9_]+)\s+"([^"]*)"', re.M)
 # enum class MibSystemState : uint8_t { INITIALIZING, IDLE = 1, ... };
 _ENUM_RE = re.compile(r"enum class (\w+)\s*:\s*\w+\s*\{(.*?)\};", re.S)
 _COMMENT_RE = re.compile(r"/\*.*?\*/|//[^\n]*", re.S)
@@ -160,11 +161,11 @@ def _group(prefix: str) -> Dict[int, str]:
     }
 
 
-#: {0: 'INITIALIZING', 1: 'IDLE', 2: 'ENABLED', 3: 'ERROR'} — MIB::MibSystemState
+#: {0: 'INITIALIZING', 1: 'IDLE', 2: 'ENABLED', 3: 'ERROR', ...} — rammp::MibSystemState
 MIB_SYSTEM_STATE_NAMES = _group("MIB_SYSTEM_STATE_")
-#: {0: 'DISABLE', 1: 'ENABLE'} — what the joystick asks for in DriveCommand
+#: {0: 'DISABLE', 1: 'ENABLE', 2: 'AUTONOMOUS', 3: 'SHARED'} — DriveCommand.request
 DRIVE_REQUEST_NAMES = _group("DRIVE_REQUEST_")
-#: {0: 'LOW', 1: 'NORMAL', 2: 'HIGH'} — MIB::DriveProfile, the HMI's profile buttons
+#: {0: 'LOW', 1: 'NORMAL', 2: 'HIGH'} — rammp::DriveProfile, the HMI's profile buttons
 DRIVE_PROFILE_NAMES = _group("DRIVE_PROFILE_")
 #: {0: 'DISARMED', 1: 'ARMED', ...} — rammp::BoardState, what a motor board is doing
 BOARD_STATE_NAMES = _group("BOARD_STATE_")
@@ -279,17 +280,17 @@ CDR_LE_HEADER = b"\x00\x01\x00\x00"
 
 # The C++ structs, field for field. A type is a struct format char, "str",
 # ("seq", element type) or a nested field list (a struct).
-# MIB::MibStatus. seatState is a nested struct, which CDR writes inline: its four
+# rammp::MibStatus. SeatState is a nested struct, which CDR writes inline: its four
 # floats sit here in its own declaration order, after the two enums.
 MSG_MIB_STATUS = [
-    ("systemState", "B"), ("activeProfile", "B"),
+    ("system_state", "B"), ("active_profile", "B"),
     ("front_back_tilt", "f"), ("lateral_tilt", "f"), ("elevation", "f"), ("translation", "f"),
     ("error_message", "str"),
     ("epoch_s", "q"), ("speed", "f"), ("utc_offset_min", "h"), ("seq", "B"),
     ("status_text", "str"), ("error_footer", "str"),
 ]
 MSG_XY_TWIST = [("x", "f"), ("y", "f"), ("twist", "f"), ("buttons", "I")]
-MSG_DRIVE_COMMAND = [("request", "B"), ("profile", "B")]
+MSG_DRIVE_COMMAND = [("request", "B"), ("profile", "B"), ("push_assist", "?")]
 MSG_SEAT_COMMAND = [("axis", "B"), ("target", "f")]
 MSG_DIAGNOSTICS = [("seq", "B"), ("items", ("seq", [("values", ("seq", "i"))]))]
 MSG_UINT32 = [("data", "I")]
@@ -395,7 +396,7 @@ def pack_mib_status(system_state: int, profile: int = 0, seat=(0.0, 0.0, 0.0, 0.
                     seq: int = 0, speed: float = 0.0, status_text: str = "",
                     error_message: str = "", error_footer: str = "",
                     clock: datetime.datetime | None = None) -> bytes:
-    """A MIB::MibStatus. `seat` is (front_back_tilt, lateral_tilt, elevation, translation)
+    """A rammp::MibStatus. `seat` is (front_back_tilt, lateral_tilt, elevation, translation)
     in whole units; `speed` is metres per second; `clock` is the MIB's wall clock, None
     sends epoch 0, "the MIB does not know the time".
 
@@ -421,19 +422,19 @@ def pack_mib_status(system_state: int, profile: int = 0, seat=(0.0, 0.0, 0.0, 0.
 
 
 def unpack_mib_status(payload: bytes):
-    """(systemState, activeProfile, front_back_tilt, lateral_tilt, elevation, translation,
+    """(system_state, active_profile, front_back_tilt, lateral_tilt, elevation, translation,
     error_message, epoch_s, speed, utc_offset_min, seq, status_text, error_footer),
     or None."""
     return decode(MSG_MIB_STATUS, payload)
 
 
-def pack_drive_command(request: int, profile: int) -> bytes:
-    """A rammp::DriveCommand (joystick -> MIB); for tests of the tools."""
-    return encode(MSG_DRIVE_COMMAND, request & 0xFF, profile & 0xFF)
+def pack_drive_command(request: int, profile: int, push_assist: bool = False) -> bytes:
+    """A rammp::DriveCommand (joystick or Jetson -> MIB); for tests of the tools."""
+    return encode(MSG_DRIVE_COMMAND, request & 0xFF, profile & 0xFF, bool(push_assist))
 
 
-def unpack_drive_command(payload: bytes) -> tuple[int, int] | None:
-    """(request, profile), or None."""
+def unpack_drive_command(payload: bytes) -> tuple[int, int, bool] | None:
+    """(request, profile, push_assist), or None."""
     return decode(MSG_DRIVE_COMMAND, payload)
 
 

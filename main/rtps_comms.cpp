@@ -61,7 +61,7 @@ std::atomic<bool> link_up{false};
 std::atomic<bool> got_ip{false};
 std::atomic<bool> peer_matched{false};    // a latch: espp only reports "matched"
 std::atomic<bool> endpoints_ready{false}; // every publisher below exists
-std::atomic<MIB::DriveProfile> last_profile{MIB::DriveProfile::NORMAL}; // for the e-stop DISABLE
+std::atomic<rammp::DriveProfile> last_profile{rammp::DriveProfile::NORMAL}; // for the e-stop DISABLE
 std::atomic<int64_t> last_status_us{0}; // last MibStatus, esp_timer time; 0 = never
 std::string ip_address;
 esp_netif_ip_info_t ip_info{};
@@ -80,7 +80,7 @@ Publisher<rammp::XYTwist> seat_stick_pub;   // SeatControlScreen, Seat; may be n
 Publisher<rammp::XYTwist> swivel_stick_pub; // SeatControlScreen, Swivel; may be null
 
 std::function<void(float)> brightness_handler;
-std::function<void(const MIB::MibStatus &)> mib_status_handler;
+std::function<void(const rammp::MibStatus &)> mib_status_handler;
 std::function<void(const rammp::Diagnostics &)> diagnostics_handler;
 std::function<void(const rammp::Motors &)> motors_handler;
 std::function<void(uint8_t)> selftest_run_handler;
@@ -169,20 +169,20 @@ void note_mcb_status(int64_t now_us, uint8_t seq) {
   mcb_last_seq = seq;
 }
 
-void on_mib_status(const MIB::MibStatus &s) {
+void on_mib_status(const rammp::MibStatus &s) {
   const int64_t now = esp_timer_get_time();
   last_status_us = now; // liveness, stamped before a slow handler can age it
   note_mcb_status(now, s.seq);
   // It repeats every kMibStatusPeriod: log only what changed. The seat is deliberately
   // not in here - it moves while a button is held, and would bury everything else.
-  auto shown = [](const MIB::MibStatus &m) {
-    return std::tie(m.systemState, m.activeProfile, m.speed, m.status_text, m.error_message,
+  auto shown = [](const rammp::MibStatus &m) {
+    return std::tie(m.system_state, m.active_profile, m.speed, m.status_text, m.error_message,
                     m.error_footer);
   };
-  static std::optional<MIB::MibStatus> last;
+  static std::optional<rammp::MibStatus> last;
   if (!last || shown(*last) != shown(s)) {
     logger.info("MIB: state={} '{}' profile={} speed={:.2f} m/s error='{}' / '{}'",
-                rammp::to_string(s.systemState), s.status_text, rammp::to_string(s.activeProfile),
+                rammp::to_string(s.system_state), s.status_text, rammp::to_string(s.active_profile),
                 s.speed, s.error_message, s.error_footer);
     last = s;
   }
@@ -387,13 +387,13 @@ bool start_participant() {
   counter_pub = make_publisher(rammp::kHmiCounter);
   joystick_pub = make_publisher(rammp::kJoystickXYTwist);
   seat_pub = make_publisher(rammp::kJoystickSeatCommand);
-  drive_pub = make_publisher(rammp::kJoystickDriveCommand);
+  drive_pub = make_publisher(rammp::kDriveCommand);
   report_pub = make_publisher(rammp::kSelfTestReport);
   motor_jog_pub = make_publisher(rammp::kJoystickMotorJog);
   const bool ok = counter_pub && joystick_pub && seat_pub && drive_pub && report_pub &&
                   motor_jog_pub && subscribe(rammp::kHmiCommand, on_command) &&
                   subscribe(rammp::kHmiBrightness, on_brightness) &&
-                  subscribe(MIB::kMibStatus, on_mib_status) &&
+                  subscribe(rammp::kMibStatus, on_mib_status) &&
                   subscribe(rammp::kMcbDiagnostics, on_diagnostics) &&
                   subscribe(rammp::kMibMotors, on_motors);
   if (!ok) {
@@ -429,7 +429,7 @@ bool start_participant() {
 void rtps_comms_on_brightness(std::function<void(float)> handler) {
   brightness_handler = std::move(handler);
 }
-void rtps_comms_on_mib_status(std::function<void(const MIB::MibStatus &)> handler) {
+void rtps_comms_on_mib_status(std::function<void(const rammp::MibStatus &)> handler) {
   mib_status_handler = std::move(handler);
 }
 void rtps_comms_on_diagnostics(std::function<void(const rammp::Diagnostics &)> handler) {
@@ -452,7 +452,7 @@ bool rtps_comms_publish_adc(float x, float y, float twist, rammp::Buttons button
   if (stopped && !was_stopped) {
     // The stop just engaged: ask the MIB to stop driving now, not at the UI's next
     // tick. A MIB that knows the e-stop stops anyway; one that does not still obeys this.
-    publish(drive_pub, rammp::DriveCommand{rammp::DriveRequest::DISABLE, last_profile.load()});
+    publish(drive_pub, rammp::DriveCommand{rammp::DriveRequest::DISABLE, last_profile.load(), false});
   }
   was_stopped = stopped;
   if (stopped) {
@@ -477,12 +477,14 @@ bool rtps_comms_publish_seat_stick(SeatStick target, float x, float y, float twi
   return false;
 }
 
-bool rtps_comms_publish_drive(rammp::DriveRequest request, MIB::DriveProfile profile) {
+bool rtps_comms_publish_drive(rammp::DriveRequest request, rammp::DriveProfile profile,
+                              bool push_assist) {
   last_profile = profile;
   if (hmi_estop.is_active()) {
     request = rammp::DriveRequest::DISABLE;
+    push_assist = false;
   }
-  return publish(drive_pub, rammp::DriveCommand{request, profile});
+  return publish(drive_pub, rammp::DriveCommand{request, profile, push_assist});
 }
 
 bool rtps_comms_publish_seat(rammp::SeatAxis axis, float target) {

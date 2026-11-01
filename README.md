@@ -70,18 +70,18 @@ Every row is one line in `main/settings_spec.h`, and every value is saved in Lit
 ## RTPS
 
 - The shared spec is [rammp-rtps](https://github.com/rammp-org/rammp-rtps), the git submodule `external/rammp-rtps`. It follows rtps `main`: Dependabot opens a PR whenever `main` moves, and CI builds it. Before a release, merge the open bump, or bump by hand with `git submodule update --remote external/rammp-rtps`.
-- `messages/joystick_message.hpp` there holds the joystick's commands, the shared tables and Diagnostics; `messages/mib_message.hpp` holds `MIB::MibStatus`, the chair's own state. Between them they are everything the MIB and the HMI share, and the first has an espp example at the top.
+- `messages/joystick_message.hpp` there holds the joystick's commands, the shared tables and Diagnostics; `messages/mib_message.hpp` holds `rammp::MibStatus`, the chair's own state. Between them they are everything the MIB and the HMI share, and the first has an espp example at the top.
 - `main/hmi_rtps_spec.hpp` adds what only this HMI needs: timing, display limits, the bench self-test topics.
 - Messages are plain C++ structs serialized by espp/cdr as **XCDR1** (classic CDR), so any DDS / ROS 2 stack can talk to it.
-- Every topic is best-effort; the MCB resends its state periodically.
+- Every topic is best-effort; the MCB resends its state periodically. The three `rt/` topics are ROS 2 facing: the Jetson reads `MibStatus` and the stick, and sends `DriveCommand`, with no bridge. The others are espp-only.
 - The MCB owns the chair's state; the HMI shows it and asks for changes.
 
 | topic | type | direction | carries |
 | --- | --- | --- | --- |
-| `rammp/mib/status` | `MIB::MibStatus` | MIB → HMI, 2 Hz | system state, active profile, seat position, speed, clock, error text |
+| `rt/rammp/mib/status` | `MibStatus` | MIB → HMI and ROS 2, 2 Hz | system state, active profile, seat position, speed, clock, error text |
 | `rammp/mcb/diagnostics` | `Diagnostics` | MIB → HMI, 2 Hz | readings for each `RAMMP_DIAG_TABLE` row |
-| `rammp/joystick/xy_twist` | `XYTwist` | HMI → MIB, ~30 Hz | calibrated X / Y / twist (-1..+1), buttons |
-| `rammp/joystick/drive_command` | `DriveCommand` | HMI → MIB, per request | enable / disable driving, and the drive profile |
+| `rt/rammp/joystick/xy_twist` | `XYTwist` | HMI → MIB and ROS 2, ~30 Hz | calibrated X / Y / twist (-1..+1), buttons |
+| `rt/rammp/drive_command` | `DriveCommand` | HMI (and the Jetson) → MIB, per request | the drive state asked for (disable, enable, push assist; the Jetson asks for autonomy), and the drive profile |
 | `rammp/joystick/seat_command` | `SeatCommand` | HMI → MIB, per press | put seat axis N at an absolute target |
 | `rammp/hmi/counter`, `command`, `brightness` | `std_msgs/UInt32` | bench PC | heartbeat, self-test run / ping, backlight % |
 | `rammp/selftest/report` | `SelfTestReport` | HMI → PC | one per self-test check |
@@ -115,9 +115,9 @@ How the messages reach the screens:
 - `AUTONOMOUS` and `ESTOP` keep the HMI locked, with a banner up for as long as they last. In `AUTONOMOUS` the stick goes to the MIB whatever the screen, so touching it hands control back; that push or press does nothing else on the HMI until it is let go. A state this firmware does not know reads neutral ("---") and bars both.
 - `PUSH_ASSIST` (an assistant drives from the push handle) is asked for from the Skunk Works tile "Push assist", from `IDLE`, and locks the HMI with a banner like `AUTONOMOUS`. Its screen is left only through the MIB, like Drive: the "Start driving" input (any stick movement, or a press of the button) asks to end it, and so does the burger key, which opens the menu once out. A refused exit, the other input and the band get the refusal sound, and the screen stays.
 - Holding the joystick button on the Locked screen sends a **DriveCommand** and waits. Leaving is a request too: the button hold on the Drive screen, or the burger key there, sends `DISABLE`, and the screen closes only when the MIB actually stops, so a refused exit keeps you on the drive screen.
-- Picking a drive mode (Manual = `HIGH`, Assist = `NORMAL`, Auto = `LOW`) sends a `DriveCommand` carrying it, and the three buttons highlight `MibStatus.activeProfile` — what the MIB reports, never what was pressed. A profile the chair refuses never lights up.
+- Picking a drive mode (Manual = `HIGH`, Assist = `NORMAL`, Auto = `LOW`) sends a `DriveCommand` carrying it, and the three buttons highlight `MibStatus.active_profile` — what the MIB reports, never what was pressed. A profile the chair refuses never lights up.
 - Three refusals get the error banner for 3 s, with the MIB's own `error_message` when it sent one: **DRIVE REFUSED: NOT GRANTED** (asked, never got `ENABLED`) and **DRIVING STOPPED** (the MIB disabled driving by itself) on the Locked screen, and **EXIT REFUSED** on the drive screen itself.
-- **MibStatus.currentSeatState** → the numbers on the seat screen and the DEBUG ACTUATORS rows. The MIB owns every position: a press asks, and the number moves when the next status says the seat did. A refusal reaches the HMI as an axis that did not move — there is no per-request verdict on the wire.
+- **MibStatus.current_seat_state** → the numbers on the seat screen and the DEBUG ACTUATORS rows. The MIB owns every position: a press asks, and the number moves when the next status says the seat did. A refusal reaches the HMI as an axis that did not move — there is no per-request verdict on the wire.
 - Each seat press sends a **SeatCommand** with an **absolute** target, so a step button and a preset are the same message, and a lost or repeated one cannot drift the seat.
 - The wire carries the seat in whole units (degrees, millimetres); the screens step and draw raw integers, converted at the wire boundary by `seat_raw()` / `seat_units()`.
 - **Diagnostics** → the DIAGNOSTICS rows; the rate label shows the arrival Hz.
@@ -141,7 +141,7 @@ One row in `messages/joystick_message.hpp` (rammp-rtps); the HMI screens and the
 - Values are raw integers in units of 10^-decimals `unit` (250 with 1 decimal is 25.0).
 - A diagnostics unit of `""` hides that reading.
 - A diagnostics item is one row and nothing else: the MIB sends one more `Diagnostics.items` entry, in table order.
-- A seat axis is two edits, because the seat is named fields rather than a sequence: the table row, and the matching field in `MIB::seatState` plus its `case` in `rammp::seat_field()`. The table's rows are that struct's fields, in that order.
+- A seat axis is two edits, because the seat is named fields rather than a sequence: the table row, and the matching field in `rammp::SeatState` plus its `case` in `rammp::seat_field()`. The table's rows are that struct's fields, in that order.
 - A seat axis also takes the next free button on the seat screen, in table order; past the fourth there is no button for it yet, and it appears only on the DEBUG ACTUATORS page.
 
 ## Testing

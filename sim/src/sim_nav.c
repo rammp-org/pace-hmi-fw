@@ -38,7 +38,7 @@ static lv_subject_t adc_y_subject;
 static lv_subject_t adc_twist_subject;
 
 /* The MIB's state, as reported by sim_nav_on_system_state(). One subject, because
- * RAMMP_MIB_STATE_* (MIB::MibSystemState in messages/mib_message.hpp) answers both
+ * RAMMP_MIB_STATE_* (rammp::MibSystemState in messages/mib_message.hpp) answers both
  * of a panel's labels. */
 static lv_subject_t mib_state_subject;
 /* Optional label overrides from the MCB. Empty means "use the enum's name". */
