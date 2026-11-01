@@ -38,9 +38,9 @@
 namespace rammp {
 
 inline constexpr Topic<XYTwist> kJoystickSeatXYTwist{RAMMP_TOPIC_JOYSTICK_SEAT_XY_TWIST,
-                                                     RAMMP_TYPE_XY_TWIST};
+                                                     RAMMP_ROS_TYPE_XY_TWIST};
 inline constexpr Topic<XYTwist> kJoystickSwivelXYTwist{RAMMP_TOPIC_JOYSTICK_SWIVEL_XY_TWIST,
-                                                       RAMMP_TYPE_XY_TWIST};
+                                                       RAMMP_ROS_TYPE_XY_TWIST};
 
 using std::chrono::milliseconds;
 
@@ -54,31 +54,31 @@ constexpr size_t index_of(SeatAxis axis) { return static_cast<size_t>(axis); }
 // logs. A value this firmware does not know reads "?".
 // Names for the status labels, the fault banner (when the MIB sends no text) and the
 // logs. A value this firmware does not know reads "?".
-constexpr const char *to_string(MIB::MibSystemState v) {
-  return v == MIB::MibSystemState::INITIALIZING  ? "INITIALIZING"
-         : v == MIB::MibSystemState::IDLE        ? "IDLE"
-         : v == MIB::MibSystemState::ENABLED     ? "ENABLED"
-         : v == MIB::MibSystemState::ERROR       ? "ERROR"
-         : v == MIB::MibSystemState::AUTONOMOUS  ? "AUTONOMOUS"
-         : v == MIB::MibSystemState::SHARED      ? "SHARED"
-         : v == MIB::MibSystemState::ESTOP       ? "ESTOP"
-         : v == MIB::MibSystemState::PUSH_ASSIST ? "PUSH_ASSIST"
-                                                 : "?";
+constexpr const char *to_string(MibSystemState v) {
+  return v == MibSystemState::INITIALIZING  ? "INITIALIZING"
+         : v == MibSystemState::IDLE        ? "IDLE"
+         : v == MibSystemState::ENABLED     ? "ENABLED"
+         : v == MibSystemState::ERROR       ? "ERROR"
+         : v == MibSystemState::AUTONOMOUS  ? "AUTONOMOUS"
+         : v == MibSystemState::SHARED      ? "SHARED"
+         : v == MibSystemState::ESTOP       ? "ESTOP"
+         : v == MibSystemState::PUSH_ASSIST ? "PUSH_ASSIST"
+                                            : "?";
 }
 
-constexpr const char *to_string(MIB::DriveProfile v) {
-  return v == MIB::DriveProfile::LOW      ? "LOW"
-         : v == MIB::DriveProfile::NORMAL ? "NORMAL"
-         : v == MIB::DriveProfile::HIGH   ? "HIGH"
-                                          : "?";
+constexpr const char *to_string(DriveProfile v) {
+  return v == DriveProfile::LOW      ? "LOW"
+         : v == DriveProfile::NORMAL ? "NORMAL"
+         : v == DriveProfile::HIGH   ? "HIGH"
+                                     : "?";
 }
 
 /* ==== Seat: the MIB's fields, and its units ============================= */
 
-// One MIB::seatState field per RAMMP_SEAT_AXIS_TABLE row, in the table's order, so the
+// One SeatState field per RAMMP_SEAT_AXIS_TABLE row, in the table's order, so the
 // table's id is the index for both. The only place the two are tied together: everything
 // else works from the table.
-constexpr float seat_field(const MIB::seatState &seat, SeatAxis axis) {
+constexpr float seat_field(const SeatState &seat, SeatAxis axis) {
   switch (axis) {
   case SeatAxis::FRONT_BACK_TILT:
     return seat.front_back_tilt;
@@ -248,13 +248,13 @@ inline constexpr char kHmiLinkDownFooter[] = "Check cable/switch to MCB";
 inline constexpr char kHmiNoIpText[] = "LINK UP, NO DHCP LEASE";
 inline constexpr char kHmiNoIpFooter[] = "Check DHCP server";
 inline constexpr char kHmiNoPeerText[] = "NO MibStatus IN 2000 MS";
-inline constexpr char kHmiNoPeerFooter[] = "topic rammp/mib/status";
+inline constexpr char kHmiNoPeerFooter[] = "topic rt/rammp/mib/status";
 static_assert(kMibStatusTimeout == milliseconds{2000}, "update kHmiNoPeerText");
-static_assert(std::string_view(kHmiNoPeerFooter).ends_with(MIB::kMibStatus.name),
+static_assert(std::string_view(kHmiNoPeerFooter).ends_with(kMibStatus.name),
               "update kHmiNoPeerFooter");
 
 /* ERROR with an empty error_message: printf(state number, to_string(state)) */
-inline constexpr char kHmiMcbNoTextFmt[] = "systemState=%u (%s), error_message empty";
+inline constexpr char kHmiMcbNoTextFmt[] = "system_state=%u (%s), error_message empty";
 
 /* ==== E-stop (messages/estop_message.hpp; docs/plans/estop.md) ========== */
 
@@ -300,7 +300,7 @@ static_assert(sizeof(kHmiAutonomousText) <= kErrorTextLen &&
 static_assert(sizeof(kHmiAutonomousFooter) <= kErrorFooterLen,
               "mode footer outgrows the banner it shares with MIB faults");
 
-/* PUSH_ASSIST (rammp-rtps#17): an assistant drives from the push handle. The footer names
+/* PUSH_ASSIST (rammp-rtps#18): an assistant drives from the push handle. The footer names
    the "Start driving" input, which ends it. Asked for from the Skunk Works tile. */
 inline constexpr char kHmiPushAssistTitle[] = "PUSH ASSIST";
 inline constexpr char kHmiPushAssistText[] = "AN ASSISTANT IS DRIVING";

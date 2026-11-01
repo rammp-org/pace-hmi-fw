@@ -26,7 +26,7 @@ std::string rtps_comms_link_state_meaning(RtpsLinkState state); ///< the likely 
 // so they reach the UI only through subjects, under lvgl_mutex.
 void rtps_comms_on_brightness(std::function<void(float percent)> handler);
 /// The MIB's whole state: what the chair is doing, where the seat is, the clock.
-void rtps_comms_on_mib_status(std::function<void(const MIB::MibStatus &)> handler);
+void rtps_comms_on_mib_status(std::function<void(const rammp::MibStatus &)> handler);
 void rtps_comms_on_diagnostics(std::function<void(const rammp::Diagnostics &)> handler);
 /// The motor debug list: every motor the MIB commands, with its latest state.
 void rtps_comms_on_motors(std::function<void(const rammp::Motors &)> handler);
@@ -48,8 +48,10 @@ enum class SeatStick : uint8_t {
 /// The stick on the seat or the swivel topic, the same XYTwist as driving. NONE sends nothing.
 bool rtps_comms_publish_seat_stick(SeatStick target, float x, float y, float twist,
                                    rammp::Buttons buttons);
-/// Ask the MIB to enable or disable driving, with the profile to drive with.
-bool rtps_comms_publish_drive(rammp::DriveRequest request, MIB::DriveProfile profile);
+/// Ask the MIB for a drive state, with the profile to drive with. push_assist with
+/// DISABLE asks for PUSH_ASSIST (the handle drives) instead of IDLE; every caller says.
+bool rtps_comms_publish_drive(rammp::DriveRequest request, rammp::DriveProfile profile,
+                              bool push_assist);
 /// Ask the MIB to put one seat axis at `target` (absolute, in the axis' whole units).
 bool rtps_comms_publish_seat(rammp::SeatAxis axis, float target);
 /// Ask the MIB to jog one motor (hold-to-run: resend while held, 0 = stop). Not sent

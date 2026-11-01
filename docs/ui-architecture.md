@@ -221,7 +221,7 @@ flowchart LR
 ```
 
 - **Nothing on screen claims what the chair has not confirmed.** A drive mode button lights
-  when `MibStatus.activeProfile` says so, not when it is tapped; a seat number moves when
+  when `MibStatus.active_profile` says so, not when it is tapped; a seat number moves when
   the next status says the seat moved.
 - **`drive_screen_follow_state`** keeps the screens honest: the Drive screen is up exactly
   while the MIB says ENABLED. Driving stopping by itself brings back Locked with the reason.

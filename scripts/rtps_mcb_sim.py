@@ -2,7 +2,7 @@
 """Stand-in for the Main Control Board: drives the joystick's status labels.
 
 The joystick HMI is a slave of the MCB: the DRIVE and STATE labels on its
-StatusPanel show whatever arrives on ``rammp/mib/status``, driving starts
+StatusPanel show whatever arrives on ``rt/rammp/mib/status``, driving starts
 only once the MCB says it has, and the seat moves only when the MCB says it
 moved. This script plays the MCB from a laptop so all of that can be exercised
 without the real board — it answers DriveCommand and SeatCommand the way the
@@ -60,7 +60,7 @@ SEAT_RESULT_OK = 0
 SEAT_RESULTS = {0: "OK", 1: "AT_MIN", 2: "AT_MAX", 3: "INHIBITED", 4: "UNKNOWN_AXIS"}
 
 #: The HMI's SeatControlScreen sends the stick on one of
-#: these instead of TOPIC_JOYSTICK_XY_TWIST, by what it was opened for.
+#: these instead of ROS_TOPIC_JOYSTICK_XY_TWIST, by what it was opened for.
 SEAT_STICK_TOPICS = {
     spec.TOPIC_JOYSTICK_SEAT_XY_TWIST: "seat",
     spec.TOPIC_JOYSTICK_SWIVEL_XY_TWIST: "swivel",
@@ -314,9 +314,9 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
         # No seat writer any more: the seat rides MibStatus, which the harness's own
         # periodic publish sends.
         for topic, type_name in ((spec.TOPIC_JOYSTICK_SEAT_COMMAND, spec.TYPE_SEAT_COMMAND),
-                                 (spec.TOPIC_JOYSTICK_DRIVE_COMMAND, spec.TYPE_DRIVE_COMMAND),
-                                 (spec.TOPIC_JOYSTICK_SEAT_XY_TWIST, spec.TYPE_XY_TWIST),
-                                 (spec.TOPIC_JOYSTICK_SWIVEL_XY_TWIST, spec.TYPE_XY_TWIST)):
+                                 (spec.ROS_TOPIC_DRIVE_COMMAND, spec.ROS_TYPE_DRIVE_COMMAND),
+                                 (spec.TOPIC_JOYSTICK_SEAT_XY_TWIST, spec.ROS_TYPE_XY_TWIST),
+                                 (spec.TOPIC_JOYSTICK_SWIVEL_XY_TWIST, spec.ROS_TYPE_XY_TWIST)):
             self.local_readers.append(rtps_host.ReaderConfig(
                 topic_name=topic,
                 type_name=type_name,
@@ -531,8 +531,8 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
             rtps_host.log(f"[selftest] run {r.run_id}: {verdict} - {r.value} pass, {r.lo} fail, "
                           f"{r.hi} skip in {r.detail}")
 
-    def apply_drive_command(self, request: int, profile: int) -> None:
-        """Take one DriveCommand from the joystick.
+    def apply_drive_command(self, request: int, profile: int, push_assist: bool = False) -> None:
+        """Take one DriveCommand from the joystick (or, for AUTONOMOUS / SHARED, the Jetson).
 
         The MCB is what decides whether the chair drives — the joystick asks
         and waits. With refuse_drive set, the request is recorded and ignored,
@@ -547,29 +547,36 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
         if request == spec.DRIVE_REQUEST_ENABLE and self.estop.latched:
             rtps_host.log("[drive] ENABLE refused: e-stop latched")
             return
-        if request == spec.DRIVE_REQUEST_DISABLE and self.refuse_stop:
-            return
-        # Push assist (rammp-rtps#17): entered from IDLE, left back to IDLE. Refused with
-        # the drive ("x"), as a MIB that cannot hand driving to the handle would.
-        if request == spec.DRIVE_REQUEST_PUSH_ASSIST_ENABLE:
+        # Push assist (rammp-rtps#18): a DISABLE with push_assist set, entered from IDLE.
+        # Refused with the drive ("x"), as a MIB that cannot hand driving to the handle
+        # would; refuse-stop ("s") is about leaving a drive state, so it is checked after
+        # this. A DISABLE without push_assist leaves (back to IDLE).
+        if request == spec.DRIVE_REQUEST_DISABLE and push_assist:
             if self.system_state == spec.MIB_SYSTEM_STATE_IDLE and not self.refuse_drive \
                     and not self.estop.latched:
                 self.system_state = spec.MIB_SYSTEM_STATE_PUSH_ASSIST
             return
-        if request == spec.DRIVE_REQUEST_PUSH_ASSIST_DISABLE:
-            if self.system_state == spec.MIB_SYSTEM_STATE_PUSH_ASSIST:
-                self.system_state = spec.MIB_SYSTEM_STATE_IDLE
+        if request == spec.DRIVE_REQUEST_DISABLE and self.refuse_stop:
             return
+        autonomy = {spec.DRIVE_REQUEST_AUTONOMOUS: spec.MIB_SYSTEM_STATE_AUTONOMOUS,
+                    spec.DRIVE_REQUEST_SHARED: spec.MIB_SYSTEM_STATE_SHARED}
         # ERROR and INITIALIZING are not ours to leave: a drive request neither clears a
-        # fault nor finishes booting.
+        # fault nor finishes booting. ESTOP is the latch's to leave.
         if self.system_state in (spec.MIB_SYSTEM_STATE_IDLE, spec.MIB_SYSTEM_STATE_ENABLED):
-            self.system_state = (spec.MIB_SYSTEM_STATE_ENABLED
-                                 if request == spec.DRIVE_REQUEST_ENABLE
-                                 else spec.MIB_SYSTEM_STATE_IDLE)
-        # As the MIB (RAMMP-mib-fw#43): DISABLE ends either autonomy mode.
-        elif (request == spec.DRIVE_REQUEST_DISABLE and self.system_state in (
-                spec.MIB_SYSTEM_STATE_AUTONOMOUS, spec.MIB_SYSTEM_STATE_SHARED)):
-            self.system_state = spec.MIB_SYSTEM_STATE_IDLE
+            if request == spec.DRIVE_REQUEST_ENABLE:
+                self.system_state = spec.MIB_SYSTEM_STATE_ENABLED
+            elif request == spec.DRIVE_REQUEST_DISABLE:
+                self.system_state = spec.MIB_SYSTEM_STATE_IDLE
+            elif request in autonomy:  # the Jetson takes over, from IDLE or while driving
+                self.system_state = autonomy[request]
+        # As the MIB (RAMMP-mib-fw#43): DISABLE ends either autonomy mode, and push assist;
+        # the Jetson may also switch between AUTONOMOUS and SHARED, or take over push assist.
+        elif self.system_state in (spec.MIB_SYSTEM_STATE_AUTONOMOUS, spec.MIB_SYSTEM_STATE_SHARED,
+                                   spec.MIB_SYSTEM_STATE_PUSH_ASSIST):
+            if request == spec.DRIVE_REQUEST_DISABLE:
+                self.system_state = spec.MIB_SYSTEM_STATE_IDLE
+            elif request in autonomy:
+                self.system_state = autonomy[request]
 
     def apply_seat_command(self, axis_id: int, target: float) -> int:
         """Judge one seat request from the HMI, return the SEAT_RESULT_* verdict.
@@ -625,7 +632,7 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
             packet
         ):
             topic = self.topic_for_sample(guid_prefix, writer_id, reader_id)
-            if topic == spec.TOPIC_JOYSTICK_XY_TWIST:
+            if topic == spec.ROS_TOPIC_JOYSTICK_XY_TWIST:
                 sample = spec.unpack_xy_twist(payload)
                 if sample is not None:
                     self.joystick = sample
@@ -675,14 +682,15 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
                 # Answer immediately. The periodic republish below is the
                 # convergence path, not the reply path.
                 self.publish_now()
-            elif topic == spec.TOPIC_JOYSTICK_DRIVE_COMMAND:
+            elif topic == spec.ROS_TOPIC_DRIVE_COMMAND:
                 command = spec.unpack_drive_command(payload)
                 if command is None:
                     continue
-                request, profile = command
-                self.apply_drive_command(request, profile)
+                request, profile, push_assist = command
+                self.apply_drive_command(request, profile, push_assist)
                 rtps_host.log(
-                    f"[drive] {spec.DRIVE_REQUEST_NAMES.get(request, '?')} "
+                    f"[drive] {spec.DRIVE_REQUEST_NAMES.get(request, '?')}"
+                    f"{' push_assist' if push_assist else ''} "
                     f"profile={spec.DRIVE_PROFILE_NAMES.get(profile, '?')} -> "
                     f"{spec.MIB_SYSTEM_STATE_NAMES.get(self.system_state, '?')}"
                     + (" (refusing)" if request == spec.DRIVE_REQUEST_ENABLE
@@ -720,7 +728,7 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
         )
 
     def seat_units(self) -> tuple:
-        """The seat model in whole units, in MIB::seatState field order.
+        """The seat model in whole units, in rammp::SeatState field order.
 
         The table's rows are that struct's fields in that order, so zip is the whole
         mapping - one row added to the table is one field more here.
@@ -836,14 +844,14 @@ def build_harness_args(cli: argparse.Namespace) -> argparse.Namespace:
         enclave="/",
         # Subscribe to the joystick stream as well as publishing status, so the
         # emulated speed can follow the stick.
-        subscribe_topic=[spec.TOPIC_JOYSTICK_XY_TWIST],
-        subscribe_type_name=spec.TYPE_XY_TWIST,
-        publish_topic=spec.TOPIC_MIB_STATUS,
+        subscribe_topic=[spec.ROS_TOPIC_JOYSTICK_XY_TWIST],
+        subscribe_type_name=spec.ROS_TYPE_XY_TWIST,
+        publish_topic=spec.ROS_TOPIC_MIB_STATUS,
         publish_value=0,  # unused: publish_now() is overridden
         publish_interval=cli.period,
         echo_received=False,
         reliable=False,
-        type_name=spec.TYPE_MIB_STATUS,
+        type_name=spec.ROS_TYPE_MIB_STATUS,
         announce_period=1.0,
         duration=0.0,
         trace_packets=cli.trace_packets,
@@ -1101,7 +1109,7 @@ def main() -> int:
     rtps_net.save_config({"peer": peer, "advertised_address": args.advertised_address,
                           "period": cli.period})
 
-    print(f"Publishing '{spec.TOPIC_MIB_STATUS}' [{spec.TYPE_MIB_STATUS}] "
+    print(f"Publishing '{spec.ROS_TOPIC_MIB_STATUS}' [{spec.ROS_TYPE_MIB_STATUS}] "
           f"every {cli.period:.2f}s\n")
     if cli.cycle:
         run_cycle(harness, cli.dwell)

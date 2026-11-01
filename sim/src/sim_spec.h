@@ -18,14 +18,14 @@
 #define RAMMP_ERROR_FOOTER_LEN 32  /* rammp::kErrorFooterLen */
 #define RAMMP_BUTTON_JOYSTICK 0x1u /* rammp::Buttons::JOYSTICK */
 
-/* MIB::MibSystemState - one enum where a drive status and a fault used to be.
+/* rammp::MibSystemState - one enum where a drive status and a fault used to be.
    The chair drives only in ENABLED, and manual seat control is IDLE-only. */
 #define RAMMP_MIB_STATE_INITIALIZING 0
 #define RAMMP_MIB_STATE_IDLE 1
 #define RAMMP_MIB_STATE_ENABLED 2
 #define RAMMP_MIB_STATE_ERROR 3
 
-/* MIB::DriveProfile - a response strength, not a kinematics mode */
+/* rammp::DriveProfile - a response strength, not a kinematics mode */
 #define RAMMP_DRIVE_PROFILE_LOW 0
 #define RAMMP_DRIVE_PROFILE_NORMAL 1
 #define RAMMP_DRIVE_PROFILE_HIGH 2

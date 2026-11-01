@@ -48,7 +48,7 @@ TWIST_RATE = 2.2
 #: Radians per second of steering at full lock, at full speed. Scaled by speed
 #: so the car cannot pirouette while stopped — that is what twist is for.
 STEER_RATE = 2.0
-#: Share of the speed range each MIB::DriveProfile reaches. The profile is a
+#: Share of the speed range each rammp::DriveProfile reaches. The profile is a
 #: response strength, so it scales the car rather than changing how it steers.
 PROFILE_SCALE = {
     spec.DRIVE_PROFILE_LOW: 0.5,

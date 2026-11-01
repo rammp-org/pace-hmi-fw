@@ -30,7 +30,7 @@ typedef enum {
   SIM_LINK_CONNECTED,      /**< MibStatus arriving */
 } sim_link_state_t;
 
-/** Plain-C mirror of MIB::MibStatus (C++ in the spec), texts cut to the HMI's lengths.
+/** Plain-C mirror of rammp::MibStatus (C++ in the spec), texts cut to the HMI's lengths.
     The seat is not mirrored: the sim has no seat screen bound to it. */
 typedef struct {
   uint8_t system_state, seq, speed_tenths;

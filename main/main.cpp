@@ -110,7 +110,7 @@ static lv_subject_t adc_twist_subject;
 // The MIB's state, as reported over RTPS. The joystick is a slave here: this holds
 // whatever the MIB last said, and every DriveBand on every screen follows it. One
 // subject, because MibSystemState answers both of a panel's labels - where the message
-// it replaced needed a drive status and a fault. Values are the MIB::MibSystemState
+// it replaced needed a drive status and a fault. Values are the rammp::MibSystemState
 // enum from messages/mib_message.hpp.
 static lv_subject_t mib_state_subject;
 // Optional label overrides from the MCB. Empty means "use the enum's name",
@@ -144,7 +144,7 @@ static std::atomic<bool> joy_button_pressed{false};
 // to the MCB with every joystick sample. Mirrored into an atomic for the same
 // reason as the button: the ADC task must not take the LVGL lock to read it.
 static lv_subject_t drive_profile_subject;
-static std::atomic<MIB::DriveProfile> drive_profile_published{MIB::DriveProfile::NORMAL};
+static std::atomic<rammp::DriveProfile> drive_profile_published{rammp::DriveProfile::NORMAL};
 // Sends the current drive request + profile; defined with the drive gestures.
 static void drive_publish();
 
@@ -278,7 +278,7 @@ static std::atomic<bool> stick_wait_centre{false};
 // handler, read by the ADC task.
 static std::atomic<bool> stick_takes_over{false};
 
-// Whether the MIB is in PUSH_ASSIST (rammp-rtps#17): an assistant drives from the push
+// Whether the MIB is in PUSH_ASSIST (rammp-rtps#18): an assistant drives from the push
 // handle, and the input "Start driving" names ends it -- any stick movement, or a press
 // of the button (push_assist_exit). Written by the MibStatus handler, read by the ADC
 // task; cleared with the link, like stick_takes_over.
@@ -447,7 +447,7 @@ static void mcb_status_label_observer(lv_observer_t *observer, lv_subject_t *) {
 
   const bool connected = static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) ==
                          RtpsLinkState::CONNECTED;
-  const auto state = static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject));
+  const auto state = static_cast<rammp::MibSystemState>(lv_subject_get_int(&mib_state_subject));
 
   // DRIVE is two words, per spec: ACTIVE in green while the chair is driving,
   // LOCKED in red whenever it is not -- locked here, a fault, the link down, or
@@ -460,13 +460,13 @@ static void mcb_status_label_observer(lv_observer_t *observer, lv_subject_t *) {
   // assistant drives from the handle, the HMI locked the same way.
   if (kind == StatusKind::kDriveStatus) {
     const bool unlocked = lv_subject_get_int(&locked_subject) == 0 && connected;
-    if (connected && state == MIB::MibSystemState::AUTONOMOUS) {
+    if (connected && state == rammp::MibSystemState::AUTONOMOUS) {
       show("AUTONOMOUS", ok);
-    } else if (connected && state == MIB::MibSystemState::PUSH_ASSIST) {
+    } else if (connected && state == rammp::MibSystemState::PUSH_ASSIST) {
       show("PUSH ASSIST", ok);
-    } else if (unlocked && state == MIB::MibSystemState::SHARED) {
+    } else if (unlocked && state == rammp::MibSystemState::SHARED) {
       show("SHARED", ok);
-    } else if (unlocked && state == MIB::MibSystemState::ENABLED) {
+    } else if (unlocked && state == rammp::MibSystemState::ENABLED) {
       show("ACTIVE", ok);
     } else {
       show("LOCKED", alert);
@@ -484,22 +484,22 @@ static void mcb_status_label_observer(lv_observer_t *observer, lv_subject_t *) {
   const char *override_text = lv_subject_get_string(&state_text_subject);
   const bool overridden = override_text != nullptr && override_text[0] != '\0';
   switch (state) {
-  case MIB::MibSystemState::IDLE:
-  case MIB::MibSystemState::ENABLED:
-  case MIB::MibSystemState::AUTONOMOUS:
-  case MIB::MibSystemState::SHARED:
-  case MIB::MibSystemState::PUSH_ASSIST:
+  case rammp::MibSystemState::IDLE:
+  case rammp::MibSystemState::ENABLED:
+  case rammp::MibSystemState::AUTONOMOUS:
+  case rammp::MibSystemState::SHARED:
+  case rammp::MibSystemState::PUSH_ASSIST:
     show(overridden ? override_text : "OK", ok);
     return;
-  case MIB::MibSystemState::INITIALIZING:
+  case rammp::MibSystemState::INITIALIZING:
     // Not a fault and not yet OK. "STARTING" rather than the enum's name, which
     // does not fit the cell.
     show(overridden ? override_text : "STARTING", muted);
     return;
-  case MIB::MibSystemState::ERROR:
+  case rammp::MibSystemState::ERROR:
     show(overridden ? override_text : "ERROR", alert);
     return;
-  case MIB::MibSystemState::ESTOP:
+  case rammp::MibSystemState::ESTOP:
     show(overridden ? override_text : "E-STOP", alert);
     return;
   default:
@@ -655,14 +655,14 @@ static void bind_rtps_label(lv_obj_t *bar) {
 /////////////////////////////////////////////////////////////////////////////
 
 // Paired with the button that selects it, so one callback serves all three.
-static MIB::DriveProfile kProfileHigh = MIB::DriveProfile::HIGH;
-static MIB::DriveProfile kProfileNormal = MIB::DriveProfile::NORMAL;
-static MIB::DriveProfile kProfileLow = MIB::DriveProfile::LOW;
+static rammp::DriveProfile kProfileHigh = rammp::DriveProfile::HIGH;
+static rammp::DriveProfile kProfileNormal = rammp::DriveProfile::NORMAL;
+static rammp::DriveProfile kProfileLow = rammp::DriveProfile::LOW;
 
 static void drive_profile_click_cb(lv_event_t *e) {
-  const auto *mode = static_cast<const MIB::DriveProfile *>(lv_event_get_user_data(e));
+  const auto *mode = static_cast<const rammp::DriveProfile *>(lv_event_get_user_data(e));
   // Ask, do not assume: drive_profile_subject is what the MIB reports, and it is fed
-  // from MibStatus.activeProfile. Setting it here would highlight a button the chair
+  // from MibStatus.active_profile. Setting it here would highlight a button the chair
   // may refuse, which is the one thing these three must not do.
   drive_profile_published.store(*mode);
   drive_publish();
@@ -673,12 +673,12 @@ static void drive_profile_click_cb(lv_event_t *e) {
 // both ways. All three are drawn at rest, so nothing is lit until the MIB says.
 static void drive_mode_button_observer(lv_observer_t *observer, lv_subject_t *subject) {
   lv_obj_t *button = lv_observer_get_target_obj(observer);
-  const auto mine = *static_cast<const MIB::DriveProfile *>(lv_observer_get_user_data(observer));
-  const bool selected = static_cast<MIB::DriveProfile>(lv_subject_get_int(subject)) == mine;
+  const auto mine = *static_cast<const rammp::DriveProfile *>(lv_observer_get_user_data(observer));
+  const bool selected = static_cast<rammp::DriveProfile>(lv_subject_get_int(subject)) == mine;
   lv_obj_set_state(button, LV_STATE_CHECKED, selected);
 }
 
-static void bind_drive_profile_button(lv_obj_t *button, MIB::DriveProfile *mode) {
+static void bind_drive_profile_button(lv_obj_t *button, rammp::DriveProfile *mode) {
   if (button == nullptr) {
     return;
   }
@@ -693,7 +693,7 @@ static void bind_drive_profile_button(lv_obj_t *button, MIB::DriveProfile *mode)
 // publish: the subject is fed from MibStatus now, and republishing on every sample
 // would put a DriveCommand on the wire twice a second.
 static void drive_mode_publish_observer(lv_observer_t *, lv_subject_t *subject) {
-  drive_profile_published.store(static_cast<MIB::DriveProfile>(lv_subject_get_int(subject)));
+  drive_profile_published.store(static_cast<rammp::DriveProfile>(lv_subject_get_int(subject)));
 }
 
 // MibStatus.speed is metres per second; the label shows mph to one decimal.
@@ -925,7 +925,7 @@ static void clock_set(const std::tm &local) {
 }
 
 // RTPS receive task.
-static void clock_note_mcb_time(const MIB::MibStatus &status) {
+static void clock_note_mcb_time(const rammp::MibStatus &status) {
   if (status.epoch_s <= 0) {
     return; // 0: the MCB does not know the time
   }
@@ -1362,12 +1362,12 @@ static void diagnostics_open();
 // and "unknown" is not "known good" on a device that moves someone. SHARED is
 // driving from the Drive screen, with another node blending in.
 static bool mcb_ready() {
-  const auto state = static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject));
+  const auto state = static_cast<rammp::MibSystemState>(lv_subject_get_int(&mib_state_subject));
   return lv_subject_get_int(&estop_subject) == kEStopNone &&
          static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) ==
              RtpsLinkState::CONNECTED &&
-         (state == MIB::MibSystemState::IDLE || state == MIB::MibSystemState::ENABLED ||
-          state == MIB::MibSystemState::SHARED);
+         (state == rammp::MibSystemState::IDLE || state == rammp::MibSystemState::ENABLED ||
+          state == rammp::MibSystemState::SHARED);
 }
 
 // The MIB disables manual seat control while it is driving, so the seat screen asks for
@@ -1376,19 +1376,19 @@ static bool seat_ready() {
   return lv_subject_get_int(&estop_subject) == kEStopNone &&
          static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) ==
              RtpsLinkState::CONNECTED &&
-         static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject)) ==
-             MIB::MibSystemState::IDLE;
+         static_cast<rammp::MibSystemState>(lv_subject_get_int(&mib_state_subject)) ==
+             rammp::MibSystemState::IDLE;
 }
 
 // AUTONOMOUS or ESTOP, live: the MIB modes that stop the user driving and are not
 // faults, so they get their own banner. Empty for anything else, or with the link down.
-static std::optional<MIB::MibSystemState> mib_mode() {
-  const auto state = static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject));
+static std::optional<rammp::MibSystemState> mib_mode() {
+  const auto state = static_cast<rammp::MibSystemState>(lv_subject_get_int(&mib_state_subject));
   const bool connected = static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) ==
                          RtpsLinkState::CONNECTED;
   if (connected &&
-      (state == MIB::MibSystemState::AUTONOMOUS || state == MIB::MibSystemState::ESTOP ||
-       state == MIB::MibSystemState::PUSH_ASSIST)) {
+      (state == rammp::MibSystemState::AUTONOMOUS || state == rammp::MibSystemState::ESTOP ||
+       state == rammp::MibSystemState::PUSH_ASSIST)) {
     return state;
   }
   return std::nullopt;
@@ -1502,7 +1502,7 @@ static void fill_drive_blocked_panel(lv_obj_t *panel, const char *link_title,
     lv_label_set_text(body, text.body);
     lv_label_set_text(footer, text.footer);
   } else {
-    const auto state = static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject));
+    const auto state = static_cast<rammp::MibSystemState>(lv_subject_get_int(&mib_state_subject));
     const char *error_text = lv_subject_get_string(&error_text_subject);
     lv_label_set_text(title, mcb_title);
     if (error_text[0] != '\0') {
@@ -1540,11 +1540,11 @@ static bool fill_mib_mode_panel(lv_obj_t *panel) {
     return false;
   }
   switch (*mode) {
-  case MIB::MibSystemState::ESTOP:
+  case rammp::MibSystemState::ESTOP:
     fill_mib_reason_panel(panel, rammp::kHmiEStopTitle, rammp::kHmiMibEStopText,
                           rammp::kHmiEStopFooter);
     break;
-  case MIB::MibSystemState::PUSH_ASSIST:
+  case rammp::MibSystemState::PUSH_ASSIST:
     // The footer names what ends it, which is whatever "Start driving" picks.
     fill_mib_reason_panel(panel, rammp::kHmiPushAssistTitle, rammp::kHmiPushAssistText,
                           drive_start_stick() ? rammp::kHmiPushAssistStickFooter
@@ -1596,7 +1596,7 @@ static void entry_refused_panel_observer(lv_observer_t *observer, lv_subject_t *
         lv_obj_set_hidden(art, up);
       }
       // Nothing drives from the push assist screen, so it does not say how to.
-      lv_obj_set_hidden(ui_DriveHint, up && mib_mode() == MIB::MibSystemState::PUSH_ASSIST);
+      lv_obj_set_hidden(ui_DriveHint, up && mib_mode() == rammp::MibSystemState::PUSH_ASSIST);
     }
   };
   // An engaged e-stop is up for as long as it holds, asked or not: it is the one
@@ -1795,7 +1795,7 @@ static bool drive_exit_requested;
 static bool drive_exit_then_menu;
 
 static void drive_publish() {
-  rtps_comms_publish_drive(drive_request.load(), drive_profile_published.load());
+  rtps_comms_publish_drive(drive_request.load(), drive_profile_published.load(), false);
 }
 
 static void drive_ask(rammp::DriveRequest request) {
@@ -1813,22 +1813,28 @@ static void entry_refused_show(int32_t which, uint32_t show_ms) {
   lv_timer_resume(entry_refused_timer);
 }
 
-// Push assist (rammp-rtps#17) rides DriveCommand, but neither request is kept in
-// drive_request: each goes out on its own, so nothing that re-sends the drive request
-// (a drive profile pick, the e-stop) can repeat one.
+// Push assist rides DriveCommand as push_assist on a DISABLE (rammp-rtps#18: a DISABLE
+// with it set asks for PUSH_ASSIST, one without asks for IDLE). Neither request is kept
+// in drive_request, so each goes out on its own. A re-sent drive_request (a profile
+// tap, drive_wait_poll's timeout) would be a plain DISABLE and would end push assist;
+// what keeps that from happening is the screen, not the protocol: in PUSH_ASSIST the
+// HMI sits on the Locked screen's banner (drive_screen_follow_state), where neither
+// path can be reached. The e-stop's DISABLE ending push assist is wanted.
 //
 // Entering: the Skunk Works tile asks, then waits like drive_request_enter does,
 // and the Locked screen says "PUSH ASSIST REFUSED" if the MIB never enters it.
 static int64_t push_assist_wait_until_us; // 0 = not waiting for an answer
 
 static void push_assist_ask() {
-  rtps_comms_publish_drive(rammp::DriveRequest::PUSH_ASSIST_ENABLE, drive_profile_published.load());
+  rtps_comms_publish_drive(rammp::DriveRequest::DISABLE, drive_profile_published.load(), true);
   push_assist_wait_until_us = esp_timer_get_time() + kDriveAnswerUs;
 }
 
 // Leaving: the "Start driving" input while in PUSH_ASSIST (the ADC task watches it),
 // or the burger key, as on the Drive screen. Sent again every kPushAssistExitResendUs
-// for as long as the input lasts, since the MIB answers only with its next status.
+// for as long as the input lasts, since the MIB answers only with its next status and
+// the link is best-effort. The contract allows this (rammp-rtps#18): a request may be
+// repeated until MibStatus answers it, and this one stops the moment the MIB has left.
 // push_assist_poll sounds the refusal if the MIB is still in push assist
 // kDriveAnswerUs after the first request it has not answered. Any task.
 static constexpr int64_t kPushAssistExitResendUs = 500 * 1000;
@@ -1846,8 +1852,7 @@ static void push_assist_exit() {
   push_assist_exit_sent_us.store(now);
   int64_t none = 0;
   push_assist_exit_since_us.compare_exchange_strong(none, now);
-  rtps_comms_publish_drive(rammp::DriveRequest::PUSH_ASSIST_DISABLE,
-                           drive_profile_published.load());
+  rtps_comms_publish_drive(rammp::DriveRequest::DISABLE, drive_profile_published.load(), false);
 }
 
 // The burger key on the push assist screen. LVGL task.
@@ -1869,14 +1874,14 @@ static void push_assist_exit_then_open_menu() {
 static void drive_screen_follow_state() {
   const bool connected = static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) ==
                          RtpsLinkState::CONNECTED;
-  const auto state = static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject));
-  const bool driving =
-      connected && (state == MIB::MibSystemState::ENABLED || state == MIB::MibSystemState::SHARED);
+  const auto state = static_cast<rammp::MibSystemState>(lv_subject_get_int(&mib_state_subject));
+  const bool driving = connected && (state == rammp::MibSystemState::ENABLED ||
+                                     state == rammp::MibSystemState::SHARED);
   const bool locked = lv_subject_get_int(&locked_subject) != 0;
 
   // Push assist is a screen of its own, the Locked one with the mode's banner, and it
   // is left only through the MIB: whatever else was up goes, the menu with it.
-  if (connected && locked && state == MIB::MibSystemState::PUSH_ASSIST &&
+  if (connected && locked && state == rammp::MibSystemState::PUSH_ASSIST &&
       (lv_screen_active() != ui_LockedScreen || nav_menu_open != nullptr)) {
     nav_home();
     return;
@@ -2882,7 +2887,7 @@ static lv_timer_t *actuator_reject_timer = nullptr;
 // Seat values come from the MIB and nowhere else: a press publishes a request, and the
 // number on screen moves only when the next MibStatus says the seat moved. The wire
 // carries whole units, the screens raw integers, so each field is converted here.
-static void seat_apply_state(const MIB::seatState &seat) {
+static void seat_apply_state(const rammp::SeatState &seat) {
   for (uint8_t i = 0; i < seat_axis_count; i++) {
     const rammp::SeatAxisSpec &spec = rammp::kSeatAxes[i];
     lv_subject_set_int(&seat_axis_value[i],
@@ -3314,7 +3319,7 @@ static void action_self_test() { selftest_request(SelfTestTrigger::LOCAL, 0); }
 // seat moves only if the MCB agrees, and a refusal flashes on that page.
 static void action_seat_up() { seat_step(rammp::index_of(rammp::SeatAxis::ELEVATION), +1); }
 
-// Push assist (rammp-rtps#17): asked for here until the menu has a row for it, then
+// Push assist (rammp-rtps#18): asked for here until the menu has a row for it, then
 // home, where the Locked screen shows the mode or the refusal.
 static void action_push_assist() {
   push_assist_ask();
@@ -4172,7 +4177,7 @@ static void nav_key_cb(lv_event_t *e) {
   }
   // Push assist is the same: leaving its screen asks the MIB to end it, and the menu
   // opens once it has (push_assist_poll). If the MIB keeps it, the screen stays.
-  if (mib_mode() == MIB::MibSystemState::PUSH_ASSIST) {
+  if (mib_mode() == rammp::MibSystemState::PUSH_ASSIST) {
     push_assist_exit_then_open_menu();
     return;
   }
@@ -4185,8 +4190,8 @@ static void nav_key_cb(lv_event_t *e) {
 static void push_assist_poll() {
   const int64_t now = esp_timer_get_time();
   const bool in_push_assist =
-      static_cast<MIB::MibSystemState>(lv_subject_get_int(&mib_state_subject)) ==
-      MIB::MibSystemState::PUSH_ASSIST;
+      static_cast<rammp::MibSystemState>(lv_subject_get_int(&mib_state_subject)) ==
+      rammp::MibSystemState::PUSH_ASSIST;
   if (push_assist_refused_input.exchange(false)) {
     refusal_feedback();
   }
@@ -4278,7 +4283,7 @@ static void nav_focusable_button(lv_obj_t *button) {
 
 static void nav_band_cb(lv_event_t *) {
   // The push assist screen is left only through the MIB (nav_key_cb).
-  if (mib_mode() == MIB::MibSystemState::PUSH_ASSIST) {
+  if (mib_mode() == rammp::MibSystemState::PUSH_ASSIST) {
     refusal_feedback();
     return;
   }
@@ -4717,7 +4722,7 @@ static void diagnostics_screen_ensure() {
 // while it is up -- menu shut, MIB idle (nav_update_stick_gate) -- the ADC task
 // sends the stick on that one's own XYTwist topic, rammp/joystick/seat/xy_twist
 // or rammp/joystick/swivel/xy_twist, the way Drive sends it on
-// rammp/joystick/xy_twist (which stays centred here). The bars show what is
+// rt/rammp/joystick/xy_twist (which stays centred here). The bars show what is
 // sent. "<", or the stick button, goes back to the seat screen.
 /////////////////////////////////////////////////////////////////////////////
 
@@ -5750,7 +5755,8 @@ extern "C" void app_main(void) {
   // binds, because lv_subject_init_int memzeroes the subject and would take any
   // observer already on it with it.
   lv_subject_init_int(&locked_subject, 1);
-  lv_subject_init_int(&mib_state_subject, static_cast<int32_t>(MIB::MibSystemState::INITIALIZING));
+  lv_subject_init_int(&mib_state_subject,
+                      static_cast<int32_t>(rammp::MibSystemState::INITIALIZING));
   // Initialised before the panels bind, because their observers read it on the
   // first run. LINK_DOWN at boot is true and self-correcting: the poll timer
   // has the real answer a quarter second later.
@@ -5808,7 +5814,7 @@ extern "C" void app_main(void) {
   clock_poll_cb(nullptr); // the RTC's time, when it had one, from the first frame
   lv_timer_create(clock_poll_cb, kClockPollMs, nullptr);
   lv_subject_add_observer_obj(&speed_tenths_subject, speed_label_observer, ui_SpeedValue, nullptr);
-  lv_subject_init_int(&drive_profile_subject, static_cast<int32_t>(MIB::DriveProfile::NORMAL));
+  lv_subject_init_int(&drive_profile_subject, static_cast<int32_t>(rammp::DriveProfile::NORMAL));
   bind_drive_profile_button(ui_ModeManual, &kProfileHigh);
   bind_drive_profile_button(ui_ModeAssist, &kProfileNormal);
   bind_drive_profile_button(ui_ModeAuto, &kProfileLow);
@@ -6835,17 +6841,17 @@ extern "C" void app_main(void) {
   // lv_subject_set_int runs the observers synchronously on this task and they
   // touch widgets.
   // RTPS handlers run on the RTPS task: subjects only, under the LVGL lock.
-  rtps_comms_on_mib_status([](const MIB::MibStatus &status) {
+  rtps_comms_on_mib_status([](const rammp::MibStatus &status) {
     clock_note_mcb_time(status); // no LVGL: sets the system clock and the RTC
     // Before the state subject, whose observers may ask the MIB to drive: by then a
     // MIB that has left AUTONOMOUS no longer gets the stick.
-    stick_takes_over.store(status.systemState == MIB::MibSystemState::AUTONOMOUS);
-    push_assist.store(status.systemState == MIB::MibSystemState::PUSH_ASSIST);
+    stick_takes_over.store(status.system_state == rammp::MibSystemState::AUTONOMOUS);
+    push_assist.store(status.system_state == rammp::MibSystemState::PUSH_ASSIST);
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
-    lv_subject_set_int(&mib_state_subject, static_cast<int32_t>(status.systemState));
+    lv_subject_set_int(&mib_state_subject, static_cast<int32_t>(status.system_state));
     // What the MIB is actually driving with: the three profile buttons highlight from
     // this, so they follow the chair even when something else changed it.
-    lv_subject_set_int(&drive_profile_subject, static_cast<int32_t>(status.activeProfile));
+    lv_subject_set_int(&drive_profile_subject, static_cast<int32_t>(status.active_profile));
     // m/s on the wire, mph on the dial: the shared spec carries the real
     // quantity and the unit on the label is ours to pick.
     lv_subject_set_int(&speed_tenths_subject, speed_display_tenths(status.speed));
@@ -6854,11 +6860,11 @@ extern "C" void app_main(void) {
     lv_subject_copy_string(&state_text_subject, status.status_text.c_str());
     // The message's default, "No error", is the MIB not saying why: the banners take
     // an empty error_message as that and fall back to their own wording.
-    static const std::string kNoError = MIB::MibStatus{}.error_message;
+    static const std::string kNoError = rammp::MibStatus{}.error_message;
     lv_subject_copy_string(&error_text_subject,
                            status.error_message == kNoError ? "" : status.error_message.c_str());
     lv_subject_copy_string(&error_footer_subject, status.error_footer.c_str());
-    seat_apply_state(status.currentSeatState);
+    seat_apply_state(status.current_seat_state);
   });
   rtps_comms_on_diagnostics([](const rammp::Diagnostics &diag) {
     std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
