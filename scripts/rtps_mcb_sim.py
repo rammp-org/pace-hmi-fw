@@ -547,18 +547,19 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
         if request == spec.DRIVE_REQUEST_ENABLE and self.estop.latched:
             rtps_host.log("[drive] ENABLE refused: e-stop latched")
             return
-        if request == spec.DRIVE_REQUEST_DISABLE and self.refuse_stop:
-            return
         # Push assist (rammp-rtps#18): a DISABLE with push_assist set, entered from IDLE.
         # Refused with the drive ("x"), as a MIB that cannot hand driving to the handle
-        # would. A DISABLE without it leaves (back to IDLE).
-        autonomy = {spec.DRIVE_REQUEST_AUTONOMOUS: spec.MIB_SYSTEM_STATE_AUTONOMOUS,
-                    spec.DRIVE_REQUEST_SHARED: spec.MIB_SYSTEM_STATE_SHARED}
+        # would; refuse-stop ("s") is about leaving a drive state, so it is checked after
+        # this. A DISABLE without push_assist leaves (back to IDLE).
         if request == spec.DRIVE_REQUEST_DISABLE and push_assist:
             if self.system_state == spec.MIB_SYSTEM_STATE_IDLE and not self.refuse_drive \
                     and not self.estop.latched:
                 self.system_state = spec.MIB_SYSTEM_STATE_PUSH_ASSIST
             return
+        if request == spec.DRIVE_REQUEST_DISABLE and self.refuse_stop:
+            return
+        autonomy = {spec.DRIVE_REQUEST_AUTONOMOUS: spec.MIB_SYSTEM_STATE_AUTONOMOUS,
+                    spec.DRIVE_REQUEST_SHARED: spec.MIB_SYSTEM_STATE_SHARED}
         # ERROR and INITIALIZING are not ours to leave: a drive request neither clears a
         # fault nor finishes booting. ESTOP is the latch's to leave.
         if self.system_state in (spec.MIB_SYSTEM_STATE_IDLE, spec.MIB_SYSTEM_STATE_ENABLED):

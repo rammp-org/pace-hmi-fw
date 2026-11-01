@@ -278,7 +278,7 @@ static std::atomic<bool> stick_wait_centre{false};
 // handler, read by the ADC task.
 static std::atomic<bool> stick_takes_over{false};
 
-// Whether the MIB is in PUSH_ASSIST (rammp-rtps#17): an assistant drives from the push
+// Whether the MIB is in PUSH_ASSIST (rammp-rtps#18): an assistant drives from the push
 // handle, and the input "Start driving" names ends it -- any stick movement, or a press
 // of the button (push_assist_exit). Written by the MibStatus handler, read by the ADC
 // task; cleared with the link, like stick_takes_over.
@@ -1795,7 +1795,7 @@ static bool drive_exit_requested;
 static bool drive_exit_then_menu;
 
 static void drive_publish() {
-  rtps_comms_publish_drive(drive_request.load(), drive_profile_published.load());
+  rtps_comms_publish_drive(drive_request.load(), drive_profile_published.load(), false);
 }
 
 static void drive_ask(rammp::DriveRequest request) {
@@ -1814,9 +1814,12 @@ static void entry_refused_show(int32_t which, uint32_t show_ms) {
 }
 
 // Push assist rides DriveCommand as push_assist on a DISABLE (rammp-rtps#18: a DISABLE
-// with it set asks for PUSH_ASSIST, one without asks for IDLE), but neither is kept in
-// drive_request: each goes out on its own, so nothing that re-sends the drive request
-// (a drive profile pick, the e-stop) can repeat one.
+// with it set asks for PUSH_ASSIST, one without asks for IDLE). Neither request is kept
+// in drive_request, so each goes out on its own. A re-sent drive_request (a profile
+// tap, drive_wait_poll's timeout) would be a plain DISABLE and would end push assist;
+// what keeps that from happening is the screen, not the protocol: in PUSH_ASSIST the
+// HMI sits on the Locked screen's banner (drive_screen_follow_state), where neither
+// path can be reached. The e-stop's DISABLE ending push assist is wanted.
 //
 // Entering: the Skunk Works tile asks, then waits like drive_request_enter does,
 // and the Locked screen says "PUSH ASSIST REFUSED" if the MIB never enters it.
@@ -1829,7 +1832,9 @@ static void push_assist_ask() {
 
 // Leaving: the "Start driving" input while in PUSH_ASSIST (the ADC task watches it),
 // or the burger key, as on the Drive screen. Sent again every kPushAssistExitResendUs
-// for as long as the input lasts, since the MIB answers only with its next status.
+// for as long as the input lasts, since the MIB answers only with its next status and
+// the link is best-effort. The contract allows this (rammp-rtps#18): a request may be
+// repeated until MibStatus answers it, and this one stops the moment the MIB has left.
 // push_assist_poll sounds the refusal if the MIB is still in push assist
 // kDriveAnswerUs after the first request it has not answered. Any task.
 static constexpr int64_t kPushAssistExitResendUs = 500 * 1000;
@@ -1870,8 +1875,8 @@ static void drive_screen_follow_state() {
   const bool connected = static_cast<RtpsLinkState>(lv_subject_get_int(&rtps_link_subject)) ==
                          RtpsLinkState::CONNECTED;
   const auto state = static_cast<rammp::MibSystemState>(lv_subject_get_int(&mib_state_subject));
-  const bool driving =
-      connected && (state == rammp::MibSystemState::ENABLED || state == rammp::MibSystemState::SHARED);
+  const bool driving = connected && (state == rammp::MibSystemState::ENABLED ||
+                                     state == rammp::MibSystemState::SHARED);
   const bool locked = lv_subject_get_int(&locked_subject) != 0;
 
   // Push assist is a screen of its own, the Locked one with the mode's banner, and it
@@ -3314,7 +3319,7 @@ static void action_self_test() { selftest_request(SelfTestTrigger::LOCAL, 0); }
 // seat moves only if the MCB agrees, and a refusal flashes on that page.
 static void action_seat_up() { seat_step(rammp::index_of(rammp::SeatAxis::ELEVATION), +1); }
 
-// Push assist (rammp-rtps#17): asked for here until the menu has a row for it, then
+// Push assist (rammp-rtps#18): asked for here until the menu has a row for it, then
 // home, where the Locked screen shows the mode or the refusal.
 static void action_push_assist() {
   push_assist_ask();
@@ -5750,7 +5755,8 @@ extern "C" void app_main(void) {
   // binds, because lv_subject_init_int memzeroes the subject and would take any
   // observer already on it with it.
   lv_subject_init_int(&locked_subject, 1);
-  lv_subject_init_int(&mib_state_subject, static_cast<int32_t>(rammp::MibSystemState::INITIALIZING));
+  lv_subject_init_int(&mib_state_subject,
+                      static_cast<int32_t>(rammp::MibSystemState::INITIALIZING));
   // Initialised before the panels bind, because their observers read it on the
   // first run. LINK_DOWN at boot is true and self-correcting: the poll timer
   // has the real answer a quarter second later.

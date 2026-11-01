@@ -49,9 +49,9 @@ enum class SeatStick : uint8_t {
 bool rtps_comms_publish_seat_stick(SeatStick target, float x, float y, float twist,
                                    rammp::Buttons buttons);
 /// Ask the MIB for a drive state, with the profile to drive with. push_assist with
-/// DISABLE asks for PUSH_ASSIST (the handle drives) instead of IDLE.
+/// DISABLE asks for PUSH_ASSIST (the handle drives) instead of IDLE; every caller says.
 bool rtps_comms_publish_drive(rammp::DriveRequest request, rammp::DriveProfile profile,
-                              bool push_assist = false);
+                              bool push_assist);
 /// Ask the MIB to put one seat axis at `target` (absolute, in the axis' whole units).
 bool rtps_comms_publish_seat(rammp::SeatAxis axis, float target);
 /// Ask the MIB to jog one motor (hold-to-run: resend while held, 0 = stop). Not sent

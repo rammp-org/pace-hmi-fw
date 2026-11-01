@@ -61,7 +61,8 @@ std::atomic<bool> link_up{false};
 std::atomic<bool> got_ip{false};
 std::atomic<bool> peer_matched{false};    // a latch: espp only reports "matched"
 std::atomic<bool> endpoints_ready{false}; // every publisher below exists
-std::atomic<rammp::DriveProfile> last_profile{rammp::DriveProfile::NORMAL}; // for the e-stop DISABLE
+std::atomic<rammp::DriveProfile> last_profile{
+    rammp::DriveProfile::NORMAL};       // for the e-stop DISABLE
 std::atomic<int64_t> last_status_us{0}; // last MibStatus, esp_timer time; 0 = never
 std::string ip_address;
 esp_netif_ip_info_t ip_info{};
@@ -452,7 +453,8 @@ bool rtps_comms_publish_adc(float x, float y, float twist, rammp::Buttons button
   if (stopped && !was_stopped) {
     // The stop just engaged: ask the MIB to stop driving now, not at the UI's next
     // tick. A MIB that knows the e-stop stops anyway; one that does not still obeys this.
-    publish(drive_pub, rammp::DriveCommand{rammp::DriveRequest::DISABLE, last_profile.load(), false});
+    publish(drive_pub,
+            rammp::DriveCommand{rammp::DriveRequest::DISABLE, last_profile.load(), false});
   }
   was_stopped = stopped;
   if (stopped) {
