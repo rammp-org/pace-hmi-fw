@@ -149,7 +149,7 @@ for _name, _text_value in re.findall(r'inline constexpr char k(EStop\w+)\[\]\s*=
                                      _HEADER_TEXT):
     globals()[_snake(_name.replace("EStop", "Estop"))] = _text_value
 for _needed in ("ESTOP_PERIOD_MS", "ESTOP_TIMEOUT_MS", "ESTOP_CLEAR_WINDOW_MS", "ESTOP_DEADMAN",
-                "ESTOP_CLEARER", "ESTOP_SELF", "TOPIC_ESTOP", "TYPE_ESTOP"):
+                "ESTOP_CLEARER", "ESTOP_SELF", "ROS_TOPIC_ESTOP", "ROS_TYPE_ESTOP"):
     if _needed not in globals():
         raise RuntimeError(f"e-stop spec: {_needed} not found — has the C++ style changed?")
 

@@ -376,7 +376,8 @@ bool start_participant() {
   // The e-stop first, so a short endpoint pool fails anything but it (estop-core adds
   // its writer and reader; best-effort, the period resend is the reliability).
   // espp copies the topic into a std::string per publish: in-place, at this length.
-  static_assert(sizeof(RAMMP_TOPIC_ESTOP) <= 16, "EStop topic must fit std::string's SSO buffer");
+  static_assert(sizeof(RAMMP_ROS_TOPIC_ESTOP) <= 16,
+                "EStop topic must fit std::string's SSO buffer");
   if (!hmi_estop.attach(*participant)) {
     logger.error("Could not add the e-stop writer and reader '{}' (CONFIG_RTPS_LIMIT_* in "
                  "sdkconfig.defaults)",

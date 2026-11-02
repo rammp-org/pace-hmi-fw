@@ -298,7 +298,7 @@ class McbPanel:
     def _build_estop(self, parent: tk.Widget) -> None:
         """The MIB's e-stop latch (estop_latch.py): it starts latched, as the MIB does,
         so nothing drives until a clear attempt succeeds, once the HMI accepts it."""
-        frame = ttk.LabelFrame(parent, text="E-stop (rammp/estop, the MIB's latch)", padding=8)
+        frame = ttk.LabelFrame(parent, text="E-stop (rt/estop, the MIB's latch)", padding=8)
         frame.pack(fill="x", padx=8, pady=(8, 4))
         self.estop_label = ttk.Label(frame, text="not connected")
         self.estop_label.grid(row=0, column=0, columnspan=5, sticky="w")
