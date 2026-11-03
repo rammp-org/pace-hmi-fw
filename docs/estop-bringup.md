@@ -1,20 +1,19 @@
 # E-stop bring-up
 
-How to test the robot-wide e-stop on the HMI and the MIB before the PRs merge. The design
-and the protocol are in [plans/estop.md](plans/estop.md).
+How to test the robot-wide e-stop on the HMI and the MIB. The design and the protocol are in
+[plans/estop.md](plans/estop.md). Everything is merged:
 
-- **HMI:** [pace-hmi-fw, branch `dev-estop`](https://github.com/rammp-org/pace-hmi-fw/tree/dev-estop)
-- **MIB:** add [estop-core `v0.3.0`](https://github.com/rammp-org/rammp-estop-core/tree/v0.3.0)
+- **rammp-rtps** `main` (rammp-rtps#21): `rammp::EStop` on `rt/estop`, ROS 2 facing.
+- **MIB:** RAMMP-mib-fw `main` (RAMMP-mib-fw#64) has estop-core `v0.3.0` and publishes `rt/estop`.
+- **HMI:** pace-hmi-fw `main` (pace-hmi-fw#26), espp 1.4.0.
 
-Both use [rammp-rtps, branch `feat/estop`](https://github.com/rammp-org/rammp-rtps/tree/feat/estop). `dev-estop` and `feat/estop` aren't merged into
-`main` yet: we test this combination on the HMI and the MIB first, and merge the PRs once it
-works.
-The HMI and estop-core already point at `feat/estop`, so there is nothing to set up for it.
+Both firmwares must be at that rammp-rtps commit or newer, or they do not hear each other
+(the MIB's deadman then latches `hmi: silent`).
 
-## 1. Flash the HMI (Tab5, ESP-IDF 6.0.0)
+## 1. Flash the HMI (Tab5, ESP-IDF 6.0)
 
 ```sh
-git clone --recurse-submodules -b dev-estop https://github.com/rammp-org/pace-hmi-fw.git
+git clone --recurse-submodules https://github.com/rammp-org/pace-hmi-fw.git
 cd pace-hmi-fw
 idf.py -p <PORT> flash monitor
 ```
@@ -22,42 +21,12 @@ idf.py -p <PORT> flash monitor
 E-stop switch: GPIO2, normally open to GND. You can change the pin and the switch type in
 **Settings > E-stop**.
 
-## 2. MIB: add estop-core
+## 2. Flash the MIB
 
-**a)** In `main/idf_component.yml`, under `dependencies:`:
-
-```yaml
-  estop_core:
-    git: https://github.com/rammp-org/rammp-estop-core.git
-    version: v0.3.0
-```
-
-**b)** In code:
-
-```cpp
-#include "estop/estop.hpp"
-
-// Watches "hmi". Clear button: normally open to GND, held 2 s.
-// Replace GPIO_NUM_35 with your clear-button pin.
-static estop::Latch latch({.clear_input = {.gpio_num = GPIO_NUM_35}});
-
-// In app_main:
-latch.start();              // first, before the network and the motors
-latch.attach(participant);  // after your espp::RtpsParticipant has started
-
-// In the motor loop:
-if (latch.active()) { /* stop the motors */ }
-```
-
-There's a full commented example in
+RAMMP-mib-fw `main`: `idf.py -p <PORT> flash monitor`. The latch is `estop::Latch` in
+`MibSystem`, watching `hmi`; the clear button is `mib::config::estop_clear_gpio`, normally
+open to GND, held 2 s. How a firmware takes estop-core in is in its README and
 [`examples/latch/main/main.cpp`](https://github.com/rammp-org/rammp-estop-core/blob/main/examples/latch/main/main.cpp).
-
-**c)** In `sdkconfig.defaults`, put espp's RTPS tasks at or above your busiest task, so the
-deadman doesn't trip on a busy board:
-
-```
-CONFIG_RTPS_THREAD_POOL_READER_PRIO=20
-```
 
 ## 3. Test
 
@@ -100,6 +69,6 @@ in `scripts/rtps_mcb_sim.py` already speaks these names.
 - Needs ESP-IDF ≥ 5.5 and espp ≥ 1.4.0. On 1.3.10 a Cyclone DDS peer never receives a
   sample (esp-cpp/espp#862, in 1.3.11), and 1.4.0 adds the locator and lease fixes
   (esp-cpp/espp#866, #867, #871) the bench needs with a laptop on several interfaces.
-- Test on a MIB branch whose rammp-rtps submodule is at `c7db102`, the same as MIB main. If yours
-  has a newer rammp-rtps, ask before building.
-- This is the first run on real MIB hardware. If anything looks off, please send the log.
+- Bench-tested 2026-11-03 (Tab5 and MIB on the chair LAN, a Cyclone DDS listener on a laptop).
+  The chair test with the Jetson is pending; see pace-hmi-fw#27 for the RTPS proxy limits it
+  may need.

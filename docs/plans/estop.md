@@ -1,7 +1,10 @@
-# E-stop plan (branch `dev-estop`)
+# E-stop plan
 
-Status: implemented on `dev-estop` (firmware, shared message, bench sim) and bench-tested on
-the Tab5 (section 10). Section 9 lists where the build differs from this plan.
+Status: merged. rammp-rtps#21 (the message, on the ROS 2 facing `rt/estop`), RAMMP-mib-fw#64
+(the MIB's latch, estop-core v0.3.0) and pace-hmi-fw#26 (this firmware). Bench-tested on the
+Tab5 and the MIB (section 10, [estop-bringup.md](../estop-bringup.md)). Section 9 lists where
+the build differs from this plan. The names below are the plan's; the wire names since
+rammp-rtps#21 are `rt/estop` and `rammp_common_interfaces::msg::dds_::EStop_`.
 
 Scope: an e-stop switch on the HMI (GPIO2 or GPIO47, NO or NC, chosen in Settings)
 that engages a robot-wide stop over RTPS. Only the MCB can end it. The MCB also
@@ -175,8 +178,8 @@ buffer on every send, and espp's receive transport builds a `std::vector` per pa
 
 ## 6. Commits
 
-1. **rammp-rtps `feat/estop`:** `messages/estop_message.hpp`, added to `messages.hpp`.
-2. **pace-hmi-fw `dev-estop`:** the submodule bump, `main/estop.{hpp,cpp}`, the
+1. **rammp-rtps** (`feat/estop`, then #21 for the ROS 2 names): `messages/estop_message.hpp`, added to `messages.hpp`.
+2. **pace-hmi-fw** (`dev-estop`, then #26): the submodule bump, `main/estop.{hpp,cpp}`, the
    `rtps_comms` hooks, the settings rows, the banner text in `hmi_rtps_spec.hpp`,
    and the drive cutoff.
 3. **pace-hmi-fw scripts:** `rammp_rtps.py` gets the EStop codec; `rtps_mcb_sim.py`
@@ -204,7 +207,7 @@ The MCB is the MIB, [rammp-org/RAMMP-mib-fw](https://github.com/rammp-org/RAMMP-
 We don't own that repo, so its side ships as a PR proposal or pseudocode at the end.
 
 - The MIB has to implement the rules in section 4.
-- The MIB publishes its latch state every period on `rammp/estop`. The HMI's banner
+- The MIB publishes its latch state every period on `rt/estop` (since RAMMP-mib-fw#64). The HMI's banner
   and LINK LOST detection depend on that.
 - Where it fits in the MIB (commit fc70b7b):
   - `MibSystem` already runs a 20 ms state task: the deadman check and the latch
@@ -225,7 +228,7 @@ We don't own that repo, so its side ships as a PR proposal or pseudocode at the 
 | RELIABLE writer | BEST_EFFORT | ROS 2 compatibility was dropped, every RAMMP topic and the MIB's readers are best-effort, and the 100 ms resend is the reliability. |
 | Interrupt in IRAM, `ESP_INTR_FLAG_IRAM` | The handler is `IRAM_ATTR`, but the shared GPIO ISR service is installed without the IRAM flag (espp's `Interrupt`, the W5500) | With the flag, every GPIO handler on the board would have to live in IRAM. During a flash write the edge is held in the GPIO status register and handled right after: delayed, never lost. |
 | Clearer `"mcb"` | `"mib"` (`rammp::kEStopClearer`) | The MCB is the MIB. |
-| HMI watches the MIB and refuses driving without its e-stop messages | Built, but off: `rammp::kEStopNeedsMib = false` | The MIB doesn't publish `rammp/estop` yet. With the check on, nothing could drive. |
+| HMI watches the MIB and refuses driving without its e-stop messages | Built, but off: `rammp::kEStopNeedsMib = false` | The MIB publishes `rt/estop` since RAMMP-mib-fw#64. Still off until the chair test shows the 10 Hz heartbeat holds under load: on, a late heartbeat stops the chair. |
 | Drive DISABLE "at once" on engage | Sent from the stick task, at the next stick period after the press | That publish goes through espp's per-publish `std::string` for a long topic name, so it stays out of the e-stop task. The stick goes out centred from the same period. |
 | (not planned) | A press inside the 2 ms settle after re-arming isn't edge-counted | The level is read once after arming, so a switch still held is caught. |
 | (not planned) | Arming is retried every period until it works; until then `estop_active()` is true and the banner says "E-STOP INPUT NOT ARMED" | Fail-safe, rather than giving up after one failed attempt. |
