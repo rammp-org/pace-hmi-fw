@@ -363,6 +363,9 @@ bool start_participant() {
   logger.info("DMA-capable heap: {} free", heap_caps_get_free_size(MALLOC_CAP_DMA));
   participant = std::make_unique<Rtps>(Rtps::Config{
       .interface_address = ip_address,
+      // espp 1.4.0: which of a peer's unicast locators is on our network. The
+      // laptop and the Jetson announce one per interface (Ethernet, Wi-Fi, ...).
+      .interface_netmask = fmt::format("{}.{}.{}.{}", IP2STR(&ip_info.netmask)),
       .on_publisher_matched = [] { peer_matched = true; },
       .on_subscriber_matched = [] { peer_matched = true; },
       .log_level = espp::Logger::Verbosity::INFO, // DEBUG traces discovery

@@ -14,54 +14,56 @@ dependencies:
   #   # `public` flag doesn't have an effect dependencies of the `main` component.
   #   # All dependencies of `main` are public by default.
   #   public: true
-  espp/task: '>=1.3.11'
+  espp/task: '>=1.4.0'
   # espp/m5stack-tab5 is vendored into components/m5stack-tab5 so the DPI panel
   # config (num_fbs) and the LVGL draw-buffer allocation can be modified for
   # performance. Removed from the manifest so the component manager does not
   # also fetch it into managed_components/ and collide with the local copy.
-  espp/adc: '>=1.3.11'
-  espp/base_component: '>=1.3.11'
-  espp/button: '>=1.3.11'
-  espp/base_peripheral: '>=1.3.11'
-  espp/bmi270: '>=1.3.11'
-  espp/format: '>=1.3.11'
-  espp/logger: '>=1.3.11'
-  espp/cli: '>=1.3.11'
-  espp/codec: '>=1.3.11'
-  espp/display: '>=1.3.11'
-  espp/display_drivers: '>=1.3.11'
+  espp/adc: '>=1.4.0'
+  espp/base_component: '>=1.4.0'
+  espp/button: '>=1.4.0'
+  espp/base_peripheral: '>=1.4.0'
+  espp/bmi270: '>=1.4.0'
+  espp/format: '>=1.4.0'
+  espp/logger: '>=1.4.0'
+  espp/cli: '>=1.4.0'
+  espp/codec: '>=1.4.0'
+  espp/display: '>=1.4.0'
+  espp/display_drivers: '>=1.4.0'
   # DRV2605 haptic motor driver (the motor on the PCB's JST connector)
-  espp/drv2605: '>=1.3.11'
+  espp/drv2605: '>=1.4.0'
   espressif/esp-dsp: ^1.8.2
-  espp/filters: '>=1.3.11'
+  espp/filters: '>=1.4.0'
   # LittleFS on the `storage` partition: joystick calibration now, more later
-  espp/file_system: '>=1.3.11'
-  espp/gt911: '>=1.3.11'
-  espp/i2c: '>=1.3.11'
-  espp/ina226: '>=1.3.11'
-  espp/input_drivers: '>=1.3.11'
-  espp/interrupt: '>=1.3.11'
-  espp/led: '>=1.3.11'
+  espp/file_system: '>=1.4.0'
+  espp/gt911: '>=1.4.0'
+  espp/i2c: '>=1.4.0'
+  espp/ina226: '>=1.4.0'
+  espp/input_drivers: '>=1.4.0'
+  espp/interrupt: '>=1.4.0'
+  espp/led: '>=1.4.0'
   lvgl/lvgl: ^9.5.0
-  espp/math: '>=1.3.11'
-  espp/rx8130ce: '>=1.3.11'
-  espp/pi4ioe5v: '>=1.3.11'
-  espp/spi: '>=1.3.11'
-  espp/touch: '>=1.3.11'
-  espp/st7123touch: '>=1.3.11'
+  espp/math: '>=1.4.0'
+  espp/rx8130ce: '>=1.4.0'
+  espp/pi4ioe5v: '>=1.4.0'
+  espp/spi: '>=1.4.0'
+  espp/touch: '>=1.4.0'
+  espp/st7123touch: '>=1.4.0'
   # RTPS comms — these components first shipped in espp 1.1.6 (espp/rtps pulls
   # in espp/socket transitively; cdr is used directly for sample serialization)
-  espp/rtps: '>=1.3.11'
-  espp/cdr: '>=1.3.11'
+  espp/rtps: '>=1.4.0'
+  espp/cdr: '>=1.4.0'
   # Every espp component moves together (dependencies.lock records the exact set).
-  espp/reflect_cpp: '>=1.3.11'
-  espp/socket: '>=1.3.11'
-  espp/thread_pool: '>=1.3.11'
+  espp/reflect_cpp: '>=1.4.0'
+  espp/socket: '>=1.4.0'
+  espp/thread_pool: '>=1.4.0'
   # The robot-wide e-stop (estop::Node). v0.3.0 needs espp 1.3.10 for
-  # CONFIG_RTPS_THREAD_POOL_READER_PRIO (sdkconfig.defaults). espp 1.3.11 is the
-  # floor for every espp component above: its rtps fix (esp-cpp/espp#862) is what
-  # lets a Cyclone DDS peer (ROS 2 on rmw_cyclonedds_cpp, the Jetson) receive our
-  # samples at all. On 1.3.10 the e-stop reaches the MIB but never ROS 2.
+  # CONFIG_RTPS_THREAD_POOL_READER_PRIO (sdkconfig.defaults). espp 1.4.0 is the
+  # floor for every espp component above, for its rtps fixes against a Cyclone DDS
+  # peer (ROS 2 on rmw_cyclonedds_cpp, the Jetson): 1.3.11's esp-cpp/espp#862 is
+  # what lets Cyclone receive our samples at all, and 1.4.0 adds #866/#867 (send to
+  # the peer's locator on our subnet, by the real prefix length) and #871 (Cyclone's
+  # repeated SPDP keeps the peer alive past its 10 s lease).
   estop_core:
     git: https://github.com/rammp-org/rammp-estop-core.git
     version: v0.3.0

@@ -97,8 +97,9 @@ in `scripts/rtps_mcb_sim.py` already speaks these names.
 
 ## Notes
 
-- Needs ESP-IDF ≥ 5.5 and espp ≥ 1.3.11 (1.3.10 never delivers a sample to a Cyclone DDS
-  peer, so ROS 2 sees nothing from the HMI while the MIB, on 1.3.11, works: esp-cpp/espp#862).
+- Needs ESP-IDF ≥ 5.5 and espp ≥ 1.4.0. On 1.3.10 a Cyclone DDS peer never receives a
+  sample (esp-cpp/espp#862, in 1.3.11), and 1.4.0 adds the locator and lease fixes
+  (esp-cpp/espp#866, #867, #871) the bench needs with a laptop on several interfaces.
 - Test on a MIB branch whose rammp-rtps submodule is at `c7db102`, the same as MIB main. If yours
   has a newer rammp-rtps, ask before building.
 - This is the first run on real MIB hardware. If anything looks off, please send the log.
