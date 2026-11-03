@@ -363,6 +363,9 @@ bool start_participant() {
   logger.info("DMA-capable heap: {} free", heap_caps_get_free_size(MALLOC_CAP_DMA));
   participant = std::make_unique<Rtps>(Rtps::Config{
       .interface_address = ip_address,
+      // espp 1.4.0: which of a peer's unicast locators is on our network. The
+      // laptop and the Jetson announce one per interface (Ethernet, Wi-Fi, ...).
+      .interface_netmask = fmt::format("{}.{}.{}.{}", IP2STR(&ip_info.netmask)),
       .on_publisher_matched = [] { peer_matched = true; },
       .on_subscriber_matched = [] { peer_matched = true; },
       .log_level = espp::Logger::Verbosity::INFO, // DEBUG traces discovery
@@ -376,7 +379,8 @@ bool start_participant() {
   // The e-stop first, so a short endpoint pool fails anything but it (estop-core adds
   // its writer and reader; best-effort, the period resend is the reliability).
   // espp copies the topic into a std::string per publish: in-place, at this length.
-  static_assert(sizeof(RAMMP_TOPIC_ESTOP) <= 16, "EStop topic must fit std::string's SSO buffer");
+  static_assert(sizeof(RAMMP_ROS_TOPIC_ESTOP) <= 16,
+                "EStop topic must fit std::string's SSO buffer");
   if (!hmi_estop.attach(*participant)) {
     logger.error("Could not add the e-stop writer and reader '{}' (CONFIG_RTPS_LIMIT_* in "
                  "sdkconfig.defaults)",

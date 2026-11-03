@@ -1,6 +1,6 @@
 dependencies:
   espp/adc:
-    component_hash: a33c7d038369f5990eee6a542772b64383c78ce9e4d02ebbc25df85b9ed57b5c
+    component_hash: b0b24497411733098f2b16d8921886be3df5f9868be5212927a492bae7e6448d
     dependencies:
     - name: espp/base_component
       registry_url: https://components.espressif.com
@@ -16,9 +16,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/base_component:
-    component_hash: 40902bce525ecb1b4c8b429b998bf3abf7b3fe20211a6991a0613e75b88fd4b2
+    component_hash: 699f0e6c6adf1f0355a784a6947ae7a7a68f1f474343f4d84bd675acf4a88523
     dependencies:
     - name: espp/logger
       registry_url: https://components.espressif.com
@@ -30,9 +30,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/base_peripheral:
-    component_hash: e6398847596f65d0c14d24cf6ef7877a69a310716522f156346cdc98073c7729
+    component_hash: 15e25bb54416151e467c8438170c60ee91ec8bb85a9f7eaa4ec26bde6b48733b
     dependencies:
     - name: espp/base_component
       registry_url: https://components.espressif.com
@@ -44,9 +44,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/bmi270:
-    component_hash: db27e653ee673b34708cff6c2ee38c59a8388dd503090000f2d496083e3298f1
+    component_hash: 859c05b58916560dbadf8091fa990f76d9cd90ec29cb2be0ad4bb4490d8cff47
     dependencies:
     - name: espp/base_peripheral
       registry_url: https://components.espressif.com
@@ -62,9 +62,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/button:
-    component_hash: ba49aec50d08b29fc3fba8085e7ef5b00cb10d8c81e93ed7788090ae99878053
+    component_hash: 540a8845522512a0c3f535807028133c7500098188ddb9d081195af707dd28b8
     dependencies:
     - name: espp/interrupt
       registry_url: https://components.espressif.com
@@ -76,9 +76,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/cdr:
-    component_hash: e09f26872d0742cbbef73898f5debe88cb20b65427ec747c48957aa2e973462b
+    component_hash: 8ca5d7cd0cc90a2bf0a095375f7054b6229cf612a7b8f9069a93c898464a99a0
     dependencies:
     - name: espp/reflect_cpp
       registry_url: https://components.espressif.com
@@ -90,9 +90,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/cli:
-    component_hash: 7ad7c88bbec6d02994fe4944852f5e8cfbb65e4530af5f7cd0526b87bd828444
+    component_hash: 1fea6a563daddd8c6bfef767236cccdb62744501db9dbcabfc6df0f0faa58015
     dependencies:
     - name: espp/logger
       registry_url: https://components.espressif.com
@@ -104,9 +104,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/codec:
-    component_hash: a1d899cc0734f55328d5e52888cdda03e1e2d070a96227b70c6236c0acf30599
+    component_hash: 20471d7239000d3389b596b4a40434a7e2a871eafef7d47bf37f6127ccf569c6
     dependencies:
     - name: idf
       require: private
@@ -114,9 +114,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/display:
-    component_hash: abbd37c235a1ae010f06feaa5dba2e8609b98620be73d5fcb550cb64ba7411b7
+    component_hash: 81f9736cff0da7674e06966fc81c2247cb8751c5667eed711763e69197f2dc56
     dependencies:
     - name: espp/base_component
       registry_url: https://components.espressif.com
@@ -140,9 +140,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/display_drivers:
-    component_hash: c6c9b7614c2845fc5fead68649ab796821a42e2702c419fbf5497530a4136e13
+    component_hash: 34f73d0baf46587b1d5f4f8547da4c294d68af5ccef3376359a1f146a2377c9a
     dependencies:
     - name: espp/display
       registry_url: https://components.espressif.com
@@ -162,9 +162,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/drv2605:
-    component_hash: 21faf4add8abc0df1f7601a0560f994f0f67bf65efd0d8c23c0885a3dba44293
+    component_hash: 7a8f9407eea8208ddefb93951247291b92278fb16ae7f76a534ef32244746dc0
     dependencies:
     - name: espp/base_peripheral
       registry_url: https://components.espressif.com
@@ -180,9 +180,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/file_system:
-    component_hash: b3e13df4e0c56b59cc909a15a4f121a194e86e02c04d96fd2828abc3921c48a0
+    component_hash: 87d0f1a040bea402b2c84bef19f5961be97b70b2701fa344e8c16d62e3737dd1
     dependencies:
     - name: espp/base_component
       registry_url: https://components.espressif.com
@@ -198,9 +198,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/filters:
-    component_hash: 9df2f098980571370c832d71d2523a18d3fad85b383b3b8173b28b6a88b3f3d3
+    component_hash: f9fc240956d8b0ced6353aea67a880f46eca52ec27ca05f04d9f11805e237177
     dependencies:
     - name: espp/format
       registry_url: https://components.espressif.com
@@ -220,9 +220,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/format:
-    component_hash: 9f52d6b6fa16e9f7b240d25eb115f6edb4e5ea3f45e254343e2b247dd7f14bda
+    component_hash: 169c0ac5f573bd1d6cfade0c30da35dec32a5c2ab9e39bc455f55b51b765477b
     dependencies:
     - name: idf
       require: private
@@ -230,9 +230,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/gt911:
-    component_hash: a20abf8c34491b98e1bea395be96ae1c2e160a4fd094c234c031ff8faf0702ed
+    component_hash: 9be636f1c3e28576285b6d707f50035ec275b175bea6f77c19b69f31d102d0f2
     dependencies:
     - name: espp/base_peripheral
       registry_url: https://components.espressif.com
@@ -248,9 +248,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/i2c:
-    component_hash: a3b9b496f3e2703a5c017a99da3552f172916cee0d0b01f60e9593d805f20575
+    component_hash: 07fa09a686a0449e720bd41786bf82de95ca4b60cc6f51ff842580a3c427fd20
     dependencies:
     - name: espp/base_component
       registry_url: https://components.espressif.com
@@ -270,23 +270,23 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/ina226:
-    component_hash: e30d347a2b620714014266c91883170dca438f6bf1dd3125294cea85b1218f28
+    component_hash: 79923afcfd11d56a2af9e2a52b51f4852d012d291539ceb85083699d6775d9f6
     dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
     - name: espp/base_peripheral
       registry_url: https://components.espressif.com
       require: private
       version: '>=1.0'
-    - name: idf
-      require: private
-      version: '>=5.0'
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/input_drivers:
-    component_hash: 6df7996349fb7e7c03e79a0157b400825e87477269c2d0dbc68fd6afac5bf897
+    component_hash: 443bad952ed223772113c4b45dd5150313d356f73aaf5e0e6bac9f77fc82765b
     dependencies:
     - name: espp/base_component
       registry_url: https://components.espressif.com
@@ -306,9 +306,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/interrupt:
-    component_hash: fb5bf821d8a48f1470717dfb8f2a4c15bd5e0553050f247df1450708ec7336d7
+    component_hash: eb283c3d6f9f32b987cf049a7811e77c975421bb3f18223f1bda39fc2312b85b
     dependencies:
     - name: espp/base_component
       registry_url: https://components.espressif.com
@@ -324,9 +324,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/led:
-    component_hash: becc1004deddf32d0dca34303bead04314649e8f2bd7e8eb8ddb31c6f5fd44f2
+    component_hash: 57cf4eac5567820fdb8b8cb540a869f76f6512673917723912c9e13f8c51dc01
     dependencies:
     - name: espp/base_component
       registry_url: https://components.espressif.com
@@ -342,9 +342,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/logger:
-    component_hash: 8b5f7915105837eb9e58e250fe0d016f22da69e9d11ece05574084a777fc33ff
+    component_hash: b3ab866b7b46b19cdf17a53702f63ecb7c19e1bebc654027b27a02978df9008a
     dependencies:
     - name: espp/format
       registry_url: https://components.espressif.com
@@ -356,9 +356,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/math:
-    component_hash: 86d57eda7d622a32ddceda3045973af9992c7e32eb0ff33c2d62a6bb102cda9c
+    component_hash: 616f6524f7d3e27c1bf722836bb7ebaff2d61053cc25b584b4345a2ba3b65d6e
     dependencies:
     - name: espp/format
       registry_url: https://components.espressif.com
@@ -370,9 +370,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/pi4ioe5v:
-    component_hash: 39df8ba44ff3dbd2bd7f01437bdea73683f5ba1b6870b8be53e03a100f16fb91
+    component_hash: 86c9f02110e726a8823343dfe1256fe4580a96b8842f698594e4d3a144d0250c
     dependencies:
     - name: espp/base_peripheral
       registry_url: https://components.espressif.com
@@ -384,9 +384,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/reflect_cpp:
-    component_hash: c717b11f477ba42ac242b7e3b576be81ae75d53855312ad016f05d98a9412356
+    component_hash: 64940e07b828df5d40418c6680a2bf6b0dbe0aacf8d75bed140eb09207f708ce
     dependencies:
     - name: idf
       require: private
@@ -394,9 +394,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/rtps:
-    component_hash: ae6c583268ca307f10028f279174280792466b6333bfecaafa46c3775908bd65
+    component_hash: a87f22faf53b7a164e3052b0408e9b4d991bdc405cc41854bd4869761227cf10
     dependencies:
     - name: espp/base_component
       registry_url: https://components.espressif.com
@@ -428,9 +428,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/rx8130ce:
-    component_hash: 5c8b11fde821c6fd760e577280ad17866016b88f951e80ae23a56cc76adbca00
+    component_hash: c9258f4e89dd521c0a120264dfbb44bf8460eca09a5084658969b4ddc0671be7
     dependencies:
     - name: espp/base_peripheral
       registry_url: https://components.espressif.com
@@ -442,9 +442,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/socket:
-    component_hash: 9e3f25ce64347e26714c167349ca389a9691361f1071ad7c38ebd2d1c80c967f
+    component_hash: b5e21390aaba0d6711669814fd88f02603daccf799787c54b52a1d89d64cb368
     dependencies:
     - name: espp/base_component
       registry_url: https://components.espressif.com
@@ -464,9 +464,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/spi:
-    component_hash: 187a8a50e7d092867ff7f2408f10f5ee690dc39bff247a1136756deeeed60698
+    component_hash: 11f3328bccb972dc34159e2b1e9c325dc3fd49479217ed1ce99c2085a7debf07
     dependencies:
     - name: espp/base_component
       registry_url: https://components.espressif.com
@@ -482,9 +482,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/st7123touch:
-    component_hash: 97029f5a0d6c267992df18fd613899748fd1628862f8814f8f1ca45beef7eae8
+    component_hash: 84f3ba2c868729989ba000daf32164b074ad6f5a0c12831fdef271382b02d162
     dependencies:
     - name: espp/base_peripheral
       registry_url: https://components.espressif.com
@@ -500,9 +500,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/task:
-    component_hash: 6c4ccacbcc01badb401e23491a93f62ef8cd4b62140a21eec913641be65970e0
+    component_hash: fbefd62543a0cbb3914285948038e91773fa96086540715017b917b434252fb3
     dependencies:
     - name: espp/base_component
       registry_url: https://components.espressif.com
@@ -514,9 +514,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/thread_pool:
-    component_hash: b4fb12a20530f7801322dda4f68ee50fe777d445924bd46fcb8604d04f051b01
+    component_hash: a0d03eaf0fd19fdc9ccea4bcaf56f89bacfd0c12809d0640c24b3335aa10910b
     dependencies:
     - name: espp/base_component
       registry_url: https://components.espressif.com
@@ -532,9 +532,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/timer:
-    component_hash: 211b2d0ac780a015b3f844f69f11879a24217a43f0a9356bde2240ca7fc64ac4
+    component_hash: b0a3ec0b4a723ed716f269cea30bc9bd9a60b6a0c712f23082c7b6b03cedee67
     dependencies:
     - name: espp/task
       registry_url: https://components.espressif.com
@@ -546,9 +546,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espp/touch:
-    component_hash: c89de40eedeed508e79c047d28868acdbac39169ff7007c6a682872a33a74e8d
+    component_hash: 89569d383d3c561c379786b0967c7b752b68840a0f596d3df39f524735e2384b
     dependencies:
     - name: idf
       require: private
@@ -556,7 +556,7 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.10
+    version: 1.4.0
   espressif/cmake_utilities:
     component_hash: 351350613ceafba240b761b4ea991e0f231ac7a9f59a9ee901f751bddc0bb18f
     dependencies:
@@ -862,6 +862,6 @@ direct_dependencies:
 - idf
 - lvgl/lvgl
 - rammp_rtps_messages
-manifest_hash: 53b48b659ac0367978ab377caef6eb8783c90ceda17d949da535d6e090514ff1
+manifest_hash: 89a6dbccd2d23229b4ba7dfb5a6c9e002d29cbc3f449e9becfc995e81fe90ede
 target: esp32p4
 version: 3.0.0

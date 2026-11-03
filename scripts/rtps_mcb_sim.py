@@ -374,7 +374,7 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
             ))
 
         # ---- e-stop: the MIB's side (estop_latch.py) --------------------
-        # The latch, its deadman and the clear handshake, on rammp/estop. Timing from
+        # The latch, its deadman and the clear handshake, on rt/estop. Timing from
         # the spec's kEStopPolicy unless overridden (--estop-*). It starts latched,
         # as the MIB does: 'ec' (or the GUI's Clear) once the HMI is heard.
         self.estop = EStopLatch(
@@ -388,15 +388,15 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
         self.estop_silent = False
         self._estop_thread: threading.Thread | None = None
         self._estop_writer = rtps_host.WriterConfig(
-            topic_name=spec.TOPIC_ESTOP,
-            type_name=spec.TYPE_ESTOP,
+            topic_name=spec.ROS_TOPIC_ESTOP,
+            type_name=spec.ROS_TYPE_ESTOP,
             reliable=False,
             entity_index=len(self.local_writers),
         )
         self.local_writers.append(self._estop_writer)
         self.local_readers.append(rtps_host.ReaderConfig(
-            topic_name=spec.TOPIC_ESTOP,
-            type_name=spec.TYPE_ESTOP,
+            topic_name=spec.ROS_TOPIC_ESTOP,
+            type_name=spec.ROS_TYPE_ESTOP,
             reliable=False,
             entity_index=len(self.local_readers),
         ))
@@ -641,7 +641,7 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
                     if self.system_state == spec.MIB_SYSTEM_STATE_AUTONOMOUS and any(sample):
                         rtps_host.log("[drive] joystick touched: AUTONOMOUS -> IDLE")
                         self.system_state = spec.MIB_SYSTEM_STATE_IDLE
-            elif topic == spec.TOPIC_ESTOP:
+            elif topic == spec.ROS_TOPIC_ESTOP:
                 message = spec.unpack_estop(payload)
                 if message is not None:
                     with self.estop_lock:

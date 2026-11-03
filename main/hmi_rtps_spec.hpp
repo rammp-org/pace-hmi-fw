@@ -265,8 +265,10 @@ inline constexpr char kEStopSelf[] = "hmi";
 static_assert(sizeof(kEStopSelf) <= 16, "EStop.source must fit std::string's SSO buffer");
 
 /* Whether the MIB's own e-stop messages are needed to drive. true: without one from
-   the MIB within kEStopPolicy.timeout the HMI treats the stop as engaged. Off until
-   the MIB publishes rammp/estop (RAMMP-mib-fw does not yet): on, nothing would drive. */
+   the MIB within kEStopPolicy.timeout the HMI treats the stop as engaged. The MIB
+   publishes rt/estop at 10 Hz since RAMMP-mib-fw#64 (bench: no loss for minutes); still
+   off until the chair test shows the heartbeat holds under load, since on, a late
+   heartbeat stops the chair. */
 inline constexpr bool kEStopNeedsMib = false;
 
 /* The banner while the stop is engaged, on every screen that can show one. */
@@ -277,7 +279,7 @@ inline constexpr char kHmiEStopFooter[] = "Only the MIB can clear it";
 inline constexpr char kHmiEStopFaultText[] = "E-STOP INPUT NOT ARMED";
 inline constexpr char kHmiEStopFaultFooter[] = "Check the E-stop settings";
 inline constexpr char kHmiEStopLinkTitle[] = "E-STOP LINK LOST";
-inline constexpr char kHmiEStopLinkText[] = "NO rammp/estop FROM THE MIB";
+inline constexpr char kHmiEStopLinkText[] = "NO rt/estop FROM THE MIB";
 inline constexpr char kHmiEStopLinkFooter[] = "MIB e-stop heartbeat missing";
 static_assert(sizeof(kHmiEStopLocalText) <= kErrorTextLen &&
                   sizeof(kHmiEStopFaultText) <= kErrorTextLen &&

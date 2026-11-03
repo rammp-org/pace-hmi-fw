@@ -73,7 +73,7 @@ Every row is one line in `main/settings_spec.h`, and every value is saved in Lit
 - `messages/joystick_message.hpp` there holds the joystick's commands, the shared tables and Diagnostics; `messages/mib_message.hpp` holds `rammp::MibStatus`, the chair's own state. Between them they are everything the MIB and the HMI share, and the first has an espp example at the top.
 - `main/hmi_rtps_spec.hpp` adds what only this HMI needs: timing, display limits, the bench self-test topics.
 - Messages are plain C++ structs serialized by espp/cdr as **XCDR1** (classic CDR), so any DDS / ROS 2 stack can talk to it.
-- Every topic is best-effort; the MCB resends its state periodically. The three `rt/` topics are ROS 2 facing: the Jetson reads `MibStatus` and the stick, and sends `DriveCommand`, with no bridge. The others are espp-only.
+- Every topic is best-effort; the MCB resends its state periodically. The four `rt/` topics are ROS 2 facing: the Jetson reads `MibStatus`, the stick and the e-stop, and sends `DriveCommand`, with no bridge. The others are espp-only.
 - The MCB owns the chair's state; the HMI shows it and asks for changes.
 
 | topic | type | direction | carries |
@@ -81,6 +81,7 @@ Every row is one line in `main/settings_spec.h`, and every value is saved in Lit
 | `rt/rammp/mib/status` | `MibStatus` | MIB → HMI and ROS 2, 2 Hz | system state, active profile, seat position, speed, clock, error text |
 | `rammp/mcb/diagnostics` | `Diagnostics` | MIB → HMI, 2 Hz | readings for each `RAMMP_DIAG_TABLE` row |
 | `rt/rammp/joystick/xy_twist` | `XYTwist` | HMI → MIB and ROS 2, ~30 Hz | calibrated X / Y / twist (-1..+1), buttons |
+| `rt/estop` | `EStop` | HMI and MIB → everyone, 10 Hz | the robot-wide e-stop: each node's state, source and reason; the MIB's clear ([docs/plans/estop.md](docs/plans/estop.md)) |
 | `rt/rammp/drive_command` | `DriveCommand` | HMI (and the Jetson) → MIB, per request | the drive state asked for (disable, enable, push assist; the Jetson asks for autonomy), and the drive profile |
 | `rammp/joystick/seat_command` | `SeatCommand` | HMI → MIB, per press | put seat axis N at an absolute target |
 | `rammp/hmi/counter`, `command`, `brightness` | `std_msgs/UInt32` | bench PC | heartbeat, self-test run / ping, backlight % |
