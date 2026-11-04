@@ -165,6 +165,9 @@ enum : int32_t {
   kEStopNoLink = 4, // rammp::kEStopNeedsMib and no EStop from the MIB
 };
 static lv_subject_t estop_subject;
+// 1 while e-stop messages from the MIB's latch are arriving (estop::NodeStatus::latch_fresh):
+// then they, not MibStatus, say whether the stop is latched. Set by the same poll timer.
+static lv_subject_t estop_latch_fresh_subject;
 static char estop_remote_text[rammp::kErrorTextLen]; // the MIB's "source: reason"
 
 // GPIO48 test button: press count (bound to the ButtonCounter label) and
@@ -804,6 +807,10 @@ static void estop_poll() {
   }
   if (changed) {
     lv_subject_set_int(&estop_subject, cause);
+  }
+  const int32_t fresh = s.latch_fresh ? 1 : 0;
+  if (fresh != lv_subject_get_int(&estop_latch_fresh_subject)) {
+    lv_subject_set_int(&estop_latch_fresh_subject, fresh);
   }
 }
 
@@ -1539,6 +1546,14 @@ static bool fill_mib_mode_panel(lv_obj_t *panel) {
   if (!mode) {
     return false;
   }
+  // While the latch's own messages arrive they are the e-stop's word: estop_subject has
+  // already shown it, and cleared it on release. MibStatus is slower (2 Hz), so for up to
+  // 500 ms after a release it still says ESTOP; without this, its banner flashes up just
+  // as the stop clears. With no e-stop messages, MibStatus is all there is, so it shows.
+  if (*mode == rammp::MibSystemState::ESTOP &&
+      lv_subject_get_int(&estop_latch_fresh_subject) != 0) {
+    return false;
+  }
   switch (*mode) {
   case rammp::MibSystemState::ESTOP:
     fill_mib_reason_panel(panel, rammp::kHmiEStopTitle, rammp::kHmiMibEStopText,
@@ -1563,8 +1578,8 @@ static bool fill_mib_mode_panel(lv_obj_t *panel) {
 // on all of them.
 static void bind_to_drive_blocked_cause(lv_obj_t *panel, lv_observer_cb_t cb) {
   keep_overlay_fill(panel);
-  for (lv_subject_t *subject : {&estop_subject, &rtps_link_subject, &mib_state_subject,
-                                &error_text_subject, &error_footer_subject}) {
+  for (lv_subject_t *subject : {&estop_subject, &estop_latch_fresh_subject, &rtps_link_subject,
+                                &mib_state_subject, &error_text_subject, &error_footer_subject}) {
     lv_subject_add_observer_obj(subject, cb, panel, nullptr);
   }
 }
@@ -5764,6 +5779,7 @@ extern "C" void app_main(void) {
   lv_subject_init_int(&rtps_blink_subject, 1);
   // Engaged until the first poll says otherwise: not knowing is not "clear".
   lv_subject_init_int(&estop_subject, kEStopFault);
+  lv_subject_init_int(&estop_latch_fresh_subject, 0);
   // empty = no override, so the labels start on the enum names
   lv_subject_init_string(&drive_text_subject, drive_text_buf, drive_text_prev_buf,
                          sizeof(drive_text_buf), "");
