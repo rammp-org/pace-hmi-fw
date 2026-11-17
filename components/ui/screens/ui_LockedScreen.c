@@ -236,6 +236,7 @@ void ui_LockedScreen_screen_init(void)
 
 
 
+
 }
 
 void ui_LockedScreen_screen_destroy(void)

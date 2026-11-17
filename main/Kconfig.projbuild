@@ -19,4 +19,46 @@ menu "RAMMP HMI"
             (which is not in git) while working on the UI, not in
             sdkconfig.defaults -- that one ships.
 
+    config HMI_WIFI_SSID
+        string "WiFi network name (SSID)"
+        default ""
+        help
+            The network the HMI joins when UI Settings -> Network is WiFi (the
+            Tab5's ESP32-C6, 2.4 GHz only). Empty = no WiFi: the HMI uses
+            Ethernet (the W5500) whatever that setting says.
+
+            Set it, and HMI_WIFI_PASSWORD, in your local sdkconfig (not in git),
+            never in sdkconfig.defaults. A network behind a login page (a
+            captive portal) will not work: nothing on the HMI can log in.
+
+    config HMI_WIFI_PASSWORD
+        string "WiFi password"
+        default ""
+        help
+            WPA2/WPA3 passphrase for HMI_WIFI_SSID. Empty = an open network.
+
+endmenu
+
+# esp_wifi_remote asks for esp_hosted >=2.11, so the component manager also looks at
+# esp_hosted 3.x, whose manifest picks its USB host stacks by these options. This
+# firmware runs esp_hosted 2.12 (main/idf_component.yml), which never defines them, and
+# a newer component manager stops the build ("Missing required kconfig option after
+# retry") on an option no Kconfig defines. Defined here as 0 (ints: 3.x tests them with
+# "== 1"), 3.x's USB dependencies stay out of the solve. They have prompts so they are
+# always written to sdkconfig.json, where the component manager looks.
+menu "esp_hosted 3.x manifest options (unused, keep off)"
+    config ESP_HOSTED_HOST_USB_CDC_ACM_MANIFEST
+        int "esp_hosted 3.x: USB CDC-ACM host (unused)"
+        default 0
+        range 0 0
+
+    config ESP_HOSTED_HOST_USB_CHERRYUSB_MANIFEST
+        int "esp_hosted 3.x: CherryUSB host (unused)"
+        default 0
+        range 0 0
+
+    config ESP_HOSTED_HOST_USB_RNDIS_MANIFEST
+        int "esp_hosted 3.x: USB RNDIS host (unused)"
+        default 0
+        range 0 0
 endmenu

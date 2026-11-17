@@ -109,6 +109,9 @@ enum {
  * rtps.rtt_* The bench PC reaches the board over Tailscale: p50 5 ms, p99
  *            15..107 ms, worst 142 ms. On a direct LAN expect a fraction of
  *            that, and tighten these if that is the bench.
+ *
+ * net.wifi_rssi  Only on WiFi (SKIP on Ethernet). Below about -75 dBm 2.4 GHz
+ *            starts losing frames, which shows up as rtps.mcb_loss and rtt.
  */
 
 #define SELFTEST_TABLE(X)                                                                          \
@@ -118,8 +121,9 @@ enum {
   X(SYS_UPTIME, "sys.uptime", "s", 0, ST_ANY_HI, ST_REQUIRED, "Seconds since boot (context)")      \
   X(LOG_CAPTURE, "log.capture", "", 1, 1, ST_REQUIRED, "Serial output reaches the log screen")     \
   /* network and RTPS - first, so the link is the first thing read on screen */                    \
-  X(NET_LINK, "net.eth_link", "", 1, 1, ST_REQUIRED, "Ethernet link up (W5500)")                   \
+  X(NET_LINK, "net.link", "", 1, 1, ST_REQUIRED, "Network link up (Ethernet, or WiFi joined)")     \
   X(NET_IP, "net.ip", "", 1, 1, ST_REQUIRED, "DHCP lease held")                                    \
+  X(NET_WIFI_RSSI, "net.wifi_rssi", "dBm", -75, ST_ANY_HI, ST_OPTIONAL, "WiFi signal at the AP")   \
   X(RTPS_LINK, "rtps.mcb_link", "", 1, 1, ST_REQUIRED, "MCB answering (McbStatus arriving)")       \
   X(RTPS_MCB_PERIOD, "rtps.mcb_period", "ms", 400, 600, ST_REQUIRED, "McbStatus period, mean")     \
   X(RTPS_MCB_GAP, "rtps.mcb_gap", "ms", 0, 1000, ST_REQUIRED, "Longest McbStatus gap")             \

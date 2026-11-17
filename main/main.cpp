@@ -51,6 +51,7 @@
 #include "actions_spec.h"
 #include "boot_logo.h"
 #include "hmi_estop.hpp"
+#include "internet_ui.hpp"
 #include "joystick_cal.hpp"
 #include "log_capture.hpp"
 #include "log_view.hpp"
@@ -243,6 +244,7 @@ static lv_subject_t sounds_subject;            // 0 = the clicks and refusals ar
 static lv_subject_t estop_pin_subject;         // EStopPin: which header pin the switch is on
 static lv_subject_t estop_type_subject;        // EStopContact: NO or NC
 static lv_subject_t drive_start_subject;       // kDriveStart*: what the Locked screen's hold is
+static lv_subject_t network_subject;           // NetLink: 0 = Ethernet, 1 = WiFi
 
 // UI Settings "Start driving": which hold on the Locked screen asks the MIB to drive.
 enum : int32_t {
@@ -608,7 +610,7 @@ static void rtps_label_observer(lv_observer_t *observer, lv_subject_t *) {
   uint32_t color = ui_get_theme_value(_ui_theme_color_alert);
   bool blink = false;
   switch (state) {
-  case RtpsLinkState::ETH_FAILED: // no hardware and no link are both "there is
+  case RtpsLinkState::NET_FAILED: // no hardware and no link are both "there is
   case RtpsLinkState::LINK_DOWN:  // no network", and neither is worth blinking
     color = ui_get_theme_value(_ui_theme_color_alert);
     break;
@@ -971,9 +973,21 @@ static void clock_poll_cb(lv_timer_t *) {
   }
 }
 
-static void bind_clock_label(lv_obj_t *bar) {
+// The TopBar's link label: what RTPS runs over. The design's "BT · WI-FI" is only
+// a placeholder; it is set from the setting before rtps_comms_start, then from the
+// link it brought up (WiFi with no network known runs Ethernet).
+static lv_subject_t link_subject;
+static char link_buf[16];
+static char link_prev_buf[16];
+
+static const char *link_text(NetLink link) {
+  return link == NetLink::WIFI ? "BT · WI-FI" : "BT · ETH";
+}
+
+static void bind_topbar_labels(lv_obj_t *bar) {
   if (bar != nullptr) {
     lv_label_bind_text(ui_comp_get_child(bar, UI_COMP_TOPBAR_CLOCK), &clock_subject, nullptr);
+    lv_label_bind_text(ui_comp_get_child(bar, UI_COMP_TOPBAR_LINK), &link_subject, nullptr);
   }
 }
 
@@ -1445,11 +1459,15 @@ static lv_timer_t *entry_refused_timer = nullptr;
 
 static_assert(sizeof(rammp::kHmiEthFailedText) <= rammp::kErrorTextLen &&
                   sizeof(rammp::kHmiLinkDownText) <= rammp::kErrorTextLen &&
+                  sizeof(rammp::kHmiWifiFailedText) <= rammp::kErrorTextLen &&
+                  sizeof(rammp::kHmiWifiDownText) <= rammp::kErrorTextLen &&
                   sizeof(rammp::kHmiNoIpText) <= rammp::kErrorTextLen &&
                   sizeof(rammp::kHmiNoPeerText) <= rammp::kErrorTextLen,
               "refusal body outgrows the banner it shares with MCB faults");
 static_assert(sizeof(rammp::kHmiEthFailedFooter) <= rammp::kErrorFooterLen &&
                   sizeof(rammp::kHmiLinkDownFooter) <= rammp::kErrorFooterLen &&
+                  sizeof(rammp::kHmiWifiFailedFooter) <= rammp::kErrorFooterLen &&
+                  sizeof(rammp::kHmiWifiDownFooter) <= rammp::kErrorFooterLen &&
                   sizeof(rammp::kHmiNoIpFooter) <= rammp::kErrorFooterLen &&
                   sizeof(rammp::kHmiNoPeerFooter) <= rammp::kErrorFooterLen,
               "refusal footer outgrows the banner it shares with MCB faults");
@@ -1460,11 +1478,14 @@ struct RefusalText {
 };
 
 static RefusalText link_refusal_text(RtpsLinkState link) {
+  const bool wifi = rtps_comms_net_link() == NetLink::WIFI;
   switch (link) {
-  case RtpsLinkState::ETH_FAILED:
-    return {rammp::kHmiEthFailedText, rammp::kHmiEthFailedFooter};
+  case RtpsLinkState::NET_FAILED:
+    return wifi ? RefusalText{rammp::kHmiWifiFailedText, rammp::kHmiWifiFailedFooter}
+                : RefusalText{rammp::kHmiEthFailedText, rammp::kHmiEthFailedFooter};
   case RtpsLinkState::LINK_DOWN:
-    return {rammp::kHmiLinkDownText, rammp::kHmiLinkDownFooter};
+    return wifi ? RefusalText{rammp::kHmiWifiDownText, rammp::kHmiWifiDownFooter}
+                : RefusalText{rammp::kHmiLinkDownText, rammp::kHmiLinkDownFooter};
   case RtpsLinkState::NO_IP:
     return {rammp::kHmiNoIpText, rammp::kHmiNoIpFooter};
   case RtpsLinkState::NO_PEER:
@@ -2595,6 +2616,7 @@ static lv_subject_t *const kSettingParamValue[] = {
     &estop_pin_subject,         // SETTINGS_PARAM_ESTOP_PIN
     &estop_type_subject,        // SETTINGS_PARAM_ESTOP_TYPE
     &drive_start_subject,       // SETTINGS_PARAM_DRIVE_START
+    &network_subject,           // SETTINGS_PARAM_NETWORK
 };
 
 // What the named rows read, in SETTINGS_PARAM_* order; nullptr = a number.
@@ -2605,6 +2627,8 @@ static constexpr const char *kSwapNames[] = {"Normal", "Swap"};
 static constexpr const char *kEStopPinNames[] = {"GPIO2", "GPIO47"};   // EStopPin order
 static constexpr const char *kEStopTypeNames[] = {"NO", "NC"};         // EStopType order
 static constexpr const char *kDriveStartNames[] = {"Stick", "Button"}; // kDriveStart* order
+// NetLink order. Not a UI Settings row: Internet Settings draws it as two buttons.
+static constexpr const char *kNetworkNames[] = {"Ethernet", "WiFi"};
 static_assert(static_cast<int>(EStopPin::GPIO47) == SETTINGS_ESTOP_PIN_MAX &&
                   static_cast<int>(EStopType::NC) == SETTINGS_ESTOP_TYPE_MAX,
               "the E-stop rows' range must match EStopPin and EStopType");
@@ -2623,6 +2647,7 @@ static const char *const *const kSettingParamNames[] = {
     kEStopPinNames,   // SETTINGS_PARAM_ESTOP_PIN
     kEStopTypeNames,  // SETTINGS_PARAM_ESTOP_TYPE
     kDriveStartNames, // SETTINGS_PARAM_DRIVE_START
+    kNetworkNames,    // SETTINGS_PARAM_NETWORK
 };
 static_assert(std::size(kSettingParamNames) == SETTINGS_PARAM_COUNT,
               "every settings_spec.h parameter needs its names (or nullptr) here");
@@ -3168,8 +3193,8 @@ static void setting_page_open(int32_t page) {
       if (kSettingParams[i].page == page) {
         StepperSpec spec = kSettingParams[i].spec;
         spec.names = kSettingParamNames[i];
-        // Remapping the stick changes which way a push drives the chair, so
-        // it is not done mid-drive.
+        // Remapping the stick changes which way a push drives the chair, so it
+        // is not done mid-drive.
         // So is moving the e-stop: for a moment it is not watching either pin.
         spec.locked_only = i == SETTINGS_PARAM_STICK_INVERT_X ||
                            i == SETTINGS_PARAM_STICK_INVERT_Y || i == SETTINGS_PARAM_STICK_SWAP ||
@@ -3780,7 +3805,7 @@ static constexpr uint32_t kRowPressMs = 300;
 // p21 "HOME BUTTON": a dissolve from any screen back to Drive.
 static constexpr uint32_t kHomeFadeMs = 120;
 
-// The eight destinations, in the order MenuOverlay draws them, and the child id
+// The nine destinations, in the order MenuOverlay draws them, and the child id
 // of each row. Adding a row in SquareLine means a line in each of these two and
 // a case in nav_go -- the row order is the menu order, nothing else encodes it.
 enum NavDest {
@@ -3789,6 +3814,7 @@ enum NavDest {
   // The rest alphabetically.
   NAV_BENCH,    // "Bench", behind the PIN gate
   NAV_DIAG,     // "Diagnostics"
+  NAV_INTERNET, // "Internet Settings": Ethernet or WiFi, and which network
   NAV_JOYSTICK, // "Joystick", the test screen with CALIBRATE on it
   NAV_LOG,      // "Log"
   NAV_SKUNK,    // "Skunk Works"
@@ -3799,7 +3825,7 @@ enum NavDest {
 static const uint32_t kNavRowIds[NAV_DEST_COUNT] = {
     UI_COMP_MENUOVERLAY_ROW1, UI_COMP_MENUOVERLAY_ROW2, UI_COMP_MENUOVERLAY_ROW3,
     UI_COMP_MENUOVERLAY_ROW4, UI_COMP_MENUOVERLAY_ROW5, UI_COMP_MENUOVERLAY_ROW6,
-    UI_COMP_MENUOVERLAY_ROW7, UI_COMP_MENUOVERLAY_ROW8,
+    UI_COMP_MENUOVERLAY_ROW7, UI_COMP_MENUOVERLAY_ROW8, UI_COMP_MENUOVERLAY_ROW9,
 };
 
 // Each screen's key and overlay, filled in as nav_attach_chrome wires them, so
@@ -4111,6 +4137,10 @@ static void nav_go(NavDest dest) {
   case NAV_SETTINGS:
     setting_page_open(0);
     break;
+  case NAV_INTERNET:
+    _ui_screen_change(&ui_InternetScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
+                      &ui_InternetScreen_screen_init);
+    break;
   case NAV_JOYSTICK:
     _ui_screen_change(&ui_JoystickScreen, LV_SCREEN_LOAD_ANIM_NONE, 0, 0,
                       &ui_JoystickScreen_screen_init);
@@ -4129,6 +4159,7 @@ static void nav_go(NavDest dest) {
   dest_screens[NAV_SEAT] = ui_SeatScreen;
   dest_screens[NAV_BENCH] = ui_BenchGateScreen;
   dest_screens[NAV_DIAG] = ui_DiagnosticsScreen;
+  dest_screens[NAV_INTERNET] = ui_InternetScreen;
   dest_screens[NAV_JOYSTICK] = ui_JoystickScreen;
   dest_screens[NAV_LOG] = ui_LogScreen;
   dest_screens[NAV_SKUNK] = ui_SkunkWorksScreen;
@@ -4412,6 +4443,8 @@ static void nav_enter_screen(const lv_obj_t *screen) {
   } else if (screen == ui_DiagnosticsScreen) {
     nav_use_group(diag_group, screen);
     diag_focus(0);
+  } else if (screen == ui_InternetScreen) {
+    internet_ui_on_load(); // its own groups, one per page
   } else if (screen == ui_LogScreen && log_view_group() != nullptr) {
     nav_use_group(log_view_group(), screen);
     log_view_on_load();
@@ -4457,6 +4490,7 @@ static const char *active_screen_name() {
       {&ui_BenchGateScreen, "BenchGateScreen"},
       {&ui_BenchMotorsScreen, "BenchMotorsScreen"},
       {&ui_LogScreen, "LogScreen"},
+      {&ui_InternetScreen, "InternetScreen"},
       {&ui_UpdateScreen, "UpdateScreen"},
       {&ui_SettingsScreen, "SettingsScreen"},
       {&ui_SkunkWorksScreen, "SkunkWorksScreen"},
@@ -4587,10 +4621,10 @@ static uint32_t strip_screen_overdraw(const lv_obj_t *screen) {
 // theme-change pass cannot drift apart. The screens built on demand are
 // nullptr while they do not exist, and skipped.
 static void strip_all_overdraw() {
-  const lv_obj_t *const screens[] = {ui_LockedScreen,    ui_DriveScreen,      ui_SeatScreen,
-                                     ui_BenchGateScreen, ui_SettingsScreen,   ui_JoystickScreen,
-                                     ui_LogScreen,       ui_SkunkWorksScreen, ui_DiagnosticsScreen,
-                                     ui_UpdateScreen,    ui_BenchMotorsScreen};
+  const lv_obj_t *const screens[] = {ui_LockedScreen,    ui_DriveScreen,       ui_SeatScreen,
+                                     ui_BenchGateScreen, ui_SettingsScreen,    ui_JoystickScreen,
+                                     ui_LogScreen,       ui_SkunkWorksScreen,  ui_DiagnosticsScreen,
+                                     ui_UpdateScreen,    ui_BenchMotorsScreen, ui_InternetScreen};
   const uint32_t stripped =
       std::accumulate(std::begin(screens), std::end(screens), uint32_t{0},
                       [](uint32_t sum, const lv_obj_t *screen) {
@@ -4652,7 +4686,7 @@ static void settings_screen_ensure() {
   ui_Parameter1 = nullptr;
   bind_status_panel(ui_DriveBand7);
   bind_rtps_label(ui_TopBar8);
-  bind_clock_label(ui_TopBar8);
+  bind_topbar_labels(ui_TopBar8);
   nav_attach_chrome(ui_MenuKey7, ui_MenuOverlay7, ui_DriveBand7);
   bind_to_drive_blocked_cause(ui_ErrorBanner6, setting_warning_observer);
   lv_subject_add_observer_obj(&setting_page_subject, setting_warning_observer, ui_ErrorBanner6,
@@ -4681,7 +4715,7 @@ static void actions_screen_ensure() {
   }
   bind_status_panel(ui_DriveBand8);
   bind_rtps_label(ui_TopBar9);
-  bind_clock_label(ui_TopBar9);
+  bind_topbar_labels(ui_TopBar9);
   nav_attach_chrome(ui_MenuKey8, ui_MenuOverlay8, ui_DriveBand8);
   // Its ErrorBanner stays down: an action that needs the MCB greys out
   // instead (action_ready_observer), which keeps the local ones reachable.
@@ -4716,7 +4750,7 @@ static void diagnostics_screen_ensure() {
   }
   bind_status_panel(ui_DriveBand9);
   bind_rtps_label(ui_TopBar10);
-  bind_clock_label(ui_TopBar10);
+  bind_topbar_labels(ui_TopBar10);
   nav_attach_chrome(ui_MenuKey9, ui_MenuOverlay9, ui_DriveBand9);
   // The red, blinking readings are this screen's warning: the ErrorBanner
   // would cover exactly what someone opened the screen to look at.
@@ -4763,7 +4797,7 @@ static void seat_control_screen_ensure() {
   ui_SeatControlScreen_screen_init();
   bind_status_panel(ui_DriveBand13);
   bind_rtps_label(ui_TopBar13);
-  bind_clock_label(ui_TopBar13);
+  bind_topbar_labels(ui_TopBar13);
   nav_attach_chrome(ui_MenuKey13, ui_MenuOverlay13, ui_DriveBand13);
   // The seat screen's banner: the link or the MCB lost. Losing either takes the
   // screen home anyway (drive_screen_follow_state), with the reason.
@@ -5740,6 +5774,7 @@ extern "C" void app_main(void) {
            {&estop_pin_subject, SETTINGS_PARAM_ESTOP_PIN},
            {&estop_type_subject, SETTINGS_PARAM_ESTOP_TYPE},
            {&drive_start_subject, SETTINGS_PARAM_DRIVE_START},
+           {&network_subject, SETTINGS_PARAM_NETWORK},
        }) {
     lv_subject_init_int(subject, settings_get(param));
     lv_subject_add_observer(subject, setting_store_observer,
@@ -5797,6 +5832,8 @@ extern "C" void app_main(void) {
   // chrome do not all get bound shows a frozen readout, and lining the three
   // calls up separately is how one gets forgotten.
   lv_subject_init_string(&clock_subject, clock_buf, clock_prev_buf, sizeof(clock_buf), "--:--");
+  lv_subject_init_string(&link_subject, link_buf, link_prev_buf, sizeof(link_buf),
+                         link_text(static_cast<NetLink>(settings_get(SETTINGS_PARAM_NETWORK))));
   struct ScreenChrome {
     lv_obj_t *bar;
     lv_obj_t *band;
@@ -5816,11 +5853,12 @@ extern "C" void app_main(void) {
       {ui_TopBar5, ui_DriveBand11, ui_MenuKey11, ui_MenuOverlay11, true},  // BenchGateScreen
       {ui_TopBar6, ui_DriveBand5, ui_MenuKey6, ui_MenuOverlay6, true},     // LogScreen
       {ui_TopBar11, ui_DriveBand10, ui_MenuKey10, ui_MenuOverlay10, true}, // UpdateScreen
+      {ui_TopBar12, ui_DriveBand12, ui_MenuKey12, ui_MenuOverlay12, true}, // InternetScreen
   };
   for (const ScreenChrome &c : kChrome) {
     bind_status_panel(c.band);
     bind_rtps_label(c.bar);
-    bind_clock_label(c.bar);
+    bind_topbar_labels(c.bar);
     nav_attach_chrome(c.key, c.overlay, c.band_goes_home ? c.band : nullptr);
   }
   // The menu stays reachable while locked: Log, Diagnostics, UI Settings and
@@ -5856,6 +5894,7 @@ extern "C" void app_main(void) {
   bind_entry_refused_panel(ui_ErrorBanner10); // JoystickScreen
   bind_entry_refused_panel(ui_ErrorBanner11); // BenchGateScreen
   bind_entry_refused_panel(ui_ErrorBanner9);  // UpdateScreen
+  bind_entry_refused_panel(ui_ErrorBanner12); // InternetScreen
   // Diagnostics readings, and whether they are live: before the poll timer
   // that keeps the latter current, and before any RTPS sample can land.
   for (auto &item : diag_value) {
@@ -6121,6 +6160,20 @@ extern "C" void app_main(void) {
   // SeatControlScreen's: only its back button, added each time the screen is built.
   seat_control_group = lv_group_create();
 
+  // InternetScreen: Ethernet or WiFi, the network list and the password page.
+  // Its two pages cover the body, so their fill is what hides it.
+  keep_overlay_fill(ui_NetPickPanel);
+  keep_overlay_fill(ui_NetPwPanel);
+  internet_ui_init({
+      .lvgl_mutex = &lvgl_mutex,
+      .connection = &network_subject,
+      .use_group = [](lv_group_t *group) { nav_use_group(group, ui_InternetScreen); },
+      .focus_ring = nav_focus_ring,
+      .mirror_states = nav_mirror_states,
+      .claim_clicks = nav_claim_clicks,
+      .refuse = refusal_feedback,
+  });
+
   lv_subject_init_string(&seat_function_subject, seat_function_buf, seat_function_prev_buf,
                          sizeof(seat_function_buf), lv_label_get_text(ui_AngleSettingLabel));
   lv_label_bind_text(ui_AngleSettingLabel, &seat_function_subject, nullptr);
@@ -6153,7 +6206,7 @@ extern "C" void app_main(void) {
   // ui_init builds, so each route in and out is covered; the ones built on
   // demand register it in their own *_screen_ensure().
   for (lv_obj_t *screen : {ui_LockedScreen, ui_DriveScreen, ui_SeatScreen, ui_BenchGateScreen,
-                           ui_JoystickScreen, ui_LogScreen, ui_UpdateScreen}) {
+                           ui_JoystickScreen, ui_LogScreen, ui_UpdateScreen, ui_InternetScreen}) {
     lv_obj_add_event_cb(screen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, nullptr);
   }
 
@@ -6892,8 +6945,12 @@ extern "C" void app_main(void) {
     }
   });
   rtps_comms_on_motors(motors_receive); // no lvgl_mutex: see motors_receive
-  if (!rtps_comms_start()) {
-    logger.warn("RTPS comms not started (Ethernet bring-up failed)");
+  if (!rtps_comms_start(static_cast<NetLink>(settings_get(SETTINGS_PARAM_NETWORK)))) {
+    logger.warn("RTPS comms not started (network bring-up failed)");
+  }
+  {
+    std::lock_guard<std::recursive_mutex> lock(lvgl_mutex);
+    lv_subject_copy_string(&link_subject, link_text(rtps_comms_net_link()));
   }
 
   // The remote UI debug channel (CONFIG_HMI_REMOTE_UI, off by default). Last,
