@@ -38,3 +38,21 @@ menu "RAMMP HMI"
             WPA2/WPA3 passphrase for HMI_WIFI_SSID. Empty = an open network.
 
 endmenu
+
+# esp_wifi_remote asks for esp_hosted >=2.11, so the component manager also looks at
+# esp_hosted 3.x, whose manifest picks its USB host stacks by these options. This
+# firmware runs esp_hosted 2.12 (main/idf_component.yml), which never defines them, and
+# a newer component manager stops the build ("Missing required kconfig option after
+# retry") on an option no Kconfig defines. Defined here, hidden and off, they keep 3.x's
+# USB dependencies out of the solve.
+config ESP_HOSTED_HOST_USB_CDC_ACM_MANIFEST
+    bool
+    default n
+
+config ESP_HOSTED_HOST_USB_CHERRYUSB_MANIFEST
+    bool
+    default n
+
+config ESP_HOSTED_HOST_USB_RNDIS_MANIFEST
+    bool
+    default n
