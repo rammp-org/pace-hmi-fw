@@ -63,6 +63,7 @@ CHROME: dict[str, tuple[str, str, str, str, str]] = {
     "ui_SkunkWorksScreen":   ("9",  "8",  "7",  "8",  "8"),
     "ui_DiagnosticsScreen":  ("10", "9",  "8",  "9",  "9"),
     "ui_UpdateScreen":       ("11", "10", "9",  "10", "10"),
+    "ui_InternetScreen":     ("12", "12", "12", "12", "12"),
 }
 
 PARENTS: dict[str, str] = {
@@ -132,6 +133,17 @@ PARENTS: dict[str, str] = {
     "ui_SeatAdjustmentButton5": "ui_SeatAdjustmentPanel",
     "ui_SeatBackButton": "ui_SeatAdjustmentPanel",
     "ui_AngleLabel": "ui_SeatAdjustmentPanel",
+
+    # InternetScreen: the main page's controls, and the two pages over the body
+    # whose list, text box and keyboard internet_ui.cpp fills
+    "ui_NetChoiceEthernet": "ui_InternetContent",
+    "ui_NetChoiceWifi": "ui_InternetContent",
+    "ui_NetWifiButton": "ui_InternetContent",
+    "ui_NetRestartButton": "ui_InternetContent",
+    "ui_NetList": "ui_NetPickPanel",
+    "ui_NetRowTemplate": "ui_NetList",
+    "ui_NetPwBox": "ui_NetPwPanel",
+    "ui_NetPwKeyboard": "ui_NetPwPanel",
 }
 
 for _screen, (_bar, _band, _banner, _key, _overlay) in CHROME.items():
@@ -174,10 +186,11 @@ LABELS: dict[str, str] = {
     "cui_RowLabel2": "Seat Functions",
     "cui_RowLabel3": "Bench",
     "cui_RowLabel4": "Diagnostics",
-    "cui_RowLabel5": "Joystick",
-    "cui_RowLabel6": "Log",
-    "cui_RowLabel7": "Skunk Works",
-    "cui_RowLabel8": "UI Settings",
+    "cui_RowLabel5": "Internet Settings",
+    "cui_RowLabel6": "Joystick",
+    "cui_RowLabel7": "Log",
+    "cui_RowLabel8": "Skunk Works",
+    "cui_RowLabel9": "UI Settings",
 }
 
 _CREATE_RE = re.compile(

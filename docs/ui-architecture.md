@@ -62,6 +62,7 @@ ErrorBanner, MenuKey and MenuOverlay, are the *chrome*.
 | SeatScreen | 04, 04b | menu: Seat Functions |
 | BenchGateScreen | - | menu: Bench (the PIN, then DEBUG ACTUATORS) |
 | DiagnosticsScreen | - | menu: Diagnostics |
+| InternetScreen | - | menu: Internet Settings (the link, the WiFi network, its status) |
 | JoystickScreen | - | menu: Joystick (the stick test and CALIBRATE) |
 | LogScreen | - | menu: Log |
 | SkunkWorksScreen | - | menu: Skunk Works |
@@ -76,17 +77,17 @@ generated at runtime, and keeping them all resident ran internal RAM out.
 ### One component, one instance per screen
 
 The menu is a SquareLine *component*, `MenuOverlay`, drawn by `build_menuoverlay` in
-`build_ui.py`: a 720 x 921 panel with eight rows, 115 px each. Each row is a `Row<n>` panel
+`build_ui.py`: a 720 x 921 panel with nine rows, 102 px each. Each row is a `Row<n>` panel
 holding a `RowGround<n>` with a `RowLabel<n>` and a chevron.
 
 LVGL screens are separate object trees, so a widget cannot appear on two of them. Every
-screen therefore has its own instance of all the chrome, `MenuOverlay1` ... `MenuOverlay11`,
-each with its own eight rows. The firmware treats them as one menu:
+screen therefore has its own instance of all the chrome, `MenuOverlay1` ... `MenuOverlay12`,
+each with its own nine rows. The firmware treats them as one menu:
 
 - **`kChrome`** (in `app_main`) lists every screen's TopBar, DriveBand, MenuKey and
   MenuOverlay.
 - **`nav_attach_chrome`** wires one screen's set: the key's click and key events, and for
-  each of the eight rows the click, the stick's arrows, the cursor and pressed looks, and,
+  each of the nine rows the click, the stick's arrows, the cursor and pressed looks, and,
   on Drive and Seat Functions, the observers that grey the row while the MCB could not act
   on it.
 - **`nav_chrome[]`** remembers which key and overlay belong to which screen, so "the menu of
@@ -160,11 +161,12 @@ with the screen's burger key appended last, so "down past the bottom" reaches th
 
 | group | screen |
 | --- | --- |
-| `menu_group` | the open menu: eight rows, then the key (wraps) |
+| `menu_group` | the open menu: nine rows, then the key (wraps) |
 | `seat_group`, `seat_adjust_group` | Seat: the function buttons; the adjustment page |
 | `rd_group` | BenchGate: the PIN pad |
 | `setting_group`, `actions_group`, `diag_group` | UI Settings, Skunk Works, Diagnostics |
 | `log_view_group()` (`main/log_view.cpp`) | Log |
+| `main_group`, `networks_group`, `password_group` (`main/internet_ui.cpp`) | Internet Settings: the main page, the network list, the keyboard |
 | `joystick_group` | everything else: Locked, Drive, Joystick |
 
 `nav_arrive` runs whenever a screen comes up (SCREEN_LOADED, or by hand when a row picks
@@ -235,6 +237,14 @@ flowchart LR
   setting is a table line, its names in `kSettingParamNames`, its subject in
   `kSettingParamValue`, and a `case` in `setting_store_observer` if it needs applying.
 - **Skunk Works** tiles come from `main/actions_spec.h`, one line each.
+- **Internet Settings** lives in `main/internet_ui.cpp`, not in the settings rows. Its three
+  pages share one screen: the main page (Ethernet or WiFi, the network, the status) and two
+  panels drawn over it, the network list and the password keyboard. The choice is the
+  `network` setting (on a page of its own in `settings_spec.h`), read at boot. The WiFi scan
+  and join block for seconds, so they run on a worker thread (`run_on_worker`) and post their
+  result back to the LVGL task; a result for a page that was left meanwhile is dropped. The
+  scan and join themselves are `rtps_comms_wifi_scan` / `rtps_comms_wifi_join` in
+  `main/rtps_comms.cpp`, which saves a network to `/storage/wifi.txt` only once it has joined.
 - **Sounds**: `play_click` for a tap, a stick select or a completed hold, and
   `play_refusal` (two quick clicks) for a greyed press or an arriving warning. The
   **Sounds** setting silences all of them except warnings.
