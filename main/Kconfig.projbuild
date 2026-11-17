@@ -43,19 +43,22 @@ endmenu
 # esp_hosted 3.x, whose manifest picks its USB host stacks by these options. This
 # firmware runs esp_hosted 2.12 (main/idf_component.yml), which never defines them, and
 # a newer component manager stops the build ("Missing required kconfig option after
-# retry") on an option no Kconfig defines. Defined here and off, 3.x's USB dependencies
-# stay out of the solve. They have prompts because a hidden bool that is off is left
-# out of sdkconfig.json, where the component manager looks.
+# retry") on an option no Kconfig defines. Defined here as 0 (ints: 3.x tests them with
+# "== 1"), 3.x's USB dependencies stay out of the solve. They have prompts so they are
+# always written to sdkconfig.json, where the component manager looks.
 menu "esp_hosted 3.x manifest options (unused, keep off)"
     config ESP_HOSTED_HOST_USB_CDC_ACM_MANIFEST
-        bool "esp_hosted 3.x: USB CDC-ACM host (unused)"
-        default n
+        int "esp_hosted 3.x: USB CDC-ACM host (unused)"
+        default 0
+        range 0 0
 
     config ESP_HOSTED_HOST_USB_CHERRYUSB_MANIFEST
-        bool "esp_hosted 3.x: CherryUSB host (unused)"
-        default n
+        int "esp_hosted 3.x: CherryUSB host (unused)"
+        default 0
+        range 0 0
 
     config ESP_HOSTED_HOST_USB_RNDIS_MANIFEST
-        bool "esp_hosted 3.x: USB RNDIS host (unused)"
-        default n
+        int "esp_hosted 3.x: USB RNDIS host (unused)"
+        default 0
+        range 0 0
 endmenu
