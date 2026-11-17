@@ -37,6 +37,16 @@ bool M5StackTab5::initialize_sdcard(const M5StackTab5::SdCardConfig &config) {
   // For setting a specific frequency, use host.max_freq_khz (range 400kHz - 20MHz for SDSPI)
   sdmmc_host_t host = SDMMC_HOST_DEFAULT();
   host.max_freq_khz = SDMMC_FREQ_HIGHSPEED; // 40MHz
+  // The card's pins (39..44) are slot 0's IOMUX pins. Slot 1 is the ESP32-C6's
+  // SDIO link (esp_hosted), which claims the P4's only SDMMC controller from a
+  // constructor before app_main: a second sdmmc_host_init() fails, so share its
+  // controller, and on a failed mount (no card) release slot 0 alone.
+  host.slot = SDMMC_HOST_SLOT_0;
+#if CONFIG_ESP_HOSTED_ENABLED
+  host.init = [] { return ESP_OK; };
+#endif
+  host.flags |= SDMMC_HOST_FLAG_DEINIT_ARG;
+  host.deinit_p = sdmmc_host_deinit_slot;
 
   // This initializes the slot without card detect (CD) and write protect (WP) signals.
   // Modify slot_config.gpio_cd and slot_config.gpio_wp if your board has these signals.

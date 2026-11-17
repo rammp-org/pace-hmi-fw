@@ -243,6 +243,7 @@ static lv_subject_t sounds_subject;            // 0 = the clicks and refusals ar
 static lv_subject_t estop_pin_subject;         // EStopPin: which header pin the switch is on
 static lv_subject_t estop_type_subject;        // EStopContact: NO or NC
 static lv_subject_t drive_start_subject;       // kDriveStart*: what the Locked screen's hold is
+static lv_subject_t network_subject;           // NetLink: 0 = Ethernet, 1 = WiFi
 
 // UI Settings "Start driving": which hold on the Locked screen asks the MIB to drive.
 enum : int32_t {
@@ -608,7 +609,7 @@ static void rtps_label_observer(lv_observer_t *observer, lv_subject_t *) {
   uint32_t color = ui_get_theme_value(_ui_theme_color_alert);
   bool blink = false;
   switch (state) {
-  case RtpsLinkState::ETH_FAILED: // no hardware and no link are both "there is
+  case RtpsLinkState::NET_FAILED: // no hardware and no link are both "there is
   case RtpsLinkState::LINK_DOWN:  // no network", and neither is worth blinking
     color = ui_get_theme_value(_ui_theme_color_alert);
     break;
@@ -1445,11 +1446,15 @@ static lv_timer_t *entry_refused_timer = nullptr;
 
 static_assert(sizeof(rammp::kHmiEthFailedText) <= rammp::kErrorTextLen &&
                   sizeof(rammp::kHmiLinkDownText) <= rammp::kErrorTextLen &&
+                  sizeof(rammp::kHmiWifiFailedText) <= rammp::kErrorTextLen &&
+                  sizeof(rammp::kHmiWifiDownText) <= rammp::kErrorTextLen &&
                   sizeof(rammp::kHmiNoIpText) <= rammp::kErrorTextLen &&
                   sizeof(rammp::kHmiNoPeerText) <= rammp::kErrorTextLen,
               "refusal body outgrows the banner it shares with MCB faults");
 static_assert(sizeof(rammp::kHmiEthFailedFooter) <= rammp::kErrorFooterLen &&
                   sizeof(rammp::kHmiLinkDownFooter) <= rammp::kErrorFooterLen &&
+                  sizeof(rammp::kHmiWifiFailedFooter) <= rammp::kErrorFooterLen &&
+                  sizeof(rammp::kHmiWifiDownFooter) <= rammp::kErrorFooterLen &&
                   sizeof(rammp::kHmiNoIpFooter) <= rammp::kErrorFooterLen &&
                   sizeof(rammp::kHmiNoPeerFooter) <= rammp::kErrorFooterLen,
               "refusal footer outgrows the banner it shares with MCB faults");
@@ -1460,11 +1465,14 @@ struct RefusalText {
 };
 
 static RefusalText link_refusal_text(RtpsLinkState link) {
+  const bool wifi = rtps_comms_net_link() == NetLink::WIFI;
   switch (link) {
-  case RtpsLinkState::ETH_FAILED:
-    return {rammp::kHmiEthFailedText, rammp::kHmiEthFailedFooter};
+  case RtpsLinkState::NET_FAILED:
+    return wifi ? RefusalText{rammp::kHmiWifiFailedText, rammp::kHmiWifiFailedFooter}
+                : RefusalText{rammp::kHmiEthFailedText, rammp::kHmiEthFailedFooter};
   case RtpsLinkState::LINK_DOWN:
-    return {rammp::kHmiLinkDownText, rammp::kHmiLinkDownFooter};
+    return wifi ? RefusalText{rammp::kHmiWifiDownText, rammp::kHmiWifiDownFooter}
+                : RefusalText{rammp::kHmiLinkDownText, rammp::kHmiLinkDownFooter};
   case RtpsLinkState::NO_IP:
     return {rammp::kHmiNoIpText, rammp::kHmiNoIpFooter};
   case RtpsLinkState::NO_PEER:
@@ -2595,6 +2603,7 @@ static lv_subject_t *const kSettingParamValue[] = {
     &estop_pin_subject,         // SETTINGS_PARAM_ESTOP_PIN
     &estop_type_subject,        // SETTINGS_PARAM_ESTOP_TYPE
     &drive_start_subject,       // SETTINGS_PARAM_DRIVE_START
+    &network_subject,           // SETTINGS_PARAM_NETWORK
 };
 
 // What the named rows read, in SETTINGS_PARAM_* order; nullptr = a number.
@@ -2605,6 +2614,8 @@ static constexpr const char *kSwapNames[] = {"Normal", "Swap"};
 static constexpr const char *kEStopPinNames[] = {"GPIO2", "GPIO47"};   // EStopPin order
 static constexpr const char *kEStopTypeNames[] = {"NO", "NC"};         // EStopType order
 static constexpr const char *kDriveStartNames[] = {"Stick", "Button"}; // kDriveStart* order
+// NetLink order. "Wired", not "Ethernet": the value box fits about six letters.
+static constexpr const char *kNetworkNames[] = {"Wired", "WiFi"};
 static_assert(static_cast<int>(EStopPin::GPIO47) == SETTINGS_ESTOP_PIN_MAX &&
                   static_cast<int>(EStopType::NC) == SETTINGS_ESTOP_TYPE_MAX,
               "the E-stop rows' range must match EStopPin and EStopType");
@@ -2623,6 +2634,7 @@ static const char *const *const kSettingParamNames[] = {
     kEStopPinNames,   // SETTINGS_PARAM_ESTOP_PIN
     kEStopTypeNames,  // SETTINGS_PARAM_ESTOP_TYPE
     kDriveStartNames, // SETTINGS_PARAM_DRIVE_START
+    kNetworkNames,    // SETTINGS_PARAM_NETWORK
 };
 static_assert(std::size(kSettingParamNames) == SETTINGS_PARAM_COUNT,
               "every settings_spec.h parameter needs its names (or nullptr) here");
@@ -2715,6 +2727,41 @@ static void stepper_format(const StepperSpec &spec, int32_t raw, char *out, size
 
 static void set_display_flipped(bool on); // screen flip, beside direct_flush_cb
 
+// UI Settings "Network". RTPS binds to one link at boot, so moving to the other
+// takes a restart: once the row has sat on it for kNetworkRestartDelayMs, so that
+// stepping past it does nothing and stepping back cancels. Only a change of the
+// link actually used counts - with no WiFi network built in both values mean
+// Ethernet (rtps_comms_start), and the first run at boot is never one.
+static constexpr uint32_t kNetworkRestartDelayMs = 3000;
+static lv_timer_t *network_restart_timer = nullptr;
+
+static void network_restart_cb(lv_timer_t *timer) {
+  lv_timer_pause(timer);
+  if (lv_subject_get_int(&locked_subject) == 0) {
+    return; // driving: the row refuses a change then, so this is belt and braces
+  }
+  static espp::Logger net_logger({.tag = "network", .level = espp::Logger::Verbosity::INFO});
+  net_logger.warn("Network changed to {}: restarting to use it",
+                  kNetworkNames[lv_subject_get_int(&network_subject)]);
+  esp_restart();
+}
+
+static void network_restart_check(int value) {
+  if (network_restart_timer == nullptr) { // the first run, at bind time: before RTPS starts
+    network_restart_timer = lv_timer_create(network_restart_cb, kNetworkRestartDelayMs, nullptr);
+    lv_timer_pause(network_restart_timer);
+    return;
+  }
+  const bool wifi = value == static_cast<int>(NetLink::WIFI) && rtps_comms_wifi_configured();
+  const NetLink wanted = wifi ? NetLink::WIFI : NetLink::ETHERNET;
+  if (wanted == rtps_comms_net_link()) {
+    lv_timer_pause(network_restart_timer);
+  } else {
+    lv_timer_reset(network_restart_timer);
+    lv_timer_resume(network_restart_timer);
+  }
+}
+
 // Applies and saves one of the UI Settings rows that has no observer of its
 // own (brightness and theme do). user_data is its SETTINGS_PARAM_*.
 static void setting_store_observer(lv_observer_t *observer, lv_subject_t *subject) {
@@ -2752,6 +2799,9 @@ static void setting_store_observer(lv_observer_t *observer, lv_subject_t *subjec
     lv_label_set_text(ui_DriveHint, value == kDriveStartStick ? rammp::kHmiDriveHintStick
                                                               : rammp::kHmiDriveHintButton);
     drive_start_button.store(value == kDriveStartButton);
+    break;
+  case SETTINGS_PARAM_NETWORK:
+    network_restart_check(value);
     break;
   default:
     break; // MENU_SLIDE: read where it is used, nothing to apply
@@ -3168,12 +3218,13 @@ static void setting_page_open(int32_t page) {
       if (kSettingParams[i].page == page) {
         StepperSpec spec = kSettingParams[i].spec;
         spec.names = kSettingParamNames[i];
-        // Remapping the stick changes which way a push drives the chair, so
-        // it is not done mid-drive.
+        // Remapping the stick changes which way a push drives the chair, and a
+        // new network restarts the HMI, so neither is done mid-drive.
         // So is moving the e-stop: for a moment it is not watching either pin.
         spec.locked_only = i == SETTINGS_PARAM_STICK_INVERT_X ||
                            i == SETTINGS_PARAM_STICK_INVERT_Y || i == SETTINGS_PARAM_STICK_SWAP ||
-                           i == SETTINGS_PARAM_ESTOP_PIN || i == SETTINGS_PARAM_ESTOP_TYPE;
+                           i == SETTINGS_PARAM_ESTOP_PIN || i == SETTINGS_PARAM_ESTOP_TYPE ||
+                           i == SETTINGS_PARAM_NETWORK;
         setting_row_add(spec, kSettingParamValue[i], false);
       }
     }
@@ -5740,6 +5791,7 @@ extern "C" void app_main(void) {
            {&estop_pin_subject, SETTINGS_PARAM_ESTOP_PIN},
            {&estop_type_subject, SETTINGS_PARAM_ESTOP_TYPE},
            {&drive_start_subject, SETTINGS_PARAM_DRIVE_START},
+           {&network_subject, SETTINGS_PARAM_NETWORK},
        }) {
     lv_subject_init_int(subject, settings_get(param));
     lv_subject_add_observer(subject, setting_store_observer,
@@ -6892,7 +6944,7 @@ extern "C" void app_main(void) {
     }
   });
   rtps_comms_on_motors(motors_receive); // no lvgl_mutex: see motors_receive
-  if (!rtps_comms_start()) {
+  if (!rtps_comms_start(static_cast<NetLink>(settings_get(SETTINGS_PARAM_NETWORK)))) {
     logger.warn("RTPS comms not started (Ethernet bring-up failed)");
   }
 

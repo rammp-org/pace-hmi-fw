@@ -76,3 +76,9 @@ dependencies:
     override_path: "../external/rammp-rtps/components/rammp_rtps_messages"
   # W5500 SPI Ethernet MAC driver (split out of esp_eth in IDF 6.0)
   espressif/w5500: ^2.0.0
+  # WiFi: the P4 has no radio; the Tab5's ESP32-C6 does it over SDIO (esp_hosted),
+  # behind the usual esp_wifi API (esp_wifi_remote).
+  espressif/esp_wifi_remote: '>=1.6.4'
+  # 2.x, not 3.x: 3.x speaks only RPC-V2 and needs 3.x firmware on the C6, which the
+  # Tab5 does not ship with.
+  espressif/esp_hosted: '~2.12.11'
