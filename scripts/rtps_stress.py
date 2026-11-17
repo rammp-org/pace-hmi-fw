@@ -30,8 +30,12 @@ import datetime
 import os
 import re
 import select
+import json
+import shutil
 import struct
+import subprocess
 import sys
+import tempfile
 import threading
 import time
 import tomllib
@@ -365,6 +369,158 @@ class Network:
         self.mib_thread.join(timeout=2.0)
 
 
+class RosStandIn:
+    """A real ROS 2 stand-in: stress/ros2/ros_standin.py in its own process (one participant)."""
+
+    def __init__(self, role: Role, sender_id: int, proc: subprocess.Popen, status: str) -> None:
+        self.role = role
+        self.participant_id = sender_id  # the stress header's sender id: what the HMI counts by
+        self.proc = proc
+        self.status = status
+        self._last = {"sent": 0, "joy_rx": 0}
+
+    def _read(self) -> dict:
+        try:
+            with open(self.status, encoding="utf-8") as handle:
+                self._last = json.load(handle)
+        except (OSError, ValueError):
+            pass
+        return self._last
+
+    @property
+    def joy_rx(self) -> int:
+        return int(self._read().get("joy_rx", 0))
+
+    @property
+    def stress_sent(self) -> int:
+        return int(self._read().get("sent", 0))
+
+
+def kill_tree(proc: subprocess.Popen) -> None:
+    if proc.poll() is not None:
+        return
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True)
+    else:
+        proc.kill()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def overlay_env(ws: str) -> dict:
+    """os.environ (the pixi environment) with the colcon workspace's install sourced on top."""
+    if os.name == "nt":
+        setup = os.path.join(ws, "install", "local_setup.bat")
+        out = subprocess.run(f'cmd /c "call "{setup}" >nul && set"', capture_output=True,
+                             text=True, shell=True, check=True).stdout
+    else:
+        setup = os.path.join(ws, "install", "local_setup.bash")
+        out = subprocess.run(["bash", "-c", f'source "{setup}" && env'], capture_output=True,
+                             text=True, check=True).stdout
+    env = {}
+    for line in out.splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            env[key] = value
+    return env
+
+
+class RosNetwork(Network):
+    """The MIB and the PACE RACER stand-ins as before (espp boards: the Python harness is what
+    they are), Guo's Jetson stack under ros2 launch, and N real rclpy stand-ins on top."""
+
+    ROS_SENDER_BASE = 60
+
+    def __init__(self, cli: argparse.Namespace) -> None:
+        super().__init__(cli)
+        here = os.path.join(HERE, "..", "stress", "ros2")
+        self.env = overlay_env(cli.ws)
+        self.env.update({
+            "RMW_IMPLEMENTATION": cli.rmw,
+            "ROS_DOMAIN_ID": str(cli.domain_id),
+            "CYCLONEDDS_URI": "file://" + os.path.abspath(os.path.join(here, "cyclonedds.xml")).replace("\\", "/"),
+            "HMI_STRESS_IFACE": cli.advertised_address,
+            "PYTHONUNBUFFERED": "1",
+        })
+        self.standin_script = os.path.abspath(os.path.join(here, "ros_standin.py"))
+        self.tmp = tempfile.mkdtemp(prefix="rtps_stress_ros_")
+        self.control = os.path.join(self.tmp, "control.json")
+        self.write_rate(0.0)
+        self.ros: list[RosStandIn] = []
+        self.log_dir = cli.ros_log_dir
+        # the PACE RACERs: every racer row of the network file, always up
+        racers = [r for r in self.roles if r.role == "racer"]
+        for i, role in enumerate(racers):
+            standin = StandIn(cli, role, FIRST_STANDIN_ID + i, self.stress_size)
+            thread = threading.Thread(target=standin.run, daemon=True, name=role.name)
+            thread.start()
+            self.standins.append(standin)
+            self.threads.append(thread)
+        self.base_count = len(self.standins)
+        self.mocks = None
+        if not cli.no_mocks:
+            launch = os.path.abspath(os.path.join(here, "jetson_mocks.launch.py"))
+            self.mocks = subprocess.Popen(
+                ["ros2", "launch", launch], env=self.env,
+                stdout=open(os.path.join(self.log_dir, "mocks.log"), "w"), stderr=subprocess.STDOUT,
+                creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+        self.mock_count = 0 if cli.no_mocks else 10
+
+    def write_rate(self, rate_hz: float) -> None:
+        tmp = self.control + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as handle:
+            json.dump({"rate_hz": rate_hz}, handle)
+        os.replace(tmp, self.control)
+
+    def resize(self, count: int) -> None:
+        """count = ROS stand-ins on top of the racers."""
+        while len(self.ros) < count:
+            i = len(self.ros)
+            role = Role(name=f"ros_filler_{i}", role="ros_node", joystick=True,
+                        namespace="/rammp/stress")
+            sender = self.ROS_SENDER_BASE + i
+            status = os.path.join(self.tmp, f"status_{sender}.json")
+            cmd = [sys.executable, self.standin_script, "--name", role.name,
+                   "--namespace", role.namespace, "--sender-id", str(sender),
+                   "--size", str(self.stress_size), "--joystick",
+                   "--control", self.control, "--status", status]
+            proc = subprocess.Popen(cmd, env=self.env,
+                                    stdout=open(os.path.join(self.log_dir, f"{role.name}.log"), "w"),
+                                    stderr=subprocess.STDOUT)
+            standin = RosStandIn(role, sender, proc, status)
+            self.ros.append(standin)
+            self.standins.append(standin)
+        while len(self.ros) > count:
+            standin = self.ros.pop()
+            self.standins.remove(standin)
+            kill_tree(standin.proc)
+
+    def set_rate(self, rate_hz: float) -> None:
+        for standin in self.standins[:self.base_count]:
+            standin.rate_hz = rate_hz
+        self.write_rate(rate_hz)
+
+    def dead(self) -> list[str]:
+        out = [s.role.name for s in self.ros if s.proc.poll() is not None]
+        if self.mocks is not None and self.mocks.poll() is not None:
+            out.append("jetson_mocks")
+        return out
+
+    def stop(self) -> None:
+        self.resize(0)
+        if self.mocks is not None:
+            kill_tree(self.mocks)
+        for standin, thread in zip(self.standins, self.threads):
+            standin.stop()
+            thread.join(timeout=2.0)
+        self.standins.clear()
+        self.mib.stop()
+        self.mib_thread.join(timeout=2.0)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+
 ###############################################################################
 # The sweep
 
@@ -553,7 +709,15 @@ def sweep(cli: argparse.Namespace) -> int:
     out_dir = cli.out or os.path.join(HERE, "..", "stress", "results", f"{stamp}-{cli.label}")
     os.makedirs(out_dir, exist_ok=True)
     hmi = HmiConsole(cli.serial, os.path.join(out_dir, "console.log"))
-    net = Network(cli)
+    ros = cli.command == "rossweep"
+    if ros:
+        cli.ros_log_dir = out_dir
+    net = RosNetwork(cli) if ros else Network(cli)
+    if ros:
+        print(f"ROS 2 ({cli.rmw}): {net.base_count} racer stand-ins, "
+              f"{net.mock_count} Jetson mock processes; {cli.settle:g} s for them to come up",
+              flush=True)
+        time.sleep(cli.settle)
     steps: list[Step] = []
     try:
         print(f"waiting for the HMI's STRESS lines on {cli.serial}...", flush=True)
@@ -561,12 +725,15 @@ def sweep(cli: argparse.Namespace) -> int:
         if not hmi.snapshot().stats:
             print("no STRESS lines: is the HMI running a stress build (stress/sdkconfig.stress)?")
             return 2
-        for count in counts:
+        for requested in counts:
             net.set_rate(0)
-            net.resize(count)
+            net.resize(requested)
+            count = len(net.standins)
             print(f"N={count}: {net.standins[-1].role.name if net.standins else 'MIB only'} "
                   f"last in; {cli.settle:g} s for discovery", flush=True)
             time.sleep(cli.settle)
+            if ros and net.dead():
+                print(f"  exited: {', '.join(net.dead())} (see its log in {out_dir})", flush=True)
             last_pass: Step | None = None
             never: dict[str, set[str]] = {}
             for rate in ([0.0] if count == 0 else rates):
@@ -582,14 +749,19 @@ def sweep(cli: argparse.Namespace) -> int:
                 last_pass.rtt_p50_us, last_pass.rtt_p99_us = rtt_probe(net)
                 print(f"  RTT at {last_pass.rate_hz:g} Hz: p50 {last_pass.rtt_p50_us} us, "
                       f"p99 {last_pass.rtt_p99_us} us", flush=True)
-            write_reports(out_dir, steps, counts[:counts.index(count) + 1], "(partial)")
+            write_reports(out_dir, steps, sorted({st.count for st in steps}), "(partial)")
     finally:
         net.stop()
         hmi.close()
     header = (f"RTPS stress {stamp} ({cli.label}): {net.stress_size} B samples "
               f"({wire_bytes(net.stress_size)} B on the wire), soak {cli.soak:g} s, network "
               f"{os.path.relpath(cli.network)}")
-    print("\n" + write_reports(out_dir, steps, counts, header))
+    if ros:
+        header += (f". ROS 2 run ({cli.rmw}): Participants = {net.base_count} PACE RACER stand-ins "
+                   f"+ real rclpy stand-ins; also always up: the MIB stand-in and "
+                   f"{net.mock_count} Jetson mock processes (total remote = Participants + "
+                   f"{net.mock_count + 1})")
+    print("\n" + write_reports(out_dir, steps, sorted({st.count for st in steps}), header))
     print(f"results in {os.path.abspath(out_dir)}")
     return 0
 
@@ -613,7 +785,7 @@ def hold(cli: argparse.Namespace) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("sweep", "hold"):
+    for name in ("sweep", "rossweep", "hold"):
         p = sub.add_parser(name)
         p.add_argument("--peer", required=True, help="The HMI's IP")
         p.add_argument("--advertised-address", required=True,
@@ -626,7 +798,24 @@ def main() -> int:
         p.add_argument("--hmi-participant-id", type=int, default=0,
                        help="The HMI's RTPS participant id (0). Discovery is seeded by unicast to it "
                             "alone: seeding a range sprays closed ports, load a real ROS node never adds")
-    s = sub.choices["sweep"]
+    r = sub.choices["rossweep"]
+    r.add_argument("--ws", default="C:/w/r2" if os.name == "nt" else
+                   os.path.join(HERE, "..", "stress", "ros2", "ws"),
+                   help="The colcon workspace stress/ros2/build_ws.py built")
+    r.add_argument("--rmw", default="rmw_cyclonedds_cpp", help="rmw_cyclonedds_cpp (the robot's) "
+                   "or rmw_fastrtps_cpp")
+    r.add_argument("--no-mocks", action="store_true", help="Leave Guo's Jetson stack out")
+    for s in (sub.choices["sweep"], r):
+        add_sweep_args(s)
+    h = sub.choices["hold"]
+    h.add_argument("--count", type=int, required=True)
+    h.add_argument("--rate", type=float, default=0.0)
+    cli = parser.parse_args()
+    quiet_harness_log(cli.verbose)
+    return hold(cli) if cli.command == "hold" else sweep(cli)
+
+
+def add_sweep_args(s: argparse.ArgumentParser) -> None:
     s.add_argument("--serial", required=True, help="The HMI's USB serial port (COM9)")
     s.add_argument("--counts", default="0,2,4,6,8,10,12,16,20,24")
     s.add_argument("--rates", default="1,5,10,20,50,100", help="Stress Hz per stand-in, ascending")
@@ -636,12 +825,6 @@ def main() -> int:
                    help="Run the HMI's self test at each count's top passing rate, for RTT")
     s.add_argument("--label", default="run", help="Names the results folder (before, tuned...)")
     s.add_argument("--out", default=None, help="Results folder")
-    h = sub.choices["hold"]
-    h.add_argument("--count", type=int, required=True)
-    h.add_argument("--rate", type=float, default=0.0)
-    cli = parser.parse_args()
-    quiet_harness_log(cli.verbose)
-    return sweep(cli) if cli.command == "sweep" else hold(cli)
 
 
 if __name__ == "__main__":

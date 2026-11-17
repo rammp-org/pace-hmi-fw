@@ -1,0 +1,36 @@
+[workspace]
+name = "hmi-rtps-stress-ros2"
+description = "Real ROS 2 (Jazzy) stand-ins and Guo's orchestrator mocks for the HMI RTPS stress test"
+channels = ["https://prefix.dev/robostack-jazzy", "https://prefix.dev/conda-forge"]
+platforms = ["win-64", "linux-64", "osx-arm64"]
+
+[dependencies]
+python = "3.12.*"
+ros-jazzy-ros-base = "*"
+ros-jazzy-rmw-cyclonedds-cpp = "*"
+ros-jazzy-rmw-fastrtps-cpp = "*"
+ros-jazzy-std-msgs = "*"
+ros-jazzy-geometry-msgs = "*"
+ros-jazzy-sensor-msgs = "*"
+ros-jazzy-control-msgs = "*"
+ros-jazzy-trajectory-msgs = "*"
+ros-jazzy-rosidl-default-generators = "*"
+ros-jazzy-ament-cmake = "*"
+ros-jazzy-ament-cmake-python = "*"
+colcon-common-extensions = "*"
+cmake = "*"
+ninja = "*"
+pkg-config = "*"
+compilers = "*"
+pyserial = ">=3.5,<4"
+
+[target.win-64.dependencies]
+# activates the installed Visual Studio 2022 Build Tools for colcon
+vs2022_win-64 = "*"
+
+[tasks]
+# Once: fetch rammp-interfaces-ros2 2.1.0 and Guo's orchestrator (rammp-orchestrator#1), build them.
+setup = "python build_ws.py"
+# The sweep against real ROS 2, from this folder:
+#   pixi run rossweep --peer <HMI IP> --advertised-address <PC IP> --serial COM9 --label ros
+rossweep = "python ../../scripts/rtps_stress.py rossweep"

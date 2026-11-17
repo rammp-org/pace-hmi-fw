@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Cyclone DDS for the stress bench, as the robot runs it (rammp-deployments
+  config/robots/gen_1_5/cyclonedds.xml plus rammp-base's defaults): one named
+  interface, SPDP-only multicast, no participant index, no peers.
+
+  The interface is the laptop's hotspot adapter, the HMI's network. Named by
+  address, because VMware's VMnet8 holds 192.168.137.1 on the same subnet and
+  autodetermination can pick it. rtps_stress.py rossweep writes this file's
+  address from --advertised-address (see HMI_STRESS_IFACE below).
+-->
+<CycloneDDS xmlns="https://cdds.io/config">
+  <Domain id="any">
+    <General>
+      <Interfaces>
+        <NetworkInterface address="${HMI_STRESS_IFACE:-192.168.137.2}" />
+      </Interfaces>
+      <AllowMulticast>spdp</AllowMulticast>
+    </General>
+    <Discovery>
+      <ParticipantIndex>none</ParticipantIndex>
+    </Discovery>
+  </Domain>
+</CycloneDDS>

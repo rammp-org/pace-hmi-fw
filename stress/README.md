@@ -45,3 +45,30 @@ For each participant count the rate goes up until a step fails.
 
 **Over WiFi** all traffic shares the air, so the bandwidth numbers only hold for WiFi. The
 participant and matching limits do carry over to Ethernet.
+
+## Real ROS 2 (step 2)
+
+`stress/ros2/` runs the same sweep with real ROS 2 Jazzy participants, on Cyclone DDS configured
+as the robot runs it:
+
+- **Swept:** rclpy stand-ins (`ros_standin.py`), on top of the PACE RACER stand-ins.
+- **Always up:** Guo's orchestrator and mocks from rammp-orchestrator#1, 10 processes started
+  by `jetson_mocks.launch.py`.
+
+```console
+cd stress/ros2
+pixi run setup        # once: rammp-interfaces-ros2 2.1.0 + rammp-orchestrator, colcon (MSVC on Windows)
+pixi run rossweep --peer <HMI IP> --advertised-address <PC IP> --serial COM9 --label ros --rtt
+```
+
+**Windows notes:**
+
+- The workspace builds into `C:/w/r2` (short paths for MSVC).
+- The first time pixi's `python.exe` opens a socket, Windows Firewall asks about it. If nobody
+  answers, it adds inbound **block** rules and no ROS 2 node hears anything. Allow it from the
+  HMI's subnet in an admin PowerShell:
+
+  ```powershell
+  Get-NetFirewallRule | ? { ($_ | Get-NetFirewallApplicationFilter).Program -like '*stress\ros2\.pixi\envs\default\python.exe' } |
+      Set-NetFirewallRule -Action Allow -RemoteAddress 192.168.137.0/24
+  ```
