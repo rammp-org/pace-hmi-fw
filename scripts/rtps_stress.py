@@ -123,7 +123,7 @@ def harness_args(cli: argparse.Namespace, name: str, participant_id: int) -> arg
         multicast_group="239.255.0.1", enclave="/", subscribe_topic=[],
         subscribe_type_name=None, publish_topic=None, publish_value=0, publish_interval=0.0,
         echo_received=False, reliable=False, type_name="", announce_period=cli.announce_period,
-        duration=0.0, trace_packets=False, peer=[cli.peer], peer_participant_ids=[0, 1, 2, 3],
+        duration=0.0, trace_packets=False, peer=[cli.peer], peer_participant_ids=[cli.hmi_participant_id],
         quiet=True)
 
 
@@ -333,7 +333,7 @@ class Network:
             bind_address=cli.bind_address, advertised_address=cli.advertised_address,
             multicast_interface=None, multicast_group="239.255.0.1",
             period=spec.MIB_STATUS_PERIOD_MS / 1000.0, trace_packets=False,  # noqa: F821
-            peer=[cli.peer], peer_participant_ids=[0, 1, 2, 3])
+            peer=[cli.peer], peer_participant_ids=[cli.hmi_participant_id])
         self.mib = rtps_mcb_sim.SystemStatePublisher(rtps_mcb_sim.build_harness_args(mib_cli))
         self.mib_thread = threading.Thread(target=self.mib.run, daemon=True)
         self.mib_thread.start()
@@ -623,6 +623,9 @@ def main() -> int:
         p.add_argument("--network", default=DEFAULT_NETWORK, help="The network definition (TOML)")
         p.add_argument("--size", type=int, default=0, help="Stress sample data bytes (default: TOML)")
         p.add_argument("--verbose", action="store_true", help="The RTPS harness log too")
+        p.add_argument("--hmi-participant-id", type=int, default=0,
+                       help="The HMI's RTPS participant id (0). Discovery is seeded by unicast to it "
+                            "alone: seeding a range sprays closed ports, load a real ROS node never adds")
     s = sub.choices["sweep"]
     s.add_argument("--serial", required=True, help="The HMI's USB serial port (COM9)")
     s.add_argument("--counts", default="0,2,4,6,8,10,12,16,20,24")
