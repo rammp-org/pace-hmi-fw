@@ -1,0 +1,115 @@
+# The RAMMP network the HMI is stress tested against (scripts/rtps_stress.py).
+#
+# Every [[participant]] is one RTPS participant, as one ROS 2 process or one espp board
+# is. They join in this order as the sweep's participant count N grows; past the end of
+# the list, [filler] supplies more. The MIB stand-in is always there and is not counted
+# in N.
+#
+# Each stand-in, whatever its role, also:
+#   - publishes rt/rammp/stress/to_hmi at the rate under test (the bandwidth axis); the
+#     HMI counts what arrives from each one;
+#   - subscribes to the joystick (rt/rammp/joystick/xy_twist) when joystick = true, and
+#     counts what arrives, so the HMI's fan-out is measured too.
+#
+# Roles:
+#   ros_node  a default rclpy node's discovery footprint: rt/rosout, rt/parameter_events
+#             and the six parameter services (rq/<node>/...Request readers, rr/...Reply
+#             writers). With a namespace those names pass 64 bytes, as on the robot.
+#   racer     a PACE RACER board (espp, no ROS): rammp/<axis>/motor_state out,
+#             rammp/mib/motor_command|motor_tuning/<axis> in.
+
+[defaults]
+stress_size = 256      # bytes of UInt8MultiArray data per stress sample
+announce_period = 1.0  # s between SPDP announcements, as espp and Fast DDS default to
+joystick = true
+
+[mib]
+# rtps_mcb_sim's SystemStatePublisher: MibStatus, the e-stop, self-test pings.
+participant_id = 15
+
+# PACE RACER boards: the four axes of rammp-rtps' RAMMP_AXIS_TABLE.
+[[participant]]
+name = "racer_drive_left"
+role = "racer"
+axis = "drive_left"
+joystick = false
+
+[[participant]]
+name = "racer_drive_right"
+role = "racer"
+axis = "drive_right"
+joystick = false
+
+[[participant]]
+name = "racer_front_caster_left"
+role = "racer"
+axis = "front_caster_left"
+joystick = false
+
+[[participant]]
+name = "racer_front_caster_right"
+role = "racer"
+axis = "front_caster_right"
+joystick = false
+
+# The Jetson: Guo's orchestrator and its mocks (rammp-orchestrator#1), and the UI bridge.
+[[participant]]
+name = "orchestrator"
+role = "ros_node"
+namespace = "/rammp/orchestrator"
+
+[[participant]]
+name = "ui_bridge"
+role = "ros_node"
+namespace = "/rammp/ui"
+
+[[participant]]
+name = "engine_base_navigation"
+role = "ros_node"
+namespace = "/rammp/orchestrator/engines"
+
+[[participant]]
+name = "engine_pick_place"
+role = "ros_node"
+namespace = "/rammp/orchestrator/engines"
+
+[[participant]]
+name = "engine_articulation"
+role = "ros_node"
+namespace = "/rammp/orchestrator/engines"
+
+[[participant]]
+name = "engine_microwave_controls"
+role = "ros_node"
+namespace = "/rammp/orchestrator/engines"
+
+[[participant]]
+name = "engine_feeding"
+role = "ros_node"
+namespace = "/rammp/orchestrator/engines"
+
+[[participant]]
+name = "perception"
+role = "ros_node"
+namespace = "/rammp/perception"
+
+[[participant]]
+name = "ui_node"
+role = "ros_node"
+namespace = "/rammp/ui"
+
+[[participant]]
+name = "arm_driver"
+role = "ros_node"
+namespace = "/rammp/arm"
+
+[[participant]]
+name = "base_driver"
+role = "ros_node"
+namespace = "/rammp/base"
+
+# More ROS 2 processes once the list runs out (a recorder, tools, a second machine...).
+[filler]
+name = "filler_{i}"
+role = "ros_node"
+namespace = "/rammp/stress"

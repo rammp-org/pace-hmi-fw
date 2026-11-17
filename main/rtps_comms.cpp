@@ -36,6 +36,7 @@
 #include "logger.hpp"
 #include "rtps_participant.hpp"
 #include "rtps_pubsub.hpp"
+#include "rtps_stress.hpp"
 #include "storage.hpp"
 #include "task.hpp"
 
@@ -619,6 +620,9 @@ bool start_participant() {
   // pool, logged by make_publisher) only SeatControlScreen goes quiet.
   seat_stick_pub = make_publisher(rammp::kJoystickSeatXYTwist);
   swivel_stick_pub = make_publisher(rammp::kJoystickSwivelXYTwist);
+#if CONFIG_HMI_RTPS_STRESS
+  rtps_stress_attach(*participant); // last: a short pool fails it, not the HMI's own
+#endif
   endpoints_ready = true;
   logger.info("RTPS up on {} ({})", address, rtps_comms_net_link_name(net_link));
   return true;

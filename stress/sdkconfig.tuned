@@ -1,0 +1,19 @@
+# The MIB's discovery limits (RAMMP-mib-fw sdkconfig.defaults, which says why each one),
+# on top of sdkconfig.stress: the "after" run. Order:
+#   "sdkconfig.defaults;stress/sdkconfig.stress;stress/sdkconfig.tuned;<wifi overlay>"
+# Remote endpoints one endpoint can match: SEDP's writers keep a reader proxy per remote
+# participant, so 6 completes discovery with six participants and skips the rest.
+CONFIG_RTPS_LIMIT_NUM_READER_PROXIES_PER_WRITER=24
+CONFIG_RTPS_LIMIT_NUM_WRITER_PROXIES_PER_READER=24
+# Remote participants tracked at once.
+CONFIG_RTPS_LIMIT_SPDP_MAX_NUMBER_FOUND_PARTICIPANTS=24
+# ROS 2 parameter-service names run past 64 bytes; a name that does not fit stops the
+# parse of the rest of that discovery message.
+CONFIG_RTPS_LIMIT_MAX_TOPICNAME_LENGTH=128
+CONFIG_RTPS_LIMIT_MAX_TYPENAME_LENGTH=128
+# SEDP's history: one sample per local endpoint (10 writers + 7 readers here), or late
+# joiners miss the first announcements.
+CONFIG_RTPS_LIMIT_HISTORY_SIZE_STATEFUL=24
+# The MIB's socket headroom for more peers.
+CONFIG_LWIP_MAX_UDP_PCBS=20
+CONFIG_LWIP_UDP_RECVMBOX_SIZE=16

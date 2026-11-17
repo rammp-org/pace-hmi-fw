@@ -46,3 +46,6 @@ __pycache__/
 
 # Claude Code project files
 .claude/
+
+# RTPS stress runs (stress/README.md)
+stress/results/

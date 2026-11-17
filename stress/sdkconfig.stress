@@ -1,0 +1,8 @@
+# RTPS stress build: today's limits plus the stress reader (main/rtps_stress.cpp).
+# Build: delete sdkconfig, then
+#   idf.py -D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;stress/sdkconfig.stress;<wifi overlay>" build
+CONFIG_HMI_RTPS_STRESS=y
+# One slot more than sdkconfig.defaults for the stress reader (readers per participant:
+# 7 user + SPDP + SEDP's 2 = 10, the profile default).
+CONFIG_RTPS_LIMIT_NUM_STATELESS_READERS=8
+CONFIG_RTPS_LIMIT_MAX_NUM_READER_CALLBACKS=8

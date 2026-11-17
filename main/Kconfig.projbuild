@@ -37,6 +37,19 @@ menu "RAMMP HMI"
         help
             WPA2/WPA3 passphrase for HMI_WIFI_SSID. Empty = an open network.
 
+    config HMI_RTPS_STRESS
+        bool "RTPS stress test: stress reader + STRESS lines on the console"
+        default n
+        help
+            Adds one reader, rt/rammp/stress/to_hmi (std_msgs/UInt8MultiArray),
+            that counts what each remote participant delivers, and prints a
+            STRESS line every second: heap, matched remote endpoints per topic,
+            delivery and MibStatus counters. scripts/rtps_stress.py drives it.
+
+            The reader needs one more slot in the stateless reader and callback
+            pools than sdkconfig.defaults has: build with stress/sdkconfig.stress
+            on top, never in sdkconfig.defaults.
+
 endmenu
 
 # esp_wifi_remote asks for esp_hosted >=2.11, so the component manager also looks at
