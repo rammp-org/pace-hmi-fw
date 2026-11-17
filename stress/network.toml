@@ -52,7 +52,7 @@ role = "racer"
 axis = "front_caster_right"
 joystick = false
 
-# The Jetson: Guo's orchestrator and its mocks (rammp-orchestrator#1), and the UI bridge.
+# The Jetson: the orchestrator and its mocks (rammp-orchestrator#1), and the UI bridge.
 [[participant]]
 name = "orchestrator"
 role = "ros_node"

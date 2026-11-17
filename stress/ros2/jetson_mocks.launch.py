@@ -1,4 +1,4 @@
-"""The Jetson's ROS 2 stack for the stress bench: Guo's orchestrator and its mocks
+"""The Jetson's ROS 2 stack for the stress bench: the orchestrator and its mocks
 (rammp-orchestrator#1), one OS process (one DDS participant) per node, as on the robot.
 
 Unlike rammp_orchestrator's demo launch files this one does not force

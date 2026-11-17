@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Fetch and build what the ROS 2 stress bench needs (run through pixi: `pixi run setup`).
 
-- rammp-interfaces-ros2 2.1.0: the message packages Guo's mocks speak, and
+- rammp-interfaces-ros2 2.1.0: the message packages the orchestrator mocks speak, and
   rammp_peripheral_interfaces for the joystick.
-- rammp-orchestrator#1 (feat/orchestrator): Guo's orchestrator and mocks.
+- rammp-orchestrator#1 (feat/orchestrator): the orchestrator and its mocks.
 
 The workspace lives at a short path (RAMMP_STRESS_WS, default C:/w/r2 on Windows, as
 MSVC and rosidl's generated paths do not mix well with long ones; ./ws elsewhere).

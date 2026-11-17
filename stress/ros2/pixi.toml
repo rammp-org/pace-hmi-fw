@@ -1,6 +1,6 @@
 [workspace]
 name = "hmi-rtps-stress-ros2"
-description = "Real ROS 2 (Jazzy) stand-ins and Guo's orchestrator mocks for the HMI RTPS stress test"
+description = "Real ROS 2 (Jazzy) stand-ins and the orchestrator mocks for the HMI RTPS stress test"
 channels = ["https://prefix.dev/robostack-jazzy", "https://prefix.dev/conda-forge"]
 platforms = ["win-64", "linux-64", "osx-arm64"]
 
@@ -29,7 +29,7 @@ pyserial = ">=3.5,<4"
 vs2022_win-64 = "*"
 
 [tasks]
-# Once: fetch rammp-interfaces-ros2 2.1.0 and Guo's orchestrator (rammp-orchestrator#1), build them.
+# Once: fetch rammp-interfaces-ros2 2.1.0 and the orchestrator (rammp-orchestrator#1), build them.
 setup = "python build_ws.py"
 # The sweep against real ROS 2, from this folder:
 #   pixi run rossweep --peer <HMI IP> --advertised-address <PC IP> --serial COM9 --label ros

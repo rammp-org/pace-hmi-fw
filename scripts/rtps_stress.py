@@ -441,7 +441,7 @@ def overlay_env(ws: str) -> dict:
 
 class RosNetwork(Network):
     """The MIB and the PACE RACER stand-ins as before (espp boards: the Python harness is what
-    they are), Guo's Jetson stack under ros2 launch, and N real rclpy stand-ins on top."""
+    they are), the Jetson mock stack under ros2 launch, and N real rclpy stand-ins on top."""
 
     ROS_SENDER_BASE = 60
 
@@ -816,7 +816,7 @@ def main() -> int:
                    help="The colcon workspace stress/ros2/build_ws.py built")
     r.add_argument("--rmw", default="rmw_cyclonedds_cpp", help="rmw_cyclonedds_cpp (the robot's) "
                    "or rmw_fastrtps_cpp")
-    r.add_argument("--no-mocks", action="store_true", help="Leave Guo's Jetson stack out")
+    r.add_argument("--no-mocks", action="store_true", help="Leave the Jetson mock stack out")
     for s in (sub.choices["sweep"], r):
         add_sweep_args(s)
     h = sub.choices["hold"]
