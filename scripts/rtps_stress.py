@@ -131,12 +131,23 @@ def harness_args(cli: argparse.Namespace, name: str, participant_id: int) -> arg
         quiet=True)
 
 
+def fresh_guid(harness: rtps_host.RtpsHostHarness) -> None:
+    """A random GUID prefix for this run. The harness derives it from name and id, as espp
+    does from the MAC: a stand-in restarted within its lease then reuses the GUID with its
+    sequence numbers back at 1, and the HMI's readers drop it as stale (StatelessReader:
+    sn < expectedSN) until the count passes the old one. That is its own finding
+    (RESULTS-2026-11-17.md); here it would only spoil the sweep."""
+    harness.guid_prefix = os.urandom(12)
+    harness.participant_guid = rtps_host.make_guid(harness.guid_prefix, rtps_host.PARTICIPANT_ENTITY_ID)
+
+
 class StandIn(rtps_host.RtpsHostHarness):
     """One stand-in participant: its role's endpoints, the stress stream, the stick."""
 
     def __init__(self, cli: argparse.Namespace, role: Role, participant_id: int,
                  stress_size: int) -> None:
         super().__init__(harness_args(cli, role.name, participant_id))
+        fresh_guid(self)
         self.role = role
         self.participant_id = participant_id
         self.stress_size = stress_size
@@ -339,6 +350,7 @@ class Network:
             period=spec.MIB_STATUS_PERIOD_MS / 1000.0, trace_packets=False,  # noqa: F821
             peer=[cli.peer], peer_participant_ids=[cli.hmi_participant_id])
         self.mib = rtps_mcb_sim.SystemStatePublisher(rtps_mcb_sim.build_harness_args(mib_cli))
+        fresh_guid(self.mib)
         self.mib_thread = threading.Thread(target=self.mib.run, daemon=True)
         self.mib_thread.start()
 

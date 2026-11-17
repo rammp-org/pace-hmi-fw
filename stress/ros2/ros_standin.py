@@ -68,9 +68,12 @@ class StandIn(Node):
             if rate > 0:
                 self.stress_timer = self.create_timer(1.0 / rate, self.send)
         tmp = self.cli.status + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as handle:
-            json.dump({"sent": self.sent, "joy_rx": self.joy_rx, "t": time.time()}, handle)
-        os.replace(tmp, self.cli.status)
+        try:
+            with open(tmp, "w", encoding="utf-8") as handle:
+                json.dump({"sent": self.sent, "joy_rx": self.joy_rx, "t": time.time()}, handle)
+            os.replace(tmp, self.cli.status)
+        except OSError:
+            pass  # Windows: the sweep is reading the file right now; the next poll writes it
 
 
 def main() -> None:
