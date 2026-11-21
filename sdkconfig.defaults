@@ -28,22 +28,24 @@ CONFIG_ESPP_FILE_SYSTEM_PARTITION_LABEL="storage"
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_SPEED_200M=y
 #
-# XIP-from-PSRAM is deliberately OFF (it is also the IDF default).
+# XIP from PSRAM: .text and .rodata are copied from flash into PSRAM at boot
+# and run from there (selects SPIRAM_FETCH_INSTRUCTIONS + SPIRAM_RODATA).
 #
-# It selects SPIRAM_FETCH_INSTRUCTIONS + SPIRAM_RODATA, which move .text and
-# .rodata out of flash and into PSRAM at boot. On the P4 flash and PSRAM sit on
-# two SEPARATE SPI buses, so that does not offload anything -- it piles code
-# fetch and rodata reads onto the one bus the DSI scanout is already saturating.
-# This panel pulls 720*1280*2 B at ~58 Hz = ~106 MB/s continuously (~140 MB/s
-# instantaneous during active pixels), and the UI's image assets are rodata:
-# ui_img_lock_png alone is 189 KB of A8. When the DSI bridge FIFO runs dry it
-# emits black, which shows up as black horizontal lines across the frame --
-# visible only where they cross non-black content, i.e. "lines in the icons".
-# The bridge logs "underrun happens" (ESP_DRAM_LOGE) when this occurs.
+# Measured on a Tab5 against the same build without it, LVGL forcing a
+# full-screen redraw every cycle: menu 9.1 -> 11.0 fps, Diagnostics
+# 9.6 -> 13.1 fps, Locked 18.6 fps both (its lock image dominates). Walking the
+# menus (partial redraws) moved 3-4%, the slowest frame 170 -> 157 ms.
+# Flash at 120 MHz (HPM) gave about the same, but needs a new bootloader,
+# which an OTA update cannot deliver.
 #
-# Leaving it off costs the ability to run arbitrary code during a flash
-# write/erase without IRAM placement, which this firmware does not need.
-# CONFIG_SPIRAM_XIP_FROM_PSRAM is not set
+# Costs: 3.6 MB of PSRAM heap (32768 -> 29090 KB) and 10 KB of internal RAM
+# (RETENT_RAM 106 -> 96 KB), which the W5500 bounce buffer also draws on.
+#
+# Watch for: DSI underruns. Code and image reads now share the PSRAM bus with
+# the panel's scanout (~106 MB/s). When the DSI bridge FIFO runs dry it emits
+# black, seen as black horizontal lines across icons, and logs "underrun
+# happens". None were logged in the runs above.
+CONFIG_SPIRAM_XIP_FROM_PSRAM=y
 CONFIG_CACHE_L2_CACHE_256KB=y
 CONFIG_CACHE_L2_CACHE_LINE_128B=y
 
