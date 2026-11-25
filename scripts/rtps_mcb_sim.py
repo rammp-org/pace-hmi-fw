@@ -81,6 +81,15 @@ MOTORS_PERIOD_S = 0.2
 MOTOR_JOG_TIMEOUT_S = 0.3
 #: The speed the MIB jogs at, rad/s at the output shaft (motor_jog_velocity_radps).
 MOTOR_JOG_SPEED = 1.0
+#: The MIB stops jogged leg actuators this long after the last ActuatorJog (the spec).
+ACTUATOR_JOG_TIMEOUT_S = 0.3
+#: The leg actuators a bench MIB starts with (RAMMP-mib-fw MIBconfig.hpp `actuators`, its
+#: Leg order): (label, min_counts, max_counts, jog speed in counts/s). The names are the
+#: MIB's, not the spec's: the HMI lists whatever Actuators sends.
+SIM_ACTUATORS = [
+    ("FC", 0, 4095, 500), ("RC", 0, 4095, 500), ("ML", 0, 4095, 500), ("MR", 0, 4095, 500),
+    ("LCarr", 0, 20000, 500), ("RCarr", 0, 20000, 500),
+]
 
 
 class SimMotor:
@@ -223,12 +232,124 @@ class MotorBench:
         return "\n".join(rows) if rows else "  (no motors)"
 
 
+class SimActuator:
+    """One leg actuator as the bench MIB reports it in Actuators."""
+
+    def __init__(self, act_id: int, label: str, lo: int, hi: int, speed: int) -> None:
+        self.id = act_id
+        self.label = label
+        self.min_counts = lo
+        self.max_counts = hi
+        self.speed = speed  # counts/s while jogged
+        self.position = float((lo + hi) // 2)
+        self.ready = True
+        self.jog_direction = 0  # -1 / +1 while a jog runs
+        self.jog_until = 0.0  # time.monotonic() the jog lapses without another ActuatorJog
+
+    def summary(self) -> "spec.ActuatorSummary":
+        return spec.ActuatorSummary(self.id, self.ready, self.jog_direction != 0,
+                                    int(round(self.position)), self.min_counts,
+                                    self.max_counts, self.label)
+
+
+class ActuatorBench:
+    """The MIB's leg actuator list: what goes out in Actuators and what an ActuatorJog does.
+
+    Plays the MIB's rules (RAMMP-mib-fw, leg jog): each ActuatorJog names the whole set,
+    so an actuator left out stops; the set jogs only while the MIB is IDLE with the
+    e-stop clear; an id that is unknown or not ready is skipped and the rest still move;
+    each clamps at its range; all stop ACTUATOR_JOG_TIMEOUT_S after the last message."""
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.actuators: list[SimActuator] = []
+        self.reset()
+        self.enabled = True  # False = stop sending Actuators (actuators not up)
+        self.seq = 0
+        self._last_step = time.monotonic()
+        #: (ids, direction, verdict) of the last ActuatorJog, for the bench to show
+        self.last_jog: tuple[tuple[int, ...], int, str] | None = None
+
+    def reset(self) -> None:
+        with self.lock:
+            self.actuators = [SimActuator(i, *row) for i, row in enumerate(SIM_ACTUATORS)]
+
+    def jog(self, ids: list[int], direction: int, may_move: bool, why_not: str) -> str:
+        """Take one ActuatorJog; returns the verdict, which the caller logs on a change."""
+        now = time.monotonic()
+        with self.lock:
+            wanted = set(ids) if direction != 0 and may_move else set()
+            moved, skipped = [], []
+            for act in self.actuators:
+                if act.id not in wanted:
+                    act.jog_direction = 0
+                elif not act.ready:
+                    act.jog_direction = 0
+                    skipped.append(act.label)
+                else:
+                    act.jog_direction = 1 if direction > 0 else -1
+                    act.jog_until = now + ACTUATOR_JOG_TIMEOUT_S
+                    moved.append(act.label)
+            unknown = sorted(set(ids) - {a.id for a in self.actuators})
+            if direction == 0 or not ids:
+                verdict = "stop"
+            elif not may_move:
+                verdict = f"refused: {why_not}"
+            else:
+                verdict = "moving " + (" ".join(moved) or "nothing")
+                if skipped:
+                    verdict += f"; not ready: {' '.join(skipped)}"
+                if unknown:
+                    verdict += f"; unknown ids: {unknown}"
+            self.last_jog = (tuple(ids), direction, verdict)
+        return verdict
+
+    def step(self) -> list[str]:
+        """Move jogged actuators on real elapsed time, lapse stale jogs; returns log lines."""
+        events: list[str] = []
+        with self.lock:
+            now = time.monotonic()
+            dt = now - self._last_step
+            self._last_step = now
+            for act in self.actuators:
+                if act.jog_direction == 0:
+                    continue
+                if now > act.jog_until or not act.ready:
+                    act.jog_direction = 0
+                    events.append(f"[actuators] jog {act.label} stopped (no ActuatorJog for "
+                                  f"{ACTUATOR_JOG_TIMEOUT_S * 1000:.0f} ms)")
+                    continue
+                act.position = min(max(act.position + act.jog_direction * act.speed * dt,
+                                       act.min_counts), act.max_counts)
+        return events
+
+    def stop_all(self) -> None:
+        with self.lock:
+            for act in self.actuators:
+                act.jog_direction = 0
+
+    def pack(self) -> bytes:
+        with self.lock:
+            payload = spec.pack_actuators([a.summary() for a in self.actuators], self.seq)
+            self.seq = (self.seq + 1) & 0xFF
+        return payload
+
+    def describe(self) -> str:
+        with self.lock:
+            rows = [f"  {i}: id {a.id} '{a.label}' {'ready' if a.ready else 'NOT READY'}"
+                    + (f" jog {a.jog_direction:+d}" if a.jog_direction else "")
+                    + f" pos {a.position:.0f} [{a.min_counts}, {a.max_counts}]"
+                    for i, a in enumerate(self.actuators)]
+        return "\n".join(rows) if rows else "  (no actuators)"
+
+
 class SystemStatePublisher(rtps_host.RtpsHostHarness):
     """Plays the MCB: publishes SystemState, and answers the joystick's commands."""
 
     def __init__(self, args: argparse.Namespace,
                  car: "rtps_drive_game.CarModel | None" = None,
-                 motors: MotorBench | None = None) -> None:
+                 motors: MotorBench | None = None,
+                 actuators: ActuatorBench | None = None) -> None:
         super().__init__(args)
         # One field where there were two: MibSystemState says both whether the chair
         # drives (ENABLED) and whether it is faulted (ERROR).
@@ -420,14 +541,34 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
             entity_index=len(self.local_readers),
         ))
 
+        # ---- leg actuator list: Actuators out, ActuatorJog in --------------
+        self.actuators = actuators if actuators is not None else ActuatorBench()
+        self._actuators_writer = rtps_host.WriterConfig(
+            topic_name=spec.TOPIC_MIB_ACTUATORS,
+            type_name=spec.TYPE_ACTUATORS,
+            reliable=False,
+            entity_index=len(self.local_writers),
+        )
+        self.local_writers.append(self._actuators_writer)
+        self.local_readers.append(rtps_host.ReaderConfig(
+            topic_name=spec.TOPIC_JOYSTICK_ACTUATOR_JOG,
+            type_name=spec.TYPE_ACTUATOR_JOG,
+            reliable=False,
+            entity_index=len(self.local_readers),
+        ))
+
     def _motors_loop(self) -> None:
         """Every MOTORS_PERIOD_S: move or lapse the jogs, then send the list. Its own
         thread, like the e-stop's: the status tick is slower than the MIB's 200 ms."""
         while True:
             for event in self.motors.step():
                 rtps_host.log(event)
+            for event in self.actuators.step():
+                rtps_host.log(event)
             if not self.paused and self.motors.enabled:
                 self._send_on(self._motors_writer, self.motors.pack())
+            if not self.paused and self.actuators.enabled:
+                self._send_on(self._actuators_writer, self.actuators.pack())
             time.sleep(MOTORS_PERIOD_S)
 
     def apply_motor_jog(self, axis_id: int, direction: int) -> str:
@@ -441,6 +582,18 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
         else:
             why_not = ""
         return self.motors.jog(axis_id, direction, not why_not, why_not)
+
+    def apply_actuator_jog(self, ids: list[int], direction: int) -> str:
+        """One ActuatorJog from the HMI: the MIB's motor-jog gate, the same rules."""
+        with self.estop_lock:
+            latched = self.estop.latched
+        if latched:
+            why_not = "e-stop latched"
+        elif self.system_state != spec.MIB_SYSTEM_STATE_IDLE:
+            why_not = f"MIB {spec.MIB_SYSTEM_STATE_NAMES.get(self.system_state, '?')}, not IDLE"
+        else:
+            why_not = ""
+        return self.actuators.jog(ids, direction, not why_not, why_not)
 
     def _estop_loop(self) -> None:
         """Every e-stop period: deadman and clear progress, then this MIB's own message.
@@ -656,6 +809,15 @@ class SystemStatePublisher(rtps_host.RtpsHostHarness):
                 if previous is None or previous != self.motors.last_jog:
                     axis_id, direction = command
                     rtps_host.log(f"[motors] jog axis {axis_id} {direction:+d}: {verdict}")
+            elif topic == spec.TOPIC_JOYSTICK_ACTUATOR_JOG:
+                command = spec.unpack_actuator_jog(payload)
+                if command is None:
+                    continue
+                previous = self.actuators.last_jog
+                verdict = self.apply_actuator_jog(*command)
+                if previous is None or previous != self.actuators.last_jog:
+                    ids, direction = command
+                    rtps_host.log(f"[actuators] jog ids {ids} {direction:+d}: {verdict}")
             elif topic in SEAT_STICK_TOPICS:
                 sample = spec.unpack_xy_twist(payload)
                 if sample is not None:
@@ -887,6 +1049,10 @@ HELP_TEXT = """commands:
   mo <n>          motors: toggle row n online/offline
   mf <n> [code]   motors: fault row n with FaultCode `code` (default 1); again clears it
   mq              motors: toggle sending Motors at all
+  l               leg actuators: list what Actuators sends
+  lr <row>        leg actuators: toggle that one ready / not ready
+  lq              leg actuators: toggle sending Actuators at all
+  l0              leg actuators: back to the MIB's six, mid-travel
   p               pause publishing (HMI should go stale after
                   MIB_STATUS_TIMEOUT_MS: blinking orange RTPS, '---')
   r               resume publishing (HMI should go straight back to green)
@@ -930,6 +1096,24 @@ def run_motor_command(motors: MotorBench, command: str) -> None:
         motors.enabled = not motors.enabled
 
 
+def run_actuator_command(actuators: ActuatorBench, command: str) -> None:
+    """One of the CLI's l commands (see HELP_TEXT)."""
+    verb, _, rest = command.partition(" ")
+    args = rest.split()
+    if verb.lower() == "lr":
+        try:
+            act = actuators.actuators[int(args[0])]
+        except (IndexError, ValueError):
+            print("  which row? (l lists them)")
+            return
+        with actuators.lock:
+            act.ready = not act.ready
+    elif verb.lower() == "lq":
+        actuators.enabled = not actuators.enabled
+    elif verb.lower() == "l0":
+        actuators.reset()
+
+
 def run_interactive(harness: SystemStatePublisher) -> None:
     print(HELP_TEXT)
     while True:
@@ -971,6 +1155,11 @@ def run_interactive(harness: SystemStatePublisher) -> None:
             run_motor_command(harness.motors, typed)  # as typed: m+ keeps the label's case
             print(harness.motors.describe()
                   + ("" if harness.motors.enabled else "\n  [not sending Motors]"))
+            continue
+        elif command == "l" or command.startswith(("lr", "lq", "l0")):
+            run_actuator_command(harness.actuators, typed)
+            print(harness.actuators.describe()
+                  + ("" if harness.actuators.enabled else "\n  [not sending Actuators]"))
             continue
         elif command in ("e", "err", "error"):
             harness.system_state = spec.MIB_SYSTEM_STATE_ERROR

@@ -300,6 +300,12 @@ MSG_MOTORS = [("seq", "B"), ("motors", ("seq", [
     ("axis_id", "B"), ("online", "B"), ("state", "B"), ("fault_code", "B"),
     ("position", "f"), ("velocity", "f"), ("label", "str"),
 ]))]
+MSG_ACTUATOR_JOG = [("ids", ("seq", "B")), ("direction", "b")]
+# rammp::Actuators: seq, then one ActuatorSummary per leg actuator.
+MSG_ACTUATORS = [("seq", "B"), ("actuators", ("seq", [
+    ("id", "B"), ("ready", "B"), ("moving", "B"), ("position", "i"),
+    ("min_counts", "i"), ("max_counts", "i"), ("label", "str"),
+]))]
 # rammp::EStop: the ROS layout (std_msgs/Header, engaged, source, reason), then the
 # appended pub_seq, clear_target, clear_pub_seq. Header is written inline: stamp.sec, stamp.nanosec,
 # frame_id.
@@ -494,6 +500,44 @@ def pack_motor_jog(axis_id: int, direction: int) -> bytes:
 def unpack_motor_jog(payload: bytes) -> tuple[int, int] | None:
     """(axis_id, direction): -1 / +1 while held, 0 = stop now. None if it does not decode."""
     return decode(MSG_MOTOR_JOG, payload)
+
+
+class ActuatorSummary(NamedTuple):
+    """One rammp::ActuatorSummary: a leg actuator as the MIB last saw it."""
+    id: int
+    ready: bool
+    moving: bool
+    position: int  # encoder counts
+    min_counts: int
+    max_counts: int
+    label: str
+
+
+def pack_actuators(actuators, seq: int = 0) -> bytes:
+    """A rammp::Actuators (MIB -> joystick): `actuators` is a list of ActuatorSummary."""
+    return encode(MSG_ACTUATORS, seq & 0xFF, [
+        (a.id & 0xFF, 1 if a.ready else 0, 1 if a.moving else 0, int(a.position),
+         int(a.min_counts), int(a.max_counts), a.label) for a in actuators])
+
+
+def unpack_actuators(payload: bytes) -> tuple[int, list[ActuatorSummary]] | None:
+    """(seq, actuators), or None."""
+    message = decode(MSG_ACTUATORS, payload)
+    if message is None:
+        return None
+    return message[0], [ActuatorSummary(i, bool(r), bool(m), p, lo, hi, lbl)
+                        for i, r, m, p, lo, hi, lbl in message[1]]
+
+
+def pack_actuator_jog(ids, direction: int) -> bytes:
+    """A rammp::ActuatorJog (joystick -> MIB); for tests of the tools."""
+    return encode(MSG_ACTUATOR_JOG, [i & 0xFF for i in ids], max(-128, min(127, direction)))
+
+
+def unpack_actuator_jog(payload: bytes) -> tuple[list[int], int] | None:
+    """(ids, direction): the whole set to jog, -1 / +1 while held, 0 = stop now."""
+    message = decode(MSG_ACTUATOR_JOG, payload)
+    return None if message is None else (list(message[0]), message[1])
 
 
 class EStop(NamedTuple):

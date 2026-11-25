@@ -284,14 +284,17 @@ CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=65536
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 
 # espp/rtps endpoint pools. SPDP takes 1 best-effort writer + 1 reader; the HMI
-# adds 9 writers (counter, stick, seat, drive, motor jog, self-test report, e-stop,
-# seat stick, swivel stick) and 6 readers (command, brightness, MibStatus,
-# diagnostics, Motors, e-stop). With SEDP's two of each that is 12 writers and 9
-# readers per participant: the writer cap goes from the embedded profile's 10 to 12.
-CONFIG_RTPS_LIMIT_NUM_STATELESS_WRITERS=10
-CONFIG_RTPS_LIMIT_NUM_WRITERS_PER_PARTICIPANT=12
-CONFIG_RTPS_LIMIT_NUM_STATELESS_READERS=7
-CONFIG_RTPS_LIMIT_MAX_NUM_READER_CALLBACKS=7
+# adds 10 writers (counter, stick, seat, drive, motor jog, actuator jog, self-test
+# report, e-stop, seat stick, swivel stick) and 7 readers (command, brightness,
+# MibStatus, diagnostics, Motors, Actuators, e-stop). With SEDP's two of each that
+# is 13 writers and 10 readers per participant: the writer cap goes from the
+# embedded profile's 10 to 13; the reader cap stays at its 10, said here so the
+# next reader knows it has to raise it.
+CONFIG_RTPS_LIMIT_NUM_STATELESS_WRITERS=11
+CONFIG_RTPS_LIMIT_NUM_WRITERS_PER_PARTICIPANT=13
+CONFIG_RTPS_LIMIT_NUM_STATELESS_READERS=8
+CONFIG_RTPS_LIMIT_NUM_READERS_PER_PARTICIPANT=10
+CONFIG_RTPS_LIMIT_MAX_NUM_READER_CALLBACKS=8
 
 # espp's RTPS tasks (rtps_worker_*, rtps_reactor) at lv_task's priority. At the
 # default 5, a screen build at 20 held the e-stop heartbeat back past the MIB's
