@@ -41,4 +41,6 @@ shape as the motor debug list ([motor-debug.md](motor-debug.md)).
 - Tab5, with a fake leg list inside the HMI: ticked legs move together (touch and stick),
   an unticked leg moves alone, one stop per release, not-ready rows grey out.
 - An LVGL stall over 300 ms (e.g. a screenshot) stops the move: the fail-safe.
-- Not run: over the network, or on a MIB. Both build.
+- Over WiFi with the fake MIB (2026-11-26): rows from `Actuators`; FC alone and FC + ML
+  together (`ids [0, 2]`) moved, one stop per release.
+- Not run on a MIB. Both build.
