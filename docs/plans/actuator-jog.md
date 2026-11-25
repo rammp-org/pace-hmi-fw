@@ -1,56 +1,44 @@
-# Leg actuator jog, several at once (issue #29)
+# Several leg actuators at once (issue #29)
 
-Move the carriages, or the front and rear casters, together from the HMI instead of one
-actuator at a time. Same shape as the motor debug list ([motor-debug.md](motor-debug.md)).
+Move the carriages, or the front and rear casters, together from DEBUG ACTUATORS. Same
+shape as the motor debug list ([motor-debug.md](motor-debug.md)).
 
 ## Messages (rammp-rtps `messages/joystick_message.hpp`)
 
 | Message | Topic | Direction | Rate |
 |---|---|---|---|
-| `Actuators {seq, actuators[]}` | `rammp/mib/actuators` | MIB -> HMI | ~5 Hz |
-| `ActuatorJog {ids[], direction}` | `rammp/joystick/actuator_jog` | HMI -> MIB | every 100 ms while held |
+| `Actuators {seq, actuators[]}` | `rammp/mib/actuators` | MIB -> HMI | 5 Hz |
+| `ActuatorJog {ids[], direction}` | `rammp/joystick/actuator_jog` | HMI -> MIB | 100 ms while held |
 
-`ActuatorSummary`: id, ready, moving, position (counts), min/max counts, label. The MIB owns
-the list and its names, so the HMI needs no rebuild when actuators are renamed or added.
+- Per leg: id, ready, moving, position and range (counts), name. The MIB owns the list.
+- `ActuatorJog` names the whole set: a leg left out stops. The MIB stops all 300 ms after
+  the last message, as for `MotorJog`.
 
-`ActuatorJog` names the whole set each time: an actuator left out stops. The MIB stops them
-all 300 ms after the last message, as for `MotorJog`.
+## HMI
 
-## HMI (DEBUG ACTUATORS)
-
-- One row per `Actuators` entry, below the motor rows. Short name = state (`RDY`, `MOV`,
-  `OFF`), label = the MIB's name, value = position in counts. Not ready: `--`, -/+ greyed.
-- A click (tap on the row, or the stick button) ticks or unticks a row (a check mark before
-  the name). Ticks persist while the page is closed; an id the MIB drops loses its tick.
-- -/+ (or stick left/right on the focused row) held: on a ticked row, every ticked row
-  jogs; on an unticked row, that row alone. Release sends one stop for the set.
-- Nothing is sent while the HMI e-stop is active.
+- One row per leg, below the motor rows: `RDY` / `MOV` / `OFF`, name, position. Not
+  ready: `--`, -/+ greyed.
+- Tap or stick button ticks a row. Ticks survive closing the page; a leg the MIB drops
+  loses its tick.
+- Hold -/+ (or stick left/right): on a ticked row, all ticked legs move; on an unticked
+  row, that leg alone. Release sends one stop. Nothing sent during e-stop.
 
 ## MIB (RAMMP-mib-fw, on `feat/20-seat-kinematics`)
 
-- `publish_actuators()` beside `Motors` (200 ms), cached readings only.
-- `run_leg_jog_step()` on the seat task (100 ms): each named ready leg gets
-  `jog(+/- jog_step)`; one dropped from the set gets `jog(0)`; leaving IDLE quick-stops.
-  Only in IDLE, e-stop clear, no seat move.
+- `Actuators` beside `Motors` (200 ms), cached readings.
+- Seat task (100 ms): each named ready leg moves one `jog_step`; a dropped leg rests;
+  leaving IDLE quick-stops. Only in IDLE, e-stop clear, no seat move.
 
-## Decided unattended (revisit)
+## Decisions
 
-- Separate messages from `Motors`/`MotorJog`: the legs are CANopen actuators with counts and
-  ranges, not RACER boards; `MotorJog` stays one motor at a time.
-- Same direction for every actuator in the set. Opposite directions (carriages apart) would
-  need a per-id direction; not asked for.
-- -/+ grey at a row's own limit, so a set cannot be pushed further from a row already at
-  its end; hold on another ticked row. The MIB clamps each actuator anyway.
+- New messages, not `Motors` / `MotorJog`: legs are counts with ranges, not motor boards,
+  and the MIB holds one `MotorJog` at a time.
+- One direction for the whole set; opposite directions would need one per leg.
+- Hold to move, not step targets: release or link loss stops every leg.
 
-## Verified, and not (2026-11-25)
+## Tested (2026-11-25)
 
-- HMI on Tab5 board 2 (local test build: a fake MIB's six actuators inside the HMI, the
-  jog it would send logged; touch and remote UI over USB). Rows built from the list; MR
-  not ready reads `--` with -/+ grey; ticks by tap and by stick button; RC + ML held + by
-  touch moved together (`ids=[1 2]`); an unticked row jogged alone with another row
-  ticked; LCarr + RCarr by stick right (`ids=[4 5]`, 1000 counts in 2 s); one stop on
-  every release.
-- A screenshot that blocks the LVGL task for over 300 ms lapses the jog (the fail-safe);
-  a long screen build would do the same.
-- Not run: the RTPS wire between HMI and fake MIB (the PC had no network path to the
-  board), and the MIB side on a MIB (none on this bench). Both build.
+- Tab5, with a fake leg list inside the HMI: ticked legs move together (touch and stick),
+  an unticked leg moves alone, one stop per release, not-ready rows grey out.
+- An LVGL stall over 300 ms (e.g. a screenshot) stops the move: the fail-safe.
+- Not run: over the network, or on a MIB. Both build.
