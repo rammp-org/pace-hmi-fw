@@ -74,6 +74,8 @@ void rtps_comms_on_mib_status(std::function<void(const rammp::MibStatus &)> hand
 void rtps_comms_on_diagnostics(std::function<void(const rammp::Diagnostics &)> handler);
 /// The motor debug list: every motor the MIB commands, with its latest state.
 void rtps_comms_on_motors(std::function<void(const rammp::Motors &)> handler);
+/// The leg actuator list: every caster, main leg and carriage the MIB drives.
+void rtps_comms_on_actuators(std::function<void(const rammp::Actuators &)> handler);
 void rtps_comms_on_selftest_run(std::function<void(uint8_t run_id)> handler);
 /// `peer_rx`: the peer's count of pings received; -1 when the pong was a plain echo.
 void rtps_comms_on_selftest_pong(std::function<void(uint16_t seq, int peer_rx)> handler);
@@ -101,6 +103,9 @@ bool rtps_comms_publish_seat(rammp::SeatAxis axis, float target);
 /// Ask the MIB to jog one motor (hold-to-run: resend while held, 0 = stop). Not sent
 /// while the e-stop is active.
 bool rtps_comms_publish_motor_jog(uint8_t axis_id, int8_t direction);
+/// Ask the MIB to jog these leg actuators together (hold-to-run: resend while held, the
+/// whole set each time; 0 = stop). Not sent while the e-stop is active.
+bool rtps_comms_publish_actuator_jog(const std::vector<uint8_t> &ids, int8_t direction);
 bool rtps_comms_publish_selftest_ping(uint16_t seq);
 
 bool rtps_comms_publish_selftest_report(const rammp::SelfTestReport &report);

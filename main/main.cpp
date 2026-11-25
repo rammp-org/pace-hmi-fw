@@ -2656,8 +2656,10 @@ static_assert(std::size(kSettingParamValue) == SETTINGS_PARAM_COUNT,
 
 // The most motor rows the actuators page shows; a longer Motors list is cut here.
 static constexpr int kMotorRowsMax = 16;
+// The most leg actuator rows; a longer Actuators list is cut here (the MIB has six).
+static constexpr int kLegRowsMax = 8;
 static constexpr int kSettingRowsMax =
-    std::max<int>(rammp::kSeatAxisCount + kMotorRowsMax, SETTINGS_PARAM_COUNT);
+    std::max<int>(rammp::kSeatAxisCount + kMotorRowsMax + kLegRowsMax, SETTINGS_PARAM_COUNT);
 static SettingRow setting_rows[kSettingRowsMax];
 static int setting_row_count; // rows on the page that is up; 0 while the screen is not
 static int setting_cursor;    // which row the joystick is on
@@ -2686,6 +2688,53 @@ static uint32_t motor_list_version; // +1 when the ids or labels change
 static uint32_t motor_rows_version; // what the rows on screen were built from
 // Each motor's position in tenths of a radian; kValueUnknown while it is offline.
 static lv_subject_t motor_position[kMotorRowsMax];
+
+// Leg actuator rows (casters, main legs, carriages), below the motors: from the MIB's
+// Actuators message at run time, like the motor rows, so the list and its names follow
+// the MIB. Any number of them can be ticked and jogged together (see "Leg actuator
+// rows"). LVGL task only.
+struct LegRowInfo {
+  uint8_t id;
+  bool ready; // the MIB can move it; a row that is not reads "--" and greys -/+
+  int32_t min_counts;
+  int32_t max_counts;
+  char state[8];  // the row's short name: "RDY", "MOV", "OFF"
+  char label[24]; // the MIB's name: "LCarr"
+};
+static LegRowInfo leg_info[kLegRowsMax];
+static int leg_info_count;
+static uint32_t leg_list_version; // +1 when the ids, labels or ranges change
+static uint32_t leg_rows_version; // what the rows on screen were built from
+// Each actuator's position in encoder counts; kValueUnknown while it is not ready.
+static lv_subject_t leg_position[kLegRowsMax];
+// Which actuators are ticked, by id: kept while the page is closed and across a
+// rebuild, dropped when the MIB stops listing the id.
+static std::array<bool, 256> leg_ticked{};
+// How many motor and leg rows the page that is up was built with: the rows run seat
+// axes, then motors, then legs.
+static int motor_rows_built;
+static int leg_rows_built;
+
+// The leg_info index of an actuators-page row, or -1 if it is not a leg row.
+static int leg_row_info(int row_index) {
+  const int i = row_index - seat_axis_count - motor_rows_built;
+  return i >= 0 && i < leg_rows_built ? i : -1;
+}
+
+// A leg row's state and its tick. Each label only on a change: a set redraws the row.
+static void leg_row_draw(const SettingRow &row, const LegRowInfo &info) {
+  lv_obj_t *name = ui_comp_get_child(row.row, UI_COMP_SETTINGROW_HEAD_NAMES_SHORT);
+  if (strcmp(lv_label_get_text(name), info.state) != 0) {
+    lv_label_set_text(name, info.state);
+  }
+  char label[sizeof(info.label) + 8];
+  lv_snprintf(label, sizeof(label), "%s%s", leg_ticked[info.id] ? LV_SYMBOL_OK " " : "",
+              info.label);
+  lv_obj_t *text = ui_comp_get_child(row.row, UI_COMP_SETTINGROW_HEAD_NAMES_LABEL);
+  if (strcmp(lv_label_get_text(text), label) != 0) {
+    lv_label_set_text(text, label);
+  }
+}
 
 // What a value reads before it is known - only ever an actuator the MCB has
 // not reported yet. Not zero: zero is a position an actuator can genuinely be
@@ -3055,9 +3104,18 @@ static void setting_step_click_cb(lv_event_t *e) {
   setting_step(row, lv_event_get_target_obj(e) == row->minus ? -1 : +1);
 }
 
-// A tap on the row itself: focus, nothing else.
+// A tap on the row itself, or the stick button on the focused one: focus, and on a leg
+// actuator row, tick or untick it.
 static void setting_row_click_cb(lv_event_t *e) {
-  setting_focus(static_cast<const SettingRow *>(lv_event_get_user_data(e))->index);
+  const auto *row = static_cast<const SettingRow *>(lv_event_get_user_data(e));
+  setting_focus(row->index);
+  const int leg =
+      lv_subject_get_int(&setting_page_subject) == kActuatorsPage ? leg_row_info(row->index) : -1;
+  if (leg >= 0) {
+    bool &ticked = leg_ticked[leg_info[leg].id];
+    ticked = !ticked;
+    leg_row_draw(*row, leg_info[leg]);
+  }
 }
 
 // LVGL's click-focus (indev_click_focus in lv_indev.c) remembers the last
@@ -3123,6 +3181,8 @@ static void setting_rows_clear() {
   }
   setting_row_count = 0;
   setting_cursor = 0;
+  motor_rows_built = 0;
+  leg_rows_built = 0;
 }
 
 static void setting_row_add(const StepperSpec &spec, lv_subject_t *value, bool actuator) {
@@ -3187,7 +3247,17 @@ static void setting_page_open(int32_t page) {
           {motor_info[i].state, motor_info[i].label, INT32_MIN + 1, INT32_MAX, 1, 1, nullptr},
           &motor_position[i], false);
     }
+    motor_rows_built = motor_info_count;
     motor_rows_version = motor_list_version;
+    // The MIB's range, so -/+ grey at the ends; position in counts, no unit.
+    for (int i = 0; i < leg_info_count; i++) {
+      const LegRowInfo &info = leg_info[i];
+      setting_row_add({info.state, info.label, info.min_counts, info.max_counts, 1, 0, nullptr},
+                      &leg_position[i], false);
+      leg_rows_built = i + 1;
+      leg_row_draw(setting_rows[setting_row_count - 1], info);
+    }
+    leg_rows_version = leg_list_version;
   } else {
     for (int i = 0; i < SETTINGS_PARAM_COUNT; i++) {
       if (kSettingParams[i].page == page) {
@@ -3285,8 +3355,118 @@ static void motors_apply(const rammp::Motors &m) {
   }
 }
 
+/////////////////////////////////////////////////////////////////////////////
+// Leg actuator rows (the actuators page, below the motors)
+//
+// One row per entry of the MIB's Actuators message, in its order: the short name is
+// its state (RDY, MOV, OFF), the label the MIB's name, the number its position in
+// encoder counts. A click (a tap on the row, or the stick button) ticks or unticks a
+// row. -/+ (or the stick left/right on the focused row) is hold-to-run, as on a motor
+// row, with one difference: held on a ticked row, it jogs every ticked row together;
+// held on a row that is not ticked, that row alone. So the two carriages, or the front
+// and rear casters, move at once. While held, the poll resends ActuatorJog with the
+// whole set every kMotorJogResendMs, and one stop for that set when the hold ends; the
+// MIB stops them all when the messages stop coming. The MIB picks the speed, clamps
+// each to its range and refuses the jog unless it is IDLE with the e-stop clear.
+/////////////////////////////////////////////////////////////////////////////
+
+// The latest Actuators sample, handed over as Motors is (see motors_rx_mutex).
+static std::mutex actuators_rx_mutex;
+static rammp::Actuators actuators_rx;
+static bool actuators_rx_new = false;
+
+static void actuators_receive(const rammp::Actuators &a) { // RTPS task
+  std::lock_guard<std::mutex> lock(actuators_rx_mutex);
+  actuators_rx = a;
+  actuators_rx_new = true;
+}
+
+// An Actuators sample. LVGL task: data and subjects only, the rows themselves are
+// redrawn and rebuilt by the poll.
+static void actuators_apply(const rammp::Actuators &a) {
+  const int count = std::min<int>(static_cast<int>(a.actuators.size()), kLegRowsMax);
+  bool changed = count != leg_info_count;
+  for (int i = 0; i < count; i++) {
+    const rammp::ActuatorSummary &actuator = a.actuators[i];
+    LegRowInfo &info = leg_info[i];
+    if (info.id != actuator.id || info.min_counts != actuator.min_counts ||
+        info.max_counts != actuator.max_counts ||
+        strncmp(info.label, actuator.label.c_str(), sizeof(info.label) - 1) != 0) {
+      changed = true;
+      info.id = actuator.id;
+      info.min_counts = actuator.min_counts;
+      info.max_counts = actuator.max_counts;
+      lv_snprintf(info.label, sizeof(info.label), "%s", actuator.label.c_str());
+    }
+    info.ready = actuator.ready != 0;
+    lv_snprintf(info.state, sizeof(info.state), "%s",
+                !info.ready ? "OFF" : (actuator.moving != 0 ? "MOV" : "RDY"));
+    lv_subject_set_int(&leg_position[i], info.ready ? actuator.position : kValueUnknown);
+  }
+  leg_info_count = count;
+  if (changed) {
+    leg_list_version++;
+    std::array<bool, 256> listed{};
+    for (int i = 0; i < count; i++) {
+      listed[leg_info[i].id] = true;
+    }
+    for (size_t id = 0; id < leg_ticked.size(); id++) {
+      leg_ticked[id] = leg_ticked[id] && listed[id];
+    }
+  }
+}
+
+// LVGL task, from motor_jog_poll_cb. Keeps the leg rows in step with the list, and
+// sends the jog for the set held, or a single stop for it when the hold ends.
+static void leg_jog_poll(bool up) {
+  static std::vector<uint8_t> held; // the set being jogged; empty = none
+  std::optional<rammp::Actuators> sample;
+  {
+    std::lock_guard<std::mutex> lock(actuators_rx_mutex);
+    if (actuators_rx_new) {
+      sample = std::move(actuators_rx);
+      actuators_rx_new = false;
+    }
+  }
+  if (sample) {
+    actuators_apply(*sample);
+  }
+  const int first = seat_axis_count + motor_rows_built;
+  int pressed = -1; // the leg_info index of the row held
+  int8_t direction = 0;
+  for (int i = 0; up && i < leg_rows_built; i++) {
+    const SettingRow &row = setting_rows[first + i];
+    leg_row_draw(row, leg_info[i]);
+    const uint32_t key = setting_cursor == first + i ? joy_key.load() : 0;
+    const bool minus = !lv_obj_has_state(row.minus, LV_STATE_DISABLED) &&
+                       (lv_obj_has_state(row.minus, LV_STATE_PRESSED) || key == LV_KEY_LEFT);
+    const bool plus = !lv_obj_has_state(row.plus, LV_STATE_DISABLED) &&
+                      (lv_obj_has_state(row.plus, LV_STATE_PRESSED) || key == LV_KEY_RIGHT);
+    if (direction == 0 && minus != plus) {
+      pressed = i;
+      direction = plus ? 1 : -1;
+    }
+  }
+  std::vector<uint8_t> ids;
+  if (direction != 0) {
+    if (leg_ticked[leg_info[pressed].id]) {
+      for (int i = 0; i < leg_rows_built; i++) {
+        if (leg_ticked[leg_info[i].id]) {
+          ids.push_back(leg_info[i].id);
+        }
+      }
+    } else {
+      ids.push_back(leg_info[pressed].id);
+    }
+    rtps_comms_publish_actuator_jog(ids, direction);
+  } else if (!held.empty()) {
+    rtps_comms_publish_actuator_jog(held, 0); // let go: stop now
+  }
+  held = std::move(ids);
+}
+
 // LVGL task. Keeps the motor rows in step with the list, and sends the jog for the
-// one held, or a single stop when the hold ends.
+// one held, or a single stop when the hold ends; then the same for the leg rows.
 static void motor_jog_poll_cb(lv_timer_t *) {
   static int held_axis = -1; // the axis being jogged; -1 = none
   std::optional<rammp::Motors> sample;
@@ -3302,12 +3482,16 @@ static void motor_jog_poll_cb(lv_timer_t *) {
   }
   const bool up = lv_screen_active() == ui_SettingsScreen &&
                   lv_subject_get_int(&setting_page_subject) == kActuatorsPage;
-  if (up && motor_rows_version != motor_list_version) {
-    setting_page_open(kActuatorsPage); // a motor came or went: the rows follow the list
+  if (up && (motor_rows_version != motor_list_version || leg_rows_version != leg_list_version)) {
+    // A motor or an actuator came or went: the rows follow the lists, the cursor stays.
+    const int cursor = setting_cursor;
+    setting_page_open(kActuatorsPage);
+    setting_focus(cursor);
   }
   int axis = -1;
   int8_t direction = 0;
-  for (int i = seat_axis_count; up && i < setting_row_count && direction == 0; i++) {
+  for (int i = seat_axis_count; up && i < seat_axis_count + motor_rows_built && direction == 0;
+       i++) {
     const SettingRow &row = setting_rows[i];
     const MotorRowInfo &info = motor_info[i - seat_axis_count];
     lv_obj_t *name = ui_comp_get_child(row.row, UI_COMP_SETTINGROW_HEAD_NAMES_SHORT);
@@ -3330,6 +3514,7 @@ static void motor_jog_poll_cb(lv_timer_t *) {
     rtps_comms_publish_motor_jog(static_cast<uint8_t>(held_axis), 0); // let go: stop now
   }
   held_axis = axis;
+  leg_jog_poll(up);
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -6372,6 +6557,9 @@ extern "C" void app_main(void) {
   for (lv_subject_t &position : motor_position) {
     lv_subject_init_int(&position, kValueUnknown);
   }
+  for (lv_subject_t &position : leg_position) {
+    lv_subject_init_int(&position, kValueUnknown);
+  }
   lv_timer_create(motor_jog_poll_cb, kMotorJogResendMs, nullptr);
 
   // Initialised before the screen's warning panel ever binds to it.
@@ -6944,7 +7132,8 @@ extern "C" void app_main(void) {
       }
     }
   });
-  rtps_comms_on_motors(motors_receive); // no lvgl_mutex: see motors_receive
+  rtps_comms_on_motors(motors_receive);       // no lvgl_mutex: see motors_receive
+  rtps_comms_on_actuators(actuators_receive); // the same
   if (!rtps_comms_start(static_cast<NetLink>(settings_get(SETTINGS_PARAM_NETWORK)))) {
     logger.warn("RTPS comms not started (network bring-up failed)");
   }
