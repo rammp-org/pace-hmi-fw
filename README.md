@@ -44,7 +44,7 @@ The UI follows RAMMP UI spec V2. Every screen has the same frame: the status bar
 | --- | --- |
 | Drive | the Drive screen while driving, else the Locked screen; greyed while the MCB could not drive |
 | Seat Functions | the four seat motions, and Seat / Swivel: the stick straight to the seat or the swivel while the MIB is idle; greyed while the MCB could not move the seat |
-| Bench | the PIN (1234), then DEBUG ACTUATORS: step each actuator with - / + |
+| Bench | the PIN (1234), then DEBUG ACTUATORS: step each actuator with - / +; tick leg actuators (tap or stick button) and hold - / + to jog the ticked ones together |
 | Diagnostics | live readings from the MCB |
 | Internet Settings | Ethernet or WiFi, the WiFi network, and the link's status: see [Network](#network) |
 | Joystick | the stick test; press and hold CALIBRATE (or the stick button) to calibrate |
