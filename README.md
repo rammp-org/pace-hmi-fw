@@ -179,6 +179,7 @@ One row in `messages/joystick_message.hpp` (rammp-rtps); the HMI screens and the
 | `python scripts/rtps_mcb_sim.py` | CLI version of the GUI (`--cycle` walks every state) |
 | `python scripts/rtps_adc_plot.py` | live joystick plot (needs matplotlib) |
 | `python scripts/hmi_ui.py shot out.png` | the board's screen, and taps / keys / `walk`, over TCP; needs `CONFIG_HMI_REMOTE_UI` in your local `sdkconfig` (never in `sdkconfig.defaults`) |
+| `CONFIG_HMI_TOUCH_STICK` | on-screen joystick keys for a board without one (menuconfig → RAMMP HMI; local `sdkconfig` only). They drive the chair like the stick |
 | `cd sim; python run.py` | the old screens on a PC, parked since spec V2 ([sim/README.md](sim/README.md)) |
 
 <img src="docs/screenshots/McbSimGui.png" alt="MCB simulator" width="480">

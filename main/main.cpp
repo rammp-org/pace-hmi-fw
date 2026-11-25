@@ -1041,6 +1041,58 @@ static void gpio48_button_callback(const espp::Interrupt::Event &event) {
   stick_button_edge(event.active);
 }
 
+#if CONFIG_HMI_TOUCH_STICK
+// On-screen joystick (CONFIG_HMI_TOUCH_STICK, off by default): for a board with no
+// joystick. Five touch keys right above the burger key, on the top layer so they show on
+// every screen and over the menu: up, down, left, right and the joystick button. A held
+// arrow is the stick pushed fully that way, already as mounted (+Y forward); let go and it
+// is centred. They replace the joystick's axes in the ADC loop, so everything downstream,
+// driving included, sees them as the stick. The button key takes the GPIO's edge path.
+static std::atomic<int8_t> touch_stick_x{0};
+static std::atomic<int8_t> touch_stick_y{0};
+
+static void touch_stick_key_cb(lv_event_t *e) {
+  const auto *dir = static_cast<const int8_t *>(lv_event_get_user_data(e));
+  const bool held = lv_event_get_code(e) == LV_EVENT_PRESSED;
+  touch_stick_x.store(held ? dir[0] : 0);
+  touch_stick_y.store(held ? dir[1] : 0);
+}
+
+static void touch_stick_button_cb(lv_event_t *e) {
+  stick_button_edge(lv_event_get_code(e) == LV_EVENT_PRESSED);
+}
+
+static void touch_stick_create() {
+  static constexpr int8_t kDirs[4][2] = {{0, 1}, {0, -1}, {-1, 0}, {1, 0}};
+  static constexpr const char *kText[5] = {LV_SYMBOL_UP, LV_SYMBOL_DOWN, LV_SYMBOL_LEFT,
+                                           LV_SYMBOL_RIGHT, "BTN"};
+  // The burger key's height, in a row ending where it starts (y 1116).
+  static constexpr int32_t kKeyWidth = 144;
+  static constexpr int32_t kKeyHeight = 164;
+  static constexpr int32_t kTop = 1116 - kKeyHeight;
+  for (int i = 0; i < 5; i++) {
+    lv_obj_t *key = lv_button_create(lv_layer_top());
+    lv_group_remove_obj(key); // touch only: never in the joystick's focus walk
+    lv_obj_set_size(key, kKeyWidth, kKeyHeight);
+    lv_obj_set_pos(key, i * kKeyWidth, kTop);
+    lv_obj_set_style_radius(key, 0, 0);
+    lv_obj_set_style_border_width(key, 2, 0);
+    lv_obj_set_style_border_color(key, lv_color_black(), 0);
+    lv_obj_t *label = lv_label_create(key);
+    lv_label_set_text(label, kText[i]);
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_48, 0);
+    lv_obj_center(label);
+    for (const auto code : {LV_EVENT_PRESSED, LV_EVENT_RELEASED, LV_EVENT_PRESS_LOST}) {
+      if (i < 4) {
+        lv_obj_add_event_cb(key, touch_stick_key_cb, code, const_cast<int8_t *>(kDirs[i]));
+      } else {
+        lv_obj_add_event_cb(key, touch_stick_button_cb, code, nullptr);
+      }
+    }
+  }
+}
+#endif
+
 static bool load_audio(size_t &out_size, size_t &out_sample_rate);
 static void play_click(espp::M5StackTab5 &tab5);
 // "Can't do that", heard (play_refusal) or heard and felt (refusal_feedback);
@@ -5873,6 +5925,9 @@ extern "C" void app_main(void) {
   // the flush instead (set_display_flipped).
   lv_display_set_rotation(lv_display_get_default(), LV_DISPLAY_ROTATION_0);
   ui_init();
+#if CONFIG_HMI_TOUCH_STICK
+  touch_stick_create();
+#endif
   // ui_init builds every screen, and this one is dead: the actuators are a
   // page of the SettingsScreen now (DEBUG ACTUATORS). Its widget tree sits in
   // internal RAM, and the W5500's SPI bounce buffer is allocated from the same
@@ -6931,6 +6986,14 @@ extern "C" void app_main(void) {
       if (stick_invert_y.load()) {
         stick_y = -stick_y;
       }
+      float stick_z = stick.z();
+#if CONFIG_HMI_TOUCH_STICK
+      // The on-screen keys are the stick (see touch_stick_create), never the ADC: a board
+      // with no joystick reads noise there. After the swap and mirrors: up is forward.
+      stick_x = static_cast<float>(touch_stick_x.load());
+      stick_y = static_cast<float>(touch_stick_y.load());
+      stick_z = 0.0f;
+#endif
 
       // Analog -> keypad level. Schmitt trigger (engage past kKeyEngage, release
       // below kKeyRelease) so the boundary can't chatter; between the two
@@ -7004,7 +7067,7 @@ extern "C" void app_main(void) {
         if (lock.owns_lock()) {
           lv_subject_set_int(&adc_x_subject, static_cast<int32_t>(stick_x * 100.0f));
           lv_subject_set_int(&adc_y_subject, static_cast<int32_t>(stick_y * 100.0f));
-          lv_subject_set_int(&adc_twist_subject, static_cast<int32_t>(stick.z() * 100.0f));
+          lv_subject_set_int(&adc_twist_subject, static_cast<int32_t>(stick_z * 100.0f));
         }
       }
 
@@ -7029,7 +7092,7 @@ extern "C" void app_main(void) {
       // its dead zones (every axis reads exactly 0 inside them), or the button. The MIB
       // does not read the stick in push assist, so the HMI asks it to leave.
       if (push_assist.load()) {
-        const bool moved = stick_x != 0.0f || stick_y != 0.0f || stick.z() != 0.0f;
+        const bool moved = stick_x != 0.0f || stick_y != 0.0f || stick_z != 0.0f;
         if (drive_start_button.load() ? joy_button_pressed.load() : moved) {
           push_assist_exit();
         }
@@ -7037,7 +7100,7 @@ extern "C" void app_main(void) {
       const bool neutral = !stick_takes_over.load() &&
                            (calibrating || !stick_drives.load() || stick_wait_centre.load());
       adc_published = rtps_comms_publish_adc(
-          neutral ? 0.0f : stick_x, neutral ? 0.0f : stick_y, neutral ? 0.0f : stick.z(),
+          neutral ? 0.0f : stick_x, neutral ? 0.0f : stick_y, neutral ? 0.0f : stick_z,
           joy_button_pressed.load() ? rammp::Buttons::JOYSTICK : rammp::Buttons::NONE);
 
       // On SeatControlScreen the stick goes to the seat or the swivel instead, on
@@ -7055,7 +7118,7 @@ extern "C" void app_main(void) {
           if (moving != SeatStick::NONE && moving != target) {
             rtps_comms_publish_seat_stick(moving, 0.0f, 0.0f, 0.0f, rammp::Buttons::NONE);
           }
-          rtps_comms_publish_seat_stick(target, stick_x, stick_y, stick.z(), buttons);
+          rtps_comms_publish_seat_stick(target, stick_x, stick_y, stick_z, buttons);
           moving = target;
           stop_left = kSeatStickStopSamples;
         } else if (stop_left > 0) {
