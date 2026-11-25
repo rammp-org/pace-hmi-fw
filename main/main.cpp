@@ -1017,13 +1017,19 @@ static void stick_button_edge(bool active) {
 
   const int64_t now = esp_timer_get_time();
   static int64_t pressed_at_us = 0;
+  // Only a release that follows a press selects. A second release edge - contact
+  // bounce, or a floating line on a board with no joystick - would otherwise select
+  // again and undo the first (a row ticked and straight back).
+  static bool down = false;
+  const bool released = !active && down;
+  down = active;
   if (active) {
     pressed_at_us = now;
     button_takes_over = button_ends_mode();
     if (push_assist.load() && !drive_start_button.load()) {
       push_assist_refused_input.store(true); // the stick ends it, not the button
     }
-  } else if (!button_takes_over && now - pressed_at_us < kSelectMaxUs) {
+  } else if (released && !button_takes_over && now - pressed_at_us < kSelectMaxUs) {
     select_key.store(true);
   }
 
@@ -1072,12 +1078,19 @@ static void touch_stick_create() {
   static constexpr int32_t kTop = 1116 - kKeyHeight;
   for (int i = 0; i < 5; i++) {
     lv_obj_t *key = lv_button_create(lv_layer_top());
-    lv_group_remove_obj(key); // touch only: never in the joystick's focus walk
+    // Touch only: never in the joystick's focus walk, and a press never moves focus
+    // (LVGL's click-focus would otherwise send the focused row LEAVE / DEFOCUSED).
+    lv_group_remove_obj(key);
+    lv_obj_set_click_focusable(key, false);
     lv_obj_set_size(key, kKeyWidth, kKeyHeight);
     lv_obj_set_pos(key, i * kKeyWidth, kTop);
     lv_obj_set_style_radius(key, 0, 0);
     lv_obj_set_style_border_width(key, 2, 0);
     lv_obj_set_style_border_color(key, lv_color_black(), 0);
+    // Half see-through, so the rows and the cursor underneath still show.
+    lv_obj_set_style_bg_opa(key, LV_OPA_40, 0);
+    lv_obj_set_style_bg_opa(key, LV_OPA_70, LV_STATE_PRESSED);
+    lv_obj_set_style_shadow_width(key, 0, 0);
     lv_obj_t *label = lv_label_create(key);
     lv_label_set_text(label, kText[i]);
     lv_obj_set_style_text_font(label, &lv_font_montserrat_48, 0);
