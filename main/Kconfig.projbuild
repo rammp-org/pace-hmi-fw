@@ -19,6 +19,23 @@ menu "RAMMP HMI"
             (which is not in git) while working on the UI, not in
             sdkconfig.defaults -- that one ships.
 
+    config HMI_TOUCH_STICK
+        bool "On-screen joystick keys (for a board without a joystick)"
+        default n
+        help
+            Five touch keys right above the burger key, on every screen: up,
+            down, left, right and the joystick button. A held arrow is the
+            stick pushed fully that way; let go and it is centred. The
+            joystick's own axes are ignored while this is on (a board with no
+            joystick reads noise there); its button still works.
+
+            The keys ARE the stick: on the Drive screen they drive the chair,
+            on the seat screen they move the seat, with the same interlocks
+            as the joystick.
+
+            Off by default. Turn it on in your local sdkconfig (menuconfig ->
+            RAMMP HMI), not in sdkconfig.defaults -- that one ships.
+
     config HMI_WIFI_SSID
         string "WiFi network name (SSID)"
         default ""
